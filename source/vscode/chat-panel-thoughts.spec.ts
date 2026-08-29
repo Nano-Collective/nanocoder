@@ -302,33 +302,33 @@ test('drops the active summary when the session is cleared', t => {
 	t.is(thoughtText(panel.thoughts()[0]), 'fresh reasoning');
 });
 
-test('opens no section for whitespace-only reasoning', t => {
+test('opens no summary for whitespace-only reasoning', t => {
 	const panel = createPanel();
 
 	panel.thought('\n\n');
-	t.is(panel.boxes().length, 0);
+	t.is(panel.summaries().length, 0);
 
 	panel.thought('   ');
-	t.is(panel.boxes().length, 0);
+	t.is(panel.summaries().length, 0);
 
 	panel.text('answer');
 	panel.finish();
-	t.is(panel.boxes().length, 0);
+	t.is(panel.summaries().length, 0);
 });
 
-test('opens the section on the first thought that has content', t => {
+test('opens the summary on the first thought that has content', t => {
 	const panel = createPanel();
 
 	panel.thought('\n\n');
 	panel.thought('actual reasoning');
 	panel.finish();
 
-	const boxes = panel.boxes();
-	t.is(boxes.length, 1);
-	t.is(bodyOf(boxes[0]), 'actual reasoning');
+	const thoughts = panel.thoughts();
+	t.is(thoughts.length, 1);
+	t.is(thoughtText(thoughts[0]), 'actual reasoning');
 });
 
-test('keeps appending whitespace once the section is open', t => {
+test('keeps appending whitespace once the thought is open', t => {
 	const panel = createPanel();
 
 	panel.thought('first line');
@@ -336,10 +336,10 @@ test('keeps appending whitespace once the section is open', t => {
 	panel.thought('second line');
 	panel.finish();
 
-	t.is(bodyOf(panel.boxes()[0]), 'first line\n\nsecond line');
+	t.is(thoughtText(panel.thoughts()[0]), 'first line\n\nsecond line');
 });
 
-test('an empty thought chunk neither opens a section nor splits the answer', t => {
+test('an empty thought chunk neither opens a summary nor splits the answer', t => {
 	const panel = createPanel();
 
 	panel.text('answer ');
@@ -350,6 +350,77 @@ test('an empty thought chunk neither opens a section nor splits the answer', t =
 
 	// Ending the text block would start a second agent bubble for 'continues',
 	// so the answer has to still be one child of the container.
-	t.is(panel.boxes().length, 0);
+	t.is(panel.summaries().length, 0);
 	t.is(panel.container.children.length, blocks);
+});
+
+test('a tool queued behind a cancelled one opens no second summary', t => {
+	const panel = createPanel();
+
+	panel.startTurn('do a long job');
+	panel.tool('in-flight');
+	panel.stop();
+
+	const summary = panel.summaries()[0];
+	t.is(titleOf(summary), 'Stopped after 0s');
+
+	// The agent only learns about the cancel after the fact: the call already
+	// running reports its outcome, and the ones queued behind it arrive as
+	// fresh ids marked cancelled. None of that may reopen the turn.
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'in-flight',
+		status: 'failed',
+		rawOutput: 'Cancelled by user',
+	});
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'queued-behind-it',
+		title: 'read_file: source/b.ts',
+		kind: 'read',
+		status: 'cancelled',
+	});
+	panel.thought('trailing reasoning');
+
+	t.is(panel.summaries().length, 1);
+	t.is(titleOf(summary), 'Stopped after 0s');
+
+	// The next real turn is unaffected.
+	panel.startTurn('try again');
+	panel.thought('starting over');
+	t.is(panel.summaries().length, 2);
+	t.is(titleOf(panel.summaries()[1]), 'Working...');
+});
+
+test('a turn that answers before it works keeps the transcript in order', t => {
+	const panel = createPanel();
+
+	panel.userMessage('check something');
+	panel.text('Let me look.');
+	panel.tool('call-1');
+	panel.finish();
+
+	// The summary is inserted where the work actually started, so the prose
+	// that preceded it is not left stranded underneath.
+	const summary = panel.summaries()[0];
+	const answer = panel.container.querySelector('.agent-markdown');
+	t.true(
+		panel.container.children.indexOf(answer.parentElement.parentElement) <
+			panel.container.children.indexOf(summary),
+	);
+});
+
+test('an emptied plan retires the summary it was the only activity in', t => {
+	const panel = createPanel();
+
+	panel.userMessage('plan the work');
+	panel.update({
+		sessionUpdate: 'plan',
+		entries: [{content: 'Run tests', status: 'in_progress'}],
+	});
+	t.is(panel.summaries().length, 1);
+
+	panel.update({sessionUpdate: 'plan', entries: []});
+	panel.finish();
+	t.is(panel.summaries().length, 0);
 });
