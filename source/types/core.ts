@@ -81,10 +81,16 @@ export interface StructuredToolOutput {
 
 export type ToolExecuteResult = string | StructuredToolOutput;
 
+export interface ToolExecutionContext {
+	abortSignal?: AbortSignal;
+	sessionId?: string;
+	workingDirectory?: string;
+}
+
 export type ToolHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	input: any,
-	options?: {abortSignal?: AbortSignal},
+	options?: ToolExecutionContext,
 ) => Promise<ToolExecuteResult>;
 
 export type ToolFormatter = (

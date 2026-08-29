@@ -7,6 +7,8 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } fro
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {ArtifactController} from './artifact-controller';
+import {PlanReviewController} from './plan-review-controller';
 import { SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
@@ -42,6 +44,8 @@ export class ChatWebviewProvider
 	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
 	/** Non-null while a timeline revert is in flight. See `_handleRevert`. */
 	private _revertReplayBuffer: any[] | null = null;
+	private readonly _planReview = new PlanReviewController();
+	private readonly _artifacts = new ArtifactController();
 	/** Code lens prompt waiting on the webview shell and the ACP session. */
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,6 +61,10 @@ export class ChatWebviewProvider
 		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			this._planReview.observeSessionUpdate(update);
+			if (this._artifacts.observeSessionUpdate(update)) {
+				this.postArtifacts();
+			}
 			this.handleDiffs(update);
 			// A revert replays the whole truncated thread from inside the
 			// timeline/revert call, so those updates arrive before the call
@@ -75,6 +83,11 @@ export class ChatWebviewProvider
 			if (kind === 'tool_call' || kind === 'tool_call_update') {
 				this.scheduleTimelineRefresh();
 			}
+		};
+
+		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			this._artifacts.replaceFromMeta(meta);
+			this.postArtifacts();
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -195,6 +208,52 @@ export class ChatWebviewProvider
 		}
 	}
 
+	public resetPlanReview(): void {
+		this._planReview.reset();
+	}
+
+	public resetSessionState(): void {
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+	}
+
+	private postArtifacts(): void {
+		this.postMessage({
+			type: 'artifactsUpdated',
+			artifacts: this._artifacts.artifacts,
+		});
+	}
+
+	/**
+	 * Signal turn completion so the webview can flip back to the send button.
+	 * Forwards the per-turn token usage and estimated cost so the webview can
+	 * render the usage indicator under the response. `outcome` distinguishes a
+	 * user cancel from a real failure; pass 'failed' explicitly when the turn
+	 * threw before a response existed.
+	 */
+	private postPromptResponse(
+		response?: import('@agentclientprotocol/sdk').PromptResponse,
+		outcomeOverride?: 'completed' | 'cancelled' | 'failed',
+	): void {
+		const outcome =
+			outcomeOverride ??
+			(response?.stopReason === 'cancelled'
+				? 'cancelled'
+				: response
+					? 'completed'
+					: 'failed');
+		this.postMessage({
+			type: 'acpUpdate',
+			update: {
+				sessionUpdate: 'prompt_response',
+				outcome,
+				usage: response?.usage,
+				cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+			},
+		});
+	}
+
 	public toggleSettings() {
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleSettings' });
@@ -274,7 +333,18 @@ export class ChatWebviewProvider
 
 					case 'setMode':
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
+						if (message.mode !== 'plan') {
+							this._planReview.revise();
+						}
 						this._acpClient.setSessionMode(message.mode);
+						break;
+					case 'approvePlan':
+						this._outputChannel.appendLine('[Webview] User approved the implementation plan.');
+						this._approvePlan();
+						break;
+					case 'revisePlan':
+						this._outputChannel.appendLine('[Webview] User requested plan revisions.');
+						this._planReview.revise();
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
@@ -293,6 +363,9 @@ export class ChatWebviewProvider
 						break;
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
+						this._planReview.reset();
+						this._artifacts.reset();
+						this.postArtifacts();
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
@@ -670,6 +743,7 @@ export class ChatWebviewProvider
 			// transcript too so the UI matches (the server's confirmation
 			// message then streams into the fresh view).
 			if (text.trim() === '/clear') {
+				this._planReview.reset();
 				this.postMessage({type: 'clear'});
 				this.postMessage({type: 'updateTimeline', entries: []});
 			}
@@ -701,28 +775,58 @@ export class ChatWebviewProvider
 			});
 
 			const response = await this._acpClient.prompt(expandedText, images);
-			const outcome = response?.stopReason === 'cancelled'
-				? 'cancelled'
-				: response
-					? 'completed'
-					: 'failed';
-			// Signal turn completion so the Webview can flip back to the send
-			// button. Forward the per-turn token usage and estimated cost so
-			// the webview can render the usage indicator under the response.
-			this.postMessage({
-				type: 'acpUpdate',
-				update: {
-					sessionUpdate: 'prompt_response',
-					outcome,
-					usage: response?.usage,
-					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
-				},
-			});
+			// A cancelled turn never produced a plan for review.
+			const review =
+				response?.stopReason === 'cancelled'
+					? undefined
+					: this._planReview.completeTurn(this._acpClient.currentMode);
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postPromptResponse(response);
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
+			this.postPromptResponse(undefined, 'failed');
+		}
+	}
+
+	private async _approvePlan(): Promise<void> {
+		try {
+			let response: import('@agentclientprotocol/sdk').PromptResponse | undefined;
+			await this._planReview.approve({
+				readFile: async artifactPath => fs.promises.readFile(artifactPath, 'utf8'),
+				setMode: async mode => {
+					await this._acpClient.setSessionMode(mode);
+					if (this._acpClient.currentMode !== mode) {
+						throw new Error('Unable to exit Plan Mode');
+					}
+				},
+				prompt: async message => {
+					response = await this._acpClient.prompt(message);
+					if (!response) {
+						throw new Error('Failed to execute the approved plan');
+					}
+				},
+			});
+			this.postPromptResponse(response);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`Plan approval failed: ${message}`);
+			const review = this._planReview.pendingReview;
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postMessage({type: 'planReviewError', message});
+			this.postPromptResponse(undefined, 'failed');
+			vscode.window.showErrorMessage(`Nanocoder: Unable to approve plan: ${message}`);
 		}
 	}
 

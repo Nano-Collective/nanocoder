@@ -5,6 +5,8 @@
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
+	const artifactBar = document.getElementById('artifact-bar');
+	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
@@ -713,6 +715,118 @@
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
+	}
+
+	function setPlanReviewActive(active) {
+		if (active) {
+			if (typeof closeMention === 'function') closeMention();
+			if (typeof closeAllDropdowns === 'function') closeAllDropdowns();
+		}
+		chatInput.disabled = active;
+		composerBox.classList.toggle('opacity-60', active);
+		composerBox.classList.toggle('pointer-events-none', active);
+	}
+
+	function removePlanReview() {
+		const existing = document.getElementById('plan-review-card');
+		if (existing) existing.remove();
+		setPlanReviewActive(false);
+	}
+
+	function renderArtifacts(artifacts) {
+		if (!artifactBar || !artifactLinks) return;
+		artifactLinks.innerHTML = '';
+		const labels = {
+			implementation_plan: 'Plan',
+			task: 'Tasks',
+			walkthrough: 'Walkthrough',
+		};
+		for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+			if (!artifact || !labels[artifact.kind] || typeof artifact.path !== 'string') continue;
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-2 py-1 cursor-pointer font-vscode text-[0.78em] text-vscode-fg';
+			button.textContent = labels[artifact.kind];
+			button.title = artifact.path;
+			button.onclick = () => {
+				vscode.postMessage({type: 'openPath', path: artifact.path, kind: 'file'});
+			};
+			artifactLinks.appendChild(button);
+		}
+		const hasArtifacts = artifactLinks.childElementCount > 0;
+		artifactBar.classList.toggle('hidden', !hasArtifacts);
+		artifactBar.classList.toggle('flex', hasArtifacts);
+	}
+
+	function renderPlanReview(artifactPath) {
+		removePlanReview();
+		endCurrentTextBlock();
+
+		const card = document.createElement('div');
+		card.id = 'plan-review-card';
+		card.className = 'my-3 border border-vscode-focusBorder rounded-lg bg-vscode-widget-bg overflow-hidden shrink-0';
+
+		const header = document.createElement('div');
+		header.className = 'px-3 py-2 bg-vscode-widget-header border-b border-vscode-widget-border';
+		const title = document.createElement('div');
+		title.className = 'font-vscode text-[0.95em] font-semibold';
+		title.textContent = 'Implementation plan ready';
+		const subtitle = document.createElement('div');
+		subtitle.className = 'font-vscode text-[0.82em] opacity-65 mt-0.5';
+		subtitle.textContent = 'Review the saved plan before implementation begins.';
+		header.appendChild(title);
+		header.appendChild(subtitle);
+
+		const body = document.createElement('div');
+		body.className = 'px-3 py-3 flex flex-col gap-2.5';
+		const openButton = document.createElement('button');
+		openButton.type = 'button';
+		openButton.className = 'w-full text-left bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] transition-colors';
+		openButton.textContent = 'Open implementation_plan.md';
+		openButton.title = artifactPath;
+		openButton.onclick = () => {
+			vscode.postMessage({type: 'openPath', path: artifactPath, kind: 'file'});
+		};
+
+		const actions = document.createElement('div');
+		actions.className = 'flex flex-col gap-1.5';
+		const approveButton = document.createElement('button');
+		approveButton.type = 'button';
+		approveButton.className = 'w-full border-none rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
+		approveButton.textContent = 'Yes, execute this plan';
+		approveButton.onclick = () => {
+			removePlanReview();
+			// Show the approval as a real user turn. The extension host sends the
+			// approved-plan prompt straight through acpClient.prompt(), bypassing
+			// submitMessage(), so nothing else would put a bubble in the
+			// transcript and the turn would appear to start from nowhere.
+			appendMessage('Approved the implementation plan. Proceeding.', 'user');
+			currentTurnEl = null;
+			currentTextEl = null;
+			setProcessing(true);
+			startVisualLoader();
+			vscode.postMessage({type: 'approvePlan'});
+		};
+
+		const reviseButton = document.createElement('button');
+		reviseButton.type = 'button';
+		reviseButton.className = 'w-full bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em]';
+		reviseButton.textContent = 'No, tell Nanocoder what to change';
+		reviseButton.onclick = () => {
+			removePlanReview();
+			vscode.postMessage({type: 'revisePlan'});
+			chatInput.focus();
+		};
+
+		actions.appendChild(approveButton);
+		actions.appendChild(reviseButton);
+		body.appendChild(openButton);
+		body.appendChild(actions);
+		card.appendChild(header);
+		card.appendChild(body);
+		messagesContainer.appendChild(card);
+		setPlanReviewActive(true);
+		scrollToBottom();
 	}
 
 	// Shared by the Stop button and Escape so the two can't drift apart.
@@ -1813,6 +1927,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				removePlanReview();
 				currentTurnFooter = null;
 				toolKinds.clear();
 				turnCancelled = false;
@@ -1843,6 +1958,23 @@
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
+				break;
+			case 'planReviewRequested':
+				setProcessing(false);
+				renderPlanReview(message.artifactPath);
+				break;
+			case 'planReviewError':
+				setProcessing(false);
+				// Surface it in the transcript too. A toast alone is easy to miss,
+				// and the approval bubble above it would otherwise sit there with
+				// no visible outcome.
+				appendMessage(
+					`Could not approve the plan: ${message.message}`,
+					'assistant',
+				);
+				break;
+			case 'artifactsUpdated':
+				renderArtifacts(message.artifacts);
 				break;
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
