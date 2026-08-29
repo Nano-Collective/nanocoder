@@ -375,9 +375,6 @@ export class ToolManager {
 			this.registry.unregisterMany(mcpToolNames);
 			await this.mcpClient.disconnect();
 
-			// Reset registry to only static tools
-			this.registry = ToolRegistry.fromToolExports(allToolExports);
-			this.customTools.clear();
 			this.mcpClient = null;
 		}
 

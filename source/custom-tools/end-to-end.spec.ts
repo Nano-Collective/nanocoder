@@ -250,3 +250,42 @@ echo`,
 	]);
 	t.false(names.includes('my_custom_thing'));
 });
+
+test.serial('custom tools survive an MCP disconnect', async t => {
+	rmSync(projectToolsDir, {recursive: true, force: true});
+	mkdirSync(projectToolsDir, {recursive: true});
+
+	writeTool(
+		'survivor.md',
+		`---
+name: survives_mcp_disconnect
+description: a thing
+approval: never
+---
+echo`,
+	);
+
+	const manager = new ToolManager();
+	manager.initializeCustomTools(projectRoot);
+	t.true(manager.isCustomTool('survives_mcp_disconnect'));
+
+	(
+		manager as unknown as {
+			mcpClient: {
+				getNativeToolsRegistry: () => Record<string, unknown>;
+				disconnect: () => Promise<void>;
+			};
+		}
+	).mcpClient = {
+		getNativeToolsRegistry: () => ({}),
+		disconnect: async () => {},
+	};
+
+	await manager.disconnectMCP();
+
+	t.is(manager.getMCPClient(), null);
+	t.true(manager.hasTool('survives_mcp_disconnect'));
+	t.true(manager.isCustomTool('survives_mcp_disconnect'));
+	t.deepEqual(manager.getCustomToolNames(), ['survives_mcp_disconnect']);
+	t.truthy(manager.getAllTools().survives_mcp_disconnect);
+});
