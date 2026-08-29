@@ -5,7 +5,6 @@ import Gradient from 'ink-gradient';
 import path from 'path';
 import {memo} from 'react';
 import {fileURLToPath} from 'url';
-import {loadDefaultMode} from '@/config/index';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
@@ -56,7 +55,6 @@ export default memo(function WelcomeMessage() {
 	const {colors} = useTheme();
 
 	const version = packageJson.version;
-	const mode = loadDefaultMode() ?? 'normal';
 	const cwd = homeRelative(process.cwd());
 	const gitStatus = getGitStatusSummarySync();
 
@@ -134,7 +132,7 @@ export default memo(function WelcomeMessage() {
 				</Box>
 			)}
 
-			<Box justifyContent={justify} width={termW} marginTop={logoText ? 1 : 0}>
+			<Box justifyContent={justify} width={termW}>
 				<Text>
 					<Text color={colors.text} bold>
 						nanocoder
@@ -192,12 +190,6 @@ export default memo(function WelcomeMessage() {
 					})}
 				</Box>
 			)}
-
-			<Box width={termW} justifyContent="center" marginTop={1}>
-				<Text color={colors.secondary} dimColor>
-					{mode}
-				</Text>
-			</Box>
 		</Box>
 	);
 });

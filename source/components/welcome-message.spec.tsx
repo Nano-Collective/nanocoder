@@ -180,8 +180,6 @@ test('WelcomeMessage shows centered footer for wide terminal', t => {
 	t.truthy(output);
 	t.regex(output!, /nanocoder/);
 	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
-	// Mode in footer (normal)
-	t.regex(output!, /normal/);
 
 	process.stdout.columns = originalColumns;
 });
