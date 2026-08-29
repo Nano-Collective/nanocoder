@@ -54,6 +54,9 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
+	// Held in a ref, not state: a cache write must not re-render the app or
+	// change the identity of getMessageTokens. Returned from this hook only so
+	// useAppState.spec.tsx can assert on it; there is no production consumer.
 	const messageTokenCacheRef = useRef<BoundedMap<string, number> | null>(null);
 	if (!messageTokenCacheRef.current) {
 		messageTokenCacheRef.current = new BoundedMap({
@@ -273,7 +276,13 @@ export function useAppState(
 	// Helper function for token calculation with caching
 	const getMessageTokens = useCallback(
 		(message: Message) => {
-			const cacheKey = (message.content || '') + message.role + currentModel;
+			// Provider is part of the key because it selects the tokenizer
+			// implementation (see the useMemo above). Two providers can serve the
+			// same model name with different encoders, so keying on the model
+			// alone would hand back counts produced by the previous tokenizer.
+			// Keep this formula in sync with tokenCacheKey() in the spec.
+			const cacheKey =
+				(message.content || '') + message.role + currentProvider + currentModel;
 
 			const cachedTokens = messageTokenCache.get(cacheKey);
 			if (cachedTokens !== undefined) {
@@ -284,7 +293,7 @@ export function useAppState(
 			messageTokenCache.set(cacheKey, tokens);
 			return tokens;
 		},
-		[messageTokenCache, tokenizer, currentModel],
+		[messageTokenCache, tokenizer, currentProvider, currentModel],
 	);
 
 	// Tracks the messages array last written through updateMessages so we can

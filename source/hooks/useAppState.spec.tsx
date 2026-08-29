@@ -22,6 +22,8 @@ console.log('\nuseAppState.spec.tsx');
 type AppStateHook = ReturnType<typeof useAppState>;
 
 let captured: AppStateHook | null = null;
+// Module-level, so it only holds up because AVA runs this suite serially -
+// same constraint the `captured` global above already relies on.
 let renderCount = 0;
 
 function Probe({initialMode}: {initialMode?: DevelopmentMode}) {
@@ -30,8 +32,15 @@ function Probe({initialMode}: {initialMode?: DevelopmentMode}) {
 	return null;
 }
 
-function tokenCacheKey(message: Message, model = '') {
-	return (message.content || '') + message.role + model;
+// Mirrors the cacheKey formula in getMessageTokens (useAppState.tsx). If that
+// formula changes, change this too or the assertions below silently drift.
+// Defaults match useAppState's initial provider/model state.
+function tokenCacheKey(
+	message: Message,
+	model = '',
+	provider = 'openai-compatible',
+) {
+	return (message.content || '') + message.role + provider + model;
 }
 
 function setup(initialMode: DevelopmentMode = 'normal') {
@@ -298,7 +307,10 @@ test('a cache miss neither re-renders nor invalidates getMessageTokens', async t
 	const {getMessageTokens} = hook;
 
 	getMessageTokens({role: 'user', content: 'uncached'} as Message);
-	await new Promise(resolve => setTimeout(resolve, 20));
+	// Two macrotask turns: enough for a stray queued microtask or a React
+	// scheduler callback to land, with no wall-clock sleep to flake on.
+	await new Promise(resolve => setImmediate(resolve));
+	await new Promise(resolve => setImmediate(resolve));
 
 	t.is(renderCount, rendersAfterMount);
 
@@ -327,6 +339,32 @@ test('token cache keys separate content, role and model', t => {
 	t.is(cache.size, 4);
 	t.is(cache.get(tokenCacheKey(user)), userTokens);
 	t.is(cache.get(tokenCacheKey(user, 'gpt-4o')), switchedTokens);
+});
+
+test('token cache keys separate providers serving the same model', t => {
+	const {hook, instance} = setup();
+	const cache = hook.messageTokenCache;
+	const msg: Message = {role: 'user', content: 'same text'} as Message;
+
+	// One model name, two providers that resolve to different tokenizers:
+	// openai-compatible gives the OpenAI tokenizer, ollama gives the Llama one.
+	// Keying on the model alone would serve the second lookup a count the first
+	// tokenizer produced.
+	hook.setCurrentModel('shared-model');
+	instance.rerender(<Probe />);
+	const openaiTokens = captured!.getMessageTokens(msg);
+
+	captured!.setCurrentProvider('ollama');
+	instance.rerender(<Probe />);
+	const ollamaTokens = captured!.getMessageTokens(msg);
+
+	t.is(cache.size, 2);
+	t.is(
+		cache.get(tokenCacheKey(msg, 'shared-model', 'openai-compatible')),
+		openaiTokens,
+	);
+	t.is(cache.get(tokenCacheKey(msg, 'shared-model', 'ollama')), ollamaTokens);
+	t.not(ollamaTokens, openaiTokens);
 });
 
 test('token cache stays bounded and evicts the oldest entry', t => {
