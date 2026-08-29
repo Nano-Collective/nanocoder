@@ -159,6 +159,9 @@ export interface AppHandlers {
  */
 export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const logger = getLogger();
+	// Last mode-switch model toast, so rapid Shift+Tab cycling doesn't stack
+	// identical lines in scrollback (the handler races ahead of prop updates).
+	const lastModeToastRef = React.useRef<string | null>(null);
 
 	// Clear messages handler
 	const clearMessages = React.useMemo(
@@ -274,11 +277,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				// Show a subtle toast when entering a mode that enforces a specific model,
 				// since programmatic switches suppress the default "Model changed to..." toast.
-				if (modeConfig) {
+				// Landing back on normal only restores the user's own default — the status
+				// bar flip is feedback enough, so no toast there.
+				const modeToast =
+					nextMode === 'normal' ? null : `[${nextMode} mode → ${targetModel}]`;
+				if (modeConfig && modeToast && modeToast !== lastModeToastRef.current) {
+					lastModeToastRef.current = modeToast;
 					props.addToChatQueue(
 						<SuccessMessage
 							key={generateKey('mode-model-override')}
-							message={`[${nextMode} mode → ${targetModel}]`}
+							message={modeToast}
 							hideBox={true}
 						/>,
 					);
