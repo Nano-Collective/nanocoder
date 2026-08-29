@@ -143,6 +143,14 @@ export default memo(function WelcomeMessage() {
 			)}
 
 			<Box justifyContent={justify} width={termW} marginTop={logoKind ? 1 : 0}>
+				<Text>
+					<Text color={colors.text} bold>
+						nanocoder
+					</Text>
+					<Text color={colors.secondary}> v{version}</Text>
+				</Text>
+			</Box>
+			<Box justifyContent={justify} width={termW} marginTop={1}>
 				<Text color={colors.text} bold>
 					Welcome to Nanocoder
 				</Text>
@@ -193,20 +201,9 @@ export default memo(function WelcomeMessage() {
 				</Box>
 			)}
 
-			<Box
-				width={termW}
-				justifyContent="space-between"
-				marginTop={1}
-				paddingX={1}
-			>
+			<Box width={termW} justifyContent="center" marginTop={1}>
 				<Text color={colors.secondary} dimColor>
 					{mode}
-				</Text>
-				<Text>
-					<Text color={colors.text} bold>
-						nanocoder
-					</Text>
-					<Text color={colors.secondary}> v{version}</Text>
 				</Text>
 			</Box>
 		</Box>

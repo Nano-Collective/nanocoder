@@ -47,19 +47,17 @@ function BootSummary({
 	provider,
 	model,
 	mode,
-	hideGit = false,
 }: {
 	provider: string;
 	model: string;
 	mode?: DevelopmentMode;
-	hideGit?: boolean;
 }): React.ReactElement {
 	const {colors} = useTheme();
 	const {isNarrow} = useResponsiveTerminal();
 	const configPath = getClosestConfigFile('agents.config.json');
 	const shortConfig = homeRelative(configPath);
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
-	const gitStatus = hideGit ? null : getGitStatusSummarySync();
+	const gitStatus = getGitStatusSummarySync();
 	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
 
 	// Narrow terminals: provider + model + mode on the first line, with the
@@ -147,19 +145,16 @@ export function createStaticComponents({
 		components.push(<WelcomeMessage key="welcome" />);
 	}
 
-	// Boot summary header: always in interactive mode (for config path
-	// visibility), and in run mode we include the active development mode
-	// so it's obvious what the agent is executing under.
-	// When the welcome banner is visible we hide git from the boot summary
-	// to avoid duplicating the centered location line inside the welcome.
-	if (currentProvider || currentModel) {
+	// Boot summary header: only in non-interactive / run mode. The welcome
+	// already shows cwd, branch, and version, so the boot summary would just
+	// duplicate that info when the user is at the welcome screen.
+	if (!shouldShowWelcome && (currentProvider || currentModel)) {
 		components.push(
 			<Box key="boot-summary" flexDirection="column" marginBottom={1}>
 				<BootSummary
 					provider={currentProvider}
 					model={currentModel}
 					mode={nonInteractiveMode ? developmentMode : undefined}
-					hideGit={shouldShowWelcome}
 				/>
 			</Box>,
 		);
