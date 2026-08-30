@@ -72,6 +72,17 @@
 				});
 			}
 
+			syncModeBadge() {
+				if (this.label?.id !== 'mode-trigger-label') return;
+				const badge = document.getElementById('composer-mode-badge');
+				if (badge) badge.textContent = this.label.textContent || '';
+				const settingsTrigger = document.getElementById('composer-settings-trigger');
+				if (settingsTrigger && this.label.textContent) {
+					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
+					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
+				}
+			}
+
 			setOptions(options, selectedValue) {
 				this.dropdown.innerHTML = '';
 				
@@ -79,6 +90,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
+					this.syncModeBadge();
 					return;
 				}
 
@@ -123,6 +135,7 @@
 					}
 					this.label.textContent = displayValue || 'Loading...';
 				}
+				this.syncModeBadge();
 			}
 		}
 
@@ -1259,7 +1272,17 @@
 	// streaming response area. Guarded by isProcessing so an idle Escape does
 	// nothing.
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && isProcessing) {
+		if (e.key !== 'Escape') return;
+		const chromeOpen = ['provider-dropdown', 'model-dropdown', 'mode-dropdown', 'composer-settings'].some(
+			(id) => !document.getElementById(id)?.classList.contains('hidden'),
+		) || (addMenuDropdown && !addMenuDropdown.classList.contains('hidden'));
+		if (chromeOpen) {
+			e.preventDefault();
+			e.stopPropagation();
+			closeAllDropdowns();
+			return;
+		}
+		if (isProcessing) {
 			e.preventDefault();
 			e.stopPropagation();
 			requestCancel();

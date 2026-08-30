@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Grouped the VS Code chat composer controls: model stays on the input row, provider and approval mode move into a Settings popover. Closes #859.
+Grouped the VS Code chat composer controls: model stays on the input row, the current approval mode stays visible on the gear, and provider plus mode pickers live in a Configuration popover. Closes #859.

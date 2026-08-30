@@ -23,18 +23,36 @@ const slice = (source: string, startId: string, endId: string) => {
 	return source.slice(start, end);
 };
 
+const syncComposer = (panel: ReturnType<typeof createPanel>) => {
+	panel.post({
+		type: 'syncState',
+		availableProviders: ['claude', 'openai'],
+		provider: 'claude',
+		availableModes: ['normal', 'auto-accept', 'yolo', 'plan'],
+		mode: 'normal',
+		availableModels: ['sonnet'],
+		model: 'sonnet',
+	});
+};
+
 test('markup keeps model on the row and moves provider and mode into settings', t => {
 	const row = slice(PANEL_HTML, 'add-menu-btn', 'send-stop-btn');
 	t.true(row.includes('id="model-trigger"'));
 	t.true(row.includes('id="composer-settings-trigger"'));
+	t.true(row.includes('id="composer-mode-badge"'));
 	t.false(row.includes('id="provider-trigger"'));
 	t.false(row.includes('id="mode-trigger"'));
 
-	const settings = slice(PANEL_HTML, 'composer-settings', 'provider-dropdown');
+	const settings = slice(PANEL_HTML, 'composer-settings', 'model-dropdown');
 	t.true(settings.includes('id="provider-trigger"'));
 	t.true(settings.includes('id="mode-trigger"'));
+	t.true(settings.includes('id="provider-dropdown"'));
+	t.true(settings.includes('id="mode-dropdown"'));
+	t.true(
+		settings.indexOf('id="mode-trigger"') <
+			settings.indexOf('id="provider-dropdown"'),
+	);
 	t.false(settings.includes('id="model-trigger"'));
-	t.false(settings.includes('id="settings-view"'));
 });
 
 test('settings trigger opens the composer settings popover', t => {
@@ -50,8 +68,20 @@ test('settings trigger opens the composer settings popover', t => {
 	);
 });
 
+test('the gear shows the current approval mode', t => {
+	const panel = createPanel();
+	syncComposer(panel);
+	t.is(panel.byId('composer-mode-badge')?.textContent, 'normal');
+	t.true(
+		panel
+			.byId('composer-settings-trigger')
+			?.title.includes('normal'),
+	);
+});
+
 test('opening a nested provider list keeps composer settings open', t => {
 	const panel = createPanel();
+	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('provider-trigger')?.click();
 
@@ -61,6 +91,7 @@ test('opening a nested provider list keeps composer settings open', t => {
 
 test('opening a nested mode list keeps composer settings open', t => {
 	const panel = createPanel();
+	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('mode-trigger')?.click();
 
@@ -70,6 +101,7 @@ test('opening a nested mode list keeps composer settings open', t => {
 
 test('opening the model list closes composer settings', t => {
 	const panel = createPanel();
+	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('model-trigger')?.click();
 
@@ -79,6 +111,17 @@ test('opening the model list closes composer settings', t => {
 		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
 		'false',
 	);
+});
+
+test('Escape and outside click close composer settings', t => {
+	const panel = createPanel();
+	panel.byId('composer-settings-trigger')?.click();
+	panel.dispatchDocument('keydown', {key: 'Escape'});
+	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
+
+	panel.byId('composer-settings-trigger')?.click();
+	panel.dispatchDocument('click');
+	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
 });
 
 test('opening the add menu closes composer settings', t => {
@@ -92,15 +135,7 @@ test('opening the add menu closes composer settings', t => {
 
 test('provider and mode still post the existing extension messages', t => {
 	const panel = createPanel();
-	panel.post({
-		type: 'syncState',
-		availableProviders: ['claude', 'openai'],
-		provider: 'claude',
-		availableModes: ['normal', 'auto'],
-		mode: 'normal',
-		availableModels: ['sonnet'],
-		model: 'sonnet',
-	});
+	syncComposer(panel);
 
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('provider-trigger')?.click();
@@ -118,7 +153,18 @@ test('provider and mode still post the existing extension messages', t => {
 	t.true(
 		panel.sent.some(
 			(message: {type?: string; mode?: string}) =>
-				message.type === 'setMode' && message.mode === 'auto',
+				message.type === 'setMode' && message.mode === 'auto-accept',
 		),
 	);
+
+	panel.post({
+		type: 'syncState',
+		availableProviders: ['claude', 'openai'],
+		provider: 'openai',
+		availableModes: ['normal', 'auto-accept', 'yolo', 'plan'],
+		mode: 'yolo',
+		availableModels: ['sonnet'],
+		model: 'sonnet',
+	});
+	t.is(panel.byId('composer-mode-badge')?.textContent, 'yolo');
 });
