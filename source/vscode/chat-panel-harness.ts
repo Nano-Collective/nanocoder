@@ -62,9 +62,9 @@ const SHELL_IDS = [
 	'timeline-track',
 ];
 
-// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
-// builds, so the stub has to stay open-ended.
-// biome-ignore lint/suspicious/noExplicitAny: stub nodes are intentionally open-ended
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes
+// it builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: open-ended DOM stub
 export type StubElement = any;
 
 /**
