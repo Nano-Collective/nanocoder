@@ -11,6 +11,7 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
@@ -24,7 +25,6 @@ import {
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
 	updateShowUsageFooter,
-	getProjectContextPreferences,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';

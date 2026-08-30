@@ -10,8 +10,8 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
-	getProjectContextPreferences,
 	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
 	updateProfessionalTone,
@@ -34,11 +34,11 @@ import type {
 	SettingsSelectorProps,
 } from './settings-selector';
 import {
+	SettingsAdvancedPanel,
 	SettingsDisplayPanel,
 	SettingsNanocoderShapePanel,
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
-	SettingsAdvancedPanel,
 	SettingsPrivacyPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
@@ -265,7 +265,9 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'semantic-memory',
 					label: 'Semantic Memory',
-					value: getProjectContextPreferences().semanticMemoryEnabled ? 'on' : 'off',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
 					panel: 'semantic-memory',
 				},
 				{

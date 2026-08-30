@@ -471,7 +471,12 @@ export function toCamelCaseCategory(value: string): string {
 function splitMemoryCandidates(content: string): string[] {
 	return content
 		.split(/\n+/u)
-		.map(part => part.trim().replace(/^[-*]\s+/u, '').replace(/^\d+\.\s+/u, ''))
+		.map(part =>
+			part
+				.trim()
+				.replace(/^[-*]\s+/u, '')
+				.replace(/^\d+\.\s+/u, ''),
+		)
 		.filter(
 			part =>
 				part.length >= 12 &&
