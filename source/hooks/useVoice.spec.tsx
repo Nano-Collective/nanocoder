@@ -5,7 +5,7 @@ import { useVoice, UseVoiceProps, VoicePlugin } from './useVoice.js';
 import type { VoiceState } from '@/components/voice-status-bar';
 import { getVoicePreference, updateVoicePreference } from '@/config/preferences';
 import type { LLMClient } from '@/types/core';
-import type { RealtimeCapability, RealtimeSession } from '@/types/realtime';
+import { isRealtimeCapable, RealtimeCapability, RealtimeSession } from '@/types/realtime';
 import { setDeclinedVoiceInstallForSession } from '@/utils/voice-install-queue';
 
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
@@ -15,12 +15,9 @@ function VoiceHarness(
 		onStateChange?: (state: VoiceState) => void;
 		triggerRef?: React.MutableRefObject<(() => void) | null>;
 		stateRef?: React.MutableRefObject<VoiceState | null>;
-		isRealtimeRef?: React.MutableRefObject<boolean | null>;
-		activeSessionRef?: React.MutableRefObject<RealtimeSession | null>;
 	},
 ) {
-	const { state, startStopRecording, isRealtimeCapable, activeRealtimeSession } =
-		useVoice(props);
+	const { state, startStopRecording } = useVoice(props);
 
 	React.useEffect(() => {
 		props.onStateChange?.(state);
@@ -28,15 +25,6 @@ function VoiceHarness(
 			props.stateRef.current = state;
 		}
 	}, [state, props]);
-
-	React.useEffect(() => {
-		if (props.isRealtimeRef) {
-			props.isRealtimeRef.current = isRealtimeCapable;
-		}
-		if (props.activeSessionRef) {
-			props.activeSessionRef.current = activeRealtimeSession;
-		}
-	}, [isRealtimeCapable, activeRealtimeSession, props.isRealtimeRef, props.activeSessionRef]);
 
 	React.useEffect(() => {
 		if (props.triggerRef) {
@@ -519,7 +507,7 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 	}
 });
 
-test.serial('hands-free mode: declining installation shows message exactly once and does not loop', async t => {
+test.serial('hands-free mode: declining installation shows message once per activation and does not loop on re-renders', async t => {
 	let queueCount = 0;
 	setDeclinedVoiceInstallForSession(true);
 
@@ -530,9 +518,6 @@ test.serial('hands-free mode: declining installation shows message exactly once 
 		}),
 	});
 
-	const originalPref = getVoicePreference();
-	updateVoicePreference({ ...originalPref, enabled: true, activationMode: 'hands-free' });
-
 	try {
 		const { rerender, unmount } = render(
 			<VoiceHarness
@@ -542,12 +527,14 @@ test.serial('hands-free mode: declining installation shows message exactly once 
 					queueCount++;
 				}}
 				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'hands-free' }}
 			/>,
 		);
 
 		await flush(100);
+		t.is(queueCount, 1, 'Initial hands-free activation queues notice exactly once');
 
-		// Trigger multiple re-renders to simulate parent state updates
+		// Simulate parent re-renders while in hands-free mode
 		for (let i = 0; i < 5; i++) {
 			rerender(
 				<VoiceHarness
@@ -557,16 +544,63 @@ test.serial('hands-free mode: declining installation shows message exactly once 
 						queueCount++;
 					}}
 					loadPlugin={async () => mockPlugin}
+					voicePreference={{ enabled: true, activationMode: 'hands-free' }}
 				/>,
 			);
 			await flush(50);
 		}
+		t.is(queueCount, 1, 'Parent re-renders in hands-free mode must not re-trigger the notice');
 
-		t.is(queueCount, 1, 'Declined notice must be queued exactly once, never in an infinite loop');
+		// Switch mode: hands-free -> push-to-talk
+		rerender(
+			<VoiceHarness
+				handleUserSubmit={async () => {}}
+				messages={[]}
+				addToChatQueue={() => {
+					queueCount++;
+				}}
+				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'push-to-talk' }}
+			/>,
+		);
+		await flush(100);
+		t.is(queueCount, 1, 'Switching to push-to-talk must not queue hands-free notices');
+
+		// Switch mode: push-to-talk -> hands-free (re-triggers the effect legitimately)
+		rerender(
+			<VoiceHarness
+				handleUserSubmit={async () => {}}
+				messages={[]}
+				addToChatQueue={() => {
+					queueCount++;
+				}}
+				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'hands-free' }}
+			/>,
+		);
+		await flush(100);
+		t.is(queueCount, 1, 'Re-entering hands-free does not re-trigger session-declined notice');
+
+		// Subsequent re-renders after second activation must still not loop
+		for (let i = 0; i < 5; i++) {
+			rerender(
+				<VoiceHarness
+					handleUserSubmit={async () => {}}
+					messages={[]}
+					addToChatQueue={() => {
+						queueCount++;
+					}}
+					loadPlugin={async () => mockPlugin}
+					voicePreference={{ enabled: true, activationMode: 'hands-free' }}
+				/>,
+			);
+			await flush(50);
+		}
+		t.is(queueCount, 1, 'Subsequent re-renders after second activation must not loop');
+
 		unmount();
 	} finally {
 		setDeclinedVoiceInstallForSession(false);
-		updateVoicePreference(originalPref);
 	}
 });
 
@@ -612,25 +646,15 @@ test.serial('rapid repeated interrupts stress test', async t => {
 // PR6 Specific Unit Tests: Realtime Capability & Cloud STT/TTS
 // ============================================================================
 
-test.serial('PR6 - Capability Detection: detects clients with and without RealtimeCapability', async t => {
-	const isRealtimeRef = { current: null as boolean | null };
-
+test('PR6 - Capability Detection: isRealtimeCapable type guard detects clients correctly', t => {
 	const standardClient: Partial<LLMClient> = {
 		getCurrentModel: () => 'gpt-4o',
 	};
 
-	const { rerender, unmount } = render(
-		<VoiceHarness
-			handleUserSubmit={async () => {}}
-			messages={[]}
-			addToChatQueue={() => {}}
-			client={standardClient as LLMClient}
-			isRealtimeRef={isRealtimeRef}
-		/>,
-	);
-
-	await flush();
-	t.is(isRealtimeRef.current, false, 'Standard client must not be detected as realtime-capable');
+	t.false(isRealtimeCapable(standardClient), 'Standard client must not be detected as realtime-capable');
+	t.false(isRealtimeCapable(null));
+	t.false(isRealtimeCapable(undefined));
+	t.false(isRealtimeCapable({ supportsRealtimeAudio: false }));
 
 	const realtimeCapableClient: Partial<LLMClient> & RealtimeCapability = {
 		getCurrentModel: () => 'realtime-model',
@@ -645,20 +669,7 @@ test.serial('PR6 - Capability Detection: detects clients with and without Realti
 		}),
 	};
 
-	rerender(
-		<VoiceHarness
-			handleUserSubmit={async () => {}}
-			messages={[]}
-			addToChatQueue={() => {}}
-			client={realtimeCapableClient as LLMClient}
-			isRealtimeRef={isRealtimeRef}
-		/>,
-	);
-
-	await flush();
-	t.is(isRealtimeRef.current, true, 'RealtimeCapability client must be detected');
-
-	unmount();
+	t.true(isRealtimeCapable(realtimeCapableClient), 'RealtimeCapability client must be detected');
 });
 
 test.serial('PR6 - Provider-Switch Teardown: provider switch tears down open realtime sessions', async t => {

@@ -11,8 +11,8 @@ import {
 	transcribeCloudAudio,
 } from '@/services/cloud-audio';
 import {generateKey} from '@/session/key-generator';
-import type {ImageAttachment, LLMClient, Message} from '@/types/core';
-import {isRealtimeCapable, type RealtimeSession} from '@/types/realtime';
+import type {LLMClient, Message} from '@/types/core';
+import type {RealtimeSession} from '@/types/realtime';
 import {formatForSpeech} from '@/utils/format-for-speech';
 import {
 	hasDeclinedVoiceInstallForSession,
@@ -57,7 +57,6 @@ export interface UseVoiceProps {
 	handleUserSubmit: (
 		submittedText: string,
 		displayText: string,
-		images?: ImageAttachment[],
 	) => Promise<void>;
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -77,8 +76,6 @@ export interface UseVoiceProps {
 export interface UseVoiceReturn {
 	state: VoiceState;
 	startStopRecording: () => void;
-	isRealtimeCapable: boolean;
-	activeRealtimeSession: RealtimeSession | null;
 }
 
 const defaultLoadPlugin = async (): Promise<VoicePlugin> =>
@@ -144,10 +141,9 @@ export function useVoice({
 	);
 	const vadEngineRef = React.useRef<unknown>(null);
 	const hasCheckedHandsFreeDepsRef = React.useRef(false);
+	const hasEmittedDeclinedSessionNoticeRef = React.useRef(false);
 	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
 	const activeRealtimeSessionRef = React.useRef<RealtimeSession | null>(null);
-
-	const hasRealtime = React.useMemo(() => isRealtimeCapable(client), [client]);
 
 	// Provider/model switch teardown gap fix: explicitly tear down any open realtime session on switch
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Teardown on provider/model/client switch
@@ -214,13 +210,16 @@ export function useVoice({
 				}
 
 				if (hasDeclinedVoiceInstallForSession()) {
-					addToChatQueueRef.current(
-						React.createElement(InfoMessage, {
-							key: generateKey('voice-dep-declined'),
-							message:
-								'Voice mode dependencies missing. Installation declined for this session.',
-						}),
-					);
+					if (!hasEmittedDeclinedSessionNoticeRef.current) {
+						hasEmittedDeclinedSessionNoticeRef.current = true;
+						addToChatQueueRef.current(
+							React.createElement(InfoMessage, {
+								key: generateKey('voice-dep-declined'),
+								message:
+									'Voice mode dependencies missing. Installation declined for this session.',
+							}),
+						);
+					}
 					return false;
 				}
 
@@ -710,7 +709,5 @@ export function useVoice({
 	return {
 		state,
 		startStopRecording,
-		isRealtimeCapable: hasRealtime,
-		activeRealtimeSession: activeRealtimeSessionRef.current,
 	};
 }
