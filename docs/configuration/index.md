@@ -175,7 +175,7 @@ One turn is a single LLM response plus its batch of tool executions. The default
 
 ### OS sandbox
 
-File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to confine those two to an OS jail. Default is off.
+File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to `true` (boolean; a string like `"true"` is ignored and treated as off, with a warning) to wrap those two in an OS jail. Default is off.
 
 ```json
 {
@@ -187,9 +187,11 @@ File tools already refuse paths outside the project. `execute_bash` and `!comman
 
 When on:
 
-- **macOS** — `sandbox-exec`: no network, writes only inside the project root.
-- **Linux** — `bwrap` (bubblewrap) if installed: no network, writes only inside the project root. If `bwrap` is missing the tool returns an error and does **not** fall through to unsandboxed bash.
+- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), and the Darwin user temp dir (bare `mktemp` ignores `TMPDIR` on macOS). Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model.
+- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. Same read caveat as macOS. If `bwrap` is missing the tool returns an error and does **not** fall through to unsandboxed bash.
 - **Windows** — not supported in this version. The tool returns an error if the flag is on.
+
+This is not a secrets boundary. Network is blocked, writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation.
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 

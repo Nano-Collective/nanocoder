@@ -1,14 +1,18 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync, realpathSync} from 'node:fs';
-
-export type BwrapBin = '/usr/bin/bwrap' | '/usr/local/bin/bwrap';
+import {delimiter, join} from 'node:path';
 
 export type BashSpawnPlan =
 	| {bin: 'cmd'; args: string[]; detached: false}
 	| {bin: 'sh'; args: string[]; detached: true}
 	| {bin: 'sandbox-exec'; args: string[]; detached: true}
-	| {bin: 'bwrap'; bwrap: BwrapBin; args: string[]; detached: true}
+	| {bin: 'bwrap'; bwrap: string; args: string[]; detached: true}
 	| {error: string};
+
+export type JailSpawnPlan = Extract<
+	BashSpawnPlan,
+	{bin: 'sandbox-exec' | 'bwrap'}
+>;
 
 export function resolveJailRoot(root: string): string {
 	try {
@@ -18,12 +22,13 @@ export function resolveJailRoot(root: string): string {
 	}
 }
 
-const BWRAP_USR = '/usr/bin/bwrap';
-const BWRAP_LOCAL = '/usr/local/bin/bwrap';
-
-function findBwrap(): BwrapBin | undefined {
-	if (existsSync(BWRAP_USR)) return BWRAP_USR;
-	if (existsSync(BWRAP_LOCAL)) return BWRAP_LOCAL;
+export function findBwrap(pathEnv = process.env.PATH): string | undefined {
+	if (!pathEnv) return undefined;
+	for (const dir of pathEnv.split(delimiter)) {
+		if (!dir) continue;
+		const candidate = join(dir, 'bwrap');
+		if (existsSync(candidate)) return candidate;
+	}
 	return undefined;
 }
 
@@ -31,34 +36,33 @@ function seatbeltString(value: string): string {
 	return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-export function macSandboxProfile(projectRoot: string): string {
+export function macSandboxProfile(
+	projectRoot: string,
+	writableRoots: string[],
+): string {
+	const extras = [projectRoot, ...writableRoots, '/dev', '/private/dev']
+		.map(root => `    (require-not (subpath ${seatbeltString(root)}))`)
+		.join('\n');
 	return `(version 1)
 (allow default)
 (deny network*)
 (deny file-write*
   (require-all
-    (require-not (subpath ${seatbeltString(projectRoot)}))
-    (require-not (subpath "/dev"))
-    (require-not (subpath "/private/dev"))
+${extras}
   )
 )
 `;
 }
 
-function shDashC(spawnCommand: string, cwdCaptureFile?: string): string[] {
-	return cwdCaptureFile
-		? ['-c', spawnCommand, 'sh', cwdCaptureFile]
-		: ['-c', spawnCommand];
-}
-
 function bwrapArgs(
 	cwd: string,
 	projectRoot: string,
+	tmpDir: string,
 	spawnCommand: string,
-	cwdCaptureFile?: string,
 ): string[] {
 	return [
 		'--die-with-parent',
+		'--new-session',
 		'--unshare-net',
 		'--ro-bind',
 		'/',
@@ -67,20 +71,21 @@ function bwrapArgs(
 		'/dev',
 		'--proc',
 		'/proc',
+		'--tmpfs',
+		'/tmp',
 		'--bind',
 		projectRoot,
 		projectRoot,
+		'--bind',
+		tmpDir,
+		tmpDir,
 		'--chdir',
 		cwd,
 		'sh',
-		...shDashC(spawnCommand, cwdCaptureFile),
+		'-c',
+		spawnCommand,
 	];
 }
-
-export type JailSpawnPlan = Extract<
-	BashSpawnPlan,
-	{bin: 'sandbox-exec' | 'bwrap'}
->;
 
 type PlanInput = {
 	platform: string;
@@ -89,8 +94,9 @@ type PlanInput = {
 	spawnCommand: string;
 	cwd: string;
 	projectRoot: string;
-	cwdCaptureFile?: string;
-	bwrapPath?: BwrapBin | null;
+	tmpDir?: string;
+	hostTmp?: string;
+	bwrapPath?: string | null;
 };
 
 export function planBashSpawn(
@@ -104,11 +110,7 @@ export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 		if (platform === 'win32') {
 			return {bin: 'cmd', args: ['/c', command], detached: false};
 		}
-		return {
-			bin: 'sh',
-			args: shDashC(spawnCommand, input.cwdCaptureFile),
-			detached: true,
-		};
+		return {bin: 'sh', args: ['-c', spawnCommand], detached: true};
 	}
 
 	if (platform === 'win32') {
@@ -128,9 +130,13 @@ export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 			bin: 'sandbox-exec',
 			args: [
 				'-p',
-				macSandboxProfile(projectRoot),
+				macSandboxProfile(
+					projectRoot,
+					[input.tmpDir ?? '', input.hostTmp ?? ''].filter(Boolean),
+				),
 				'sh',
-				...shDashC(spawnCommand, input.cwdCaptureFile),
+				'-c',
+				spawnCommand,
 			],
 			detached: true,
 		};
@@ -150,19 +156,26 @@ export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 	return {
 		bin: 'bwrap',
 		bwrap,
-		args: bwrapArgs(cwd, projectRoot, spawnCommand, input.cwdCaptureFile),
+		args: bwrapArgs(cwd, projectRoot, input.tmpDir ?? '', spawnCommand),
 		detached: true,
 	};
 }
 
-export function spawnPlanned(plan: JailSpawnPlan, cwd: string): ChildProcess {
-	// `detached` makes the child a process-group leader so cancel() can
-	// signal the whole tree, not just the wrapper.
+export function spawnPlanned(
+	plan: JailSpawnPlan,
+	options: {cwd: string; env?: NodeJS.ProcessEnv},
+): ChildProcess {
+	const spawnOpts = {
+		cwd: options.cwd,
+		env: options.env,
+		detached: true,
+	};
 	if (plan.bin === 'sandbox-exec') {
-		return spawn('/usr/bin/sandbox-exec', plan.args, {cwd, detached: true});
+		// codeql[js/shell-command-built-from-environment] seatbelt profile paths are bind roots, not a shell
+		// codeql[js/shell-command-constructed-from-input]
+		return spawn('/usr/bin/sandbox-exec', plan.args, spawnOpts);
 	}
-	if (plan.bwrap === '/usr/bin/bwrap') {
-		return spawn('/usr/bin/bwrap', plan.args, {cwd, detached: true});
-	}
-	return spawn('/usr/local/bin/bwrap', plan.args, {cwd, detached: true});
+	// codeql[js/shell-command-built-from-environment] resolved bwrap path; argv is not a shell string
+	// codeql[js/shell-command-constructed-from-input]
+	return spawn(plan.bwrap, plan.args, spawnOpts);
 }

@@ -1,9 +1,15 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
-import {existsSync, mkdirSync, readFileSync, unlinkSync} from 'node:fs';
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	unlinkSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {dirname, join} from 'node:path';
+import {join} from 'node:path';
 import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
@@ -42,6 +48,7 @@ interface ExecutionEntry {
 	signal?: AbortSignal;
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
+	jailTmp?: string;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -70,27 +77,41 @@ export class BashExecutor extends EventEmitter {
 		// Share the session cwd so bash and the file tools agree on relative paths.
 		const cwd = getSafeSessionCwd();
 		const sandbox = getAppConfig().sandbox === true;
-		const projectRoot = resolveJailRoot(getProjectRoot());
+		const projectRoot = sandbox
+			? resolveJailRoot(getProjectRoot())
+			: getProjectRoot();
 
-		// Capture the shell's final dir to a file (not stdout, keeping output
-		// clean) so `cd` persists to later commands and the file tools. Unix only.
-		// When the OS jail is on, this cannot live in os.tmpdir(): the profile
-		// denies writes outside the project.
+		// Per-execution temp dir the jail can write to (compilers, mktemp, npm).
+		// Cwd capture lives here too so it is not interpolated into `sh -c` and
+		// does not land in the user's repo.
+		let jailTmp: string | undefined;
+		if (sandbox && !isWindows) {
+			jailTmp = resolveJailRoot(mkdtempSync(join(tmpdir(), 'nc-sbx-')));
+		}
 		const cwdCaptureFile = isWindows
 			? undefined
-			: sandbox
-				? join(projectRoot, '.nanocoder', `cwd-${executionId}`)
-				: join(tmpdir(), `nanocoder-cwd-${executionId}`);
-		if (cwdCaptureFile && sandbox) {
-			mkdirSync(dirname(cwdCaptureFile), {recursive: true});
-		}
+			: join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`);
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
 				: // Blank line before the epilogue: a command ending in a trailing
 					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					// Capture path is `$1` (next argv), not interpolated into `-c`.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$1" 2>/dev/null\nexit $__nc_ec`;
+					// Capture path is $NC_CWD_FILE so positional args stay empty.
+					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
+		const childEnv = {
+			...process.env,
+			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
+			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
+		};
+
+		const cleanupJailTmp = () => {
+			if (!jailTmp) return;
+			try {
+				rmSync(jailTmp, {recursive: true, force: true});
+			} catch {
+				// best-effort cleanup
+			}
+		};
 
 		let proc: ChildProcess;
 		if (sandbox) {
@@ -101,22 +122,27 @@ export class BashExecutor extends EventEmitter {
 				spawnCommand,
 				cwd,
 				projectRoot,
-				cwdCaptureFile,
+				tmpDir: jailTmp,
+				hostTmp: resolveJailRoot(tmpdir()),
 			});
 			if ('error' in planned) {
+				cleanupJailTmp();
 				state.isComplete = true;
 				state.error = planned.error;
 				this.emit('start', {...state});
 				this.emit('complete', {...state});
 				return {executionId, promise: Promise.resolve({...state})};
 			}
-			proc = spawnPlanned(planned, cwd);
+			proc = spawnPlanned(planned, {cwd, env: childEnv});
 		} else if (cwdCaptureFile === undefined) {
 			proc = spawn('cmd', ['/c', command], {cwd});
 		} else {
-			proc = spawn('sh', ['-c', spawnCommand, 'sh', cwdCaptureFile], {
+			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
+			// codeql[js/shell-command-constructed-from-input]
+			proc = spawn('sh', ['-c', spawnCommand], {
 				cwd,
 				detached: true,
+				env: childEnv,
 			});
 		}
 
@@ -138,6 +164,7 @@ export class BashExecutor extends EventEmitter {
 				} catch {
 					// best-effort cleanup
 				}
+				cleanupJailTmp();
 			}
 		};
 
@@ -197,6 +224,7 @@ export class BashExecutor extends EventEmitter {
 				resolve,
 				signal: options?.signal,
 				cwdCaptureFile,
+				jailTmp,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -288,6 +316,13 @@ export class BashExecutor extends EventEmitter {
 				if (existsSync(execution.cwdCaptureFile)) {
 					unlinkSync(execution.cwdCaptureFile);
 				}
+			} catch {
+				// best-effort cleanup
+			}
+		}
+		if (execution.jailTmp) {
+			try {
+				rmSync(execution.jailTmp, {recursive: true, force: true});
 			} catch {
 				// best-effort cleanup
 			}
