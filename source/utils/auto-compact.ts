@@ -8,6 +8,7 @@ import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {compressMessages} from './message-compression';
+import {filterModelFacing} from './message-visibility';
 import {createSessionOverride} from './session-override';
 
 export interface AutoCompactSessionOverrides {
@@ -132,10 +133,13 @@ export async function performAutoCompact(
 	}
 
 	try {
-		// Calculate current token count
+		// Calculate current token count. Display-only notices are filtered out of
+		// the provider payload, so counting them would trip the threshold on
+		// tokens the model never receives — but they stay in `allMessages`, which
+		// is what compaction rewrites and the UI renders.
 		const allMessages = [systemMessage, ...messages];
 		let messageTokens = 0;
-		for (const msg of allMessages) {
+		for (const msg of filterModelFacing(allMessages)) {
 			messageTokens += tokenizer.countTokens(msg);
 		}
 
@@ -179,7 +183,7 @@ export async function performAutoCompact(
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
 					const compressedTokenCount =
-						[systemMessage, ...llmCompressed].reduce(
+						[systemMessage, ...filterModelFacing(llmCompressed)].reduce(
 							(sum, msg) => sum + tokenizer.countTokens(msg),
 							0,
 						) + toolDefTokens;

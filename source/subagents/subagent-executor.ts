@@ -25,13 +25,14 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
-import type {ToolManager} from '@/tools/tool-manager';
+import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
 	LLMClient,
 	Message,
 	ToolCall,
+	ToolExecutionContext,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
@@ -119,6 +120,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -171,6 +173,7 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					executionContext,
 				);
 
 				// Read final token count from the correct progress source
@@ -262,6 +265,13 @@ export class SubagentExecutor {
 
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
+
+		// Always exclude the session-artifact tools. Subagents run with the
+		// parent's session id, so `getAllTools()` (which applies no development
+		// mode) would otherwise let a subagent overwrite the very plan, task
+		// list, or walkthrough the user is about to act on.
+		const artifactTools = new Set<string>(SESSION_ARTIFACT_TOOLS);
+		available = available.filter(name => !artifactTools.has(name));
 
 		return available;
 	}
@@ -383,6 +393,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -539,6 +550,7 @@ export class SubagentExecutor {
 					toolCall.id,
 					config,
 					signal,
+					executionContext,
 				);
 
 				// Count tokens from tool results
@@ -586,9 +598,24 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
+		}
+
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		if (!this.getAvailableToolNames(config).includes(toolName)) {
+			return (
+				`Error: Tool '${toolName}' is not available to this subagent. ` +
+				'Use only the tools listed in your instructions.'
+			);
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
@@ -636,7 +663,10 @@ export class SubagentExecutor {
 				return `Error: ${gate.reason}`;
 			}
 
-			const result = await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs, {
+				...executionContext,
+				abortSignal: signal,
+			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
 			const content = typeof result === 'string' ? result : result.llmContent;

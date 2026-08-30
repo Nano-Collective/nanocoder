@@ -1,3 +1,4 @@
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import type {
 	NonInteractiveCompletionResult,
 	NonInteractiveModeState,
@@ -20,11 +21,13 @@ export function isNonInteractiveModeComplete(
 		(message: {role: string; content: string}) => message.role === 'error',
 	);
 
-	// Check for tool approval required messages
+	// Check for tool approval required messages. The notice is display-only
+	// chrome, so match the shared prefix its producer uses rather than a loose
+	// literal that a reword would silently invalidate.
 	const hasToolApprovalRequired = appState.messages.some(
 		(message: {role: string; content: string}) =>
 			typeof message.content === 'string' &&
-			message.content.includes('Tool approval required'),
+			message.content.includes(TOOL_APPROVAL_REQUIRED_PREFIX),
 	);
 
 	if (hasTimedOut) {

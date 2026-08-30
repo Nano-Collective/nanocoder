@@ -94,10 +94,18 @@ test('buildSystemPrompt - auto-accept mode includes autonomous approach', t => {
 });
 
 test('buildSystemPrompt - plan mode includes planning approach', t => {
-	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+	const result = buildSystemPrompt('plan', undefined, [...ALL_TOOLS, 'write_plan']);
 	t.true(result.includes('PLANNING MODE'));
-	t.true(result.includes('Do NOT make changes'));
+	t.true(result.includes('Do NOT make project changes'));
 	t.true(result.includes('structured plan'));
+	t.true(result.includes('write_plan'));
+});
+
+test('buildSystemPrompt - plan mode omits artifact instructions when write_plan is unavailable', t => {
+	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+
+	t.true(result.includes('Do NOT make changes'));
+	t.false(result.includes('write_plan'));
 });
 
 test('buildSystemPrompt - scheduler mode includes scheduler approach', t => {
@@ -132,6 +140,16 @@ test('buildSystemPrompt - excludes git section when no git tools', t => {
 test('buildSystemPrompt - includes task management when write_tasks available', t => {
 	const result = buildSystemPrompt('normal', undefined, ['write_tasks']);
 	t.true(result.includes('TASK MANAGEMENT'));
+});
+
+test('buildSystemPrompt - requires a truthful walkthrough when the tool is available', t => {
+	const result = buildSystemPrompt('normal', undefined, [
+		'write_tasks',
+		'write_walkthrough',
+	]);
+
+	t.true(result.includes('write_walkthrough'));
+	t.true(result.includes('Only report tests you actually ran'));
 });
 
 test('buildSystemPrompt - excludes task management in plan mode', t => {

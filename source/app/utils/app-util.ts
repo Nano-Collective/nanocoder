@@ -14,7 +14,6 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
-import {clearAllTasks} from '@/tools/tasks/storage';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -314,7 +313,6 @@ async function handleSpecialCommand(
 		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			await clearAllTasks();
 			// Increment clear counter to force re-render of static components
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);

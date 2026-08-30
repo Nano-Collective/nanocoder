@@ -4,7 +4,12 @@ import {
 	runLifecycleHooks,
 } from '@/services/lifecycle-hooks';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
+import type {
+	ToolCall,
+	ToolExecutionContext,
+	ToolHandler,
+	ToolResult,
+} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -46,7 +51,7 @@ export function getCommandLoader(): CustomCommandLoader | null {
 
 export async function processToolUse(
 	toolCall: ToolCall,
-	options?: {abortSignal?: AbortSignal},
+	options?: ToolExecutionContext,
 ): Promise<ToolResult> {
 	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
 	if (toolCall.function.name === '__xml_validation_error__') {

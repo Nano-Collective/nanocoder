@@ -1,8 +1,14 @@
+import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -47,6 +53,12 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
+	artifacts: Pick<
+		ArtifactManager,
+		| 'cleanupStaleEphemeralSessions'
+		| 'markEphemeralSession'
+		| 'deleteSessionArtifacts'
+	>;
 }
 
 const defaultDeps: RunPlainShellDeps = {
@@ -55,6 +67,7 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
+	artifacts: artifactManager,
 };
 
 /**
@@ -216,6 +229,31 @@ export async function runPlainShell(
 	const abortController = new AbortController();
 	const sigint = () => abortController.abort();
 	process.on('SIGINT', sigint);
+	const sessionId = randomUUID();
+	await deps.artifacts.cleanupStaleEphemeralSessions();
+	await deps.artifacts.markEphemeralSession(sessionId);
+
+	const shutdownManager = deps.getShutdownManager();
+	const cleanupHandlerName = `plain-artifacts-${sessionId}`;
+	let conversationPromise:
+		| ReturnType<typeof deps.runPlainConversation>
+		| undefined;
+	let cleaned = false;
+	const cleanupArtifacts = async () => {
+		if (cleaned) return;
+		await deps.artifacts.deleteSessionArtifacts(sessionId);
+		cleaned = true;
+		shutdownManager.unregister(cleanupHandlerName);
+	};
+	shutdownManager.register({
+		name: cleanupHandlerName,
+		priority: 10,
+		handler: async () => {
+			abortController.abort();
+			await conversationPromise?.catch(() => undefined);
+			await cleanupArtifacts();
+		},
+	});
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
@@ -223,19 +261,27 @@ export async function runPlainShell(
 		writeLine();
 	}
 
-	const outcome = await deps.runPlainConversation({
-		client,
-		toolManager,
-		systemMessage,
-		initialMessages,
-		developmentMode,
-		nonInteractiveAlwaysAllow,
-		abortSignal: abortController.signal,
-		tune,
-		model,
-		outputFormat,
-	});
-	process.off('SIGINT', sigint);
+	let outcome;
+	try {
+		conversationPromise = deps.runPlainConversation({
+			client,
+			toolManager,
+			systemMessage,
+			initialMessages,
+			developmentMode,
+			nonInteractiveAlwaysAllow,
+			abortSignal: abortController.signal,
+			tune,
+			model,
+			outputFormat,
+			sessionId,
+			workingDirectory: process.cwd(),
+		});
+		outcome = await conversationPromise;
+	} finally {
+		process.off('SIGINT', sigint);
+		await cleanupArtifacts();
+	}
 
 	if (isJson) {
 		const exitCode =
@@ -294,7 +340,7 @@ export async function runPlainShell(
 			return;
 		case 'tool-approval-required':
 			writeError(
-				`Tool approval required for: ${outcome.toolNames.join(', ')}. ` +
+				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
 					`agents.config.json "alwaysAllow".`,
 			);

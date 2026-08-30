@@ -1,3 +1,8 @@
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+} from '@/artifacts/walkthrough-lifecycle';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
@@ -33,6 +38,14 @@ export interface RunPlainConversationOptions {
 	tune?: TuneConfig;
 	model?: string;
 	outputFormat?: 'text' | 'json';
+	sessionId?: string;
+	workingDirectory?: string;
+	/**
+	 * Force a walkthrough after approved-plan work. Off by default: the plain
+	 * shell's artifact directory is ephemeral, so a forced walkthrough there
+	 * would cost a model turn and then be deleted unread.
+	 */
+	enforceWalkthrough?: boolean;
 }
 
 export interface PlainConversationUsage {
@@ -98,12 +111,17 @@ export async function runPlainConversation(
 		tune,
 		model,
 		outputFormat = 'text',
+		sessionId,
+		workingDirectory = process.cwd(),
+		enforceWalkthrough = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
 
 	let messages = initialMessages;
+	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
 	let accumulatedFinalText = '';
+	let finalTextBeforeWalkthroughNudge: string | undefined;
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
@@ -322,9 +340,25 @@ export async function runPlainConversation(
 					usage: getUsage(),
 				};
 			}
+			// Only nudge when the walkthrough will actually outlive the run.
+			// `nanocoder --plain` deletes its ephemeral artifact directory on
+			// exit and reports nothing about the walkthrough, so forcing one
+			// there buys an extra model round trip for a file nobody ever reads.
+			const walkthroughFallback =
+				finalTurn || !enforceWalkthrough
+					? null
+					: takeWalkthroughFallback(
+							walkthroughLifecycle,
+							availableNames.includes('write_walkthrough'),
+						);
+			if (walkthroughFallback) {
+				finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
+				messages = [...messages, walkthroughFallback];
+				continue;
+			}
 			return {
 				kind: 'success',
-				finalText: accumulatedFinalText,
+				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
 				usage: getUsage(),
@@ -365,8 +399,15 @@ export async function runPlainConversation(
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
 
-			const toolResult = await processToolUse(toolCall);
+			const toolResult = await processToolUse(toolCall, {
+				abortSignal,
+				sessionId,
+				workingDirectory,
+			});
 			toolResults.push(toolResult);
+			if (!toolResult.isError) {
+				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+			}
 
 			const contentStr = toolResult.content
 				? typeof toolResult.content === 'string'

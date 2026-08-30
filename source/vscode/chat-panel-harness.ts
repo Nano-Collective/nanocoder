@@ -121,8 +121,13 @@ export function createElement(tagName: string): StubElement {
 			},
 		},
 		appendChild(child: StubElement) {
+			// Real appendChild moves a node rather than cloning it, and the panel
+			// relies on that when a card is re-homed into the work summary.
+			if (child.parentElement && child.parentElement !== element) {
+				child.parentElement.removeChild(child);
+			}
 			child.parentElement = element;
-			element.children.push(child);
+			if (!element.children.includes(child)) element.children.push(child);
 			return child;
 		},
 		removeChild(child: StubElement) {
@@ -179,6 +184,9 @@ export function createElement(tagName: string): StubElement {
 		get: () => html,
 		set: (value: string) => {
 			html = String(value);
+			// Detached children must not keep claiming this node as their parent,
+			// or remove() on one of them would corrupt the new child list.
+			for (const child of element.children) child.parentElement = null;
 			element.children = [];
 		},
 	});
@@ -327,14 +335,25 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				status: 'pending',
 			});
 		},
-		finish() {
-			this.update({sessionUpdate: 'prompt_response'});
+		finish(outcome: string = 'completed') {
+			this.update({sessionUpdate: 'prompt_response', outcome});
 		},
 		userMessage(value: string) {
 			this.update({
 				sessionUpdate: 'user_message_chunk',
 				content: {type: 'text', text: value},
 			});
+		},
+		/**
+		 * Start a real turn, so `isProcessing` is set and the Stop button is
+		 * live. `userMessage` only replays a message; it starts no turn.
+		 */
+		startTurn(text: string) {
+			this.post({type: 'runPrompt', text});
+		},
+		/** Press Stop, the way the user cancels a turn. */
+		stop() {
+			(findById(root, 'send-stop-btn') as StubElement).click();
 		},
 		advance(ms: number) {
 			clock.now += ms;
@@ -345,16 +364,19 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				timer.fn();
 			}
 		},
-		boxes(): StubElement[] {
+		/** The per-turn work summaries, in the order they were inserted. */
+		summaries(): StubElement[] {
 			return container.children.filter((child: StubElement) =>
-				child.className.includes('thought-aggregator'),
+				child.className.includes('work-summary'),
 			);
 		},
-		/** The tool-call cards, in the order they were inserted. */
+		/** Every stretch of reasoning, across all summaries. */
+		thoughts(): StubElement[] {
+			return container.querySelectorAll('.work-summary-thought');
+		},
+		/** The tool-call group cards, in the order they were inserted. */
 		aggregators(): StubElement[] {
-			return container.children.filter((child: StubElement) =>
-				child.className.includes('tool-aggregator'),
-			);
+			return container.querySelectorAll('.tool-aggregator');
 		},
 		/** The copy/timestamp footers currently in the transcript. */
 		footers(): StubElement[] {
