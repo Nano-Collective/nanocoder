@@ -6,7 +6,8 @@
  */
 
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getRetryLimits} from '@/config/index';
+import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendSubagentTool,
 	getSubagentProgress,
@@ -21,13 +22,14 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
-import type {ToolManager} from '@/tools/tool-manager';
+import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
 	LLMClient,
 	Message,
 	ToolCall,
+	ToolExecutionContext,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
@@ -47,6 +49,21 @@ const MAX_SUBAGENT_DEPTH = 2;
 
 /** Maximum number of concurrent subagents */
 export const MAX_CONCURRENT_AGENTS = 5;
+
+/**
+ * Thrown when the conversation loop stops itself (repeated-call cap). Carries
+ * the assistant text produced before the stop so the parent still receives the
+ * work the subagent did complete instead of an empty result.
+ */
+class SubagentLoopStopError extends Error {
+	readonly partialOutput: string;
+
+	constructor(message: string, partialOutput: string) {
+		super(message);
+		this.name = 'SubagentLoopStopError';
+		this.partialOutput = partialOutput;
+	}
+}
 
 /**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
@@ -115,6 +132,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -167,6 +185,7 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					executionContext,
 				);
 
 				// Read final token count from the correct progress source
@@ -190,7 +209,11 @@ export class SubagentExecutor {
 		} catch (error) {
 			return {
 				subagentName: task.subagent_type,
-				output: '',
+				// A loop stop still returns whatever the subagent produced before
+				// it got stuck, so the parent can use the partial work instead of
+				// being handed an empty result.
+				output:
+					error instanceof SubagentLoopStopError ? error.partialOutput : '',
 				success: false,
 				error: formatError(error),
 				executionTimeMs: Date.now() - startTime,
@@ -258,6 +281,13 @@ export class SubagentExecutor {
 
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
+
+		// Always exclude the session-artifact tools. Subagents run with the
+		// parent's session id, so `getAllTools()` (which applies no development
+		// mode) would otherwise let a subagent overwrite the very plan, task
+		// list, or walkthrough the user is about to act on.
+		const artifactTools = new Set<string>(SESSION_ARTIFACT_TOOLS);
+		available = available.filter(name => !artifactTools.has(name));
 
 		return available;
 	}
@@ -379,6 +409,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -386,6 +417,25 @@ export class SubagentExecutor {
 
 		let streamingText = '';
 		let streamingReasoning = '';
+
+		// Repeated-call cap (`nanocoder.retries.maxRepeatedToolCalls`): the same
+		// agent-loop guard the main runtimes apply. A subagent re-issuing the
+		// identical tool call(s) on consecutive turns is stuck; there is no user
+		// to ask inside a delegated run, so hitting the cap stops with an error.
+		// The signature covers every emitted call, so a subagent stuck on an
+		// unknown tool trips the cap too.
+		//
+		// Deliberately out of scope for #897: a hard turn ceiling (the plain and
+		// ACP `maxTurns` equivalent) and alternating-pattern detection, so a
+		// subagent cycling A, B, A, B... is still only bounded by the parent's
+		// abort signal. Revisit as its own change.
+		const {maxRepeatedToolCalls} = getRetryLimits();
+		let lastToolSignature = '';
+		let repeatedToolCallCount = 0;
+
+		// Assistant text from every turn so far. The repeated-call stop hands
+		// this to the parent instead of discarding the work already done.
+		const assistantTranscript: string[] = [];
 
 		if (agentId) {
 			initSubagentSession(agentId, config.name, messages);
@@ -483,12 +533,30 @@ export class SubagentExecutor {
 			);
 
 			const responseContent = response.choices[0]?.message.content || '';
+			if (responseContent.trim()) {
+				assistantTranscript.push(responseContent);
+			}
 
 			const toolCalls = response.choices[0]?.message.tool_calls;
 			if (!toolCalls || toolCalls.length === 0) {
 				emitProgress('complete');
 				return responseContent;
 			}
+
+			const currentToolSignature = computeToolCallSignature(toolCalls);
+			const currentRepeatedCount =
+				currentToolSignature && currentToolSignature === lastToolSignature
+					? repeatedToolCallCount + 1
+					: 1;
+			if (currentRepeatedCount >= maxRepeatedToolCalls) {
+				emitProgress('error');
+				throw new SubagentLoopStopError(
+					`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
+					assistantTranscript.join('\n\n'),
+				);
+			}
+			lastToolSignature = currentToolSignature;
+			repeatedToolCallCount = currentRepeatedCount;
 
 			// Count tokens from tool call arguments
 			for (const tc of toolCalls) {
@@ -535,6 +603,7 @@ export class SubagentExecutor {
 					toolCall.id,
 					config,
 					signal,
+					executionContext,
 				);
 
 				// Count tokens from tool results
@@ -582,9 +651,24 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
+		}
+
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		if (!this.getAvailableToolNames(config).includes(toolName)) {
+			return (
+				`Error: Tool '${toolName}' is not available to this subagent. ` +
+				'Use only the tools listed in your instructions.'
+			);
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
@@ -619,7 +703,10 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
-			const result = await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs, {
+				...executionContext,
+				abortSignal: signal,
+			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
 			const content = typeof result === 'string' ? result : result.llmContent;

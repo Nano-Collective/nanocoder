@@ -454,3 +454,34 @@ test('ToolRegistry - fromRegistries skips tools without matching handlers', t =>
 	t.true(registry.hasTool('tool1'));
 	t.false(registry.hasTool('tool2'));
 });
+
+test('ToolRegistry - fromToolExports forwards the abort signal to execute', async t => {
+	let seen: AbortSignal | undefined;
+	const controller = new AbortController();
+
+	// inputSchema.jsonSchema is what every real tool export carries, so this is
+	// the wrapped-by-validation path: if the wrapper drops its options, Stop
+	// stops reaching long-running tools (agent, execute_bash) entirely.
+	const registry = ToolRegistry.fromToolExports([
+		{
+			name: 'slow-tool',
+			tool: {
+				inputSchema: {
+					jsonSchema: {
+						type: 'object',
+						properties: { path: { type: 'string' } },
+					},
+				},
+				execute: async (_args: unknown, opts: { abortSignal?: AbortSignal }) => {
+					seen = opts?.abortSignal;
+					return 'done';
+				},
+			} as any,
+		},
+	]);
+
+	const handler = registry.getHandler('slow-tool');
+	t.truthy(handler);
+	await handler?.({ path: 'a.ts' }, { abortSignal: controller.signal });
+	t.is(seen, controller.signal);
+});

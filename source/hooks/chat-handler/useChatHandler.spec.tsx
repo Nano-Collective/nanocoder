@@ -1,6 +1,15 @@
 import test from 'ava';
+import {mkdtempSync, rmSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import React from 'react';
 import {render} from 'ink-testing-library';
+import {
+	resetPreferencesCache,
+	updateProfessionalTone,
+} from '@/config/preferences';
+import {setToolRegistryGetter} from '@/message-handler';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
@@ -417,7 +426,7 @@ test('useChatHandler - drains queued message when setup fails before conversatio
 	rendered.unmount();
 });
 
-test('useChatHandler - fires onPlanTurnComplete when a plan-mode turn completes', async t => {
+test('useChatHandler - does not offer review when plan mode wrote no artifact', async t => {
 	let planComplete = 0;
 	let hookResult: ChatHandlerReturn | null = null;
 	const customCommandLoader = {
@@ -443,7 +452,190 @@ test('useChatHandler - fires onPlanTurnComplete when a plan-mode turn completes'
 
 	await waitForCondition(() => hookResult !== null);
 	await hookResult!.handleChatMessage('make a plan');
-	t.is(planComplete, 1);
+	t.is(planComplete, 0);
+});
+
+test('useChatHandler - offers review after write_plan succeeds', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	let callCount = 0;
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			callbacks.onFinish?.();
+			callCount++;
+			return {
+				choices: [
+					{
+						message:
+							callCount === 1
+								? {
+									role: 'assistant' as const,
+									content: '',
+									tool_calls: [
+										{
+											id: 'write-plan',
+											function: {
+												name: 'write_plan',
+												arguments: {content: '# Plan'},
+											},
+										},
+									],
+								}
+								: {role: 'assistant' as const, content: 'Plan ready'},
+					},
+				],
+			};
+		},
+	};
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
+		getToolNames: () => ['write_plan'],
+		hasTool: (name: string) => name === 'write_plan',
+		getToolEntry: () => ({
+			name: 'write_plan',
+			approval: false,
+			readOnly: false,
+		}),
+		isReadOnly: () => false,
+		getToolFormatter: () => undefined,
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+	setToolRegistryGetter(() => ({write_plan: async () => 'Plan saved'}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager,
+					customCommandLoader,
+					developmentMode: 'plan',
+					ensureCurrentSessionId: () =>
+						'11111111-1111-4111-8111-111111111111',
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+		t.is(planComplete, 1);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - persists a prose plan when write_plan was omitted', async t => {
+	let planComplete = 0;
+	let persistedContent = '';
+	let persistedSessionId: string | undefined;
+	let hookResult: ChatHandlerReturn | null = null;
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant' as const,
+							content: '# Plan\n\n1. Build it.',
+						},
+					},
+				],
+			};
+		},
+	};
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
+		getToolNames: () => ['write_plan'],
+		hasTool: (name: string) => name === 'write_plan',
+		getToolEntry: () => ({
+			name: 'write_plan',
+			approval: false,
+			readOnly: false,
+		}),
+		isReadOnly: () => false,
+		getToolFormatter: () => undefined,
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args, options) => {
+			persistedContent = args.content;
+			persistedSessionId = options?.sessionId;
+			return 'Plan saved';
+		},
+	}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager,
+					customCommandLoader,
+					developmentMode: 'plan',
+					ensureCurrentSessionId: () =>
+						'11111111-1111-4111-8111-111111111111',
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+		t.is(persistedContent, '# Plan\n\n1. Build it.');
+		t.is(persistedSessionId, '11111111-1111-4111-8111-111111111111');
+		t.is(planComplete, 1);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - allocates a session before starting a turn', async t => {
+	let ensureCalls = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				ensureCurrentSessionId: () => {
+					ensureCalls++;
+					return '11111111-1111-4111-8111-111111111111';
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('start a session');
+	t.is(ensureCalls, 1);
 });
 
 // The signal must be scoped to plan mode — a normal-mode turn completing must
@@ -542,3 +734,40 @@ test('getBaseSystemPrompt - normal mode reuses cached prompt', t => {
 
 	t.is(result, 'cached-prompt');
 });
+
+test.serial(
+	'useChatHandler - toggling professional tone rebuilds the cached prompt',
+	async t => {
+		// The settings panel writes preferences straight to disk. Without the
+		// subscription the memoized base prompt would keep the old TONE state
+		// until the next mode or model switch.
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-hook-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+		updateProfessionalTone(false);
+
+		try {
+			render(
+				<TestHookComponent
+					{...createMockProps({toolManager: createMockToolManager()})}
+				/>,
+			);
+
+			t.false(getLastBuiltPrompt().includes('## TONE'));
+
+			updateProfessionalTone(true);
+			await waitForCondition(() => getLastBuiltPrompt().includes('## TONE'));
+
+			t.true(getLastBuiltPrompt().includes('## TONE'));
+		} finally {
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);

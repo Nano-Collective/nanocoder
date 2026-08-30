@@ -37,6 +37,7 @@ class CommandRegistry {
 		const proxy: Command = {
 			name: entry.name,
 			description: entry.description,
+			progressLabel: entry.progressLabel,
 			handler: async (args, messages, metadata) => {
 				if (!resolved) {
 					resolved = await entry.load();

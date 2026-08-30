@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -7,6 +8,7 @@ import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {setCliSessionId} from '@/session/cli-session-context';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
 import type {Task} from '@/tools/tasks/types';
@@ -52,14 +54,17 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [messageTokenCache, setMessageTokenCache] = useState<
-		BoundedMap<string, number>
-	>(
-		new BoundedMap({
+	// Held in a ref, not state: a cache write must not re-render the app or
+	// change the identity of getMessageTokens. Returned from this hook only so
+	// useAppState.spec.tsx can assert on it; there is no production consumer.
+	const messageTokenCacheRef = useRef<BoundedMap<string, number> | null>(null);
+	if (!messageTokenCacheRef.current) {
+		messageTokenCacheRef.current = new BoundedMap({
 			maxSize: 1000,
 			// No TTL - cache is session-based and cleared on app restart
-		}),
-	);
+		});
+	}
+	const messageTokenCache = messageTokenCacheRef.current;
 	const [currentModel, setCurrentModel] = useState<string>('');
 	const [currentProvider, setCurrentProvider] =
 		useState<string>('openai-compatible');
@@ -110,11 +115,13 @@ export function useAppState(
 	// plan mode completes uninterrupted. The interactive UI consumes it to show
 	// the plan review bar (reading the latest messages), then resets it.
 	const [planTurnCompleted, setPlanTurnCompleted] = useState<boolean>(false);
-	// One-shot signal: set true when the user hits Proceed on the plan review bar.
-	// The dispatch of the "implement the plan" message is deferred to an effect
+	// One-shot approved-plan message created when the user hits Proceed.
+	// Dispatch is deferred to an effect
 	// that waits for developmentMode to become 'normal', so the executing turn
 	// runs with normal-mode tools/prompt instead of the stale plan-mode closures.
-	const [pendingPlanProceed, setPendingPlanProceed] = useState<boolean>(false);
+	const [pendingPlanProceed, setPendingPlanProceed] = useState<string | null>(
+		null,
+	);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -128,7 +135,23 @@ export function useAppState(
 		currentMessageCount: number;
 	} | null>(null);
 	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
-	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+	const [currentSessionId, setCurrentSessionIdState] = useState<string | null>(
+		null,
+	);
+	const currentSessionIdRef = useRef<string | null>(null);
+	const setCurrentSessionId = useCallback((value: string | null) => {
+		currentSessionIdRef.current = value;
+		setCliSessionId(value);
+		setCurrentSessionIdState(value);
+	}, []);
+	const ensureCurrentSessionId = useCallback((): string => {
+		if (currentSessionIdRef.current) return currentSessionIdRef.current;
+		const id = randomUUID();
+		currentSessionIdRef.current = id;
+		setCliSessionId(id);
+		setCurrentSessionIdState(id);
+		return id;
+	}, []);
 	const [sessionName, setSessionName] = useState<string>('');
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
@@ -253,7 +276,13 @@ export function useAppState(
 	// Helper function for token calculation with caching
 	const getMessageTokens = useCallback(
 		(message: Message) => {
-			const cacheKey = (message.content || '') + message.role + currentModel;
+			// Provider is part of the key because it selects the tokenizer
+			// implementation (see the useMemo above). Two providers can serve the
+			// same model name with different encoders, so keying on the model
+			// alone would hand back counts produced by the previous tokenizer.
+			// Keep this formula in sync with tokenCacheKey() in the spec.
+			const cacheKey =
+				(message.content || '') + message.role + currentProvider + currentModel;
 
 			const cachedTokens = messageTokenCache.get(cacheKey);
 			if (cachedTokens !== undefined) {
@@ -261,25 +290,10 @@ export function useAppState(
 			}
 
 			const tokens = tokenizer.countTokens(message);
-			// Defer cache update to avoid "Cannot update a component while rendering" error
-			// This can happen when components call getMessageTokens during their render
-			queueMicrotask(() => {
-				setMessageTokenCache(prev => {
-					const newCache = new BoundedMap<string, number>({
-						maxSize: 1000,
-					});
-					// Copy existing entries
-					for (const [k, v] of prev.entries()) {
-						newCache.set(k, v);
-					}
-					// Add new entry
-					newCache.set(cacheKey, tokens);
-					return newCache;
-				});
-			});
+			messageTokenCache.set(cacheKey, tokens);
 			return tokens;
 		},
-		[messageTokenCache, tokenizer, currentModel],
+		[messageTokenCache, tokenizer, currentProvider, currentModel],
 	);
 
 	// Tracks the messages array last written through updateMessages so we can
@@ -362,6 +376,7 @@ export function useAppState(
 		checkpointLoadData,
 		showAllSessions,
 		currentSessionId,
+		ensureCurrentSessionId,
 		sessionName,
 		isToolConfirmationMode,
 		isToolExecuting,
@@ -390,7 +405,6 @@ export function useAppState(
 		// Setters
 		setClient,
 		setMessages,
-		setMessageTokenCache,
 		setCurrentModel,
 		setCurrentProvider,
 		setCurrentProviderConfig,
