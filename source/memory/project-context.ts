@@ -102,7 +102,7 @@ export async function appendRelevantProjectContextWithCount(
 			memoryCount: projectContext.memoryCount,
 		};
 	} catch (error) {
-		getLogger().warn('Failed to recall project memories', {error});
+		getLogger().warn({error}, 'Failed to recall project memories');
 		return {systemPrompt, memoryCount: 0};
 	}
 }

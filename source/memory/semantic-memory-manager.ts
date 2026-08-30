@@ -362,8 +362,7 @@ export class SemanticMemoryManager {
 						matchedQueryTerms++;
 					}
 				}
-				const relevanceRatio =
-					queryTerms.size === 0 ? 0 : matchedQueryTerms / queryTerms.size;
+				const relevanceRatio = matchedQueryTerms / queryTerms.size;
 				return {memory, matchedQueryTerms, categoryHit, relevanceRatio};
 			})
 			.filter(

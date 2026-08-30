@@ -174,6 +174,10 @@ test('SemanticMemoryManager recalls a memory on a single keyword when it covers 
 
 	t.deepEqual(await manager.findRelevantMemories('auth', 3), [auth]);
 	t.deepEqual(await manager.findRelevantMemories('fix auth', 3), [auth]);
+	t.deepEqual(
+		await manager.findRelevantMemories('refactor the auth middleware', 3),
+		[auth],
+	);
 	t.deepEqual(await manager.findRelevantMemories('update clerk auth flow', 3), [
 		auth,
 	]);
