@@ -89,7 +89,7 @@ test('DevelopmentModeIndicator renders with normal mode', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /▶ normal/);
+	t.regex(output!, /normal mode on/);
 });
 
 test('DevelopmentModeIndicator renders with auto-accept mode', t => {
@@ -103,7 +103,7 @@ test('DevelopmentModeIndicator renders with auto-accept mode', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⏵⏵ auto/);
+	t.regex(output!, /auto-accept mode on/);
 });
 
 test('DevelopmentModeIndicator renders with plan mode', t => {
@@ -113,7 +113,7 @@ test('DevelopmentModeIndicator renders with plan mode', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⏸ plan/);
+	t.regex(output!, /plan mode on/);
 });
 
 test('DevelopmentModeIndicator renders with yolo mode', t => {
@@ -123,7 +123,7 @@ test('DevelopmentModeIndicator renders with yolo mode', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⏵⏵⏵ yolo/);
+	t.regex(output!, /yolo mode on/);
 });
 
 test('DevelopmentModeIndicator renders with headless mode', t => {
@@ -133,7 +133,7 @@ test('DevelopmentModeIndicator renders with headless mode', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⏵⏵ headless/);
+	t.regex(output!, /headless mode on/);
 });
 
 test('DevelopmentModeIndicator renders without crashing', t => {
@@ -191,7 +191,7 @@ test('DevelopmentModeIndicator shows mode label in bold', t => {
 
 	const output = lastFrame();
 	// Bold is represented by ANSI escape codes, check for the label
-	t.regex(output!, /▶ normal/);
+	t.regex(output!, /normal mode on/);
 });
 
 test('DevelopmentModeIndicator shows context percentage when provided', t => {
@@ -258,9 +258,9 @@ test('DevelopmentModeIndicator normal mode uses correct label', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /▶ normal/);
-	t.notRegex(output!, /⏵⏵ auto/);
-	t.notRegex(output!, /⏸ plan/);
+	t.regex(output!, /normal mode on/);
+	t.notRegex(output!, /auto-accept mode on/);
+	t.notRegex(output!, /plan mode on/);
 });
 
 test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
@@ -273,9 +273,9 @@ test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /⏵⏵ auto/);
-	t.notRegex(output!, /▶ normal/);
-	t.notRegex(output!, /⏸ plan/);
+	t.regex(output!, /auto-accept mode on/);
+	t.notRegex(output!, /normal mode on/);
+	t.notRegex(output!, /plan mode on/);
 });
 
 test('DevelopmentModeIndicator plan mode uses correct label', t => {
@@ -284,9 +284,9 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /⏸ plan/);
-	t.notRegex(output!, /▶ normal/);
-	t.notRegex(output!, /⏵⏵ auto/);
+	t.regex(output!, /plan mode on/);
+	t.notRegex(output!, /normal mode on/);
+	t.notRegex(output!, /auto-accept mode on/);
 });
 
 test('DevelopmentModeIndicator headless mode uses correct label', t => {
@@ -295,10 +295,10 @@ test('DevelopmentModeIndicator headless mode uses correct label', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /⏵⏵ headless/);
-	t.notRegex(output!, /▶ normal/);
-	t.notRegex(output!, /⏵⏵ auto/);
-	t.notRegex(output!, /⏸ plan/);
+	t.regex(output!, /headless mode on/);
+	t.notRegex(output!, /normal mode on/);
+	t.notRegex(output!, /auto-accept mode on/);
+	t.notRegex(output!, /plan mode on/);
 });
 
 // ============================================================================
@@ -327,7 +327,7 @@ test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 	);
 
 	const normalOutput = lastFrame();
-	t.regex(normalOutput!, /▶ normal/);
+	t.regex(normalOutput!, /normal mode on/);
 
 	rerender(
 		<DevelopmentModeIndicator
@@ -338,7 +338,7 @@ test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 	);
 
 	const autoAcceptOutput = lastFrame();
-	t.regex(autoAcceptOutput!, /⏵⏵ auto/);
+	t.regex(autoAcceptOutput!, /auto-accept mode on/);
 });
 
 // ============================================================================
@@ -352,7 +352,7 @@ test('DevelopmentModeIndicator has correct structure', t => {
 
 	const output = lastFrame();
 	// Should have the mode label and context percentage
-	t.regex(output!, /▶ normal/);
+	t.regex(output!, /normal mode on/);
 	t.regex(output!, /ctx: ~?25%/);
 });
 
@@ -391,7 +391,7 @@ test('DevelopmentModeIndicator handles rapid mode changes', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /▶ normal/);
+	t.regex(output!, /normal mode on/);
 });
 
 test('DevelopmentModeIndicator handles custom colors', t => {
@@ -413,20 +413,191 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 	});
 });
 
-test('DevelopmentModeIndicator groups provider and model into one unlabeled chip', t => {
-	const {lastFrame} = render(
+// ============================================================================
+// Task indicator badge
+// ============================================================================
+
+const WIDE = 200;
+
+function renderWithWidth(
+	element: React.ReactElement,
+	columns: number = WIDE,
+): string {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = columns;
+	try {
+		const {lastFrame} = render(element);
+		return lastFrame()!;
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+}
+
+test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
+	const output = renderWithWidth(
 		<DevelopmentModeIndicator
-			developmentMode="auto-accept"
+			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			currentProvider="claude"
-			currentModel="claude-sonnet-5"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: false,
+			}}
 		/>,
 	);
+	t.regex(output, /Tasks \(~2\/5 Ctrl-t\)/);
+});
 
-	const output = lastFrame()!;
-	t.regex(output, /claude\/claude-sonnet-5/);
-	t.regex(output, /⏵⏵ auto/);
-	t.notRegex(output, /AI Provider/);
-	t.notRegex(output, /Approval Mode/);
+test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no in-progress tasks', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in-progress and unread updates', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(~2\/5\* Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide terminal', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(hide Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
+	const zero = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 0,
+				completedCount: 0,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.notRegex(zero, /Tasks/);
+
+	const missing = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={null}
+		/>,
+	);
+	t.notRegex(missing, /Tasks/);
+});
+
+// ============================================================================
+// Task badge width budget
+// ============================================================================
+
+test('expanded task badge is dropped entirely when the row is under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+		40,
+	);
+	// The expanded badge is pure help text - it goes before anything else does,
+	// and never squeezes the segments that carry information.
+	t.notRegex(output, /Tasks/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps its progress readout and drops only the key hint under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+		40,
+	);
+	// Progress survives - it is the only trace of the collapsed list on screen.
+	t.regex(output, /Tasks \(~2\/5\*\)/);
+	t.notRegex(output, /Ctrl-t/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps the key hint when there is room for it', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+		60,
+	);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
 });

@@ -121,36 +121,52 @@ test('handleAtomicDeletion returns null for additions', t => {
 
 test('findPlaceholderAtPosition finds placeholder ID', t => {
 	const text = 'Before [Paste #789: 300 chars] after';
+	const content = {
+		paste_789: {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #789: 300 chars]',
+			content: 'code',
+			originalSize: 300,
+		} as PastePlaceholderContent,
+	};
 
 	// Position inside the placeholder
-	const result1 = findPlaceholderAtPosition(text, 10); // Inside "[Paste #789: 300 chars]"
-	t.is(result1, '789');
+	const result1 = findPlaceholderAtPosition(text, 10, content); // Inside "[Paste #789: 300 chars]"
+	t.is(result1, 'paste_789');
 
 	// Position outside the placeholder
-	const result2 = findPlaceholderAtPosition(text, 0); // In "Before"
+	const result2 = findPlaceholderAtPosition(text, 0, content); // In "Before"
 	t.is(result2, null);
 
 	// Position after placeholder
-	const result3 = findPlaceholderAtPosition(text, 35); // In "after"
+	const result3 = findPlaceholderAtPosition(text, 35, content); // In "after"
 	t.is(result3, null);
 });
 
 test('wouldPartiallyDeletePlaceholder detects partial deletion', t => {
 	const text = 'Text [Paste #123: 100 chars] more';
+	const content = {
+		paste_123: {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #123: 100 chars]',
+			content: 'code',
+			originalSize: 100,
+		} as PastePlaceholderContent,
+	};
 	//       01234567890123456789012345678901234
 	//       0         1         2         3
 	// Placeholder is at position 5-28 (length 23)
 
 	// Partial deletion from middle of placeholder
-	const result1 = wouldPartiallyDeletePlaceholder(text, 8, 5); // Delete "Paste"
+	const result1 = wouldPartiallyDeletePlaceholder(text, 8, 5, content); // Delete "Paste"
 	t.true(result1);
 
 	// Complete deletion of placeholder - delete from position 5, length 23
-	const result2 = wouldPartiallyDeletePlaceholder(text, 5, 23); // Delete entire "[Paste #123: 100 chars]"
+	const result2 = wouldPartiallyDeletePlaceholder(text, 5, 23, content); // Delete entire "[Paste #123: 100 chars]"
 	t.false(result2);
 
 	// Deletion outside placeholder
-	const result3 = wouldPartiallyDeletePlaceholder(text, 0, 4); // Delete "Text"
+	const result3 = wouldPartiallyDeletePlaceholder(text, 0, 4, content); // Delete "Text"
 	t.false(result3);
 });
 
@@ -191,4 +207,58 @@ test('atomic deletion works with multiple placeholders', t => {
 			originalSize: 50,
 		} as PastePlaceholderContent,
 	});
+});
+
+test('handleAtomicDeletion removes a file mention placeholder', t => {
+	const previousState: InputState = {
+		displayValue: 'Review [@src/app.tsx] please',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				displayText: '[@src/app.tsx]',
+				filePath: '/repo/src/app.tsx',
+				content: 'export const App = () => null;',
+			},
+		},
+	};
+
+	// Backspace into the trailing bracket of the mention
+	const result = handleAtomicDeletion(
+		previousState,
+		'Review [@src/app.tsx please',
+	);
+
+	t.truthy(result);
+	t.is(result!.displayValue, 'Review  please');
+	t.deepEqual(
+		result!.placeholderContent,
+		{},
+		'the mention leaves no orphan entry behind',
+	);
+});
+
+test('handleAtomicDeletion removes the second of two identical placeholders', t => {
+	const previousState: InputState = {
+		displayValue: '[@a.ts] and [@a.ts]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				displayText: '[@a.ts]',
+				filePath: '/repo/a.ts',
+				content: 'first',
+			},
+			file_2: {
+				type: PlaceholderType.FILE,
+				displayText: '[@a.ts]',
+				filePath: '/repo/a.ts',
+				content: 'second',
+			},
+		},
+	};
+
+	const result = handleAtomicDeletion(previousState, '[@a.ts] and [@a.ts');
+
+	t.truthy(result);
+	t.is(result!.displayValue, '[@a.ts] and ');
+	t.deepEqual(Object.keys(result!.placeholderContent), ['file_1']);
 });

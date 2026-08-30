@@ -14,6 +14,16 @@
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
+			<div id="timeline-strip" class="hidden shrink-0 border-b border-vscode-border px-3 py-2" aria-label="Action timeline">
+				<div class="flex items-center gap-2">
+					<span class="text-[0.65em] uppercase tracking-[0.06em] opacity-50 shrink-0">Timeline</span>
+					<div id="timeline-track" class="flex-1 overflow-x-auto overflow-y-hidden">
+						<div id="timeline-nodes" class="flex items-center min-h-[28px] px-1"></div>
+					</div>
+				</div>
+				<div id="timeline-hint" class="mt-1 h-[1.2em] text-[0.7em] opacity-60 truncate" aria-live="polite"></div>
+				<div id="timeline-confirm" class="hidden mt-2 p-2 rounded-md border border-vscode-widget-border bg-vscode-widget-bg text-[0.8em] font-vscode"></div>
+			</div>
 			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
 			</div>
@@ -36,16 +46,201 @@
 			<div id="history-list" class="flex-1 overflow-y-auto py-1.5"></div>
 		</div>
 
+		<div id="settings-view" class="flex flex-col flex-1 overflow-hidden hidden">
+
+			<!-- Settings Tabs -->
+			<div class="flex w-full border-b border-vscode-border shrink-0">
+				<button class="settings-tab flex-1 active" data-tab="providers">Providers</button>
+				<button class="settings-tab flex-1" data-tab="behavior">Behavior</button>
+				<button class="settings-tab flex-1" data-tab="advanced">Advanced</button>
+			</div>
+
+			<!-- Settings Content -->
+			<div id="settings-content" class="flex-1 overflow-y-auto py-3 px-4">
+				<!-- Providers Tab -->
+				<div id="settings-tab-providers" class="settings-tab-content flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-section-title">AI Providers</div>
+						<div id="settings-providers-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-providers">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">MCP Servers <span style="text-transform: none; letter-spacing: 0; font-weight: 400;">(.mcp.json)</span></div>
+						<div id="settings-mcp-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-mcp">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Tool Auto-Approval</div>
+						<div id="settings-tools-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-tools">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Web Search</div>
+						<div id="settings-websearch-status" class="settings-list"></div>
+					</div>
+				</div>
+
+				<!-- Behavior Tab -->
+				<div id="settings-tab-behavior" class="settings-tab-content hidden flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Default Mode</span>
+								<span class="settings-row-desc">The operating mode for new sessions</span>
+							</div>
+							<select id="setting-defaultMode" class="settings-select">
+								<option value="normal">Normal</option>
+								<option value="auto-accept">Auto-Accept</option>
+								<option value="yolo">YOLO</option>
+<option value="plan">Plan</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Auto-Compact</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Enabled</span>
+								<span class="settings-row-desc">Automatically compact conversation context</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-autoCompact-enabled">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Threshold</span>
+								<span class="settings-row-desc">Context usage % to trigger compaction (50–95)</span>
+							</div>
+							<input type="number" id="setting-autoCompact-threshold" class="settings-number-input"
+								min="50" max="95" step="5">
+						</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Mode</span>
+								<span class="settings-row-desc">Compaction aggressiveness</span>
+							</div>
+							<select id="setting-autoCompact-mode" class="settings-select">
+								<option value="conservative">Conservative</option>
+								<option value="default">Default</option>
+								<option value="aggressive">Aggressive</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Reasoning Traces</span>
+								<span class="settings-row-desc">Expand model reasoning traces by default</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-reasoningTraces">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Session Auto-Save</span>
+								<span class="settings-row-desc">Automatically save session history</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-sessions-autoSave">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+					</div>
+				</div>
+
+				<!-- Advanced Tab -->
+				<div id="settings-tab-advanced" class="settings-tab-content hidden flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-section-title">Configuration Files</div>
+						<button class="settings-action-btn w-full" data-action="open-agents-config">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+								<polyline points="13 2 13 9 20 9"></polyline>
+							</svg>
+							Open agents.config.json
+						</button>
+						<button class="settings-action-btn w-full mt-1.5" data-action="open-preferences">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+								<polyline points="13 2 13 9 20 9"></polyline>
+							</svg>
+							Open nanocoder-preferences.json
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Engine</div>
+						<button class="settings-action-btn w-full settings-action-btn-danger" data-action="restart-acp">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<polyline points="23 4 23 10 17 10"></polyline>
+								<polyline points="1 20 1 14 7 14"></polyline>
+								<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+							</svg>
+							Restart ACP Engine
+						</button>
+						<div class="text-xs opacity-50 mt-1">Applies config file changes to the running engine</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
+			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg items-center gap-2">
+				<span class="font-vscode text-[0.78em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
+				<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+			</div>
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
 				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mention-dropdown slash-dropdown"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
-						<button id="add-image-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0" title="Add Image">
+						<button id="add-menu-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0 disabled:opacity-50 disabled:pointer-events-none" title="Add attachment">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 						</button>
 						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
@@ -68,13 +263,6 @@
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 					</div>
-					
-					<!-- Attach file/folder button -->
-					<button id="attach-btn" class="bg-transparent text-vscode-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all opacity-60 hover:opacity-100 hover:bg-vscode-toolbarHover ml-1" title="Attach file or folder">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
-							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-						</svg>
-					</button>
 
 					<button id="send-stop-btn" class="group bg-vscode-button-bg [&.is-processing]:bg-vscode-button-secondary [&.is-processing]:hover:bg-vscode-button-secondaryHover text-vscode-button-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-vscode-button-hover hover:scale-105 ml-1" title="Send (Enter)">
 						<!-- FiSend icon (react-icons/fi) — shown when idle -->
@@ -89,13 +277,36 @@
 					</button>
 				</div>
 				
-				<!-- Dropdown Menus (Full Width) -->
+				<div id="add-menu-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+					<button type="button" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate w-full text-left bg-transparent border-none" id="menu-upload-image">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+						Upload Image
+					</button>
+					<button type="button" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate w-full text-left bg-transparent border-none" id="menu-attach-file">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="shrink-0">
+							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+						</svg>
+						Attach File / Folder
+					</button>
+				</div>
 				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+
+				<!-- @ mention autocomplete. Anchored to the composer rather than the
+				     caret: a textarea exposes no caret coordinates without a mirror
+				     element, and in a narrow sidebar full-width is more readable. -->
+				<div id="mention-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1" role="listbox" aria-label="Attach file or folder"></div>
+				<div id="slash-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1" role="listbox" aria-label="Slash commands"></div>
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
+	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
+	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
+	<!-- Pure drop-payload helpers; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{uriUtilsUri}}"></script>
+	<!-- Pure slash-command helpers; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{slashCommandUtilsUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

@@ -8,7 +8,8 @@ import {
 import {InputState, PlaceholderType} from '../types/hooks';
 import {handleAtomicDeletion} from '../utils/atomic-deletion';
 import {PasteDetector} from '../utils/paste-detection';
-import {handlePaste} from '../utils/paste-utils';
+import {handlePaste, resizePasteDisplayText} from '../utils/paste-utils';
+import {findPlaceholderOccurrences} from '../utils/placeholders';
 
 // Scales the paste window size based on content length.
 // Prevents truncation on slow terminals while keeping small pastes snappy
@@ -105,7 +106,10 @@ export function useInputState() {
 					// Merge the new chunk into the existing paste placeholder
 					const updatedContent = placeholder.content + addedChunk;
 					const oldPlaceholder = placeholder.displayText;
-					const newPlaceholder = `[Paste #${lastPasteIdRef.current}: ${updatedContent.length} chars]`;
+					const newPlaceholder = resizePasteDisplayText(
+						oldPlaceholder,
+						updatedContent.length,
+					);
 
 					const updatedPlaceholderContent = {
 						...currentState.placeholderContent,
@@ -169,7 +173,10 @@ export function useInputState() {
 					if (placeholder.type === PlaceholderType.PASTE) {
 						const updatedContent = placeholder.content + detection.addedText;
 						const oldPlaceholder = placeholder.displayText;
-						const newPlaceholder = `[Paste #${activePasteId}: ${updatedContent.length} chars]`;
+						const newPlaceholder = resizePasteDisplayText(
+							oldPlaceholder,
+							updatedContent.length,
+						);
 
 						const updatedPlaceholderContent = {
 							...currentState.placeholderContent,
@@ -291,24 +298,25 @@ export function useInputState() {
 	// Delete placeholder atomically
 	const deletePlaceholder = useCallback(
 		(placeholderId: string) => {
-			// Sanitize placeholderId to ensure it only contains safe characters
-			const sanitizedPlaceholderId = placeholderId.replace(
-				/[^a-zA-Z0-9_-]/g,
-				'',
-			);
-			const placeholderPattern = `[Paste #${sanitizedPlaceholderId}: \\d+ chars]`;
-			/* nosemgrep */
-			const regex = new RegExp(
-				placeholderPattern.replace(/[[\]]/g, '\\$&'),
-				'g',
-			);
+			if (!currentState.placeholderContent[placeholderId]) {
+				return;
+			}
 
-			const newDisplayValue = currentState.displayValue.replace(regex, '');
+			// Locate the placeholder by its own display text rather than rebuilding
+			// a pattern from the id: ids are namespaced keys, not display labels.
+			const occurrence = findPlaceholderOccurrences(
+				currentState.displayValue,
+				currentState.placeholderContent,
+			).find(candidate => candidate.id === placeholderId);
+
 			const newPlaceholderContent = {...currentState.placeholderContent};
 			delete newPlaceholderContent[placeholderId];
 
 			pushToUndoStack({
-				displayValue: newDisplayValue,
+				displayValue: occurrence
+					? currentState.displayValue.slice(0, occurrence.start) +
+						currentState.displayValue.slice(occurrence.end)
+					: currentState.displayValue,
 				placeholderContent: newPlaceholderContent,
 			});
 		},

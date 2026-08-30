@@ -3,13 +3,14 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import path from 'path';
-import {memo} from 'react';
+import {memo, useState} from 'react';
 import {fileURLToPath} from 'url';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getNanocoderShape} from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderShape} from '@/types/ui';
+import {getRandomTip} from '@/utils/tips';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,9 +22,20 @@ const packageJson = JSON.parse(
 
 const DEFAULT_SHAPE: NanocoderShape = 'tiny';
 
-export default memo(function WelcomeMessage() {
+type WelcomeMessageProps = {
+	/**
+	 * Pin the tip shown under the banner. Defaults to a random one held for
+	 * the life of the component; tests pass an explicit tip so they can assert
+	 * exact text instead of scanning the catalogue.
+	 */
+	tip?: string;
+};
+
+export default memo(function WelcomeMessage({tip}: WelcomeMessageProps) {
 	const {boxWidth, isNarrow, isNormal} = useResponsiveTerminal();
 	const {colors} = useTheme();
+	const [randomTip] = useState(getRandomTip);
+	const shownTip = tip ?? randomTip;
 
 	// Get the user's preferred nanocoder shape or use default
 	const nanocoderShape = getNanocoderShape() ?? DEFAULT_SHAPE;
@@ -97,6 +109,16 @@ export default memo(function WelcomeMessage() {
 					</TitledBoxWithPreferences>
 				</>
 			)}
+			{/*
+			 * No paddingX: the tip sits flush with the left border of the box
+			 * above it, which renders at column 0 in both layouts. Indenting it
+			 * to the box's inner text instead leaves it visibly off-grid.
+			 */}
+			<Box marginBottom={1}>
+				<Text color={colors.secondary} dimColor>
+					Tip: {shownTip}
+				</Text>
+			</Box>
 		</>
 	);
 });
