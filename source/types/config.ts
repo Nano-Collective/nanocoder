@@ -463,4 +463,11 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * "Boring" output mode. false (default): playful touches stay, e.g. the
+	 * "Worked for a plucky 12s." completion note. true: progress text is
+	 * strictly functional and the system prompt gains a section telling the
+	 * model to be terse — no filler, no preamble, no celebratory wrap-ups.
+	 */
+	professionalTone?: boolean;
 }

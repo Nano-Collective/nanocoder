@@ -35,7 +35,7 @@ import type {
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {performAutoCompact} from '@/utils/auto-compact';
-import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
+import {buildCompletionNote} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
@@ -1248,12 +1248,10 @@ export const processAssistantResponse = async (
 		await flushAll();
 
 		setIsGenerating(false);
-		const adjective = getRandomAdjective();
-		const elapsed = formatElapsedTime(startTime);
 		addToChatQueue(
 			<InfoMessage
 				key={generateKey('completion-time')}
-				message={`Worked for a ${adjective} ${elapsed}.`}
+				message={buildCompletionNote(startTime)}
 				hideBox={true}
 				marginBottom={2}
 			/>,

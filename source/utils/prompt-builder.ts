@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
+import {getProfessionalTone} from '@/config/preferences';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -317,6 +318,12 @@ export function buildSystemPrompt(
 
 ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
+	}
+
+	// Professional ("boring") tone — user preference, opt-in. Placed last among
+	// the static sections so it overrides the register of anything above it.
+	if (getProfessionalTone()) {
+		sections.push(loadSection('professional-tone'));
 	}
 
 	// System info (dynamic) — slim variant under nano

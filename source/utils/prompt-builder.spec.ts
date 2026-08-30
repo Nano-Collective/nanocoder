@@ -2,6 +2,7 @@ import test from 'ava';
 import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
+import {resetPreferencesCache} from '@/config/preferences';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -563,4 +564,48 @@ test('buildSystemPrompt - replace systemPrompt updates getLastBuiltPrompt cache'
 	};
 	buildSystemPrompt('normal', undefined, ALL_TOOLS, false, override);
 	t.is(getLastBuiltPrompt(), 'cached override prompt');
+});
+
+// ============================================================================
+// Professional tone
+// ============================================================================
+
+/**
+ * Build a prompt with `professionalTone` forced to a known value by pointing
+ * the preferences loader at a throwaway config dir.
+ */
+function buildWithProfessionalTone(enabled: boolean): string {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = dir;
+	resetPreferencesCache();
+	writeFileSync(
+		join(dir, 'nanocoder-preferences.json'),
+		JSON.stringify({professionalTone: enabled}),
+		'utf-8',
+	);
+	try {
+		return buildSystemPrompt('normal', undefined, ALL_TOOLS);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('professional tone section is omitted when the preference is off', t => {
+	const result = buildWithProfessionalTone(false);
+	t.false(result.includes('## TONE'));
+});
+
+test.serial('professional tone section is included when the preference is on', t => {
+	const result = buildWithProfessionalTone(true);
+	t.true(result.includes('## TONE'));
+	t.true(result.includes('professional tone'));
+	// Placed before the system info block so it stays close to the end.
+	t.true(result.indexOf('## TONE') < result.indexOf('SYSTEM INFORMATION'));
 });
