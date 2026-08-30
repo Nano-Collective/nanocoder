@@ -197,8 +197,8 @@ test('Non-interactive mode: CLI parsing with complex prompt', t => {
 	t.is(prompt, 'create a new file with content');
 });
 
-test('Non-interactive mode: exits with tool-approval reason when tool approval required', t => {
-	// Test that we exit with tool-approval reason when a message indicates tool approval is required
+test('Non-interactive mode: exits with tool-approval-required reason when tool approval required', t => {
+	// Test that we exit with tool-approval-required reason when a message indicates tool approval is required
 	const appStateToolApprovalRequired = {
 		isThinking: false,
 		isToolExecuting: false,
@@ -220,7 +220,11 @@ test('Non-interactive mode: exits with tool-approval reason when tool approval r
 	);
 
 	t.true(shouldExit, 'Should exit when tool approval is required');
-	t.is(reason, TOOL_APPROVAL_REQUIRED_KIND, 'Exit reason should be tool-approval-required');
+	t.is(
+		reason,
+		TOOL_APPROVAL_REQUIRED_KIND,
+		'Exit reason should be tool-approval-required',
+	);
 });
 
 test('Non-interactive mode: CLI parsing without run command', t => {

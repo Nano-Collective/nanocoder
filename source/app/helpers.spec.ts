@@ -19,7 +19,7 @@ test('isNonInteractiveModeComplete returns timeout when time exceeded', t => {
 	t.is(result.reason, 'timeout');
 });
 
-test('isNonInteractiveModeComplete returns tool-approval when tool approval required', t => {
+test('isNonInteractiveModeComplete returns tool-approval-required when tool approval required', t => {
 	const state: NonInteractiveModeState = {
 		isToolExecuting: false,
 		isToolConfirmationMode: false,

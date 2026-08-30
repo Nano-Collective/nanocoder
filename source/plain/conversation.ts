@@ -73,7 +73,7 @@ export type PlainConversationOutcome =
 			usage?: PlainConversationUsage;
 	  }
 	| {
-			kind: typeof TOOL_APPROVAL_REQUIRED_KIND;
+			kind: 'tool-approval-required';
 			toolNames: string[];
 			finalText: string;
 			reasoning: string | null;

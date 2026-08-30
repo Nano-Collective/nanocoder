@@ -1,7 +1,7 @@
 import test from "ava";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
-import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
+import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
 import type { ToolManager } from "@/tools/tool-manager";
 import type {

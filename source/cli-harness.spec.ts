@@ -1,5 +1,6 @@
 import test from 'ava';
-import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
+import type {NonInteractiveExitReason} from '@/app/types';
+import {getExitCodeForReason} from '@/app/helpers';
 import {
 	CLITestHarness,
 	createCLITestHarness,
@@ -276,29 +277,23 @@ test('CLI args parsing: nonInteractiveMode is false without run command', t => {
 	t.false(nonInteractiveMode);
 });
 
-type ExitReason = 'complete' | 'timeout' | 'error' | typeof TOOL_APPROVAL_REQUIRED_KIND | null;
-
-function getExitCodeForReason(reason: ExitReason): number {
-	return reason === 'error' || reason === TOOL_APPROVAL_REQUIRED_KIND ? 1 : 0;
-}
-
 test('Exit code mapping: complete reason uses exit code 0', t => {
-	const reason: ExitReason = 'complete';
+	const reason: NonInteractiveExitReason = 'complete';
 	t.is(getExitCodeForReason(reason), 0);
 });
 
 test('Exit code mapping: error reason uses exit code 1', t => {
-	const reason: ExitReason = 'error';
+	const reason: NonInteractiveExitReason = 'error';
 	t.is(getExitCodeForReason(reason), 1);
 });
 
 test('Exit code mapping: tool-approval-required reason uses exit code 1', t => {
-	const reason: ExitReason = TOOL_APPROVAL_REQUIRED_KIND;
+	const reason: NonInteractiveExitReason = 'tool-approval-required';
 	t.is(getExitCodeForReason(reason), 1);
 });
 
 test('Exit code mapping: timeout reason uses exit code 0', t => {
-	const reason: ExitReason = 'timeout';
+	const reason: NonInteractiveExitReason = 'timeout';
 	t.is(getExitCodeForReason(reason), 0);
 });
 

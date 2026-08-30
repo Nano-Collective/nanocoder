@@ -4,6 +4,7 @@ import {
 } from '@/constants';
 import type {
 	NonInteractiveCompletionResult,
+	NonInteractiveExitReason,
 	NonInteractiveModeState,
 } from './types';
 
@@ -53,4 +54,13 @@ export function isNonInteractiveModeComplete(
 	}
 
 	return {shouldExit: false, reason: null};
+}
+
+/**
+ * Maps a non-interactive exit reason to the corresponding process exit code.
+ * Used by both the Ink runtime (`useNonInteractiveMode`) and the headless
+ * plain shell (`runPlainShell`) to stay in sync.
+ */
+export function getExitCodeForReason(reason: NonInteractiveExitReason): number {
+	return reason === 'error' || reason === 'tool-approval-required' ? 1 : 0;
 }
