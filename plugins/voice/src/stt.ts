@@ -1,7 +1,31 @@
 import cp from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { platform } from 'node:process';
 
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB limit for safety
+
+function getVoiceBinDir(): string {
+	return join(homedir(), '.nanocoder', 'voice-bin');
+}
+
+function resolveWhisperCommand(): string {
+	if (process.env.WHISPER_CMD) return process.env.WHISPER_CMD;
+	const localBin = join(
+		getVoiceBinDir(),
+		platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli',
+	);
+	if (existsSync(localBin)) return localBin;
+	return 'whisper-cli';
+}
+
+function resolveWhisperModel(): string {
+	if (process.env.WHISPER_MODEL) return process.env.WHISPER_MODEL;
+	const localModel = join(getVoiceBinDir(), 'ggml-base.en.bin');
+	if (existsSync(localModel)) return localModel;
+	return 'ggml-base.en.bin';
+}
 
 /**
  * Transcribes audio from a .wav file to text using local whisper.cpp.
@@ -17,8 +41,8 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000, signa
 			return reject(new Error('AbortError: Transcription aborted'));
 		}
 
-		const command = process.env.WHISPER_CMD || 'whisper-cli';
-		const modelPath = process.env.WHISPER_MODEL || 'ggml-base.en.bin';
+		const command = resolveWhisperCommand();
+		const modelPath = resolveWhisperModel();
 		
 		const args = ['-m', modelPath, '-f', filePath, '-nt']; // -nt disables timestamps
 

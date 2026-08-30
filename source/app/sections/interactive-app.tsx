@@ -104,6 +104,9 @@ export function InteractiveApp({
 		addToChatQueue: appState.addToChatQueue,
 		voicePreference: voicePref,
 		handleCancel: appHandlers.handleCancel,
+		client: appState.client,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
 	});
 
 	const handleToggleCompactDisplay = () => {

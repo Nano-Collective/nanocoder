@@ -41,10 +41,22 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
-| `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
+| `/voice` | Configure Voice Mode (`/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>]`) |
 
-## Special Input Syntax
+## Voice Mode
+
+Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS.
+
+| Command | Description |
+|---------|-------------|
+| `/voice` | Toggle voice mode on/off |
+| `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+T` to record/submit) |
+| `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
+| `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
+| `/voice tts [local\|cloud]` | Configure text-to-speech backend (local Piper or opt-in cloud) |
+| `/voice status` | Display current voice configuration and backend status |
+| `/voice mode <push-to-talk\|hands-free>` | Set specific activation mode |
 
 These shortcuts work directly in the chat input — no `/` prefix needed.
 

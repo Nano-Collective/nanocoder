@@ -484,22 +484,50 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	}, undefined, 'process.kill(pid, 0) should throw because the child was killed by the process-group signal');
 });
 
-test('cancel - rapid repeated cancellation with SIGKILL fallback for processes ignoring SIGTERM', async t => {
+test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async t => {
 	const executor = createExecutor();
 
-	for (let i = 0; i < 3; i++) {
-		// Spawn a node process that traps/ignores SIGTERM
-		const { executionId, promise } = executor.execute(
-			`node -e "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"`,
-		);
+	// Spawn a node process that traps/ignores SIGTERM and outputs its PID
+	const { executionId, promise } = executor.execute(
+		`node -e "process.on('SIGTERM', () => {}); console.log('PID:' + process.pid); setInterval(() => {}, 1000)"`,
+	);
 
-		await new Promise(resolve => setTimeout(resolve, 100));
+	// Wait for process to spawn and capture its output
+	await new Promise(resolve => setTimeout(resolve, 300));
+	const state = executor.getState(executionId);
+	t.truthy(state);
+	const match = state?.output?.match(/PID:(\d+)/);
+	const childPid = match ? Number(match[1]) : undefined;
 
-		const cancelled = executor.cancel(executionId);
-		t.true(cancelled, 'cancel() should return true for active execution');
+	const cancelled = executor.cancel(executionId);
+	t.true(cancelled, 'cancel() should return true for active execution');
 
-		const result = await promise;
-		t.true(result.isComplete, 'Execution should be marked complete');
-		t.is(result.error, 'Cancelled by user');
+	const result = await promise;
+	t.true(result.isComplete, 'Execution should be marked complete');
+	t.is(result.error, 'Cancelled by user');
+
+	if (childPid && process.platform !== 'win32') {
+		// Immediately after cancel(), the process should still be alive because it ignores SIGTERM
+		let isAliveBefore = false;
+		try {
+			process.kill(childPid, 0);
+			isAliveBefore = true;
+		} catch {
+			isAliveBefore = false;
+		}
+		t.true(isAliveBefore, 'Process should still be alive immediately after SIGTERM since it traps SIGTERM');
+
+		// Wait past the 2000ms SIGKILL timeout
+		await new Promise(resolve => setTimeout(resolve, 2300));
+
+		// Now process MUST be dead via SIGKILL
+		let isAliveAfter = false;
+		try {
+			process.kill(childPid, 0);
+			isAliveAfter = true;
+		} catch {
+			isAliveAfter = false;
+		}
+		t.false(isAliveAfter, 'Process must be killed by SIGKILL fallback after 2 seconds');
 	}
 });

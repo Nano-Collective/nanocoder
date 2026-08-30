@@ -6,8 +6,13 @@ import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import type {VoiceState} from '@/components/voice-status-bar';
 import {getVoicePreference} from '@/config/preferences';
+import {
+	synthesizeCloudSpeech,
+	transcribeCloudAudio,
+} from '@/services/cloud-audio';
 import {generateKey} from '@/session/key-generator';
-import type {ImageAttachment, Message} from '@/types/core';
+import type {LLMClient, Message} from '@/types/core';
+import type {RealtimeSession} from '@/types/realtime';
 import {formatForSpeech} from '@/utils/format-for-speech';
 import {
 	hasDeclinedVoiceInstallForSession,
@@ -42,7 +47,8 @@ export interface VoicePlugin {
 		customCheck?: unknown,
 	) => Promise<{installed: boolean; missing: ('sox' | 'whisper' | 'piper')[]}>;
 	installDependencies?: (options?: {
-		onProgress?: (progress: {stage: string; percent: number}) => void;
+		onProgress?: (step: string, percent: number) => void;
+		installRunner?: (command: string, args: string[]) => Promise<void>;
 	}) => Promise<void>;
 	createVadEngine?: (options?: unknown) => unknown;
 }
@@ -51,13 +57,20 @@ export interface UseVoiceProps {
 	handleUserSubmit: (
 		submittedText: string,
 		displayText: string,
-		images?: ImageAttachment[],
 	) => Promise<void>;
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
 	loadPlugin?: () => Promise<VoicePlugin>;
-	voicePreference?: {enabled: boolean; activationMode: string};
+	voicePreference?: {
+		enabled: boolean;
+		activationMode: string;
+		sttBackend?: 'local' | 'cloud';
+		ttsBackend?: 'local' | 'cloud';
+	};
 	handleCancel?: () => void;
+	client?: LLMClient | null;
+	currentProvider?: string;
+	currentModel?: string;
 }
 
 export interface UseVoiceReturn {
@@ -65,14 +78,19 @@ export interface UseVoiceReturn {
 	startStopRecording: () => void;
 }
 
+const defaultLoadPlugin = async (): Promise<VoicePlugin> =>
+	(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin;
+
 export function useVoice({
 	handleUserSubmit,
 	messages,
 	addToChatQueue,
-	loadPlugin = async () =>
-		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
+	loadPlugin = defaultLoadPlugin,
 	voicePreference,
 	handleCancel,
+	client,
+	currentProvider,
+	currentModel,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -96,6 +114,21 @@ export function useVoice({
 		addToChatQueueRef.current = addToChatQueue;
 	}, [addToChatQueue]);
 
+	const loadPluginRef = React.useRef(loadPlugin);
+	React.useEffect(() => {
+		loadPluginRef.current = loadPlugin;
+	}, [loadPlugin]);
+
+	const clientRef = React.useRef(client);
+	React.useEffect(() => {
+		clientRef.current = client;
+	}, [client]);
+
+	const voicePreferenceRef = React.useRef(voicePreference);
+	React.useEffect(() => {
+		voicePreferenceRef.current = voicePreference;
+	}, [voicePreference]);
+
 	const abortControllerRef = React.useRef<AbortController | null>(null);
 	const ttsAbortControllerRef = React.useRef<AbortController | null>(null);
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
@@ -107,6 +140,19 @@ export function useVoice({
 		null,
 	);
 	const vadEngineRef = React.useRef<unknown>(null);
+	const hasCheckedHandsFreeDepsRef = React.useRef(false);
+	const hasEmittedDeclinedSessionNoticeRef = React.useRef(false);
+	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
+	const activeRealtimeSessionRef = React.useRef<RealtimeSession | null>(null);
+
+	// Provider/model switch teardown gap fix: explicitly tear down any open realtime session on switch
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Teardown on provider/model/client switch
+	React.useEffect(() => {
+		if (activeRealtimeSessionRef.current) {
+			void activeRealtimeSessionRef.current.close().catch(() => {});
+			activeRealtimeSessionRef.current = null;
+		}
+	}, [currentProvider, currentModel, client]);
 
 	const cleanupActiveFile = React.useCallback(() => {
 		if (activeFileRef.current && existsSync(activeFileRef.current)) {
@@ -142,6 +188,10 @@ export function useVoice({
 			abortControllerRef.current = null;
 		}
 
+		if (activeRealtimeSessionRef.current) {
+			void activeRealtimeSessionRef.current.interrupt().catch(() => {});
+		}
+
 		cleanupActiveFile();
 
 		handleCancelRef.current?.();
@@ -160,13 +210,16 @@ export function useVoice({
 				}
 
 				if (hasDeclinedVoiceInstallForSession()) {
-					addToChatQueueRef.current(
-						React.createElement(InfoMessage, {
-							key: generateKey('voice-dep-declined'),
-							message:
-								'Voice mode dependencies missing. Installation declined for this session.',
-						}),
-					);
+					if (!hasEmittedDeclinedSessionNoticeRef.current) {
+						hasEmittedDeclinedSessionNoticeRef.current = true;
+						addToChatQueueRef.current(
+							React.createElement(InfoMessage, {
+								key: generateKey('voice-dep-declined'),
+								message:
+									'Voice mode dependencies missing. Installation declined for this session.',
+							}),
+						);
+					}
 					return false;
 				}
 
@@ -229,6 +282,11 @@ export function useVoice({
 				vadEngineRef.current = null;
 			}
 
+			if (activeRealtimeSessionRef.current) {
+				void activeRealtimeSessionRef.current.close().catch(() => {});
+				activeRealtimeSessionRef.current = null;
+			}
+
 			pendingTTSRef.current = false;
 			pluginRef.current = null;
 			cleanupActiveFile();
@@ -243,6 +301,7 @@ export function useVoice({
 	// Hands-free VAD effect - REACTIVE to enabled and activationMode changes
 	React.useEffect(() => {
 		if (!enabled || activationMode !== 'hands-free') {
+			hasCheckedHandsFreeDepsRef.current = false;
 			if (vadEngineRef.current) {
 				const engine = vadEngineRef.current as {stop?: () => void};
 				if (typeof engine.stop === 'function') {
@@ -253,16 +312,17 @@ export function useVoice({
 			return;
 		}
 
-		if (vadEngineRef.current) {
+		if (vadEngineRef.current || hasCheckedHandsFreeDepsRef.current) {
 			return;
 		}
 
+		hasCheckedHandsFreeDepsRef.current = true;
 		let isCancelled = false;
 
 		const initVad = async () => {
 			let plugin: VoicePlugin;
 			try {
-				plugin = await loadPlugin();
+				plugin = await (loadPluginRef.current || defaultLoadPlugin)();
 			} catch {
 				return;
 			}
@@ -294,10 +354,28 @@ export function useVoice({
 				setState('processing');
 				activeFileRef.current = evt.filePath;
 				try {
-					const transcribed = await plugin.transcribeAudio(
-						evt.filePath,
-						60_000,
-					);
+					const pref = voicePreferenceRef.current ?? getVoicePreference();
+					let transcribed = '';
+
+					if (pref.sttBackend === 'cloud') {
+						try {
+							transcribed = await transcribeCloudAudio(evt.filePath, {
+								providerConfig: clientRef.current?.getProviderConfig(),
+								timeoutMs: 60_000,
+							});
+						} catch (cloudErr) {
+							addToChatQueueRef.current(
+								React.createElement(InfoMessage, {
+									key: generateKey('voice-cloud-stt-fallback'),
+									message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+								}),
+							);
+							transcribed = await plugin.transcribeAudio(evt.filePath, 60_000);
+						}
+					} else {
+						transcribed = await plugin.transcribeAudio(evt.filePath, 60_000);
+					}
+
 					cleanupActiveFile();
 
 					if (!transcribed || transcribed.trim() === '') {
@@ -327,22 +405,38 @@ export function useVoice({
 				} catch (err) {
 					cleanupActiveFile();
 					setState('idle');
-					addToChatQueueRef.current(
-						React.createElement(ErrorMessage, {
-							key: generateKey('voice-vad-error'),
-							message: `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`,
-						}),
-					);
+					const errorMsg = `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`;
+					const now = Date.now();
+					if (
+						lastVadErrorRef.current.message !== errorMsg ||
+						now - lastVadErrorRef.current.timestamp > 10_000
+					) {
+						lastVadErrorRef.current = {message: errorMsg, timestamp: now};
+						addToChatQueueRef.current(
+							React.createElement(ErrorMessage, {
+								key: generateKey('voice-vad-error'),
+								message: errorMsg,
+							}),
+						);
+					}
 				}
 			});
 
 			engine.on('error', (err: Error) => {
-				addToChatQueueRef.current(
-					React.createElement(ErrorMessage, {
-						key: generateKey('voice-vad-engine-error'),
-						message: `VAD engine error: ${err.message}`,
-					}),
-				);
+				const errorMsg = `VAD engine error: ${err.message}`;
+				const now = Date.now();
+				if (
+					lastVadErrorRef.current.message !== errorMsg ||
+					now - lastVadErrorRef.current.timestamp > 10_000
+				) {
+					lastVadErrorRef.current = {message: errorMsg, timestamp: now};
+					addToChatQueueRef.current(
+						React.createElement(ErrorMessage, {
+							key: generateKey('voice-vad-engine-error'),
+							message: errorMsg,
+						}),
+					);
+				}
 			});
 
 			engine.start();
@@ -364,7 +458,6 @@ export function useVoice({
 	}, [
 		enabled,
 		activationMode,
-		loadPlugin,
 		ensureDependencies,
 		cleanupActiveFile,
 		interrupt,
@@ -399,13 +492,42 @@ export function useVoice({
 		const ttsAbortController = new AbortController();
 		ttsAbortControllerRef.current = ttsAbortController;
 
-		plugin
-			.synthesizeSpeech(
-				formattedText,
-				ttsFile,
-				60_000,
-				ttsAbortController.signal,
-			)
+		const synthesize = async () => {
+			const pref = voicePreferenceRef.current ?? getVoicePreference();
+			if (pref.ttsBackend === 'cloud') {
+				try {
+					await synthesizeCloudSpeech(formattedText, ttsFile, {
+						providerConfig: clientRef.current?.getProviderConfig(),
+						timeoutMs: 60_000,
+						signal: ttsAbortController.signal,
+					});
+					return;
+				} catch (cloudErr) {
+					if (ttsAbortController.signal.aborted) throw cloudErr;
+					addToChatQueueRef.current(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-cloud-tts-fallback'),
+							message: `Cloud TTS fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+						}),
+					);
+					await plugin.synthesizeSpeech(
+						formattedText,
+						ttsFile,
+						60_000,
+						ttsAbortController.signal,
+					);
+				}
+			} else {
+				await plugin.synthesizeSpeech(
+					formattedText,
+					ttsFile,
+					60_000,
+					ttsAbortController.signal,
+				);
+			}
+		};
+
+		synthesize()
 			.then(async () => {
 				if (ttsAbortController.signal.aborted) return;
 				return plugin.playAudio(ttsFile, 60_000, ttsAbortController.signal);
@@ -457,7 +579,7 @@ export function useVoice({
 
 		let plugin: VoicePlugin;
 		try {
-			plugin = await loadPlugin();
+			plugin = await (loadPluginRef.current || defaultLoadPlugin)();
 		} catch (_error) {
 			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
@@ -509,10 +631,28 @@ export function useVoice({
 			}
 
 			setState('processing');
-			const transcribedText = await plugin.transcribeAudio(
-				recordingFile,
-				60_000,
-			);
+
+			const pref = voicePreferenceRef.current ?? getVoicePreference();
+			let transcribedText = '';
+
+			if (pref.sttBackend === 'cloud') {
+				try {
+					transcribedText = await transcribeCloudAudio(recordingFile, {
+						providerConfig: clientRef.current?.getProviderConfig(),
+						timeoutMs: 60_000,
+					});
+				} catch (cloudErr) {
+					addToChatQueueRef.current(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-cloud-stt-fallback'),
+							message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+						}),
+					);
+					transcribedText = await plugin.transcribeAudio(recordingFile, 60_000);
+				}
+			} else {
+				transcribedText = await plugin.transcribeAudio(recordingFile, 60_000);
+			}
 
 			cleanupActiveFile();
 
@@ -564,7 +704,7 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [loadPlugin, ensureDependencies, cleanupActiveFile, interrupt]);
+	}, [ensureDependencies, cleanupActiveFile, interrupt]);
 
 	return {
 		state,
