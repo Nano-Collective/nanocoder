@@ -54,6 +54,15 @@ const GIT_PR_ALL_ACTIONS: readonly GitPrAction[] = [
 
 // Read/investigate tools — safe at every trust level, never touch the
 // working tree or push anything.
+//
+// Deliberately excludes `web_search`/`fetch_url`: every consumer of this
+// allowlist runs headless/auto-execute (no tool-approval-queue handler is
+// registered — see `signalToolApproval` in `source/utils/tool-approval-queue.ts`),
+// and the text these tools investigate (a PR diff, a CI log) is attacker-
+// controlled. An injected instruction could have either tool exfiltrate
+// local file contents to an external URL with no confirmation step, and the
+// result can end up posted publicly (e.g. `verify --post-review`). A
+// read-only reviewer doesn't need to browse to do its job.
 const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'read_file'},
 	{tool: 'find_files'},
@@ -63,8 +72,6 @@ const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'git_diff'},
 	{tool: 'git_log'},
 	{tool: 'lsp_get_diagnostics'},
-	{tool: 'web_search'},
-	{tool: 'fetch_url'},
 ];
 
 // File-mutation tools — the write access the issue calls out explicitly as

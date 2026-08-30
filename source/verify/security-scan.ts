@@ -28,10 +28,22 @@ export interface SecurityScanResult {
 	ranSuccessfully: boolean;
 	/** Findings sorted ERROR > WARNING > INFO, capped at MAX_FINDINGS. */
 	findings: SemgrepFinding[];
+	/** Count of findings before the MAX_FINDINGS cap was applied. */
+	totalFound: number;
 	errorMessage?: string;
 }
 
+/** Matches node:child_process's `spawn` signature — injectable for tests. */
+type SpawnFn = typeof spawn;
+
 const MAX_FINDINGS = 50;
+
+// A very large PR (bulk rename, lockfile regen) can produce a changed-file
+// list long enough that spreading every path into semgrep's argv risks
+// hitting the OS command-line length limit (ARG_MAX / ~32K on Windows).
+// Past this count, fall back to scanning the whole tree instead of failing
+// the scan outright.
+const MAX_SCAN_PATHS = 300;
 
 const SEVERITY_ORDER: Record<SemgrepFinding['severity'], number> = {
 	ERROR: 0,
@@ -70,7 +82,15 @@ function normalizeSeverity(
 	return 'INFO';
 }
 
-function parseFindings(stdout: string): SemgrepFinding[] {
+/**
+ * Parse semgrep's `--json` output into sorted, capped findings. Exported for
+ * direct unit testing of severity normalization, sort order, and the cap —
+ * behavior that's otherwise only reachable by actually running semgrep.
+ */
+export function parseFindings(stdout: string): {
+	findings: SemgrepFinding[];
+	totalFound: number;
+} {
 	const parsed = JSON.parse(stdout) as {results?: RawSemgrepResult[]};
 	const results = Array.isArray(parsed.results) ? parsed.results : [];
 
@@ -86,7 +106,21 @@ function parseFindings(stdout: string): SemgrepFinding[] {
 	findings.sort(
 		(a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
 	);
-	return findings.slice(0, MAX_FINDINGS);
+	return {
+		findings: findings.slice(0, MAX_FINDINGS),
+		totalFound: findings.length,
+	};
+}
+
+/**
+ * Resolves the effective scan target paths: an empty/unset list scans the
+ * whole tree, and a list too long to safely pass as argv (see
+ * MAX_SCAN_PATHS) falls back to the whole tree rather than erroring.
+ * Exported for direct unit testing of the fallback threshold.
+ */
+export function resolveScanPaths(paths?: string[]): string[] {
+	if (!paths?.length) return ['.'];
+	return paths.length > MAX_SCAN_PATHS ? ['.'] : paths;
 }
 
 /**
@@ -94,37 +128,67 @@ function parseFindings(stdout: string): SemgrepFinding[] {
  * — any failure (missing binary, spawn error, timeout, unparseable output)
  * is reported in the returned result so a flaky/missing semgrep never
  * aborts a `verify` run.
+ *
+ * Pass `paths` to scope the scan to specific files/dirs (e.g. a PR's changed
+ * files) instead of the whole tree — keeps scan time down and avoids
+ * pre-existing repo-wide findings crowding out what the PR introduced.
  */
 export async function runSecurityScan(opts?: {
 	cwd?: string;
 	timeoutMs?: number;
+	paths?: string[];
+	spawnFn?: SpawnFn;
 }): Promise<SecurityScanResult> {
 	if (!isSemgrepAvailable()) {
-		return {available: false, ranSuccessfully: false, findings: []};
+		return {
+			available: false,
+			ranSuccessfully: false,
+			findings: [],
+			totalFound: 0,
+		};
 	}
 
 	const cwd = opts?.cwd ?? process.cwd();
 	const timeoutMs = opts?.timeoutMs ?? TIMEOUT_SEMGREP_MS;
+	const paths = resolveScanPaths(opts?.paths);
 
 	try {
-		const stdout = await runSemgrepProcess(cwd, timeoutMs);
-		const findings = parseFindings(stdout);
-		return {available: true, ranSuccessfully: true, findings};
+		const stdout = await runSemgrepProcess(
+			cwd,
+			timeoutMs,
+			paths,
+			opts?.spawnFn,
+		);
+		const {findings, totalFound} = parseFindings(stdout);
+		return {available: true, ranSuccessfully: true, findings, totalFound};
 	} catch (error) {
 		return {
 			available: true,
 			ranSuccessfully: false,
 			findings: [],
+			totalFound: 0,
 			errorMessage: error instanceof Error ? error.message : String(error),
 		};
 	}
 }
 
-function runSemgrepProcess(cwd: string, timeoutMs: number): Promise<string> {
+/**
+ * Spawns semgrep and collects its stdout. `spawnFn` defaults to node's real
+ * `spawn` but is injectable so tests can simulate timeout / empty-stdout /
+ * spawn-error without actually running semgrep.
+ */
+export function runSemgrepProcess(
+	cwd: string,
+	timeoutMs: number,
+	paths: string[],
+	spawnFn: SpawnFn = spawn,
+): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn('semgrep', ['scan', '--config', 'auto', '--json', '.'], {
-			cwd,
-		});
+		const proc = spawnFn(
+			'semgrep',
+			['scan', '--config', 'auto', '--json', ...paths],
+			{cwd},
+		);
 		let stdout = '';
 		let stderr = '';
 		let timedOut = false;
@@ -188,12 +252,16 @@ export function formatFindingsForPrompt(result: SecurityScanResult): string {
 	if (result.findings.length === 0) {
 		return 'semgrep found no issues.';
 	}
-	return result.findings
-		.map(
-			f =>
-				`[${f.severity}] ${f.path}:${f.startLine} (${f.ruleId}) — ${f.message}`,
-		)
-		.join('\n');
+	const lines = result.findings.map(
+		f =>
+			`[${f.severity}] ${f.path}:${f.startLine} (${f.ruleId}) — ${f.message}`,
+	);
+	if (result.totalFound > result.findings.length) {
+		lines.push(
+			`… showing ${result.findings.length} of ${result.totalFound} findings (capped, sorted by severity).`,
+		);
+	}
+	return lines.join('\n');
 }
 
 /** Markdown section for the posted/printed review body. */
@@ -207,10 +275,14 @@ export function formatFindingsSection(result: SecurityScanResult): string {
 	if (result.findings.length === 0) {
 		return 'No findings.';
 	}
-	return result.findings
-		.map(
-			f =>
-				`- **[${f.severity}]** \`${f.path}:${f.startLine}\` (${f.ruleId}) — ${f.message}`,
-		)
-		.join('\n');
+	const lines = result.findings.map(
+		f =>
+			`- **[${f.severity}]** \`${f.path}:${f.startLine}\` (${f.ruleId}) — ${f.message}`,
+	);
+	if (result.totalFound > result.findings.length) {
+		lines.push(
+			`\n_Showing ${result.findings.length} of ${result.totalFound} findings (capped, sorted by severity)._`,
+		);
+	}
+	return lines.join('\n');
 }

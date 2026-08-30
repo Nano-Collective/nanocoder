@@ -11,8 +11,6 @@ tools:
   - git_diff
   - git_log
   - lsp_get_diagnostics
-  - web_search
-  - fetch_url
   - git_pr
 ---
 

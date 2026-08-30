@@ -79,9 +79,11 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
-  verify --pr <n> [--post-review] Headless, read-only PR review: runs the verify-pr-review
+  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
                                   subagent plus a semgrep pass. Prints the review to stdout
                                   by default; posts it as a PR comment with --post-review.
+                                  --provider/--model select the LLM (see Options below).
 
 Options:
   -v, --version       Show version number

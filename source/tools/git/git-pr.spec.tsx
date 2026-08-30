@@ -205,6 +205,45 @@ test('git_pr formatter shows success message', t => {
 	t.regex(output!, /PR created/i);
 });
 
+test('git_pr formatter does not show the error banner when result content merely contains "Error:" mid-text', t => {
+	// diff/logs results are raw CI-log/diff content, not tool-generated
+	// status text — a failing build's log legitimately contains "Error:"
+	// substrings even though the tool call itself succeeded.
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{logs: {pr: 5}},
+		'Build log:\nCompiling...\nError: TS2345 argument mismatch\nBuild failed.',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /✗/);
+});
+
+test('git_pr formatter shows the error banner when the tool itself reports a genuine error', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{diff: 42},
+		'Error: Not authenticated with GitHub. Run "gh auth login" first.',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /✗/);
+});
+
 test('git_pr formatter shows PR body', t => {
 	const formatter = gitPrTool.formatter;
 	if (!formatter) {

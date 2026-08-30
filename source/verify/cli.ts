@@ -14,9 +14,17 @@
  * doc / EXPLANATION.md for the full rationale.
  */
 
+import {existsSync} from 'node:fs';
+import {join} from 'node:path';
 import type {SubagentTask} from '@/subagents/types';
-import {execGh, getCurrentBranch, isGhAvailable} from '@/tools/git/utils';
-import type {LLMClient} from '@/types/core';
+import {
+	execGh,
+	getCurrentCommitSha,
+	getPrChangedFiles,
+	getPrRefs,
+	isGhAvailable,
+	type PrRefs,
+} from '@/tools/git/utils';
 import {formatError} from '@/utils/error-formatter';
 import {formatReviewBody} from './format-review';
 import {
@@ -24,6 +32,7 @@ import {
 	formatFindingsForPrompt,
 	type SecurityScanResult,
 } from './security-scan';
+import {getAllowedToolNames} from './trust';
 
 export interface VerifyCliOptions {
 	projectRoot: string;
@@ -32,6 +41,12 @@ export interface VerifyCliOptions {
 export interface VerifyCliDeps {
 	initializePlain: typeof import('@/plain/initialize').initializePlain;
 	isGhAvailable: typeof isGhAvailable;
+	getCurrentCommitSha: typeof getCurrentCommitSha;
+	getPrRefs: typeof getPrRefs;
+	getPrChangedFiles: typeof getPrChangedFiles;
+	/** Whether a changed-file path exists in the local checkout. Defaults to
+	 * `existsSync`; injectable so tests don't depend on real repo contents. */
+	fileExists: (absolutePath: string) => boolean;
 	runSecurityScan: typeof defaultRunSecurityScan;
 	runSubagent: (
 		init: import('@/plain/initialize').PlainInitResult,
@@ -51,11 +66,25 @@ async function defaultRunSubagent(
 	const {SubagentExecutor} = await import('@/subagents/subagent-executor');
 	const executor = new SubagentExecutor(
 		init.toolManager,
-		init.client as LLMClient,
+		init.client,
 		projectRoot,
 		'headless',
 	);
-	return executor.execute(task, signal);
+	// Narrow the tool *names* available to comment-only's list, so the
+	// subagent's frontmatter can't silently drift from trust.ts. This is
+	// name-level only — it doesn't stop git_pr's comment/review/create
+	// argument shapes, which trust.ts's isActionAllowed() would deny at
+	// comment-only but which nothing currently enforces at call time. The
+	// actual reason a mutating git_pr call can't succeed here is that
+	// git_pr's own `approval` fn requires confirmation for those actions,
+	// and headless mode has no registered approval handler, so
+	// signalToolApproval() auto-denies (see source/utils/tool-approval-queue.ts).
+	// That's a property of headless mode, not of this tool list — if a
+	// future trust level ever runs headless with an approval handler
+	// registered, this override alone would no longer be sufficient.
+	return executor.execute(task, signal, 0, undefined, {
+		tools: getAllowedToolNames('comment-only'),
+	});
 }
 
 async function defaultPostReview(pr: number, body: string): Promise<void> {
@@ -102,6 +131,8 @@ function parseArgs(args: string[]): ParsedArgs | {error: string} {
 				return {error: `Invalid --model value: "${value ?? ''}".`};
 			}
 			model = value;
+		} else {
+			return {error: `Unknown flag: "${arg}".`};
 		}
 	}
 
@@ -124,6 +155,10 @@ const defaultDeps: VerifyCliDeps = {
 		return initializePlain(opts);
 	},
 	isGhAvailable,
+	getCurrentCommitSha,
+	getPrRefs,
+	getPrChangedFiles,
+	fileExists: existsSync,
 	runSecurityScan: defaultRunSecurityScan,
 	runSubagent: defaultRunSubagent,
 	postReview: defaultPostReview,
@@ -155,27 +190,69 @@ export async function runVerifyCli(
 		};
 	}
 
+	// Independent of each other — fetch PR metadata and the local commit SHA
+	// concurrently before touching anything else.
+	let refs: PrRefs;
+	let changedFiles: string[];
+	let currentSha: string;
+	try {
+		[refs, changedFiles, currentSha] = await Promise.all([
+			deps.getPrRefs(pr),
+			deps.getPrChangedFiles(pr),
+			deps.getCurrentCommitSha(),
+		]);
+	} catch (error) {
+		return {
+			exitCode: 1,
+			output: `Error: failed to fetch PR #${pr} metadata (${formatError(error)}).`,
+		};
+	}
+
+	// Compare commit SHAs rather than branch names: robust to detached-HEAD
+	// checkouts (the norm for PR-triggered CI) and to a local branch named
+	// differently than the PR's head branch (e.g. gh pr checkout disambiguating
+	// a fork PR).
+	if (currentSha !== refs.headRefOid) {
+		return {
+			exitCode: 1,
+			output:
+				`Error: the local working tree (${currentSha.slice(0, 7)}) doesn't match ` +
+				`PR #${pr}'s head commit (${refs.headRefOid.slice(0, 7)}, branch ` +
+				`"${refs.headRefName}"). semgrep and the reviewer's file reads would see ` +
+				`the wrong code. Run \`gh pr checkout ${pr}\`, then retry.`,
+		};
+	}
+
+	// gh pr diff --name-only includes deleted/renamed-away paths, which don't
+	// exist in this checkout — passing a nonexistent path to semgrep as an
+	// explicit scan target can error instead of degrading gracefully.
+	const scannablePaths = changedFiles.filter(file =>
+		deps.fileExists(join(opts.projectRoot, file)),
+	);
+
 	// Independent of each other (scan reads the working tree, init bootstraps
 	// the LLM/tool stack) — run concurrently rather than paying both
-	// durations back-to-back.
+	// durations back-to-back. Note: isSemgrepAvailable()'s execSync inside
+	// runSecurityScan still runs synchronously before either operation's
+	// first await, so the two don't start in true lockstep — but the scan
+	// itself and initializePlain's bootstrap do overlap once both are underway.
 	let scan: SecurityScanResult;
 	let init: import('@/plain/initialize').PlainInitResult;
 	try {
 		[scan, init] = await Promise.all([
-			deps.runSecurityScan({cwd: opts.projectRoot}),
+			deps.runSecurityScan({cwd: opts.projectRoot, paths: scannablePaths}),
 			deps.initializePlain({cliProvider: provider, cliModel: model}),
 		]);
 	} catch (error) {
 		return {exitCode: 1, output: `Error: ${formatError(error)}`};
 	}
 
-	const targetBranch = await getCurrentBranch();
 	const task: SubagentTask = {
 		subagent_type: 'verify-pr-review',
 		description: `Review PR #${pr}`,
 		context: {
 			prNumber: pr,
-			targetBranch,
+			targetBranch: refs.baseRefName,
 			semgrepFindings: formatFindingsForPrompt(scan),
 		},
 	};

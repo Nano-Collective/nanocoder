@@ -159,6 +159,44 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
+test.serial('toolOverride replaces the effective tool list beyond what frontmatter declares', async t => {
+	// 'explore's frontmatter tools list does not include write_file, so
+	// without an override this call would be filtered out before reaching
+	// the model. toolOverride.tools should replace the effective list.
+	const writeHandler = async (args: unknown) => {
+		const parsed = args as {path: string};
+		return `Wrote ${parsed.path}`;
+	};
+
+	const toolManager = createMockToolManager({
+		write_file: {handler: writeHandler, readOnly: false},
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [{
+				id: 'tc1',
+				function: {name: 'write_file', arguments: '{"path": "out.txt"}'},
+			}],
+		},
+		{content: 'Wrote the file'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Write a file'},
+		undefined,
+		0,
+		undefined,
+		{tools: ['write_file']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Wrote the file');
+});
+
 test.serial('caps tool output before the next subagent model turn', async t => {
 	const largeOutput = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
 	const toolManager = createMockToolManager({

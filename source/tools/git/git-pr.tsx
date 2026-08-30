@@ -758,7 +758,7 @@ function GitPrFormatter({
 				</Box>
 			)}
 
-			{result?.includes('Error:') && (
+			{result?.startsWith('Error:') && (
 				<Box marginTop={1}>
 					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
