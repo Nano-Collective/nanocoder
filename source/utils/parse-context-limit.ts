@@ -13,12 +13,14 @@ export function parseContextLimit(value: string): number | null {
 		return null;
 	}
 
-	const [, numStr, suffix] = match;
-	const parsed = Number.parseFloat(numStr);
-	if (parsed <= 0) {
+	// The regex only matches digits, so `parseFloat` can never return NaN here.
+	// It can still overflow to Infinity on a very long digit string, and callers
+	// store whatever we hand back without further validation.
+	const parsed = Number.parseFloat(match[1]);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
 		return null;
 	}
 
-	const multiplier = suffix === 'k' ? 1000 : 1;
+	const multiplier = match[2] === 'k' ? 1000 : 1;
 	return Math.round(parsed * multiplier);
 }

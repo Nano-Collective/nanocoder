@@ -54,3 +54,31 @@ test('parseContextLimit - rejects trailing junk after number', t => {
 	t.is(parseContextLimit('128abc'), null);
 	t.is(parseContextLimit('1024.5tokens'), null);
 });
+
+// These parsed before the anchored-regex fix. Pin them so a future loosening of
+// the pattern has to be deliberate rather than accidental.
+test('parseContextLimit - rejects exponent, sign and partial decimal forms', t => {
+	t.is(parseContextLimit('1e5'), null);
+	t.is(parseContextLimit('.5k'), null);
+	t.is(parseContextLimit('+5'), null);
+	t.is(parseContextLimit('1.'), null);
+});
+
+test('parseContextLimit - rejects internal whitespace', t => {
+	t.is(parseContextLimit('128 k'), null);
+	t.is(parseContextLimit('1 024'), null);
+});
+
+test('parseContextLimit - rejects separators', t => {
+	t.is(parseContextLimit('1,024'), null);
+	t.is(parseContextLimit('8_192'), null);
+});
+
+test('parseContextLimit - empty string returns null', t => {
+	t.is(parseContextLimit(''), null);
+	t.is(parseContextLimit('   '), null);
+});
+
+test('parseContextLimit - overflowing digit string returns null', t => {
+	t.is(parseContextLimit('9'.repeat(400)), null);
+});
