@@ -1896,6 +1896,94 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 	t.true(toolMsg?.content.startsWith('Error:'));
 });
 
+// The ACP option bound has to match the `ask_user` tool schema (2-6), otherwise
+// identical prompts succeed in the CLI and fail in the VS Code extension.
+test('runAcpConversation - ask_user accepts six options', async t => {
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async (p: any) => ({
+			outcome: {outcome: 'selected', optionId: p.options[5].optionId},
+		}),
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{question: 'Pick one', options: ['A', 'B', 'C', 'D', 'E', 'F']},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getFilteredTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.is(toolMsg?.content, 'F');
+});
+
+test('runAcpConversation - ask_user rejects more than six options', async t => {
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async () => {
+			t.fail('should not prompt the client for an out-of-range option list');
+			return {outcome: {outcome: 'cancelled'}};
+		},
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{question: 'Pick one', options: ['A', 'B', 'C', 'D', 'E', 'F', 'G']},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getFilteredTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.true(toolMsg?.content.startsWith('Error:'));
+	t.true(toolMsg?.content.includes('2-6'));
+});
+
 // ============================================================================
 // Action timeline capture
 // ============================================================================

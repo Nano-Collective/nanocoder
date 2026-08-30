@@ -64,13 +64,23 @@
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					// Close all dropdowns
-					closeAllDropdowns();
-					
+					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
+					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
 				});
+			}
+
+			syncModeBadge() {
+				if (this.label?.id !== 'mode-trigger-label') return;
+				const badge = document.getElementById('composer-mode-badge');
+				if (badge) badge.textContent = this.label.textContent || '';
+				const settingsTrigger = document.getElementById('composer-settings-trigger');
+				if (settingsTrigger && this.label.textContent) {
+					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
+					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
+				}
 			}
 
 			setOptions(options, selectedValue) {
@@ -80,6 +90,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
+					this.syncModeBadge();
 					return;
 				}
 
@@ -124,6 +135,7 @@
 					}
 					this.label.textContent = displayValue || 'Loading...';
 				}
+				this.syncModeBadge();
 			}
 		}
 
@@ -139,6 +151,23 @@
 			vscode.postMessage({ type: 'setModel', model: val });
 		});
 
+		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
+		const composerSettings = document.getElementById('composer-settings');
+		if (composerSettingsTrigger && composerSettings) {
+			composerSettingsTrigger.addEventListener('click', (e) => {
+				e.stopPropagation();
+				const opening = composerSettings.classList.contains('hidden');
+				closeAllDropdowns();
+				if (opening) {
+					composerSettings.classList.remove('hidden');
+					composerSettingsTrigger.setAttribute('aria-expanded', 'true');
+				}
+			});
+			composerSettings.addEventListener('click', (e) => {
+				e.stopPropagation();
+			});
+		}
+
 		document.addEventListener('click', () => {
 			closeAllDropdowns();
 		});
@@ -146,11 +175,19 @@
 
 	initDropdowns();
 
-	function closeAllDropdowns() {
-		document.getElementById('provider-dropdown').classList.add('hidden');
-		document.getElementById('model-dropdown').classList.add('hidden');
-		document.getElementById('mode-dropdown').classList.add('hidden');
+	function closeAllDropdowns(keepId) {
+		['provider-dropdown', 'model-dropdown', 'mode-dropdown', 'composer-settings'].forEach((id) => {
+			if (id !== keepId) {
+				document.getElementById(id)?.classList.add('hidden');
+			}
+		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		const composerSettings = document.getElementById('composer-settings');
+		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
+		if (composerSettingsTrigger) {
+			const open = composerSettings && !composerSettings.classList.contains('hidden');
+			composerSettingsTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+		}
 	}
 
 	// ── @ mention autocomplete ──────────────────────────────
@@ -1235,7 +1272,17 @@
 	// streaming response area. Guarded by isProcessing so an idle Escape does
 	// nothing.
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && isProcessing) {
+		if (e.key !== 'Escape') return;
+		const chromeOpen = ['provider-dropdown', 'model-dropdown', 'mode-dropdown', 'composer-settings'].some(
+			(id) => !document.getElementById(id)?.classList.contains('hidden'),
+		) || (addMenuDropdown && !addMenuDropdown.classList.contains('hidden'));
+		if (chromeOpen) {
+			e.preventDefault();
+			e.stopPropagation();
+			closeAllDropdowns();
+			return;
+		}
+		if (isProcessing) {
 			e.preventDefault();
 			e.stopPropagation();
 			requestCancel();

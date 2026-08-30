@@ -49,20 +49,18 @@ Preferences follow the same location hierarchy as configuration files:
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the `nanocoder.paste` namespace:
+The paste threshold is also stored in the preferences file under the top-level `paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "nanocoder": {
-    "paste": {
-      "singleLineThreshold": 1500
-    }
+  "paste": {
+    "singleLineThreshold": 1500
   }
 }
 ```
@@ -127,15 +125,17 @@ One exception: if you have replaced the system prompt entirely with a [`systemPr
 
 ### Notification Configuration
 
-Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
+Desktop notification preferences are stored under the top-level `notifications` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.notifications.enabled` | boolean | `false` | Enable desktop notifications |
-| `nanocoder.notifications.sound` | boolean | `false` | Play a sound with notifications |
-| `nanocoder.notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
-| `nanocoder.notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
-| `nanocoder.notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `notifications.enabled` | boolean | `false` | Enable desktop notifications |
+| `notifications.sound` | boolean | `false` | Play a sound with notifications |
+| `notifications.bell` | boolean | `false` | Also ring the terminal bell (works over SSH / tmux) |
+| `notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
+| `notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
+| `notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `notifications.events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
 
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 

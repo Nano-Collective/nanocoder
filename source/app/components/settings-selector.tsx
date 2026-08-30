@@ -705,10 +705,12 @@ export function SettingsNotificationsPanel({
 		saved ?? {
 			enabled: false,
 			sound: false,
+			bell: false,
 			events: {
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -725,9 +727,11 @@ export function SettingsNotificationsPanel({
 	type ToggleKey =
 		| 'enabled'
 		| 'sound'
+		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -741,6 +745,10 @@ export function SettingsNotificationsPanel({
 				value: 'sound' as ToggleKey,
 			},
 			{
+				label: `  Terminal Bell: ${isOn(config.bell)}`,
+				value: 'bell' as ToggleKey,
+			},
+			{
 				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
 				value: 'toolConfirmation' as ToggleKey,
 			},
@@ -752,6 +760,12 @@ export function SettingsNotificationsPanel({
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
 			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
+			},
 		];
 	}, [config]);
 
@@ -761,6 +775,8 @@ export function SettingsNotificationsPanel({
 			next.enabled = !next.enabled;
 		} else if (item.value === 'sound') {
 			next.sound = !next.sound;
+		} else if (item.value === 'bell') {
+			next.bell = !next.bell;
 		} else {
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
