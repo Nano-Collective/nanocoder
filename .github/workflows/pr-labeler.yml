@@ -1,0 +1,52 @@
+name: PR path labels
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    # Skip the automated "Version Packages" PR.
+    if: github.head_ref != 'changeset-release/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Ensure area labels exist
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const wanted = [
+              'area:tools',
+              'area:tui',
+              'area:ci',
+              'area:docs',
+              'area:vscode',
+            ];
+            const {owner, repo} = context.repo;
+            const existing = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              {owner, repo, per_page: 100},
+            );
+            const names = new Set(existing.map(l => l.name));
+            for (const name of wanted) {
+              if (names.has(name)) continue;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name,
+                color: '0e8a16',
+              });
+            }
+
+      - name: Label by path
+        uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: false
