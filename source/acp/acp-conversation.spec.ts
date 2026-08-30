@@ -2166,6 +2166,16 @@ test.serial(
 				.map(m => (typeof m.content === 'string' ? m.content : ''))
 				.join('');
 			t.true(secondHistory.length < filler.length);
+			t.false(
+				payloads[1].some(
+					m => typeof m.content === 'string' && m.content.includes(filler),
+				),
+				'the verbose turn must be compressed out of the next model turn',
+			);
+			t.true(
+				secondHistory.includes('call the tool'),
+				'compaction must keep the recent turn, not empty the history',
+			);
 		} finally {
 			resetAutoCompactSession();
 			resetSessionContextLimit();

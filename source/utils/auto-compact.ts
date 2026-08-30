@@ -263,7 +263,15 @@ export async function maybeAutoCompact(
 	systemMessage: Message,
 	client: LLMClient,
 	nativeTools?: Record<string, AISDKCoreTool>,
-	options?: {signal?: AbortSignal; onNotify?: (message: string) => void},
+	options?: {
+		signal?: AbortSignal;
+		onNotify?: (message: string) => void;
+		// Callers that already track the active provider/model (the TUI reads
+		// them from app state) pass them explicitly. Everything else derives
+		// them from the client.
+		provider?: string;
+		model?: string;
+	},
 ): Promise<Message[]> {
 	if (options?.signal?.aborted) {
 		return messages;
@@ -278,8 +286,8 @@ export async function maybeAutoCompact(
 		const compressed = await performAutoCompact(
 			messages,
 			systemMessage,
-			client.getProviderConfig().name,
-			client.getCurrentModel(),
+			options?.provider ?? client.getProviderConfig().name,
+			options?.model ?? client.getCurrentModel(),
 			autoCompactConfig,
 			options?.onNotify,
 			client,

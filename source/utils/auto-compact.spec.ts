@@ -851,3 +851,32 @@ test('maybeAutoCompact omits native tools from the gate when toolsDisabled', asy
 	t.not(withTools, messages);
 });
 
+test('maybeAutoCompact uses caller-supplied provider and model over the client', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: 'recent question'},
+	];
+	// A client that cannot report its provider/model — the TUI supplies both
+	// from app state, so compaction must still run rather than being swallowed
+	// by the catch in maybeAutoCompact.
+	const client = {} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+		undefined,
+		{provider: 'openai', model: 'gpt-4'},
+	);
+
+	t.not(result, messages, 'compaction must run on the caller-supplied model');
+});
+

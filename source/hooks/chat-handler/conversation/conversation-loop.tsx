@@ -11,7 +11,11 @@ import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getShowUsageFooter} from '@/config/preferences';
-import {MAX_COMPACT_RETRIES, TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
+import {
+	MAX_COMPACT_RETRIES,
+	TOOL_APPROVAL_REQUIRED_KIND,
+	TOOL_APPROVAL_REQUIRED_PREFIX,
+} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -598,12 +602,21 @@ export const processAssistantResponse = async (
 			updatedMessages,
 			systemMessage,
 			client,
+			// Native tool definitions occupy context out-of-band. Pass them so
+			// the gate matches the ctx% indicator; under XML/JSON fallback they
+			// already live inside systemMessage, so pass nothing to avoid
+			// double-counting.
 			result.toolsDisabled ? undefined : tools,
 			{
 				signal: controller.signal,
 				onNotify: notification => {
 					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
+				// The TUI tracks the active provider/model in app state; use those
+				// rather than re-deriving them from the client, which may lag a
+				// pending switch.
+				provider: currentProvider,
+				model: currentModel,
 			},
 		);
 
@@ -904,7 +917,7 @@ export const processAssistantResponse = async (
 			const errorMsg = `${TOOL_APPROVAL_REQUIRED_PREFIX}${toolNames}. Exiting non-interactive mode`;
 			addToChatQueue(
 				<ErrorMessage
-					key={generateKey('tool-approval-required')}
+					key={generateKey(TOOL_APPROVAL_REQUIRED_KIND)}
 					message={errorMsg}
 					hideBox={true}
 				/>,

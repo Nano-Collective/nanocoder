@@ -8,6 +8,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
@@ -413,8 +414,11 @@ export async function runPlainConversation(
 				},
 			];
 		}
-		messages = await maybeAutoCompact(
-			messages,
+		// Gate on the same view the next turn will send, so the threshold is not
+		// measured against rows the cap already drops from the request.
+		const compactGateInput = capMessagesForModel(messages, maxMessages);
+		const compacted = await maybeAutoCompact(
+			compactGateInput,
 			systemMessage,
 			client,
 			result.toolsDisabled ? undefined : tools,
@@ -425,6 +429,12 @@ export async function runPlainConversation(
 					: message => writeStatus(message.split('\n')[0] ?? message),
 			},
 		);
+		// Only adopt the result when compaction actually ran — otherwise
+		// maybeAutoCompact returns the capped view it was handed, and taking it
+		// would discard history the cap only meant to hide from one request.
+		if (compacted !== compactGateInput) {
+			messages = compacted;
+		}
 		if (abortSignal.aborted) {
 			return {
 				kind: 'error',
@@ -542,7 +552,7 @@ export async function runPlainConversation(
 
 		if (toolsNeedingApproval.length > 0) {
 			return {
-				kind: 'tool-approval-required',
+				kind: TOOL_APPROVAL_REQUIRED_KIND,
 				toolNames: toolsNeedingApproval,
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
