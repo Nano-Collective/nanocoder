@@ -19,7 +19,7 @@ test('planBashSpawn off on unix is sh -c, detached', t => {
 		t.fail(plan.error);
 		return;
 	}
-	t.is(plan.file, 'sh');
+	t.is(plan.bin, 'sh');
 	t.deepEqual(plan.args, ['-c', 'echo hi\n\nexit 0']);
 	t.true(plan.detached);
 });
@@ -37,7 +37,7 @@ test('planBashSpawn off on windows is cmd /c', t => {
 		t.fail(plan.error);
 		return;
 	}
-	t.is(plan.file, 'cmd');
+	t.is(plan.bin, 'cmd');
 	t.deepEqual(plan.args, ['/c', 'echo hi']);
 	t.false(plan.detached);
 });
@@ -87,7 +87,10 @@ test('planBashSpawn on linux with bwrap uses --unshare-net and binds the project
 		t.fail(plan.error);
 		return;
 	}
-	t.is(plan.file, '/usr/bin/bwrap');
+	t.is(plan.bin, 'bwrap');
+	if (plan.bin === 'bwrap') {
+		t.is(plan.bwrap, '/usr/bin/bwrap');
+	}
 	t.true(plan.args.includes('--unshare-net'));
 	t.true(plan.args.includes('/tmp/proj'));
 });
@@ -111,7 +114,7 @@ test('planBashSpawn on darwin with sandbox uses sandbox-exec when present', t =>
 		t.regex(plan.error, /sandbox-exec/);
 		return;
 	}
-	t.is(plan.file, '/usr/bin/sandbox-exec');
+	t.is(plan.bin, 'sandbox-exec');
 	t.is(plan.args[0], '-p');
 	t.true(plan.args[1].includes('deny network*'));
 	t.true(plan.args.includes('sh'));
