@@ -31,7 +31,9 @@ import type {
 	ToolCall,
 	ToolExecutionContext,
 } from '@/types/core';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
+import {capMessagesForModel} from '@/utils/message-capping';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -483,8 +485,17 @@ export class SubagentExecutor {
 			emitProgress('running');
 			await new Promise(resolve => setTimeout(resolve, 50));
 
+			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+			const systemMessage =
+				messages[0]?.role === 'system' ? messages[0] : undefined;
+			const history = systemMessage ? messages.slice(1) : messages;
+			const cappedHistory = capMessagesForModel(history, maxMessages);
+			const modelMessages = systemMessage
+				? [systemMessage, ...cappedHistory]
+				: cappedHistory;
+
 			const response = await client.chat(
-				messages,
+				modelMessages,
 				tools,
 				{
 					onToken: token => {
@@ -572,6 +583,25 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
+			if (systemMessage) {
+				// Gate on the same view the model receives, so the threshold is not
+				// measured against rows the cap already dropped from the request.
+				const gateInput = capMessagesForModel(messages.slice(1), maxMessages);
+				const compacted = await maybeAutoCompact(
+					gateInput,
+					systemMessage,
+					client,
+					tools,
+					{signal},
+				);
+				// Only adopt the result when compaction actually ran. Otherwise
+				// maybeAutoCompact hands back the capped view it was given, and
+				// writing that in would permanently discard history the cap only
+				// ever meant to hide from a single request.
+				if (compacted !== gateInput) {
+					messages.splice(0, messages.length, systemMessage, ...compacted);
+				}
+			}
 			if (agentId) {
 				streamingText = '';
 				streamingReasoning = '';

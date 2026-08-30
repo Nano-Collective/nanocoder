@@ -42,8 +42,12 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsage} from '@/usage/response-usage';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
-import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	type PendingToolApproval,
+	setGlobalToolApprovalHandler,
+} from '@/utils/tool-approval-queue';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
@@ -74,7 +78,96 @@ export interface RunAcpConversationOptions {
 	nonInteractiveAlwaysAllow: string[];
 }
 
+/**
+ * Sub-agent tool calls reach the approval slot in tool-approval-queue, which
+ * only the Ink UI installs a handler for. Under ACP the slot fell back to
+ * denying, so a dispatched sub-agent was refused without the client seeing a
+ * request. Route those to the same session/request_permission channel the
+ * top-level calls use.
+ */
+function createSubagentApprovalHandler(
+	session: AcpSession,
+	conn: AgentSideConnection,
+): (approval: PendingToolApproval) => Promise<boolean> {
+	return async ({toolCall, subagentName}) => {
+		// The sub-agent's own model names its tool calls and shares an id space
+		// with the top-level ones, so prefix to keep the two cards distinct.
+		const announced: ToolCall = {
+			...toolCall,
+			id: `${SUBAGENT_TOOL_CALL_PREFIX}${toolCall.id}`,
+		};
+
+		try {
+			const meta = await buildToolCallMeta(announced);
+			const subagentMeta: AcpToolCallMeta = {
+				...meta,
+				title: `${meta.title} (${subagentName})`,
+			};
+
+			// Announced first: a permission request naming a tool call the
+			// client has not seen is rejected as invalid params.
+			await emitToolCall(session, conn, announced, 'pending', subagentMeta);
+
+			const permission = await requestToolPermission(
+				session,
+				announced,
+				conn,
+				subagentMeta,
+				session.abortController.signal,
+			);
+
+			if (permission === 'approved') {
+				// The sub-agent layer does not report its results back here, so
+				// settle the card now rather than leave it spinning forever.
+				await emitToolCall(
+					session,
+					conn,
+					announced,
+					'completed',
+					subagentMeta,
+					'tool_call_update',
+				);
+				return true;
+			}
+
+			await emitToolCallUpdate(
+				session,
+				conn,
+				announced,
+				'failed',
+				permission === 'cancelled' ? 'Cancelled by user' : 'Denied by user',
+			);
+			return false;
+		} catch {
+			// signalToolApproval is awaited outside the sub-agent executor's own
+			// try, so a transport failure here would abort the whole sub-agent
+			// run. Deny the one tool instead and keep the safe-fallback posture.
+			return false;
+		}
+	};
+}
+
 export async function runAcpConversation(
+	options: RunAcpConversationOptions,
+): Promise<PromptResponse> {
+	// The slot is a module singleton with last-writer-wins semantics, and two
+	// sessions can have turns in flight at once, so the handler is scoped to
+	// this turn. Without the teardown a second session's closure would answer
+	// the first session's approvals against the wrong session id and abort
+	// controller, and a finished turn's session would stay reachable.
+	const restoreApprovalHandler = setGlobalToolApprovalHandler(
+		createSubagentApprovalHandler(options.session, options.conn),
+	);
+	try {
+		return await runTurn(options);
+	} finally {
+		restoreApprovalHandler();
+	}
+}
+
+const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
+
+async function runTurn(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
 	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow} =
@@ -84,51 +177,6 @@ export async function runAcpConversation(
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 	let wrotePlan = false;
-
-	// Tool calls made inside a dispatched sub-agent go through the global
-	// approval slot, which has no handler under ACP and so denied every one of
-	// them without the client ever seeing a request. Route them to the same
-	// session/request_permission channel the top-level calls use. The call is
-	// announced first because a permission request naming an unknown tool call
-	// is rejected as invalid params.
-	setGlobalToolApprovalHandler(async ({toolCall, subagentName}) => {
-		const meta = await buildToolCallMeta(toolCall);
-		const subagentMeta: AcpToolCallMeta = {
-			...meta,
-			title: `${meta.title} (${subagentName})`,
-		};
-
-		await emitToolCall(session, conn, toolCall, 'pending', subagentMeta);
-
-		const permission = await requestToolPermission(
-			session,
-			toolCall,
-			conn,
-			subagentMeta,
-			abortController.signal,
-		);
-
-		if (permission === 'approved') {
-			await emitToolCall(
-				session,
-				conn,
-				toolCall,
-				'in_progress',
-				subagentMeta,
-				'tool_call_update',
-			);
-			return true;
-		}
-
-		await emitToolCallUpdate(
-			session,
-			conn,
-			toolCall,
-			'failed',
-			permission === 'cancelled' ? 'Cancelled by user' : 'Denied by user',
-		);
-		return false;
-	});
 
 	// Provider-reported usage accumulated across this prompt's model calls,
 	// returned on the PromptResponse (experimental ACP `usage` field) so
@@ -322,6 +370,26 @@ export async function runAcpConversation(
 				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
+		// Gate on the same view the next turn will send, so the threshold is not
+		// measured against rows the cap already drops from the request.
+		const compactGateInput = capMessagesForModel(messages, maxMessages);
+		const compacted = await maybeAutoCompact(
+			compactGateInput,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{signal: abortController.signal},
+		);
+		// Only adopt the result when compaction actually ran — otherwise
+		// maybeAutoCompact returns the capped view it was handed, and taking it
+		// would discard history the cap only meant to hide from one request.
+		if (compacted !== compactGateInput) {
+			messages = compacted;
+		}
+		if (abortController.signal.aborted) {
+			session.messages = messages;
+			return withTurnUsage({stopReason: 'cancelled'});
+		}
 
 		if (errorResults.length > 0) {
 			messages = [...messages, ...resultsForAbandonedTurn];

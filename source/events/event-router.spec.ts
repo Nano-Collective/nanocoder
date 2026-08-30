@@ -153,6 +153,34 @@ test('matchesFilter on kind mismatch returns false', t => {
 	t.false(matchesFilter(sub, event));
 });
 
+test('matchGlob: brace alternation', t => {
+	t.true(matchGlob('*.{ts,tsx}', 'app.tsx'));
+	t.true(matchGlob('*.{ts,tsx}', 'app.ts'));
+	t.false(matchGlob('*.{ts,tsx}', 'app.js'));
+
+	t.true(matchGlob('src/**/*.{ts,tsx}', 'src/a/b/app.tsx'));
+	t.false(matchGlob('src/**/*.{ts,tsx}', 'src/a/b/app.css'));
+
+	// A single alternative and more than two both hold.
+	t.true(matchGlob('{docs}/**', 'docs/intro.md'));
+	t.true(matchGlob('*.{js,ts,tsx,mts}', 'a.mts'));
+
+	// `*` still stops at a directory boundary inside an alternative.
+	t.false(matchGlob('*.{ts,tsx}', 'src/app.ts'));
+});
+
+test('matchGlob: unbalanced braces stay literal instead of throwing', t => {
+	t.notThrows(() => matchGlob('docs/{a', 'docs/{a'));
+	t.true(matchGlob('docs/{a', 'docs/{a'));
+	t.false(matchGlob('docs/{a', 'docs/a'));
+	t.true(matchGlob('a}b', 'a}b'));
+});
+
+test('matchGlob: a comma outside braces is literal', t => {
+	t.true(matchGlob('a,b.md', 'a,b.md'));
+	t.false(matchGlob('a,b.md', 'a.md'));
+});
+
 test('matchGlob: basic patterns', t => {
 	t.true(matchGlob('docs/**', 'docs/intro.md'));
 	t.true(matchGlob('docs/**', 'docs/deep/sub/file.md'));

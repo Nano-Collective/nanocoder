@@ -11,10 +11,16 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
-import type {
-	LLMClient,
-	ToolCall,
-} from '@/types/core';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/models-dev-client.js';
+import type {LLMClient, Message, ToolCall} from '@/types/core';
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact.js';
 
 console.log('\nacp-conversation.spec.ts');
 
@@ -2091,34 +2097,141 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 	t.deepEqual(await session.timeline.list(), []);
 });
 
+test.serial(
+	'runAcpConversation - compacts history before the next model turn when over the token threshold',
+	async t => {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+		setSessionContextLimit(100);
+		setAutoCompactStrategy('mechanical');
+		setAutoCompactThreshold(50);
+
+		const filler = 'old context sentence. '.repeat(60);
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {
+			devMode: 'yolo',
+			messages: [
+				{role: 'user', content: filler},
+				{role: 'assistant', content: 'ack'},
+				{role: 'user', content: 'call the tool'},
+			],
+		});
+		const toolManager = {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		};
+		setToolRegistryGetter(() => ({
+			read_file: async () => 'ok',
+		}));
+
+		const payloads: Message[][] = [];
+		let callCount = 0;
+		const client = {
+			getCurrentModel: () => 'gpt-4',
+			getProviderConfig: () => ({name: 'openai'}),
+			chat: async (messages: Message[]) => {
+				payloads.push(messages);
+				callCount++;
+				if (callCount === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('read_file', {path: 'a.ts'}, 'call-1'),
+									],
+								},
+							},
+						],
+					};
+				}
+				return {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+
+		try {
+			const result = await runAcpConversation({
+				session,
+				client,
+				toolManager: toolManager as any,
+				conn,
+				nonInteractiveAlwaysAllow: [],
+			});
+
+			t.is(result.stopReason, 'end_turn');
+			t.is(payloads.length, 2);
+			const secondHistory = payloads[1]
+				.slice(1)
+				.map(m => (typeof m.content === 'string' ? m.content : ''))
+				.join('');
+			t.true(secondHistory.length < filler.length);
+			t.false(
+				payloads[1].some(
+					m => typeof m.content === 'string' && m.content.includes(filler),
+				),
+				'the verbose turn must be compressed out of the next model turn',
+			);
+			t.true(
+				secondHistory.includes('call the tool'),
+				'compaction must keep the recent turn, not empty the history',
+			);
+		} finally {
+			resetAutoCompactSession();
+			resetSessionContextLimit();
+		}
+	},
+);
+
 
 // ============================================================================
 // Sub-agent tool approval (#1019)
 // ============================================================================
 
-const runTurnThenApprove = async (
-	outcome: {outcome: string; optionId?: string},
+/**
+ * Drives signalToolApproval from inside the turn, which is the only way the
+ * sub-agent executor ever reaches it. Firing it after runAcpConversation
+ * returned would only pass while the handler leaked past the turn.
+ */
+const approveFromInsideTurn = async (
+	requestPermission: (p: any) => Promise<any>,
 	subagentName = 'docs',
 ) => {
 	const updates: any[] = [];
 	const permissionRequests: any[] = [];
+	let approved: boolean | undefined;
+	let signalled = false;
+
 	const conn = {
 		sessionUpdate: async (u: any) => {
 			updates.push(u.update);
 		},
 		requestPermission: async (p: any) => {
 			permissionRequests.push(p);
-			return {outcome};
+			return requestPermission(p);
 		},
 	} as unknown as AgentSideConnection;
 
 	const session = createMockSession(conn);
-	const {client} = createMockClient([
-		{
-			choices: [{message: {content: 'done', tool_calls: []}}],
-			toolsDisabled: false,
+	// chat() is awaited by the turn, so this is a point where the handler is
+	// installed and the turn has not returned - the state the sub-agent
+	// executor signals from.
+	const client = {
+		chat: async () => {
+			if (!signalled) {
+				signalled = true;
+				approved = await signalToolApproval({
+					toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
+					subagentName,
+				});
+			}
+			return {
+				choices: [{message: {content: 'done', tool_calls: []}}],
+				toolsDisabled: false,
+			};
 		},
-	]);
+	} as unknown as LLMClient;
 	const toolManager = {
 		getAvailableToolNames: () => [],
 		getFilteredTools: () => ({}),
@@ -2135,58 +2248,74 @@ const runTurnThenApprove = async (
 		nonInteractiveAlwaysAllow: [],
 	});
 
-	// The turn is what installs the handler the sub-agent executor signals
-	// through, so this stands in for a tool call made inside a sub-agent.
-	const approved = await signalToolApproval({
-		toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-sub'),
-		subagentName,
-	});
-
-	return {approved, updates, permissionRequests};
+	return {approved, updates, permissionRequests, session};
 };
 
 test('runAcpConversation - a sub-agent tool call reaches the client for permission', async t => {
-	const {approved, updates, permissionRequests} = await runTurnThenApprove({
-		outcome: 'selected',
-		optionId: 'allow',
-	});
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
+	);
 
 	t.true(approved);
 	t.is(permissionRequests.length, 1);
-	t.is(permissionRequests[0].toolCall.toolCallId, 'call-sub');
-	t.true(
-		String(permissionRequests[0].toolCall.title).includes('docs'),
-		'the sub-agent is named so the client can tell the calls apart',
-	);
 
-	// Announced before the request: a permission request naming an unknown
-	// tool call is rejected as invalid params.
+	// Prefixed: sub-agent ids come from the sub-agent's own model and share an
+	// id space with top-level calls, so an unprefixed id could merge two cards.
+	const announcedId = permissionRequests[0].toolCall.toolCallId;
+	t.is(announcedId, 'subagent:call-1');
+	t.true(String(permissionRequests[0].toolCall.title).includes('docs'));
+
+	// Announced before the request, or the client rejects the id.
 	const announced = updates.filter(
-		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === 'call-sub',
+		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === announcedId,
 	);
 	t.is(announced.length, 1);
+
+	// Settled rather than left spinning: the sub-agent layer reports no result.
+	const terminal = updates.filter(
+		(u: any) => u.toolCallId === announcedId && u.status === 'completed',
+	);
+	t.is(terminal.length, 1);
 });
 
 test('runAcpConversation - a denied sub-agent tool call is reported as failed', async t => {
-	const {approved, updates, permissionRequests} = await runTurnThenApprove({
-		outcome: 'selected',
-		optionId: 'deny',
-	});
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'selected', optionId: 'deny'}}),
+	);
 
 	t.false(approved);
 	t.is(permissionRequests.length, 1);
 	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'call-sub' && u.status === 'failed',
+		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
 	);
 	t.is(failed.length, 1);
 });
 
-test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
-	const {approved, updates} = await runTurnThenApprove({outcome: 'cancelled'});
+test('runAcpConversation - a transport failure denies the tool rather than aborting the sub-agent', async t => {
+	const {approved, permissionRequests} = await approveFromInsideTurn(async () => {
+		throw new Error('connection closed');
+	});
 
+	// signalToolApproval is awaited outside the sub-agent executor's own try, so
+	// a throw here would abort the whole run instead of denying one tool.
 	t.false(approved);
-	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'call-sub' && u.status === 'failed',
-	);
-	t.is(failed.length, 1);
+	t.is(permissionRequests.length, 1);
+});
+
+test('runAcpConversation - the approval handler does not outlive the turn', async t => {
+	const {permissionRequests} = await approveFromInsideTurn(async () => ({
+		outcome: {outcome: 'selected', optionId: 'allow'},
+	}));
+	t.is(permissionRequests.length, 1);
+
+	// The slot is a module singleton shared across sessions, so a handler left
+	// installed would answer a later session's approvals with this turn's
+	// session id and abort controller.
+	const afterTurn = await signalToolApproval({
+		toolCall: createMockToolCall('write_file', {path: 'b.txt'}, 'call-2'),
+		subagentName: 'docs',
+	});
+
+	t.false(afterTurn);
+	t.is(permissionRequests.length, 1);
 });
