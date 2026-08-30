@@ -1,4 +1,4 @@
-import {type ChildProcess} from 'node:child_process';
+import {type ChildProcess, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {existsSync, mkdirSync, readFileSync, unlinkSync} from 'node:fs';
@@ -89,25 +89,36 @@ export class BashExecutor extends EventEmitter {
 				? command
 				: // Blank line before the epilogue: a command ending in a trailing
 					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
+					// Capture path is `$1` (next argv), not interpolated into `-c`.
+					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$1" 2>/dev/null\nexit $__nc_ec`;
 
-		const planned = planBashSpawn({
-			platform,
-			sandbox,
-			command,
-			spawnCommand,
-			cwd,
-			projectRoot,
-		});
-		if ('error' in planned) {
-			state.isComplete = true;
-			state.error = planned.error;
-			this.emit('start', {...state});
-			this.emit('complete', {...state});
-			return {executionId, promise: Promise.resolve({...state})};
+		let proc: ChildProcess;
+		if (sandbox) {
+			const planned = planBashSpawn({
+				platform,
+				sandbox: true,
+				command,
+				spawnCommand,
+				cwd,
+				projectRoot,
+				cwdCaptureFile,
+			});
+			if ('error' in planned) {
+				state.isComplete = true;
+				state.error = planned.error;
+				this.emit('start', {...state});
+				this.emit('complete', {...state});
+				return {executionId, promise: Promise.resolve({...state})};
+			}
+			proc = spawnPlanned(planned, cwd);
+		} else if (cwdCaptureFile === undefined) {
+			proc = spawn('cmd', ['/c', command], {cwd});
+		} else {
+			proc = spawn('sh', ['-c', spawnCommand, 'sh', cwdCaptureFile], {
+				cwd,
+				detached: true,
+			});
 		}
-
-		const proc = spawnPlanned(planned, cwd);
 
 		// Best-effort: a missed capture just leaves the cwd where it was.
 		const applyCapturedCwd = () => {
