@@ -36,10 +36,11 @@ export function handleAtomicDeletion(
 	const deletionEnd = deletionStart + deletedChars;
 
 	// Check if any placeholder was affected by this deletion
-	for (const occurrence of findPlaceholderOccurrences(
+	const occurrences = findPlaceholderOccurrences(
 		previousText,
 		previousState.placeholderContent,
-	)) {
+	);
+	for (const occurrence of occurrences) {
 		const {start, end} = occurrence;
 
 		if (
@@ -51,7 +52,14 @@ export function handleAtomicDeletion(
 			const newDisplayValue =
 				previousText.slice(0, start) + previousText.slice(end);
 			const newPlaceholderContent = {...previousState.placeholderContent};
-			delete newPlaceholderContent[occurrence.id];
+			const hasAnotherOccurrence = occurrences.some(
+				candidate =>
+					candidate.id === occurrence.id &&
+					(candidate.start !== start || candidate.end !== end),
+			);
+			if (!hasAnotherOccurrence) {
+				delete newPlaceholderContent[occurrence.id];
+			}
 
 			return {
 				displayValue: newDisplayValue,

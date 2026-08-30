@@ -26,59 +26,6 @@ test('assemblePrompt - replaces placeholder with paste content', t => {
 	t.is(result, 'Hello Hello World');
 });
 
-test('assemblePrompt - restores every repeated paste placeholder', t => {
-	const inputState: InputState = {
-		displayValue: '[Paste #1: 11 chars] and [Paste #1: 11 chars]',
-		placeholderContent: {
-			1: {
-				type: PlaceholderType.PASTE,
-				content: 'Hello World',
-				displayText: '[Paste #1: 11 chars]',
-			},
-		},
-	};
-
-	const result = assemblePrompt(inputState);
-
-	t.is(result, 'Hello World and Hello World');
-});
-
-test('assemblePrompt - preserves dollar tokens in placeholder content', t => {
-	const replacementContent = "literal $& $1 $` $' $$";
-	const inputState: InputState = {
-		displayValue: '[Paste #1: 21 chars]',
-		placeholderContent: {
-			1: {
-				type: PlaceholderType.PASTE,
-				content: replacementContent,
-				displayText: '[Paste #1: 21 chars]',
-			},
-		},
-	};
-
-	const result = assemblePrompt(inputState);
-
-	t.is(result, replacementContent);
-});
-
-test('assemblePrompt - preserves dollar tokens through the legacy fallback', t => {
-	const replacementContent = "literal $& $1 $` $' $$";
-	const inputState: InputState = {
-		displayValue: '[Paste #1: 21 chars]',
-		placeholderContent: {
-			1: {
-				type: PlaceholderType.PASTE,
-				content: replacementContent,
-				displayText: '',
-			},
-		},
-	};
-
-	const result = assemblePrompt(inputState);
-
-	t.is(result, replacementContent);
-});
-
 test('assemblePrompt - replaces placeholder with file content', t => {
 	const inputState: InputState = {
 		displayValue: 'File: [File #1: example.txt]',

@@ -278,6 +278,23 @@ test('deletePlaceholder removes only the targeted duplicate', t => {
 	]);
 });
 
+test('deletePlaceholder removes every occurrence owned by one entry', t => {
+	const {hook, instance} = setupTest();
+	const placeholder = createPastePlaceholder('paste_1', 'first', '1');
+
+	hook.setInputState({
+		displayValue: `${placeholder.displayText} and ${placeholder.displayText}`,
+		placeholderContent: {paste_1: placeholder},
+	});
+	instance.rerender(<TestComponent />);
+
+	currentHook!.deletePlaceholder('paste_1');
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, ' and ');
+	t.deepEqual(currentHook!.currentState.placeholderContent, {});
+});
+
 // Test setInputState
 test('setInputState updates current state', t => {
 	const {hook, instance} = setupTest();
@@ -753,6 +770,36 @@ test('chunked paste updates existing placeholder', t => {
 
 	// If a placeholder was created, the content should be managed
 	t.truthy(currentHook!.currentState);
+});
+
+test('chunked paste relabels every repeated placeholder occurrence', t => {
+	const {hook, instance} = setupTest();
+	const originalPaste = 'x'.repeat(801);
+
+	hook.updateInput(originalPaste);
+	instance.rerender(<TestComponent />);
+
+	const pasteId = Object.keys(currentHook!.currentState.placeholderContent)[0];
+	t.is(pasteId, 'paste_1');
+	const placeholder = currentHook!.currentState.placeholderContent[pasteId];
+	const repeatedState: InputState = {
+		displayValue: `${placeholder.displayText} and ${placeholder.displayText}`,
+		placeholderContent: currentHook!.currentState.placeholderContent,
+	};
+
+	currentHook!.setInputState(repeatedState);
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput(`${repeatedState.displayValue}tail`);
+	instance.rerender(<TestComponent />);
+
+	const updated = currentHook!.currentState.placeholderContent[
+		pasteId
+	] as PastePlaceholderContent;
+	t.is(updated.content, `${originalPaste}tail`);
+	t.is(
+		currentHook!.currentState.displayValue,
+		`${updated.displayText} and ${updated.displayText}`,
+	);
 });
 
 // Test paste detection with multiline

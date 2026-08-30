@@ -83,6 +83,37 @@ test('findPlaceholderOccurrences gives each duplicate its own entry', t => {
 	);
 });
 
+test('findPlaceholderOccurrences reuses one entry for repeated display text', t => {
+	const content = {paste_1: paste('[Paste #1: 4 chars]')};
+
+	const occurrences = findPlaceholderOccurrences(
+		'[Paste #1: 4 chars] [Paste #1: 4 chars]',
+		content,
+	);
+
+	t.deepEqual(
+		occurrences.map(o => o.id),
+		['paste_1', 'paste_1'],
+	);
+});
+
+test('findPlaceholderOccurrences keeps longest-match priority after reuse', t => {
+	const content = {
+		file_1: file('[@a.ts] extended'),
+		file_2: file('[@a.ts]'),
+	};
+
+	const occurrences = findPlaceholderOccurrences(
+		'[@a.ts] extended [@a.ts] extended',
+		content,
+	);
+
+	t.deepEqual(
+		occurrences.map(o => o.id),
+		['file_1', 'file_1'],
+	);
+});
+
 test('findPlaceholderOccurrences prefers the longest matching display text', t => {
 	const content = {
 		file_1: file('[@a.ts]'),

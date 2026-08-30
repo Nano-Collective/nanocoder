@@ -262,3 +262,26 @@ test('handleAtomicDeletion removes the second of two identical placeholders', t 
 	t.is(result!.displayValue, '[@a.ts] and ');
 	t.deepEqual(Object.keys(result!.placeholderContent), ['file_1']);
 });
+
+test('handleAtomicDeletion keeps content used by another repeated occurrence', t => {
+	const displayText = '[Paste #1: 4 chars]';
+	const placeholder = {
+		type: PlaceholderType.PASTE,
+		displayText,
+		content: 'body',
+		originalSize: 4,
+	} as PastePlaceholderContent;
+	const previousState: InputState = {
+		displayValue: `${displayText} and ${displayText}`,
+		placeholderContent: {paste_1: placeholder},
+	};
+
+	const result = handleAtomicDeletion(
+		previousState,
+		`${displayText} and [Paste #1: 4 chars`,
+	);
+
+	t.truthy(result);
+	t.is(result!.displayValue, `${displayText} and `);
+	t.deepEqual(result!.placeholderContent, {paste_1: placeholder});
+});
