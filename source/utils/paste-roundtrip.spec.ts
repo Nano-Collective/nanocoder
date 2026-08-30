@@ -164,7 +164,7 @@ function handleAtomicDeletion(
 
 		if (
 			(deletionStart >= placeholderStart && deletionStart < placeholderEnd) ||
-			(deletionEnd > placeholderStart && deletionEnd <= placeholderEnd) ||
+			(deletionEnd > placeholderStart && deletionEnd < placeholderEnd) ||
 			(deletionStart <= placeholderStart && deletionEnd >= placeholderEnd)
 		) {
 			// Deletion affects this placeholder - remove it atomically

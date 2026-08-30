@@ -133,6 +133,11 @@ test('findPlaceholderAtPosition finds placeholder ID', t => {
 	// Position after placeholder
 	const result3 = findPlaceholderAtPosition(text, 35); // In "after"
 	t.is(result3, null);
+
+	// Position exactly at the end boundary (should not match)
+	// placeholder ends at index 30
+	const result4 = findPlaceholderAtPosition(text, 30);
+	t.is(result4, null);
 });
 
 test('wouldPartiallyDeletePlaceholder detects partial deletion', t => {
@@ -152,6 +157,16 @@ test('wouldPartiallyDeletePlaceholder detects partial deletion', t => {
 	// Deletion outside placeholder
 	const result3 = wouldPartiallyDeletePlaceholder(text, 0, 4); // Delete "Text"
 	t.false(result3);
+
+	// Boundary edge: delete exactly the space after placeholder (ends at 28)
+	// deletionStart = 28, length = 1
+	const result4 = wouldPartiallyDeletePlaceholder(text, 28, 1);
+	t.false(result4);
+
+	// Boundary edge: delete exactly the space before placeholder (ends at 5)
+	// deletionStart = 4, length = 1
+	const result5 = wouldPartiallyDeletePlaceholder(text, 4, 1);
+	t.false(result5);
 });
 
 // Integration test showing complete flow

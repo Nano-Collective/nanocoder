@@ -46,7 +46,7 @@ export function handleAtomicDeletion(
 
 		if (
 			(deletionStart >= placeholderStart && deletionStart < placeholderEnd) ||
-			(deletionEnd > placeholderStart && deletionEnd <= placeholderEnd) ||
+			(deletionEnd > placeholderStart && deletionEnd < placeholderEnd) ||
 			(deletionStart <= placeholderStart && deletionEnd >= placeholderEnd)
 		) {
 			// Deletion affects this placeholder - remove it atomically
@@ -79,7 +79,7 @@ export function findPlaceholderAtPosition(
 		const placeholderStart = match.index;
 		const placeholderEnd = placeholderStart + match[0].length;
 
-		if (position >= placeholderStart && position <= placeholderEnd) {
+		if (position >= placeholderStart && position < placeholderEnd) {
 			return match[1]; // Return the placeholder ID
 		}
 	}
@@ -108,7 +108,7 @@ export function wouldPartiallyDeletePlaceholder(
 		const overlapsStart =
 			deletionStart >= placeholderStart && deletionStart < placeholderEnd;
 		const overlapsEnd =
-			deletionEnd > placeholderStart && deletionEnd <= placeholderEnd;
+			deletionEnd > placeholderStart && deletionEnd < placeholderEnd;
 		const spansPast =
 			deletionStart < placeholderStart && deletionEnd > placeholderStart;
 		const spansOver =
