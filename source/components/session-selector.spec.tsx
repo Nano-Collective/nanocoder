@@ -210,6 +210,67 @@ test('session-selector does not call onCancel when Escape is pressed during load
 	t.false(cancelCalled);
 });
 
+test('session-selector does not call onCancel when arbitrary key is pressed in empty state', async t => {
+	let cancelCalled = false;
+	const onSelect = () => {};
+	const onCancel = () => {
+		cancelCalled = true;
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(
+		React.createElement(SessionSelector, {onSelect, onCancel}),
+	);
+
+	// Wait for loading to complete
+	await new Promise(resolve => setTimeout(resolve, 200));
+
+	const output = lastFrame();
+
+	// Only meaningful in the empty-state case; skip if sessions exist
+	if (
+		output!.includes('No saved sessions') ||
+		output!.includes('No sessions for this project')
+	) {
+		// Press an arbitrary, non-Escape key
+		stdin.write('j');
+
+		await new Promise(resolve => setTimeout(resolve, 50));
+
+		t.false(cancelCalled);
+	} else {
+		t.pass();
+	}
+});
+
+test('session-selector calls onCancel when Escape is pressed in empty state', async t => {
+	let cancelCalled = false;
+	const onSelect = () => {};
+	const onCancel = () => {
+		cancelCalled = true;
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(
+		React.createElement(SessionSelector, {onSelect, onCancel}),
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 200));
+
+	const output = lastFrame();
+
+	if (
+		output!.includes('No saved sessions') ||
+		output!.includes('No sessions for this project')
+	) {
+		stdin.write('\u001B');
+
+		await new Promise(resolve => setTimeout(resolve, 50));
+
+		t.true(cancelCalled);
+	} else {
+		t.pass();
+	}
+});
+
 test('session-selector shows Esc hint in footer', async t => {
 	const onSelect = () => {};
 	const onCancel = () => {};
