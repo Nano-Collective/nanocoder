@@ -13,6 +13,7 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 8.
  */
 
+import picomatch from 'picomatch';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -111,57 +112,8 @@ export function toPosixPath(path: string): string {
 	return path.split('\\').join('/');
 }
 
-// Minimal glob -> regex matcher: enough for `docs/<star><star>`,
-// `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, and `?`
-// single-character wildcards. Step 9 brings chokidar (and its picomatch dep)
-// into the tree, at which point we can swap this for picomatch and delete
-// the helper. Until then this is sufficient to make the router unit-testable.
+// Match subscription globs with picomatch so standard glob features such as
+// brace expansion and negation behave consistently with chokidar.
 export function matchGlob(pattern: string, path: string): boolean {
-	const regex = globToRegex(toPosixPath(pattern));
-	return regex.test(toPosixPath(path));
-}
-
-function globToRegex(pattern: string): RegExp {
-	let out = '';
-	for (let i = 0; i < pattern.length; i++) {
-		const ch = pattern[i];
-		if (ch === '*') {
-			const next = pattern[i + 1];
-			if (next === '*') {
-				// `**` matches any characters including `/`
-				out += '.*';
-				i++;
-				// Consume a trailing `/` after `**` so `docs/**` matches `docs`
-				if (pattern[i + 1] === '/') i++;
-			} else {
-				// `*` matches anything except `/`
-				out += '[^/]*';
-			}
-		} else if (ch === '?') {
-			out += '[^/]';
-		} else if (
-			ch === '.' ||
-			ch === '+' ||
-			ch === '(' ||
-			ch === ')' ||
-			ch === '|' ||
-			ch === '^' ||
-			ch === '$' ||
-			ch === '{' ||
-			ch === '}' ||
-			ch === '[' ||
-			ch === ']' ||
-			ch === '\\'
-		) {
-			out += `\\${ch}`;
-		} else {
-			out += ch;
-		}
-	}
-	// `out` is built by the escape loop above: every character is either a
-	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `[^/]`. There is no user-supplied raw regex syntax in `out`.
-	// The shape is bounded by the glob length, so ReDoS is not reachable.
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	return new RegExp(`^${out}$`);
+	return picomatch.isMatch(toPosixPath(path), toPosixPath(pattern));
 }

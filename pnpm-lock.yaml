@@ -93,6 +93,9 @@ importers:
       llama-tokenizer-js:
         specifier: ^1.2.2
         version: 1.2.2
+      picomatch:
+        specifier: ^4.0.5
+        version: 4.0.5
       pino:
         specifier: ^10.1.0
         version: 10.3.1
@@ -139,6 +142,9 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
+      '@types/picomatch':
+        specifier: ^4.0.3
+        version: 4.0.3
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.17
@@ -1603,6 +1609,9 @@ packages:
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+
+  '@types/picomatch@4.0.3':
+    resolution: {integrity: sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ==}
 
   '@types/react@19.2.17':
     resolution: {integrity: sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==}
@@ -5625,6 +5634,8 @@ snapshots:
       undici-types: 8.3.0
 
   '@types/normalize-package-data@2.4.4': {}
+
+  '@types/picomatch@4.0.3': {}
 
   '@types/react@19.2.17':
     dependencies:

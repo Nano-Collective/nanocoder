@@ -170,6 +170,12 @@ test('matchGlob: basic patterns', t => {
 // pattern is asked to match `docs\guide.md`. Both directions matter: a
 // segment pattern must still match, and `*` must not cross a backslash any
 // more than it crosses a slash.
+test('matchGlob: brace expansion patterns', t => {
+	t.true(matchGlob('*.{ts,tsx}', 'component.ts'));
+	t.true(matchGlob('*.{ts,tsx}', 'component.tsx'));
+	t.false(matchGlob('*.{ts,tsx}', 'component.js'));
+});
+
 test('matchGlob: paths using Windows separators', t => {
 	const cases: Array<[pattern: string, path: string, expected: boolean]> = [
 		['docs/**', 'docs\\guide.md', true],
