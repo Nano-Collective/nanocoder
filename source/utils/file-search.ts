@@ -484,6 +484,7 @@ export async function walkProjectEntries(
 		// No --follow (symlinks could escape cwd); --no-require-git works without a repo.
 		'--no-ignore-parent',
 		'--no-require-git',
+		'--no-config',
 		'--sort',
 		'path',
 		...defaultIgnoreGlobs(),
@@ -765,6 +766,7 @@ export async function searchProjectContents(
 		'--hidden',
 		'--no-ignore-parent',
 		'--no-require-git',
+		'--no-config',
 		'--sort',
 		'path',
 		caseSensitive ? '--case-sensitive' : '--ignore-case',
