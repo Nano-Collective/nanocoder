@@ -41,6 +41,13 @@ interface Overrides {
 	setPendingPlanProceed?: (v: string | null) => void;
 	handleMessageSubmit?: (message: string) => Promise<void>;
 	currentSessionId?: string | null;
+	toolManager?: unknown;
+	queuedMessages?: Array<{id: string; message: string; displayValue: string}>;
+	handleUserSubmit?: (message: string) => Promise<void>;
+	drainNextMessage?: (
+		dispatch: (message: {id: string; message: string; displayValue: string}) =>
+			boolean | Promise<boolean>,
+	) => boolean | Promise<boolean>;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -49,6 +56,7 @@ function makeProps(o: Overrides = {}) {
 
 	const appState = {
 		client: o.client ?? null,
+		toolManager: o.toolManager ?? null,
 		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
@@ -140,16 +148,16 @@ function makeProps(o: Overrides = {}) {
 		pendingToolConfirmation: null,
 		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
-		handleUserSubmit: noopAsync,
+		handleUserSubmit: o.handleUserSubmit ?? noopAsync,
 		userMessageQueue: {
-			queuedMessages: [],
+			queuedMessages: o.queuedMessages ?? [],
 			enqueueMessage: () => ({
 				id: 'queued-test',
 				message: '',
 				displayValue: '',
 			}),
 			removeMessage: noop,
-			drainNextMessage: () => false,
+			drainNextMessage: o.drainNextMessage ?? (() => false),
 		},
 		handleIdeSelect: noop,
 	} as never;
@@ -158,6 +166,31 @@ function makeProps(o: Overrides = {}) {
 test('renders without crashing in default state', t => {
 	const {lastFrame} = renderWithTheme(<InteractiveApp {...makeProps()} />);
 	t.truthy(lastFrame());
+});
+
+test('does not drain queued prompts while a turn is generating', async t => {
+	let submitted = false;
+	const {unmount} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isGenerating: true,
+				isConversationComplete: true,
+				queuedMessages: [
+					{id: 'queued-1', message: 'queued prompt', displayValue: 'queued prompt'},
+				],
+				handleUserSubmit: async () => {
+					submitted = true;
+				},
+			})}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.false(submitted);
+	unmount();
 });
 
 test('renders the static-component marker through ChatHistory', t => {

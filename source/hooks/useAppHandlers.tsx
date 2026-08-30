@@ -747,6 +747,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.developmentMode,
 			props.lastApiUsage,
 			props.apiCallHistory,
+			props.onCommandComplete,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

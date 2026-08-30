@@ -99,6 +99,7 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+	const drainInProgressRef = React.useRef(false);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -179,6 +180,57 @@ export function InteractiveApp({
 			chatHandler.isGenerating ||
 			appState.isToolExecuting ||
 			appState.abortController !== null);
+
+	// Drain queued prompts only after the previous turn is fully idle and all
+	// modal modes have closed. Command handlers and conversation completion can
+	// both signal completion, so keeping the drain here makes it idempotent and
+	// prevents nested or duplicate turns.
+	React.useEffect(() => {
+		if (
+			cancellable ||
+			appState.activeMode !== null ||
+			appState.isSettingsMode ||
+			!appState.isConversationComplete ||
+			userMessageQueue.queuedMessages.length === 0 ||
+			drainInProgressRef.current
+		) {
+			return;
+		}
+
+		drainInProgressRef.current = true;
+		let started = false;
+		const timeout = setTimeout(() => {
+			started = true;
+			void userMessageQueue
+				.drainNextMessage(async message => {
+					if (!appState.client || !appState.toolManager) return false;
+					await handleUserSubmit(
+						message.message,
+						message.displayValue,
+						message.images,
+					);
+					return true;
+				})
+				.finally(() => {
+					drainInProgressRef.current = false;
+				});
+		}, 0);
+
+		return () => {
+			clearTimeout(timeout);
+			if (!started) drainInProgressRef.current = false;
+		};
+	}, [
+		appState.activeMode,
+		appState.client,
+		appState.isConversationComplete,
+		appState.isSettingsMode,
+		appState.toolManager,
+		cancellable,
+		handleUserSubmit,
+		userMessageQueue.drainNextMessage,
+		userMessageQueue.queuedMessages.length,
+	]);
 
 	const recallableSubmittedDraft =
 		cancellable &&
