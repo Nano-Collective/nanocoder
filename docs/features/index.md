@@ -49,6 +49,8 @@ Prefix any command with **`!`** to run it directly in your shell without leaving
 !npm test
 ```
 
+With `nanocoder.sandbox` set (see [Configuration](../configuration/index.md#os-sandbox)), those commands run in an OS jail. Off by default.
+
 ### Attaching Images
 
 Press **Ctrl+V** to paste an image from your clipboard, or drag an image file into the terminal, to send it to a vision-capable model. Pending attachments show above the input box; **Ctrl+X** removes the last one. See [Image Attachments](image-attachments.md) for supported formats and platform requirements.

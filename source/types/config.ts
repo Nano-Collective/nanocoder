@@ -252,6 +252,9 @@ export interface AppConfig {
 		maxTurns?: number;
 	};
 
+	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
+	sandbox?: boolean;
+
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
 }

@@ -173,6 +173,26 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
+### OS sandbox
+
+File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to confine those two to an OS jail. Default is off.
+
+```json
+{
+  "nanocoder": {
+    "sandbox": true
+  }
+}
+```
+
+When on:
+
+- **macOS** — `sandbox-exec`: no network, writes only inside the project root.
+- **Linux** — `bwrap` (bubblewrap) if installed: no network, writes only inside the project root. If `bwrap` is missing the tool returns an error and does **not** fall through to unsandboxed bash.
+- **Windows** — not supported in this version. The tool returns an error if the flag is on.
+
+Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).

@@ -422,6 +422,16 @@ function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
 	);
 }
 
+function loadSandboxConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'sandbox', config => {
+			if (config.nanocoder?.sandbox === true) return true;
+			if (config.nanocoder?.sandbox === false) return false;
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -613,6 +623,8 @@ function loadAppConfig(): AppConfig {
 	// Load project-level tune defaults from agents.config.json
 	const tune = loadTuneConfig();
 
+	const sandbox = loadSandboxConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -628,6 +640,7 @@ function loadAppConfig(): AppConfig {
 		notifications,
 		modeProviders,
 		tune,
+		sandbox,
 	};
 }
 

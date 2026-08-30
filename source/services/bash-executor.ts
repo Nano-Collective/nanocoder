@@ -1,18 +1,24 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
-import {existsSync, readFileSync, unlinkSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {platform} from 'node:process';
 
+import {getAppConfig} from '@/config/index';
 import {
 	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
-import {getSafeSessionCwd, setSessionCwd} from './session-cwd.js';
+import {planBashSpawn, resolveJailRoot} from './bash-sandbox.js';
+import {
+	getProjectRoot,
+	getSafeSessionCwd,
+	setSessionCwd,
+} from './session-cwd.js';
 
 const isWindows = platform === 'win32';
 
@@ -63,12 +69,21 @@ export class BashExecutor extends EventEmitter {
 
 		// Share the session cwd so bash and the file tools agree on relative paths.
 		const cwd = getSafeSessionCwd();
+		const sandbox = getAppConfig().sandbox === true;
+		const projectRoot = resolveJailRoot(getProjectRoot());
 
-		// Capture the shell's final dir to a temp file (not stdout, keeping output
+		// Capture the shell's final dir to a file (not stdout, keeping output
 		// clean) so `cd` persists to later commands and the file tools. Unix only.
+		// When the OS jail is on, this cannot live in os.tmpdir(): the profile
+		// denies writes outside the project.
 		const cwdCaptureFile = isWindows
 			? undefined
-			: join(tmpdir(), `nanocoder-cwd-${executionId}`);
+			: sandbox
+				? join(projectRoot, '.nanocoder', `cwd-${executionId}`)
+				: join(tmpdir(), `nanocoder-cwd-${executionId}`);
+		if (cwdCaptureFile && sandbox) {
+			mkdirSync(dirname(cwdCaptureFile), {recursive: true});
+		}
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
@@ -76,13 +91,30 @@ export class BashExecutor extends EventEmitter {
 					// backslash would otherwise line-continue into `__nc_ec=$?`.
 					`${command}\n\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
 
-		const proc = isWindows
-			? spawn('cmd', ['/c', command], {cwd})
-			: // `detached` makes the child a process-group leader so cancel() can
-				// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
-				// not just the `sh` wrapper. Without it a cancelled command's
-				// children keep running in the background.
-				spawn('sh', ['-c', spawnCommand], {cwd, detached: true});
+		const planned = planBashSpawn({
+			platform,
+			sandbox,
+			command,
+			spawnCommand,
+			cwd,
+			projectRoot,
+		});
+		if ('error' in planned) {
+			state.isComplete = true;
+			state.error = planned.error;
+			this.emit('start', {...state});
+			this.emit('complete', {...state});
+			return {executionId, promise: Promise.resolve({...state})};
+		}
+
+		const proc = spawn(planned.file, planned.args, {
+			cwd,
+			// `detached` makes the child a process-group leader so cancel() can
+			// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
+			// not just the `sh` wrapper. Without it a cancelled command's
+			// children keep running in the background.
+			detached: planned.detached || undefined,
+		});
 
 		// Best-effort: a missed capture just leaves the cwd where it was.
 		const applyCapturedCwd = () => {
