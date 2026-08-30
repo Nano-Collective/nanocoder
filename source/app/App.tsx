@@ -509,6 +509,7 @@ export default function App({
 		setIsCancelling: appState.setIsCancelling,
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
+		onCommandComplete: drainQueuedUserMessage,
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,

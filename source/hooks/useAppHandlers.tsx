@@ -73,6 +73,8 @@ interface UseAppHandlersProps {
 
 	// Callbacks
 	onClearCounterIncrement?: () => void;
+	/** Called after a slash command finishes, including delayed completions. */
+	onCommandComplete?: () => void;
 
 	// State setters
 	updateMessages: (newMessages: Message[]) => void;
@@ -696,7 +698,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onAddToChatQueue: props.addToChatQueue,
 					setLiveComponent: props.setLiveComponent,
 					setIsToolExecuting: props.setIsToolExecuting,
-					onCommandComplete: () => props.setIsConversationComplete(true),
+					onCommandComplete: () => {
+						props.setIsConversationComplete(true);
+						props.onCommandComplete?.();
+					},
 					setMessages: props.updateMessages,
 					messages: props.messages,
 					provider: props.currentProvider,
