@@ -14,6 +14,25 @@ const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
+
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+/**
+ * Column the first non-space character of the line matching `pattern` sits in,
+ * with colour codes stripped so they do not count toward the offset.
+ */
+function indentOf(frame: string, pattern: RegExp): number {
+	const line = frame
+		.split('\n')
+		.map(l => l.replace(ANSI, ''))
+		.find(l => pattern.test(l));
+
+	if (line === undefined) {
+		throw new Error(`no line matched ${pattern}`);
+	}
+
+	return line.search(/\S/);
+}
 const VERSION = packageJson.version;
 
 // ============================================================================
@@ -159,6 +178,27 @@ test('WelcomeMessage shows the given tip in full layout', t => {
 	const output = lastFrame() ?? '';
 
 	t.true(output.includes('Tip: Short pinned tip.'));
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage aligns the tip with the left edge of the box above it', t => {
+	const originalColumns = process.stdout.columns;
+
+	for (const columns of [50, 120]) {
+		process.stdout.columns = columns;
+
+		const {lastFrame} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const output = lastFrame() ?? '';
+
+		t.is(
+			indentOf(output, /^\s*╰/),
+			indentOf(output, /Tip: Short pinned tip\./),
+			`tip is off the box's left edge at ${columns} columns`,
+		);
+	}
+
 	process.stdout.columns = originalColumns;
 });
 

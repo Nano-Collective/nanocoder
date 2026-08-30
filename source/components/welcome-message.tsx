@@ -110,10 +110,11 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps) {
 				</>
 			)}
 			{/*
-			 * paddingX 3 lines the tip up with the content of the bordered box
-			 * above it in both layouts: 1 column of border plus its paddingX 2.
+			 * No paddingX: the tip sits flush with the left border of the box
+			 * above it, which renders at column 0 in both layouts. Indenting it
+			 * to the box's inner text instead leaves it visibly off-grid.
 			 */}
-			<Box paddingX={3} marginBottom={1}>
+			<Box marginBottom={1}>
 				<Text color={colors.secondary} dimColor>
 					Tip: {shownTip}
 				</Text>
