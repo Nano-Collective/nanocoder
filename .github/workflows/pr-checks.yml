@@ -1,19 +1,28 @@
 name: Pull Request Automated Checks
 
+# The shared org workflow covers the checks every repo runs. Everything
+# genuinely nanocoder-specific — the VS Code extension — stays in this file
+# rather than becoming an input on the shared workflow.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
 
-env:
-  ENABLE_COVERAGE_THRESHOLD: '80'
-  FAIL_ON_COVERAGE_DROP: 'true'
-  ENABLE_SECURITY_SCAN: 'true'
+permissions:
+  actions: read
+  contents: read
+  security-events: write
 
 jobs:
-  # Self-contained test jobs - optimized for parallel execution
-  test-lint:
-    name: Linting
+  pr-checks:
+    uses: Nano-Collective/.github/.github/workflows/pr-checks.yml@main
+
+  # nanocoder ships a VS Code extension alongside the CLI. It has its own
+  # tsconfig, so the root `test:types` does not cover it, and it produces the
+  # .vsix that the release consumes.
+  vscode-extension:
+    name: VS Code Extension
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -34,283 +43,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run linting
-        run: pnpm test:lint
+      # The root tsconfig only includes source/**, so the extension's own
+      # sources and specs are checked by their own project or not at all.
+      - name: Type check the extension
+        run: pnpm test:types:vscode
 
-  test-types:
-    name: Type Checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
+      - name: Build the extension
+        run: pnpm run build:vscode
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run TypeScript type checking
-        run: pnpm test:types
-
-  test-format:
-    name: Format Checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run format check
-        run: pnpm test:format
-
-  test-knip:
-    name: Unused Dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run dependency check (knip)
-        run: pnpm test:knip
-
-  test-coverage:
-    name: Unit Tests & Coverage Analysis
-    runs-on: ubuntu-latest
-    env:
-      CI: true
-      NODE_ENV: test
-      FORCE_COLOR: '1'
-      TERM: xterm-256color
-    outputs:
-      coverage: ${{ steps.coverage.outputs.coverage }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          # Ensure proper git state for file-snapshot.ts tests
-          set-safe-directory: false
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install Nerd Fonts for Powerline character support
+      - name: Verify the .vsix was produced
         run: |
-          # Install required packages for font support
-          sudo apt-get update
-          sudo apt-get install -y fonts-firacode fonts-powerline
-          # Install Nerd Fonts manually
-          mkdir -p ~/.local/share/fonts
-          wget -q https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/FiraCode.zip -O /tmp/FiraCode.zip
-          unzip -q /tmp/FiraCode.zip -d ~/.local/share/fonts
-          fc-cache -fv
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate credits
-        run: pnpm run build:credits
-
-      - name: Build project (required for CLI integration tests)
-        run: pnpm build
-
-      - name: Run unit tests with coverage
-        run: npx c8 ava #pnpm test:ava:coverage
-
-      - name: Generate coverage summary
-        run: |
-          pnpm exec c8 report --reporter=json-summary
-        # pnpm exec c8 report --reporter=json-summary --include='source/**/*.ts' --exclude='**/*.spec.ts'
-
-      - name: Extract coverage percentage
-        id: coverage
-        run: |
-          if [ -f coverage/coverage-summary.json ]; then
-            COVERAGE=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct')
-            echo "coverage=${COVERAGE}" >> $GITHUB_OUTPUT
-            echo "Current coverage: ${COVERAGE}%"
-
-            # Check coverage threshold
-            if (( $(echo "${COVERAGE} < ${ENABLE_COVERAGE_THRESHOLD}" | bc -l) )); then
-              echo "❌ Coverage ${COVERAGE}% is below threshold ${ENABLE_COVERAGE_THRESHOLD}%"
-              exit 1
-            else
-              echo "✅ Coverage ${COVERAGE}% meets threshold ${ENABLE_COVERAGE_THRESHOLD}%"
-            fi
-          else
-            echo "❌ No coverage report found"
-            exit 1
-          fi
-
-  verify-build:
-    name: Verify Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate credits
-        run: pnpm run build:credits
-
-      - name: Build project
-        run: pnpm build
-
-      - name: Verify build artifacts
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            test -f dist/cli.js
-            echo "✓ CLI build verified"
-          fi
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            test -f assets/nanocoder-vscode.vsix
-            echo "✓ VS Code extension verified"
-          fi
-        shell: bash
-
-  # Package Audit and dependency analysis (runs once)
-  package-audit:
-    name: Package Audit Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run security audit
-        run: pnpm test:audit
-        continue-on-error: false
-
-      - name: Check for outdated dependencies
-        run: |
-          echo "Checking for outdated dependencies..."
-          pnpm outdated || echo "Some dependencies are outdated"
-        continue-on-error: true
-  
-  # Security analysis with Semgrep
-  semgrep-scan:
-    name: Semgrep Security Scan
-    runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Run Semgrep
-        run: semgrep scan --config auto --error
-
-  # CodeQL Analysis
-  codeql-scan:
-    name: CodeQL Security Analysis
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ['javascript']  # CodeQL analyzes both JavaScript and TypeScript together
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      # Initializes the CodeQL tools for scanning
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d
-        with:
-          languages: ${{ matrix.language }}
-          # If you wish to specify custom queries, you can do so here or in a config file
-          # By default, queries listed here will override any specified in a config file
-          # Prefix the list here with "+" to use these queries and those in the config file
-          # queries: security-extended,security-and-quality
-
-      # Autobuild attempts to build any compiled languages (C/C++, C#, Go, or Java)
-      # If this step fails, then you should remove it and run the build manually
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d
-
-      # Perform CodeQL Analysis
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d
+          set -euo pipefail
+          test -f assets/nanocoder-vscode.vsix
+          echo "VS Code extension packaged"
