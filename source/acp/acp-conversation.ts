@@ -43,6 +43,7 @@ import type {
 } from '@/types/core';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
@@ -83,6 +84,51 @@ export async function runAcpConversation(
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 	let wrotePlan = false;
+
+	// Tool calls made inside a dispatched sub-agent go through the global
+	// approval slot, which has no handler under ACP and so denied every one of
+	// them without the client ever seeing a request. Route them to the same
+	// session/request_permission channel the top-level calls use. The call is
+	// announced first because a permission request naming an unknown tool call
+	// is rejected as invalid params.
+	setGlobalToolApprovalHandler(async ({toolCall, subagentName}) => {
+		const meta = await buildToolCallMeta(toolCall);
+		const subagentMeta: AcpToolCallMeta = {
+			...meta,
+			title: `${meta.title} (${subagentName})`,
+		};
+
+		await emitToolCall(session, conn, toolCall, 'pending', subagentMeta);
+
+		const permission = await requestToolPermission(
+			session,
+			toolCall,
+			conn,
+			subagentMeta,
+			abortController.signal,
+		);
+
+		if (permission === 'approved') {
+			await emitToolCall(
+				session,
+				conn,
+				toolCall,
+				'in_progress',
+				subagentMeta,
+				'tool_call_update',
+			);
+			return true;
+		}
+
+		await emitToolCallUpdate(
+			session,
+			conn,
+			toolCall,
+			'failed',
+			permission === 'cancelled' ? 'Cancelled by user' : 'Denied by user',
+		);
+		return false;
+	});
 
 	// Provider-reported usage accumulated across this prompt's model calls,
 	// returned on the PromptResponse (experimental ACP `usage` field) so

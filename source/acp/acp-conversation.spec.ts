@@ -6,6 +6,7 @@ import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -2090,3 +2091,102 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 	t.deepEqual(await session.timeline.list(), []);
 });
 
+
+// ============================================================================
+// Sub-agent tool approval (#1019)
+// ============================================================================
+
+const runTurnThenApprove = async (
+	outcome: {outcome: string; optionId?: string},
+	subagentName = 'docs',
+) => {
+	const updates: any[] = [];
+	const permissionRequests: any[] = [];
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u.update);
+		},
+		requestPermission: async (p: any) => {
+			permissionRequests.push(p);
+			return {outcome};
+		},
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: 'done', tool_calls: []}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => [],
+		getFilteredTools: () => ({}),
+		hasTool: () => false,
+		getToolEntry: () => undefined,
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	// The turn is what installs the handler the sub-agent executor signals
+	// through, so this stands in for a tool call made inside a sub-agent.
+	const approved = await signalToolApproval({
+		toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-sub'),
+		subagentName,
+	});
+
+	return {approved, updates, permissionRequests};
+};
+
+test('runAcpConversation - a sub-agent tool call reaches the client for permission', async t => {
+	const {approved, updates, permissionRequests} = await runTurnThenApprove({
+		outcome: 'selected',
+		optionId: 'allow',
+	});
+
+	t.true(approved);
+	t.is(permissionRequests.length, 1);
+	t.is(permissionRequests[0].toolCall.toolCallId, 'call-sub');
+	t.true(
+		String(permissionRequests[0].toolCall.title).includes('docs'),
+		'the sub-agent is named so the client can tell the calls apart',
+	);
+
+	// Announced before the request: a permission request naming an unknown
+	// tool call is rejected as invalid params.
+	const announced = updates.filter(
+		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === 'call-sub',
+	);
+	t.is(announced.length, 1);
+});
+
+test('runAcpConversation - a denied sub-agent tool call is reported as failed', async t => {
+	const {approved, updates, permissionRequests} = await runTurnThenApprove({
+		outcome: 'selected',
+		optionId: 'deny',
+	});
+
+	t.false(approved);
+	t.is(permissionRequests.length, 1);
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'call-sub' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+});
+
+test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
+	const {approved, updates} = await runTurnThenApprove({outcome: 'cancelled'});
+
+	t.false(approved);
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'call-sub' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+});
