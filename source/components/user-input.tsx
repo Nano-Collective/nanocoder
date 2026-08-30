@@ -37,6 +37,8 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {isSelectionMode, toggleSelectionMode} from '@/utils/terminal-mouse';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -134,6 +136,8 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	// True while mouse reporting is suspended so the terminal can select text.
+	const [selectionModeActive, setSelectionModeActive] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
@@ -146,6 +150,7 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		insertPaste,
 	} = inputState;
 
 	const {
@@ -172,6 +177,25 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Real pastes, as reported by the terminal via bracketed paste. The
+	// payload is lifted off stdin before Ink's keypress parser sees it, so
+	// a multi-line paste can no longer submit the prompt on its first
+	// newline — it arrives here whole, in one event.
+	useEffect(() => {
+		if (disabled || !effectiveFocus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			insertPaste(payload);
+			// Remount TextInput so its cursor follows the appended text.
+			setTextInputKey(prev => prev + 1);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (
@@ -718,6 +742,17 @@ export default function UserInput({
 			return;
 		}
 
+		// Ctrl+P suspends mouse reporting so the terminal can click-drag
+		// select again, and resumes it on the next press. Only fullscreen
+		// turns reporting on, so toggleSelectionMode reports false in inline
+		// mode and the key falls through unhandled. Sits above the disabled
+		// guard: selecting output while the agent works is exactly when you
+		// want this.
+		if (key.ctrl && inputChar === 'p' && toggleSelectionMode()) {
+			setSelectionModeActive(isSelectionMode());
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -731,8 +766,10 @@ export default function UserInput({
 		}
 
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
-		// Terminal paste of regular text arrives as a bracketed paste, not as
-		// Ctrl+V, so this binding is free to mean "paste image".
+		// Text pasted into the terminal arrives as a bracketed paste on stdin
+		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
+		// never as a Ctrl+V keypress, so this binding is free to mean
+		// "paste image".
 		if (key.ctrl && inputChar === 'v') {
 			const image = readClipboardImage();
 			if (image) {
@@ -1019,6 +1056,15 @@ export default function UserInput({
 
 				{showClearMessage && (
 					<Text color={colors.secondary}>Press escape again to clear</Text>
+				)}
+
+				{selectionModeActive && (
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Selection mode: drag to select, wheel scrolling paused. Ctrl+P to
+							resume
+						</Text>
+					</Box>
 				)}
 
 				{showCompletions && completions.length > 0 && (

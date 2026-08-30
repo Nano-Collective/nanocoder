@@ -8,7 +8,10 @@ import {
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
-import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
+import {
+	TOOL_APPROVAL_REQUIRED_KIND,
+	TOOL_APPROVAL_REQUIRED_PREFIX,
+} from '@/constants';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -273,7 +276,7 @@ export async function runPlainShell(
 			...(outcome.kind === 'error' && {
 				message: sanitizeOutput(outcome.message),
 			}),
-			...(outcome.kind === 'tool-approval-required' && {
+			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
 				toolNames: outcome.toolNames,
 			}),
 		};
@@ -288,7 +291,7 @@ export async function runPlainShell(
 		case 'success':
 			await shutdown(0, deps);
 			return;
-		case 'tool-approval-required':
+		case TOOL_APPROVAL_REQUIRED_KIND:
 			writeError(
 				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +

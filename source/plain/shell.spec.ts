@@ -1,4 +1,5 @@
 import test from "ava";
+import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
 import type { PlainConversationOutcome } from "./conversation.js";
@@ -354,7 +355,7 @@ test.serial(
 				deps: baseDeps({
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
-						kind: "tool-approval-required",
+						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
@@ -368,7 +369,7 @@ test.serial(
 		}
 
 		const report = JSON.parse(stdout.get());
-		t.is(report.kind, "tool-approval-required");
+		t.is(report.kind, TOOL_APPROVAL_REQUIRED_KIND);
 		t.is(report.exitCode, 2);
 		t.deepEqual(report.toolNames, ["risky_tool"]);
 		t.is(shutdown.code, 2);
@@ -700,7 +701,7 @@ test.serial(
 				deps: baseDeps({
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
-						kind: "tool-approval-required",
+						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
