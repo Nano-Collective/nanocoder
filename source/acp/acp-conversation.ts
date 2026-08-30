@@ -719,8 +719,8 @@ async function handleAskUser(
 	const options = normalizeQuestionOptions(args.options);
 
 	let content: string;
-	if (!question || options.length < 2 || options.length > 4) {
-		content = 'Error: ask_user requires a question and 2-4 string options.';
+	if (!question || options.length < 2 || options.length > 6) {
+		content = 'Error: ask_user requires a question and 2-6 string options.';
 		await emitToolCallUpdate(session, conn, toolCall, 'failed', content);
 	} else {
 		await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
