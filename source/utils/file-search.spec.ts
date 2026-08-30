@@ -229,6 +229,28 @@ test.serial(
 	},
 );
 
+test.serial('findMatchingPaths finds binary-extension files', async t => {
+	const testDir = createTempDir('test-file-search-binary-ext-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'icon.svg'), '<svg></svg>');
+		writeFileSync(join(testDir, 'photo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+		writeFileSync(join(testDir, 'module.wasm'), Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+
+		const svgResult = await findMatchingPaths('*.svg', testDir, 50);
+		t.deepEqual(svgResult.files, ['icon.svg']);
+
+		const pngResult = await findMatchingPaths('*.png', testDir, 50);
+		t.deepEqual(pngResult.files, ['photo.png']);
+
+		const wasmResult = await findMatchingPaths('*.wasm', testDir, 50);
+		t.deepEqual(wasmResult.files, ['module.wasm']);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test.serial('findMatchingPaths enforces maxResults and truncation', async t => {
 	const testDir = createTempDir('test-file-search-max-temp');
 

@@ -488,7 +488,6 @@ export async function walkProjectEntries(
 		'--sort',
 		'path',
 		...defaultIgnoreGlobs(),
-		...binaryExcludeGlobs(),
 		'--',
 		rootPath,
 	];
