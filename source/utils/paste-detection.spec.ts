@@ -58,6 +58,29 @@ test('PasteDetector does not detect manual typing', async t => {
 	t.is(result2.method, 'none');
 });
 
+test('PasteDetector ignores deletions without returning sliced garbage', t => {
+	const detector = new PasteDetector();
+
+	detector.detectPaste('hello world');
+	const result = detector.detectPaste('hello');
+
+	t.false(result.isPaste);
+	t.is(result.method, 'none');
+	t.is(result.addedText, '');
+	t.is(result.details.charsAdded, -6);
+});
+
+test('PasteDetector ignores unchanged input without returning text', t => {
+	const detector = new PasteDetector();
+
+	detector.detectPaste('hello');
+	const result = detector.detectPaste('hello');
+
+	t.false(result.isPaste);
+	t.is(result.addedText, '');
+	t.is(result.details.charsAdded, 0);
+});
+
 test('PasteDetector reset clears state', t => {
 	const detector = new PasteDetector();
 
