@@ -628,6 +628,31 @@ function buildWithProfessionalTone(enabled: boolean): string {
 	}
 }
 
+test('nano profile uses the shortened professional tone section', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		TUNE_NANO,
+		NANO_TOOLS,
+		false,
+		undefined,
+		undefined,
+		true,
+	);
+	t.true(result.includes('## TONE'));
+	// Long-form professional-tone.md content should be absent
+	t.false(result.includes('Neutral register'));
+});
+
+test('nano professional tone section is smaller than the full one', t => {
+	const build = (tune: TuneConfig, tools: string[]) =>
+		buildSystemPrompt('normal', tune, tools, false, undefined, undefined, true)
+			.length -
+		buildSystemPrompt('normal', tune, tools, false, undefined, undefined, false)
+			.length;
+
+	t.true(build(TUNE_NANO, NANO_TOOLS) < build(TUNE_FULL, ALL_TOOLS));
+});
+
 test.serial('professional tone defaults to the preference when unset', t => {
 	t.false(buildWithProfessionalTone(false).includes('## TONE'));
 	t.true(buildWithProfessionalTone(true).includes('## TONE'));

@@ -323,8 +323,11 @@ ${getSubagentDescriptions()}`;
 
 	// Professional ("boring") tone — user preference, opt-in. Placed last among
 	// the static sections so it overrides the register of anything above it.
+	// Nano gets the shortened variant, like every other section under nano.
 	if (professionalTone) {
-		sections.push(loadSection('professional-tone'));
+		sections.push(
+			loadSection(nano ? 'professional-tone-nano' : 'professional-tone'),
+		);
 	}
 
 	// System info (dynamic) — slim variant under nano

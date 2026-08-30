@@ -121,7 +121,9 @@ You can change this via `/settings` → **Behavior** → **Professional Tone**, 
 
 Toggling it from `/settings` applies to both halves straight away - the progress text on the next turn, and the TONE section on the next system prompt rebuild, which the toggle itself triggers. Editing the preferences file by hand needs a restart, since nothing is watching the file.
 
-One exception: if you have replaced the system prompt entirely with a `systemPrompt` override in `mode: "replace"`, the TONE section is not added - your override is used verbatim. The progress text still changes.
+Under the `nano` tool profile the TONE section is swapped for a shortened variant, the same way every other section is slimmed for tiny models.
+
+One exception: if you have replaced the system prompt entirely with a [`systemPrompt` override](index.md#custom-system-prompt) in `mode: "replace"`, the TONE section is not added - your override is used verbatim. The progress text still changes. In `mode: "append"` the section is kept, and your appended text lands after it, so your wording wins on any conflict.
 
 ### Notification Configuration
 
