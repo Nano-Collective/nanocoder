@@ -570,9 +570,40 @@ test('buildSystemPrompt - replace systemPrompt updates getLastBuiltPrompt cache'
 // Professional tone
 // ============================================================================
 
+test('professional tone section is omitted when the flag is off', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		undefined,
+		undefined,
+		false,
+	);
+	t.false(result.includes('## TONE'));
+});
+
+test('professional tone section is included when the flag is on', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		undefined,
+		undefined,
+		true,
+	);
+	t.true(result.includes('## TONE'));
+	t.true(result.includes('professional tone'));
+	// Placed before the system info block so it stays close to the end.
+	t.true(result.indexOf('## TONE') < result.indexOf('SYSTEM INFORMATION'));
+});
+
 /**
- * Build a prompt with `professionalTone` forced to a known value by pointing
- * the preferences loader at a throwaway config dir.
+ * Build a prompt with `professionalTone` left to its default by pointing the
+ * preferences loader at a throwaway config dir. Covers the fallback used by
+ * every caller that doesn't pass the flag explicitly (plain shell, ACP,
+ * headless runs).
  */
 function buildWithProfessionalTone(enabled: boolean): string {
 	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-'));
@@ -597,15 +628,7 @@ function buildWithProfessionalTone(enabled: boolean): string {
 	}
 }
 
-test.serial('professional tone section is omitted when the preference is off', t => {
-	const result = buildWithProfessionalTone(false);
-	t.false(result.includes('## TONE'));
-});
-
-test.serial('professional tone section is included when the preference is on', t => {
-	const result = buildWithProfessionalTone(true);
-	t.true(result.includes('## TONE'));
-	t.true(result.includes('professional tone'));
-	// Placed before the system info block so it stays close to the end.
-	t.true(result.indexOf('## TONE') < result.indexOf('SYSTEM INFORMATION'));
+test.serial('professional tone defaults to the preference when unset', t => {
+	t.false(buildWithProfessionalTone(false).includes('## TONE'));
+	t.true(buildWithProfessionalTone(true).includes('## TONE'));
 });

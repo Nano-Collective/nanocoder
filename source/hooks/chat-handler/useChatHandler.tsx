@@ -3,6 +3,11 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
+import {
+	getPreferencesVersion,
+	getProfessionalTone,
+	subscribeToPreferences,
+} from '@/config/preferences';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
@@ -121,11 +126,21 @@ export function useChatHandler({
 	const fallbackToolFormat: 'xml' | 'json' =
 		tuneToolMode === 'json' ? 'json' : 'xml';
 
-	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
+	// Prompt-affecting preferences (Professional Tone) are written straight to
+	// disk by the settings panel, so subscribe to those writes explicitly.
+	// Without this the memo below only picks the change up on the next mode or
+	// model switch, which reads as the toggle silently not working.
+	const preferencesVersion = React.useSyncExternalStore(
+		subscribeToPreferences,
+		getPreferencesVersion,
+	);
+
+	// Cache the base system prompt — only rebuild when mode, tune, tools, toolsDisabled
+	// or a prompt-affecting preference change
 	// This preserves KV cache by keeping the system message stable across turns
 	// When native tools are disabled, XML tool definitions are included in the prompt
 	// so token counting reflects the full system message the model actually sees.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: subagentsReady isn't read in the callback, but flipping it must invalidate the memo so buildSystemPrompt re-reads the module-level subagent cache populated by setAvailableSubagents.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: subagentsReady and preferencesVersion aren't read in the callback, but flipping either must invalidate the memo — subagentsReady so buildSystemPrompt re-reads the module-level subagent cache populated by setAvailableSubagents, preferencesVersion so it re-reads getProfessionalTone().
 	const cachedBasePrompt = React.useMemo(() => {
 		if (!toolManager) return null;
 		const availableNames = toolManager.getAvailableToolNames(
@@ -141,6 +156,7 @@ export function useChatHandler({
 			toolsDisabled,
 			getAppConfig().systemPrompt,
 			currentModel,
+			getProfessionalTone(),
 		);
 
 		const tools = toolsDisabled
@@ -165,6 +181,7 @@ export function useChatHandler({
 		fallbackToolFormat,
 		subagentsReady,
 		currentModel,
+		preferencesVersion,
 	]);
 
 	// Track when the current conversation started for elapsed time display

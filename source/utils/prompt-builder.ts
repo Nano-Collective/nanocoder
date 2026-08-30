@@ -194,6 +194,7 @@ export function buildSystemPrompt(
 	toolsDisabled = false,
 	systemPromptOverride?: SystemPromptConfig,
 	model?: string,
+	professionalTone: boolean = getProfessionalTone(),
 ): string {
 	const overrideContent = systemPromptOverride
 		? resolveSystemPromptOverride(systemPromptOverride)
@@ -322,7 +323,7 @@ ${getSubagentDescriptions()}`;
 
 	// Professional ("boring") tone — user preference, opt-in. Placed last among
 	// the static sections so it overrides the register of anything above it.
-	if (getProfessionalTone()) {
+	if (professionalTone) {
 		sections.push(loadSection('professional-tone'));
 	}
 

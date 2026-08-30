@@ -1,7 +1,15 @@
 import test from 'ava';
+import {mkdtempSync, rmSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import React from 'react';
 import {render} from 'ink-testing-library';
+import {
+	resetPreferencesCache,
+	updateProfessionalTone,
+} from '@/config/preferences';
 import {setToolRegistryGetter} from '@/message-handler';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
@@ -726,3 +734,40 @@ test('getBaseSystemPrompt - normal mode reuses cached prompt', t => {
 
 	t.is(result, 'cached-prompt');
 });
+
+test.serial(
+	'useChatHandler - toggling professional tone rebuilds the cached prompt',
+	async t => {
+		// The settings panel writes preferences straight to disk. Without the
+		// subscription the memoized base prompt would keep the old TONE state
+		// until the next mode or model switch.
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-hook-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+		updateProfessionalTone(false);
+
+		try {
+			render(
+				<TestHookComponent
+					{...createMockProps({toolManager: createMockToolManager()})}
+				/>,
+			);
+
+			t.false(getLastBuiltPrompt().includes('## TONE'));
+
+			updateProfessionalTone(true);
+			await waitForCondition(() => getLastBuiltPrompt().includes('## TONE'));
+
+			t.true(getLastBuiltPrompt().includes('## TONE'));
+		} finally {
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);

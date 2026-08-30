@@ -119,7 +119,9 @@ You can change this via `/settings` → **Behavior** → **Professional Tone**, 
 }
 ```
 
-The progress text changes immediately. The system prompt section is picked up the next time the prompt is rebuilt — on a mode or model switch, or on restart.
+Toggling it from `/settings` applies to both halves straight away - the progress text on the next turn, and the TONE section on the next system prompt rebuild, which the toggle itself triggers. Editing the preferences file by hand needs a restart, since nothing is watching the file.
+
+One exception: if you have replaced the system prompt entirely with a `systemPrompt` override in `mode: "replace"`, the TONE section is not added - your override is used verbatim. The progress text still changes.
 
 ### Notification Configuration
 
