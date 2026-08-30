@@ -19,6 +19,10 @@ import {
 	takeWalkthroughFallback,
 } from '@/artifacts/walkthrough-lifecycle';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {
+	buildAbandonedTurnMessages,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
 	getAllSubagentProgress,
@@ -258,36 +262,23 @@ export async function runAcpConversation(
 		];
 		const cleanedContent = xmlParse.cleanedContent;
 
-		const validToolCalls: ToolCall[] = [];
-		const errorResults: ToolResult[] = [];
-		for (const toolCall of allToolCalls) {
-			if (
-				toolCall.function.name === '__xml_validation_error__' ||
-				!toolManager.hasTool(toolCall.function.name)
-			) {
-				errorResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolCall.function.name,
-					content: `Unknown tool: ${toolCall.function.name}`,
-				});
-				continue;
-			}
-			validToolCalls.push(toolCall);
-		}
+		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
+		const {validToolCalls, errorResults} = partition;
+		const {emittedToolCalls, resultsForAbandonedTurn} =
+			buildAbandonedTurnMessages(partition);
 
 		messages = [
 			...messages,
 			{
 				role: 'assistant',
 				content: cleanedContent,
-				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
 
 		if (errorResults.length > 0) {
-			messages = [...messages, ...errorResults];
+			messages = [...messages, ...resultsForAbandonedTurn];
 			continue;
 		}
 

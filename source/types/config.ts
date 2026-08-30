@@ -103,6 +103,28 @@ export interface PasteConfig {
 	singleLineThreshold: number;
 }
 
+// Agent-loop retry limits: caps on how many times the conversation loop
+// auto-retries a failing pattern without user intervention. Distinct from the
+// per-provider `maxRetries` setting, which governs network request retries.
+export interface RetryLimitsConfig {
+	// Consecutive turns emitting the identical tool call(s) before the loop
+	// pauses and asks the user whether to continue (interactive) or stops
+	// (--plain, headless, subagent runs). The check fires before the Nth
+	// repeat runs, so the default of 3 executes it twice. Unknown-tool calls
+	// count toward the streak too.
+	maxRepeatedToolCalls: number;
+	// Consecutive empty assistant turns auto-nudged before the loop gives up.
+	// The interactive loop additionally compacts the context and retries once;
+	// --plain stops straight after the nudges. Not used by subagent runs,
+	// whose loop ends on its own when a turn has no tool calls.
+	maxEmptyTurns: number;
+	// Malformed self-correction retries allowed for text-parsed tool calls
+	// before the loop gives up. Covers the XML fallback path in both runtimes,
+	// plus (interactive only) native responses that emit tool-call text
+	// instead of native tool calls. Not used by subagent runs.
+	maxMalformedRetries: number;
+}
+
 // Custom system prompt configuration
 export interface SystemPromptConfig {
 	// "replace" overrides the entire built-in prompt; "append" adds to the end.
@@ -229,6 +251,9 @@ export interface AppConfig {
 		// Maximum LLM turns before the loop forces a final, tool-free answer.
 		maxTurns?: number;
 	};
+
+	// Agent-loop retry limits (interactive conversation loop)
+	retries?: RetryLimitsConfig;
 }
 
 // MCP Server configuration with source tracking

@@ -144,6 +144,14 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 - The session-artifact tools `write_plan`, `write_tasks`, and `write_walkthrough` are never available to a subagent, regardless of its `tools` list. Subagents run under the parent's session, so allowing them would let a subagent overwrite the plan, task list, or walkthrough the main conversation is working from. Subagents report back through their return value instead.
 - The `alwaysAllow` setting in `agents.config.json` applies to tools within subagents, so you can configure which tools run without prompts.
 
+## Loop Protection
+
+A subagent that re-issues the identical tool call(s) on consecutive turns is stopped by the same [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap the main agent uses (default 3). There is nobody to ask inside a delegated run, so it never pauses: the run fails with an error naming the setting. Calls to nonexistent tools count toward the streak too, so a subagent stuck on a tool it doesn't have hits the same cap.
+
+Whatever the subagent produced before it got stuck is still handed to the main agent under a `Partial output produced before stopping:` heading, so useful work isn't discarded along with the failure.
+
+The other two retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), and they don't use text-parsed tool calls (so `maxMalformedRetries` is too). There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
+
 ## Development Modes and Tune Profiles
 
 ### Plan Mode
