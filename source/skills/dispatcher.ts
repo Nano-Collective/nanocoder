@@ -94,6 +94,13 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 			await this.dispatchAgent(subscription, event);
 			return;
 		}
+		if (target.kind === 'skill') {
+			this.options.onUnsupportedTarget?.(
+				subscription,
+				'skill targets are resolved earlier by the registrar',
+			);
+			return;
+		}
 		if (target.kind === 'command') {
 			this.options.onUnsupportedTarget?.(
 				subscription,
