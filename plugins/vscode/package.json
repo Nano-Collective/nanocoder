@@ -219,7 +219,7 @@
 		"esbuild": "^0.28.1",
 		"eslint": "^10.1.0",
 		"postcss": "^8.4.38",
-		"tailwindcss": "^3.4.4",
+		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2"
 	},
 	"dependencies": {
