@@ -1,4 +1,4 @@
-import {type ChildProcess, spawn} from 'node:child_process';
+import {type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {existsSync, mkdirSync, readFileSync, unlinkSync} from 'node:fs';
@@ -13,7 +13,7 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
-import {planBashSpawn, resolveJailRoot} from './bash-sandbox.js';
+import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
 import {
 	getProjectRoot,
 	getSafeSessionCwd,
@@ -107,14 +107,7 @@ export class BashExecutor extends EventEmitter {
 			return {executionId, promise: Promise.resolve({...state})};
 		}
 
-		const proc = spawn(planned.file, planned.args, {
-			cwd,
-			// `detached` makes the child a process-group leader so cancel() can
-			// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
-			// not just the `sh` wrapper. Without it a cancelled command's
-			// children keep running in the background.
-			detached: planned.detached || undefined,
-		});
+		const proc = spawnPlanned(planned, cwd);
 
 		// Best-effort: a missed capture just leaves the cwd where it was.
 		const applyCapturedCwd = () => {
@@ -141,7 +134,7 @@ export class BashExecutor extends EventEmitter {
 		let outputTruncated = false;
 
 		// Collect output
-		proc.stdout.on('data', (data: Buffer) => {
+		proc.stdout?.on('data', (data: Buffer) => {
 			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
 				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
 				const limitedChunk = data.subarray(0, remaining);
@@ -160,7 +153,7 @@ export class BashExecutor extends EventEmitter {
 			this.emit('progress', {...state});
 		});
 
-		proc.stderr.on('data', (data: Buffer) => {
+		proc.stderr?.on('data', (data: Buffer) => {
 			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
 				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
 				const limitedChunk = data.subarray(0, remaining);
