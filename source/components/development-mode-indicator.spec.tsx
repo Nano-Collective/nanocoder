@@ -412,3 +412,108 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 		);
 	});
 });
+
+// ============================================================================
+// Todo indicator badge
+// ============================================================================
+
+test('DevelopmentModeIndicator shows Todo (~2/5 Ctrl-t) when hidden with in-progress tasks', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(lastFrame()!, /Todo \(~2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Todo (2/5 Ctrl-t) when hidden with no in-progress tasks', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(lastFrame()!, /Todo \(2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Todo (~2/5* Ctrl-t) when hidden with in-progress and unread updates', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+	);
+	t.regex(lastFrame()!, /Todo \(~2\/5\* Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Todo (hide Ctrl-t) when visible on wide terminal', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(lastFrame()!, /Todo \(hide Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator does not show todo badge when totalCount is 0 or todoInfo is null', t => {
+	const {lastFrame: frame1} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 0,
+				completedCount: 0,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.notRegex(frame1()!, /Todo/);
+
+	const {lastFrame: frame2} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={null}
+		/>,
+	);
+	t.notRegex(frame2()!, /Todo/);
+});
+

@@ -187,7 +187,41 @@ export function useAppState(
 
 	// Live task list state - renders in the live area (updating in-place)
 	// instead of appending repeated task lists to the static chat queue
-	const [liveTaskList, setLiveTaskList] = useState<Task[] | null>(null);
+	const [liveTaskList, setLiveTaskListState] = useState<Task[] | null>(null);
+	const [showTodoList, setShowTodoList] = useState<boolean>(true);
+	const [todoHasUnread, setTodoHasUnread] = useState<boolean>(false);
+	const showTodoListRef = useRef<boolean>(true);
+	showTodoListRef.current = showTodoList;
+
+	const setLiveTaskList = useCallback(
+		(
+			tasksOrUpdater: Task[] | null | ((prev: Task[] | null) => Task[] | null),
+		) => {
+			setLiveTaskListState(prev => {
+				const next =
+					typeof tasksOrUpdater === 'function'
+						? tasksOrUpdater(prev)
+						: tasksOrUpdater;
+				if (!next || next.length === 0) {
+					setTodoHasUnread(false);
+				} else if (!showTodoListRef.current) {
+					setTodoHasUnread(true);
+				}
+				return next;
+			});
+		},
+		[],
+	);
+
+	const toggleTodoList = useCallback(() => {
+		setShowTodoList(prev => {
+			const next = !prev;
+			if (next) {
+				setTodoHasUnread(false);
+			}
+			return next;
+		});
+	}, []);
 
 	// Question mode state (ask_question tool)
 	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
@@ -386,6 +420,11 @@ export function useAppState(
 		compactToolCounts,
 		compactToolCountsRef,
 		liveTaskList,
+		showTodoList,
+		setShowTodoList,
+		todoHasUnread,
+		setTodoHasUnread,
+		toggleTodoList,
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,

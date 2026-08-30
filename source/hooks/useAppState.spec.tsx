@@ -421,3 +421,50 @@ test('exposes setters for every state slice', t => {
 		t.is(typeof hook[name], 'function', `expected ${name} to be a function`);
 	}
 });
+
+test('toggleTodoList toggles showTodoList and clears todoHasUnread when opening', t => {
+	const {hook, instance} = setup();
+
+	t.true(hook.showTodoList);
+	t.false(hook.todoHasUnread);
+
+	// Hide
+	hook.toggleTodoList();
+	instance.rerender(<Probe />);
+	t.false(captured!.showTodoList);
+
+	// Update tasks while hidden -> sets todoHasUnread
+	captured!.setLiveTaskList([
+		{id: '1', title: 'Task 1', status: 'pending', createdAt: '', updatedAt: ''},
+	]);
+	instance.rerender(<Probe />);
+	t.true(captured!.todoHasUnread);
+
+	// Toggle visible -> clears todoHasUnread
+	captured!.toggleTodoList();
+	instance.rerender(<Probe />);
+	t.true(captured!.showTodoList);
+	t.false(captured!.todoHasUnread);
+});
+
+test('setLiveTaskList clears todoHasUnread when tasks become empty or null', t => {
+	const {hook, instance} = setup();
+
+	// Hide
+	hook.toggleTodoList();
+	instance.rerender(<Probe />);
+	t.false(captured!.showTodoList);
+
+	// Add tasks
+	captured!.setLiveTaskList([
+		{id: '1', title: 'Task 1', status: 'pending', createdAt: '', updatedAt: ''},
+	]);
+	instance.rerender(<Probe />);
+	t.true(captured!.todoHasUnread);
+
+	// Clear tasks
+	captured!.setLiveTaskList(null);
+	instance.rerender(<Probe />);
+	t.false(captured!.todoHasUnread);
+});
+
