@@ -79,3 +79,9 @@ Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
 | Toggle expanded reasoning traces | Ctrl+R |
+
+## Voice Mode
+
+| Action | Shortcut | Notes |
+|--------|----------|-------|
+| Push-to-talk / Barge-in | Ctrl+T | Start/stop voice recording; interrupts AI response if speaking or processing |
