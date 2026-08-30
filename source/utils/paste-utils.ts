@@ -5,12 +5,29 @@ import {
 	PlaceholderContent,
 	PlaceholderType,
 } from '../types/hooks';
+import {allocatePlaceholderId} from './placeholders';
 
 /**
  * Default threshold for single-line paste handling.
  * Pastes <= this character limit are inserted directly without placeholders.
  */
 export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
+
+/** Render the label shown in the input for a paste placeholder. */
+function formatPasteDisplayText(ordinal: number, size: number): string {
+	return `[Paste #${ordinal}: ${size} chars]`;
+}
+
+/**
+ * Restate an existing paste label at a new size, keeping its ordinal.
+ * Used when a chunked paste grows after its placeholder already exists.
+ */
+export function resizePasteDisplayText(
+	displayText: string,
+	size: number,
+): string {
+	return displayText.replace(/: \d+ chars\]$/, `: ${size} chars]`);
+}
 
 function getSingleLinePasteThreshold(): number {
 	const config = getAppConfig();
@@ -37,12 +54,11 @@ export function handlePaste(
 		return null;
 	}
 
-	// Generate simple incrementing ID based on existing paste placeholders
-	const existingPasteCount = Object.values(currentPlaceholderContent).filter(
-		content => content.type === PlaceholderType.PASTE,
-	).length;
-	const pasteId = (existingPasteCount + 1).toString();
-	const placeholder = `[Paste #${pasteId}: ${pastedText.length} chars]`;
+	const {id: pasteId, ordinal} = allocatePlaceholderId(
+		currentPlaceholderContent,
+		PlaceholderType.PASTE,
+	);
+	const placeholder = formatPasteDisplayText(ordinal, pastedText.length);
 
 	const pasteContent: PastePlaceholderContent = {
 		type: PlaceholderType.PASTE,

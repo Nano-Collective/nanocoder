@@ -8,7 +8,11 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {useTheme} from '@/hooks/useTheme';
 import {resolveToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	TaskIndicatorInfo,
+} from '@/types/core';
 import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
@@ -26,6 +30,7 @@ interface DevelopmentModeIndicatorProps {
 	tune?: TuneConfig;
 	currentModel?: string;
 	activeEditor?: ActiveEditorState | null;
+	taskInfo?: TaskIndicatorInfo | null;
 }
 
 function getContextColor(
@@ -52,6 +57,7 @@ export const DevelopmentModeIndicator = React.memo(
 		tune,
 		currentModel,
 		activeEditor,
+		taskInfo,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 		const modeLabel = isNarrow
@@ -70,6 +76,28 @@ export const DevelopmentModeIndicator = React.memo(
 				: `tune: ${resolved}`;
 		})();
 
+		// Two forms of the task badge. The base form is the progress readout,
+		// which only exists while the list is collapsed and is the sole trace of
+		// it on screen, so it always renders. The Ctrl-t key hint on top of that
+		// is a help string: worth showing when there is room, first to go when
+		// there isn't (see the drop order below). When the list is expanded there
+		// is no progress to report, so only the hint form exists.
+		const {taskLabelBase, taskLabelWithHint} = (() => {
+			if (!taskInfo || taskInfo.totalCount <= 0) {
+				return {taskLabelBase: '', taskLabelWithHint: ''};
+			}
+			if (!taskInfo.isHidden) {
+				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl-t)'};
+			}
+			const inFlight = taskInfo.inProgressCount > 0 ? '~' : '';
+			const unread = taskInfo.hasUnread ? '*' : '';
+			const progress = `${inFlight}${taskInfo.completedCount}/${taskInfo.totalCount}${unread}`;
+			return {
+				taskLabelBase: `Tasks (${progress})`,
+				taskLabelWithHint: `Tasks (${progress} Ctrl-t)`,
+			};
+		})();
+
 		// Figures with any client-side estimation ('estimate', or 'api+estimate'
 		// where the estimated tail moved the number) render with a leading '~'
 		// (≈); fully API-reported figures render bare. The marker is a single
@@ -77,15 +105,17 @@ export const DevelopmentModeIndicator = React.memo(
 		// truncates.
 		const ctxPrefix = contextSource === 'api' ? '' : '~';
 
-		// Mode, tune, and ctx never truncate. Session name and the filename
-		// portion of the editor pill share whatever room is left, each
-		// truncating with an ellipsis; if both fit fully neither truncates;
-		// if both overflow they split the remaining space evenly.
-		// The line-range suffix and the (Shift+Tab to cycle) hint are
-		// optional — drop them when otherwise the row would wrap. Suffix
-		// drops first (line-range info is more contextual than help text),
-		// then the shift hint.
-		const {sessionLabel, editorLabel, showShiftHint} = (() => {
+		// Mode, tune, ctx, and the collapsed-task progress readout never
+		// truncate. Session name and the filename portion of the editor pill
+		// share whatever room is left, each truncating with an ellipsis; if both
+		// fit fully neither truncates; if both overflow they split the remaining
+		// space evenly.
+		// The Ctrl-t hint, the line-range suffix and the (Shift+Tab to cycle)
+		// hint are optional — drop them when otherwise the row would wrap. The
+		// Ctrl-t hint drops first (the collapsed badge still reports progress
+		// without it, and an expanded list needs no badge at all), then the
+		// line-range suffix, then the shift hint.
+		const {sessionLabel, editorLabel, showShiftHint, taskLabel} = (() => {
 			const editorFileName = activeEditor?.fileName;
 			const hasSelection =
 				!!activeEditor?.selection &&
@@ -106,6 +136,14 @@ export const DevelopmentModeIndicator = React.memo(
 					? ' (Shift+Tab to cycle)'
 					: '';
 			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
+			const taskBaseSegment = taskLabelBase ? ` · ${taskLabelBase}` : '';
+			const taskHintSegment = taskLabelWithHint
+				? ` · ${taskLabelWithHint}`
+				: '';
+			// Cost of upgrading the badge from its base form to the key-hint
+			// form. With the list expanded there is no base form, so this is the
+			// price of the whole segment.
+			const taskHintExtraFull = taskHintSegment.length - taskBaseSegment.length;
 			const ctxSegment =
 				contextPercentUsed !== null
 					? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
@@ -121,6 +159,7 @@ export const DevelopmentModeIndicator = React.memo(
 			const requiredWidth =
 				modeLabel.length +
 				tuneSegment.length +
+				taskBaseSegment.length +
 				ctxSegment.length +
 				sessionSeparator.length +
 				editorSeparator.length +
@@ -128,17 +167,29 @@ export const DevelopmentModeIndicator = React.memo(
 				minSessionLen +
 				minEditorLen;
 
-			// Decide which optional segments fit. Drop the suffix first, then
-			// the shift hint, until the row fits within actualWidth.
+			// Decide which optional segments fit. Drop the Ctrl-t hint first,
+			// then the suffix, then the shift hint, until the row fits within
+			// actualWidth.
 			let editorSuffix = editorSuffixFull;
 			let shiftHint = shiftHintFull;
+			let taskHintExtra = taskHintExtraFull;
 			if (
-				requiredWidth + editorSuffix.length + shiftHint.length + 1 >
+				requiredWidth +
+					taskHintExtra +
+					editorSuffix.length +
+					shiftHint.length +
+					1 >
 				actualWidth
 			) {
-				editorSuffix = '';
-				if (requiredWidth + shiftHint.length + 1 > actualWidth) {
-					shiftHint = '';
+				taskHintExtra = 0;
+				if (
+					requiredWidth + editorSuffix.length + shiftHint.length + 1 >
+					actualWidth
+				) {
+					editorSuffix = '';
+					if (requiredWidth + shiftHint.length + 1 > actualWidth) {
+						shiftHint = '';
+					}
 				}
 			}
 
@@ -146,6 +197,8 @@ export const DevelopmentModeIndicator = React.memo(
 				modeLabel.length +
 				shiftHint.length +
 				tuneSegment.length +
+				taskBaseSegment.length +
+				taskHintExtra +
 				ctxSegment.length +
 				sessionSeparator.length +
 				editorSeparator.length +
@@ -195,6 +248,7 @@ export const DevelopmentModeIndicator = React.memo(
 				sessionLabel: session,
 				editorLabel: editor,
 				showShiftHint: shiftHint.length > 0,
+				taskLabel: taskHintExtra > 0 ? taskLabelWithHint : taskLabelBase,
 			};
 		})();
 
@@ -225,6 +279,16 @@ export const DevelopmentModeIndicator = React.memo(
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={colors.info}>{tuneLabel}</Text>
+					</>
+				)}
+				{taskLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text
+							color={taskInfo?.hasUnread ? colors.warning : colors.secondary}
+						>
+							{taskLabel}
+						</Text>
 					</>
 				)}
 				{contextPercentUsed !== null && (

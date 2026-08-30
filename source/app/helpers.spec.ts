@@ -1,4 +1,5 @@
 import test from 'ava';
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {isNonInteractiveModeComplete} from './helpers';
 import type {NonInteractiveModeState} from './types';
 
@@ -23,7 +24,13 @@ test('isNonInteractiveModeComplete returns tool-approval when tool approval requ
 		isToolExecuting: false,
 		isToolConfirmationMode: false,
 		isConversationComplete: false,
-		messages: [{role: 'assistant', content: 'Tool approval required'}],
+		// Exactly what conversation-loop emits, prefix and all.
+		messages: [
+			{
+				role: 'assistant',
+				content: `${TOOL_APPROVAL_REQUIRED_PREFIX}execute_bash. Exiting non-interactive mode`,
+			},
+		],
 	};
 
 	const startTime = Date.now();

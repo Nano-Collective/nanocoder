@@ -49,20 +49,18 @@ Preferences follow the same location hierarchy as configuration files:
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the `nanocoder.paste` namespace:
+The paste threshold is also stored in the preferences file under the top-level `paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "nanocoder": {
-    "paste": {
-      "singleLineThreshold": 1500
-    }
+  "paste": {
+    "singleLineThreshold": 1500
   }
 }
 ```
@@ -103,17 +101,41 @@ You can change this via `/settings` → **Behavior** → **Tool Results and Thin
 
 The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
 
-### Notification Configuration
+### Professional Tone
 
-Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
+Professional ("boring") tone is stored in the preferences file with the `professionalTone` field:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.notifications.enabled` | boolean | `false` | Enable desktop notifications |
-| `nanocoder.notifications.sound` | boolean | `false` | Play a sound with notifications |
-| `nanocoder.notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
-| `nanocoder.notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
-| `nanocoder.notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `professionalTone` | boolean | `false` | When true, progress text is strictly functional (`Completed in 12s.` instead of `Worked for a plucky 12s.`) and the system prompt gains a TONE section telling the model to be terse — no filler, no preamble, no celebratory wrap-ups. |
+
+You can change this via `/settings` → **Behavior** → **Professional Tone**, or by editing the preferences file directly:
+
+```json
+{
+  "professionalTone": true
+}
+```
+
+Toggling it from `/settings` applies to both halves straight away - the progress text on the next turn, and the TONE section on the next system prompt rebuild, which the toggle itself triggers. Editing the preferences file by hand needs a restart, since nothing is watching the file.
+
+Under the `nano` tool profile the TONE section is swapped for a shortened variant, the same way every other section is slimmed for tiny models.
+
+One exception: if you have replaced the system prompt entirely with a [`systemPrompt` override](index.md#custom-system-prompt) in `mode: "replace"`, the TONE section is not added - your override is used verbatim. The progress text still changes. In `mode: "append"` the section is kept, and your appended text lands after it, so your wording wins on any conflict.
+
+### Notification Configuration
+
+Desktop notification preferences are stored under the top-level `notifications` key:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `notifications.enabled` | boolean | `false` | Enable desktop notifications |
+| `notifications.sound` | boolean | `false` | Play a sound with notifications |
+| `notifications.bell` | boolean | `false` | Also ring the terminal bell (works over SSH / tmux) |
+| `notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
+| `notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
+| `notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `notifications.events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
 
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 

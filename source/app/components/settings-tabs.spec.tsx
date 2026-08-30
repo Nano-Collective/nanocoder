@@ -270,6 +270,7 @@ test('each tab lists its expected setting rows', async t => {
 	stdin.write(RIGHT);
 	await tick();
 	await expectRow('Tool Results and Thinking');
+	await expectRow('Professional Tone');
 
 	// Advanced.
 	stdin.write(RIGHT);

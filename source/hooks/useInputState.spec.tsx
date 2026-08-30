@@ -12,10 +12,11 @@ console.log('\nuseInputState.spec.ts');
 function createPastePlaceholder(
 	id: string,
 	content: string,
+	label: string = id,
 ): PastePlaceholderContent {
 	return {
 		type: PlaceholderType.PASTE,
-		displayText: `[Paste #${id}: ${content.length} chars]`,
+		displayText: `[Paste #${label}: ${content.length} chars]`,
 		content,
 		originalSize: content.length,
 	} as PastePlaceholderContent;
@@ -214,45 +215,67 @@ test('deletePlaceholder removes placeholder from state', t => {
 	const {hook, instance} = setupTest();
 
 	// Create a state with a placeholder
+	// The map key is namespaced; the label the user sees is a separate counter.
 	const initialState: InputState = {
-		displayValue: 'text [Paste #abc123: 10 chars] more',
+		displayValue: 'text [Paste #1: 10 chars] more',
 		placeholderContent: {
-			abc123: createPastePlaceholder('abc123', 'test paste') as PastePlaceholderContent,
+			paste_1: createPastePlaceholder('paste_1', 'test paste', '1'),
 		},
 	};
 
 	hook.setInputState(initialState);
 	instance.rerender(<TestComponent />);
 
-	t.true(currentHook!.input.includes('[Paste #abc123'));
+	t.true(currentHook!.input.includes('[Paste #1:'));
 
 	// Delete the placeholder
-	hook.deletePlaceholder('abc123');
+	currentHook!.deletePlaceholder('paste_1');
 	instance.rerender(<TestComponent />);
 
-	t.false(currentHook!.input.includes('[Paste #abc123'));
-	t.false('abc123' in currentHook!.currentState.placeholderContent);
+	t.is(currentHook!.input, 'text  more');
+	t.false('paste_1' in currentHook!.currentState.placeholderContent);
 });
 
-// Test deletePlaceholder with special characters (sanitization)
-test('deletePlaceholder sanitizes placeholder ID', t => {
+// An id that is not in the map must not touch the input or the other entries
+test('deletePlaceholder ignores an unknown placeholder ID', t => {
 	const {hook, instance} = setupTest();
 
 	const initialState: InputState = {
-		displayValue: 'text [Paste #safe123: 10 chars] more',
+		displayValue: 'text [Paste #1: 10 chars] more',
 		placeholderContent: {
-			safe123: createPastePlaceholder('safe123', 'test paste'),
+			paste_1: createPastePlaceholder('paste_1', 'test paste', '1'),
 		},
 	};
 	hook.setInputState(initialState);
 	instance.rerender(<TestComponent />);
 
-	// Try with potentially unsafe ID (should sanitize it)
-	hook.deletePlaceholder('safe123;rm-rf');
+	currentHook!.deletePlaceholder('paste_1;rm -rf');
 	instance.rerender(<TestComponent />);
 
-	// The deletion should have worked on the sanitized ID
-	t.pass();
+	t.is(currentHook!.input, 'text [Paste #1: 10 chars] more');
+	t.true('paste_1' in currentHook!.currentState.placeholderContent);
+});
+
+test('deletePlaceholder removes only the targeted duplicate', t => {
+	const {hook, instance} = setupTest();
+
+	// Two placeholders that render identically - the id has to disambiguate.
+	hook.setInputState({
+		displayValue: '[Paste #1: 5 chars][Paste #1: 5 chars]',
+		placeholderContent: {
+			paste_1: createPastePlaceholder('paste_1', 'first', '1'),
+			paste_2: createPastePlaceholder('paste_2', 'other', '1'),
+		},
+	});
+	instance.rerender(<TestComponent />);
+
+	currentHook!.deletePlaceholder('paste_2');
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, '[Paste #1: 5 chars]');
+	t.deepEqual(Object.keys(currentHook!.currentState.placeholderContent), [
+		'paste_1',
+	]);
 });
 
 // Test setInputState
