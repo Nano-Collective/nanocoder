@@ -10,10 +10,16 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
-import type {
-	LLMClient,
-	ToolCall,
-} from '@/types/core';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/models-dev-client.js';
+import type {LLMClient, Message, ToolCall} from '@/types/core';
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact.js';
 
 console.log('\nacp-conversation.spec.ts');
 
@@ -1890,6 +1896,94 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 	t.true(toolMsg?.content.startsWith('Error:'));
 });
 
+// The ACP option bound has to match the `ask_user` tool schema (2-6), otherwise
+// identical prompts succeed in the CLI and fail in the VS Code extension.
+test('runAcpConversation - ask_user accepts six options', async t => {
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async (p: any) => ({
+			outcome: {outcome: 'selected', optionId: p.options[5].optionId},
+		}),
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{question: 'Pick one', options: ['A', 'B', 'C', 'D', 'E', 'F']},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getFilteredTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.is(toolMsg?.content, 'F');
+});
+
+test('runAcpConversation - ask_user rejects more than six options', async t => {
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async () => {
+			t.fail('should not prompt the client for an out-of-range option list');
+			return {outcome: {outcome: 'cancelled'}};
+		},
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{question: 'Pick one', options: ['A', 'B', 'C', 'D', 'E', 'F', 'G']},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getFilteredTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.true(toolMsg?.content.startsWith('Error:'));
+	t.true(toolMsg?.content.includes('2-6'));
+});
+
 // ============================================================================
 // Action timeline capture
 // ============================================================================
@@ -2001,4 +2095,91 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 
 	t.deepEqual(await session.timeline.list(), []);
 });
+
+test.serial(
+	'runAcpConversation - compacts history before the next model turn when over the token threshold',
+	async t => {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+		setSessionContextLimit(100);
+		setAutoCompactStrategy('mechanical');
+		setAutoCompactThreshold(50);
+
+		const filler = 'old context sentence. '.repeat(60);
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {
+			devMode: 'yolo',
+			messages: [
+				{role: 'user', content: filler},
+				{role: 'assistant', content: 'ack'},
+				{role: 'user', content: 'call the tool'},
+			],
+		});
+		const toolManager = {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		};
+		setToolRegistryGetter(() => ({
+			read_file: async () => 'ok',
+		}));
+
+		const payloads: Message[][] = [];
+		let callCount = 0;
+		const client = {
+			getCurrentModel: () => 'gpt-4',
+			getProviderConfig: () => ({name: 'openai'}),
+			chat: async (messages: Message[]) => {
+				payloads.push(messages);
+				callCount++;
+				if (callCount === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('read_file', {path: 'a.ts'}, 'call-1'),
+									],
+								},
+							},
+						],
+					};
+				}
+				return {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+
+		try {
+			const result = await runAcpConversation({
+				session,
+				client,
+				toolManager: toolManager as any,
+				conn,
+				nonInteractiveAlwaysAllow: [],
+			});
+
+			t.is(result.stopReason, 'end_turn');
+			t.is(payloads.length, 2);
+			const secondHistory = payloads[1]
+				.slice(1)
+				.map(m => (typeof m.content === 'string' ? m.content : ''))
+				.join('');
+			t.true(secondHistory.length < filler.length);
+			t.false(
+				payloads[1].some(
+					m => typeof m.content === 'string' && m.content.includes(filler),
+				),
+				'the verbose turn must be compressed out of the next model turn',
+			);
+			t.true(
+				secondHistory.includes('call the tool'),
+				'compaction must keep the recent turn, not empty the history',
+			);
+		} finally {
+			resetAutoCompactSession();
+			resetSessionContextLimit();
+		}
+	},
+);
 

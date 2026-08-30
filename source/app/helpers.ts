@@ -1,6 +1,10 @@
-import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
+import {
+	TOOL_APPROVAL_REQUIRED_KIND,
+	TOOL_APPROVAL_REQUIRED_PREFIX,
+} from '@/constants';
 import type {
 	NonInteractiveCompletionResult,
+	NonInteractiveExitReason,
 	NonInteractiveModeState,
 } from './types';
 
@@ -35,7 +39,7 @@ export function isNonInteractiveModeComplete(
 	}
 
 	if (hasToolApprovalRequired) {
-		return {shouldExit: true, reason: 'tool-approval'};
+		return {shouldExit: true, reason: TOOL_APPROVAL_REQUIRED_KIND};
 	}
 
 	if (hasErrorMessages) {
@@ -50,4 +54,14 @@ export function isNonInteractiveModeComplete(
 	}
 
 	return {shouldExit: false, reason: null};
+}
+
+/**
+ * Maps a non-interactive exit reason to the corresponding process exit code.
+ * Used by the Ink runtime (`useNonInteractiveMode`) for the interactive
+ * non-interactive path. The headless plain shell (`runPlainShell`) has its
+ * own intentionally distinct mapping (exit 2 for tool-approval-required).
+ */
+export function getExitCodeForReason(reason: NonInteractiveExitReason): number {
+	return reason === 'error' || reason === TOOL_APPROVAL_REQUIRED_KIND ? 1 : 0;
 }

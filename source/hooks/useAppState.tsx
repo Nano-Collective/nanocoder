@@ -172,8 +172,10 @@ export function useAppState(
 	const reasoningExpandedRef = useRef(false);
 	reasoningExpandedRef.current = reasoningExpanded;
 
-	// Compact tool display state
-	const [compactToolDisplay, setCompactToolDisplay] = useState<boolean>(true);
+	// Set to preference on launch, but can be toggled freely during runtime
+	const [compactToolDisplay, setCompactToolDisplay] = useState<boolean>(
+		preferences.compactToolDisplay ?? true,
+	);
 	// Ref keeps current value accessible to long-running async loops
 	const compactToolDisplayRef = useRef(true);
 	compactToolDisplayRef.current = compactToolDisplay;
@@ -187,7 +189,41 @@ export function useAppState(
 
 	// Live task list state - renders in the live area (updating in-place)
 	// instead of appending repeated task lists to the static chat queue
-	const [liveTaskList, setLiveTaskList] = useState<Task[] | null>(null);
+	const [liveTaskList, setLiveTaskListState] = useState<Task[] | null>(null);
+	// Ctrl-T collapses the list into a status-bar badge for the rest of the
+	// session. While collapsed, updates that land behind the user's back set
+	// the unread marker so the badge can flag them.
+	const [showTaskList, setShowTaskList] = useState<boolean>(true);
+	const [taskListHasUnread, setTaskListHasUnread] = useState<boolean>(false);
+	// Ref rather than the state value so setLiveTaskList (called from async
+	// loops, and from the same tick as a toggle) always reads the live value.
+	// toggleTaskList is the only writer of showTaskList, so the two stay in sync.
+	const showTaskListRef = useRef(true);
+	// Fingerprint of the last list we saw. Re-setting an unchanged list must not
+	// light up the unread marker, so only real id/status churn counts.
+	const taskListFingerprintRef = useRef('');
+
+	const setLiveTaskList = useCallback((tasks: Task[] | null) => {
+		const fingerprint = tasks?.map(t => `${t.id}:${t.status}`).join(',') ?? '';
+		const changed = fingerprint !== taskListFingerprintRef.current;
+		taskListFingerprintRef.current = fingerprint;
+
+		if (!tasks || tasks.length === 0) {
+			setTaskListHasUnread(false);
+		} else if (changed && !showTaskListRef.current) {
+			setTaskListHasUnread(true);
+		}
+		setLiveTaskListState(tasks);
+	}, []);
+
+	const toggleTaskList = useCallback(() => {
+		const next = !showTaskListRef.current;
+		showTaskListRef.current = next;
+		setShowTaskList(next);
+		// Expanding marks the list read; collapsing has nothing unread to carry
+		// over, since everything in it was on screen a moment ago.
+		setTaskListHasUnread(false);
+	}, []);
 
 	// Question mode state (ask_question tool)
 	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
@@ -386,6 +422,9 @@ export function useAppState(
 		compactToolCounts,
 		compactToolCountsRef,
 		liveTaskList,
+		showTaskList,
+		taskListHasUnread,
+		toggleTaskList,
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,
