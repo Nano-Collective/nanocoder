@@ -43,6 +43,21 @@ export class PasteDetector {
 		const timeElapsed = currentTime - this.lastInputTime;
 		const charsAdded = newText.length - this.lastInputLength;
 
+		if (charsAdded <= 0) {
+			this.lastInputTime = currentTime;
+			this.lastInputLength = newText.length;
+			return {
+				isPaste: false,
+				method: 'none',
+				addedText: '',
+				details: {
+					timeElapsed,
+					charsAdded,
+					linesAdded: 0,
+				},
+			};
+		}
+
 		// Calculate lines added in THIS change, not total lines in text
 		const previousLineCount =
 			this.lastInputLength > 0
