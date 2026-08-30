@@ -835,7 +835,9 @@ export function SettingsDisplayPanel({
 				value: 'reasoningExpanded' as ToggleKey,
 			},
 			{
-				label: `Expand Tool Results by default: ${isOn(currentCompactToolDisplay)}`,
+				// compactToolDisplay=true means results are COMPACT, so
+				// expansion is on exactly when the preference is false.
+				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
 				value: 'compactToolDisplay' as ToggleKey,
 			},
 			{
