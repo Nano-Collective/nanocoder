@@ -42,6 +42,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsage} from '@/usage/response-usage';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
@@ -276,6 +277,26 @@ export async function runAcpConversation(
 				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
+		// Gate on the same view the next turn will send, so the threshold is not
+		// measured against rows the cap already drops from the request.
+		const compactGateInput = capMessagesForModel(messages, maxMessages);
+		const compacted = await maybeAutoCompact(
+			compactGateInput,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{signal: abortController.signal},
+		);
+		// Only adopt the result when compaction actually ran — otherwise
+		// maybeAutoCompact returns the capped view it was handed, and taking it
+		// would discard history the cap only meant to hide from one request.
+		if (compacted !== compactGateInput) {
+			messages = compacted;
+		}
+		if (abortController.signal.aborted) {
+			session.messages = messages;
+			return withTurnUsage({stopReason: 'cancelled'});
+		}
 
 		if (errorResults.length > 0) {
 			messages = [...messages, ...resultsForAbandonedTurn];

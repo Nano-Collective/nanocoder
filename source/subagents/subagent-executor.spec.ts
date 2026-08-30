@@ -1,7 +1,11 @@
 import test from 'ava';
 import {SubagentExecutor} from './subagent-executor.js';
-import {getAppConfig} from '@/config/index';
-import {getModelContextLimit} from '@/models';
+import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {
+	getModelContextLimit,
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -11,6 +15,12 @@ import type {
 	ToolExecutionContext,
 } from '@/types/core';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
+import {
+	resetAutoCompactSession,
+	setAutoCompactEnabled,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
 console.log('\nsubagent-executor.spec.ts');
@@ -1126,3 +1136,151 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.false(wrote, 'a read-only subagent must not be able to write files');
 	t.regex(toolResult, /not available to this subagent/);
 });
+
+test.serial(
+	'caps subagent history before client.chat without starting on a tool row',
+	async t => {
+		if (getAppConfig().sessions) {
+			getAppConfig().sessions.maxMessages = 3;
+		}
+
+		const payloads: Message[][] = [];
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'ok', readOnly: true},
+		});
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't1',
+							function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't2',
+							function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't3',
+							function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+						},
+					],
+				},
+				{content: 'done'},
+			],
+			messages => {
+				payloads.push(messages);
+			},
+		);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		try {
+			const result = await executor.execute({
+				subagent_type: 'explore',
+				description: 'Read a few files',
+			});
+
+			t.true(result.success);
+			t.is(payloads.length, 4);
+			const last = payloads[3];
+			t.is(last[0]?.role, 'system');
+			t.not(last[1]?.role, 'tool');
+			t.true(
+				last.length <= 5,
+				'cap walks back to keep a full assistant/tool turn',
+			);
+		} finally {
+			reloadAppConfig();
+		}
+	},
+);
+
+test.serial('compacts subagent history after a tool turn', async t => {
+	resetSessionContextLimit();
+	setSessionContextLimit(80);
+	setAutoCompactEnabled(true);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const blob = 'old context sentence. '.repeat(80);
+	const payloads: Message[][] = [];
+	let reads = 0;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				reads += 1;
+				return reads === 1 ? blob : `ok-${reads}`;
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't1',
+						function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't2',
+						function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't3',
+						function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+					},
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			payloads.push(messages);
+		},
+	);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	try {
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read a file',
+		});
+		t.true(result.success);
+		t.true(payloads.length >= 4);
+		const last = payloads[3];
+		t.is(last[0]?.role, 'system');
+		t.false(
+			last.some(
+				message =>
+					typeof message.content === 'string' && message.content === blob,
+			),
+			'an earlier tool blob must be compressed out of the later model turn',
+		);
+	} finally {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+	}
+});
+

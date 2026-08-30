@@ -46,6 +46,7 @@
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
+		"test:changesets": "node scripts/validate-changesets.js",
 		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",

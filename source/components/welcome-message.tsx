@@ -1,24 +1,19 @@
-import fs from 'fs';
 import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
-import path from 'path';
 import {memo, useState} from 'react';
-import {fileURLToPath} from 'url';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getNanocoderShape} from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderShape} from '@/types/ui';
+import {getPackageVersion} from '@/utils/package-version';
 import {getRandomTip} from '@/utils/tips';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Read package.json once at module load time to avoid repeated file reads
-const packageJson = JSON.parse(
-	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
-) as {version: string};
+// Resolve the version once at module load time to avoid repeated file reads.
+// `getPackageVersion` never throws, so a broken install degrades the banner
+// instead of killing the process before anything renders.
+const packageVersion = getPackageVersion();
 
 const DEFAULT_SHAPE: NanocoderShape = 'tiny';
 
@@ -58,7 +53,7 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps) {
 					>
 						<Box marginBottom={1}>
 							<Text color={colors.primary} bold>
-								✻ Version {packageJson.version} ✻
+								✻ Version {packageVersion} ✻
 							</Text>
 						</Box>
 
@@ -76,7 +71,7 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps) {
 					</Gradient>
 
 					<TitledBoxWithPreferences
-						title={`✻ Welcome to Nanocoder ${packageJson.version} ✻`}
+						title={`✻ Welcome to Nanocoder ${packageVersion} ✻`}
 						width={boxWidth}
 						borderColor={colors.primary}
 						paddingX={2}
