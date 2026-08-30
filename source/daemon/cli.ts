@@ -248,6 +248,11 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 }
 
 const LOG_TAIL_BYTES = 64 * 1024;
+// How far into the window we look for a line break before giving up on
+// realigning. Past this point the partial first line is worth more than the
+// alignment, since realigning would discard most of the tail. Ordinary log
+// lines are far shorter than this.
+const LOG_TAIL_REALIGN_BYTES = 4 * 1024;
 
 async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const logPath = getLogPath(opts.projectRoot);
@@ -273,12 +278,18 @@ async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	if (start > 0) {
 		const newline = tail.indexOf(0x0a);
-		if (newline !== -1 && newline < tail.length - 1) {
+		if (
+			newline !== -1 &&
+			newline < tail.length - 1 &&
+			newline <= LOG_TAIL_REALIGN_BYTES
+		) {
 			tail = tail.subarray(newline + 1);
 		} else {
-			// A window with no usable line break would be emptied by realigning to
-			// the trailing newline. Drop the extra leading byte instead, plus the
-			// bytes of a character the window opened part way through.
+			// Either the window holds no usable line break, or the first one sits
+			// so far in that realigning to it would throw away most of the tail.
+			// Both cases keep the partial first line: drop the extra leading byte
+			// instead, plus the bytes of a character the window opened part way
+			// through.
 			let partial = 1;
 			while (
 				partial < tail.length &&

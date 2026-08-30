@@ -94,6 +94,24 @@ test.serial('logs keeps the tail when the window holds no line break', async t =
 	}
 });
 
+test.serial('logs keeps the tail when the first line break sits late in the window', async t => {
+	// One oversized log line runs past the start of the window, so the first
+	// line break is thousands of bytes in. Realigning to it would return only
+	// the handful of bytes that follow.
+	const content = `${'a'.repeat(200_000)}${'x'.repeat(60_000)}\ntail line\n`;
+	const root = await tempProject(content);
+	try {
+		const result = await runDaemonCli('logs', {projectRoot: root});
+		t.is(result.exitCode, 0);
+		t.true(result.output.endsWith('tail line\n'));
+		const bytes = Buffer.byteLength(result.output, 'utf-8');
+		t.true(bytes > TAIL_BYTES / 2);
+		t.true(bytes <= TAIL_BYTES);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test.serial('logs keeps every line when the window opens on a line boundary', async t => {
 	const line = `${'z'.repeat(63)}\n`;
 	const content = line.repeat(2000);
