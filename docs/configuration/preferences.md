@@ -127,15 +127,16 @@ One exception: if you have replaced the system prompt entirely with a [`systemPr
 
 ### Notification Configuration
 
-Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
+Desktop notification preferences are stored under the top-level `notifications` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.notifications.enabled` | boolean | `false` | Enable desktop notifications |
-| `nanocoder.notifications.sound` | boolean | `false` | Play a sound with notifications |
-| `nanocoder.notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
-| `nanocoder.notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
-| `nanocoder.notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `notifications.enabled` | boolean | `false` | Enable desktop notifications |
+| `notifications.sound` | boolean | `false` | Play a sound with notifications |
+| `notifications.bell` | boolean | `false` | Also ring the terminal bell (works over SSH / tmux) |
+| `notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
+| `notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
+| `notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
 
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 
