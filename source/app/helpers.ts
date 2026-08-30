@@ -58,9 +58,10 @@ export function isNonInteractiveModeComplete(
 
 /**
  * Maps a non-interactive exit reason to the corresponding process exit code.
- * Used by both the Ink runtime (`useNonInteractiveMode`) and the headless
- * plain shell (`runPlainShell`) to stay in sync.
+ * Used by the Ink runtime (`useNonInteractiveMode`) for the interactive
+ * non-interactive path. The headless plain shell (`runPlainShell`) has its
+ * own intentionally distinct mapping (exit 2 for tool-approval-required).
  */
 export function getExitCodeForReason(reason: NonInteractiveExitReason): number {
-	return reason === 'error' || reason === 'tool-approval-required' ? 1 : 0;
+	return reason === 'error' || reason === TOOL_APPROVAL_REQUIRED_KIND ? 1 : 0;
 }
