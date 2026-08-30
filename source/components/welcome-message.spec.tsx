@@ -3,7 +3,6 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
-import {TIPS} from '@/constants';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import WelcomeMessage from './welcome-message';
 
@@ -65,14 +64,14 @@ test('WelcomeMessage shows quick tips in narrow layout', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows a tip of the day in narrow layout', t => {
+test('WelcomeMessage shows the given tip in narrow layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
 	const output = lastFrame() ?? '';
 
-	t.true(TIPS.some(tip => output.includes(`Tip: ${tip}`)));
+	t.true(output.includes('Tip: Short pinned tip.'));
 	process.stdout.columns = originalColumns;
 });
 
@@ -152,14 +151,30 @@ test('WelcomeMessage shows help command for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows a tip of the day in full layout', t => {
+test('WelcomeMessage shows the given tip in full layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('Tip: Short pinned tip.'));
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage falls back to a catalogue tip when none is given', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
 
 	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
 	const output = lastFrame() ?? '';
 
-	t.true(TIPS.some(tip => output.includes(`Tip: ${tip}`)));
+	// Only the label is asserted. ink-testing-library renders to a fixed 100
+	// column stdout regardless of process.stdout.columns, so a long catalogue
+	// tip wraps and a full-string match would break on tip length rather than
+	// on anything this test cares about. getRandomTip's own spec covers which
+	// tip comes back.
+	t.regex(output, /Tip: \S/);
 	process.stdout.columns = originalColumns;
 });
 

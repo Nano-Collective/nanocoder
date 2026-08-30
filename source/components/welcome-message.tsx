@@ -22,10 +22,20 @@ const packageJson = JSON.parse(
 
 const DEFAULT_SHAPE: NanocoderShape = 'tiny';
 
-export default memo(function WelcomeMessage() {
+type WelcomeMessageProps = {
+	/**
+	 * Pin the tip shown under the banner. Defaults to a random one held for
+	 * the life of the component; tests pass an explicit tip so they can assert
+	 * exact text instead of scanning the catalogue.
+	 */
+	tip?: string;
+};
+
+export default memo(function WelcomeMessage({tip}: WelcomeMessageProps) {
 	const {boxWidth, isNarrow, isNormal} = useResponsiveTerminal();
 	const {colors} = useTheme();
-	const [tip] = useState(getRandomTip);
+	const [randomTip] = useState(getRandomTip);
+	const shownTip = tip ?? randomTip;
 
 	// Get the user's preferred nanocoder shape or use default
 	const nanocoderShape = getNanocoderShape() ?? DEFAULT_SHAPE;
@@ -99,9 +109,13 @@ export default memo(function WelcomeMessage() {
 					</TitledBoxWithPreferences>
 				</>
 			)}
-			<Box paddingX={isNarrow ? 1 : 2} marginBottom={1}>
+			{/*
+			 * paddingX 3 lines the tip up with the content of the bordered box
+			 * above it in both layouts: 1 column of border plus its paddingX 2.
+			 */}
+			<Box paddingX={3} marginBottom={1}>
 				<Text color={colors.secondary} dimColor>
-					Tip: {tip}
+					Tip: {shownTip}
 				</Text>
 			</Box>
 		</>
