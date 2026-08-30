@@ -584,14 +584,23 @@ export class SubagentExecutor {
 				tool_calls: toolCalls,
 			});
 			if (systemMessage) {
+				// Gate on the same view the model receives, so the threshold is not
+				// measured against rows the cap already dropped from the request.
+				const gateInput = capMessagesForModel(messages.slice(1), maxMessages);
 				const compacted = await maybeAutoCompact(
-					capMessagesForModel(messages.slice(1), maxMessages),
+					gateInput,
 					systemMessage,
 					client,
 					tools,
 					{signal},
 				);
-				messages.splice(0, messages.length, systemMessage, ...compacted);
+				// Only adopt the result when compaction actually ran. Otherwise
+				// maybeAutoCompact hands back the capped view it was given, and
+				// writing that in would permanently discard history the cap only
+				// ever meant to hide from a single request.
+				if (compacted !== gateInput) {
+					messages.splice(0, messages.length, systemMessage, ...compacted);
+				}
 			}
 			if (agentId) {
 				streamingText = '';
