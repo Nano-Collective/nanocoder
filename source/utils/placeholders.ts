@@ -8,6 +8,8 @@ const ID_PREFIX: Record<PlaceholderType, string> = {
 	[PlaceholderType.FILE]: 'file',
 };
 
+const PASTE_MARKER = `${ID_PREFIX[PlaceholderType.PASTE]}_`;
+
 export interface AllocatedPlaceholderId {
 	/** Map key. Namespaced by type so two kinds can never collide. */
 	id: string;
@@ -58,6 +60,33 @@ export interface PlaceholderOccurrence {
 }
 
 /**
+ * The text an entry renders as in the input.
+ *
+ * Prompt history persists InputState to disk, so paste entries written before
+ * placeholders carried a `displayText` can still arrive from an older session's
+ * history file. Rebuild the label those entries rendered with, from the
+ * ordinal in their key and the content they hold, so they still expand instead
+ * of reaching the model as their own literal label.
+ */
+function resolveDisplayText(id: string, content: PlaceholderContent): string {
+	if (content.displayText) {
+		return content.displayText;
+	}
+
+	if (content.type !== PlaceholderType.PASTE) {
+		return '';
+	}
+
+	const ordinal = id.startsWith(PASTE_MARKER)
+		? id.slice(PASTE_MARKER.length)
+		: id;
+
+	return ORDINAL.test(ordinal)
+		? `[Paste #${ordinal}: ${content.content.length} chars]`
+		: '';
+}
+
+/**
  * Locate every placeholder in `text` by scanning for its display text.
  *
  * Each entry claims at most one occurrence, so two placeholders that render
@@ -71,8 +100,9 @@ export function findPlaceholderOccurrences(
 	// Longest display text first, so a placeholder whose text merely starts with
 	// another's can't be claimed by the shorter one.
 	const candidates = Object.entries(placeholderContent)
-		.filter(([, content]) => Boolean(content.displayText))
-		.sort(([, a], [, b]) => b.displayText.length - a.displayText.length);
+		.map(([id, content]) => [id, resolveDisplayText(id, content)] as const)
+		.filter(([, displayText]) => Boolean(displayText))
+		.sort(([, a], [, b]) => b.length - a.length);
 
 	const claimed = new Set<string>();
 	const occurrences: PlaceholderOccurrence[] = [];
@@ -80,8 +110,8 @@ export function findPlaceholderOccurrences(
 	let index = 0;
 	while (index < text.length) {
 		const hit = candidates.find(
-			([id, content]) =>
-				!claimed.has(id) && text.startsWith(content.displayText, index),
+			([id, displayText]) =>
+				!claimed.has(id) && text.startsWith(displayText, index),
 		);
 
 		if (!hit) {
@@ -89,14 +119,14 @@ export function findPlaceholderOccurrences(
 			continue;
 		}
 
-		const [id, content] = hit;
+		const [id, displayText] = hit;
 		claimed.add(id);
 		occurrences.push({
 			id,
 			start: index,
-			end: index + content.displayText.length,
+			end: index + displayText.length,
 		});
-		index += content.displayText.length;
+		index += displayText.length;
 	}
 
 	return occurrences;

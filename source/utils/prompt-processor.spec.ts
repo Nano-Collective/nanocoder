@@ -229,3 +229,20 @@ test('assemblePrompt - leaves content that looks like a placeholder alone', t =>
 
 	t.is(assemblePrompt(inputState), 'echo [Paste #1: 21 chars]');
 });
+
+test('assemblePrompt - expands a legacy paste that has no displayText', t => {
+	// Prompt history persists InputState as JSON, so an entry written before
+	// placeholders carried a displayText can come back from an older session.
+	const inputState: InputState = {
+		displayValue: 'look [Paste #2: 11 chars] ok',
+		placeholderContent: {
+			'2': {
+				type: PlaceholderType.PASTE,
+				content: 'legacy body',
+				originalSize: 11,
+			} as InputState['placeholderContent'][string],
+		},
+	};
+
+	t.is(assemblePrompt(inputState), 'look legacy body ok');
+});

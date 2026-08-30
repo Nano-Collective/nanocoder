@@ -105,3 +105,43 @@ test('findPlaceholderOccurrences skips entries that are no longer in the text', 
 		['file_1'],
 	);
 });
+
+// A paste persisted to prompt history before placeholders carried a
+// displayText still has to be located, or it reaches the model as its label.
+const legacyPaste = (content: string): PlaceholderContent =>
+	({
+		type: PlaceholderType.PASTE,
+		content,
+		originalSize: content.length,
+	}) as PlaceholderContent;
+
+test('findPlaceholderOccurrences locates a legacy bare-numeric paste key', t => {
+	const occurrences = findPlaceholderOccurrences('look [Paste #2: 5 chars] ok', {
+		'2': legacyPaste('hello'),
+	});
+
+	t.deepEqual(occurrences, [{id: '2', start: 5, end: 24}]);
+});
+
+test('findPlaceholderOccurrences locates a legacy namespaced paste key', t => {
+	const occurrences = findPlaceholderOccurrences('[Paste #2: 5 chars]', {
+		paste_2: legacyPaste('hello'),
+	});
+
+	t.deepEqual(occurrences, [{id: 'paste_2', start: 0, end: 19}]);
+});
+
+test('findPlaceholderOccurrences ignores a displayText-less entry it cannot label', t => {
+	// No ordinal to rebuild from, and file mentions have always had a
+	// displayText, so there is nothing to reconstruct.
+	const occurrences = findPlaceholderOccurrences('[@a.ts] [Paste #2: 5 chars]', {
+		file_x: {
+			type: PlaceholderType.FILE,
+			filePath: '/repo/a.ts',
+			content: 'body',
+		} as PlaceholderContent,
+		notanordinal: legacyPaste('hello'),
+	});
+
+	t.deepEqual(occurrences, []);
+});
