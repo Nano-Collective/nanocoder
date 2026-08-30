@@ -6,6 +6,7 @@ import React from 'react';
 
 import {DEFAULT_REPO_MAP_TOKENS, type RepoMap} from '@/repo-map/index';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
+import {lazyCommands} from './lazy-registry';
 import {parseRepoMapArgs, RepoMapView, repomapCommand} from './repomap';
 
 console.log('\nrepomap.spec.tsx');
@@ -27,6 +28,14 @@ function frameOf(map: RepoMap): string {
 test('repomapCommand exposes matching name and description', t => {
 	t.is(repomapCommand.name, 'repomap');
 	t.true(repomapCommand.description.includes('--tokens'));
+	t.is(repomapCommand.progressLabel, 'Building repo map');
+});
+
+test('lazy registry entry mirrors the command name, description and label', t => {
+	const entry = lazyCommands.find(command => command.name === 'repomap');
+	t.truthy(entry);
+	t.is(entry?.description, repomapCommand.description);
+	t.is(entry?.progressLabel, repomapCommand.progressLabel);
 });
 
 test('parseRepoMapArgs defaults to the standard budget', t => {
@@ -105,39 +114,44 @@ test('RepoMapView renders an empty state when nothing is indexable', t => {
 	t.true(output.includes('No indexable source files found'));
 });
 
-test('repomapCommand handler renders a map for the current directory', async t => {
-	const root = join(
-		tmpdir(),
-		`nanocoder-repomap-command-${process.pid}-${Date.now()}`,
-	);
-	mkdirSync(root, {recursive: true});
-	writeFileSync(
-		join(root, 'core.ts'),
-		'export function sharedHelper() {\n\treturn 1;\n}\n',
-	);
-	writeFileSync(
-		join(root, 'user.ts'),
-		'import {sharedHelper} from "./core";\nsharedHelper();\n',
-	);
+test.serial(
+	'repomapCommand handler renders a map for the current directory',
+	async t => {
+		const root = join(
+			tmpdir(),
+			`nanocoder-repomap-command-${process.pid}-${Date.now()}`,
+		);
+		mkdirSync(root, {recursive: true});
+		writeFileSync(
+			join(root, 'core.ts'),
+			'export function sharedHelper() {\n\treturn 1;\n}\n',
+		);
+		writeFileSync(
+			join(root, 'user.ts'),
+			'import {sharedHelper} from "./core";\nsharedHelper();\n',
+		);
 
-	const previousCwd = process.cwd();
-	process.chdir(root);
+		const previousCwd = process.cwd();
+		process.chdir(root);
 
-	try {
-		const result = await repomapCommand.handler([], [], metadata);
-		t.true(React.isValidElement(result));
+		try {
+			const result = await repomapCommand.handler([], [], metadata);
+			t.true(React.isValidElement(result));
 
-		const {lastFrame, unmount} = renderWithTheme(result as React.ReactElement);
-		const output = lastFrame() ?? '';
-		unmount();
-		t.true(output.includes('/repomap'));
-		t.true(output.includes('files'));
-		t.true(output.includes('core.ts'));
-	} finally {
-		process.chdir(previousCwd);
-		rmSync(root, {recursive: true, force: true});
-	}
-});
+			const {lastFrame, unmount} = renderWithTheme(
+				result as React.ReactElement,
+			);
+			const output = lastFrame() ?? '';
+			unmount();
+			t.true(output.includes('/repomap'));
+			t.true(output.includes('files'));
+			t.true(output.includes('core.ts'));
+		} finally {
+			process.chdir(previousCwd);
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test('repomapCommand handler renders usage for a bad argument', async t => {
 	const result = await repomapCommand.handler(['--nope'], [], metadata);

@@ -349,6 +349,42 @@ test.serial('keeps python hash comments out of the index', async t => {
 	}
 });
 
+test.serial('keeps python docstring bodies out of the index', async t => {
+	const root = createRepo({
+		'double.py':
+			'class Real:\n\t"""\n\tdef ghost_double(self):\n\t\tpass\n\t"""\n\tdef real_method(self):\n\t\treturn 1\n',
+		'single.py':
+			"class Other:\n\t'''\n\tdef ghost_single(self):\n\t\tpass\n\t'''\n\tdef other_method(self):\n\t\treturn 2\n",
+	});
+
+	try {
+		const map = await buildRepoMap(root);
+		const symbolsFor = (path: string) =>
+			map.files.find(file => file.path === path)?.symbols ?? [];
+
+		t.deepEqual(symbolsFor('double.py').sort(), ['Real', 'real_method']);
+		t.deepEqual(symbolsFor('single.py').sort(), ['Other', 'other_method']);
+	} finally {
+		cleanup(root);
+	}
+});
+
+test.serial('does not report truncation at exactly maxFiles', async t => {
+	const root = createRepo({
+		'a.ts': 'export function aSymbol() {}\n',
+		'b.ts': 'export function bSymbol() {}\n',
+		'README.md': '# not indexable\n',
+	});
+
+	try {
+		const map = await buildRepoMap(root, {maxFiles: 2});
+		t.is(map.scannedFiles, 2);
+		t.false(map.truncated);
+	} finally {
+		cleanup(root);
+	}
+});
+
 test.serial('extracts definitions across supported languages', async t => {
 	const root = createRepo({
 		'svc.go': 'package main\n\nfunc RunServer() {}\n\ntype Options struct{}\n',

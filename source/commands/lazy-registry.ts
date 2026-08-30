@@ -222,6 +222,7 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'repomap',
 		description:
 			'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+		progressLabel: 'Building repo map',
 		load: () => import('@/commands/repomap').then(m => m.repomapCommand),
 	},
 	{

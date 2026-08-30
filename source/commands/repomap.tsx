@@ -14,6 +14,7 @@ import {errorMsg} from '@/utils/message-factory';
 
 const MIN_TOKENS = 64;
 const MAX_TOKENS = 32_000;
+const TOKENS_FLAG_PREFIX = '--tokens=';
 
 export function parseRepoMapArgs(args: string[]): {
 	maxTokens: number;
@@ -23,10 +24,11 @@ export function parseRepoMapArgs(args: string[]): {
 
 	for (let index = 0; index < args.length; index++) {
 		const arg = args[index];
-		if (arg !== '--tokens' && !arg.startsWith('--tokens=')) {
+		if (arg !== '--tokens' && !arg.startsWith(TOKENS_FLAG_PREFIX)) {
 			return {maxTokens, error: `Unknown argument: ${arg}`};
 		}
-		const inline = arg === '--tokens' ? undefined : arg.slice(9);
+		const inline =
+			arg === '--tokens' ? undefined : arg.slice(TOKENS_FLAG_PREFIX.length);
 		const raw = inline ?? args[++index];
 		const parsed = Number(raw);
 		if (!raw || !Number.isFinite(parsed) || parsed < MIN_TOKENS) {
@@ -86,6 +88,7 @@ export const repomapCommand: Command = {
 	name: 'repomap',
 	description:
 		'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+	progressLabel: 'Building repo map',
 	handler: async (args, _messages, _metadata) => {
 		const {maxTokens, error} = parseRepoMapArgs(args);
 		if (error) {

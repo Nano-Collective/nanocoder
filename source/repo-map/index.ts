@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {extname} from 'node:path';
 import {walkProjectEntries} from '@/utils/file-search';
+import {calculateTokens} from '@/utils/token-calculator';
 
 export interface RepoMapFile {
 	path: string;
@@ -29,7 +30,6 @@ const DEFAULT_MAX_SYMBOLS_PER_FILE = 12;
 const DAMPING = 0.85;
 const MAX_ITERATIONS = 24;
 const CONVERGENCE = 1e-6;
-const CHARS_PER_TOKEN = 4;
 
 const DEFINITION_PATTERNS: Record<string, RegExp[]> = {
 	js: [
@@ -223,8 +223,11 @@ const KEYWORDS = new Set([
 const IDENTIFIER = /(?<![.\w$])[A-Za-z_$][\w$]*/g;
 const BASE_NOISE =
 	/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+// Triple-quoted forms must lead: alternation is left-to-right, so a `"..."`
+// branch placed first matches the empty string inside `"""` and the docstring
+// body would survive stripping.
 const HASH_NOISE =
-	/#[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|"""[\s\S]*?"""/g;
+	/"""[\s\S]*?"""|'''[\s\S]*?'''|#[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g;
 
 function stripNoise(source: string, language: string): string {
 	const pattern = HASH_COMMENT_LANGUAGES.has(language)
@@ -317,6 +320,12 @@ async function scanFiles(
 		if (!language) {
 			return false;
 		}
+		// Checked before the push so a repo holding exactly `maxFiles` indexable
+		// files is not reported as truncated.
+		if (files.length >= maxFiles) {
+			truncated = true;
+			return true;
+		}
 
 		let source: string;
 		try {
@@ -335,10 +344,6 @@ async function scanFiles(
 			references: countReferences(stripped, language),
 		});
 
-		if (files.length >= maxFiles) {
-			truncated = true;
-			return true;
-		}
 		return false;
 	});
 
@@ -392,10 +397,6 @@ function pageRank(
 		}
 	}
 	return ranks;
-}
-
-function estimateTokens(text: string): number {
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 export async function buildRepoMap(
@@ -467,7 +468,7 @@ export async function buildRepoMap(
 				return diff === 0 ? a.localeCompare(b) : diff;
 			})
 			.slice(0, maxSymbolsPerFile);
-		const cost = estimateTokens(`${file.path}\n${symbols.join(' ')}\n`);
+		const cost = calculateTokens(`${file.path}\n${symbols.join(' ')}\n`);
 		if (usedTokens + cost > maxTokens) {
 			budgetTruncated = true;
 			break;
