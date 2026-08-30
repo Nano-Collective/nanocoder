@@ -255,18 +255,43 @@ async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		return {exitCode: 0, output: 'No daemon log yet.'};
 	}
 	const size = statSync(logPath).size;
+	if (size === 0) {
+		return {exitCode: 0, output: ''};
+	}
 	const start = Math.max(0, size - LOG_TAIL_BYTES);
+	// Read the byte before the window as well. When it is a newline the window
+	// already opens on a whole line, and skipping past it keeps that line.
+	const readFrom = start === 0 ? 0 : start - 1;
 	const chunks: Buffer[] = [];
-	for await (const chunk of createReadStream(logPath, {start})) {
+	for await (const chunk of createReadStream(logPath, {
+		start: readFrom,
+		end: size - 1,
+	})) {
 		chunks.push(chunk as Buffer);
 	}
-	const tail = Buffer.concat(chunks).toString('utf-8');
-	if (start === 0) {
-		return {exitCode: 0, output: tail};
+	let tail = Buffer.concat(chunks);
+
+	if (start > 0) {
+		const newline = tail.indexOf(0x0a);
+		if (newline !== -1 && newline < tail.length - 1) {
+			tail = tail.subarray(newline + 1);
+		} else {
+			// A window with no usable line break would be emptied by realigning to
+			// the trailing newline. Drop the extra leading byte instead, plus the
+			// bytes of a character the window opened part way through.
+			let partial = 1;
+			while (
+				partial < tail.length &&
+				partial < 4 &&
+				(tail[partial] & 0xc0) === 0x80
+			) {
+				partial++;
+			}
+			tail = tail.subarray(partial);
+		}
 	}
-	// A byte offset can land inside a character or a line, so resume at the next line.
-	const newline = tail.indexOf('\n');
-	return {exitCode: 0, output: newline === -1 ? tail : tail.slice(newline + 1)};
+
+	return {exitCode: 0, output: tail.toString('utf-8')};
 }
 
 function launchSelfHosted(projectRoot: string): ChildProcess {
