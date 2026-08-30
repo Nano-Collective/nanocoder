@@ -66,6 +66,23 @@ test('handler validates URL format', async t => {
 	);
 });
 
+test('handler rejects loopback aliases without fetching', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	await t.throwsAsync(
+		async () => {
+			await fetchUrlTool.tool.execute!(
+				{url: 'http://127.0.0.2/'},
+				{toolCallId: 'test', messages: []},
+			);
+		},
+		{message: /internal\/private network/},
+	);
+});
+
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
@@ -220,6 +237,22 @@ test('validator accepts external IP addresses', async t => {
 	const result = await fetchUrlTool.validator!({url: 'http://8.8.8.8'});
 
 	t.true(result.valid);
+});
+
+test('validator rejects 127.0.0.2 and cloud metadata hosts', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://127.0.0.2',
+		'http://169.254.169.254/latest/meta-data/',
+		'http://metadata.google.internal',
+		'http://[::ffff:127.0.0.2]',
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `expected ${url} to be rejected`);
+	}
 });
 
 test('tool has correct name', t => {
