@@ -710,6 +710,7 @@ export function SettingsNotificationsPanel({
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -729,7 +730,8 @@ export function SettingsNotificationsPanel({
 		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -757,6 +759,12 @@ export function SettingsNotificationsPanel({
 			{
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
+			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
 			},
 		];
 	}, [config]);

@@ -129,3 +129,32 @@ test('SettingsNotificationsPanel reflects an enabled bell preference', t => {
 		updateNotificationsPreference({enabled: false, bell: false});
 	}
 });
+
+test('SettingsNotificationsPanel exposes every notification event', t => {
+	updateNotificationsPreference({
+		enabled: true,
+		events: {
+			toolConfirmation: true,
+			questionPrompt: true,
+			generationComplete: true,
+			triggeredRunComplete: true,
+		},
+	});
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<SettingsNotificationsPanel onBack={() => {}} onCancel={() => {}} />,
+		);
+		const output = lastFrame();
+		t.truthy(output);
+		// Every NotificationEvent needs a row: the panel writes its whole config
+		// back on each toggle, so an event with no row is dropped from the saved
+		// preference and its notification silently stops firing.
+		t.true(output!.includes('Tool Confirmation: ON'));
+		t.true(output!.includes('Question Prompt: ON'));
+		t.true(output!.includes('Generation Complete: ON'));
+		t.true(output!.includes('Triggered Run Complete: ON'));
+		unmount();
+	} finally {
+		updateNotificationsPreference({enabled: false});
+	}
+});
