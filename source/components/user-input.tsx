@@ -18,6 +18,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 } from '@/types/core';
 import type {
 	InputState,
@@ -57,6 +58,7 @@ interface ChatProps {
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
+	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
@@ -66,6 +68,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
@@ -83,6 +86,7 @@ export default function UserInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
+	onToggleTaskList,
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
@@ -92,6 +96,7 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	taskInfo,
 	forceFocus = false,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
@@ -709,6 +714,14 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+t to collapse/expand the live task list (always available -
+		// this sits above the disabled guard so it still works while the agent
+		// is working, which is when the task list is on screen)
+		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+			onToggleTaskList();
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -956,6 +969,7 @@ export default function UserInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					taskInfo={taskInfo}
 				/>
 			</Box>
 		);
@@ -1116,6 +1130,7 @@ export default function UserInput({
 				tune={tune}
 				currentModel={currentModel}
 				activeEditor={activeEditor}
+				taskInfo={taskInfo}
 			/>
 		</>
 	);

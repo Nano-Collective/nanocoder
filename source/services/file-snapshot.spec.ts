@@ -480,6 +480,36 @@ test.serial(
 	},
 );
 
+test.serial('FileSnapshotService refuses to restore outside the workspace', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const service = new FileSnapshotService(tempDir);
+		// Snapshot keys come back from user-writable metadata on disk, so a
+		// corrupted index must not be able to write anywhere it likes.
+		await t.throwsAsync(
+			service.restoreFiles(new Map([['../escaped.txt', 'owned']])),
+			{message: /outside workspace/},
+		);
+		t.false(existsSync(path.join(path.dirname(tempDir), 'escaped.txt')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('FileSnapshotService reports whether a scan was truncated', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const service = new FileSnapshotService(tempDir);
+		const result = service.getModifiedFilesResult();
+
+		t.true(Array.isArray(result.files));
+		t.is(typeof result.truncated, 'boolean');
+		t.is(typeof result.available, 'boolean');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 	// Note: This test runs in a git directory, so it may return files.
 	// The important thing is that it returns an array and doesn't throw.

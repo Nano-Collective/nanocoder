@@ -1,10 +1,9 @@
 /**
- * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
- * the panel's rendering can be driven and inspected from tests. Shared by the
- * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
- *
- * `mention-utils.js` must run first: the real webview loads it before
- * `chat-panel.js`, which immediately reads `globalThis.NanocoderMentionUtils`.
+ * Boots the chat panel scripts inside a VM against a stub DOM so the panel's
+ * rendering can be driven and inspected from tests. Shared by the chat-panel
+ * specs. Mirrors production load order in chat-panel.html: the helper scripts
+ * must run first because chat-panel.js reads `globalThis.NanocoderMentionUtils`
+ * and `globalThis.NanocoderSlashCommandUtils` at IIFE eval time.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -16,6 +15,11 @@ const mediaUrl = (filename: string) =>
 	);
 
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
+const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
+const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
+	mediaUrl('slash-command-utils.js'),
+	'utf8',
+);
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
@@ -39,6 +43,7 @@ const SHELL_IDS = [
 	'menu-upload-image',
 	'mention-dropdown',
 	'messages-container',
+	'slash-dropdown',
 	'modal-image',
 	'mode-dropdown',
 	'mode-trigger',
@@ -50,11 +55,16 @@ const SHELL_IDS = [
 	'provider-trigger',
 	'provider-trigger-label',
 	'send-stop-btn',
+	'timeline-confirm',
+	'timeline-hint',
+	'timeline-nodes',
+	'timeline-strip',
+	'timeline-track',
 ];
 
-// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
-// builds, so the stub has to stay open-ended.
-// biome-ignore lint/suspicious/noExplicitAny: stub nodes are intentionally open-ended
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes
+// it builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: open-ended DOM stub
 export type StubElement = any;
 
 /**
@@ -111,8 +121,13 @@ export function createElement(tagName: string): StubElement {
 			},
 		},
 		appendChild(child: StubElement) {
+			// Real appendChild moves a node rather than cloning it, and the panel
+			// relies on that when a card is re-homed into the work summary.
+			if (child.parentElement && child.parentElement !== element) {
+				child.parentElement.removeChild(child);
+			}
 			child.parentElement = element;
-			element.children.push(child);
+			if (!element.children.includes(child)) element.children.push(child);
 			return child;
 		},
 		removeChild(child: StubElement) {
@@ -145,8 +160,14 @@ export function createElement(tagName: string): StubElement {
 		click: (event: StubElement = {}) => {
 			for (const fn of listeners.get('click') ?? []) fn(event);
 		},
+		/** Drive any registered listener, not just click. */
+		dispatch: (type: string, event: StubElement = {}) => {
+			for (const fn of listeners.get(type) ?? []) fn(event);
+		},
 		scrollTop: 0,
 		scrollHeight: 0,
+		scrollLeft: 0,
+		scrollWidth: 0,
 	};
 
 	Object.defineProperty(element, 'className', {
@@ -163,6 +184,9 @@ export function createElement(tagName: string): StubElement {
 		get: () => html,
 		set: (value: string) => {
 			html = String(value);
+			// Detached children must not keep claiming this node as their parent,
+			// or remove() on one of them would corrupt the new child list.
+			for (const child of element.children) child.parentElement = null;
 			element.children = [];
 		},
 	});
@@ -271,6 +295,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	sandbox.globalThis = sandbox;
 	createContext(sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
+	runInContext(URI_UTILS_SOURCE, sandbox);
+	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
@@ -279,6 +305,10 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		container,
 		sent,
 		copied,
+		/** Any shell element by id, for panels rendered outside the transcript. */
+		byId(id: string): StubElement | null {
+			return findById(root, id);
+		},
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});
 		},
@@ -305,14 +335,25 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				status: 'pending',
 			});
 		},
-		finish() {
-			this.update({sessionUpdate: 'prompt_response'});
+		finish(outcome: string = 'completed') {
+			this.update({sessionUpdate: 'prompt_response', outcome});
 		},
 		userMessage(value: string) {
 			this.update({
 				sessionUpdate: 'user_message_chunk',
 				content: {type: 'text', text: value},
 			});
+		},
+		/**
+		 * Start a real turn, so `isProcessing` is set and the Stop button is
+		 * live. `userMessage` only replays a message; it starts no turn.
+		 */
+		startTurn(text: string) {
+			this.post({type: 'runPrompt', text});
+		},
+		/** Press Stop, the way the user cancels a turn. */
+		stop() {
+			(findById(root, 'send-stop-btn') as StubElement).click();
 		},
 		advance(ms: number) {
 			clock.now += ms;
@@ -323,16 +364,19 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				timer.fn();
 			}
 		},
-		boxes(): StubElement[] {
+		/** The per-turn work summaries, in the order they were inserted. */
+		summaries(): StubElement[] {
 			return container.children.filter((child: StubElement) =>
-				child.className.includes('thought-aggregator'),
+				child.className.includes('work-summary'),
 			);
 		},
-		/** The tool-call cards, in the order they were inserted. */
+		/** Every stretch of reasoning, across all summaries. */
+		thoughts(): StubElement[] {
+			return container.querySelectorAll('.work-summary-thought');
+		},
+		/** The tool-call group cards, in the order they were inserted. */
 		aggregators(): StubElement[] {
-			return container.children.filter((child: StubElement) =>
-				child.className.includes('tool-aggregator'),
-			);
+			return container.querySelectorAll('.tool-aggregator');
 		},
 		/** The copy/timestamp footers currently in the transcript. */
 		footers(): StubElement[] {
