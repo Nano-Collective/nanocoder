@@ -31,6 +31,8 @@ const SHELL_IDS = [
 	'chat-view',
 	'close-modal-btn',
 	'composer-box',
+	'composer-settings',
+	'composer-settings-trigger',
 	'context-chips',
 	'history-list',
 	'history-view',
@@ -157,7 +159,7 @@ export function createElement(tagName: string): StubElement {
 			);
 		},
 		focus: () => {},
-		click: (event: StubElement = {}) => {
+		click: (event: StubElement = {stopPropagation() {}}) => {
 			for (const fn of listeners.get('click') ?? []) fn(event);
 		},
 		/** Drive any registered listener, not just click. */
@@ -236,9 +238,19 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const root = createElement('html');
 	const body = createElement('body');
 	root.appendChild(body);
+	const hiddenOnLoad = new Set([
+		'add-menu-dropdown',
+		'composer-settings',
+		'mention-dropdown',
+		'mode-dropdown',
+		'model-dropdown',
+		'provider-dropdown',
+		'slash-dropdown',
+	]);
 	for (const id of SHELL_IDS) {
 		const element = createElement('div');
 		element.id = id;
+		if (hiddenOnLoad.has(id)) element.classList.add('hidden');
 		body.appendChild(element);
 	}
 
