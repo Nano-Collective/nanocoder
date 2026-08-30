@@ -164,3 +164,68 @@ test('assemblePrompt - handles file with nested path', t => {
 	t.true(result.includes('=== File: file.ts ==='));
 	t.true(result.includes('export const x = 1'));
 });
+
+test('assemblePrompt - expands two placeholders that render identically', t => {
+	const inputState: InputState = {
+		displayValue: 'compare [@a.ts] against [@a.ts]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content: 'first revision',
+				filePath: 'a.ts',
+				displayText: '[@a.ts]',
+			},
+			file_2: {
+				type: PlaceholderType.FILE,
+				content: 'second revision',
+				filePath: 'a.ts',
+				displayText: '[@a.ts]',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('first revision'));
+	t.true(result.includes('second revision'));
+	t.false(result.includes('[@a.ts]'), 'no placeholder is left unexpanded');
+});
+
+test('assemblePrompt - expands a mixed paste and file mention input', t => {
+	const inputState: InputState = {
+		displayValue: 'see [@a.ts] then [Paste #1: 5 chars]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content: 'file body',
+				filePath: 'a.ts',
+				displayText: '[@a.ts]',
+			},
+			paste_1: {
+				type: PlaceholderType.PASTE,
+				content: 'Hello',
+				displayText: '[Paste #1: 5 chars]',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('file body'));
+	t.true(result.endsWith('Hello'));
+});
+
+test('assemblePrompt - leaves content that looks like a placeholder alone', t => {
+	const inputState: InputState = {
+		displayValue: 'echo [Paste #1: 21 chars]',
+		placeholderContent: {
+			paste_1: {
+				type: PlaceholderType.PASTE,
+				content: '[Paste #1: 21 chars]',
+				displayText: '[Paste #1: 21 chars]',
+			},
+		},
+	};
+
+	t.is(assemblePrompt(inputState), 'echo [Paste #1: 21 chars]');
+});
