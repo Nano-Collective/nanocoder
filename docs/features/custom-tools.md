@@ -126,7 +126,7 @@ The body is a shell script with two placeholder forms:
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. That is shell-safe under bash/sh. It is **not** shell-safe under cmd.exe: cmd does not treat `'` as a quote, so `type {{ file }}` becomes `type 'notes.txt'` (file not found) and `&`, `|`, `>`, `^`, `%VAR%` in a value can break out. Per-shell quoting in `renderValue` is a follow-up; until then the default Windows shell is cmd.
+All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. That is shell-safe under bash/sh. It is **not** shell-safe under cmd.exe: cmd does not treat `'` as a quote, so `type {{ file }}` becomes `type 'notes.txt'` (file not found) and `&`, `|`, `>`, `^`, `%VAR%` in a value can break out. Per-shell quoting in `renderValue` is a follow-up (#1084); until then the default Windows shell is cmd.
 
 This blocks shell injection through parameter values on POSIX:
 
