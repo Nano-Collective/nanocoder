@@ -231,6 +231,9 @@ test('session-selector does not call onCancel when arbitrary key is pressed in e
 		output!.includes('No saved sessions') ||
 		output!.includes('No sessions for this project')
 	) {
+		// The empty state must tell the user which key dismisses it
+		t.regex(output!, /Press Escape to continue/);
+
 		// Press an arbitrary, non-Escape key
 		stdin.write('j');
 
