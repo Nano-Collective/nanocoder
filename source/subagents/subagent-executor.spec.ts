@@ -23,7 +23,7 @@ function createMockToolManager(
 			handler: (
 				args: unknown,
 				options?: ToolExecutionContext,
-			) => Promise<string>;
+			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
 		}
@@ -173,6 +173,42 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('stringifies structured tool output without llmContent', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({someField: 'value'}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-structured',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The tool returned structured data.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Read structured data',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'The tool returned structured data.');
+	t.is(toolResults[0]?.content, '{"someField":"value"}');
 });
 
 test.serial('forwards the parent execution context to subagent tools', async t => {
