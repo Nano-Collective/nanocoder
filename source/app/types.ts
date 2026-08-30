@@ -1,3 +1,4 @@
+import type {Session} from '@/session/session-manager';
 import type {DevelopmentMode} from '@/types/core';
 
 /**
@@ -35,6 +36,24 @@ export interface AppProps {
 	 * is ephemeral — preferences are not modified.
 	 */
 	trustDirectory?: boolean;
+	/**
+	 * Whether cli.tsx put the terminal on the alternate screen buffer for
+	 * this run. Drives the fullscreen (fixed-height, in-app scroll) layout;
+	 * when false the interactive UI renders inline with Ink's Static and
+	 * the terminal's native scrollback.
+	 */
+	altScreenActive?: boolean;
+	/**
+	 * A session resolved by `cli.tsx` from `--continue`/`--resume <id>` before
+	 * render. Applied once on mount via the same `applySession` path used by
+	 * `/resume` (see App.tsx).
+	 */
+	initialSession?: Session;
+	/**
+	 * Set when `--resume` was passed with no id: opens the session picker
+	 * (activeMode `'sessionSelector'`) as soon as the app mounts.
+	 */
+	openSessionSelectorOnStart?: boolean;
 }
 
 /**

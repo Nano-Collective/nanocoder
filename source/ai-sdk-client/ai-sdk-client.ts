@@ -17,6 +17,7 @@ import type {
 import {getLogger} from '@/utils/logging';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
+import {normalizeModelIdForRequest} from './model-id.js';
 import {
 	createProvider,
 	type TaggedProvider,
@@ -169,6 +170,12 @@ export class AISDKClient implements LLMClient {
 						? this.provider.provider.responses(this.currentModel)
 						: this.provider.provider.chat(this.currentModel);
 				case 'openai-compatible':
+					return this.provider.provider(
+						normalizeModelIdForRequest(
+							this.providerConfig.config.baseURL,
+							this.currentModel,
+						),
+					) as LanguageModel;
 				case 'anthropic':
 				case 'google':
 					return this.provider.provider(this.currentModel) as LanguageModel;

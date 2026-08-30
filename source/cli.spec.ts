@@ -28,8 +28,6 @@ function parsePrompt(args: string[]): string | undefined {
 				continue;
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
-			} else if (arg === '--web' || arg === '--gui') {
-				continue; // skip this flag
 			} else {
 				promptArgs.push(arg);
 			}
@@ -160,25 +158,6 @@ test('CLI parsing: detects -h flag', t => {
 	const hasHelpFlag = args.includes('--help') || args.includes('-h');
 
 	t.true(hasHelpFlag);
-});
-
-test('CLI parsing: detects --web flag', t => {
-	const args = ['--web'];
-	const hasWebModeFlag = args.includes('--web') || args.includes('--gui');
-
-	t.true(hasWebModeFlag);
-});
-
-test('CLI parsing: detects --gui flag', t => {
-	const args = ['--gui'];
-	const hasWebModeFlag = args.includes('--web') || args.includes('--gui');
-
-	t.true(hasWebModeFlag);
-});
-
-test('CLI parsing: filters --web and --gui from prompt args', t => {
-	t.is(parsePrompt(['run', 'do', '--web', 'a', 'thing']), 'do a thing');
-	t.is(parsePrompt(['run', 'do', '--gui', 'a', 'thing']), 'do a thing');
 });
 
 test('CLI parsing: version flag takes precedence over other arguments', t => {
@@ -345,4 +324,235 @@ test('plain mode: --vscode suppresses auto-detection', t => {
 	});
 	t.false(plainMode);
 	t.true(vscodeMode);
+});
+
+// --alt-screen / --no-alt-screen flag tests. The resolution rule mirrors
+// the logic in cli.tsx: --no-alt-screen always wins (forces inline), then
+// --alt-screen or the "alternateScreen" preference opt in, and the whole
+// thing is gated on being an interactive TTY session (never in
+// nonInteractiveMode, e.g. `run`, and never off a real TTY).
+function resolveAltScreenMode(opts: {
+	args: string[];
+	stdoutIsTTY: boolean;
+	nonInteractiveMode: boolean;
+	preferenceAlternateScreen: boolean;
+}): boolean {
+	const {args, stdoutIsTTY, nonInteractiveMode, preferenceAlternateScreen} =
+		opts;
+	const altScreenAllowed =
+		!args.includes('--no-alt-screen') &&
+		(args.includes('--alt-screen') || preferenceAlternateScreen === true);
+	return stdoutIsTTY && !nonInteractiveMode && altScreenAllowed;
+}
+
+test('alt-screen: off by default (no flag, no preference)', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: [],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: --alt-screen flag turns it on over a TTY', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: "alternateScreen" preference turns it on without the flag', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: [],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: true,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: --no-alt-screen overrides the flag', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen', '--no-alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: --no-alt-screen overrides the persisted preference', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--no-alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: true,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: never enabled off a non-TTY, even with the flag', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: false,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: never enabled for non-interactive `run` mode, even with the flag', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: true,
+		preferenceAlternateScreen: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: flag and preference both true is not double-negated', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: true,
+	});
+	t.true(useAltScreen);
+});
+
+// --continue / -c and --resume / -r flag parsing tests. Mirrors the logic in
+// cli.tsx: mutual exclusion, optional id/index after --resume, and rejection
+// when combined with the `run` command.
+function resolveResumeFlags(args: string[]): {
+	continueRequested: boolean;
+	resumeRequested: boolean;
+	resumeArg: string | undefined;
+	mutuallyExclusiveError: boolean;
+	nonInteractiveError: boolean;
+} {
+	const runCommandIndex = args.findIndex(arg => arg === 'run');
+	const nonInteractiveMode = runCommandIndex !== -1;
+
+	const continueRequested =
+		args.includes('--continue') || args.includes('-c');
+	const resumeFlagIndex = args.findIndex(
+		arg => arg === '--resume' || arg === '-r',
+	);
+	const resumeRequested = resumeFlagIndex !== -1;
+
+	const mutuallyExclusiveError = continueRequested && resumeRequested;
+
+	let resumeArg: string | undefined;
+	if (resumeRequested) {
+		const next = args[resumeFlagIndex + 1];
+		if (next && !next.startsWith('-') && next !== 'run') {
+			resumeArg = next;
+		}
+	}
+
+	const nonInteractiveError =
+		(continueRequested || resumeRequested) &&
+		nonInteractiveMode &&
+		!mutuallyExclusiveError;
+
+	return {
+		continueRequested,
+		resumeRequested,
+		resumeArg,
+		mutuallyExclusiveError,
+		nonInteractiveError,
+	};
+}
+
+test('resume flags: detects --continue', t => {
+	const {continueRequested} = resolveResumeFlags(['--continue']);
+	t.true(continueRequested);
+});
+
+test('resume flags: detects -c shorthand', t => {
+	const {continueRequested} = resolveResumeFlags(['-c']);
+	t.true(continueRequested);
+});
+
+test('resume flags: detects --resume with no id', t => {
+	const {resumeRequested, resumeArg} = resolveResumeFlags(['--resume']);
+	t.true(resumeRequested);
+	t.is(resumeArg, undefined);
+});
+
+test('resume flags: detects -r shorthand with no id', t => {
+	const {resumeRequested, resumeArg} = resolveResumeFlags(['-r']);
+	t.true(resumeRequested);
+	t.is(resumeArg, undefined);
+});
+
+test('resume flags: captures an id after --resume', t => {
+	const {resumeRequested, resumeArg} = resolveResumeFlags([
+		'--resume',
+		'last',
+	]);
+	t.true(resumeRequested);
+	t.is(resumeArg, 'last');
+});
+
+test('resume flags: captures a numeric index after -r', t => {
+	const {resumeArg} = resolveResumeFlags(['-r', '2']);
+	t.is(resumeArg, '2');
+});
+
+test('resume flags: captures a raw uuid after --resume', t => {
+	const {resumeArg} = resolveResumeFlags([
+		'--resume',
+		'123e4567-e89b-42d3-a456-426614174000',
+	]);
+	t.is(resumeArg, '123e4567-e89b-42d3-a456-426614174000');
+});
+
+test('resume flags: does not treat a following flag as the resume id', t => {
+	const {resumeArg} = resolveResumeFlags(['--resume', '--alt-screen']);
+	t.is(resumeArg, undefined);
+});
+
+test('resume flags: does not treat a following `run` as the resume id', t => {
+	const {resumeArg} = resolveResumeFlags(['--resume', 'run', 'do a thing']);
+	t.is(resumeArg, undefined);
+});
+
+test('resume flags: --continue and --resume together is an error', t => {
+	const {mutuallyExclusiveError} = resolveResumeFlags([
+		'--continue',
+		'--resume',
+	]);
+	t.true(mutuallyExclusiveError);
+});
+
+test('resume flags: -c and -r together is an error', t => {
+	const {mutuallyExclusiveError} = resolveResumeFlags(['-c', '-r']);
+	t.true(mutuallyExclusiveError);
+});
+
+test('resume flags: neither flag alone is not a mutual-exclusion error', t => {
+	t.false(resolveResumeFlags(['--continue']).mutuallyExclusiveError);
+	t.false(resolveResumeFlags(['--resume']).mutuallyExclusiveError);
+	t.false(resolveResumeFlags([]).mutuallyExclusiveError);
+});
+
+test('resume flags: --continue combined with `run` is an error', t => {
+	const {nonInteractiveError} = resolveResumeFlags(['--continue', 'run', 'hi']);
+	t.true(nonInteractiveError);
+});
+
+test('resume flags: --resume combined with `run` is an error', t => {
+	const {nonInteractiveError} = resolveResumeFlags(['--resume', 'run', 'hi']);
+	t.true(nonInteractiveError);
+});
+
+test('resume flags: --continue without `run` is not a non-interactive error', t => {
+	const {nonInteractiveError} = resolveResumeFlags(['--continue']);
+	t.false(nonInteractiveError);
 });

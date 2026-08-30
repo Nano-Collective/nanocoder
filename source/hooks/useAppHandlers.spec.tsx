@@ -12,6 +12,8 @@ import {
 	getKeyGeneratorSessionId,
 	setKeyGeneratorSessionId,
 } from '@/session/key-generator';
+import {clearAppConfig} from '@/config/index';
+import {resetPreferencesCache} from '@/config/preferences';
 
 console.log('\nuseAppHandlers.spec.tsx');
 
@@ -61,20 +63,22 @@ function makeProps(overrides: ProbeOverrides) {
 	const setCurrentProvider = spy<[string]>();
 	const setCurrentModel = spy<[string]>();
 	const setLiveTaskList = spy<[unknown]>();
+	const setPlanReviewState = spy<
+		[{show: boolean; originalMessage: string} | null]
+	>();
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const setChatComponents = spy<[React.ReactNode[]]>();
 	const setLiveComponent = spy<[React.ReactNode]>();
 	const enterModelSelectionMode = spy<[]>();
 	const enterModelDatabaseMode = spy<[]>();
-	const enterConfigWizardMode = spy<[]>();
 	const enterSettingsMode = spy<[]>();
-	const enterMcpWizardMode = spy<[]>();
 	const enterExplorerMode = spy<[]>();
 	const enterIdeSelectionMode = spy<[]>();
 	const enterTune = spy<[]>();
 	const enterSchedulerMode = spy<[]>();
 	const handleChatMessage = spy<[string]>();
 	const dismissActiveEditor = spy<[]>();
+	const handleModelSelect = spy<[string, string, boolean?]>();
 
 	const baseProps = {
 		messages: overrides.messages ?? [],
@@ -91,6 +95,9 @@ function makeProps(overrides: ProbeOverrides) {
 		customCommandCache: new Map<string, CustomCommand>(),
 		customCommandLoader: null,
 		customCommandExecutor: null,
+		currentSessionId: '11111111-1111-4111-8111-111111111111',
+		ensureCurrentSessionId: () =>
+			'11111111-1111-4111-8111-111111111111',
 		updateMessages,
 		setIsCancelling,
 		setDevelopmentMode,
@@ -104,6 +111,7 @@ function makeProps(overrides: ProbeOverrides) {
 		setCurrentProvider,
 		setCurrentModel,
 		setLiveTaskList,
+		setPlanReviewState,
 		addToChatQueue,
 		setChatComponents,
 		setLiveComponent,
@@ -111,9 +119,7 @@ function makeProps(overrides: ProbeOverrides) {
 		getMessageTokens: () => 0,
 		enterModelSelectionMode,
 		enterModelDatabaseMode,
-		enterConfigWizardMode,
 		enterSettingsMode,
-		enterMcpWizardMode,
 		enterExplorerMode,
 		enterIdeSelectionMode,
 		enterTune,
@@ -122,6 +128,10 @@ function makeProps(overrides: ProbeOverrides) {
 			handleChatMessage(m);
 		},
 		dismissActiveEditor: () => dismissActiveEditor(),
+		developmentMode: overrides.developmentMode ?? 'normal',
+		handleModelSelect: async (provider: string, model: string, isProgrammatic?: boolean) => {
+			handleModelSelect(provider, model, isProgrammatic);
+		},
 	};
 
 	return {
@@ -138,7 +148,9 @@ function makeProps(overrides: ProbeOverrides) {
 			setCurrentSessionId,
 			setChatComponents,
 			addToChatQueue,
+			setPlanReviewState,
 			dismissActiveEditor,
+			handleModelSelect,
 		},
 	};
 }
@@ -179,7 +191,7 @@ test('returns the expected handler surface', t => {
 });
 
 test('handleCancel without an abort controller is a no-op', t => {
-	const {handlers, spies} = setup({abortController: null});
+	const { handlers, spies } = setup({ abortController: null });
 
 	handlers.handleCancel();
 
@@ -188,7 +200,7 @@ test('handleCancel without an abort controller is a no-op', t => {
 
 test('handleCancel aborts the controller and sets cancelling=true', t => {
 	const controller = new AbortController();
-	const {handlers, spies} = setup({abortController: controller});
+	const { handlers, spies } = setup({ abortController: controller });
 
 	handlers.handleCancel();
 
@@ -196,37 +208,148 @@ test('handleCancel aborts the controller and sets cancelling=true', t => {
 	t.true(controller.signal.aborted);
 });
 
-test('handleToggleDevelopmentMode cycles through modes via the updater', t => {
-	const {handlers, spies} = setup();
-
+test('handleToggleDevelopmentMode cycles through modes', t => {
+	const { handlers, spies } = setup({ developmentMode: 'normal' });
 	handlers.handleToggleDevelopmentMode();
-	t.is(spies.setDevelopmentMode.calls.length, 1);
+	t.deepEqual(spies.setDevelopmentMode.calls, [['auto-accept']]);
 
-	const updater = spies.setDevelopmentMode.calls[0]![0] as (
-		prev: DevelopmentMode,
-	) => DevelopmentMode;
-	t.is(updater('normal'), 'auto-accept');
-	t.is(updater('auto-accept'), 'yolo');
-	t.is(updater('yolo'), 'plan');
-	t.is(updater('plan'), 'normal');
+	const { handlers: h2, spies: s2 } = setup({ developmentMode: 'auto-accept' });
+	h2.handleToggleDevelopmentMode();
+	t.deepEqual(s2.setDevelopmentMode.calls, [['yolo']]);
+
+	const { handlers: h3, spies: s3 } = setup({ developmentMode: 'yolo' });
+	h3.handleToggleDevelopmentMode();
+	t.deepEqual(s3.setDevelopmentMode.calls, [['plan']]);
+
+	const { handlers: h4, spies: s4 } = setup({ developmentMode: 'plan' });
+	h4.handleToggleDevelopmentMode();
+	t.deepEqual(s4.setDevelopmentMode.calls, [['normal']]);
+});
+
+test('declining execution keeps Plan Mode active and asks for revisions', t => {
+	const {handlers, spies} = setup({developmentMode: 'plan'});
+
+	handlers.handlePlanModify();
+
+	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
+	t.deepEqual(spies.setDevelopmentMode.calls, []);
+	const notice = spies.addToChatQueue.calls.at(-1)?.[0];
+	t.true(
+		React.isValidElement(notice) &&
+			String((notice.props as {message?: string}).message).includes(
+				'Plan Mode remains active',
+			),
+	);
+	t.true(
+		React.isValidElement(notice) &&
+			String((notice.props as {message?: string}).message).includes(
+				'what to change',
+			),
+	);
+});
+
+async function withMockConfig(
+	config: any,
+	preferences: any,
+	fn: () => Promise<void>
+) {
+	const {tmpdir} = await import('os');
+	const {join} = await import('path');
+	const {mkdirSync, writeFileSync, rmSync} = await import('fs');
+	
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const originalCwd = process.cwd();
+	const testDir = join(tmpdir(), `nanocoder-apphandlers-test-${Date.now()}-${Math.random()}`);
+	mkdirSync(testDir, {recursive: true});
+
+	try {
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(config));
+		writeFileSync(join(testDir, 'nanocoder-preferences.json'), JSON.stringify(preferences));
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+		process.chdir(testDir);
+		clearAppConfig();
+		resetPreferencesCache();
+		
+		await fn();
+	} finally {
+		if (originalConfigDir) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		process.chdir(originalCwd);
+		clearAppConfig();
+		resetPreferencesCache();
+		rmSync(testDir, {recursive: true, force: true});
+	}
+}
+
+test.serial('handleToggleDevelopmentMode calls handleModelSelect using modeProviders if configured', async t => {
+	const config = {
+		nanocoder: {
+			providers: [
+				{name: 'test-provider', models: ['model-1']}
+			],
+			modeProviders: {
+				'auto-accept': {provider: 'test-provider', model: 'model-1'}
+			}
+		}
+	};
+	
+	await withMockConfig(config, {}, async () => {
+		const {handlers, spies} = setup({developmentMode: 'normal'});
+		handlers.handleToggleDevelopmentMode();
+		
+		// Wait a tick for the async void function to run
+		await new Promise(resolve => setTimeout(resolve, 0));
+		
+		t.is(spies.handleModelSelect.calls.length, 1);
+		t.is(spies.handleModelSelect.calls[0]![0], 'test-provider');
+		t.is(spies.handleModelSelect.calls[0]![1], 'model-1');
+		t.is(spies.handleModelSelect.calls[0]![2], true);
+	});
+});
+
+test.serial('handleToggleDevelopmentMode uses fallback if modeProviders is not configured', async t => {
+	const config = {
+		nanocoder: {
+			providers: [
+				{name: 'fallback-provider', models: ['fallback-model']}
+			]
+		}
+	};
+	
+	const prefs = {
+		lastProvider: 'fallback-provider',
+		lastModel: 'fallback-model',
+	};
+	
+	await withMockConfig(config, prefs, async () => {
+		const {handlers, spies} = setup({developmentMode: 'normal'});
+		handlers.handleToggleDevelopmentMode();
+		
+		// Wait a tick for the async void function to run
+		await new Promise(resolve => setTimeout(resolve, 0));
+		
+		t.is(spies.handleModelSelect.calls.length, 1);
+		t.is(spies.handleModelSelect.calls[0]![0], 'fallback-provider');
+		t.is(spies.handleModelSelect.calls[0]![1], 'fallback-model');
+		t.is(spies.handleModelSelect.calls[0]![2], true);
+	});
 });
 
 test('handleToggleDevelopmentMode preserves headless mode', t => {
 	// Headless is entered by the daemon for triggered runs, not by the user.
 	// Shift+Tab cycles only through user-facing modes; if `developmentMode`
 	// is somehow `headless` when toggle fires, it should stay there.
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup({ developmentMode: 'headless' });
 
 	handlers.handleToggleDevelopmentMode();
-	const updater = spies.setDevelopmentMode.calls[0]![0] as (
-		prev: DevelopmentMode,
-	) => DevelopmentMode;
-
-	t.is(updater('headless'), 'headless');
+	t.is(spies.setDevelopmentMode.calls.length, 0);
 });
 
 test('handleCheckpointCancel clears active mode and checkpoint data', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.handleCheckpointCancel();
 
@@ -235,7 +358,7 @@ test('handleCheckpointCancel clears active mode and checkpoint data', t => {
 });
 
 test('handleSessionCancel clears active mode', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.handleSessionCancel();
 
@@ -243,10 +366,10 @@ test('handleSessionCancel clears active mode', t => {
 });
 
 test('enterCheckpointLoadMode sets data then activates the mode', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	const checkpoints = [
-		{name: 'cp1', timestamp: 0, messageCount: 0} as unknown as CheckpointListItem,
+		{ name: 'cp1', timestamp: 0, messageCount: 0 } as unknown as CheckpointListItem,
 	];
 
 	handlers.enterCheckpointLoadMode(checkpoints, 5);
@@ -260,7 +383,7 @@ test('enterCheckpointLoadMode sets data then activates the mode', t => {
 });
 
 test('enterSessionSelectorMode defaults showAll to false', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.enterSessionSelectorMode();
 
@@ -269,7 +392,7 @@ test('enterSessionSelectorMode defaults showAll to false', t => {
 });
 
 test('enterSessionSelectorMode forwards showAll=true when requested', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.enterSessionSelectorMode(true);
 
@@ -278,8 +401,8 @@ test('enterSessionSelectorMode forwards showAll=true when requested', t => {
 });
 
 test('clearMessages resets key generator session ID', async t => {
-	const {handlers} = setup({
-		messages: [{role: 'user', content: 'test'}],
+	const { handlers } = setup({
+		messages: [{ role: 'user', content: 'test' }],
 	});
 
 	setKeyGeneratorSessionId('old-session-id-prefix');

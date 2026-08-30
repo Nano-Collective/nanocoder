@@ -1,4 +1,4 @@
-import {Box, Text, useApp} from 'ink';
+import {Box, Text, useApp, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import {createStaticComponents} from '@/app/components/app-container';
@@ -16,6 +16,7 @@ import {SuccessMessage} from '@/components/message-box';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
+import {SubagentView} from '@/components/subagent-view';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -41,6 +42,7 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
 import type {ImageAttachment} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
@@ -59,6 +61,9 @@ export default function App({
 	cliModel,
 	cliMode,
 	trustDirectory = false,
+	altScreenActive = false,
+	initialSession,
+	openSessionSelectorOnStart = false,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -103,10 +108,77 @@ export default function App({
 	const [extensionPromptComplete, setExtensionPromptComplete] =
 		React.useState(false);
 
+	// Conversation ID to force re-render of all content on /clear
+	const [conversationId, setConversationId] = React.useState(() =>
+		crypto.randomUUID(),
+	);
+
+	// Track whether we should show welcome (reset on /clear to clear banner)
+	const [showWelcome, setShowWelcome] = React.useState(true);
+
+	// Exit WITHOUT unmounting Ink first: the shutdown manager's
+	// 'tui-exit-render' handler (cli.tsx) erases the live region and prints
+	// the farewell — ink's clear() only works while still mounted. A second
+	// Ctrl+C while shutdown is in flight force-quits immediately.
+	const isExitingRef = React.useRef(false);
 	const handleExit = () => {
-		exit();
+		if (isExitingRef.current) {
+			exit();
+			process.exit(0);
+		}
+		isExitingRef.current = true;
 		void getShutdownManager().gracefulShutdown(0);
 	};
+
+	// Mirror of attachedAgentId that updates synchronously, so rapid Ctrl+S
+	// presses cycle correctly even before React commits the previous change.
+	const attachedAgentIdRef = React.useRef(appState.attachedAgentId);
+	React.useEffect(() => {
+		attachedAgentIdRef.current = appState.attachedAgentId;
+	}, [appState.attachedAgentId]);
+
+	// Attach/cycle/detach the subagent inspector. The transcript renders
+	// through <Static> (append-only, permanent scrollback), so switching
+	// views needs the same treatment as /clear: wipe the real terminal, then
+	// let the remounted <Static> (keyed by agentId / conversationId) reprint.
+	const changeAttachedAgent = (nextAgentId: string | null) => {
+		if (attachedAgentIdRef.current === nextAgentId) {
+			return;
+		}
+		attachedAgentIdRef.current = nextAgentId;
+		if (!altScreenActive && process.stdout.isTTY) {
+			process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
+		}
+		appState.setAttachedAgentId(nextAgentId);
+	};
+
+	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
+	// the same graceful path as /exit instead of abandoning the last frame.
+	useInput((input, key) => {
+		if (key.ctrl && input === 'c') {
+			handleExit();
+		}
+		if (key.ctrl && input === 's') {
+			const progresses = Array.from(getAllSubagentProgress().entries());
+			const runningAgents = progresses
+				.filter(([_, p]) => p.status !== 'complete' && p.status !== 'error')
+				.map(([id]) => id);
+
+			const current = attachedAgentIdRef.current;
+			if (runningAgents.length === 0) {
+				changeAttachedAgent(null);
+			} else if (!current) {
+				changeAttachedAgent(runningAgents[0]);
+			} else {
+				const currentIndex = runningAgents.indexOf(current);
+				changeAttachedAgent(
+					currentIndex === -1
+						? runningAgents[0]
+						: runningAgents[(currentIndex + 1) % runningAgents.length],
+				);
+			}
+		}
+	});
 
 	// VS Code → chat plumbing. The dispatcher is created up front because
 	// useVSCodeServer needs `onPrompt` immediately, and `handleUserSubmit`
@@ -123,24 +195,30 @@ export default function App({
 		onPrompt: vscodePromptDispatcher.handleVSCodePrompt,
 	});
 
-	// Create theme context value
-	const themeContextValue = {
-		currentTheme: appState.currentTheme,
-		colors: getThemeColors(appState.currentTheme),
-		setCurrentTheme: (theme: ThemePreset) => {
-			appState.setCurrentTheme(theme);
-			updateSelectedTheme(theme);
-		},
-	};
+	// Create theme context value (memoized to prevent unnecessary re-renders)
+	const themeContextValue = React.useMemo(
+		() => ({
+			currentTheme: appState.currentTheme,
+			colors: getThemeColors(appState.currentTheme),
+			setCurrentTheme: (theme: ThemePreset) => {
+				appState.setCurrentTheme(theme);
+				updateSelectedTheme(theme);
+			},
+		}),
+		[appState.currentTheme, appState.setCurrentTheme],
+	);
 
-	// Create title shape context value
-	const titleShapeContextValue = {
-		currentTitleShape: appState.currentTitleShape,
-		setCurrentTitleShape: (shape: TitleShape) => {
-			appState.setCurrentTitleShape(shape);
-			updateTitleShape(shape);
-		},
-	};
+	// Create title shape context value (memoized to prevent unnecessary re-renders)
+	const titleShapeContextValue = React.useMemo(
+		() => ({
+			currentTitleShape: appState.currentTitleShape,
+			setCurrentTitleShape: (shape: TitleShape) => {
+				appState.setCurrentTitleShape(shape);
+				updateTitleShape(shape);
+			},
+		}),
+		[appState.currentTitleShape, appState.setCurrentTitleShape],
+	);
 
 	// Initialize global message queue on component mount
 	React.useEffect(() => {
@@ -223,6 +301,11 @@ export default function App({
 			appState.setLiveTaskList(null);
 			drainQueuedUserMessage();
 		},
+		// A turn that started in plan mode finished uninterrupted — a plan was
+		// produced. Flag it so the interactive UI can show the plan review bar.
+		onPlanTurnComplete: () => {
+			appState.setPlanTurnCompleted(true);
+		},
 		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
@@ -236,6 +319,7 @@ export default function App({
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
 		privacyEnabled: getPrivacyPreference(),
+		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 	});
 
 	// Desktop notifications on state transitions. The unified tool flow drives
@@ -332,6 +416,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
+		setSettingsActiveTab: appState.setSettingsActiveTab,
 		addToChatQueue: appState.addToChatQueue,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 		setTune: appState.setTune,
@@ -407,6 +492,19 @@ export default function App({
 		customCommandCache: appState.customCommandCache,
 		customCommandLoader: appState.customCommandLoader,
 		customCommandExecutor: appState.customCommandExecutor,
+		currentSessionId: appState.currentSessionId,
+		ensureCurrentSessionId: appState.ensureCurrentSessionId,
+		onClearCounterIncrement: () => {
+			// Inline mode: /clear must wipe the real terminal (screen +
+			// native scrollback + home) like Claude Code's classic renderer,
+			// otherwise the old transcript stays above the fresh banner. The
+			// fullscreen path repaints its whole fixed-height frame anyway.
+			if (!altScreenActive && process.stdout.isTTY) {
+				process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
+			}
+			setConversationId(crypto.randomUUID());
+			setShowWelcome(true);
+		},
 		updateMessages: appState.updateMessages,
 		setIsCancelling: appState.setIsCancelling,
 		setDevelopmentMode: appState.setDevelopmentMode,
@@ -420,6 +518,8 @@ export default function App({
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
+		setPlanReviewState: appState.setPlanReviewState,
+		setPendingPlanProceed: appState.setPendingPlanProceed,
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,
 		setLiveComponent: appState.setLiveComponent,
@@ -427,9 +527,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
-		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 		enterSettingsMode: modeHandlers.enterSettingsMode,
-		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		enterExplorerMode: modeHandlers.enterExplorerMode,
 		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
 		enterTune: modeHandlers.enterTune,
@@ -437,6 +535,25 @@ export default function App({
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
+
+	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
+	// the picker for a bare --resume), once on mount. Reuses the exact same
+	// applySession path as the in-app /resume command so messages, provider,
+	// model, sessionId, key-generator reseed, and scrollback replay all stay
+	// in sync. Guarded by a ref (not an empty dep array) so a re-render before
+	// the effect fires — e.g. from the vscode-prompt-dispatcher bind above —
+	// can't apply it twice.
+	const startupSessionAppliedRef = React.useRef(false);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: startup-only effect, guarded by the ref above
+	React.useEffect(() => {
+		if (startupSessionAppliedRef.current) return;
+		startupSessionAppliedRef.current = true;
+		if (initialSession) {
+			appHandlers.applySession(initialSession);
+		} else if (openSessionSelectorOnStart) {
+			appState.setActiveMode('sessionSelector');
+		}
+	}, []);
 
 	// Bind the chat-input submit handler into the VS Code prompt dispatcher
 	// now that appHandlers exists. The dispatcher was created earlier (before
@@ -483,29 +600,21 @@ export default function App({
 		setCurrentSessionId: appState.setCurrentSessionId,
 	});
 
-	const shouldShowWelcome = !nonInteractiveMode;
-
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
 	// indicator.
-	const staticComponents = React.useMemo(
-		() =>
-			createStaticComponents({
-				shouldShowWelcome,
-				currentProvider: appState.currentProvider,
-				currentModel: appState.currentModel,
-				nonInteractiveMode,
-				developmentMode: initialDevelopmentMode,
-			}),
-		[
-			shouldShowWelcome,
-			appState.currentProvider,
-			appState.currentModel,
+	const initialProvider = React.useRef(appState.currentProvider);
+	const initialModel = React.useRef(appState.currentModel);
+	const staticComponents = React.useMemo(() => {
+		return createStaticComponents({
+			shouldShowWelcome: showWelcome && !nonInteractiveMode,
+			currentProvider: initialProvider.current,
+			currentModel: initialModel.current,
 			nonInteractiveMode,
-			initialDevelopmentMode,
-		],
-	);
+			developmentMode: initialDevelopmentMode,
+		});
+	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
@@ -643,20 +752,29 @@ export default function App({
 	return (
 		<ThemeContext.Provider value={themeContextValue}>
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
-				<UIStateProvider>
-					<PrivacyContext.Provider
-						value={{
-							privacyEnabled: getPrivacyPreference(),
-							privacySessionMapRef: appState.privacySessionMapRef,
-						}}
-					>
+				<PrivacyContext.Provider
+					value={{
+						privacyEnabled: getPrivacyPreference(),
+						privacySessionMapRef: appState.privacySessionMapRef,
+					}}
+				>
+					{appState.attachedAgentId ? (
+						<SubagentView
+							agentId={appState.attachedAgentId}
+							onDetach={() => changeAttachedAgent(null)}
+							reasoningExpanded={appState.reasoningExpanded}
+							altScreenActive={altScreenActive}
+						/>
+					) : (
 						<InteractiveApp
+							altScreenActive={altScreenActive}
 							appState={appState}
 							chatHandler={chatHandler}
 							modeHandlers={modeHandlers}
 							appHandlers={appHandlers}
 							vscodeServer={vscodeServer}
 							staticComponents={staticComponents}
+							clearKey={conversationId}
 							liveComponent={liveComponent}
 							pendingSubagentApproval={pendingSubagentApproval}
 							handleSubagentToolApproval={handleSubagentToolApproval}
@@ -667,8 +785,8 @@ export default function App({
 							userMessageQueue={userMessageQueue}
 							handleIdeSelect={handleIdeSelect}
 						/>
-					</PrivacyContext.Provider>
-				</UIStateProvider>
+					)}
+				</PrivacyContext.Provider>
 			</TitleShapeContext.Provider>
 		</ThemeContext.Provider>
 	);

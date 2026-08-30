@@ -2,7 +2,10 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {clearAppConfig, confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {resolveTune} from './tune';
+
+type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
 
 console.log(`\nindex.spec.ts`);
 
@@ -574,3 +577,415 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 		},
 	);
 });
+
+// Tests for agent-loop retry limits (nanocoder.retries)
+async function withRetriesConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (retries: {
+		maxRepeatedToolCalls: number;
+		maxEmptyTurns: number;
+		maxMalformedRetries: number;
+	}) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		const retries = getAppConfig().retries;
+		if (!retries) {
+			throw new Error('Resolved config should always carry retry limits');
+		}
+		assertion(retries);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial('retry limits default to the historical caps when not configured', async t => {
+	await withRetriesConfig('retries-default', {nanocoder: {}}, retries => {
+		t.is(retries.maxRepeatedToolCalls, 3);
+		t.is(retries.maxEmptyTurns, 2);
+		t.is(retries.maxMalformedRetries, 2);
+	});
+});
+
+test.serial('retry limits load custom values from config', async t => {
+	await withRetriesConfig(
+		'retries-config',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: 10,
+					maxEmptyTurns: 5,
+					maxMalformedRetries: 4,
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 10);
+			t.is(retries.maxEmptyTurns, 5);
+			t.is(retries.maxMalformedRetries, 4);
+		},
+	);
+});
+
+test.serial('retry limits apply defaults for fields not configured', async t => {
+	await withRetriesConfig(
+		'retries-partial',
+		{nanocoder: {retries: {maxRepeatedToolCalls: 7}}},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 7);
+			t.is(retries.maxEmptyTurns, 2);
+			t.is(retries.maxMalformedRetries, 2);
+		},
+	);
+});
+
+test.serial('retry limits clamp maxRepeatedToolCalls to at least 2', async t => {
+	await withRetriesConfig(
+		'retries-clamp-repeated',
+		{nanocoder: {retries: {maxRepeatedToolCalls: 1}}},
+		retries => {
+			// A fresh tool call already counts as 1 repeat, so anything below 2
+			// would pause on every single tool call.
+			t.is(retries.maxRepeatedToolCalls, 2);
+		},
+	);
+});
+
+test.serial('retry limits clamp negative values to their minimums', async t => {
+	await withRetriesConfig(
+		'retries-clamp-negative',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: -5,
+					maxEmptyTurns: -1,
+					maxMalformedRetries: -1,
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 2);
+			t.is(retries.maxEmptyTurns, 0);
+			t.is(retries.maxMalformedRetries, 0);
+		},
+	);
+});
+
+test.serial('retry limits ignore non-numeric values', async t => {
+	await withRetriesConfig(
+		'retries-invalid-types',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: 'lots',
+					maxEmptyTurns: null,
+					maxMalformedRetries: {nope: true},
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 3);
+			t.is(retries.maxEmptyTurns, 2);
+			t.is(retries.maxMalformedRetries, 2);
+		},
+	);
+});
+
+test.serial('getRetryLimits falls back per field, not per object', async t => {
+	// A retries object missing a key would otherwise hand callers `undefined`,
+	// and every `count >= limit` guard reading it evaluates false, silently
+	// disabling the cap.
+	const {
+		getAppConfig,
+		getRetryLimits,
+		reloadAppConfig: reload,
+	} = await import('./index.js');
+	const config = getAppConfig();
+	const original = config.retries;
+	config.retries = {maxEmptyTurns: 5} as unknown as typeof original;
+	try {
+		const limits = getRetryLimits();
+		t.is(limits.maxEmptyTurns, 5);
+		t.is(limits.maxRepeatedToolCalls, 3);
+		t.is(limits.maxMalformedRetries, 2);
+	} finally {
+		config.retries = original;
+		reload();
+	}
+});
+
+// Tests for modeProviders
+async function withModeProvidersConfig(
+	testName: string,
+	configData: Record<string, unknown>,
+	assertionFn: (modeProviders: unknown) => void,
+) {
+	const {tmpdir} = await import('os');
+	const {join} = await import('path');
+	const {mkdirSync, writeFileSync, rmSync} = await import('fs');
+	
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testDir = join(tmpdir(), `nanocoder-modeproviders-test-${Date.now()}-${testName}`);
+	mkdirSync(testDir, {recursive: true});
+
+	try {
+		// Define some valid providers to test against
+		const providers = [
+			{
+				name: 'TestProvider1',
+				models: ['model1', 'model2'],
+			},
+			{
+				name: 'TestProvider2',
+				models: [],
+			}
+		];
+		
+		const fullConfig = {
+			...configData,
+			nanocoder: {
+				...(configData.nanocoder as Record<string, unknown> || {}),
+				providers,
+			}
+		};
+
+		writeFileSync(
+			join(testDir, 'agents.config.json'),
+			JSON.stringify(fullConfig),
+			'utf-8',
+		);
+		process.chdir(testDir);
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+
+		const {
+			reloadAppConfig: reload,
+			getAppConfig,
+		} = await import('./index.js');
+		
+		reload();
+		assertionFn(getAppConfig().modeProviders);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		rmSync(testDir, {recursive: true, force: true});
+	}
+}
+
+test.serial('modeProviders loads valid config', async t => {
+	await withModeProvidersConfig(
+		'valid',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1',
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.deepEqual(modeProviders, {
+				plan: {
+					provider: 'TestProvider1',
+					model: 'model1'
+				}
+			});
+		}
+	);
+});
+
+test.serial('modeProviders ignores missing provider or model string', async t => {
+	await withModeProvidersConfig(
+		'missing-fields',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1'
+					},
+					yolo: {
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders ignores unknown provider', async t => {
+	await withModeProvidersConfig(
+		'unknown-provider',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'UnknownProvider',
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders ignores unknown model for provider', async t => {
+	await withModeProvidersConfig(
+		'unknown-model',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1',
+						model: 'unknown-model'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders accepts model if provider has empty models list', async t => {
+	await withModeProvidersConfig(
+		'empty-models-list',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider2',
+						model: 'any-model'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.deepEqual(modeProviders, {
+				plan: {
+					provider: 'TestProvider2',
+					model: 'any-model'
+				}
+			});
+		}
+	);
+});
+
+// Tests for tune (nanocoder.tune)
+const tuneTestDir = join(tmpdir(), `nanocoder-tune-test-${Date.now()}`);
+
+test.before(() => {
+	mkdirSync(tuneTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(tuneTestDir)) {
+		rmSync(tuneTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withTuneConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (appConfig: AppConfig) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(tuneTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial(
+	'loadAppConfig reads nanocoder.tune.includeAgentsMd from agents.config.json',
+	async t => {
+		await withTuneConfig(
+			'tune-include-agents-md',
+			{nanocoder: {tune: {includeAgentsMd: false}}},
+			appConfig => {
+				t.is(appConfig.tune?.includeAgentsMd, false);
+			},
+		);
+	},
+);
+
+test.serial(
+	'resolveTune applies project tune end-to-end through getAppConfig()',
+	async t => {
+		await withTuneConfig(
+			'tune-resolve-e2e',
+			{nanocoder: {tune: {includeAgentsMd: false}}},
+			appConfig => {
+				const resolved = resolveTune(appConfig, undefined, {});
+				// agents.config.json tune flows through and is not overridden by empty preferences
+				t.is(resolved.includeAgentsMd, false);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig returns no tune when agents.config.json omits it',
+	async t => {
+		await withTuneConfig(
+			'tune-absent',
+			{nanocoder: {}},
+			appConfig => {
+				t.is(appConfig.tune, undefined);
+			},
+		);
+	},
+);

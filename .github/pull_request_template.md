@@ -9,6 +9,12 @@ Brief description of what this PR does
 - [ ] Breaking change
 - [ ] Documentation update
 
+## Changeset
+
+- [ ] Added a changeset (`pnpm changeset`) describing this change for the changelog
+
+Docs-only or internal chores need no changeset (or run `pnpm changeset --empty` to note that intentionally).
+
 ## Testing
 
 ### Automated Tests
@@ -26,6 +32,7 @@ Brief description of what this PR does
 
 ## Checklist
 
+- [ ] If this was for an open issue, I was assigned to it
 - [ ] Code follows project style guidelines
 - [ ] Self-review completed
 - [ ] Documentation updated (if needed)

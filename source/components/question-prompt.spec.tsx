@@ -135,6 +135,68 @@ test('QuestionPrompt renders with 2 options (minimum)', t => {
 	unmount();
 });
 
+// ============================================================================
+// Tests for rich option metadata (description + pros/cons)
+// ============================================================================
+
+test('QuestionPrompt renders the description and pros/cons of the selected option', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<QuestionPrompt
+			question={createQuestion({
+				options: ['JWT', 'Session'],
+				allowFreeform: false,
+				optionMeta: [
+					{
+						label: 'JWT',
+						description: 'Stateless tokens',
+						pros: ['Scalable'],
+						cons: ['Revocation'],
+					},
+					{label: 'Session'},
+				],
+			})}
+			onAnswer={() => {}}
+		/>,
+	);
+	const output = lastFrame()!;
+	// First option is selected by default, so its meta is shown.
+	t.regex(output, /Stateless tokens/);
+	t.regex(output, /Scalable/);
+	t.regex(output, /Revocation/);
+	unmount();
+});
+
+// Regression: a model returned pros/cons as a bare string rather than an array.
+// The old guard (`meta.pros && meta.pros.length > 0`) passed for a string, then
+// `.map` threw ("meta.pros.map is not a function"), crashing the whole prompt.
+// The renderer must coerce defensively and never throw.
+test('QuestionPrompt does not crash when pros/cons arrive as a non-array', t => {
+	t.notThrows(() => {
+		const {lastFrame, unmount} = renderWithTheme(
+			<QuestionPrompt
+				question={createQuestion({
+					options: ['JWT', 'Session'],
+					allowFreeform: false,
+					optionMeta: [
+						{
+							label: 'JWT',
+							description: 'Stateless',
+							// Model-supplied bad shapes — cast past the type.
+							pros: 'Scalable' as never,
+							cons: 'Revocation' as never,
+						},
+						{label: 'Session'},
+					],
+				})}
+				onAnswer={() => {}}
+			/>,
+		);
+		t.truthy(lastFrame());
+		t.regex(lastFrame()!, /JWT/);
+		unmount();
+	});
+});
+
 // Regression: when two ask_user calls fire back-to-back the parent batches
 // pendingQuestion null → new, so QuestionPrompt re-renders with new props
 // instead of unmounting. Internal state (answeredRef, freeform mode/value,

@@ -1,7 +1,11 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
-import {useEffect, useState} from 'react';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {useEffect, useRef, useState} from 'react';
+import {
+	getVisualLineSegments,
+	moveCursorToVisualLine,
+	wrapWithTrimmedContinuations,
+} from '@/utils/text-wrapping';
 
 export type Props = {
 	readonly placeholder?: string;
@@ -15,6 +19,7 @@ export type Props = {
 	readonly onEnter?: (value: string) => void;
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
+	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
 };
 
 function TextInput({
@@ -29,6 +34,7 @@ function TextInput({
 	onEnter,
 	wrapWidth,
 	handleEnter = true,
+	onEdgeArrow,
 }: Props) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
@@ -36,6 +42,12 @@ function TextInput({
 	});
 
 	const {cursorOffset, cursorWidth} = state;
+
+	// Refs so useInput handlers always read the latest values (avoids stale closures)
+	const cursorOffsetRef = useRef(cursorOffset);
+	const originalValueRef = useRef(originalValue);
+	cursorOffsetRef.current = cursorOffset;
+	originalValueRef.current = originalValue;
 
 	useEffect(() => {
 		setState(previousState => {
@@ -56,6 +68,24 @@ function TextInput({
 		});
 	}, [originalValue, focus, showCursor]);
 
+	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
+	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
+	function moveToPrevWord(value: string, offset: number): number {
+		let i = offset;
+		// Skip whitespace (spaces + newlines) backward, then word backward
+		while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) i--;
+		while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') i--;
+		return i;
+	}
+
+	function moveToNextWord(value: string, offset: number): number {
+		let i = offset;
+		// Skip word forward, then whitespace (spaces + newlines) forward
+		while (i < value.length && value[i] !== ' ' && value[i] !== '\n') i++;
+		while (i < value.length && (value[i] === ' ' || value[i] === '\n')) i++;
+		return i;
+	}
+
 	const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
 	const value = mask ? mask.repeat(originalValue.length) : originalValue;
 	let renderedValue = value;
@@ -72,10 +102,12 @@ function TextInput({
 		let i = 0;
 
 		for (const char of value) {
-			renderedValue +=
-				i >= cursorOffset - cursorActualWidth && i <= cursorOffset
-					? chalk.inverse(char)
-					: char;
+			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+				renderedValue +=
+					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
+			} else {
+				renderedValue += char;
+			}
 
 			i++;
 		}
@@ -87,104 +119,146 @@ function TextInput({
 
 	useInput(
 		(input, key) => {
-			if (
-				key.upArrow ||
-				key.downArrow ||
-				(key.ctrl && input === 'c') ||
-				key.tab ||
-				(key.shift && key.tab)
-			) {
+			if ((key.ctrl && input === 'c') || key.tab || (key.shift && key.tab)) {
+				return;
+			}
+
+			// Multiline: Up/Down navigate between visual lines instead of history.
+			// Visual lines include soft-wrapped rows — a single long line with no
+			// \n that wraps at wrapWidth is still multiline for navigation.
+			if (key.upArrow || key.downArrow) {
+				const val = originalValueRef.current;
+				const cur = cursorOffsetRef.current;
+				if (!showCursor) {
+					return;
+				}
+
+				const segments = getVisualLineSegments(val, wrapWidth);
+				if (segments.length <= 1) {
+					// Single visual line — parent's useInput handles history
+					return;
+				}
+
+				const direction = key.upArrow ? 'up' : 'down';
+				const next = moveCursorToVisualLine(segments, cur, direction);
+				if (next === null) {
+					// First/last visual line — hand off to history navigation
+					onEdgeArrow?.(direction);
+				} else {
+					cursorOffsetRef.current = next;
+					setState(s => ({...s, cursorOffset: next}));
+				}
 				return;
 			}
 
 			if (key.return) {
 				if (handleEnter && onEnter) {
-					onEnter(originalValue);
+					onEnter(originalValueRef.current);
 					return;
 				}
 				if (handleEnter && onSubmit) {
-					onSubmit(originalValue);
+					onSubmit(originalValueRef.current);
 					return;
 				}
 				return;
 			}
 
-			let nextCursorOffset = cursorOffset;
-			let nextValue = originalValue;
+			let nextCursorOffset = cursorOffsetRef.current;
+			let nextValue = originalValueRef.current;
 			let nextCursorWidth = 0;
 
 			if (key.ctrl) {
-				// Readline keybinds
-				switch (input) {
-					case 'a': {
-						// Move cursor to start of line
-						nextCursorOffset = 0;
-						break;
+				if (key.leftArrow) {
+					// Ctrl+Left: jump to start of previous word
+					if (showCursor) {
+						nextCursorOffset = moveToPrevWord(
+							originalValueRef.current,
+							cursorOffsetRef.current,
+						);
 					}
-
-					case 'e': {
-						// Move cursor to end of line
-						nextCursorOffset = originalValue.length;
-						break;
+				} else if (key.rightArrow) {
+					// Ctrl+Right: jump to end of next word
+					if (showCursor) {
+						nextCursorOffset = moveToNextWord(
+							originalValueRef.current,
+							cursorOffsetRef.current,
+						);
 					}
-
-					case 'b': {
-						// Move cursor back one character
-						if (showCursor) {
-							nextCursorOffset--;
+				} else {
+					// Readline keybinds
+					switch (input) {
+						case 'a': {
+							// Move cursor to start of line
+							nextCursorOffset = 0;
+							break;
 						}
 
-						break;
-					}
-
-					case 'f': {
-						// Move cursor forward one character
-						if (showCursor) {
-							nextCursorOffset++;
+						case 'e': {
+							// Move cursor to end of line
+							nextCursorOffset = originalValueRef.current.length;
+							break;
 						}
 
-						break;
-					}
-
-					case 'w': {
-						// Delete previous word (backward-kill-word)
-						if (cursorOffset > 0) {
-							let i = cursorOffset;
-
-							// Skip whitespace immediately before cursor
-							while (i > 0 && originalValue[i - 1] === ' ') {
-								i--;
+						case 'b': {
+							// Move cursor back one character
+							if (showCursor) {
+								nextCursorOffset--;
 							}
 
-							// Delete back to next whitespace or start
-							while (i > 0 && originalValue[i - 1] !== ' ') {
-								i--;
-							}
-
-							nextValue =
-								originalValue.slice(0, i) + originalValue.slice(cursorOffset);
-							nextCursorOffset = i;
+							break;
 						}
 
-						break;
-					}
+						case 'f': {
+							// Move cursor forward one character
+							if (showCursor) {
+								nextCursorOffset++;
+							}
 
-					case 'u': {
-						// Delete from cursor to start of line
-						nextValue = originalValue.slice(cursorOffset);
-						nextCursorOffset = 0;
-						break;
-					}
+							break;
+						}
 
-					case 'k': {
-						// Delete from cursor to end of line
-						nextValue = originalValue.slice(0, cursorOffset);
-						break;
-					}
+						case 'w': {
+							// Delete previous word (backward-kill-word, newline-aware)
+							if (cursorOffset > 0) {
+								let i = cursorOffset;
+								while (
+									i > 0 &&
+									(originalValueRef.current[i - 1] === ' ' ||
+										originalValueRef.current[i - 1] === '\n')
+								)
+									i--;
+								while (
+									i > 0 &&
+									originalValueRef.current[i - 1] !== ' ' &&
+									originalValueRef.current[i - 1] !== '\n'
+								)
+									i--;
+								nextValue =
+									originalValueRef.current.slice(0, i) +
+									originalValueRef.current.slice(cursorOffset);
+								nextCursorOffset = i;
+							}
 
-					default:
-						// Ignore all other ctrl combinations (don't insert characters)
-						break;
+							break;
+						}
+
+						case 'u': {
+							// Delete from cursor to start of line
+							nextValue = originalValueRef.current.slice(cursorOffset);
+							nextCursorOffset = 0;
+							break;
+						}
+
+						case 'k': {
+							// Delete from cursor to end of line
+							nextValue = originalValueRef.current.slice(0, cursorOffset);
+							break;
+						}
+
+						default:
+							// Ignore all other ctrl combinations (don't insert characters)
+							break;
+					}
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
@@ -197,15 +271,21 @@ function TextInput({
 			} else if (key.backspace || key.delete) {
 				if (cursorOffset > 0) {
 					nextValue =
-						originalValue.slice(0, cursorOffset - 1) +
-						originalValue.slice(cursorOffset, originalValue.length);
+						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(
+							cursorOffset,
+							originalValueRef.current.length,
+						);
 					nextCursorOffset--;
 				}
 			} else {
 				nextValue =
-					originalValue.slice(0, cursorOffset) +
+					originalValueRef.current.slice(0, cursorOffset) +
 					input +
-					originalValue.slice(cursorOffset, originalValue.length);
+					originalValueRef.current.slice(
+						cursorOffset,
+						originalValueRef.current.length,
+					);
 				nextCursorOffset += input.length;
 
 				if (input.length > 1) {
@@ -221,12 +301,16 @@ function TextInput({
 				nextCursorOffset = nextValue.length;
 			}
 
+			// Update refs immediately so the next event in the same stdin.read()
+			// block sees the correct values (Ink doesn't re-render between events)
+			cursorOffsetRef.current = nextCursorOffset;
 			setState({
 				cursorOffset: nextCursorOffset,
 				cursorWidth: nextCursorWidth,
 			});
 
-			if (nextValue !== originalValue) {
+			if (nextValue !== originalValueRef.current) {
+				originalValueRef.current = nextValue;
 				onChange(nextValue);
 			}
 		},

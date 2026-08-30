@@ -375,11 +375,37 @@ Nanocoder uses structured logging based on Pino. See [`docs/pino-logging.md`](do
 
 ## Releasing a New Version
 
-> **Releases are handled exclusively by code owners / maintainers.** Contributors should not bump the version, edit the changelog for a release, or update `benchmarks/baseline.json` — these are all maintainer responsibilities. If your PR is ready to ship and you think a release is warranted, say so in the PR description and a maintainer will pick it up.
+> **Cutting a release is handled exclusively by code owners / maintainers.** Contributors should not bump the version, edit `CHANGELOG.md` directly, or update `benchmarks/baseline.json` - these are maintainer responsibilities. Contributors DO, however, add a changeset to their PR (see below); that is how your change gets a changelog entry.
 
-Releases follow a simple three-step flow. Do each step in order — skipping the test gate is how broken releases ship.
+We use [Changesets](https://github.com/changesets/changesets) to manage versions and the changelog. The short version:
 
-### Step 1: Ensure all tests pass
+- Every user-facing PR includes a `.changeset/*.md` file describing the change (written by the author, in our changelog voice).
+- A bot keeps a single open "Version Packages" PR that accumulates those entries and rolls them into `CHANGELOG.md` with the version bump.
+- A maintainer cuts a release simply by merging that PR. The existing `release.yml` then publishes to npm, GitHub, Discord, nix, and homebrew automatically.
+
+### Adding a changeset (contributors)
+
+When your change is user-facing, add a changeset before your PR is merged:
+
+```bash
+pnpm changeset
+```
+
+Pick the bump type and write the entry:
+
+- **Patch** (`1.24.1` → `1.24.2`) - bug fixes only, no behavior changes
+- **Minor** (`1.24.1` → `1.25.0`) - new features, backwards-compatible
+- **Major** - breaking changes
+
+The markdown body you write IS the changelog entry, verbatim. Follow the existing voice: a self-contained bullet describing user-facing impact, with attribution where relevant (`Thanks to @username. Closes #123.`). Commit the generated `.changeset/*.md` file with your PR.
+
+If your PR is docs-only or a chore that needs no release note, you can skip the changeset (a bot will leave a friendly reminder you can ignore), or record the intent explicitly with `pnpm changeset --empty`.
+
+### Cutting the release (maintainers)
+
+Do each step in order - skipping the test gate is how broken releases ship.
+
+#### Step 1: Ensure all tests pass
 
 Run the full local gate from a clean working tree — standard test suite first, then the release-only CLI quality report:
 
@@ -398,35 +424,17 @@ The benchmark is intentionally **not** part of `pnpm test:all` — it is a relea
 - **Health WARNs** (`test_file_count`, `test_case_count`, `audit_high_vulns`) — test count dropping is a red flag (tests shouldn't disappear silently); investigate before releasing. Audit count increases should never be waved through — fix the vulnerability or document why it can't be fixed in this release.
 - **Any FAIL** — do not release. FAILs indicate correctness regressions or metrics that doubled against baseline.
 
-Commit the updated `benchmarks/baseline.json` alongside the version bump so reviewers can see what shifted and why.
+If the baseline shifted, commit the updated `benchmarks/baseline.json` to `main` (or fold it into the Version PR before merging) so reviewers can see what shifted and why.
 
-### Step 2: Update the changelog
+#### Step 2: Merge the Version Packages PR
 
-Edit `CHANGELOG.md` and add a new entry at the top for the upcoming version. Follow the existing format: `# X.Y.Z` as the header, then a bulleted list of changes. Focus on user-facing impact, not implementation detail.
+The `release-prepare.yml` workflow keeps a single open **"Version Packages"** PR up to date as changesets land on `main`. It bumps `package.json` and rolls the pending changesets into `CHANGELOG.md` in our house style (via `pnpm changeset:version`).
 
-Each bullet should stand on its own — a user reading the changelog should understand what changed and why it matters without needing to read the diff. Group related changes into single bullets rather than listing every commit.
+To cut a release, review that PR and merge it whenever you want a release to go out. There is no manual version bump or changelog edit - the PR already contains both.
 
-Include:
+Merging pushes the version bump to `main`, which `release.yml` detects (package.json version differs from npm) and publishes: npm, GitHub release, Discord, nix, and homebrew. Nothing else to do.
 
-- New features and enhancements (what users can now do that they couldn't before)
-- Bug fixes (what was broken)
-- Breaking changes (call these out explicitly at the top)
-- Notable dependency or tooling changes
-- Contributor attribution where relevant (`Thanks to @username.`)
-
-### Step 3: Bump the version
-
-Update `version` in `package.json` following [semver](https://semver.org/):
-
-- **Patch** (`1.24.1` → `1.24.2`) — bug fixes only, no behavior changes
-- **Minor** (`1.24.1` → `1.25.0`) — new features, backwards-compatible
-
-Commit the changelog, version bump, and any baseline updates together:
-
-```bash
-git add CHANGELOG.md package.json benchmarks/baseline.json
-git commit -m "release: vX.Y.Z"
-```
+> The Changesets action here runs **version-only** - it never publishes. `release.yml` remains the single source of truth for publishing. Do not add a `publish:` step to `release-prepare.yml`.
 
 ## Community and Communication
 

@@ -54,7 +54,7 @@ export async function loadFileContent(
 			const metadataContent = [
 				`[Binary file: ${filePath}]`,
 				`Type: ${fileType}`,
-				`Size: ${fileStats.size.toLocaleString()} bytes (${formatBytes(fileStats.size)})`,
+				`Size: ${fileStats.size} bytes (${formatBytes(fileStats.size)})`,
 				`Last Modified: ${fileStats.mtime.toISOString()}`,
 				'',
 				'(Binary files cannot be included as text content)',
@@ -79,8 +79,8 @@ export async function loadFileContent(
 			const estimatedLines = Math.round(fileStats.size / 40);
 			const metadataContent = [
 				`[Large file: ${filePath}]`,
-				`Size: ${fileStats.size.toLocaleString()} bytes (${formatBytes(fileStats.size)})`,
-				`Lines: ~${estimatedLines.toLocaleString()}`,
+				`Size: ${fileStats.size} bytes (${formatBytes(fileStats.size)})`,
+				`Lines: ~${estimatedLines}`,
 				`Last Modified: ${fileStats.mtime.toISOString()}`,
 				'',
 				`(File exceeds ${formatBytes(MAX_FILE_TAG_SIZE_BYTES)} limit for inline tagging. Use @file:1-100 to tag specific line ranges)`,

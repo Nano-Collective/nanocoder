@@ -28,6 +28,13 @@ test('formatProjectContext formats memories as project context', t => {
 	);
 });
 
+test('formatProjectContext strips a leading list marker so bullets are not doubled', t => {
+	t.is(
+		formatProjectContext([memory('- Added a regression test for the 40-column case.')]),
+		'## Project Context\n\n```\n- Added a regression test for the 40-column case.\n```',
+	);
+});
+
 test('formatProjectContext respects token budget', t => {
 	t.is(
 		formatProjectContext(

@@ -68,6 +68,13 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'commit',
+		description:
+			'Generate a conventional commit message from staged changes (--copy)',
+		progressLabel: 'Generating commit message',
+		load: () => import('@/commands/commit').then(m => m.commitCommand),
+	},
+	{
 		name: 'doctor',
 		description: 'Show environment health report for bug reports',
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
@@ -138,20 +145,14 @@ export const lazyCommands: LazyCommand[] = [
 			import('@/commands/setup-config').then(m => m.setupConfigCommand),
 	},
 	{
-		name: 'setup-providers',
-		description: 'Launch interactive configuration wizard',
-		load: () =>
-			import('@/commands/setup-providers').then(m => m.setupProvidersCommand),
-	},
-	{
-		name: 'setup-mcp',
-		description: 'Launch interactive MCP server configuration wizard',
-		load: () => import('@/commands/setup-mcp').then(m => m.setupMcpCommand),
-	},
-	{
 		name: 'usage',
 		description: 'Display token usage statistics',
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
+	},
+	{
+		name: 'tip',
+		description: 'Show a random Nanocoder usage tip',
+		load: () => import('@/commands/tip').then(m => m.tipCommand),
 	},
 	{
 		name: 'checkpoint',
@@ -194,7 +195,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'settings',
 		description:
-			'Configure UI settings (theme, shapes, branding, paste threshold)',
+			'Configure settings (providers, MCP, theme, shapes, paste threshold). Accepts a tab: /settings providers',
 		load: () => import('@/commands/settings').then(m => m.settingsCommand),
 	},
 	{
@@ -231,6 +232,13 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
+	},
+	{
+		name: 'repomap',
+		description:
+			'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+		progressLabel: 'Building repo map',
+		load: () => import('@/commands/repomap').then(m => m.repomapCommand),
 	},
 	{
 		name: 'privacy',

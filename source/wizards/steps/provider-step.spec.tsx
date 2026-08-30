@@ -1,5 +1,5 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import {findTemplateForProvider, ProviderStep} from './provider-step.js';
 
@@ -831,4 +831,191 @@ test.serial('ProviderStep surfaces fetchModels errors', async t => {
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
+});
+
+// ============================================================================
+// Regression: finishing a provider must land somewhere "Done & Save" is
+// visible (issue #829). Landing on the raw template list buried it under 23
+// templates, off screen on a normal terminal — the wizard looked hung.
+// ============================================================================
+
+test.serial(
+	'ProviderStep returns to the root menu after model selection completes',
+	async t => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () =>
+			({
+				ok: true,
+				status: 200,
+				statusText: 'OK',
+				json: async () => ({models: [{name: 'llama4'}, {name: 'qwen3'}]}),
+			}) as unknown as Response;
+
+		try {
+			const {lastFrame, stdin, unmount} = render(
+				<ProviderStep onComplete={() => {}} />,
+			);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Choose a provider template/);
+
+			// Ollama is the first template; accept its defaults through
+			// provider name and base URL, which auto-fetches the model list.
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Provider name/i);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Base URL/i);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Press a to select all models/);
+
+			// Select the highlighted model, then finish with "d".
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /1 selected/);
+
+			await wait(50);
+			stdin.write('d');
+
+			const output = await waitForText(lastFrame, /Done & Save/);
+			t.regex(output, /1 provider\(s\) already added/);
+			t.notRegex(output, /Choose a provider template/);
+
+			unmount();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial(
+	'ProviderStep scrolls the template list instead of overflowing the terminal',
+	async t => {
+		const {lastFrame, stdin, unmount} = render(
+			<ProviderStep onComplete={() => {}} />,
+		);
+
+		await wait(50);
+		stdin.write('\r');
+		const output = await waitForText(lastFrame, /Choose a provider template/);
+
+		// The full list is 20+ templates. At the default 24-row terminal only a
+		// window of them may render, so the last entries stay off the list.
+		t.regex(output, /Ollama/);
+		t.notRegex(output, /Custom Provider/);
+		t.regex(output, /list scrolls/);
+
+		unmount();
+	},
+);
+
+// ============================================================================
+// Deep-linking straight into one provider's edit/delete choice
+// ============================================================================
+
+const deepLinkProviders = [
+	{name: 'ollama', baseUrl: 'http://localhost:11434/v1', models: ['llama2']},
+	{name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', models: ['x']},
+];
+
+test('ProviderStep with initialEditName opens that provider edit/delete choice', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Edit this provider/);
+	t.regex(output, /Delete this provider/);
+	t.notRegex(
+		output,
+		/Let's add AI providers/,
+		'should skip the template menu entirely',
+	);
+});
+
+test('ProviderStep initialEditName targets the named provider, not the first', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	t.regex(lastFrame()!, /openrouter/);
+});
+
+test('ProviderStep falls back to the menu when initialEditName is unknown', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="not-a-configured-provider"
+		/>,
+	);
+
+	// The settings panel lists the resolved config while the wizard loads a
+	// single file, so a name it cannot find must not strand the user.
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
+
+test('ProviderStep without initialEditName still opens the template menu', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
+
+test('ProviderStep omits the mode entry when no handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	// Mode-specific providers are advanced and opt-in: a caller that doesn't
+	// support them must not show a menu row that goes nowhere.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
+	t.regex(lastFrame()!, /Done & Save/);
+});
+
+test('ProviderStep offers the mode entry when a handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			onConfigureModes={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Configure mode-specific providers/);
+	// It sits above Done & Save so the save action stays the last row.
+	t.true(
+		output.indexOf('Configure mode-specific providers') <
+			output.indexOf('Done & Save'),
+	);
+});
+
+test('ProviderStep hides the mode entry until a provider exists', t => {
+	const {lastFrame} = render(
+		<ProviderStep onComplete={() => {}} onConfigureModes={() => {}} />,
+	);
+
+	// Nothing to assign a mode to yet.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
 });

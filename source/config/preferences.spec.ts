@@ -16,24 +16,28 @@ import {
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
+	getProfessionalTone,
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
 	loadPreferences,
-	resetPreferencesCache,
 	resolveProjectContextPreferences,
+	resetPreferencesCache,
 	savePreferences,
+	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateLastUsed,
 	updateNanocoderShape,
 	updateNotificationsPreference,
 	updatePasteThreshold,
+	updateProfessionalTone,
 	updateReasoningExpanded,
 	updateSemanticMemoryEnabled,
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
+	updateShowUsageFooter,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -1570,6 +1574,151 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 		updatePrivacyPreference(false);
 		const retrieved2 = getPrivacyPreference();
 		t.is(retrieved2, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Usage Footer Tests
+// ============================================================================
+
+test.serial('getShowUsageFooter defaults to true when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowUsageFooter defaults to true when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	t.is(getShowUsageFooter(), true);
+});
+
+test.serial('getShowUsageFooter returns false when explicitly disabled', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {showUsageFooter: false};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		t.is(getShowUsageFooter(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateShowUsageFooter preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existing: UserPreferences = {
+		lastProvider: 'ollama',
+		lastModel: 'qwen',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existing, null, 2), 'utf-8');
+
+	try {
+		updateShowUsageFooter(false);
+
+		const parsed = JSON.parse(
+			readFileSync(preferencesPath, 'utf-8'),
+		) as UserPreferences;
+		t.is(parsed.showUsageFooter, false);
+		t.is(parsed.lastProvider, 'ollama');
+		t.is(parsed.lastModel, 'qwen');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: toggle usage footer off and back on', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateShowUsageFooter(false);
+		t.is(getShowUsageFooter(), false);
+
+		updateShowUsageFooter(true);
+		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// professionalTone Tests
+// ============================================================================
+
+test.serial('getProfessionalTone returns false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getProfessionalTone(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateProfessionalTone persists the value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateProfessionalTone(true);
+		t.is(getProfessionalTone(), true);
+		t.is(loadPreferences().professionalTone, true);
+
+		updateProfessionalTone(false);
+		t.is(getProfessionalTone(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateProfessionalTone preserves other preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	savePreferences({lastProvider: 'ollama', lastModel: 'qwen'});
+
+	try {
+		updateProfessionalTone(true);
+		const preferences = loadPreferences();
+		t.is(preferences.lastProvider, 'ollama');
+		t.is(preferences.lastModel, 'qwen');
+		t.is(preferences.professionalTone, true);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

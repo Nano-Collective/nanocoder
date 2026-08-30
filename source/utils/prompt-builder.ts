@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
+import {getProfessionalTone} from '@/config/preferences';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -193,6 +194,7 @@ export function buildSystemPrompt(
 	toolsDisabled = false,
 	systemPromptOverride?: SystemPromptConfig,
 	model?: string,
+	professionalTone: boolean = getProfessionalTone(),
 ): string {
 	const overrideContent = systemPromptOverride
 		? resolveSystemPromptOverride(systemPromptOverride)
@@ -219,13 +221,14 @@ export function buildSystemPrompt(
 		sections.push(loadSection('core-principles'));
 	}
 
-	// Mode-specific task approach (nano variant when active)
+	// Mode-specific task approach (nano variant when active). Retain a read-only
+	// fallback for clients or tool profiles where write_plan is unavailable.
+	const planSuffix =
+		developmentMode === 'plan' && !toolSet.has('write_plan')
+			? '-plan-readonly'
+			: `-${developmentMode}`;
 	sections.push(
-		loadSection(
-			nano
-				? `task-approach-nano-${developmentMode}`
-				: `task-approach-${developmentMode}`,
-		),
+		loadSection(`task-approach${nano ? '-nano' : ''}${planSuffix}`),
 	);
 
 	// Tool rules — XML variant when native tool calling is disabled
@@ -266,6 +269,10 @@ export function buildSystemPrompt(
 		sections.push(loadSection('task-management'));
 	}
 
+	if (toolSet.has('write_walkthrough') && developmentMode !== 'plan') {
+		sections.push(loadSection('walkthrough'));
+	}
+
 	// Web tools — only if web_search or fetch_url are available
 	if (toolSet.has('web_search') || toolSet.has('fetch_url')) {
 		sections.push(loadSection('web-tools'));
@@ -283,7 +290,14 @@ export function buildSystemPrompt(
 
 	// Asking questions — only if ask_user is available
 	if (toolSet.has('ask_user')) {
-		sections.push(loadSection('asking-questions'));
+		// Plan mode gets stronger upfront-questioning guidance
+		sections.push(
+			loadSection(
+				developmentMode === 'plan'
+					? 'asking-questions-plan'
+					: 'asking-questions',
+			),
+		);
 	}
 
 	// Coding practices and constraints — not needed in plan mode
@@ -305,6 +319,15 @@ export function buildSystemPrompt(
 
 ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
+	}
+
+	// Professional ("boring") tone — user preference, opt-in. Placed last among
+	// the static sections so it overrides the register of anything above it.
+	// Nano gets the shortened variant, like every other section under nano.
+	if (professionalTone) {
+		sections.push(
+			loadSection(nano ? 'professional-tone-nano' : 'professional-tone'),
+		);
 	}
 
 	// System info (dynamic) — slim variant under nano

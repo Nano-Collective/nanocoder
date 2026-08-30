@@ -1,5 +1,6 @@
 import test from 'ava';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import fs, {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mock} from 'node:test';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
@@ -286,6 +287,121 @@ test('getCachedFileContent - concurrent reads with mtime change get consistent r
 	}
 });
 
+test('getCachedFileContent - does not clear a replacement pending read', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'pending-read-race.txt');
+		await writeFile(filePath, 'original', 'utf-8');
+		await getCachedFileContent(filePath);
+
+		let targetStatCalls = 0;
+		let targetReadCalls = 0;
+		let replacementRead: ReturnType<typeof getCachedFileContent> | undefined;
+
+		let releaseInitialStats!: () => void;
+		const initialStatsReleased = new Promise<void>(resolve => {
+			releaseInitialStats = resolve;
+		});
+		let resolveInitialStatsStarted!: () => void;
+		const initialStatsStarted = new Promise<void>(resolve => {
+			resolveInitialStatsStarted = resolve;
+		});
+
+		let releaseOriginalRead!: () => void;
+		const originalReadReleased = new Promise<void>(resolve => {
+			releaseOriginalRead = resolve;
+		});
+		let resolveOriginalReadStarted!: () => void;
+		const originalReadStarted = new Promise<void>(resolve => {
+			resolveOriginalReadStarted = resolve;
+		});
+
+		let releaseReplacementRead!: () => void;
+		const replacementReadReleased = new Promise<void>(resolve => {
+			releaseReplacementRead = resolve;
+		});
+		let resolveReplacementReadStarted!: () => void;
+		const replacementReadStarted = new Promise<void>(resolve => {
+			resolveReplacementReadStarted = resolve;
+		});
+
+		const syntheticStat = (mtimeMs: number) => ({mtimeMs});
+		const originalStat = fs.stat;
+		const originalReadFile = fs.readFile;
+
+		mock.method(fs, 'stat', async path => {
+			if (path !== filePath) {
+				return originalStat(path);
+			}
+
+			targetStatCalls += 1;
+			if (targetStatCalls <= 2) {
+				if (targetStatCalls === 2) {
+					resolveInitialStatsStarted();
+				}
+				await initialStatsReleased;
+				return syntheticStat(2);
+			}
+
+			if (targetStatCalls === 3) {
+				// Replace the original pending read before its owner resumes.
+				clearCache();
+				replacementRead = getCachedFileContent(filePath);
+				return syntheticStat(2);
+			}
+
+			return syntheticStat(3);
+		});
+
+		mock.method(fs, 'readFile', async path => {
+			if (path !== filePath) {
+				return originalReadFile(path);
+			}
+
+			targetReadCalls += 1;
+			if (targetReadCalls === 1) {
+				resolveOriginalReadStarted();
+				await originalReadReleased;
+				return Buffer.from('original read');
+			}
+			if (targetReadCalls === 2) {
+				resolveReplacementReadStarted();
+				await replacementReadReleased;
+				return Buffer.from('replacement read');
+			}
+
+			throw new Error('duplicate read after replacement pending read was cleared');
+		});
+
+		const firstRead = getCachedFileContent(filePath);
+		const secondRead = getCachedFileContent(filePath);
+		await initialStatsStarted;
+		releaseInitialStats();
+		await originalReadStarted;
+		releaseOriginalRead();
+		await replacementReadStarted;
+		await Promise.all([firstRead, secondRead]);
+
+		if (!replacementRead) {
+			t.fail('Expected a replacement pending read to be created');
+			return;
+		}
+
+		const deduplicatedRead = getCachedFileContent(filePath);
+		releaseReplacementRead();
+		const [replacementResult, deduplicatedResult] = await Promise.all([
+			replacementRead,
+			deduplicatedRead,
+		]);
+
+		t.is(deduplicatedResult, replacementResult);
+		t.is(targetReadCalls, 2);
+	} finally {
+		mock.restoreAll();
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test('getCachedFileContent - handles rapid sequential modifications', async t => {
 	const tempDir = await createTempDir();
 	try {
@@ -303,6 +419,75 @@ test('getCachedFileContent - handles rapid sequential modifications', async t =>
 			const result = await getCachedFileContent(filePath);
 			t.is(result.content, `v${i}`, `Should see version ${i}`);
 		}
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+// ============================================================================
+// Tests for Binary File Conversion (PDF/DOCX)
+// ============================================================================
+
+test('getCachedFileContent - throws descriptive error for corrupt PDF', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.pdf');
+		// Write a dummy PDF signature
+		await writeFile(filePath, '%PDF-1.4\n%Fake PDF content');
+
+		// The real get-md will fail on a fake PDF and throw an error.
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - throws descriptive error for corrupt DOCX', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.docx');
+		// Write a dummy ZIP signature for DOCX
+		await writeFile(filePath, 'PK\x03\x04\nFake DOCX content');
+
+		// The real get-md will fail on a corrupt/fake zip and throw an error.
+		// We expect the file-cache to catch this and throw a descriptive error.
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - reads extensionless file as utf-8 text', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'LICENSE');
+		await writeFile(filePath, 'plain text\nno extension', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.is(result.content, 'plain text\nno extension');
+		t.deepEqual(result.lines, ['plain text', 'no extension']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - document extension check is case-insensitive', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.PDF');
+		await writeFile(filePath, '%PDF-1.4\n%Fake PDF content');
+
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}

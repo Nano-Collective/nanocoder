@@ -1,7 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
-import SelectInput from 'ink-select-input';
 import {type ReactNode, useMemo, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -12,8 +11,8 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
-	getProjectContextPreferences,
 	getReasoningExpanded,
+	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
@@ -24,6 +23,8 @@ import {
 	updateSemanticMemoryEnabled,
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
+	updateShowUsageFooter,
+	getProjectContextPreferences,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -33,9 +34,15 @@ import type {NotificationsConfig} from '@/types/config';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import type {SettingsTabId} from './settings-constants';
 
-type SettingsStep =
-	| 'main'
+/**
+ * The set of "managed" settings panels: preserved full-featured sub-UIs that
+ * the tabbed Settings dialog (`settings-tabs.tsx`) opens in place of the old
+ * top-level menu. `main`/`done` no longer exist as panel states — the tab
+ * dialog's own list/header modes replace them.
+ */
+export type ManagedSettingsPanel =
 	| 'theme'
 	| 'title-shape'
 	| 'nanocoder-shape'
@@ -43,149 +50,43 @@ type SettingsStep =
 	| 'notifications'
 	| 'display-settings'
 	| 'privacy'
-	| 'advanced'
-	| 'done';
+	| 'semantic-memory'
+	| 'json-config'
+	| 'web-search'
+	| 'providers-config'
+	| 'mcp-config'
+	| 'default-mode'
+	| 'reasoning-traces'
+	| 'auto-compact'
+	| 'sessions'
+	| 'tool-approval'
+	| 'environment';
 
-interface SettingsSelectorProps {
+export interface SettingsSelectorProps {
 	onCancel: () => void;
-}
-
-interface MainMenuItem {
-	label: string;
-	value: SettingsStep;
-	description: string;
-}
-
-// Main settings menu
-function SettingsMainMenu({
-	onSelect,
-	onCancel,
-}: {
-	onSelect: (step: SettingsStep) => void;
-	onCancel: () => void;
-}) {
-	const {colors} = useTheme();
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-
-	const items: MainMenuItem[] = [
-		{
-			label: 'Theme',
-			value: 'theme',
-			description: 'Change color scheme',
-		},
-		{
-			label: 'Title Shape',
-			value: 'title-shape',
-			description: 'Customize box title styles',
-		},
-		{
-			label: 'Nanocoder Shape',
-			value: 'nanocoder-shape',
-			description: 'Change welcome banner font',
-		},
-		{
-			label: 'Paste Threshold',
-			value: 'paste-threshold',
-			description: 'Set single-line paste character limit',
-		},
-		{
-			label: 'Notifications',
-			value: 'notifications',
-			description: 'Desktop notification preferences',
-		},
-		{
-			label: 'Tool Results and Thinking',
-			value: 'display-settings',
-			description: 'Set defaults for model thoughts and tool results',
-		},
-		{
-			label: 'Privacy',
-			value: 'privacy',
-			description: 'Manage prompt scrubbing and sensitive data',
-		},
-		{
-			label: 'Advanced',
-			value: 'advanced',
-			description: 'Memory and advanced behavior',
-		},
-		{
-			label: 'Done',
-			value: 'done',
-			description: 'Exit settings',
-		},
-	];
-
-	useInput((_input, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-	});
-
-	// Narrow terminal: simplified layout (matches Status component pattern)
-	if (isNarrow) {
-		return (
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				borderStyle="round"
-				borderColor={colors.primary}
-				paddingY={1}
-				paddingX={2}
-				width="100%"
-			>
-				<Text color={colors.primary} bold>
-					Settings
-				</Text>
-				<Text color={colors.text}> </Text>
-				<StyledSelectInput
-					items={items.map(item => ({
-						label: item.label,
-						value: item.value,
-					}))}
-					onSelect={item => {
-						if (item.value === 'done') {
-							onCancel();
-						} else {
-							onSelect(item.value as SettingsStep);
-						}
-					}}
-				/>
-				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Esc</Text>
-			</Box>
-		);
-	}
-
-	return (
-		<TitledBoxWithPreferences
-			title="Settings"
-			width={boxWidth}
-			borderColor={colors.primary}
-			paddingX={1}
-			paddingY={1}
-			flexDirection="column"
-		>
-			<Box marginBottom={1}>
-				<Text color={colors.secondary}>Select a setting to configure:</Text>
-			</Box>
-			<StyledSelectInput
-				items={items.map(item => ({
-					label: `${item.label} - ${item.description}`,
-					value: item.value,
-				}))}
-				onSelect={item => {
-					if (item.value === 'done') {
-						onCancel();
-					} else {
-						onSelect(item.value as SettingsStep);
-					}
-				}}
-			/>
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter to select, Esc to exit</Text>
-			</Box>
-		</TitledBoxWithPreferences>
-	);
+	/** Close settings and launch the tune wizard (app-level mode switch). */
+	onLaunchTune?: () => void;
+	/** Close settings and launch the IDE-connection wizard. */
+	onLaunchIde?: () => void;
+	/**
+	 * Rebuild the live MCP connections after the MCP panel edits config. Without
+	 * this, servers added here only take effect on the next launch.
+	 */
+	onMcpChanged?: () => void | Promise<void>;
+	/**
+	 * Rebuild the client for the current provider/model after the Providers panel
+	 * edits config, without clearing messages or resetting to default provider.
+	 */
+	onProvidersChanged?: () => void | Promise<void>;
+	/**
+	 * The tab to open initially. Defaults to 'appearance' if not specified.
+	 */
+	initialTab?: SettingsTabId;
+	/**
+	 * Called when the active tab changes, so the parent can track it for
+	 * returning after launching wizards.
+	 */
+	onTabChange?: (tab: SettingsTabId) => void;
 }
 
 function ThemePreviewMessage({
@@ -300,7 +201,7 @@ function ThemeMiniPreview({
 }
 
 // Theme settings panel
-function SettingsThemePanel({
+export function SettingsThemePanel({
 	onBack,
 	onCancel,
 }: {
@@ -367,7 +268,7 @@ function SettingsThemePanel({
 				<ThemeMiniPreview colors={previewColors} compact />
 				<Box marginBottom={1}></Box>
 				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter select · Esc exit
+					↑↓ navigate · Enter select · Esc back
 				</Text>
 			</TitledBoxWithPreferences>
 		);
@@ -389,7 +290,7 @@ function SettingsThemePanel({
 			</Text>
 			<Box marginBottom={1}>
 				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter apply · Shift+Tab back · Esc exit
+					↑↓ navigate · Enter apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 
@@ -399,7 +300,7 @@ function SettingsThemePanel({
 }
 
 // Title Shape settings panel
-function SettingsTitleShapePanel({
+export function SettingsTitleShapePanel({
 	onBack,
 	onCancel,
 }: {
@@ -532,7 +433,7 @@ function SettingsTitleShapePanel({
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
+				<StyledSelectInput
 					items={shapeOptions}
 					initialIndex={initialIndex}
 					onSelect={handleSelect}
@@ -556,11 +457,11 @@ function SettingsTitleShapePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to exit
+					Enter to apply, Shift+Tab to go back, Esc to go back
 				</Text>
 			</Box>
 
-			<SelectInput
+			<StyledSelectInput
 				items={shapeOptions}
 				initialIndex={initialIndex}
 				onSelect={handleSelect}
@@ -571,7 +472,7 @@ function SettingsTitleShapePanel({
 }
 
 // Nanocoder Shape settings panel
-function SettingsNanocoderShapePanel({
+export function SettingsNanocoderShapePanel({
 	onBack,
 	onCancel,
 }: {
@@ -648,7 +549,7 @@ function SettingsNanocoderShapePanel({
 					flexDirection="column"
 					marginBottom={1}
 				>
-					<SelectInput
+					<StyledSelectInput
 						items={shapeOptions}
 						initialIndex={initialIndex}
 						onSelect={handleSelect}
@@ -680,11 +581,11 @@ function SettingsNanocoderShapePanel({
 			>
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Enter to apply, Shift+Tab to go back, Esc to exit
+						Enter to apply, Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 
-				<SelectInput
+				<StyledSelectInput
 					items={shapeOptions}
 					initialIndex={initialIndex}
 					onSelect={handleSelect}
@@ -696,7 +597,7 @@ function SettingsNanocoderShapePanel({
 }
 
 // Paste Threshold settings panel
-function SettingsPasteThresholdPanel({
+export function SettingsPasteThresholdPanel({
 	onBack,
 	onCancel,
 }: {
@@ -769,7 +670,7 @@ function SettingsPasteThresholdPanel({
 			{isNarrow && (
 				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
 			)}
-			<SelectInput
+			<StyledSelectInput
 				items={thresholdOptions.map(opt => ({
 					label:
 						opt.value === currentThreshold
@@ -786,7 +687,7 @@ function SettingsPasteThresholdPanel({
 				<Text color={colors.secondary}>
 					{isNarrow
 						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to exit'}
+						: 'Enter to apply, Shift+Tab to go back, Esc to go back'}
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
@@ -794,7 +695,7 @@ function SettingsPasteThresholdPanel({
 }
 
 // Notifications settings panel
-function SettingsNotificationsPanel({
+export function SettingsNotificationsPanel({
 	onBack,
 	onCancel,
 }: {
@@ -809,10 +710,12 @@ function SettingsNotificationsPanel({
 		saved ?? {
 			enabled: false,
 			sound: false,
+			bell: false,
 			events: {
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -829,9 +732,11 @@ function SettingsNotificationsPanel({
 	type ToggleKey =
 		| 'enabled'
 		| 'sound'
+		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -845,6 +750,10 @@ function SettingsNotificationsPanel({
 				value: 'sound' as ToggleKey,
 			},
 			{
+				label: `  Terminal Bell: ${isOn(config.bell)}`,
+				value: 'bell' as ToggleKey,
+			},
+			{
 				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
 				value: 'toolConfirmation' as ToggleKey,
 			},
@@ -856,6 +765,12 @@ function SettingsNotificationsPanel({
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
 			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
+			},
 		];
 	}, [config]);
 
@@ -865,6 +780,8 @@ function SettingsNotificationsPanel({
 			next.enabled = !next.enabled;
 		} else if (item.value === 'sound') {
 			next.sound = !next.sound;
+		} else if (item.value === 'bell') {
+			next.bell = !next.bell;
 		} else {
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
@@ -888,7 +805,7 @@ function SettingsNotificationsPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 			)}
@@ -903,7 +820,7 @@ function SettingsNotificationsPanel({
 }
 
 // Display settings panel
-function SettingsDisplayPanel({
+export function SettingsDisplayPanel({
 	onBack,
 	onCancel,
 }: {
@@ -915,6 +832,7 @@ function SettingsDisplayPanel({
 
 	const currentReasoningExpanded = getReasoningExpanded();
 	const currentCompactToolDisplay = getCompactToolDisplay();
+	const currentShowUsageFooter = getShowUsageFooter();
 
 	useInput((_, key) => {
 		if (key.escape) {
@@ -925,7 +843,10 @@ function SettingsDisplayPanel({
 		}
 	});
 
-	type ToggleKey = 'reasoningExpanded' | 'compactToolDisplay';
+	type ToggleKey =
+		| 'reasoningExpanded'
+		| 'compactToolDisplay'
+		| 'showUsageFooter';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -935,11 +856,21 @@ function SettingsDisplayPanel({
 				value: 'reasoningExpanded' as ToggleKey,
 			},
 			{
-				label: `Expand Tool Results by default: ${isOn(currentCompactToolDisplay)}`,
+				// compactToolDisplay=true means results are COMPACT, so
+				// expansion is on exactly when the preference is false.
+				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
 				value: 'compactToolDisplay' as ToggleKey,
 			},
+			{
+				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
+				value: 'showUsageFooter' as ToggleKey,
+			},
 		];
-	}, [currentReasoningExpanded, currentCompactToolDisplay]);
+	}, [
+		currentReasoningExpanded,
+		currentCompactToolDisplay,
+		currentShowUsageFooter,
+	]);
 
 	const handleSelect = (item: {label: string; value: ToggleKey}) => {
 		if (item.value === 'reasoningExpanded') {
@@ -948,6 +879,10 @@ function SettingsDisplayPanel({
 		} else if (item.value === 'compactToolDisplay') {
 			const newValue = !currentCompactToolDisplay;
 			updateCompactToolDisplay(newValue);
+		} else if (item.value === 'showUsageFooter') {
+			// Applies to the next response, no restart needed - the footer is
+			// read from preferences per message.
+			updateShowUsageFooter(!currentShowUsageFooter);
 		}
 		onBack();
 	};
@@ -967,7 +902,7 @@ function SettingsDisplayPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 			)}
@@ -981,70 +916,78 @@ function SettingsDisplayPanel({
 	);
 }
 
-// Main settings selector with step navigation
-export function SettingsSelector({onCancel}: SettingsSelectorProps) {
-	const [step, setStep] = useState<SettingsStep>('main');
+// Privacy settings panel
+export function SettingsPrivacyPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
 
-	switch (step) {
-		case 'main':
-			return <SettingsMainMenu onSelect={setStep} onCancel={onCancel} />;
-		case 'theme':
-			return (
-				<SettingsThemePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'title-shape':
-			return (
-				<SettingsTitleShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'nanocoder-shape':
-			return (
-				<SettingsNanocoderShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'paste-threshold':
-			return (
-				<SettingsPasteThresholdPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'notifications':
-			return (
-				<SettingsNotificationsPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'display-settings':
-			return (
-				<SettingsDisplayPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'privacy':
-			return (
-				<SettingsPrivacyPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'advanced':
-			return (
-				<SettingsAdvancedPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-	}
+	const [enabled, setEnabled] = useState(getPrivacyPreference());
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const items = useMemo(() => {
+		return [
+			{
+				label: `Prompt Scrubbing: ${enabled ? 'ON' : 'OFF'}`,
+				value: 'toggle',
+			},
+		];
+	}, [enabled]);
+
+	const handleSelect = () => {
+		const next = !enabled;
+		setEnabled(next);
+		updatePrivacyPreference(next);
+	};
+
+	const title = isNarrow ? 'Privacy' : 'Privacy Settings';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+					</Text>
+				</Box>
+			)}
+
+			<Box marginBottom={1}>
+				<Text color={colors.warning}>
+					Prompt Scrubbing removes sensitive identifiers before sending prompts
+					to cloud providers. This improves privacy but does not guarantee
+					semantic anonymity.
+				</Text>
+			</Box>
+
+			<StyledSelectInput items={items} onSelect={handleSelect} />
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Enter/Esc</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
 }
 
 /** Presets cycled by the Advanced panel. Any value in range can still be set
@@ -1060,7 +1003,7 @@ function cyclePreset(presets: number[], current: number): number {
 }
 
 // Advanced settings panel
-function SettingsAdvancedPanel({
+export function SettingsAdvancedPanel({
 	onBack,
 	onCancel,
 }: {
@@ -1156,80 +1099,6 @@ function SettingsAdvancedPanel({
 					future prompts. Turn it off for stateless agent behavior. The budget
 					and per-prompt count bound how much of the context window it may
 					consume - lower them on small local models.
-				</Text>
-			</Box>
-
-			<StyledSelectInput items={items} onSelect={handleSelect} />
-
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
-			</Box>
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Privacy settings panel
-function SettingsPrivacyPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const [enabled, setEnabled] = useState(getPrivacyPreference());
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	const items = useMemo(() => {
-		return [
-			{
-				label: `Prompt Scrubbing: ${enabled ? 'ON' : 'OFF'}`,
-				value: 'toggle',
-			},
-		];
-	}, [enabled]);
-
-	const handleSelect = () => {
-		const next = !enabled;
-		setEnabled(next);
-		updatePrivacyPreference(next);
-	};
-
-	const title = isNarrow ? 'Privacy' : 'Privacy Settings';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
-					</Text>
-				</Box>
-			)}
-
-			<Box marginBottom={1}>
-				<Text color={colors.warning}>
-					Prompt Scrubbing removes sensitive identifiers before sending prompts
-					to cloud providers. This improves privacy but does not guarantee
-					semantic anonymity.
 				</Text>
 			</Box>
 

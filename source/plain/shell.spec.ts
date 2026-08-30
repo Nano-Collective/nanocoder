@@ -23,6 +23,8 @@ interface CapturedShutdown {
 
 function makeFakeShutdownManager(captured: CapturedShutdown) {
 	return () => ({
+		register: () => undefined,
+		unregister: () => undefined,
 		gracefulShutdown: async (code: number) => {
 			captured.code = code;
 		},
@@ -93,9 +95,135 @@ function baseDeps(
 	return {
 		loadPreferences: () => ({ trustedDirectories: [] }) as never,
 		savePreferences: () => undefined,
+		artifacts: {
+			cleanupStaleEphemeralSessions: async () => undefined,
+			markEphemeralSession: async () => undefined,
+			deleteSessionArtifacts: async () => undefined,
+		},
+		getShutdownManager: makeFakeShutdownManager({ code: null }),
 		...overrides,
 	};
 }
+
+test.serial("plain shell creates a session for artifact tools", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	let sessionId: string | undefined;
+	let workingDirectory: string | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async options => {
+					sessionId = options.sessionId;
+					workingDirectory = options.workingDirectory;
+					return {
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.regex(sessionId ?? "", /^[0-9a-f-]{36}$/);
+	t.is(workingDirectory, process.cwd());
+});
+
+test.serial("plain shell marks and cleans its ephemeral artifact session", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	const calls: string[] = [];
+	let conversationSessionId = "";
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async options => {
+					conversationSessionId = options.sessionId ?? "";
+					return {
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						toolCalls: [],
+					};
+				},
+				artifacts: {
+					cleanupStaleEphemeralSessions: async () => {
+						calls.push("sweep");
+					},
+					markEphemeralSession: async sessionId => {
+						calls.push(`mark:${sessionId}`);
+					},
+					deleteSessionArtifacts: async sessionId => {
+						calls.push(`delete:${sessionId}`);
+					},
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.deepEqual(calls, [
+		"sweep",
+		`mark:${conversationSessionId}`,
+		`delete:${conversationSessionId}`,
+	]);
+});
+
+test.serial("plain shell cleans its ephemeral session when the conversation throws", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	let markedSessionId = "";
+	let deletedSessionId = "";
+	try {
+		await t.throwsAsync(
+			runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async () => {
+						throw new Error("conversation failed");
+					},
+					artifacts: {
+						cleanupStaleEphemeralSessions: async () => undefined,
+						markEphemeralSession: async sessionId => {
+							markedSessionId = sessionId;
+						},
+						deleteSessionArtifacts: async sessionId => {
+							deletedSessionId = sessionId;
+						},
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			}),
+			{message: "conversation failed"},
+		);
+	} finally {
+		stdout.restore();
+	}
+
+	t.regex(markedSessionId, /^[0-9a-f-]{36}$/);
+	t.is(deletedSessionId, markedSessionId);
+});
 
 test.serial(
 	"--json success outcome emits a well-formed report with exit code 0",
@@ -129,6 +257,50 @@ test.serial(
 		t.is(report.finalText, "all done");
 		t.deepEqual(report.toolCalls, []);
 		t.deepEqual(report.filesChanged, []);
+		t.is(report.usage, undefined);
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
+	"--json success outcome includes usage block when present in conversation outcome",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+						usage: {
+							inputTokens: 500,
+							outputTokens: 100,
+							totalTokens: 600,
+						},
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.is(report.kind, "success");
+		t.is(report.exitCode, 0);
+		t.deepEqual(report.usage, {
+			inputTokens: 500,
+			outputTokens: 100,
+			totalTokens: 600,
+		});
 		t.is(shutdown.code, 0);
 	},
 );
@@ -222,20 +394,21 @@ test.serial(
 						reasoning: null,
 						toolCalls: [
 							{
-								name: "write_to_file",
+								name: "write_file",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
 								// Same path written twice — should be deduped.
-								name: "edit_file",
+								name: "diff_edit",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
-								name: "create_file",
+								// write_file accepts file_path as a legacy alias.
+								name: "write_file",
 								arguments: { file_path: "/repo/b.ts" },
 								result: "ok",
 								error: null,

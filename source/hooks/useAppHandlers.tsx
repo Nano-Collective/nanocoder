@@ -1,9 +1,11 @@
 import {randomBytes} from 'node:crypto';
 import React from 'react';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/app-util';
+import {createApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {
 	ErrorMessage,
 	SuccessMessage,
@@ -11,6 +13,7 @@ import {
 } from '@/components/message-box';
 import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
+import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
@@ -25,6 +28,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
@@ -64,6 +68,11 @@ interface UseAppHandlersProps {
 	customCommandCache: Map<string, CustomCommand>;
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
+	currentSessionId: string | null;
+	ensureCurrentSessionId: () => string;
+
+	// Callbacks
+	onClearCounterIncrement?: () => void;
 
 	// State setters
 	updateMessages: (newMessages: Message[]) => void;
@@ -86,6 +95,10 @@ interface UseAppHandlersProps {
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
+	setPlanReviewState: (
+		value: {show: boolean; originalMessage: string} | null,
+	) => void;
+	setPendingPlanProceed: (value: string | null) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -97,13 +110,15 @@ interface UseAppHandlersProps {
 	// Mode handlers
 	enterModelSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
-	enterConfigWizardMode: () => void;
-	enterSettingsMode: () => void;
-	enterMcpWizardMode: () => void;
+	enterSettingsMode: (tab?: SettingsTabId) => void;
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
-	handleModelSelect: (provider: string, model: string) => Promise<boolean>;
+	handleModelSelect: (
+		provider: string,
+		model: string,
+		isProgrammatic?: boolean,
+	) => Promise<boolean>;
 
 	// Chat handler
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
@@ -125,6 +140,7 @@ export interface AppHandlers {
 	) => Promise<void>;
 	handleCheckpointCancel: () => void;
 	enterSessionSelectorMode: (showAll?: boolean) => void;
+	applySession: (session: Session) => void;
 	handleSessionSelect: (sessionId: string) => Promise<void>;
 	handleSessionCancel: () => void;
 	enterCheckpointLoadMode: (
@@ -136,6 +152,10 @@ export interface AppHandlers {
 		displayValue?: string,
 		images?: ImageAttachment[],
 	) => Promise<void>;
+	// Plan review action bar
+	handlePlanProceed: () => Promise<void>;
+	handlePlanAskMore: () => Promise<void>;
+	handlePlanModify: () => void;
 }
 
 /**
@@ -198,33 +218,90 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
-		props.setDevelopmentMode(currentMode => {
-			// Don't allow toggling out of headless via Shift+Tab: it's a
-			// non-interactive mode entered by the daemon, not the user.
-			if (currentMode === 'headless') return currentMode;
+		// Don't allow toggling out of headless via Shift+Tab: it's a
+		// non-interactive mode entered by the daemon, not the user.
+		if (props.developmentMode === 'headless') return;
 
-			const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
-				'normal',
-				'auto-accept',
-				'yolo',
-				'plan',
-			];
-			const currentIndex = modes.indexOf(
-				currentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
-			);
-			const nextIndex = (currentIndex + 1) % modes.length;
-			const nextMode = modes[nextIndex];
+		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
+			'normal',
+			'auto-accept',
+			'yolo',
+			'plan',
+		];
+		const currentIndex = modes.indexOf(
+			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+		);
+		const nextIndex = (currentIndex + 1) % modes.length;
+		const nextMode = modes[nextIndex];
 
-			logger.info('Development mode toggled', {
-				previousMode: currentMode,
-				nextMode,
-				modeIndex: nextIndex,
-				totalModes: modes.length,
-			});
-
-			return nextMode;
+		logger.info('Development mode toggled', {
+			previousMode: props.developmentMode,
+			nextMode,
+			modeIndex: nextIndex,
+			totalModes: modes.length,
 		});
-	}, [props.setDevelopmentMode, logger, props]);
+
+		props.setDevelopmentMode(nextMode);
+
+		// Handle mode-specific provider switching
+		const config = getAppConfig();
+		const modeConfig = config.modeProviders?.[nextMode];
+
+		void (async () => {
+			let targetProvider: string | undefined;
+			let targetModel: string | undefined;
+
+			if (modeConfig) {
+				targetProvider = modeConfig.provider;
+				targetModel = modeConfig.model;
+			} else {
+				// Restore the user's currently configured default provider/model (stored in preferences)
+				const preferences = loadPreferences();
+				targetProvider =
+					preferences.lastProvider ||
+					config.providers?.[0]?.name ||
+					'openai-compatible';
+				targetModel =
+					preferences.providerModels?.[targetProvider] ||
+					preferences.lastModel ||
+					config.providers?.find(p => p.name === targetProvider)?.models[0] ||
+					'';
+			}
+
+			if (targetProvider && targetModel) {
+				if (
+					targetProvider === props.currentProvider &&
+					targetModel === props.currentModel
+				) {
+					return;
+				}
+
+				// Show a subtle toast when entering a mode that enforces a specific model,
+				// since programmatic switches suppress the default "Model changed to..." toast.
+				if (modeConfig) {
+					props.addToChatQueue(
+						<SuccessMessage
+							key={generateKey('mode-model-override')}
+							message={`[${nextMode} mode → ${targetModel}]`}
+							hideBox={true}
+						/>,
+					);
+				}
+
+				await props.handleModelSelect(targetProvider, targetModel, true);
+			}
+		})().catch(error => {
+			logger.error('Failed to switch model on mode toggle', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}, [
+		props.developmentMode,
+		props.setDevelopmentMode,
+		props.handleModelSelect,
+		logger,
+		props,
+	]);
 
 	// Show status handler
 	const handleShowStatus = React.useCallback(async () => {
@@ -458,6 +535,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
+			void loadTasks(session.id).then(tasks => {
+				props.setLiveTaskList(tasks.length > 0 ? tasks : null);
+			});
 			// Replay the persisted conversation into scrollback so the user can see
 			// what they resumed (prompts, assistant replies, tool activity) instead
 			// of an empty screen with only a success line.
@@ -521,6 +601,49 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.setActiveMode(null);
 	}, [props.setActiveMode, props]);
 
+	// Plan review action bar handlers
+	const handlePlanProceed = React.useCallback(async () => {
+		// Approving must always be able to proceed. A missing session id or an
+		// unreadable plan artifact degrades to referring to the plan already in
+		// the conversation rather than leaving the user stuck on the review bar
+		// with "Yes" permanently broken.
+		const approvedPlanMessage = props.currentSessionId
+			? await createApprovedPlanMessage(props.currentSessionId)
+			: await createApprovedPlanMessage('');
+		// The effect in InteractiveApp waits for this mode change before it
+		// submits the persisted plan, preventing a stale plan-mode turn.
+		props.setPlanReviewState(null);
+		props.setDevelopmentMode('normal');
+		props.setPendingPlanProceed(approvedPlanMessage);
+	}, [
+		props.currentSessionId,
+		props.setPlanReviewState,
+		props.setDevelopmentMode,
+		props.setPendingPlanProceed,
+		props,
+	]);
+
+	const handlePlanAskMore = React.useCallback(async () => {
+		// Hide the review bar and stay in plan mode; the model asks its questions
+		// and the user answers before a new plan is produced.
+		props.setPlanReviewState(null);
+		await props.handleChatMessage(
+			'please ask me any additional clarifying questions before proceeding',
+		);
+	}, [props.setPlanReviewState, props.handleChatMessage, props]);
+
+	const handlePlanModify = React.useCallback(() => {
+		// Return to input without changing mode so the user can request revisions.
+		props.setPlanReviewState(null);
+		props.addToChatQueue(
+			<SuccessMessage
+				key={generateKey('plan-revision-request')}
+				message="Plan Mode remains active. Tell Nanocoder what to change."
+				hideBox={true}
+			/>,
+		);
+	}, [props.setPlanReviewState, props.addToChatQueue, props]);
+
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
 		async (
@@ -528,6 +651,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			displayValue?: string,
 			images?: ImageAttachment[],
 		) => {
+			props.ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -554,13 +678,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					customCommandLoader: props.customCommandLoader,
 					customCommandExecutor: props.customCommandExecutor,
 					onClearMessages: clearMessages,
+					onClearCounterIncrement: props.onClearCounterIncrement,
 					onRenameSession: props.setSessionName,
 					commandArgs,
 					onEnterModelSelectionMode: props.enterModelSelectionMode,
 					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-					onEnterConfigWizardMode: props.enterConfigWizardMode,
 					onEnterSettingsMode: props.enterSettingsMode,
-					onEnterMcpWizardMode: props.enterMcpWizardMode,
 					onEnterExplorerMode: props.enterExplorerMode,
 					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
 					onEnterTune: props.enterTune,
@@ -599,9 +722,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.customCommandExecutor,
 			props.enterModelSelectionMode,
 			props.enterModelDatabaseMode,
-			props.enterConfigWizardMode,
 			props.enterSettingsMode,
-			props.enterMcpWizardMode,
 			props.enterExplorerMode,
 			props.enterIdeSelectionMode,
 			props.enterTune,
@@ -639,8 +760,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handleCheckpointCancel,
 		enterCheckpointLoadMode,
 		enterSessionSelectorMode,
+		applySession,
 		handleSessionSelect,
 		handleSessionCancel,
 		handleMessageSubmit,
+		handlePlanProceed,
+		handlePlanAskMore,
+		handlePlanModify,
 	};
 }

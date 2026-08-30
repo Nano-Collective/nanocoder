@@ -1,9 +1,9 @@
 import {Box, Text, useInput} from 'ink';
 import {useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
-import {useTerminalWidth} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import type {PendingQuestion} from '@/utils/question-queue';
+import type {PendingQuestion, QuestionOptionMeta} from '@/utils/question-queue';
 import {ensureString} from '@/utils/type-helpers';
 
 interface QuestionPromptProps {
@@ -14,6 +14,7 @@ interface QuestionPromptProps {
 interface OptionItem {
 	label: string;
 	value: string;
+	meta?: QuestionOptionMeta;
 }
 
 const FREEFORM_VALUE = '__freeform__';
@@ -23,7 +24,9 @@ export default function QuestionPrompt({
 	onAnswer,
 }: QuestionPromptProps) {
 	const {colors} = useTheme();
-	const boxWidth = useTerminalWidth();
+	// On narrow terminals the inline label/description row splits into two
+	// cramped columns that both wrap. Stack them vertically instead.
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const answeredRef = useRef(false);
 	const [isFreeformMode, setIsFreeformMode] = useState(false);
 	const [freeformValue, setFreeformValue] = useState('');
@@ -32,9 +35,9 @@ export default function QuestionPrompt({
 	// Build option items. The model controls `options`, so it may not be an
 	// array of strings — coerce so a malformed call can't crash.
 	const safeOptions = Array.isArray(question.options) ? question.options : [];
-	const items: OptionItem[] = safeOptions.map(opt => {
+	const items: OptionItem[] = safeOptions.map((opt, i) => {
 		const label = ensureString(opt);
-		return {label, value: label};
+		return {label, value: label, meta: question.optionMeta?.[i]};
 	});
 
 	if (question.allowFreeform) {
@@ -160,23 +163,61 @@ export default function QuestionPrompt({
 							: isFreeform
 								? colors.secondary
 								: colors.text;
+						const meta = item.meta;
+						// The model controls optionMeta, so pros/cons may arrive as a
+						// string (or anything) rather than an array. Coerce defensively
+						// so a malformed call can't crash the render (.map on a string).
+						const description = meta?.description
+							? ensureString(meta.description)
+							: '';
+						const pros = Array.isArray(meta?.pros)
+							? meta.pros.map(ensureString)
+							: [];
+						const cons = Array.isArray(meta?.cons)
+							? meta.cons.map(ensureString)
+							: [];
 						return (
 							<Box
 								key={item.value}
-								flexDirection="row"
+								flexDirection="column"
 								width={boxWidth}
 								marginBottom={1}
 							>
-								<Box flexShrink={0} marginRight={1}>
-									<Text color={colors.primary} bold>
-										{isSelected ? '❯' : ' '}
-									</Text>
+								<Box flexDirection="row">
+									<Box flexShrink={0} marginRight={1}>
+										<Text color={colors.primary} bold>
+											{isSelected ? '❯' : ' '}
+										</Text>
+									</Box>
+									<Box
+										flexGrow={1}
+										flexShrink={1}
+										flexDirection={isNarrow ? 'column' : 'row'}
+									>
+										<Text wrap="wrap" color={color} bold={isSelected}>
+											{item.label}
+										</Text>
+										{description && (
+											<Text wrap="wrap" italic color={colors.secondary}>
+												{isNarrow ? description : ` — ${description}`}
+											</Text>
+										)}
+									</Box>
 								</Box>
-								<Box flexGrow={1} flexShrink={1}>
-									<Text wrap="wrap" color={color} bold={isSelected}>
-										{item.label}
-									</Text>
-								</Box>
+								{isSelected && (pros.length > 0 || cons.length > 0) && (
+									<Box flexDirection="column" marginLeft={2}>
+										{pros.map(pro => (
+											<Text key={pro} color="green">
+												+ {pro}
+											</Text>
+										))}
+										{cons.map(con => (
+											<Text key={con} color="red">
+												- {con}
+											</Text>
+										))}
+									</Box>
+								)}
 							</Box>
 						);
 					})}

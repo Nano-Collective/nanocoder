@@ -1,4 +1,18 @@
-import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+} from '@/artifacts/walkthrough-lifecycle';
+import {
+	DEFAULT_HEADLESS_MAX_TURNS,
+	getAppConfig,
+	getRetryLimits,
+} from '@/config/index';
+import {
+	buildAbandonedTurnMessages,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
+import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -33,6 +47,20 @@ export interface RunPlainConversationOptions {
 	tune?: TuneConfig;
 	model?: string;
 	outputFormat?: 'text' | 'json';
+	sessionId?: string;
+	workingDirectory?: string;
+	/**
+	 * Force a walkthrough after approved-plan work. Off by default: the plain
+	 * shell's artifact directory is ephemeral, so a forced walkthrough there
+	 * would cost a model turn and then be deleted unread.
+	 */
+	enforceWalkthrough?: boolean;
+}
+
+export interface PlainConversationUsage {
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
 }
 
 export type PlainConversationOutcome =
@@ -41,6 +69,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'tool-approval-required';
@@ -48,6 +77,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'error';
@@ -55,6 +85,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  };
 
 // On the last allowed turn we strip tools and inject this so the model
@@ -74,6 +105,11 @@ const FINAL_TURN_INSTRUCTION =
  * The turn ceiling guards against a wedged model looping unbounded in an
  * unattended run. It defaults to DEFAULT_HEADLESS_MAX_TURNS and is overridable
  * via the NANOCODER_MAX_TURNS env var or `nanocoder.headless.maxTurns` config.
+ *
+ * Within that ceiling the `nanocoder.retries` limits also apply, mirroring the
+ * interactive loop: consecutive identical tool calls, consecutive empty turns,
+ * and malformed tool-call retries each hard-stop with a clear error once their
+ * cap is hit (there is no user to ask in a plain run).
  */
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
@@ -89,17 +125,82 @@ export async function runPlainConversation(
 		tune,
 		model,
 		outputFormat = 'text',
+		sessionId,
+		workingDirectory = process.cwd(),
+		enforceWalkthrough = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
 
 	let messages = initialMessages;
+	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
 	let accumulatedFinalText = '';
+	let finalTextBeforeWalkthroughNudge: string | undefined;
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
+	let hasReportedUsage = false;
+	let accumulatedInputTokens = 0;
+	let accumulatedOutputTokens = 0;
+	let accumulatedTotalTokens = 0;
+
+	const getUsage = (): PlainConversationUsage | undefined => {
+		if (!hasReportedUsage) return undefined;
+		return {
+			inputTokens: accumulatedInputTokens,
+			outputTokens: accumulatedOutputTokens,
+			totalTokens: accumulatedTotalTokens,
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
+
+	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
+	// interactive loop applies. There is nobody to ask in a plain run, so
+	// hitting any of them hard-stops with a clear error instead of pausing.
+	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
+		getRetryLimits();
+
+	// Consecutive-failure streaks. Each kind of failing turn increments its own
+	// counter and resets the others; any healthy turn resets all of them.
+	let emptyTurnCount = 0;
+	let malformedRetryCount = 0;
+	let lastToolSignature = '';
+	let repeatedToolCallCount = 0;
+
+	// Count this turn's tool-call signature against the repeated-call streak.
+	// Returns the hard-stop outcome when the cap is hit, null otherwise. Called
+	// for unknown-tool turns too: a model stuck re-emitting the same
+	// nonexistent tool is looping just as surely as one re-running a real call.
+	const trackRepeatedToolCalls = (
+		turnToolCalls: ToolCall[],
+	): PlainConversationOutcome | null => {
+		const currentToolSignature = computeToolCallSignature(turnToolCalls);
+		const currentRepeatedCount =
+			currentToolSignature && currentToolSignature === lastToolSignature
+				? repeatedToolCallCount + 1
+				: 1;
+		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			// No writeError here: the caller prints every `error` outcome's
+			// message once (source/plain/shell.ts), and --json reports it in the
+			// report instead.
+			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
+			return {
+				kind: 'error',
+				message,
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				usage: getUsage(),
+			};
+		}
+		lastToolSignature = currentToolSignature;
+		repeatedToolCallCount = currentRepeatedCount;
+		emptyTurnCount = 0;
+		malformedRetryCount = 0;
+		return null;
+	};
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
@@ -109,6 +210,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -132,6 +234,14 @@ export async function runPlainConversation(
 		let streamedReasoning = '';
 		let reasoningPrinted = false;
 		let contentStarted = false;
+
+		// Streamed text lands in the accumulators as it arrives, before we know
+		// whether the turn is usable. A turn rejected as malformed is discarded
+		// and retried, so keep a pre-turn snapshot to roll back to. Otherwise
+		// the rejected tool-call blob stays glued to the front of the finalText
+		// a later successful turn returns (visible to --json consumers).
+		const finalTextBeforeTurn = accumulatedFinalText;
+		const reasoningBeforeTurn = accumulatedReasoning;
 
 		const sessionConfig = getAppConfig().sessions;
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;
@@ -173,6 +283,31 @@ export async function runPlainConversation(
 			modeOverrides,
 		);
 
+		// The client always returns a `usage` object, but every field inside it is
+		// optional — providers that report nothing leave all three undefined, and
+		// OpenAI-compatible local servers commonly report input/output without a
+		// total. Only count a turn as reporting usage when at least one field is a
+		// real number, so the block stays absent (rather than an all-zero block
+		// indistinguishable from a genuine zero) for providers with no telemetry.
+		const turnUsage = result?.usage;
+		const inputTokens =
+			typeof turnUsage?.inputTokens === 'number' ? turnUsage.inputTokens : null;
+		const outputTokens =
+			typeof turnUsage?.outputTokens === 'number'
+				? turnUsage.outputTokens
+				: null;
+		const totalTokens =
+			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+
+		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+			hasReportedUsage = true;
+			accumulatedInputTokens += inputTokens ?? 0;
+			accumulatedOutputTokens += outputTokens ?? 0;
+			// Fall back to input+output so a missing total never reads as zero spend.
+			accumulatedTotalTokens +=
+				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+		}
+
 		if (!isJson && (reasoningPrinted || contentStarted)) {
 			writeLine();
 		}
@@ -184,6 +319,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -201,16 +337,41 @@ export async function runPlainConversation(
 					};
 
 		if (!xmlParse.success) {
-			if (!isJson) {
-				writeError(`Malformed tool call: ${xmlParse.error}`);
+			// Same self-correction loop the interactive runtime runs: feed the
+			// parse error back to the model, capped so a model stuck producing
+			// bad tool calls cannot drain tokens unbounded.
+			if (malformedRetryCount >= maxMalformedRetries) {
+				// The caller prints the `error` outcome message; see above.
+				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+				return {
+					kind: 'error',
+					message,
+					finalText: accumulatedFinalText,
+					reasoning: accumulatedReasoning || null,
+					toolCalls: toolCallsLog,
+					usage: getUsage(),
+				};
 			}
-			return {
-				kind: 'error',
-				message: xmlParse.error,
-				finalText: accumulatedFinalText,
-				reasoning: accumulatedReasoning || null,
-				toolCalls: toolCallsLog,
-			};
+			malformedRetryCount += 1;
+			emptyTurnCount = 0;
+			lastToolSignature = '';
+			repeatedToolCallCount = 0;
+			accumulatedFinalText = finalTextBeforeTurn;
+			accumulatedReasoning = reasoningBeforeTurn;
+			if (!isJson) {
+				writeError(
+					`Malformed tool call: ${xmlParse.error} — asking the model to retry (${malformedRetryCount}/${maxMalformedRetries}).`,
+				);
+			}
+			messages = [
+				...messages,
+				{role: 'assistant', content: fullContent},
+				{
+					role: 'user',
+					content: `Your previous response contained a malformed tool call. ${xmlParse.error}\n\n${xmlParse.examples}\n\nPlease try again using the correct format.`,
+				},
+			];
+			continue;
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -219,63 +380,124 @@ export async function runPlainConversation(
 		];
 		const cleanedContent = xmlParse.cleanedContent;
 
-		const validToolCalls: ToolCall[] = [];
-		const errorResults: ToolResult[] = [];
-		for (const toolCall of allToolCalls) {
-			if (
-				toolCall.function.name === '__xml_validation_error__' ||
-				!toolManager.hasTool(toolCall.function.name)
-			) {
-				const errorMsg = `Unknown tool: ${toolCall.function.name}`;
-				errorResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolCall.function.name,
-					content: errorMsg,
-					isError: true,
-				});
-				toolCallsLog.push({
-					name: toolCall.function.name,
-					arguments: toolCall.function.arguments || {},
-					result: null,
-					error: errorMsg,
-				});
-				continue;
-			}
-			validToolCalls.push(toolCall);
+		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
+		const {validToolCalls, unknownToolCalls, errorResults} = partition;
+		// errorResults is paired 1:1 with unknownToolCalls, in the same order.
+		for (const [index, toolCall] of unknownToolCalls.entries()) {
+			toolCallsLog.push({
+				name: toolCall.function.name,
+				arguments: toolCall.function.arguments || {},
+				result: null,
+				error: errorResults[index].content,
+			});
 		}
 
-		messages = [
-			...messages,
-			{
-				role: 'assistant',
-				content: cleanedContent,
-				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
-				reasoning: streamedReasoning || undefined,
-			},
-		];
+		const {emittedToolCalls, resultsForAbandonedTurn} =
+			buildAbandonedTurnMessages(partition);
+
+		// Skip appending a fully-empty assistant message (no content, no tool
+		// calls): providers reject them, and the empty-turn nudge below re-asks
+		// without one — same rule the interactive loop applies.
+		const hasAssistantPayload =
+			cleanedContent.trim() || emittedToolCalls.length > 0;
+		if (hasAssistantPayload) {
+			messages = [
+				...messages,
+				{
+					role: 'assistant',
+					content: cleanedContent,
+					tool_calls:
+						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
+					reasoning: streamedReasoning || undefined,
+				},
+			];
+		}
 
 		if (errorResults.length > 0) {
-			messages = [...messages, ...errorResults];
+			// Unknown-tool turns count toward the repeated-call streak, so a model
+			// stuck calling a nonexistent tool trips the same cap instead of
+			// draining tokens until maxTurns. The signature covers every call the
+			// model emitted this turn, valid and unknown alike.
+			const stopped = trackRepeatedToolCalls(allToolCalls);
+			if (stopped) {
+				return stopped;
+			}
+			messages = [...messages, ...resultsForAbandonedTurn];
 			continue;
 		}
 
 		if (validToolCalls.length === 0) {
 			if (!cleanedContent.trim()) {
-				return {
-					kind: 'error',
-					message: 'Model returned an empty response with no tool calls',
-					finalText: accumulatedFinalText,
-					reasoning: accumulatedReasoning || null,
-					toolCalls: toolCallsLog,
-				};
+				// Nudge through consecutive empty turns up to the cap, mirroring
+				// the interactive loop, then stop so a silent model cannot spin.
+				if (emptyTurnCount >= maxEmptyTurns) {
+					const attempts = maxEmptyTurns + 1;
+					// The caller prints the `error` outcome message; see above.
+					const message = `Model produced no output after ${attempts} attempt${attempts === 1 ? '' : 's'} — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
+					return {
+						kind: 'error',
+						message,
+						finalText: accumulatedFinalText,
+						reasoning: accumulatedReasoning || null,
+						toolCalls: toolCallsLog,
+						usage: getUsage(),
+					};
+				}
+				emptyTurnCount += 1;
+				malformedRetryCount = 0;
+				lastToolSignature = '';
+				repeatedToolCallCount = 0;
+				if (!isJson) {
+					// Count attempts, not nudges, so the denominator matches the
+					// "no output after N attempts" stop message below.
+					writeStatus(
+						`empty response — retry ${emptyTurnCount}/${maxEmptyTurns + 1}`,
+					);
+				}
+				messages = [
+					...messages,
+					{role: 'user', content: 'Please continue with the task.'},
+				];
+				continue;
+			}
+			// Only nudge when the walkthrough will actually outlive the run.
+			// `nanocoder --plain` deletes its ephemeral artifact directory on
+			// exit and reports nothing about the walkthrough, so forcing one
+			// there buys an extra model round trip for a file nobody ever reads.
+			const walkthroughFallback =
+				finalTurn || !enforceWalkthrough
+					? null
+					: takeWalkthroughFallback(
+							walkthroughLifecycle,
+							availableNames.includes('write_walkthrough'),
+						);
+			if (walkthroughFallback) {
+				finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
+				messages = [...messages, walkthroughFallback];
+				continue;
 			}
 			return {
 				kind: 'success',
-				finalText: accumulatedFinalText,
+				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
+		}
+
+		// Loop detection: a model re-issuing the identical tool call(s) on
+		// consecutive turns is almost certainly stuck. In the interactive
+		// runtime this pauses and asks; here it hard-stops before executing
+		// the repeat that hits the cap.
+		//
+		// Keyed on allToolCalls, matching the unknown-tool branch above and the
+		// interactive loop. Keying this site on validToolCalls instead would
+		// break the streak whenever a turn mixed a valid call with an unknown
+		// one, since the two sites would compute different signatures for what
+		// is really the same repetition.
+		const stopped = trackRepeatedToolCalls(allToolCalls);
+		if (stopped) {
+			return stopped;
 		}
 
 		const toolsNeedingApproval: string[] = [];
@@ -302,6 +524,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -311,8 +534,15 @@ export async function runPlainConversation(
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
 
-			const toolResult = await processToolUse(toolCall);
+			const toolResult = await processToolUse(toolCall, {
+				abortSignal,
+				sessionId,
+				workingDirectory,
+			});
 			toolResults.push(toolResult);
+			if (!toolResult.isError) {
+				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+			}
 
 			const contentStr = toolResult.content
 				? typeof toolResult.content === 'string'
@@ -352,6 +582,7 @@ export async function runPlainConversation(
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
 		toolCalls: toolCallsLog,
+		usage: getUsage(),
 	};
 }
 

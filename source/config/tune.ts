@@ -8,7 +8,14 @@ import {TUNE_DEFAULTS} from '@/types/config';
 
 /**
  * Resolves tune configuration by merging layers:
- * hardcoded defaults → config top-level → config per-provider → preferences → session
+ * hardcoded defaults → config per-provider → preferences → config top-level → session
+ *
+ * Precedence (lowest → highest):
+ *   1. hardcoded defaults
+ *   2. per-provider config
+ *   3. user preferences
+ *   4. app config (agents.config.json) — overrides preferences
+ *   5. session override (highest priority)
  */
 export function resolveTune(
 	appConfig?: AppConfig,
@@ -19,11 +26,6 @@ export function resolveTune(
 	// Start with hardcoded defaults
 	let resolved: TuneConfig = {...TUNE_DEFAULTS};
 
-	// Layer: config top-level
-	if (appConfig?.tune) {
-		resolved = {...resolved, ...appConfig.tune};
-	}
-
 	// Layer: config per-provider
 	if (providerConfig?.tune) {
 		resolved = {...resolved, ...providerConfig.tune};
@@ -32,6 +34,11 @@ export function resolveTune(
 	// Layer: preferences (last-used settings)
 	if (preferences?.tune) {
 		resolved = {...resolved, ...preferences.tune};
+	}
+
+	// Layer: config top-level (agents.config.json) — overrides preferences
+	if (appConfig?.tune) {
+		resolved = {...resolved, ...appConfig.tune};
 	}
 
 	// Layer: session override (highest priority)

@@ -1,5 +1,10 @@
+import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
 	loadPreferences,
@@ -7,6 +12,7 @@ import {
 	savePreferences,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {runPlainConversation} from '@/plain/conversation';
@@ -49,6 +55,12 @@ export interface RunPlainShellDeps {
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
 	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
+	artifacts: Pick<
+		ArtifactManager,
+		| 'cleanupStaleEphemeralSessions'
+		| 'markEphemeralSession'
+		| 'deleteSessionArtifacts'
+	>;
 }
 
 const defaultDeps: RunPlainShellDeps = {
@@ -58,6 +70,7 @@ const defaultDeps: RunPlainShellDeps = {
 	loadPreferences,
 	savePreferences,
 	appendRelevantProjectContextWithCount,
+	artifacts: artifactManager,
 };
 
 /**
@@ -187,6 +200,31 @@ export async function runPlainShell(
 	const abortController = new AbortController();
 	const sigint = () => abortController.abort();
 	process.on('SIGINT', sigint);
+	const sessionId = randomUUID();
+	await deps.artifacts.cleanupStaleEphemeralSessions();
+	await deps.artifacts.markEphemeralSession(sessionId);
+
+	const shutdownManager = deps.getShutdownManager();
+	const cleanupHandlerName = `plain-artifacts-${sessionId}`;
+	let conversationPromise:
+		| ReturnType<typeof deps.runPlainConversation>
+		| undefined;
+	let cleaned = false;
+	const cleanupArtifacts = async () => {
+		if (cleaned) return;
+		await deps.artifacts.deleteSessionArtifacts(sessionId);
+		cleaned = true;
+		shutdownManager.unregister(cleanupHandlerName);
+	};
+	shutdownManager.register({
+		name: cleanupHandlerName,
+		priority: 10,
+		handler: async () => {
+			abortController.abort();
+			await conversationPromise?.catch(() => undefined);
+			await cleanupArtifacts();
+		},
+	});
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
@@ -194,30 +232,36 @@ export async function runPlainShell(
 		writeLine();
 	}
 
-	const outcome = await deps.runPlainConversation({
-		client,
-		toolManager,
-		systemMessage,
-		initialMessages,
-		developmentMode,
-		nonInteractiveAlwaysAllow,
-		abortSignal: abortController.signal,
-		tune,
-		model,
-		outputFormat,
-	});
-	process.off('SIGINT', sigint);
+	let outcome;
+	try {
+		conversationPromise = deps.runPlainConversation({
+			client,
+			toolManager,
+			systemMessage,
+			initialMessages,
+			developmentMode,
+			nonInteractiveAlwaysAllow,
+			abortSignal: abortController.signal,
+			tune,
+			model,
+			outputFormat,
+			sessionId,
+			workingDirectory: process.cwd(),
+		});
+		outcome = await conversationPromise;
+	} finally {
+		process.off('SIGINT', sigint);
+		await cleanupArtifacts();
+	}
 
 	if (isJson) {
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
-		const mutatingTools = [
-			'write_to_file',
-			'create_file',
-			'string_replace',
-			'edit_file',
-		];
+		// Must match the registered names in source/tools/file-ops/. Any name
+		// listed here that isn't a real tool silently drops its edits from
+		// `filesChanged`.
+		const mutatingTools = ['write_file', 'string_replace', 'diff_edit'];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
@@ -244,6 +288,9 @@ export async function runPlainShell(
 			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
 			toolCalls: formattedToolCalls,
 			filesChanged: Array.from(filesChangedSet),
+			...(outcome.usage && {
+				usage: outcome.usage,
+			}),
 			...(outcome.kind === 'error' && {
 				message: sanitizeOutput(outcome.message),
 			}),
@@ -264,7 +311,7 @@ export async function runPlainShell(
 			return;
 		case 'tool-approval-required':
 			writeError(
-				`Tool approval required for: ${outcome.toolNames.join(', ')}. ` +
+				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
 					`agents.config.json "alwaysAllow".`,
 			);

@@ -1,11 +1,11 @@
 import {useEffect, useState} from 'react';
-import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
 
 type TerminalSize = 'narrow' | 'normal' | 'wide';
 
 // Calculate box width (leave some padding and ensure minimum width)
 const calculateBoxWidth = (columns: number) =>
-	Math.max(Math.min(columns - 4, 120), 40);
+	Math.max(Math.min(columns - 4, DEFAULT_TERMINAL_WIDTH), 40);
 
 const computeWidth = () =>
 	calculateBoxWidth(process.stdout.columns || DEFAULT_TERMINAL_COLUMNS);
@@ -41,6 +41,53 @@ function subscribe(onChange: (width: number) => void): () => void {
 		}
 	};
 }
+
+const DEFAULT_TERMINAL_ROWS = 24;
+
+const computeRows = () => process.stdout.rows || DEFAULT_TERMINAL_ROWS;
+
+// Same shared-listener pattern as width, but for rows. Kept as a separate
+// subscriber set so width consumers don't re-render on height-only changes.
+const rowSubscribers = new Set<(rows: number) => void>();
+let sharedRowListener: (() => void) | null = null;
+
+function subscribeRows(onChange: (rows: number) => void): () => void {
+	rowSubscribers.add(onChange);
+
+	if (!sharedRowListener) {
+		sharedRowListener = () => {
+			const newRows = computeRows();
+			for (const notify of rowSubscribers) {
+				notify(newRows);
+			}
+		};
+		process.stdout.on('resize', sharedRowListener);
+	}
+
+	return () => {
+		rowSubscribers.delete(onChange);
+		if (rowSubscribers.size === 0 && sharedRowListener) {
+			process.stdout.off('resize', sharedRowListener);
+			sharedRowListener = null;
+		}
+	};
+}
+
+/**
+ * Reactive terminal height in rows. Drives the fixed-height fullscreen
+ * layout: the interactive app sizes its root Box to exactly this many rows
+ * so the frame never exceeds the alternate-screen viewport.
+ */
+export const useTerminalRows = () => {
+	const [rows, setRows] = useState(computeRows);
+
+	useEffect(() => {
+		setRows(computeRows());
+		return subscribeRows(setRows);
+	}, []);
+
+	return rows;
+};
 
 export const useTerminalWidth = () => {
 	const [boxWidth, setBoxWidth] = useState(computeWidth);

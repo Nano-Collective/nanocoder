@@ -4,7 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
-import {EMPTY_CONTENT_MARKER} from '../constants';
+import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {readFileTool} from './read-file';
 
@@ -13,6 +13,10 @@ import {readFileTool} from './read-file';
 // ============================================================================
 
 console.log(`\nread-file.spec.tsx – ${React.version}`);
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
 
 // Create a mock theme provider for tests
 function TestThemeProvider({children}: {children: React.ReactNode}) {
@@ -64,12 +68,14 @@ test('ReadFileFormatter renders with path', async t => {
 	}
 });
 
-test('ReadFileFormatter shows metadata only indicator', async t => {
-	const testDir = join(process.cwd(), 'test-read-metadata-temp');
+test('ReadFileFormatter shows truncated preview range', async t => {
+	const testDir = join(process.cwd(), 'test-read-preview-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		const content = 'line\n'.repeat(400); // Over 300 lines
+		const content = Array.from({length: 1600}, (_, index) =>
+			`line-${index + 1}`,
+		).join('\n');
 		writeFileSync(join(testDir, 'large.ts'), content);
 
 		const formatter = readFileTool.formatter;
@@ -80,7 +86,7 @@ test('ReadFileFormatter shows metadata only indicator', async t => {
 
 		const element = await formatter(
 			{path: join(testDir, 'large.ts')},
-			'File: large.ts\nType: TypeScript\nTotal lines: 400',
+			`line-1\nline-${FILE_READ_PREVIEW_LINES}\n[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1} and end_line to continue.]`,
 		);
 		const {lastFrame} = render(
 			<TestThemeProvider>{element}</TestThemeProvider>,
@@ -88,7 +94,8 @@ test('ReadFileFormatter shows metadata only indicator', async t => {
 
 		const output = lastFrame();
 		t.truthy(output);
-		t.regex(output!, /metadata\s+only/);
+		t.notRegex(output!, /metadata\s+only/);
+		t.regex(stripAnsi(output!), /Lines:\s+1 - 250 of 1600/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -149,7 +156,7 @@ test('ReadFileFormatter displays line range for partial reads', async t => {
 // ============================================================================
 
 test.serial(
-	'read_file returns content directly for small files (<300 lines)',
+	'read_file returns content directly for files below the preview threshold',
 	async t => {
 		t.timeout(10000);
 		const testDir = join(process.cwd(), 'test-read-small-temp');
@@ -178,28 +185,29 @@ test.serial(
 );
 
 test.serial(
-	'read_file returns metadata for files >300 lines without ranges',
+	'read_file returns content for files below the preview threshold',
 	async t => {
 		t.timeout(10000);
-		const testDir = join(process.cwd(), 'test-read-metadata-only-temp');
+		const testDir = join(process.cwd(), 'test-read-below-preview-temp');
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			const content = 'line\n'.repeat(400);
-			writeFileSync(join(testDir, 'large.ts'), content);
+			const content = Array.from({length: 400}, (_, index) =>
+				`line-${index + 1}`,
+			).join('\n');
+			writeFileSync(join(testDir, 'medium.ts'), content);
 
 			const result = await readFileTool.tool.execute!(
 				{
-					path: join(testDir, 'large.ts'),
+					path: join(testDir, 'medium.ts'),
 				},
 				{toolCallId: 'test', messages: []},
 			);
 
-			// Should return metadata, not content
-			t.regex(result, /File:/);
-			t.regex(result, /Type: TypeScript/);
-			t.regex(result, /Total lines: \d+/); // Don't check exact number
-			t.regex(result, /Estimated tokens:/);
+			// Files below the preview threshold should be returned in full.
+			t.true(result.includes('line-1'));
+			t.true(result.includes('line-400'));
+			t.false(result.includes('[Truncated'));
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -237,41 +245,15 @@ test.serial(
 	},
 );
 
-test.serial(
-	'read_file provides progressive read suggestions for medium files',
-	async t => {
-		t.timeout(10000);
-		const testDir = join(process.cwd(), 'test-read-medium-temp');
-
-		try {
-			mkdirSync(testDir, {recursive: true});
-			const content = 'line\n'.repeat(350);
-			writeFileSync(join(testDir, 'medium.ts'), content);
-
-			const result = await readFileTool.tool.execute!(
-				{
-					path: join(testDir, 'medium.ts'),
-				},
-				{toolCallId: 'test', messages: []},
-			);
-
-			// Should suggest progressive reading
-			t.regex(result, /Medium file/);
-			t.regex(result, /start_line: 1, end_line: 250/);
-			t.regex(result, /start_line: 251/);
-		} finally {
-			rmSync(testDir, {recursive: true, force: true});
-		}
-	},
-);
-
-test.serial('read_file provides chunk suggestions for large files', async t => {
+test.serial('read_file returns a preview for very large files', async t => {
 	t.timeout(10000);
-	const testDir = join(process.cwd(), 'test-read-chunks-temp');
+	const testDir = join(process.cwd(), 'test-read-preview-content-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		const content = 'line\n'.repeat(1000);
+		const content = Array.from({length: 1600}, (_, index) =>
+			`line-${index + 1}`,
+		).join('\n');
 		writeFileSync(join(testDir, 'large.ts'), content);
 
 		const result = await readFileTool.tool.execute!(
@@ -281,11 +263,18 @@ test.serial('read_file provides chunk suggestions for large files', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should suggest chunked reading
-		t.regex(result, /Large file/);
-		t.regex(result, /Targeted read/);
-		t.regex(result, /Progressive read/);
-		t.regex(result, /Example chunks/);
+		// The first read should contain usable content and a concise continuation
+		// hint instead of generated chunk calls.
+		t.true(result.startsWith('line-1\n'));
+		t.true(result.includes(`line-${FILE_READ_PREVIEW_LINES}`));
+		t.false(result.includes('line-251'));
+		t.regex(
+			result,
+			new RegExp(
+				`\\[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600\\. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1}`,
+			),
+		);
+		t.false(result.includes('Example chunks'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -437,6 +426,7 @@ test.serial('read_file detects common file types', async t => {
 			const result = await readFileTool.tool.execute!(
 				{
 					path: join(testDir, filename),
+					metadata_only: true,
 				},
 				{toolCallId: 'test', messages: []},
 			);
@@ -585,7 +575,7 @@ test.serial(
 			t.false(result.valid);
 			if (!result.valid) {
 				t.regex(result.error, /minified or binary content/);
-				t.regex(result.error, /15,000 characters/);
+				t.regex(result.error, /15000 characters/);
 			}
 		} finally {
 			process.chdir(originalCwd);
@@ -892,9 +882,10 @@ test.serial('read_file handles files without extension', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should still provide metadata
-		t.regex(result, /File: .*Makefile/);
-		t.regex(result, /Total lines: \d+/); // Don't check exact number
+		// Files below the preview threshold return their content regardless of
+		// whether they have a recognized extension.
+		t.true(result.includes('line'));
+		t.false(result.includes('[Truncated'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -1027,6 +1018,104 @@ test.serial('read_file metadata_only shows last modified time', async t => {
 		t.regex(result, /Last Modified:/);
 		// ISO format: YYYY-MM-DDTHH:MM:SS
 		t.regex(result, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only shows converted binary encoding for PDF', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-pdf');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const pdfContent = `%PDF-1.1
+%\xA5\xB1\xEB
+1 0 obj
+  << /Type /Catalog
+     /Pages 2 0 R
+  >>
+endobj
+2 0 obj
+  << /Type /Pages
+     /Kids [3 0 R]
+     /Count 1
+     /MediaBox [0 0 300 144]
+  >>
+endobj
+3 0 obj
+  <<  /Type /Page
+      /Parent 2 0 R
+      /Resources
+       << /Font
+           << /F1
+               << /Type /Font
+                  /Subtype /Type1
+                  /BaseFont /Times-Roman
+               >>
+           >>
+       >>
+      /Contents 4 0 R
+  >>
+endobj
+4 0 obj
+  << /Length 55 >>
+stream
+  BT
+    /F1 18 Tf
+    0 0 Td
+    (Hello World) Tj
+  ET
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f 
+0000000018 00000 n 
+0000000077 00000 n 
+0000000178 00000 n 
+0000000457 00000 n 
+trailer
+  <<  /Root 1 0 R
+      /Size 5
+  >>
+startxref
+565
+%%EOF`;
+		writeFileSync(join(testDir, 'test.pdf'), pdfContent);
+
+		const result = (await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.pdf'),
+				metadata_only: true,
+			},
+			{toolCallId: 'test', messages: []},
+		)) as string;
+
+		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only shows converted binary encoding for DOCX', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-docx');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const docxBase64 = 'UEsDBBQAAAAAAOtT6lzMVIwQnAEAAJwBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii93b3JkL2RvY3VtZW50LnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC53b3JkcHJvY2Vzc2luZ21sLmRvY3VtZW50Lm1haW4reG1sIi8+PC9UeXBlcz5QSwMEFAAAAAAA61PqXDZX3twYAQAAGAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ3b3JkL2RvY3VtZW50LnhtbCIvPjwvUmVsYXRpb25zaGlwcz5QSwMEFAAAAAAA61PqXKOp4qS9AAAAvQAAABEAAAB3b3JkL2RvY3VtZW50LnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PHc6ZG9jdW1lbnQgeG1sbnM6dz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3dvcmRwcm9jZXNzaW5nbWwvMjAwNi9tYWluIj48dzpib2R5Pjx3OnA+PHc6cj48dzp0PkhlbGxvPC93OnQ+PC93OnI+PC93OnA+PC93OmJvZHk+PC93OmRvY3VtZW50PlBLAQIUAxQAAAAAAOtT6lzMVIwQnAEAAJwBAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAAAAAA61PqXDZX3twYAQAAGAEAAAsAAAAAAAAAAAAAAIABzQEAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAAA61PqXKOp4qS9AAAAvQAAABEAAAAAAAAAAAAAAIABDgMAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAAPoDAAAAAA==';
+		writeFileSync(join(testDir, 'test.docx'), Buffer.from(docxBase64, 'base64'));
+
+		const result = (await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.docx'),
+				metadata_only: true,
+			},
+			{toolCallId: 'test', messages: []},
+		)) as string;
+
+		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

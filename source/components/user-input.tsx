@@ -18,6 +18,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 } from '@/types/core';
 import type {
 	InputState,
@@ -36,6 +37,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
@@ -56,6 +58,7 @@ interface ChatProps {
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
+	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
@@ -65,6 +68,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
@@ -82,6 +86,7 @@ export default function UserInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
+	onToggleTaskList,
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
@@ -91,6 +96,7 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	taskInfo,
 	forceFocus = false,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
@@ -101,8 +107,19 @@ export default function UserInput({
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+	// Must match the wrapWidth passed to TextInput below — both sides use it to
+	// decide whether Up/Down means line navigation or history.
+	const inputWrapWidth = boxWidth - 3;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
+	// Input value for which the user dismissed the completion menu with Escape,
+	// so the auto-show effect doesn't immediately re-open it until they type more.
+	const dismissedForInputRef = useRef<string | null>(null);
+	// True while the current input came from history navigation (↑/↓), not typing.
+	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
+	// menu captures ↑/↓ and history navigation is blocked. Cleared on any keystroke
+	// so editing the recalled command surfaces suggestions again.
+	const inputFromHistoryRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -307,14 +324,29 @@ export default function UserInput({
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			setShowCompletions(true);
-			setSelectedCompletionIndex(0);
+			// Show the menu as soon as completions exist (typing `/`), not only on
+			// Tab — unless the user dismissed it with Escape for this exact input,
+			// or the input was recalled from history (keep ↑/↓ free to navigate).
+			if (
+				!inputFromHistoryRef.current &&
+				dismissedForInputRef.current !== input
+			) {
+				setShowCompletions(true);
+			}
+			setSelectedCompletionIndex(prev =>
+				prev >= commandCompletions.length
+					? commandCompletions.length - 1
+					: prev < 0
+						? 0
+						: prev,
+			);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
 			setSelectedCompletionIndex(-1);
 		}
 	}, [
+		input,
 		commandCompletions,
 		showCompletions,
 		setCompletions,
@@ -387,9 +419,13 @@ export default function UserInput({
 		let display = currentState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
-		// (often quoted, mixed in with prose) become attachments and are stripped
-		// from the message text rather than sent as literal paths.
-		const {text: cleanedAssembled, paths} = extractImageReferences(assembled);
+		// (often quoted, mixed in with prose) become attachments; the literal
+		// path in the message text is replaced with an `[Image #N]` placeholder,
+		// numbered after any attachments already added via Ctrl+V.
+		const {text: cleanedAssembled, paths} = extractImageReferences(
+			assembled,
+			attachments.length,
+		);
 		if (paths.length > 0) {
 			const dropped = paths
 				.map(readImageFile)
@@ -397,7 +433,7 @@ export default function UserInput({
 			if (dropped.length > 0) {
 				images = [...attachments, ...dropped];
 				assembled = cleanedAssembled;
-				display = extractImageReferences(display).text;
+				display = extractImageReferences(display, attachments.length).text;
 			}
 		}
 
@@ -452,6 +488,17 @@ export default function UserInput({
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
+		if (showCompletions) {
+			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
+			dismissedForInputRef.current = input;
+			return;
+		}
+		if (isFileAutocompleteMode) {
+			setIsFileAutocompleteMode(false);
+			setFileCompletions([]);
+			return;
+		}
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
@@ -462,7 +509,12 @@ export default function UserInput({
 			setShowClearMessage(true);
 		}
 	}, [
+		input,
+		showCompletions,
+		isFileAutocompleteMode,
 		showClearMessage,
+		setShowCompletions,
+		setSelectedCompletionIndex,
 		resetInput,
 		resetUIState,
 		onDismissActiveEditor,
@@ -475,6 +527,10 @@ export default function UserInput({
 		(direction: 'up' | 'down') => {
 			const history = promptHistory.getHistory();
 			if (history.length === 0) return;
+
+			// This value is being recalled, not typed — suppress the auto-show so a
+			// recalled `/command` doesn't hijack ↑/↓ from further history navigation.
+			inputFromHistoryRef.current = true;
 
 			if (direction === 'up') {
 				if (historyIndex === -1) {
@@ -537,6 +593,16 @@ export default function UserInput({
 			setOriginalInput,
 			setInputState,
 		],
+	);
+
+	// Any keystroke means the user is composing, not navigating — re-enable the
+	// auto-show so editing a recalled command surfaces suggestions again.
+	const handleInputChange = useCallback(
+		(value: string) => {
+			inputFromHistoryRef.current = false;
+			updateInput(value);
+		},
+		[updateInput],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -648,6 +714,14 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+t to collapse/expand the live task list (always available -
+		// this sits above the disabled guard so it still works while the agent
+		// is working, which is when the task list is on screen)
+		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+			onToggleTaskList();
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -693,8 +767,23 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
-				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				// Tab selects the highlighted suggestion when the menu is open. #696 made
+				// completion Tab-triggered, but that often failed to render the menu
+				// (especially in alt-screen); show-on-`/` + Tab-to-select is more reliable.
 				if (showCompletions && completions.length > 0) {
+					const selected =
+						completions[
+							selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0
+						];
+					const completedText = `/${selected.name}`;
+					completionJustSelectedRef.current = true;
+					setInputState({
+						displayValue: completedText,
+						placeholderContent: {},
+					});
+					setShowCompletions(false);
+					setSelectedCompletionIndex(-1);
+					setTextInputKey(prev => prev + 1);
 					return;
 				}
 				if (commandCompletions.length === 1) {
@@ -711,6 +800,7 @@ export default function UserInput({
 					// Show completions when there are multiple matches
 					setCompletions(commandCompletions);
 					setShowCompletions(true);
+					setSelectedCompletionIndex(0);
 				}
 				return;
 			}
@@ -776,6 +866,9 @@ export default function UserInput({
 
 		// Handle navigation
 		if (key.upArrow) {
+			// In multiline mode (real \n or soft-wrapped visual lines), Up/Down
+			// navigate lines — let TextInput handle it
+			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -798,6 +891,9 @@ export default function UserInput({
 		}
 
 		if (key.downArrow) {
+			// In multiline mode (real \n or soft-wrapped visual lines), Up/Down
+			// navigate lines — let TextInput handle it
+			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -873,6 +969,7 @@ export default function UserInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					taskInfo={taskInfo}
 				/>
 			</Box>
 		);
@@ -913,12 +1010,13 @@ export default function UserInput({
 					<TextInput
 						key={textInputKey}
 						value={input}
-						onChange={updateInput}
+						onChange={handleInputChange}
+						onEdgeArrow={handleHistoryNavigation}
 						onSubmit={handleSubmit}
 						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
 						focus={effectiveFocus}
-						wrapWidth={boxWidth - 3}
+						wrapWidth={inputWrapWidth}
 						handleEnter={false}
 					/>
 				</Box>
@@ -1032,6 +1130,7 @@ export default function UserInput({
 				tune={tune}
 				currentModel={currentModel}
 				activeEditor={activeEditor}
+				taskInfo={taskInfo}
 			/>
 		</>
 	);

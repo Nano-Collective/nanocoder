@@ -1,25 +1,42 @@
 import {Box, Text} from 'ink';
+import {useState} from 'react';
 import {getColors} from '@/config/index';
-import type {ProviderConfig} from '../types/config';
+import type {DevelopmentMode} from '@/types/core';
+import type {ModeProviderConfig, ProviderConfig} from '../types/config';
 import {BaseConfigWizard} from './base-config-wizard';
+import {ModeProviderStep} from './steps/mode-provider-step';
 import {ProviderStep} from './steps/provider-step';
-import {buildProviderConfigObject} from './validation';
+import {
+	buildProviderConfigObject,
+	type ProviderWizardState,
+} from './validation';
 
 interface ProviderWizardProps {
 	projectDir: string;
 	onComplete: (configPath: string) => void;
 	onCancel?: () => void;
+	/** Open straight into the edit/delete choice for this provider. */
+	initialEditName?: string;
 }
 
-function parseProviderConfig(raw: unknown): ProviderConfig[] {
-	const config = raw as {nanocoder?: {providers?: ProviderConfig[]}} | null;
-	return config?.nanocoder?.providers ?? [];
+function parseProviderConfig(raw: unknown): ProviderWizardState {
+	const config = raw as {
+		nanocoder?: {
+			providers?: ProviderConfig[];
+			modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
+		};
+	} | null;
+	return {
+		providers: config?.nanocoder?.providers ?? [],
+		modeProviders: config?.nanocoder?.modeProviders ?? {},
+	};
 }
 
-function ProviderSummaryItems({items}: {items: ProviderConfig[]}) {
+function ProviderSummaryItems({items}: {items: ProviderWizardState}) {
 	const colors = getColors();
+	const {providers, modeProviders} = items;
 
-	if (items.length === 0) {
+	if (providers.length === 0) {
 		return (
 			<Box marginBottom={1}>
 				<Text color={colors.warning}>No providers configured</Text>
@@ -29,8 +46,8 @@ function ProviderSummaryItems({items}: {items: ProviderConfig[]}) {
 
 	return (
 		<Box marginBottom={1} flexDirection="column">
-			<Text color={colors.secondary}>Providers ({items.length}):</Text>
-			{items.map((provider, index) => (
+			<Text color={colors.secondary}>Providers ({providers.length}):</Text>
+			{providers.map((provider, index) => (
 				<Text key={index} color={colors.success}>
 					• {provider.name}
 					<Text>
@@ -44,17 +61,30 @@ function ProviderSummaryItems({items}: {items: ProviderConfig[]}) {
 					</Text>
 				</Text>
 			))}
+
+			{modeProviders && Object.keys(modeProviders).length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>Mode-Specific Providers:</Text>
+					{Object.entries(modeProviders).map(([mode, config]) => (
+						<Text key={mode} color={colors.success}>
+							• {mode}: {config.provider} ({config.model})
+						</Text>
+					))}
+				</Box>
+			)}
 		</Box>
 	);
 }
 
-function ProviderCompleteExtras({items}: {items: ProviderConfig[]}) {
+function ProviderCompleteExtras({items}: {items: ProviderWizardState}) {
 	const colors = getColors();
-	const copilotProviders = items.filter(
+	const copilotProviders = items.providers.filter(
 		p => p.sdkProvider === 'github-copilot',
 	);
-	const codexProviders = items.filter(p => p.sdkProvider === 'chatgpt-codex');
-	const localProviders = items.filter(
+	const codexProviders = items.providers.filter(
+		p => p.sdkProvider === 'chatgpt-codex',
+	);
+	const localProviders = items.providers.filter(
 		p =>
 			!p.apiKey &&
 			p.baseUrl &&
@@ -93,34 +123,79 @@ function ProviderCompleteExtras({items}: {items: ProviderConfig[]}) {
 	);
 }
 
+function ProviderWizardSteps({
+	items,
+	onComplete,
+	onBack,
+	onDelete,
+	configExists,
+	initialEditName,
+}: {
+	items: ProviderWizardState;
+	onComplete: (items: ProviderWizardState) => void;
+	onBack: () => void;
+	onDelete: () => void;
+	configExists: boolean;
+	initialEditName?: string;
+}) {
+	const [step, setStep] = useState<'providers' | 'modes'>('providers');
+	const [providers, setProviders] = useState(items.providers);
+	const [modeProviders, setModeProviders] = useState(items.modeProviders);
+
+	// The provider menu is the hub: "Done & Save" goes straight to the summary,
+	// and mode-specific providers are an advanced option you opt into and come
+	// back from. Interposing the mode step between "Done & Save" and the
+	// summary made a first run walk through a screen it had nothing to say to.
+	if (step === 'providers') {
+		return (
+			<ProviderStep
+				existingProviders={providers}
+				onComplete={newProviders => {
+					setProviders(newProviders);
+					onComplete({providers: newProviders, modeProviders});
+				}}
+				onConfigureModes={newProviders => {
+					setProviders(newProviders);
+					setStep('modes');
+				}}
+				onBack={onBack}
+				onDelete={onDelete}
+				configExists={configExists}
+				initialEditName={initialEditName}
+			/>
+		);
+	}
+
+	return (
+		<ModeProviderStep
+			providers={providers}
+			existingModeProviders={modeProviders}
+			onComplete={newModeProviders => {
+				setModeProviders(newModeProviders);
+				setStep('providers');
+			}}
+			onBack={() => setStep('providers')}
+		/>
+	);
+}
+
 export function ProviderWizard({
 	projectDir,
 	onComplete,
 	onCancel,
+	initialEditName,
 }: ProviderWizardProps) {
 	return (
-		<BaseConfigWizard<ProviderConfig[]>
+		<BaseConfigWizard<ProviderWizardState>
 			title="Provider Wizard"
 			focusId="config-wizard"
 			configFileName="agents.config.json"
-			initialItems={[]}
+			initialItems={{providers: [], modeProviders: {}}}
 			parseConfig={parseProviderConfig}
 			buildConfig={buildProviderConfigObject}
-			hasItems={items => items.length > 0}
-			renderConfigureStep={({
-				items,
-				onComplete: onItemsComplete,
-				onBack,
-				onDelete,
-				configExists,
-			}) => (
-				<ProviderStep
-					existingProviders={items}
-					onComplete={onItemsComplete}
-					onBack={onBack}
-					onDelete={onDelete}
-					configExists={configExists}
-				/>
+			hasItems={items => items.providers.length > 0}
+			renderConfigureStep={args => (
+				<ProviderWizardSteps {...args} initialEditName={initialEditName} />
 			)}
 			renderSummaryItems={items => <ProviderSummaryItems items={items} />}
 			renderCompleteExtras={items => <ProviderCompleteExtras items={items} />}

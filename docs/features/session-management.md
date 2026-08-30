@@ -19,6 +19,19 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+### From the Command Line
+
+You can resume a session directly at launch instead of using a slash command:
+
+```bash
+nanocoder --continue      # resume the most recent session for this directory (-c)
+nanocoder --resume        # open the session picker at startup (-r)
+nanocoder --resume last   # jump straight into the most recent session
+nanocoder --resume {id}   # resume a specific session by ID or list index
+```
+
+`--continue` silently starts a fresh session if no previous session exists for the current directory, while `--resume` exits with an error if the requested session is not found. The two flags are mutually exclusive, and both are interactive-only — they cannot be combined with `run`. See the [CLI Options Reference](../getting-started/index.md#cli-options) for the full flag list.
+
 ## Renaming a Session
 
 ```bash
@@ -35,6 +48,7 @@ Each session captures:
 - Provider and model used
 - Working directory
 - Timestamps and message count
+- Its artifacts: the implementation plan, the task list, and the completion walkthrough
 
 Sessions are saved every 30 seconds by default and retained for 30 days.
 
@@ -49,6 +63,17 @@ Sessions are stored in the platform-specific app data directory:
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
 This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+
+### Session Artifacts
+
+Alongside `sessions/`, each session gets an `artifacts/<session id>/` directory holding the files behind the **Plan**, **Tasks**, and **Walkthrough** shortcuts above the prompt. They are written with owner-only permissions and never placed in your project directory.
+
+- Resuming a session restores its artifact shortcuts
+- Deleting a session, or letting retention expire it, deletes its artifacts too
+- Directories belonging to sessions that were never saved — because `autoSave` is off, or because `/clear` retired the session id — are swept at startup once they are more than a day old
+- `nanocoder --plain` runs get a session for the duration of the run and delete their artifacts on exit, so headless runs leave nothing behind
+
+See [Development Modes](development-modes.md) for how the artifacts are produced and [Task Management](task-management.md) for the task list specifically.
 
 ## Configuration
 

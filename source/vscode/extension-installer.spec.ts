@@ -143,8 +143,8 @@ test('installExtension with VSIX missing returns appropriate error', async t => 
 			result.message.includes('Failed') || result.message.includes('not found'),
 		);
 	} else {
-		// If it succeeded, the extension was installed
-		t.true(result.message.includes('success'));
+		t.true(result.results.some(cliResult => cliResult.success));
+		t.true(result.message.includes('installed'));
 	}
 });
 

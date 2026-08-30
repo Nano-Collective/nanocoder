@@ -312,6 +312,47 @@ test.serial(
 	},
 );
 
+test.serial(
+	'CheckpointManager rejects path traversal in delete',
+	async t => {
+		const tempDir = await createTempDir();
+		// A file outside the checkpoints dir that a traversal name would target.
+		const outside = path.join(tempDir, 'outside');
+		await fs.mkdir(outside, {recursive: true});
+		try {
+			const manager = new CheckpointManager(tempDir);
+
+			await t.throwsAsync(
+				async () => {
+					await manager.deleteCheckpoint('../../outside');
+				},
+				{message: /Invalid checkpoint name|invalid characters/},
+			);
+
+			// The escape target must still be there.
+			t.true(existsSync(outside));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial('CheckpointManager rejects path traversal in load', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new CheckpointManager(tempDir);
+
+		await t.throwsAsync(
+			async () => {
+				await manager.loadCheckpoint('../../../etc');
+			},
+			{message: /Invalid checkpoint name|invalid characters/},
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('CheckpointManager validates checkpoint integrity', async t => {
 	const tempDir = await createTempDir();
 	try {

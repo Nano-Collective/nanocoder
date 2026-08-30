@@ -239,7 +239,7 @@ test('SummarizerService guards false positive on reversal when user provides pat
 		service.proposeMemoriesFromMessages([
 			{
 				role: 'user',
-				content: 'That path is wrong, it should be /src/auth/style.ts',
+				content: 'That path is wrong, it should be /src/auth/style.ts.',
 			},
 			{
 				role: 'assistant',
@@ -248,11 +248,11 @@ test('SummarizerService guards false positive on reversal when user provides pat
 		]),
 		[
 			{
-				content: 'That path is wrong, it should be /src/auth/style.ts',
+				content: 'That path is wrong, it should be /src/auth/style.ts.',
 				category: 'codingStyle',
 				sourceType: 'explicit-user',
 				evidence: {
-					userMessages: ['That path is wrong, it should be /src/auth/style.ts'],
+					userMessages: ['That path is wrong, it should be /src/auth/style.ts.'],
 					assistantMessages: [],
 				},
 				warnings: [],
@@ -273,7 +273,7 @@ test('SummarizerService guards false positive on reversal when user provides pat
 	);
 });
 
-test('SummarizerService drops uncategorized assistant chatter but keeps uncategorized user statements', t => {
+test('SummarizerService drops uncategorized lines from both user and assistant', t => {
 	const service = new SummarizerService();
 
 	t.deepEqual(
@@ -286,19 +286,17 @@ test('SummarizerService drops uncategorized assistant chatter but keeps uncatego
 				role: 'user',
 				content: 'The project name is Nanocoder, not nano-coder.',
 			},
-		]),
-		[
 			{
-				content: 'The project name is Nanocoder, not nano-coder.',
-				category: 'project',
-				sourceType: 'explicit-user',
-				evidence: {
-					userMessages: ['The project name is Nanocoder, not nano-coder.'],
-					assistantMessages: [],
-				},
-				warnings: [],
+				role: 'user',
+				content: 'run the tests',
 			},
-		],
+			{
+				role: 'user',
+				content:
+					'One thing I noticed while in there: the provider list component does the same',
+			},
+		]),
+		[],
 	);
 });
 
@@ -306,7 +304,7 @@ test('SummarizerService caps candidates per message and truncates evidence snipp
 	const service = new SummarizerService();
 	const longSuffix = 'x'.repeat(200);
 	const longMessage = [
-		`Fix the provider retry storage schema bug one. ${longSuffix}`,
+		`Fix the provider retry storage schema bug one. ${longSuffix}.`,
 		'Fix the provider retry storage schema bug two.',
 		'Fix the provider retry storage schema bug three.',
 		'Fix the provider retry storage schema bug four.',
@@ -539,4 +537,83 @@ test('SummarizerService bounds the scan window and total proposal count', t => {
 	// The window keeps the newest turns, so the oldest message is not proposed.
 	t.false(proposals.some(p => p.content.endsWith('number 0.')));
 	t.true(proposals.some(p => p.content.endsWith(`number ${total - 1}.`)));
+});
+
+test('reversal is still flagged when an intervening tool call has narration', t => {
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{
+					role: 'assistant',
+					content: 'Let me re-read the config loader.',
+					tool_calls: [
+						{id: 't1', function: {name: 'read_file', arguments: {}}},
+					],
+				},
+				{
+					role: 'tool',
+					content: 'file contents',
+					tool_call_id: 't1',
+					name: 'read_file',
+				},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is still flagged across a look-ahead narration turn with no tool call', t => {
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{role: 'assistant', content: 'Let me look at the file first.'},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is still flagged when the user message contains camelCase or the word error', t => {
+	t.true(
+		reversalWarnings(
+			[
+				{
+					role: 'user',
+					content:
+						'the two exceptClauses are over-engineered, simplify it.',
+				},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+	t.true(
+		reversalWarnings(
+			[
+				{
+					role: 'user',
+					content: 'is that not over-engineered? one error handler reads better.',
+				},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('SummarizerService strips leading list markers from proposed content', t => {
+	const service = new SummarizerService();
+	const proposals = service.proposeMemoriesFromMessages([
+		{
+			role: 'user',
+			content: '- Added a regression test for the 40-column case.',
+		},
+	]);
+
+	t.is(proposals.length, 1);
+	t.is(proposals[0]?.content, 'Added a regression test for the 40-column case.');
 });

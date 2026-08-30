@@ -346,22 +346,27 @@ export class SemanticMemoryManager {
 			.map(memory => {
 				const memoryTerms = tokenize(memory.content);
 				const categoryTerms = tokenize(memory.category);
-				let score = 0;
+				let matchedQueryTerms = 0;
+				let categoryHit = false;
 				for (const term of queryTerms) {
-					if (memoryTerms.has(term)) score++;
-					if (categoryTerms.has(term)) score++;
+					if (categoryTerms.has(term)) categoryHit = true;
+					if (memoryTerms.has(term) || categoryTerms.has(term)) {
+						matchedQueryTerms++;
+					}
 				}
-				const vocabularySize = memoryTerms.size + categoryTerms.size;
 				const relevanceRatio =
-					vocabularySize === 0 ? 0 : score / vocabularySize;
-				return {memory, score, relevanceRatio};
+					queryTerms.size === 0 ? 0 : matchedQueryTerms / queryTerms.size;
+				return {memory, matchedQueryTerms, categoryHit, relevanceRatio};
 			})
 			.filter(
 				result =>
-					result.score > 0 && result.relevanceRatio >= MIN_RELEVANCE_RATIO,
+					result.relevanceRatio >= MIN_RELEVANCE_RATIO &&
+					(result.categoryHit || result.matchedQueryTerms >= 2),
 			)
 			.sort((a, b) => {
-				if (a.score !== b.score) return b.score - a.score;
+				if (a.matchedQueryTerms !== b.matchedQueryTerms) {
+					return b.matchedQueryTerms - a.matchedQueryTerms;
+				}
 				return b.memory.timestamp.localeCompare(a.memory.timestamp);
 			})
 			.slice(0, limit)

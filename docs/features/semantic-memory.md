@@ -79,7 +79,7 @@ The scan covers the last 40 messages and prints at most 20 proposals, so a long 
 
 Proposals inferred purely from assistant text carry an `Inferred from conversation, no explicit user statement.` warning.
 
-A proposal is additionally flagged `Possible assistant position reversal.` when the assistant turn looks like a concession to pressure rather than to evidence. That means the turn was preceded by a user message carrying no code, file path or error output, and the turn either contradicts an earlier assistant turn on the same subject or opens with an agreement phrase. Tool-call turns between the two are stepped over, so the check still works in a normal agentic session where the assistant reads files between turns.
+A proposal is additionally flagged `Possible assistant position reversal.` when the assistant turn looks like a concession to pressure rather than to evidence. That means the turn was preceded by a user message carrying no code, file path, or error output, and the turn either contradicts an earlier assistant turn on the same subject or opens with an agreement phrase. Tool-call turns (including ones that also have narration) and short "let me look at the file" turns are stepped over, so the check still works in a normal agentic session where the assistant reads files between turns. CamelCase words and the bare word "error" in ordinary prose do not count as technical evidence.
 
 This catches the case where a model agreeing with a user's stylistic preference gets summarized into a "project convention" that was never actually decided. If you explicitly restate the same line yourself, the reversal warning is cleared, since your own statement is what actually resolves the ambiguity.
 

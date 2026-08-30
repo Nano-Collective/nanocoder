@@ -56,6 +56,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/mcp/` - Model Context Protocol server integration
 - `source/tool-calling/` - XML/text tool-call parsers for the fallback path (non-native-tool models)
 - `source/services/` - Checkpoint manager, bash executor, file snapshots
+- `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, session usage storage
 - `source/session/` - Chat session persistence (autosave / resume)
 - `source/schedule/` - Cron-based scheduled agent runs (`scheduler` mode)
 - `source/subagents/` - Subagent executor (delegated agent runs)
@@ -83,11 +84,13 @@ File editing uses a content-based approach:
 - `string_replace`: Primary edit tool — replaces exact content
 - `write_file`: Whole file overwrites
 
-Two execution paths exist: native tool calling (preferred, via AI SDK) and an XML fallback for models that don't support tools. `LLMChatResponse.toolsDisabled` signals which path produced the response; the conversation loop only runs `parseToolCalls()` (in `source/tool-calling/`) when `toolsDisabled` is true.
+Two execution paths exist: native tool calling (preferred, via AI SDK) and an XML fallback for models that don't support tools. `LLMChatResponse.toolsDisabled` signals which path produced the response. The conversation loop runs `parseToolCalls()` (in `source/tool-calling/`) whenever the response has no native tool calls — always on the fallback path, and on the native path too, since models marketed as native-tool-capable sometimes regress to emitting tool-call text. Malformed text there feeds the self-correction retry loop capped by `nanocoder.retries.maxMalformedRetries`.
 
 ### Command System
 
 Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file exporting a `Command` object (name, description, handler), then add an entry to `lazyCommands` in the registry. Commands return React elements for Ink rendering. Some commands (clear, model, provider, etc.) need app state and are intercepted as "special commands" in `source/app/utils/app-util.ts`.
+
+A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. `handleBuiltInCommand` then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the handler runs. Set it on both the module's `Command` object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
 
 ### Custom Tools
 

@@ -338,6 +338,71 @@ test('string_replace: works with large replacements', async t => {
 	t.true(result.includes('Successfully replaced'));
 });
 
+test('string_replace: returns only a bounded context window around the edit', async t => {
+	const filePath = await createTestFile(
+		'large-context.txt',
+		Array.from({length: 100}, (_, i) => `line ${i + 1}`).join('\n'),
+	);
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'line 50',
+		new_str: 'changed line 50',
+	});
+
+	t.regex(result, /Updated file context \(lines 30-70 of 100\)/);
+	t.true(result.includes('[... lines 1-29 omitted ...]'));
+	t.true(result.includes('  30: line 30'));
+	t.true(result.includes('  50: changed line 50'));
+	t.true(result.includes('  70: line 70'));
+	t.true(result.includes('[... lines 71-100 omitted ...]'));
+	t.false(result.includes('  29: line 29'));
+	t.false(result.includes('  71: line 71'));
+});
+
+test('string_replace: clamps context windows at the file boundaries', async t => {
+	const filePath = await createTestFile(
+		'boundary-context.txt',
+		Array.from(
+			{length: 45},
+			(_, i) => `line ${String(i + 1).padStart(3, '0')}`,
+		).join('\n'),
+	);
+
+	const startResult = await executeStringReplace({
+		path: filePath,
+		old_str: 'line 001',
+		new_str: 'changed line 001',
+	});
+	const endResult = await executeStringReplace({
+		path: filePath,
+		old_str: 'line 045',
+		new_str: 'changed line 045',
+	});
+
+	t.regex(startResult, /Updated file context \(lines 1-21 of 45\)/);
+	t.false(startResult.includes('[... lines 1-'));
+	t.true(startResult.includes('[... lines 22-45 omitted ...]'));
+	t.regex(endResult, /Updated file context \(lines 25-45 of 45\)/);
+	t.true(endResult.includes('[... lines 1-24 omitted ...]'));
+	t.false(endResult.includes('[... lines 46-'));
+});
+
+test('string_replace: reports the line for inline matches', async t => {
+	const filePath = await createTestFile(
+		'inline-match.txt',
+		'prefix target suffix\nnext line\n',
+	);
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'target',
+		new_str: 'replacement',
+	});
+
+	t.regex(result, /Successfully replaced content at line 1 \(now line 1\)/);
+});
+
 // ============================================================================
 // Validator Tests
 // ============================================================================
@@ -964,4 +1029,3 @@ test('string_replace formatter: normalizes tabs to 2 spaces', async t => {
 	t.regex(output!, /string_replace/);
 	t.regex(output!, /Path:/);
 });
-

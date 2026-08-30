@@ -25,9 +25,9 @@ export async function runAcpServer(
 			cliModel: options.cliModel,
 		});
 	} catch (error) {
-		logger.error(
-			`ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`,
-		);
+		const msg = `ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`;
+		logger.error(msg);
+		process.stderr.write(`[nanocoder] ${msg}\n`);
 		process.exit(1);
 	}
 

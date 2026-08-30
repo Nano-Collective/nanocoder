@@ -44,10 +44,18 @@ export default function ModelSelector({
 			? 'No models available. Please check your configuration.'
 			: null;
 
+	const currentIndex = entries.findIndex(
+		entry => entry.provider === currentProvider && entry.model === currentModel,
+	);
+
 	return (
 		<ItemSelector
 			title="Select a Model"
 			items={items}
+			searchable
+			initialSelectedValue={
+				currentIndex >= 0 ? String(currentIndex) : undefined
+			}
 			onSelect={value => {
 				const entry = entries[Number(value)];
 				if (entry) {

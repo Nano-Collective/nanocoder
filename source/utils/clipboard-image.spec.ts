@@ -88,7 +88,7 @@ test('extractImageReferences pulls a quoted path out of surrounding prose', t =>
 		`Give me text of the image'${file}'`,
 	);
 	t.deepEqual(paths, [file]);
-	t.is(text, 'Give me text of the image');
+	t.is(text, 'Give me text of the image[Image #1]');
 });
 
 test('extractImageReferences pulls an unquoted path token out of prose', t => {
@@ -96,7 +96,7 @@ test('extractImageReferences pulls an unquoted path token out of prose', t => {
 	writeFileSync(file, PNG_BYTES);
 	const {text, paths} = extractImageReferences(`look at ${file} please`);
 	t.deepEqual(paths, [file]);
-	t.is(text, 'look at please');
+	t.is(text, 'look at [Image #1] please');
 });
 
 test('extractImageReferences pulls an unquoted escaped-space path out of prose', t => {
@@ -106,7 +106,7 @@ test('extractImageReferences pulls an unquoted escaped-space path out of prose',
 	const escaped = file.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
 	const {text, paths} = extractImageReferences(`describe ${escaped} please`);
 	t.deepEqual(paths, [file]);
-	t.is(text, 'describe please');
+	t.is(text, 'describe [Image #1] please');
 });
 
 test('extractImageReferences leaves remote image URLs untouched', t => {
@@ -131,6 +131,17 @@ test('extractImageReferences returns multiple resolved paths', t => {
 	const b = join(dir, 'b.jpg');
 	writeFileSync(a, PNG_BYTES);
 	writeFileSync(b, PNG_BYTES);
-	const {paths} = extractImageReferences(`'${a}' and '${b}'`);
+	const {text, paths} = extractImageReferences(`'${a}' and '${b}'`);
 	t.deepEqual(paths.sort(), [a, b].sort());
+	t.is(text, '[Image #1] and [Image #2]');
+});
+
+test('extractImageReferences numbers placeholders from startIndex', t => {
+	const file = join(dir, 'offset.png');
+	writeFileSync(file, PNG_BYTES);
+	// startIndex counts attachments with no textual token (e.g. Ctrl+V pastes),
+	// so the placeholder number lines up with the attachment order.
+	const {text, paths} = extractImageReferences(`see '${file}'`, 2);
+	t.deepEqual(paths, [file]);
+	t.is(text, 'see [Image #3]');
 });

@@ -7,6 +7,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
@@ -29,7 +30,7 @@ const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
 
 	// Type guard: ensure content is string for write operation
@@ -44,23 +45,16 @@ const executeWriteFile = async (args: {
 	// follow-up edit or rewrite is not blind.
 	markFileSeen(absPath);
 
-	// Read back to verify and show actual content
+	// Read back to verify the write succeeded (but don't echo the content back
+	// to the model — it just sent us that exact content as the tool call
+	// arguments, so returning it again is pure duplication).
 	const actualContent = await readFile(absPath, 'utf-8');
-	const lines = actualContent.split('\n');
-	const lineCount = lines.length;
+	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
 	const estimatedTokens = calculateTokens(actualContent);
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nFile contents after write:\n';
-	for (let i = 0; i < lines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = lines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
-
 	const action = fileExists ? 'overwritten' : 'written';
-	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${fileContext}`;
+	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).`;
 };
 
 const writeFileCoreTool = tool({
@@ -183,7 +177,7 @@ const writeFileFormatter = async (
 	result?: string,
 ): Promise<React.ReactElement> => {
 	const path = args.path || args.file_path || '';
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
@@ -232,7 +226,7 @@ const writeFileValidator = async (args: {
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
 
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	// Check if parent directory exists
 	const parentDir = dirname(absPath);
@@ -270,7 +264,7 @@ const writeFileValidator = async (args: {
 	if (existsSync(absPath) && !hasSeenFile(absPath)) {
 		return {
 			valid: false,
-			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first (so you don't discard existing content), then retry. For small changes, prefer string_replace over a full overwrite.`,
+			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
 		};
 	}
 

@@ -15,10 +15,10 @@ function stripVSCodeContext(message: string): string {
 	);
 }
 
-// Parse a line and return segments with file placeholders highlighted
+// Parse a line and return segments with file/image placeholders highlighted
 function parseLineWithPlaceholders(line: string) {
 	const segments: Array<{text: string; isPlaceholder: boolean}> = [];
-	const filePattern = /\[@[^\]]+\]/g;
+	const filePattern = /\[@[^\]]+\]|\[Image #\d+\]/g;
 	let lastIndex = 0;
 	let match;
 

@@ -6,8 +6,9 @@
  */
 
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
+import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendRelevantProjectContextWithCount,
 	type MemoryFinder,
@@ -21,19 +22,27 @@ import {
 	updateSubagentProgress,
 	updateSubagentProgressById,
 } from '@/services/subagent-events';
+import {
+	cleanupSubagentSession,
+	initSubagentSession,
+	updateSubagentSessionMessages,
+	updateSubagentSessionStreaming,
+} from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
-import type {ToolManager} from '@/tools/tool-manager';
+import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
 	LLMClient,
 	Message,
 	ToolCall,
+	ToolExecutionContext,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -47,6 +56,21 @@ const MAX_SUBAGENT_DEPTH = 2;
 
 /** Maximum number of concurrent subagents */
 export const MAX_CONCURRENT_AGENTS = 5;
+
+/**
+ * Thrown when the conversation loop stops itself (repeated-call cap). Carries
+ * the assistant text produced before the stop so the parent still receives the
+ * work the subagent did complete instead of an empty result.
+ */
+class SubagentLoopStopError extends Error {
+	readonly partialOutput: string;
+
+	constructor(message: string, partialOutput: string) {
+		super(message);
+		this.name = 'SubagentLoopStopError';
+		this.partialOutput = partialOutput;
+	}
+}
 
 /**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
@@ -123,6 +147,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -184,6 +209,7 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					executionContext,
 				);
 
 				// Read final token count from the correct progress source
@@ -199,12 +225,19 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
+				if (agentId) {
+					cleanupSubagentSession(agentId);
+				}
 				restoreParent();
 			}
 		} catch (error) {
 			return {
 				subagentName: task.subagent_type,
-				output: '',
+				// A loop stop still returns whatever the subagent produced before
+				// it got stuck, so the parent can use the partial work instead of
+				// being handed an empty result.
+				output:
+					error instanceof SubagentLoopStopError ? error.partialOutput : '',
 				success: false,
 				error: formatError(error),
 				executionTimeMs: Date.now() - startTime,
@@ -272,6 +305,13 @@ export class SubagentExecutor {
 
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
+
+		// Always exclude the session-artifact tools. Subagents run with the
+		// parent's session id, so `getAllTools()` (which applies no development
+		// mode) would otherwise let a subagent overwrite the very plan, task
+		// list, or walkthrough the user is about to act on.
+		const artifactTools = new Set<string>(SESSION_ARTIFACT_TOOLS);
+		available = available.filter(name => !artifactTools.has(name));
 
 		return available;
 	}
@@ -393,10 +433,37 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
 		let totalTokens = 0;
+
+		let streamingText = '';
+		let streamingReasoning = '';
+
+		// Repeated-call cap (`nanocoder.retries.maxRepeatedToolCalls`): the same
+		// agent-loop guard the main runtimes apply. A subagent re-issuing the
+		// identical tool call(s) on consecutive turns is stuck; there is no user
+		// to ask inside a delegated run, so hitting the cap stops with an error.
+		// The signature covers every emitted call, so a subagent stuck on an
+		// unknown tool trips the cap too.
+		//
+		// Deliberately out of scope for #897: a hard turn ceiling (the plain and
+		// ACP `maxTurns` equivalent) and alternating-pattern detection, so a
+		// subagent cycling A, B, A, B... is still only bounded by the parent's
+		// abort signal. Revisit as its own change.
+		const {maxRepeatedToolCalls} = getRetryLimits();
+		let lastToolSignature = '';
+		let repeatedToolCallCount = 0;
+
+		// Assistant text from every turn so far. The repeated-call stop hands
+		// this to the parent instead of discarding the work already done.
+		const assistantTranscript: string[] = [];
+
+		if (agentId) {
+			initSubagentSession(agentId, config.name, messages);
+		}
 
 		// Rough token estimate: ~4 chars per token
 		const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -444,10 +511,38 @@ export class SubagentExecutor {
 				messages,
 				tools,
 				{
-					onToken: () => {
+					onToken: token => {
 						totalTokens++;
+						if (agentId) {
+							streamingText += token;
+							updateSubagentSessionStreaming(
+								agentId,
+								streamingText,
+								streamingReasoning,
+							);
+						}
 						// Update the live token count directly on the mutable
 						// progress object so the UI polls the latest value.
+						if (agentId) {
+							const progress = progressRef;
+							if (progress) {
+								progress.tokenCount = totalTokens;
+							}
+						} else {
+							subagentProgress.tokenCount = totalTokens;
+						}
+					},
+					onReasoningToken: token => {
+						totalTokens++;
+						if (agentId) {
+							streamingReasoning += token;
+							updateSubagentSessionStreaming(
+								agentId,
+								streamingText,
+								streamingReasoning,
+							);
+						}
+						// Update the live token count directly on the mutable
 						if (agentId) {
 							const progress = progressRef;
 							if (progress) {
@@ -462,12 +557,30 @@ export class SubagentExecutor {
 			);
 
 			const responseContent = response.choices[0]?.message.content || '';
+			if (responseContent.trim()) {
+				assistantTranscript.push(responseContent);
+			}
 
 			const toolCalls = response.choices[0]?.message.tool_calls;
 			if (!toolCalls || toolCalls.length === 0) {
 				emitProgress('complete');
 				return responseContent;
 			}
+
+			const currentToolSignature = computeToolCallSignature(toolCalls);
+			const currentRepeatedCount =
+				currentToolSignature && currentToolSignature === lastToolSignature
+					? repeatedToolCallCount + 1
+					: 1;
+			if (currentRepeatedCount >= maxRepeatedToolCalls) {
+				emitProgress('error');
+				throw new SubagentLoopStopError(
+					`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
+					assistantTranscript.join('\n\n'),
+				);
+			}
+			lastToolSignature = currentToolSignature;
+			repeatedToolCallCount = currentRepeatedCount;
 
 			// Count tokens from tool call arguments
 			for (const tc of toolCalls) {
@@ -483,6 +596,16 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
+			if (agentId) {
+				streamingText = '';
+				streamingReasoning = '';
+				updateSubagentSessionStreaming(
+					agentId,
+					streamingText,
+					streamingReasoning,
+				);
+				updateSubagentSessionMessages(agentId, messages);
+			}
 
 			// Execute each tool call — yield between each so Ink can render
 			for (const toolCall of toolCalls) {
@@ -504,6 +627,7 @@ export class SubagentExecutor {
 					toolCall.id,
 					config,
 					signal,
+					executionContext,
 				);
 
 				// Count tokens from tool results
@@ -515,6 +639,9 @@ export class SubagentExecutor {
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
+				if (agentId) {
+					updateSubagentSessionMessages(agentId, messages);
+				}
 
 				emitProgress('running', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
@@ -548,9 +675,24 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
+		}
+
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		if (!this.getAvailableToolNames(config).includes(toolName)) {
+			return (
+				`Error: Tool '${toolName}' is not available to this subagent. ` +
+				'Use only the tools listed in your instructions.'
+			);
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
@@ -585,14 +727,18 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
-			const result = await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs, {
+				...executionContext,
+				abortSignal: signal,
+			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
-			return typeof result === 'string' ? result : result.llmContent;
+			const content = typeof result === 'string' ? result : result.llmContent;
+			return truncateToolResult(content);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail.
-			return toolErrorToContent(error);
+			return truncateToolResult(toolErrorToContent(error));
 		}
 	}
 }

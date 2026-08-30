@@ -138,6 +138,29 @@ test('SemanticMemoryManager filters out stopword-only matches on an unrelated qu
 	t.deepEqual(results, [style]);
 });
 
+test('SemanticMemoryManager ranks by query coverage, not memory length', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	await manager.addMemory({
+		content: 'Always add tests.',
+	});
+	const worker = await manager.addMemory({
+		content:
+			'We decided against introducing a separate background worker process for indexing, because the daemon already owns scheduling and a second long-lived process would complicate the lockfile story.',
+	});
+
+	t.deepEqual(
+		await manager.findRelevantMemories(
+			'should I add a background worker for this',
+			5,
+		),
+		[worker],
+	);
+});
+
 test('SemanticMemoryManager serializes concurrent writes so none are lost', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');

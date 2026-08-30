@@ -23,6 +23,15 @@ test('BoundedMap - has() method', t => {
 	t.false(map.has('nonexistent'));
 });
 
+test('BoundedMap - has() returns true for an existing undefined value', t => {
+	const map = new BoundedMap<string, undefined>();
+
+	map.set('key', undefined);
+
+	t.true(map.has('key'));
+	t.false(map.has('missing'));
+});
+
 test('BoundedMap - delete() method', t => {
 	const map = new BoundedMap<string, number>();
 

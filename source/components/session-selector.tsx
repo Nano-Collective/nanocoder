@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import React, {useEffect, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {SessionMetadata} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -79,13 +79,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	}, [showAll]);
 
 	useInput((_input, key) => {
-		if (key.escape) {
-			if (!loading) {
-				onCancel();
-			}
-			return;
-		}
-		if (!loading && sessions.length === 0) {
+		if (key.escape && !loading) {
 			onCancel();
 		}
 	});
@@ -109,7 +103,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				) : (
 					<Text>No saved sessions found.</Text>
 				)}
-				<Text>Press any key to continue...</Text>
+				<Text>Press Escape to continue</Text>
 			</Box>
 		);
 	}
@@ -143,7 +137,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		<Box flexDirection="column" marginY={1}>
 			<Text bold>Recent Sessions:</Text>
 			<Box marginTop={1}>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={handleSelect}
 					limit={Math.min(items.length, 10)}

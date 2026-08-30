@@ -1,4 +1,5 @@
-import {readFile, stat} from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import {extname} from 'node:path';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 
 /**
@@ -30,6 +31,15 @@ let accessCounter = 0;
 // Track pending reads to deduplicate concurrent requests for the same file
 const pendingReads = new Map<string, Promise<CachedFile>>();
 
+function cleanupPendingRead(
+	absPath: string,
+	pending: Promise<CachedFile>,
+): void {
+	if (pendingReads.get(absPath) === pending) {
+		pendingReads.delete(absPath);
+	}
+}
+
 /**
  * Get file content from cache or read from disk.
  * Automatically checks mtime to ensure freshness.
@@ -53,7 +63,7 @@ export async function getCachedFileContent(
 		} else {
 			// Check if file mtime has changed
 			try {
-				const fileStat = await stat(absPath);
+				const fileStat = await fs.stat(absPath);
 				const currentMtime = fileStat.mtimeMs;
 
 				if (currentMtime === data.mtime) {
@@ -66,16 +76,20 @@ export async function getCachedFileContent(
 
 				// Check for pending read before starting a new one (deduplication)
 				let pending = pendingReads.get(absPath);
+				let ownsPendingRead = false;
 				if (!pending) {
 					// Reuse the stat we just did to avoid double stat
 					pending = readAndCacheFile(absPath, now, fileStat.mtimeMs);
 					pendingReads.set(absPath, pending);
+					ownsPendingRead = true;
 				}
 
 				try {
 					return await pending;
 				} finally {
-					pendingReads.delete(absPath);
+					if (ownsPendingRead) {
+						cleanupPendingRead(absPath, pending);
+					}
 				}
 			} catch {
 				// File may have been deleted, invalidate cache
@@ -97,7 +111,7 @@ export async function getCachedFileContent(
 	try {
 		return await readPromise;
 	} finally {
-		pendingReads.delete(absPath);
+		cleanupPendingRead(absPath, readPromise);
 	}
 }
 
@@ -113,12 +127,13 @@ async function readAndCacheFile(
 	retryCount = 0,
 ): Promise<CachedFile> {
 	// Get mtime before reading (or use known mtime from caller)
-	const mtimeBefore = knownMtime ?? (await stat(absPath)).mtimeMs;
+	const mtimeBefore = knownMtime ?? (await fs.stat(absPath)).mtimeMs;
 
-	const content = await readFile(absPath, 'utf-8');
+	// Read as Buffer to support both text and binary formats
+	const buffer = await fs.readFile(absPath);
 
 	// Verify mtime didn't change during read
-	const mtimeAfter = (await stat(absPath)).mtimeMs;
+	const mtimeAfter = (await fs.stat(absPath)).mtimeMs;
 	if (mtimeAfter !== mtimeBefore) {
 		if (retryCount >= MAX_FILE_READ_RETRIES) {
 			throw new Error(
@@ -127,6 +142,24 @@ async function readAndCacheFile(
 		}
 		// File changed during read, retry with fresh timestamp
 		return readAndCacheFile(absPath, Date.now(), undefined, retryCount + 1);
+	}
+
+	let content: string;
+	const ext = extname(absPath).toLowerCase();
+
+	if (ext === '.pdf' || ext === '.docx') {
+		try {
+			const {convertToMarkdown} = await import('@nanocollective/get-md');
+			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
+			const result = await convertToMarkdown(buffer as any);
+			content = result.markdown;
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			throw new Error(`Failed to extract text from document: ${errorMessage}`);
+		}
+	} else {
+		content = buffer.toString('utf-8');
 	}
 
 	const cachedFile: CachedFile = {

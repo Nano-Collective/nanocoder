@@ -26,6 +26,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import {SessionManager} from '../session/session-manager.js';
 import {
+	deriveSessionTitle,
+	shouldResetSessionId,
+} from './useSessionAutosave.js';
+import {
 	getKeyGeneratorSessionId,
 	resetKeyGeneratorForTests,
 	setKeyGeneratorSessionId,
@@ -41,6 +45,66 @@ function makeMessages(count: number) {
 		content: `msg ${i + 1}`,
 	}));
 }
+
+test('slash-only sessions keep their preallocated ID while messages stay empty', t => {
+	t.false(shouldResetSessionId(0, 0));
+});
+
+test('clearing a non-empty conversation resets its session ID', t => {
+	t.true(shouldResetSessionId(1, 0));
+});
+
+test('internal walkthrough fallback does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('approved plan injection does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'The plan is ready for approval.'},
+		{
+			role: 'user',
+			content:
+				'The implementation plan below is approved. Proceed with implementing it now.\n\n<approved_plan>\nImplement the helper.\n</approved_plan>',
+		},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('session titles keep the existing 50-character truncation', t => {
+	const content = 'a'.repeat(51);
+
+	t.is(deriveSessionTitle([{role: 'user', content}]), `${'a'.repeat(50)}...`);
+});
+
+test('an internal walkthrough without a real user message uses the fallback title', t => {
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, `Session ${new Date().toLocaleDateString()}`);
+});
 
 // ---------------------------------------------------------------------------
 // Bug A — Duplicate-session race
@@ -277,6 +341,56 @@ test.serial(
 			afterResumeId,
 			startupId,
 			'Without the fix, key generator keeps the random startup ID (old bug)',
+		);
+	},
+);
+
+// ---------------------------------------------------------------------------
+// Bug D — lastAccessedAt never bumped by autosave
+// ---------------------------------------------------------------------------
+//
+// autosave's update path (read session, mutate fields, saveSession) never
+// touched lastAccessedAt, so a session that's actively being chatted in kept
+// showing its create/resume time as "last used" until closed and reopened.
+// The fix sets lastAccessedAt = now() in the update path itself, right
+// before saveSession - saveSession() trusts whatever it's given, it doesn't
+// bump anything on its own (other callers, e.g. resolve-session.spec.ts's
+// test helpers, rely on being able to set an explicit lastAccessedAt).
+
+test.serial(
+	'D: autosave update path bumps lastAccessedAt on every save',
+	async t => {
+		const dir = await mkdtemp(join(tmpdir(), 'nc-lastaccessed-'));
+		t.teardown(() => rm(dir, {recursive: true, force: true}));
+
+		const manager = new SessionManager(dir);
+		await manager.initialize();
+
+		const created = await manager.createSession({
+			title: 'Original',
+			messageCount: 1,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: dir,
+			messages: makeMessages(1),
+		});
+		const originalLastAccessed = created.lastAccessedAt;
+
+		await new Promise(r => setTimeout(r, 10));
+
+		// Mirrors the hook's update path (source/hooks/useSessionAutosave.ts).
+		const session = await manager.readSession(created.id);
+		if (!session) throw new Error('session missing');
+		session.messages = makeMessages(3);
+		session.messageCount = 3;
+		session.lastAccessedAt = new Date().toISOString();
+		await manager.saveSession(session);
+
+		const loaded = await manager.readSession(created.id);
+		t.not(
+			loaded!.lastAccessedAt,
+			originalLastAccessed,
+			'autosave must bump lastAccessedAt so "last used" reflects real activity',
 		);
 	},
 );

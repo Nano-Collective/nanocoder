@@ -30,6 +30,17 @@ interface Overrides {
 	setIsCancelling?: (value: boolean) => void;
 	setAbortController?: (controller: AbortController | null) => void;
 	client?: unknown;
+	// Plan review knobs
+	planReviewState?: {show: boolean; originalMessage: string} | null;
+	setPlanReviewState?: (v: {show: boolean; originalMessage: string} | null) => void;
+	isConversationComplete?: boolean;
+	developmentMode?: string;
+	planTurnCompleted?: boolean;
+	setPlanTurnCompleted?: (v: boolean) => void;
+	pendingPlanProceed?: string | null;
+	setPendingPlanProceed?: (v: string | null) => void;
+	handleMessageSubmit?: (message: string) => Promise<void>;
+	currentSessionId?: string | null;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -41,6 +52,7 @@ function makeProps(o: Overrides = {}) {
 		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
+		currentSessionId: o.currentSessionId ?? null,
 		startChat: o.startChat ?? false,
 		mcpInitialized: true,
 		activeMode: o.activeMode ?? null,
@@ -57,13 +69,23 @@ function makeProps(o: Overrides = {}) {
 		pendingToolCalls: o.pendingToolCalls ?? [],
 		currentToolIndex: 0,
 		pendingQuestion: null,
+		planReviewState: o.planReviewState ?? null,
+		setPlanReviewState: o.setPlanReviewState ?? noop,
+		planTurnCompleted: o.planTurnCompleted ?? false,
+		setPlanTurnCompleted: o.setPlanTurnCompleted ?? noop,
+		pendingPlanProceed: o.pendingPlanProceed ?? null,
+		setPendingPlanProceed: o.setPendingPlanProceed ?? noop,
+		isConversationComplete: o.isConversationComplete ?? false,
+		developmentMode: o.developmentMode ?? 'normal',
 		customCommandCache: new Map(),
-		developmentMode: 'normal',
 		contextPercentUsed: null,
 		sessionName: '',
 		compactToolCounts: null,
 		compactToolDisplay: false,
 		liveTaskList: null,
+		showTaskList: true,
+		taskListHasUnread: false,
+		toggleTaskList: noop,
 		tune: {enabled: false, toolProfile: 'minimal', aggressiveCompact: false},
 		reasoningExpanded: false,
 		chatComponents: o.chatComponents ?? [],
@@ -92,8 +114,6 @@ function makeProps(o: Overrides = {}) {
 			handleModelDatabaseCancel: noop,
 			handleConfigWizardComplete: noop,
 			handleConfigWizardCancel: noop,
-			handleMcpWizardComplete: noop,
-			handleMcpWizardCancel: noop,
 			handleSettingsCancel: noop,
 			handleTuneSelect: noop,
 			handleTuneCancel: noop,
@@ -105,6 +125,9 @@ function makeProps(o: Overrides = {}) {
 			handleSessionCancel: noop,
 			handleCancel: o.handleCancel ?? noop,
 			handleToggleDevelopmentMode: noop,
+			handleMessageSubmit: o.handleMessageSubmit ?? noopAsync,
+			handlePlanProceed: noop,
+			handlePlanModify: noop,
 		},
 		vscodeServer: {
 			activeEditor: null,
@@ -182,6 +205,10 @@ test('renders consistently across two mounts with the same props', t => {
 // ============================================================================
 // Global Escape -> cancel handler
 // ============================================================================
+
+// Lets mount effects (plan review signal / proceed dispatch) run and settle.
+const tickInteractive = () =>
+	new Promise(resolve => setTimeout(resolve, 30));
 
 const pressEscape = async (stdin: {write: (s: string) => void}) => {
 	stdin.write('\u001B');
@@ -482,6 +509,154 @@ test('Escape does NOT hijack tool confirmation (decline owns it)', async t => {
 
 	await pressEscape(stdin);
 	t.is(cancelled, 0);
+});
+
+// ============================================================================
+// Plan review bar
+// ============================================================================
+
+test('plan review bar is shown when planReviewState.show is true', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				planReviewState: {show: true, originalMessage: 'add auth'},
+			})}
+		/>,
+	);
+	t.regex(lastFrame()!, /Plan ready/);
+});
+
+test('plan review bar receives the current session artifact path', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				currentSessionId: '11111111-1111-4111-8111-111111111111',
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+			})}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /implementation_plan\.md/);
+});
+
+test('plan review bar tolerates an invalid external session ID', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				currentSessionId: '../outside',
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+			})}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Plan ready/);
+	t.notRegex(lastFrame()!, /implementation_plan\.md/);
+});
+
+test('plan review bar shows when the planTurnCompleted signal fires', async t => {
+	let shown: {show: boolean; originalMessage: string} | null = null;
+	let resetToFalse = false;
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				planTurnCompleted: true,
+				planReviewState: null,
+				setPlanReviewState: v => {
+					shown = v;
+				},
+				setPlanTurnCompleted: v => {
+					if (v === false) resetToFalse = true;
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.deepEqual(shown, {show: true, originalMessage: ''});
+	// The one-shot signal must be reset after consumption.
+	t.true(resetToFalse);
+});
+
+// Regression: the bar used to be inferred from (isConversationComplete + current
+// mode). Switching into plan mode while a prior turn was already complete popped
+// it up with no plan behind it. It must now ONLY show on the explicit signal.
+test('plan review bar does NOT show from idle completion in plan mode (no signal)', async t => {
+	let setPlanCalls = 0;
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				planTurnCompleted: false, // no signal — just idle-complete in plan mode
+				planReviewState: null,
+				isConversationComplete: true,
+				developmentMode: 'plan',
+				setPlanReviewState: () => {
+					setPlanCalls++;
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(setPlanCalls, 0);
+});
+
+// Proceed defers the "implement" dispatch until the mode switch to normal has
+// propagated, so the executing turn runs with normal-mode tools/prompt.
+test('Proceed dispatches the implement message once mode is normal', async t => {
+	const submitted: string[] = [];
+	let pendingReset = false;
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				pendingPlanProceed:
+					'The persisted plan is approved. Proceed with implementing it.',
+				developmentMode: 'normal',
+				setPendingPlanProceed: v => {
+					if (v === null) pendingReset = true;
+				},
+				handleMessageSubmit: async m => {
+					submitted.push(m);
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(submitted.length, 1);
+	t.regex(submitted[0], /approved.*implement/i);
+	t.true(pendingReset);
+});
+
+test('Proceed does NOT dispatch while still in plan mode', async t => {
+	const submitted: string[] = [];
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				pendingPlanProceed:
+					'The persisted plan is approved. Proceed with implementing it.',
+				developmentMode: 'plan',
+				handleMessageSubmit: async m => {
+					submitted.push(m);
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(submitted.length, 0);
+});
+
+test('ChatInput is NOT rendered while plan review bar is showing', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				planReviewState: {show: true, originalMessage: 'add auth'},
+			})}
+		/>,
+	);
+	const output = lastFrame()!;
+	// Plan bar is present.
+	t.regex(output, /Plan ready/);
+	// The ChatInput prompt line should be absent — both inputs must not be
+	// active at the same time (double-input blocker).
+	t.notRegex(output, /What now\?/);
 });
 
 // FileExplorer/IdeSelector start watchers that keep the event loop alive

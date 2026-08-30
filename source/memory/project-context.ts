@@ -59,7 +59,11 @@ function formatProjectContextWithCount(
 		estimateTokens('## Project Context\n\n') + estimateTokens('```\n\n```');
 
 	for (const memory of memories) {
-		const bullet = `- ${memory.content.replaceAll(/\s+/gu, ' ').trim()}`;
+		const text = memory.content.replaceAll(/\s+/gu, ' ').trim().replace(
+			/^[-*]\s+/u,
+			'',
+		);
+		const bullet = `- ${text}`;
 		const bulletTokens = estimateTokens(`${bullet}\n`);
 		if (usedTokens + bulletTokens > tokenBudget) break;
 

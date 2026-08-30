@@ -44,11 +44,43 @@ export function loadPreferences(): UserPreferences {
 	return {};
 }
 
+// Preferences are written straight to disk, so React has no natural signal that
+// a setting flipped. Consumers holding derived state (e.g. the memoized system
+// prompt in useChatHandler) subscribe here and re-read on the next render.
+let preferencesVersion = 0;
+const preferencesListeners = new Set<() => void>();
+
+/**
+ * Subscribe to preference writes. Returns an unsubscribe function, matching the
+ * shape React's useSyncExternalStore expects.
+ */
+export function subscribeToPreferences(listener: () => void): () => void {
+	preferencesListeners.add(listener);
+	return () => {
+		preferencesListeners.delete(listener);
+	};
+}
+
+/**
+ * Monotonic counter bumped on every successful preferences write. Reading it is
+ * free (no file I/O), which is what makes it safe as a snapshot for
+ * useSyncExternalStore - unlike the getters below, which hit the disk.
+ */
+export function getPreferencesVersion(): number {
+	return preferencesVersion;
+}
+
 export function savePreferences(preferences: UserPreferences): void {
 	try {
 		writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
+		return;
+	}
+
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
 	}
 }
 
@@ -186,6 +218,23 @@ export function updateCompactToolDisplay(value: boolean): void {
 }
 
 /**
+ * Get the per-response usage footer preference. On by default.
+ */
+export function getShowUsageFooter(): boolean {
+	const preferences = loadPreferences();
+	return preferences.showUsageFooter ?? true;
+}
+
+/**
+ * Save the per-response usage footer preference
+ */
+export function updateShowUsageFooter(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.showUsageFooter = value;
+	savePreferences(preferences);
+}
+
+/**
  * Get the privacy scrubbing preference from preferences
  */
 export function getPrivacyPreference(): boolean {
@@ -282,5 +331,41 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
 		MIN_TOKEN_BUDGET,
 		MAX_TOKEN_BUDGET,
 	);
+	savePreferences(preferences);
+}
+
+/**
+ * Get the alternate-screen (fullscreen) preference. Also settable via
+ * --alt-screen/--no-alt-screen at launch; this is the persisted default.
+ */
+export function getAlternateScreen(): boolean {
+	const preferences = loadPreferences();
+	return preferences.alternateScreen ?? false;
+}
+
+/**
+ * Save the alternate-screen preference
+ */
+export function updateAlternateScreen(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.alternateScreen = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the professional ("boring") tone preference. When on, progress text is
+ * strictly functional and the model is instructed to keep responses terse.
+ */
+export function getProfessionalTone(): boolean {
+	const preferences = loadPreferences();
+	return preferences.professionalTone ?? false;
+}
+
+/**
+ * Save the professional tone preference
+ */
+export function updateProfessionalTone(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.professionalTone = value;
 	savePreferences(preferences);
 }

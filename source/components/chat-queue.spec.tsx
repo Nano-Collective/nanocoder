@@ -1,5 +1,5 @@
 import test from 'ava';
-import {Box} from 'ink';
+import {Box, Text} from 'ink';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import ChatQueue from './chat-queue';
@@ -116,4 +116,162 @@ test('ChatQueue generates default key for component without key prop', t => {
 	t.notThrows(() => {
 		render(<ChatQueue staticComponents={components} queuedComponents={[]} />);
 	});
+});
+
+// ============================================================================
+// Fullscreen (disableStatic) path — used on the alt screen where Ink's
+// <Static> has no native scrollback to print into.
+// ============================================================================
+
+test('disableStatic renders staticComponents in regular flow instead of Static', t => {
+	const {lastFrame} = render(
+		<ChatQueue
+			staticComponents={[<Box key="1">Flow message</Box>]}
+			queuedComponents={[]}
+			disableStatic
+		/>,
+	);
+	t.regex(lastFrame() ?? '', /Flow message/);
+});
+
+test('disableStatic still renders the live (last-queued) component below the flow', t => {
+	const {lastFrame} = render(
+		<ChatQueue
+			staticComponents={[]}
+			queuedComponents={[
+				<Box key="frozen">Frozen part</Box>,
+				<Box key="live">Live part</Box>,
+			]}
+			renderLastQueuedComponentLive
+			disableStatic
+		/>,
+	);
+	const output = lastFrame() ?? '';
+	t.regex(output, /Frozen part/);
+	t.regex(output, /Live part/);
+});
+
+test('disableStatic caps the rendered tail at FULLSCREEN_TAIL_CAP (60) components', t => {
+	// 70 numbered items; only the last 60 (indices 10..69) should survive.
+	const components = Array.from({length: 70}, (_, i) => (
+		<Box key={`item-${i}`}>{`item-${i}`}</Box>
+	));
+
+	const {lastFrame} = render(
+		<ChatQueue
+			staticComponents={components}
+			queuedComponents={[]}
+			disableStatic
+		/>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.false(output.includes('item-9\n') || /item-9$/.test(output));
+	t.notRegex(output, /\bitem-0\b/);
+	t.notRegex(output, /\bitem-9\b/);
+	t.regex(output, /\bitem-10\b/);
+	t.regex(output, /\bitem-69\b/);
+});
+
+test('disableStatic with fewer than 60 components renders all of them untouched', t => {
+	const components = Array.from({length: 5}, (_, i) => (
+		<Box key={`short-${i}`}>{`short-${i}`}</Box>
+	));
+	const {lastFrame} = render(
+		<ChatQueue
+			staticComponents={components}
+			queuedComponents={[]}
+			disableStatic
+		/>,
+	);
+	const output = lastFrame() ?? '';
+	for (let i = 0; i < 5; i++) {
+		t.regex(output, new RegExp(`\\bshort-${i}\\b`));
+	}
+});
+
+test('disableStatic falls back to `flow-${index}` key for components without a key', t => {
+	const NoKeyComponent = () => <Box>anonymous flow item</Box>;
+	t.notThrows(() => {
+		render(
+			<ChatQueue
+				staticComponents={[<NoKeyComponent />]}
+				queuedComponents={[]}
+				disableStatic
+			/>,
+		);
+	});
+});
+
+test('disableStatic renders nothing extra when both component lists are empty', t => {
+	const {lastFrame} = render(
+		<ChatQueue staticComponents={[]} queuedComponents={[]} disableStatic />,
+	);
+	t.is(lastFrame(), '');
+});
+
+// ============================================================================
+// clearKey — forces a fresh Ink <Static> instance on /clear
+// ============================================================================
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 30));
+
+test('changing clearKey remounts the Static-backed content (component key changes across renders)', async t => {
+	let mountCount = 0;
+	const TrackMount = () => {
+		React.useEffect(() => {
+			mountCount++;
+		}, []);
+		return <Text>tracked</Text>;
+	};
+
+	const {rerender} = render(
+		<ChatQueue
+			staticComponents={[<TrackMount key="tracked" />]}
+			queuedComponents={[]}
+			clearKey="session-1"
+		/>,
+	);
+	await tick();
+	t.is(mountCount, 1);
+
+	rerender(
+		<ChatQueue
+			staticComponents={[<TrackMount key="tracked" />]}
+			queuedComponents={[]}
+			clearKey="session-2"
+		/>,
+	);
+	await tick();
+	t.is(mountCount, 2);
+});
+
+test('same clearKey across rerenders does not remount the Static content', async t => {
+	let mountCount = 0;
+	const TrackMount = () => {
+		React.useEffect(() => {
+			mountCount++;
+		}, []);
+		return <Text>tracked</Text>;
+	};
+
+	const {rerender} = render(
+		<ChatQueue
+			staticComponents={[<TrackMount key="tracked" />]}
+			queuedComponents={[]}
+			clearKey="stable"
+		/>,
+	);
+	await tick();
+	t.is(mountCount, 1);
+
+	rerender(
+		<ChatQueue
+			staticComponents={[<TrackMount key="tracked" />]}
+			queuedComponents={[]}
+			clearKey="stable"
+		/>,
+	);
+	await tick();
+	t.is(mountCount, 1);
 });

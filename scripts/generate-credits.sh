@@ -11,12 +11,12 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
+# `grep -v` exits 1 when it filters out every line (e.g. a shallow clone whose
+# only commit is authored by a bot), which pipefail would turn into a hard
+# failure — hence the `|| true`.
 git log --format="%aN" \
   | sort -u \
-  | grep -v '\[bot\]' \
-  | grep -v '^GitHub Action$' \
-  | grep -v '^Claude$' \
-  | grep -v '^Researcher$' \
+  | { grep -Ev '\[bot\]|^(GitHub Action|Claude|Researcher)$' || true; } \
   | jq -R . \
   | jq -s '{ contributors: . }' \
   > "$OUT"

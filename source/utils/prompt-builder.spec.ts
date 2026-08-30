@@ -2,6 +2,7 @@ import test from 'ava';
 import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
+import {resetPreferencesCache} from '@/config/preferences';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -94,10 +95,18 @@ test('buildSystemPrompt - auto-accept mode includes autonomous approach', t => {
 });
 
 test('buildSystemPrompt - plan mode includes planning approach', t => {
-	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+	const result = buildSystemPrompt('plan', undefined, [...ALL_TOOLS, 'write_plan']);
 	t.true(result.includes('PLANNING MODE'));
-	t.true(result.includes('Do NOT make changes'));
+	t.true(result.includes('Do NOT make project changes'));
 	t.true(result.includes('structured plan'));
+	t.true(result.includes('write_plan'));
+});
+
+test('buildSystemPrompt - plan mode omits artifact instructions when write_plan is unavailable', t => {
+	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+
+	t.true(result.includes('Do NOT make changes'));
+	t.false(result.includes('write_plan'));
 });
 
 test('buildSystemPrompt - scheduler mode includes scheduler approach', t => {
@@ -132,6 +141,16 @@ test('buildSystemPrompt - excludes git section when no git tools', t => {
 test('buildSystemPrompt - includes task management when write_tasks available', t => {
 	const result = buildSystemPrompt('normal', undefined, ['write_tasks']);
 	t.true(result.includes('TASK MANAGEMENT'));
+});
+
+test('buildSystemPrompt - requires a truthful walkthrough when the tool is available', t => {
+	const result = buildSystemPrompt('normal', undefined, [
+		'write_tasks',
+		'write_walkthrough',
+	]);
+
+	t.true(result.includes('write_walkthrough'));
+	t.true(result.includes('Only report tests you actually ran'));
 });
 
 test('buildSystemPrompt - excludes task management in plan mode', t => {
@@ -192,6 +211,20 @@ test('buildSystemPrompt - plan mode excludes coding practices', t => {
 test('buildSystemPrompt - plan mode excludes constraints', t => {
 	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
 	t.false(result.includes('## CONSTRAINTS'));
+});
+
+test('buildSystemPrompt - plan mode uses plan-specific asking-questions section', t => {
+	const result = buildSystemPrompt('plan', undefined, ['ask_user']);
+	// Plan mode section includes "Ask before you explore" instruction
+	t.true(result.includes('Ask before you explore'));
+	t.true(result.includes('ASKING QUESTIONS'));
+});
+
+test('buildSystemPrompt - normal mode uses standard asking-questions section', t => {
+	const result = buildSystemPrompt('normal', undefined, ['ask_user']);
+	t.true(result.includes('ASKING QUESTIONS'));
+	// Normal mode does NOT include the plan-specific pre-flight instruction
+	t.false(result.includes('Ask before you explore'));
 });
 
 // ============================================================================
@@ -256,10 +289,16 @@ test('buildSystemPrompt - minimal profile produces smaller prompt than full', t 
 	t.true(minimalPrompt.length < fullPrompt.length);
 });
 
-test('buildSystemPrompt - plan mode produces smaller prompt than normal', t => {
-	const normalPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+test('buildSystemPrompt - plan mode excludes coding practices and constraints (reducing size vs full normal)', t => {
+	// Plan mode drops CODING PRACTICES (~595B) and CONSTRAINTS (~560B)
+	// compared to normal mode — verify those heavyweight sections are absent.
 	const planPrompt = buildSystemPrompt('plan', undefined, ALL_TOOLS);
-	t.true(planPrompt.length < normalPrompt.length);
+	t.false(planPrompt.includes('CODING PRACTICES'));
+	t.false(planPrompt.includes('## CONSTRAINTS'));
+	// Normal mode includes both
+	const normalPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+	t.true(normalPrompt.includes('CODING PRACTICES'));
+	t.true(normalPrompt.includes('## CONSTRAINTS'));
 });
 
 // ============================================================================
@@ -525,4 +564,96 @@ test('buildSystemPrompt - replace systemPrompt updates getLastBuiltPrompt cache'
 	};
 	buildSystemPrompt('normal', undefined, ALL_TOOLS, false, override);
 	t.is(getLastBuiltPrompt(), 'cached override prompt');
+});
+
+// ============================================================================
+// Professional tone
+// ============================================================================
+
+test('professional tone section is omitted when the flag is off', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		undefined,
+		undefined,
+		false,
+	);
+	t.false(result.includes('## TONE'));
+});
+
+test('professional tone section is included when the flag is on', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		undefined,
+		undefined,
+		true,
+	);
+	t.true(result.includes('## TONE'));
+	t.true(result.includes('professional tone'));
+	// Placed before the system info block so it stays close to the end.
+	t.true(result.indexOf('## TONE') < result.indexOf('SYSTEM INFORMATION'));
+});
+
+/**
+ * Build a prompt with `professionalTone` left to its default by pointing the
+ * preferences loader at a throwaway config dir. Covers the fallback used by
+ * every caller that doesn't pass the flag explicitly (plain shell, ACP,
+ * headless runs).
+ */
+function buildWithProfessionalTone(enabled: boolean): string {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = dir;
+	resetPreferencesCache();
+	writeFileSync(
+		join(dir, 'nanocoder-preferences.json'),
+		JSON.stringify({professionalTone: enabled}),
+		'utf-8',
+	);
+	try {
+		return buildSystemPrompt('normal', undefined, ALL_TOOLS);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test('nano profile uses the shortened professional tone section', t => {
+	const result = buildSystemPrompt(
+		'normal',
+		TUNE_NANO,
+		NANO_TOOLS,
+		false,
+		undefined,
+		undefined,
+		true,
+	);
+	t.true(result.includes('## TONE'));
+	// Long-form professional-tone.md content should be absent
+	t.false(result.includes('Neutral register'));
+});
+
+test('nano professional tone section is smaller than the full one', t => {
+	const build = (tune: TuneConfig, tools: string[]) =>
+		buildSystemPrompt('normal', tune, tools, false, undefined, undefined, true)
+			.length -
+		buildSystemPrompt('normal', tune, tools, false, undefined, undefined, false)
+			.length;
+
+	t.true(build(TUNE_NANO, NANO_TOOLS) < build(TUNE_FULL, ALL_TOOLS));
+});
+
+test.serial('professional tone defaults to the preference when unset', t => {
+	t.false(buildWithProfessionalTone(false).includes('## TONE'));
+	t.true(buildWithProfessionalTone(true).includes('## TONE'));
 });

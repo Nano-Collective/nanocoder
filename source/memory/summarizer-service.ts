@@ -91,9 +91,9 @@ const INLINE_CODE_PATTERN = /`[^`]+`/;
 const PATH_PATTERN =
 	/(?:^|[\s('"])(?:~\/|\.{1,2}\/|\/)[\w.-]+|[\w.-]+\/[\w.-]+\/[\w.-]+|\b[\w-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|ya?ml|md|py|rb|go|rs|java|html|css|scss|toml|sh|sql)\b/;
 const ERROR_OUTPUT_PATTERN =
-	/\b(error[:\s]|exception|traceback|stack\s?trace|failed\s+with|exit\s+code|ENOENT|undefined is not|cannot read)\b/i;
+	/\b(error:|exception|traceback|stack\s?trace|failed\s+with|exit\s+code|ENOENT|undefined is not|cannot read)\b/i;
 const CODE_IDENTIFIER_PATTERN =
-	/\b[A-Za-z_$][\w$]*\([^)]*\)|\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]+\b|\b[a-z]+[A-Z][\w$]*\b/;
+	/\b[A-Za-z_$][\w$]*\([^)]*\)|\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]+\b/;
 
 function hasTechnicalEvidence(content: string): boolean {
 	return (
@@ -105,11 +105,13 @@ function hasTechnicalEvidence(content: string): boolean {
 	);
 }
 
-/** An assistant turn that only carries tool calls is plumbing, not a reply. */
-function isToolCallTurn(message: Message): boolean {
-	return (
-		(message.tool_calls?.length ?? 0) > 0 && message.content.trim().length === 0
-	);
+const LOOKAHEAD_NARRATION =
+	/^(?:let me |i(?:'m going to |'ll | will )?)(?:re-)?(?:read|look at|check|inspect|open|examine)\b/i;
+
+/** Tool calls (with or without narration) and "I'll look at the file" turns. */
+function isPlumbingTurn(message: Message): boolean {
+	if ((message.tool_calls?.length ?? 0) > 0) return true;
+	return LOOKAHEAD_NARRATION.test(message.content.trim());
 }
 
 const NEGATION_PATTERN =
@@ -310,7 +312,7 @@ export class SummarizerService {
 
 			for (const candidate of candidates) {
 				const category = inferMemoryCategory(candidate);
-				if (category === 'project' && message.role === 'assistant') continue;
+				if (category === 'project') continue;
 
 				const key = candidate.toLowerCase();
 				let entry = proposals.get(key);
@@ -400,7 +402,7 @@ export class SummarizerService {
 			if (!m) continue;
 			if (m.role === 'tool') continue;
 			if (m.role === 'assistant') {
-				if (isToolCallTurn(m)) continue;
+				if (isPlumbingTurn(m)) continue;
 				return false;
 			}
 			if (m.role === 'user') {
@@ -434,7 +436,7 @@ export class SummarizerService {
 		for (let i = userIndex - 1; i >= 0; i--) {
 			const earlier = messages[i];
 			if (!earlier || earlier.role !== 'assistant') continue;
-			if (isToolCallTurn(earlier)) continue;
+			if (isPlumbingTurn(earlier)) continue;
 			if (isContradiction(earlier.content, later.content)) return true;
 		}
 
@@ -469,8 +471,12 @@ export function toCamelCaseCategory(value: string): string {
 function splitMemoryCandidates(content: string): string[] {
 	return content
 		.split(/\n+/u)
-		.map(part => part.trim())
+		.map(part => part.trim().replace(/^[-*]\s+/u, '').replace(/^\d+\.\s+/u, ''))
 		.filter(
-			part => part.length >= 12 && part.length <= 300 && !part.endsWith('?'),
+			part =>
+				part.length >= 12 &&
+				part.length <= 300 &&
+				!part.endsWith('?') &&
+				/[.!:]$/u.test(part),
 		);
 }

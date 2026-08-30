@@ -1,13 +1,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {getAppDataPath} from '@/config/paths';
+import {MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {isValidSessionId} from '@/session/session-id';
 import type {Message} from '@/types/core';
-
-/** UUID v4 pattern for session ID validation (prevents path traversal) */
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface Session {
 	id: string;
@@ -19,6 +21,9 @@ export interface Session {
 	model: string;
 	workingDirectory: string;
 	messages: Message[];
+	/** True once a user has explicitly renamed this session, so autosave's
+	 * auto-derived title (from the latest message) stops overwriting it. */
+	titleManuallySet?: boolean;
 }
 
 export interface SessionMetadata {
@@ -30,10 +35,7 @@ export interface SessionMetadata {
 	provider: string;
 	model: string;
 	workingDirectory: string;
-}
-
-function isValidSessionId(id: string): boolean {
-	return SESSION_ID_PATTERN.test(id);
+	titleManuallySet?: boolean;
 }
 
 function isRecord(obj: unknown): obj is Record<string, unknown> {
@@ -93,7 +95,10 @@ export class SessionManager {
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
 
-	constructor(sessionsDir?: string) {
+	constructor(
+		sessionsDir?: string,
+		private readonly artifacts: ArtifactManager = artifactManager,
+	) {
 		this.overrideDir = sessionsDir;
 	}
 
@@ -159,9 +164,17 @@ export class SessionManager {
 	}
 
 	async createSession(
-		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
+		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'> & {
+			id?: string;
+		},
 	): Promise<Session> {
-		const sessionId = crypto.randomUUID();
+		// A caller-supplied id is used verbatim as a path segment, so validate it
+		// rather than trusting it. Anything unexpected falls back to a fresh id
+		// instead of reaching path.join().
+		const sessionId =
+			sessionData.id && isValidSessionId(sessionData.id)
+				? sessionData.id
+				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -211,6 +224,7 @@ export class SessionManager {
 				provider: session.provider,
 				model: session.model,
 				workingDirectory: session.workingDirectory,
+				titleManuallySet: session.titleManuallySet,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -272,6 +286,7 @@ export class SessionManager {
 							provider: parsed.provider,
 							model: parsed.model,
 							workingDirectory: parsed.workingDirectory,
+							titleManuallySet: parsed.titleManuallySet,
 						});
 					}
 				} catch (_fileError) {
@@ -291,6 +306,33 @@ export class SessionManager {
 			return metadata;
 		} catch (_error) {
 			return [];
+		}
+	}
+
+	/**
+	 * Delete artifact directories with no surviving session.
+	 *
+	 * Runs at startup regardless of the autosave setting. With autosave off no
+	 * session file is ever written, so nothing else would ever reclaim these
+	 * directories; with autosave on, every `/clear` retires a session id and
+	 * only the persisted ones are kept.
+	 *
+	 * Best-effort: a missing or unreadable session index means "keep nothing
+	 * known", and any failure is swallowed — reclaiming disk must never block
+	 * or crash startup.
+	 */
+	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
+		try {
+			let known: string[] = [];
+			try {
+				known = (await this.readIndex()).map(session => session.id);
+			} catch {
+				known = [];
+			}
+			if (liveSessionId) known.push(liveSessionId);
+			await this.artifacts.cleanupOrphanedSessions(known);
+		} catch {
+			// Never let artifact housekeeping break startup.
 		}
 	}
 
@@ -336,6 +378,35 @@ export class SessionManager {
 		return updatedSession;
 	}
 
+	/** Persist a user-chosen title, marking it so autosave stops overwriting it. */
+	async renameSession(
+		sessionId: string,
+		title: string,
+	): Promise<Session | null> {
+		const trimmed = title.trim();
+		if (!trimmed) {
+			throw new Error('Session name cannot be empty.');
+		}
+		if (trimmed.length > MAX_SESSION_NAME_LENGTH) {
+			throw new Error(
+				`Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
+			);
+		}
+
+		const session = await this.readSession(sessionId);
+		if (!session) return null;
+
+		const updatedSession: Session = {
+			...session,
+			title: trimmed,
+			titleManuallySet: true,
+			lastAccessedAt: new Date().toISOString(),
+		};
+
+		await this.saveSession(updatedSession);
+		return updatedSession;
+	}
+
 	async deleteSession(sessionId: string): Promise<void> {
 		if (!isValidSessionId(sessionId)) {
 			throw new Error(`Invalid session ID: ${sessionId}`);
@@ -362,6 +433,8 @@ export class SessionManager {
 				0o600,
 			);
 		});
+
+		await this.artifacts.deleteSessionArtifacts(sessionId);
 	}
 
 	getSessionDirectory(): string {
@@ -424,6 +497,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}
@@ -465,6 +539,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}

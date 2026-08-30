@@ -55,9 +55,16 @@ test.before(() => {
 });
 
 test.after.always(() => {
-	// Clean up test directory
+	// Clean up test directory. addPrompt persists on a debounced timer, so a
+	// write can still land mid-walk and leave rmSync with a non-empty dir --
+	// retries are Node's documented remedy for the ENOTEMPTY that causes.
 	if (existsSync(testDir)) {
-		rmSync(testDir, {recursive: true, force: true});
+		rmSync(testDir, {
+			recursive: true,
+			force: true,
+			maxRetries: 5,
+			retryDelay: 50,
+		});
 	}
 });
 
@@ -269,7 +276,7 @@ test('getNextString returns string value', t => {
 	t.is(nextString, 'command two', 'Should return string value');
 });
 
-test('getNextString returns empty string at end', t => {
+test('getNextString returns null at end', t => {
 	const history = createTestHistory();
 
 	history.addPrompt('command one');
@@ -279,8 +286,8 @@ test('getNextString returns empty string at end', t => {
 	const nextString = history.getNextString();
 	t.is(
 		nextString,
-		'',
-		'Should return empty string when reaching end (legacy behavior)',
+		null,
+		'Should return null when reaching end',
 	);
 });
 
@@ -531,7 +538,7 @@ test('backwards compatibility - getPreviousString vs getPrevious', t => {
 	t.is(stringValue, 'test');
 });
 
-test('backwards compatibility - getNextString returns empty string at end', t => {
+test('backwards compatibility - getNextString returns null at end', t => {
 	const history = createTestHistory();
 
 	history.addPrompt('test');
@@ -540,8 +547,8 @@ test('backwards compatibility - getNextString returns empty string at end', t =>
 	const nextString = history.getNextString();
 	t.is(
 		nextString,
-		'',
-		'Legacy method should return empty string, not null',
+		null,
+		'Legacy method should return null, matching getNext',
 	);
 });
 

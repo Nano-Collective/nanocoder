@@ -1,6 +1,7 @@
 import test from 'ava';
 import {MessageBuilder} from './message-builder.js';
 import type {Message, ToolResult} from '@/types/core';
+import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 
 test('MessageBuilder starts with initial messages', t => {
 	const userMsg: Message = {role: 'user', content: 'Hello'};
@@ -67,6 +68,27 @@ test('MessageBuilder addToolResults adds tool messages', t => {
 
 	t.is(messages[1].role, 'tool');
 	t.is(messages[1].tool_call_id, 'tool_2');
+});
+
+test('MessageBuilder caps results from optimized execution paths', t => {
+	const content = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
+	const builder = new MessageBuilder([]);
+
+	builder.addToolResults([
+		{
+			tool_call_id: 'large-tool',
+			role: 'tool',
+			name: 'execute_bash',
+			content,
+		},
+	]);
+
+	const [message] = builder.build();
+
+	t.is(message.content.length, MAX_TOOL_RESULT_CHARS);
+	t.true(message.content.startsWith('HEAD\n'));
+	t.true(message.content.endsWith('TAIL'));
+	t.true(message.content.includes('Output truncated'));
 });
 
 test('MessageBuilder addUserMessage adds user message', t => {

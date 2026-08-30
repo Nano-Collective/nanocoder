@@ -9,6 +9,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {SessionManager} from './session-manager.js';
 
 let testDir: string;
@@ -84,6 +85,22 @@ test.serial('createSession writes session file to disk', async t => {
 	const parsed = JSON.parse(data);
 	t.is(parsed.id, session.id);
 	t.is(parsed.title, 'Disk test');
+});
+
+test.serial('createSession can persist a preallocated session ID', async t => {
+	const id = '11111111-1111-4111-8111-111111111111';
+	const session = await manager.createSession({
+		id,
+		title: 'Preallocated session',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	t.is(session.id, id);
+	t.is((await manager.readSession(id))?.title, 'Preallocated session');
 });
 
 test.serial('createSession adds metadata to the index', async t => {
@@ -198,6 +215,31 @@ test.serial('saveSession updates an existing session', async t => {
 	t.is(loaded!.messages.length, 2);
 });
 
+test.serial('saveSession round-trips the displayOnly flag', async t => {
+	// A resumed session must keep harness notices marked; losing the flag on
+	// disk would let them re-enter the provider payload on the next turn.
+	const session = await manager.createSession({
+		title: 'Notices',
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'go'},
+			{
+				role: 'assistant',
+				content: '_Cancelled by user._',
+				displayOnly: true,
+			},
+		],
+	});
+
+	const loaded = await manager.readSession(session.id);
+	t.is(loaded!.messages.length, 2);
+	t.is(loaded!.messages[0].displayOnly, undefined);
+	t.true(loaded!.messages[1].displayOnly);
+});
+
 test.serial('saveSession rejects invalid session ID', async t => {
 	await t.throwsAsync(
 		() =>
@@ -257,6 +299,25 @@ test.serial(
 		await t.notThrowsAsync(() => manager.deleteSession(session.id));
 	},
 );
+
+test.serial('deleteSession removes the session artifacts', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+	const coupledManager = new SessionManager(sessionsDir, artifacts);
+	await coupledManager.initialize();
+	const session = await coupledManager.createSession({
+		title: 'Delete artifacts',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+	await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+
+	await coupledManager.deleteSession(session.id);
+
+	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
+});
 
 test.serial('deleteSession rejects invalid ID', async t => {
 	await t.throwsAsync(() => manager.deleteSession('bad-id'), {
@@ -662,9 +723,15 @@ test.serial(
 		oldDate.setDate(oldDate.getDate() - 60);
 		index[0].lastAccessedAt = oldDate.toISOString();
 		await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+		const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+		await artifacts.writeArtifact(
+			session.id,
+			'implementation_plan',
+			'# Old plan\n',
+		);
 
 		// Re-initialize to trigger cleanup (default retention is 30 days)
-		const mgr2 = new SessionManager(sessionsDir);
+		const mgr2 = new SessionManager(sessionsDir, artifacts);
 		await mgr2.initialize();
 
 		const sessions = await mgr2.listSessions();
@@ -673,6 +740,7 @@ test.serial(
 		// File should also be deleted
 		const result = await mgr2.readSession(session.id);
 		t.is(result, null);
+		t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
 	},
 );
 
@@ -850,5 +918,140 @@ test.serial(
 			e => e.endsWith('.json') && e !== 'sessions.json',
 		);
 		t.is(jsonFiles.length, sessions.length);
+	},
+);
+
+// --- saveSession (lastAccessedAt) ---
+
+test.serial(
+	'saveSession trusts the caller-supplied lastAccessedAt (does not force "now")',
+	async t => {
+		// Callers (autosave, renameSession, and test helpers that simulate
+		// time passing) rely on being able to set an explicit lastAccessedAt
+		// via saveSession(). It must not silently override that value.
+		const session = await manager.createSession({
+			title: 'Explicit timestamp test',
+			messageCount: 1,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [{role: 'user', content: 'hi'}],
+		});
+
+		const explicitPast = new Date(Date.now() - 60_000).toISOString();
+		await manager.saveSession({...session, lastAccessedAt: explicitPast});
+
+		const loaded = await manager.readSession(session.id);
+		t.is(loaded!.lastAccessedAt, explicitPast);
+
+		const [indexed] = await manager.listSessions();
+		t.is(indexed.lastAccessedAt, explicitPast);
+	},
+);
+
+// --- renameSession ---
+
+test.serial('renameSession persists the new title and sets the flag', async t => {
+	const session = await manager.createSession({
+		title: 'Original title',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	const originalLastAccessed = session.lastAccessedAt;
+	await new Promise(r => setTimeout(r, 10));
+
+	const renamed = await manager.renameSession(session.id, 'New title');
+	t.truthy(renamed);
+	t.is(renamed!.title, 'New title');
+	t.is(renamed!.titleManuallySet, true);
+	t.not(renamed!.lastAccessedAt, originalLastAccessed);
+
+	const loaded = await manager.readSession(session.id);
+	t.is(loaded!.title, 'New title');
+	t.is(loaded!.titleManuallySet, true);
+});
+
+test.serial('renameSession trims surrounding whitespace', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	const renamed = await manager.renameSession(session.id, '  Trimmed  ');
+	t.is(renamed!.title, 'Trimmed');
+});
+
+test.serial('renameSession rejects an empty title', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	await t.throwsAsync(() => manager.renameSession(session.id, '   '), {
+		message: /cannot be empty/,
+	});
+});
+
+test.serial('renameSession rejects an over-length title', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	await t.throwsAsync(
+		() => manager.renameSession(session.id, 'x'.repeat(101)),
+		{message: /100 characters or less/},
+	);
+});
+
+test.serial('renameSession returns null for a non-existent session', async t => {
+	const result = await manager.renameSession(
+		'00000000-0000-0000-0000-000000000000',
+		'New title',
+	);
+	t.is(result, null);
+});
+
+test.serial(
+	'renameSession-set title survives a later autosave-style save',
+	async t => {
+		const session = await manager.createSession({
+			title: 'Original',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+
+		const renamed = await manager.renameSession(session.id, 'Kept title');
+		t.truthy(renamed);
+
+		// Simulate autosave deriving a new title from the latest message,
+		// but respecting titleManuallySet (same guard as useSessionAutosave.ts).
+		const reread = await manager.readSession(session.id);
+		if (!reread!.titleManuallySet) {
+			reread!.title = 'Auto-derived title';
+		}
+		await manager.saveSession(reread!);
+
+		const loaded = await manager.readSession(session.id);
+		t.is(loaded!.title, 'Kept title');
 	},
 );

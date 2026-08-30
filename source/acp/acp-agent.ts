@@ -5,14 +5,23 @@ import type {
 	AuthenticateResponse,
 	CancelNotification,
 	ClientCapabilities,
+	DeleteSessionRequest,
+	DeleteSessionResponse,
+	DidFocusDocumentNotification,
 	InitializeRequest,
 	InitializeResponse,
+	ListProvidersRequest,
+	ListProvidersResponse,
+	ListSessionsRequest,
+	ListSessionsResponse,
 	LoadSessionRequest,
 	LoadSessionResponse,
 	NewSessionRequest,
 	NewSessionResponse,
 	PromptRequest,
 	PromptResponse,
+	ResumeSessionRequest,
+	ResumeSessionResponse,
 	SessionConfigOption,
 	SessionModeState,
 	SetSessionConfigOptionRequest,
@@ -30,8 +39,12 @@ import {
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
+import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
+import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
 	getProjectContextPreferences,
@@ -41,6 +54,8 @@ import {
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {TimelineManager} from '@/services/timeline-manager';
+import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -49,6 +64,20 @@ const logger = getLogger();
 
 // Stable id for the model selector config option (category `model`).
 const MODEL_CONFIG_ID = 'model';
+
+async function listSessionArtifacts(sessionId: string) {
+	try {
+		return await artifactManager.listArtifacts(sessionId);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith('Invalid session ID:')
+		) {
+			return [];
+		}
+		throw error;
+	}
+}
 
 export class AcpAgent implements Agent {
 	private sessions = new Map<string, AcpSession>();
@@ -93,6 +122,24 @@ export class AcpAgent implements Agent {
 
 		const session = this.registerSession(sessionId, params.cwd);
 
+		await sessionManager.initialize();
+		await this.saveAcpSessionToDisk(session);
+
+		// Emit available slash commands
+		const availableCommands = (
+			this.initContext.customCommandLoader?.getAllCommands() || []
+		).map(c => ({
+			name: `/${c.fullName}`,
+			description: c.metadata.description || '',
+		}));
+		this.conn.sessionUpdate({
+			sessionId,
+			update: {
+				sessionUpdate: 'available_commands_update',
+				availableCommands,
+			},
+		});
+
 		return {
 			sessionId,
 			modes: this.buildModeState(session),
@@ -102,19 +149,29 @@ export class AcpAgent implements Agent {
 
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
-		const session =
-			existing ?? this.registerSession(params.sessionId, params.cwd);
+		let session = existing;
+
+		if (!session) {
+			// Try loading from disk first so history persists across process restarts.
+			await sessionManager.initialize();
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			session = this.registerSession(params.sessionId, params.cwd);
+			if (persisted) {
+				session.messages = persisted.messages;
+			}
+		}
+
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
 
-		// Replay whatever history we hold so the client can rebuild the thread.
-		// Note: sessions are in-memory, so history only survives within a single
-		// agent process - a reload after restart yields an empty but usable
-		// session rather than an error.
+		// Replay history so the client can rebuild the thread.
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -134,6 +191,8 @@ export class AcpAgent implements Agent {
 			);
 		}
 
+		session.beginTurn();
+
 		const {text: userText, images} = await acpContentToUserMessage(
 			params.prompt,
 			{
@@ -146,11 +205,137 @@ export class AcpAgent implements Agent {
 			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
 		);
 
+		// Prepend active workspace context (e.g. the file focused in VS Code) so
+		// the model always knows what the user is looking at.
+		let contextualUserText = userText;
+
+		// Slash command interception
+		const trimmedUserText = userText.trim();
+		if (trimmedUserText.startsWith('/')) {
+			const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
+
+			// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
+			// not a slash command. Skip command interception.
+			if (!commandName.includes('/')) {
+				const command =
+					this.initContext.customCommandLoader?.getCommand(commandName);
+
+				if (command) {
+					// Custom user-defined command — expand its instructions into the prompt
+					const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
+					contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+				} else {
+					// Check for built-in commands that have special ACP handling
+					const sendBuiltinReply = (msg: string) => {
+						session.messages = [
+							...session.messages,
+							{
+								role: 'user',
+								content: contextualUserText,
+								displayOnly: true,
+							},
+							{role: 'assistant', content: msg, displayOnly: true},
+						];
+						this.conn.sessionUpdate({
+							sessionId: params.sessionId,
+							update: {
+								sessionUpdate: 'agent_message_chunk',
+								content: {type: 'text', text: msg},
+							},
+						});
+						return {stopReason: 'end_turn' as const};
+					};
+
+					if (commandName === 'clear') {
+						// Clear the conversation history and action timeline
+						session.messages = [];
+						await session.timeline.clear();
+						const msg = 'Conversation cleared.';
+						this.conn.sessionUpdate({
+							sessionId: params.sessionId,
+							update: {
+								sessionUpdate: 'agent_message_chunk',
+								content: {type: 'text', text: msg},
+							},
+						});
+						return {stopReason: 'end_turn'};
+					}
+
+					if (commandName === 'help') {
+						const customCmds =
+							this.initContext.customCommandLoader?.getAllCommands() ?? [];
+						const customList =
+							customCmds.length > 0
+								? customCmds
+										.map(
+											c =>
+												`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
+										)
+										.join('\n')
+								: '';
+						const msg = [
+							'**Available slash commands in VS Code GUI:**',
+							'',
+							'- `/clear` — Clear the current conversation',
+							'- `/copy` — Copy the last assistant response',
+							'- `/copy code` — Copy the last code block from the last response',
+							'- `/help` — Show this help message',
+							'',
+							'**Not available in VS Code GUI** (CLI-only):',
+							'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+							'',
+							customList ? `**Your custom commands:**\n${customList}` : '',
+						]
+							.filter(Boolean)
+							.join('\n');
+						return sendBuiltinReply(msg);
+					}
+
+					// `/copy` is normally intercepted by the webview before it
+					// reaches us, but `/help` advertises it, so a client without
+					// that interception must not get "unrecognized command".
+					if (commandName === 'copy') {
+						const msg =
+							'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
+						return sendBuiltinReply(msg);
+					}
+
+					if (['model', 'provider'].includes(commandName)) {
+						const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
+						return sendBuiltinReply(msg);
+					}
+
+					if (commandName === 'settings') {
+						const msg =
+							'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
+						return sendBuiltinReply(msg);
+					}
+
+					if (
+						['init', 'theme', 'compact', 'context-max', 'usage'].includes(
+							commandName,
+						)
+					) {
+						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
+						return sendBuiltinReply(msg);
+					}
+
+					// Truly unrecognized command
+					const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
+					return sendBuiltinReply(errorMsg);
+				}
+			}
+		}
+
+		if (session.activeFile) {
+			contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
+		}
+
 		session.messages = [
 			...session.messages,
 			{
 				role: 'user',
-				content: userText,
+				content: contextualUserText,
 				...(images.length > 0 ? {images} : {}),
 			},
 		];
@@ -186,8 +371,55 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+
+			// A user-initiated cancellation isn't a failure: surface it inline in
+			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
+			// call, otherwise the VS Code client's catch handler shows a
+			// "RequestError: Internal error" toast on top of the cancel notice.
+			if (errorMsg === 'Operation was cancelled') {
+				const cancelNotice = '\n\n_Cancelled by user._\n';
+				this.conn.sessionUpdate({
+					sessionId: params.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: cancelNotice},
+					},
+				});
+				session.messages.push({
+					role: 'assistant',
+					content: cancelNotice,
+					displayOnly: true,
+				});
+				return {stopReason: 'cancelled'};
+			}
+
+			logger.error(`Error during ACP prompt: ${errorMsg}`);
+
+			// Relay the error to the chat UI so the user sees it inline
+			const formattedError = `\n\n**Error:** ${errorMsg}\n`;
+
+			this.conn.sessionUpdate({
+				sessionId: params.sessionId,
+				update: {
+					sessionUpdate: 'agent_message_chunk',
+					content: {type: 'text', text: formattedError},
+				},
+			});
+
+			session.messages.push({
+				role: 'assistant',
+				content: formattedError,
+				displayOnly: true,
+			});
+
+			throw error;
 		} finally {
 			session.turnActive = false;
+			await this.saveAcpSessionToDisk(session).catch(err => {
+				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
+			});
 		}
 	}
 
@@ -226,6 +458,36 @@ export class AcpAgent implements Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
+		if (params.configId === 'provider') {
+			const providerId = params.value;
+			if (typeof providerId !== 'string') {
+				throw new Error(`Invalid provider value: ${String(providerId)}`);
+			}
+			const config = getAppConfig();
+			const validProviders = (config.providers ?? []).map(p => p.name);
+			if (!validProviders.includes(providerId)) {
+				throw new Error(`Unknown provider: ${providerId}`);
+			}
+
+			this.initContext.provider = providerId;
+			const {client: newClient} = await createLLMClient(providerId);
+			this.initContext.client = newClient;
+
+			const availableModels = await newClient.getAvailableModels();
+			if (availableModels.includes(this.initContext.model)) {
+				newClient.setModel(this.initContext.model);
+			} else if (availableModels.length > 0) {
+				this.initContext.model = availableModels[0];
+				newClient.setModel(availableModels[0]);
+			}
+			updateLastUsed(providerId, this.initContext.model);
+
+			logger.info(
+				`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${providerId}`,
+			);
+			return {configOptions: await this.buildConfigOptions()};
+		}
+
 		if (params.configId !== MODEL_CONFIG_ID) {
 			throw new Error(`Unknown config option: ${params.configId}`);
 		}
@@ -247,6 +509,7 @@ export class AcpAgent implements Agent {
 		// model is effectively process-global. This matches single-session ACP
 		// usage (Zed); a future multi-session client would see one shared model.
 		client.setModel(modelId);
+		this.initContext.model = modelId;
 		updateLastUsed(provider, modelId);
 		logger.info(
 			`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${modelId}`,
@@ -255,10 +518,193 @@ export class AcpAgent implements Agent {
 		return {configOptions: await this.buildConfigOptions()};
 	}
 
+	async listSessions(
+		params: ListSessionsRequest,
+	): Promise<ListSessionsResponse> {
+		await sessionManager.initialize();
+		const sessions = await sessionManager.listSessions(
+			params.cwd ? {workingDirectory: params.cwd} : undefined,
+		);
+		logger.info(`ACP listSessions: found=${sessions.length}`);
+		return {
+			sessions: sessions.map(s => ({
+				sessionId: s.id,
+				cwd: s.workingDirectory,
+				title: s.title,
+				updatedAt: s.lastAccessedAt,
+			})),
+		};
+	}
+
+	async deleteSession(
+		params: DeleteSessionRequest,
+	): Promise<DeleteSessionResponse> {
+		await sessionManager.initialize();
+		const existing = this.sessions.get(params.sessionId);
+		if (existing) {
+			await existing.timeline.clear();
+		} else {
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			if (persisted) {
+				await new TimelineManager(
+					persisted.workingDirectory,
+					params.sessionId,
+				).clear();
+			}
+		}
+		await sessionManager.deleteSession(params.sessionId);
+		// Evict from in-memory map if present
+		this.sessions.delete(params.sessionId);
+		logger.info(`ACP deleteSession: ${params.sessionId}`);
+		return {};
+	}
+
+	async resumeSession(
+		params: ResumeSessionRequest,
+	): Promise<ResumeSessionResponse> {
+		await sessionManager.initialize();
+		const persisted = await sessionManager.loadSession(params.sessionId);
+		if (!persisted) {
+			throw new Error(`Session not found on disk: ${params.sessionId}`);
+		}
+
+		// Evict any stale in-memory session first
+		this.sessions.delete(params.sessionId);
+		const session = this.registerSession(
+			params.sessionId,
+			persisted.workingDirectory,
+		);
+		session.messages = persisted.messages;
+		logger.info(
+			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
+		);
+
+		// Replay history so the client rebuilds the thread view.
+		await this.replaySessionHistory(session);
+
+		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
+			modes: this.buildModeState(session),
+			configOptions: await this.buildConfigOptions(),
+		};
+	}
+
+	/**
+	 * ACP's core methods don't include a way for the client to rename a
+	 * session (title is otherwise agent-driven, from the latest message).
+	 * `extMethod` is the protocol's sanctioned escape hatch for exactly this.
+	 */
+	async extMethod(
+		method: string,
+		params: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
+		if (method === 'renameSession') {
+			const sessionId = params.sessionId;
+			const title = params.title;
+			if (typeof sessionId !== 'string' || typeof title !== 'string') {
+				throw new Error(
+					'renameSession requires string sessionId and title params',
+				);
+			}
+
+			await sessionManager.initialize();
+			const updated = await sessionManager.renameSession(sessionId, title);
+			if (!updated) {
+				throw new Error(`Session not found on disk: ${sessionId}`);
+			}
+			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
+			return {title: updated.title};
+		}
+
+		if (method === 'timeline/list') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('timeline/list requires a string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			return {entries: await session.timeline.list()};
+		}
+
+		if (method === 'timeline/revert') {
+			const sessionId = params.sessionId;
+			const checkpointId = params.checkpointId;
+			if (typeof sessionId !== 'string' || typeof checkpointId !== 'string') {
+				throw new Error(
+					'timeline/revert requires string sessionId and checkpointId',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error(
+					'Cannot revert the timeline while a prompt is in progress',
+				);
+			}
+
+			const result = await session.timeline.revertTo(checkpointId);
+			session.messages = session.messages.slice(
+				0,
+				resolveTruncationPoint(session.messages, result.revertedTo),
+			);
+			// Harness chrome, not model output: it tells the user what the revert
+			// did. The model learns about the revert from the truncated history
+			// itself, so this must never come back as its own past turn.
+			session.messages.push({
+				role: 'assistant',
+				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+				displayOnly: true,
+			});
+			await this.saveAcpSessionToDisk(session);
+			await this.replaySessionHistory(session);
+			logger.info(
+				`ACP extMethod timeline/revert: session=${sessionId} checkpoint=${checkpointId}`,
+			);
+			return {
+				revertedTo: result.revertedTo,
+				filesRestored: result.filesRestored,
+			};
+		}
+
+		throw new Error(`Unknown extension method: ${method}`);
+	}
+
+	async unstable_listProviders(
+		_params: ListProvidersRequest,
+	): Promise<ListProvidersResponse> {
+		const config = getAppConfig();
+		const providers = (config.providers ?? []).map(p => ({
+			id: p.name,
+			providerId: p.name,
+			required: false,
+			supported: ['openai' as const],
+		}));
+		return {providers};
+	}
+
+	async unstable_didFocusDocument(
+		params: DidFocusDocumentNotification,
+	): Promise<void> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) return;
+		session.activeFile = params.uri;
+		logger.info(
+			`ACP didFocusDocument: session=${params.sessionId} uri=${params.uri}`,
+		);
+	}
+
 	async authenticate(
 		_params: AuthenticateRequest,
 	): Promise<AuthenticateResponse> {
 		return {};
+	}
+
+	private requireSession(sessionId: string): AcpSession {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		return session;
 	}
 
 	private registerSession(sessionId: string, cwd: string): AcpSession {
@@ -283,25 +729,54 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
-			if (typeof message.content !== 'string' || message.content.length === 0) {
-				continue;
-			}
+			if (isInternalWalkthroughMessage(message)) continue;
 			if (message.role === 'user') {
-				await this.conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'user_message_chunk',
-						content: {type: 'text', text: message.content},
-					},
-				});
+				if (typeof message.content === 'string' && message.content.length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'user_message_chunk',
+							content: {type: 'text', text: message.content},
+						},
+					});
+				}
 			} else if (message.role === 'assistant') {
-				await this.conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'agent_message_chunk',
-						content: {type: 'text', text: message.content},
-					},
-				});
+				// runAcpConversation no longer stores whitespace-only reasoning, so
+				// this guard is for sessions written before that — replaying one
+				// would otherwise open a thought section that renders to nothing.
+				if (message.reasoning && message.reasoning.trim().length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_thought_chunk',
+							content: {type: 'text', text: message.reasoning},
+						},
+					});
+				}
+				if (typeof message.content === 'string' && message.content.length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: message.content},
+						},
+					});
+				}
+				if (message.tool_calls && message.tool_calls.length > 0) {
+					for (const tc of message.tool_calls) {
+						await this.conn.sessionUpdate({
+							sessionId: session.sessionId,
+							update: {
+								// Replay tool calls as already completed
+								sessionUpdate: 'tool_call',
+								toolCallId: tc.id,
+								title: tc.function.name,
+								rawInput: tc.function.arguments,
+								status: 'completed',
+							},
+						});
+					}
+				}
 			}
 		}
 	}
@@ -321,7 +796,28 @@ export class AcpAgent implements Agent {
 			modelIds.unshift(currentModelId);
 		}
 
+		const config = getAppConfig();
+		const providerNames = (config.providers ?? []).map(p => p.name);
+		const currentProvider =
+			this.initContext.provider || client.getProviderConfig().name || 'openai';
+
+		const providerIds = [...providerNames];
+		if (
+			!providerNames.includes(currentProvider) &&
+			currentProvider.length > 0
+		) {
+			providerIds.unshift(currentProvider);
+		}
+
 		return [
+			{
+				type: 'select',
+				id: 'provider',
+				name: 'Provider',
+				category: 'model',
+				currentValue: currentProvider,
+				options: providerIds.map(id => ({name: id, value: id})),
+			},
 			{
 				type: 'select',
 				id: MODEL_CONFIG_ID,
@@ -371,6 +867,65 @@ export class AcpAgent implements Agent {
 
 		session.baseSystemMessage = {role: 'system', content: systemContent};
 		session.systemMessage = session.baseSystemMessage;
+	}
+
+	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
+		try {
+			// First, see if it already exists to preserve createdAt/title
+			let existingSession = undefined;
+			try {
+				existingSession = await sessionManager.loadSession(session.sessionId);
+			} catch (_e) {
+				// Ignore if it doesn't exist yet
+			}
+
+			const timestamp = new Date().toISOString();
+
+			// We only want user/assistant messages for the title generation/saving
+			const saveableMessages = session.messages.filter(
+				m => m.role === 'user' || m.role === 'assistant',
+			);
+
+			if (saveableMessages.length === 0) {
+				return;
+			}
+
+			// Simple title generation if it's new. A user-renamed title is never
+			// auto-derived over — the flag below is what tells the CLI's autosave
+			// the same thing, so it has to be carried forward on every save.
+			let title = existingSession?.title;
+			if (!title || title === 'New Session') {
+				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
+				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
+					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
+				} else {
+					title = 'New Session';
+				}
+			}
+
+			await sessionManager.saveSession({
+				id: session.sessionId,
+				title,
+				titleManuallySet: existingSession?.titleManuallySet,
+				createdAt: existingSession?.createdAt || timestamp,
+				lastAccessedAt: timestamp,
+				messageCount: saveableMessages.length,
+				provider: this.initContext.client.getProviderConfig().name || 'openai',
+				model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+				workingDirectory: session.cwd,
+				messages: session.messages.map(m => {
+					if (m.role === 'user' && typeof m.content === 'string') {
+						return {
+							...m,
+							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+						};
+					}
+					return m;
+				}), // We save the raw AcpSession messages with UI prefix stripped
+			});
+		} catch (error) {
+			logger.error(`Failed to save session to disk: ${error}`);
+		}
 	}
 }
 

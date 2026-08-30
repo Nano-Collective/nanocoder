@@ -1,5 +1,5 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import {McpStep} from './mcp-step.js';
 
@@ -929,4 +929,85 @@ test('McpStep handles server with empty env object', t => {
 
 	const output = lastFrame();
 	t.regex(output!, /test/);
+});
+
+// ============================================================================
+// Regression: an unbounded list overflows the wizard box on a normal-height
+// terminal, hiding the trailing "Done & Save" entry (same class as #829).
+// ============================================================================
+
+const waitTick = async (ms = 50) =>
+	new Promise(resolve => setTimeout(resolve, ms));
+
+test.serial(
+	'McpStep scrolls the template list instead of overflowing the terminal',
+	async t => {
+		const {lastFrame, stdin, unmount} = render(
+			<McpStep onComplete={() => {}} />,
+		);
+
+		await waitTick();
+		stdin.write('\r');
+		await waitTick();
+
+		const output = lastFrame() || '';
+		t.regex(output, /Add MCP Servers:/);
+		t.regex(output, /list scrolls/);
+
+		// Only a window of the local templates fits at the default 24 rows: the
+		// first entries render, later ones and the trailing "Done & Save" stay
+		// off the list until the user scrolls to them.
+		t.regex(output, /Filesystem/);
+		t.notRegex(output, /Playwright/);
+		t.notRegex(output, /Done & Save/);
+
+		unmount();
+	},
+);
+
+// ============================================================================
+// Deep-linking straight into one server's edit/delete choice
+// ============================================================================
+
+const deepLinkServers = {
+	filesystem: {transport: 'stdio' as const, command: 'mcp-fs'},
+	github: {transport: 'stdio' as const, command: 'mcp-gh'},
+};
+
+test('McpStep with initialEditName opens that server edit/delete choice', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={deepLinkServers}
+			initialEditName="github"
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Edit this server/);
+	t.notRegex(
+		output,
+		/Add MCP servers/,
+		'should skip the initial menu entirely',
+	);
+});
+
+test('McpStep falls back to the menu when initialEditName is unknown', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={deepLinkServers}
+			initialEditName="not-a-configured-server"
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Add MCP servers/);
+});
+
+test('McpStep without initialEditName still opens the initial menu', t => {
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={deepLinkServers} />,
+	);
+
+	t.regex(lastFrame()!, /Add MCP servers/);
 });

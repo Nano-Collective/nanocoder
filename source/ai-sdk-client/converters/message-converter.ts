@@ -7,6 +7,9 @@ import type {
 	UserContent,
 } from 'ai';
 import type {Message} from '@/types/index';
+import {getLogger} from '@/utils/logging';
+import {filterModelFacing} from '@/utils/message-visibility';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 import type {TestableMessage} from '../types.js';
 
 /**
@@ -63,24 +66,117 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
 	return result;
 }
 
+const CACHE_BREAKPOINT = Object.freeze({
+	anthropic: Object.freeze({cacheControl: Object.freeze({type: 'ephemeral'})}),
+});
+
+// Heuristic stand-in for Anthropic's token-based minimum cacheable prompt
+// length (1024 tokens on Sonnet/Opus, 2048 on Haiku): ~4 chars a token, so
+// 4096 chars clears the Sonnet/Opus bar. Below the real minimum Anthropic
+// ignores the breakpoint rather than erroring, so a Haiku prompt between the
+// two thresholds is marked but simply not cached. Note the count below covers
+// system + messages but not tool schemas, which sit inside the prefix the
+// system breakpoint caches — so this errs conservative on tool-heavy turns.
+const MIN_CACHEABLE_CHARS = 4096;
+
+function messageChars(message: ModelMessage): number {
+	if (typeof message.content === 'string') {
+		return message.content.length;
+	}
+	if (!Array.isArray(message.content)) {
+		return 0;
+	}
+	return message.content.reduce((sum, part) => {
+		if (part.type === 'text') {
+			return sum + part.text.length;
+		}
+		return sum + JSON.stringify(part).length;
+	}, 0);
+}
+
+function markCacheBreakpoint(message: ModelMessage): ModelMessage {
+	// Merge rather than assign: nothing sets per-message providerOptions today,
+	// but clobbering them would silently drop whatever does next.
+	return {
+		...message,
+		providerOptions: {...message.providerOptions, ...CACHE_BREAKPOINT},
+	} as ModelMessage;
+}
+
+export function withCacheBreakpoints(
+	messages: ModelMessage[],
+	systemContent: string,
+): ModelMessage[] {
+	const system: ModelMessage[] = systemContent
+		? [{role: 'system', content: systemContent}]
+		: [];
+	const totalChars =
+		systemContent.length +
+		messages.reduce((sum, message) => sum + messageChars(message), 0);
+	if (totalChars < MIN_CACHEABLE_CHARS) {
+		return [...system, ...messages];
+	}
+	const marked = system.map(markCacheBreakpoint);
+	const lastIndex = messages.length - 1;
+	messages.forEach((message, index) => {
+		marked.push(index === lastIndex ? markCacheBreakpoint(message) : message);
+	});
+	return marked;
+}
+
 /**
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
  * Tool messages: Converted to AI SDK tool-result format with proper structure.
- * Orphaned tool results are dropped first (see dropOrphanedToolResults).
+ * Display-only messages are filtered first (harness chrome the model must not
+ * see as its own output), then orphaned tool results are dropped (see
+ * dropOrphanedToolResults).
+ *
+ * Order matters: filtering first means pairing is computed over exactly the
+ * set the provider receives. The corollary is that a display-only message
+ * carrying tool_calls would take its answering tool results down with it —
+ * that combination is a bug, so warn loudly rather than fail silently.
  */
 export function convertToModelMessages(messages: Message[]): ModelMessage[] {
-	return dropOrphanedToolResults(messages).map((msg): ModelMessage => {
+	const modelFacing = filterModelFacing(messages);
+	if (modelFacing.length !== messages.length) {
+		for (const msg of messages) {
+			if (msg.displayOnly && msg.tool_calls && msg.tool_calls.length > 0) {
+				getLogger().warn(
+					'Display-only message carries tool_calls; its tool results will be dropped from the payload',
+					{
+						role: msg.role,
+						toolCallIds: msg.tool_calls.map(tc => tc.id),
+					},
+				);
+			}
+		}
+	}
+	return dropOrphanedToolResults(modelFacing).map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
 			// Convert to AI SDK tool-result format
 			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }
 			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
 			// Structured tool results travel as JSON so the model can reason over
 			// the typed shape; everything else falls back to the text content.
-			const output =
-				msg.structuredContent !== undefined
-					? ({type: 'json', value: msg.structuredContent} as const)
-					: ({type: 'text', value: msg.content} as const);
+			let output;
+			if (msg.structuredContent === undefined) {
+				output = {
+					type: 'text',
+					value: truncateToolResult(msg.content),
+				} as const;
+			} else {
+				const serializedStructuredContent = JSON.stringify(
+					msg.structuredContent,
+				);
+				const boundedStructuredContent = truncateToolResult(
+					serializedStructuredContent,
+				);
+				output =
+					boundedStructuredContent === serializedStructuredContent
+						? ({type: 'json', value: msg.structuredContent} as const)
+						: ({type: 'text', value: boundedStructuredContent} as const);
+			}
 			return {
 				role: 'tool',
 				content: [

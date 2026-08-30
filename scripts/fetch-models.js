@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {request} from 'undici';
 import {xdgCache} from 'xdg-basedir';
@@ -16,8 +17,8 @@ const CACHE_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 // Get cache directory
 const DEFAULT_CACHE_DIR =
 	process.platform === 'darwin'
-		? path.join(process.env.HOME || '~', 'Library', 'Caches')
-		: path.join(process.env.HOME || '~', '.cache');
+		? path.join(os.homedir(), 'Library', 'Caches')
+		: path.join(os.homedir(), '.cache');
 
 const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
 const cacheDir = path.join(cacheBase, 'nanocoder');

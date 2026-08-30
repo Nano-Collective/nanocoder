@@ -22,7 +22,7 @@ Welcome to Nanocoder! This section covers everything you need to install, config
    nanocoder
    ```
 
-3. **Configure** a provider when prompted, or run `/setup-providers` for the interactive wizard.
+3. **Configure** a provider when prompted, or run `/settings providers` for the interactive wizard.
 
 ## CLI Options
 
@@ -49,10 +49,17 @@ nanocoder -h
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
+| `--plain` | | Use the lightweight, Ink-free runtime for non-interactive runs. Requires `run`; auto-enables in CI and non-TTY environments |
+| `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | |Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run`; incompatible with `--acp` and `--vscode`|
+| `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
+| `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling. Overrides the `alternateScreen` preference for this run. |
+| `--no-alt-screen` | | Force inline mode (the default), even if `alternateScreen: true` is set in your preferences file. |
+| `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
+| `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**

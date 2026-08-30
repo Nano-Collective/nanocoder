@@ -35,6 +35,12 @@ export interface UseChatHandlerProps {
 	>;
 	nonInteractiveMode?: boolean;
 	onConversationComplete?: () => void;
+	// Fired when a turn that STARTED in plan mode runs to completion without
+	// being interrupted — i.e. a plan was actually produced. Decided here rather
+	// than inferred from ambient state (isConversationComplete + current mode),
+	// which is racy: the user can toggle modes mid-generation, so a completing
+	// normal-mode turn would otherwise look like a finished plan.
+	onPlanTurnComplete?: () => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
@@ -55,6 +61,8 @@ export interface UseChatHandlerProps {
 	privacyEnabled?: boolean;
 	memoryFinder?: MemoryFinder;
 	projectContextOptions?: ProjectContextOptions;
+	/** Ensure tool calls in this turn share the persisted conversation ID. */
+	ensureCurrentSessionId?: () => string;
 }
 
 export interface ChatHandlerReturn {

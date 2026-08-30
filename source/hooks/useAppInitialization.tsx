@@ -22,6 +22,7 @@ import {validateProjectConfigSecurity} from '@/config/validation';
 import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
@@ -29,10 +30,10 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
+import {sessionManager} from '@/session/session-manager';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
@@ -113,6 +114,7 @@ export function useAppInitialization({
 	const initializeClient = async (
 		preferredProvider?: string,
 		preferredModel?: string,
+		isProgrammatic: boolean = false,
 	): Promise<LLMClient | null> => {
 		// Lint provider configs before instantiation so typos and misplaced
 		// blocks surface as warnings in the chat queue, without a box —
@@ -160,8 +162,10 @@ export function useAppInitialization({
 		setCurrentModel(finalModel);
 		setCurrentProviderConfig(client.getProviderConfig());
 
-		// Save the preference - use actualProvider and the model that was actually set
-		updateLastUsed(actualProvider, finalModel);
+		if (!isProgrammatic) {
+			// Save the preference - use actualProvider and the model that was actually set
+			updateLastUsed(actualProvider, finalModel);
+		}
 
 		return client;
 	};
@@ -358,10 +362,36 @@ export function useAppInitialization({
 		preferences: UserPreferences,
 	): Promise<void> => {
 		try {
-			// Use CLI provider/model if provided, otherwise use preferences
-			const provider = cliProvider || preferences.lastProvider;
-			const model = cliModel || undefined;
-			const client = await initializeClient(provider, model);
+			const config = getAppConfig();
+			const currentMode = developmentModeRef?.current || 'normal';
+			const modeConfig = config.modeProviders?.[currentMode];
+
+			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
+			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
+			// A saved/mode provider can go stale (renamed or removed from
+			// agents.config.json). Passing it through would make createLLMClient
+			// throw and strand the app on an error screen with no client. Fall
+			// back to the default-provider path with a warning instead. An
+			// explicit --provider CLI arg stays strict: the user asked for that
+			// provider by name, so a hard error is the honest response.
+			const configuredNames = loadAllProviderConfigs().map(p => p.name);
+			const {provider, staleName} = resolveStartupProvider(
+				cliProvider,
+				modeConfig?.provider,
+				preferences.lastProvider,
+				configuredNames,
+			);
+			if (staleName) {
+				addToChatQueue(
+					<WarningMessage
+						key={generateKey('stale-provider')}
+						message={`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`}
+						hideBox={true}
+					/>,
+				);
+			}
+			const model = cliModel || modeConfig?.model || undefined;
+			const client = await initializeClient(provider, model, isProgrammatic);
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
@@ -414,6 +444,26 @@ export function useAppInitialization({
 							hideBox={true}
 						/>,
 					);
+				}
+			} else if (
+				error instanceof Error &&
+				error.message.includes('All configured providers failed')
+			) {
+				// Every configured provider failed to initialize. Without a
+				// client the app is unusable, so surface the per-provider
+				// errors and open the provider wizard — the user has to fix
+				// or re-enter a provider either way.
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('init-error')}
+						message={error.message}
+						hideBox={true}
+					/>,
+				);
+				if (!nonInteractiveMode) {
+					setTimeout(() => {
+						setActiveMode('configWizard');
+					}, 100);
 				}
 			} else {
 				// Regular error - show simple error message
@@ -513,8 +563,11 @@ export function useAppInitialization({
 			setCurrentModel('');
 			setCurrentProviderConfig(null);
 
-			// Clear task list — fire-and-forget, just deletes a JSON file
-			void clearAllTasks();
+			// Reclaim artifact directories left behind by sessions that no longer
+			// exist — /clear retires a session id every time, and with autosave off
+			// no session file is ever written for the session-delete path to catch.
+			// Fire-and-forget: housekeeping must never delay or break startup.
+			void sessionManager.cleanupOrphanedArtifacts();
 
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();

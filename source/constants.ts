@@ -19,6 +19,10 @@ export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
 export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
+// Ceiling on the pricing lookup for the per-response usage footer: past
+// this the message renders with token counts only rather than holding the
+// streaming-to-static swap hostage to a cold models.dev fetch.
+export const TIMEOUT_COST_LOOKUP_MS = 250;
 
 // === PASTE DETECTION ===
 export const PASTE_CHUNK_BASE_WINDOW_MS = 500;
@@ -36,6 +40,9 @@ export const MAX_SESSION_NAME_LENGTH = 100;
 
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
+export const MAX_TIMELINE_ENTRIES = 50;
+export const MAX_TIMELINE_SESSIONS = 20;
+export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
@@ -47,13 +54,14 @@ export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 export const DEFAULT_FIND_FILES_RESULTS = 50;
 export const DEFAULT_SEARCH_RESULTS = 30;
 export const DEFAULT_WEB_SEARCH_RESULTS = 10;
-export const DEFAULT_TERMINAL_WIDTH = 120;
+export const DEFAULT_TERMINAL_WIDTH = 200;
 export const DEFAULT_TERMINAL_COLUMNS = 80;
 
 // === FILE READING ===
-export const FILE_READ_METADATA_THRESHOLD_LINES = 300;
-export const FILE_READ_CHUNKING_HINT_THRESHOLD_LINES = 500;
-export const FILE_READ_CHUNK_SIZE_LINES = 250;
+// Files at or below this size are returned in full. Larger files get a bounded
+// preview so the first read still gives the model useful context.
+export const FILE_READ_PREVIEW_THRESHOLD_LINES = 1500;
+export const FILE_READ_PREVIEW_LINES = 250;
 
 // === @-FILE MENTION INLINING (prompt-processor) ===
 // Files at or under this many lines are inlined in full when @-mentioned.
@@ -71,13 +79,43 @@ export const EMPTY_CONTENT_MARKER = '[file is empty]';
 export const PATH_LENGTH_NARROW_TERMINAL = 30;
 export const PATH_LENGTH_NORMAL_TERMINAL = 60;
 export const TABLE_COLUMN_MIN_WIDTH = 10;
+export const WIZARD_ROW_CHROME_CHARS = 10;
+export const MIN_PATH_BUDGET_CHARS = 10;
+
+// Short, discoverable hints shown on the welcome screen and by `/tip`.
+// Keep these aligned with the documented command and keyboard behaviour.
+export const TIPS = [
+	'Press Ctrl+J to add a new line without sending your prompt.',
+	'Press Shift+Tab to cycle between development modes.',
+	'Press Ctrl+O to toggle compact tool output.',
+	'Press Ctrl+R to toggle expanded reasoning traces.',
+	'Use @ followed by a file path to add that file to context.',
+	'Use /explorer to browse project files and add them to context.',
+	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /compact --preview to inspect a context compression before applying it.',
+	'Run /copy to copy the last assistant response to your clipboard.',
+	'Run /usage to see how much of the current model context is in use.',
+	'Run /model to switch providers or models without restarting your session.',
+	'Paste an image with Ctrl+V when your selected model supports vision.',
+] as const;
 
 // === TOKEN THRESHOLDS (percentages - useChatHandler) ===
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;
 export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 
+// === NON-INTERACTIVE NOTICES ===
+// Non-interactive runs can't prompt, so a tool needing approval ends the run.
+// The notice is display-only chrome, but `isNonInteractiveModeComplete` detects
+// it by content to pick exit reason "tool-approval" — share the prefix so a
+// reword can't silently break that exit path.
+export const TOOL_APPROVAL_REQUIRED_PREFIX = 'Tool approval required for: ';
+
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
+// Keep one unusually large tool response from dominating the model context.
+// The cap is intentionally higher than the Bash preview limit so normal file
+// reads and search results remain useful while unbounded tools stay bounded.
+export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 
 // === DELAYS ===
@@ -86,6 +124,7 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
+export const BASH_OUTPUT_DISPLAY_LINES = 20;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
@@ -114,23 +153,28 @@ export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
-// Cap how many consecutive empty assistant turns we'll auto-nudge through
-// before surfacing an error. Some models (notably GPT-5 reasoning models)
-// can produce reasoning-only turns; one or two retries usually clears it,
-// but unbounded recursion would loop forever.
+// Default for `nanocoder.retries.maxEmptyTurns` (see source/config/index.ts):
+// how many consecutive empty assistant turns we'll auto-nudge through before
+// surfacing an error. Some models (notably GPT-5 reasoning models) can produce
+// reasoning-only turns; one or two retries usually clears it, but unbounded
+// recursion would loop forever.
 export const MAX_EMPTY_TURNS = 2;
 // After hitting the empty-turn cap, mechanically compact the context and
 // retry. This many compact-and-retry cycles are allowed before giving up.
 export const MAX_COMPACT_RETRIES = 1;
-// Cap how many consecutive malformed-XML self-correction recursions we'll
-// attempt before surfacing an error. Without this, a model stuck producing
-// bad XML loops async and appends two messages per iteration until Node's
-// heap exhausts (~1.4GB).
+// Default for `nanocoder.retries.maxMalformedRetries` (see
+// source/config/index.ts): how many consecutive malformed-tool-call
+// self-correction recursions we'll attempt before surfacing an error. Without
+// this, a model stuck producing bad XML loops async and appends two messages
+// per iteration until Node's heap exhausts (~1.4GB).
 export const MAX_MALFORMED_RETRIES = 2;
-// Cap how many times the model may emit the exact same tool call(s) on
-// consecutive turns. Small models can get stuck re-issuing an identical failing
-// call forever; once the same signature repeats this many times in a row we
-// stop and surface an actionable error instead of looping.
+// Default for `nanocoder.retries.maxRepeatedToolCalls` (see
+// source/config/index.ts): how many times the model may emit the exact same
+// tool call(s) on consecutive turns. Small models can get stuck re-issuing an
+// identical failing call forever. Once the same signature repeats this many
+// times in a row, interactive sessions pause and ask the user whether to stop
+// or allow another window; non-interactive and headless runs, which have nobody
+// to ask, stop with an actionable error.
 export const MAX_REPEATED_TOOL_CALLS = 3;
 
 // === MCP ===
