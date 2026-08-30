@@ -178,6 +178,31 @@ subscribe:
 );
 
 test.serial(
+	'manifest subscription accepts skill targets without local member resolution',
+	async t => {
+		await withTempEnv(async ({projectRoot}) => {
+			const bundleRoot = join(projectRoot, '.nanocoder', 'skills');
+			await makeBundle(bundleRoot, 'cross-skill-sub', {
+				'skill.yaml': `
+name: cross-skill-sub
+description: Cross-skill subscription.
+subscribe:
+  - kind: file.changed
+    target: skill:some-other-skill
+    paths: ["src/**"]
+`,
+			});
+
+			const loader = new BundleLoader(projectRoot);
+			const {skills, errors} = await loader.load();
+			t.deepEqual(errors, []);
+			t.is(skills.length, 1);
+			t.is(skills[0]?.subscribe?.[0]?.target, 'skill:some-other-skill');
+		});
+	},
+);
+
+test.serial(
 	'frontmatter subscription target is resolved to the owning member',
 	async t => {
 		await withTempEnv(async ({projectRoot}) => {

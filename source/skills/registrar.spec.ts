@@ -277,3 +277,24 @@ test('subscriptions are registered with the event router', async t => {
 	t.is(deps.dispatchCalls.length, 1);
 	t.is(deps.dispatchCalls[0]?.sub.id, r.subscriptionIds[0]);
 });
+
+test('skill subscription targets are registered with the event router', t => {
+	const deps = makeDeps();
+	const skill = bundleSkill({
+		subscribe: [
+			{
+				kind: 'file.changed',
+				target: 'skill:some-other-skill',
+				paths: ['docs/**'],
+			},
+		],
+	});
+
+	const r = registerSkills([skill], deps);
+	t.deepEqual(r.collisions, []);
+	t.is(r.subscriptionIds.length, 1);
+	t.deepEqual(deps.eventRouter.listByKind('file.changed')[0]?.target, {
+		kind: 'skill',
+		name: 'some-other-skill',
+	});
+});
