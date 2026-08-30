@@ -412,12 +412,28 @@ export async function runPlainConversation(
 					reasoning: streamedReasoning || undefined,
 				},
 			];
-			messages = await maybeAutoCompact(
-				messages,
-				systemMessage,
-				client,
-				result.toolsDisabled ? undefined : tools,
-			);
+		}
+		messages = await maybeAutoCompact(
+			messages,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{
+				signal: abortSignal,
+				onNotify: isJson
+					? undefined
+					: message => writeStatus(message.split('\n')[0] ?? message),
+			},
+		);
+		if (abortSignal.aborted) {
+			return {
+				kind: 'error',
+				message: 'Aborted',
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				usage: getUsage(),
+			};
 		}
 
 		if (errorResults.length > 0) {

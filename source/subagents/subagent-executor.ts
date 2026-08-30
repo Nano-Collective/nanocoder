@@ -486,14 +486,13 @@ export class SubagentExecutor {
 			await new Promise(resolve => setTimeout(resolve, 50));
 
 			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
-			const systemMessage = messages[0];
-			const history =
-				systemMessage?.role === 'system' ? messages.slice(1) : messages;
+			const systemMessage =
+				messages[0]?.role === 'system' ? messages[0] : undefined;
+			const history = systemMessage ? messages.slice(1) : messages;
 			const cappedHistory = capMessagesForModel(history, maxMessages);
-			const modelMessages =
-				systemMessage?.role === 'system'
-					? [systemMessage, ...cappedHistory]
-					: cappedHistory;
+			const modelMessages = systemMessage
+				? [systemMessage, ...cappedHistory]
+				: cappedHistory;
 
 			const response = await client.chat(
 				modelMessages,
@@ -584,14 +583,15 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
-			if (systemMessage?.role === 'system') {
+			if (systemMessage) {
 				const compacted = await maybeAutoCompact(
-					messages.slice(1),
+					capMessagesForModel(messages.slice(1), maxMessages),
 					systemMessage,
 					client,
 					tools,
+					{signal},
 				);
-				messages = [systemMessage, ...compacted];
+				messages.splice(0, messages.length, systemMessage, ...compacted);
 			}
 			if (agentId) {
 				streamingText = '';

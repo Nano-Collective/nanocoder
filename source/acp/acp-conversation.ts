@@ -282,7 +282,12 @@ export async function runAcpConversation(
 			systemMessage,
 			client,
 			result.toolsDisabled ? undefined : tools,
+			{signal: abortController.signal},
 		);
+		if (abortController.signal.aborted) {
+			session.messages = messages;
+			return withTurnUsage({stopReason: 'cancelled'});
+		}
 
 		if (errorResults.length > 0) {
 			messages = [...messages, ...resultsForAbandonedTurn];
