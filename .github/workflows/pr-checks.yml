@@ -21,9 +21,13 @@ jobs:
   # `changeset-check.yml` only asserts that a changeset file was added, never
   # that the package name inside it resolves. A wrong name is accepted on the
   # PR and then breaks `release-prepare` on every subsequent push to main,
-  # which is what #1065 did. `changeset status` is the cheapest thing that
-  # catches it: it exits 1 on an unresolvable package and 0 when a PR has no
-  # changesets at all, so docs-only and chore PRs are unaffected.
+  # which is what #1065 did.
+  #
+  # This runs scripts/validate-changesets.js rather than `changeset status`:
+  # status also exits 1 when packages changed but no changeset was added, which
+  # would turn changeset-check.yml's deliberately non-blocking nudge into a hard
+  # requirement, and it needs a local `main` ref that this detached checkout
+  # does not have.
   changeset-validation:
     name: Changeset Validation
     runs-on: ubuntu-latest
@@ -31,26 +35,20 @@ jobs:
     # adding them, matching the skip in changeset-check.yml.
     if: github.head_ref != 'changeset-release/main'
     steps:
+      # The validator is dependency-free and reads only the working tree, so
+      # this job needs no pnpm install and no history beyond the head commit.
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Validate every changeset resolves to a workspace package
-        run: pnpm exec changeset status
+        run: node scripts/validate-changesets.js
 
   # nanocoder ships a VS Code extension alongside the CLI. It has its own
   # tsconfig, so the root `test:types` does not cover it, and it produces the
