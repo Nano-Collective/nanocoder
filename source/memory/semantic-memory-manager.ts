@@ -56,10 +56,18 @@ async function withExclusiveLock<T>(
 		try {
 			const handle = await fs.open(lockPath, 'wx', 0o600);
 			try {
+				await handle.writeFile(String(process.pid), 'utf8');
 				return await operation();
 			} finally {
 				await handle.close();
-				await fs.unlink(lockPath).catch(() => undefined);
+				try {
+					const owner = (await fs.readFile(lockPath, 'utf8')).trim();
+					if (owner === String(process.pid)) {
+						await fs.unlink(lockPath);
+					}
+				} catch {
+					// Lock already gone or stolen.
+				}
 			}
 		} catch (error) {
 			const code =
@@ -309,9 +317,8 @@ export class SemanticMemoryManager {
 			return parsed.filter(isSemanticMemory);
 		} catch (error) {
 			if (
-				error instanceof Error &&
-				'code' in error &&
-				error.code === 'ENOENT'
+				error instanceof SyntaxError ||
+				(error instanceof Error && 'code' in error && error.code === 'ENOENT')
 			) {
 				return [];
 			}

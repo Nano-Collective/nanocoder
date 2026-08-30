@@ -843,3 +843,62 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	);
 	rendered.unmount();
 });
+
+test('useChatHandler - does not accumulate project context across turns', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	const sentSystemPrompts: string[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentSystemPrompts.push(String(messages[0]?.content ?? ''));
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: 'ok',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	const props = createMockProps({
+		client,
+		toolManager: createMockToolManager(),
+		memoryFinder: {
+			findRelevantMemories: async query => {
+				if (query === 'refactor auth') {
+					return [
+						{
+							id: 'memory-1',
+							content: 'Auth uses Clerk and avoids middleware.',
+							category: 'architecture',
+							timestamp: '2026-07-17T00:00:00.000Z',
+						},
+					];
+				}
+				return [];
+			},
+		},
+	});
+
+	const rendered = render(
+		<TestHookComponent
+			{...props}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+	await hookResult!.handleChatMessage('unrelated question about docs');
+
+	t.true(sentSystemPrompts[0]?.includes('## Project Context'));
+	t.false(sentSystemPrompts[1]?.includes('## Project Context'));
+	rendered.unmount();
+});

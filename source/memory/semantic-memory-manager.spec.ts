@@ -252,3 +252,19 @@ test('SemanticMemoryManager rejects empty memory content', async t => {
 		message: 'Memory content cannot be empty',
 	});
 });
+
+test('SemanticMemoryManager rewrites a corrupt store on the next write', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	await manager.addMemory({content: 'Auth uses Clerk.'});
+	const files = await fs.readdir(dir);
+	const store = files.find(name => name.endsWith('.json'));
+	t.truthy(store);
+	await fs.writeFile(path.join(dir, store!), '{not json', 'utf8');
+
+	const repaired = await manager.addMemory({content: 'Use adapters.'});
+	t.deepEqual(await manager.listMemories(), [repaired]);
+});

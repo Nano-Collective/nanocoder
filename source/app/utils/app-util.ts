@@ -563,6 +563,7 @@ async function handleBuiltInCommand(
 			developmentMode: options.developmentMode,
 			lastApiUsage,
 			apiCallHistory,
+			sessionId: options.sessionId,
 		});
 	} finally {
 		if (progressLabel) {

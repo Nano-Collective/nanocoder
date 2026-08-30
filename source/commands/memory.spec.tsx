@@ -37,6 +37,7 @@ class FakeMemoryManager {
 
 class FakeSummarizerService {
 	accepted: Array<Pick<MemoryProposal, 'content' | 'category'>> = [];
+	sessionIds: Array<string | undefined> = [];
 
 	constructor(private readonly proposals: MemoryProposal[]) {}
 
@@ -46,8 +47,10 @@ class FakeSummarizerService {
 
 	async acceptProposal(
 		proposal: Pick<MemoryProposal, 'content' | 'category'>,
+		sourceSessionId?: string,
 	): Promise<SemanticMemory> {
 		this.accepted.push({content: proposal.content, category: proposal.category});
+		this.sessionIds.push(sourceSessionId);
 		return {
 			id: `accepted-${this.accepted.length}`,
 			content: proposal.content,
@@ -221,6 +224,29 @@ test('memory command accepts a proposal by index after propose', async t => {
 	t.deepEqual(summarizerService.accepted, [
 		{content: 'Auth uses Clerk.', category: 'architecture'},
 	]);
+	t.deepEqual(summarizerService.sessionIds, [undefined]);
+});
+
+test('memory command passes the current session id when accepting a proposal', async t => {
+	const manager = new FakeMemoryManager();
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({memoryManager: manager, summarizerService});
+
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+	await command.handler(['accept', '1'], [], {
+		...testMetadata,
+		sessionId: 'session-1',
+	});
+
+	t.deepEqual(summarizerService.sessionIds, ['session-1']);
 });
 
 test('memory command rejects accept with no prior proposals', async t => {

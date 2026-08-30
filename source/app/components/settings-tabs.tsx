@@ -34,12 +34,12 @@ import type {
 	SettingsSelectorProps,
 } from './settings-selector';
 import {
-	SettingsAdvancedPanel,
 	SettingsDisplayPanel,
 	SettingsNanocoderShapePanel,
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
 	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
@@ -420,7 +420,7 @@ function renderManagedPanel(
 		case 'display-settings':
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
 		case 'semantic-memory':
-			return <SettingsAdvancedPanel onBack={onBack} onCancel={onBack} />;
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':

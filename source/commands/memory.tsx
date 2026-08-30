@@ -185,9 +185,15 @@ function MemoryProposals({proposals}: {proposals: readonly MemoryProposal[]}) {
 export function createMemoryCommand(
 	options: MemoryCommandOptions = {},
 ): Command {
-	const memoryManager = options.memoryManager ?? new SemanticMemoryManager();
-	const summarizerService =
-		options.summarizerService ?? new SummarizerService();
+	let memoryManager = options.memoryManager;
+	let summarizerService = options.summarizerService;
+	if (!memoryManager) {
+		const manager = new SemanticMemoryManager();
+		memoryManager = manager;
+		summarizerService ??= new SummarizerService(manager);
+	} else {
+		summarizerService ??= new SummarizerService();
+	}
 	// Defaults to a private store; only the exported singleton binds the shared
 	// one, so tests and any ad-hoc instance can't clobber each other's state.
 	const proposalStore = options.proposalStore ?? new ProposalStore();
@@ -195,7 +201,7 @@ export function createMemoryCommand(
 	return {
 		name: 'memory',
 		description: 'Manage project memories',
-		handler: async (args, messages) => {
+		handler: async (args, messages, metadata) => {
 			const subcommand = args[0]?.toLowerCase() ?? 'list';
 
 			try {
@@ -293,7 +299,10 @@ export function createMemoryCommand(
 						);
 					}
 
-					const memory = await summarizerService.acceptProposal(proposal);
+					const memory = await summarizerService.acceptProposal(
+						proposal,
+						metadata.sessionId,
+					);
 					proposalStore.markAccepted(index);
 
 					return successMsg(

@@ -92,7 +92,7 @@ export class SubagentExecutor {
 	 * that don't supply a resolver (plain shell, tests).
 	 */
 	private modeResolver?: () => DevelopmentMode;
-	private memoryFinder?: MemoryFinder;
+	private memoryFinder: MemoryFinder;
 	private projectContextOptions?: ProjectContextOptions;
 
 	constructor(
@@ -109,7 +109,9 @@ export class SubagentExecutor {
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
 		this.parentMode = parentMode;
-		this.memoryFinder = options.memoryFinder;
+		this.memoryFinder =
+			options.memoryFinder ??
+			new SemanticMemoryManager({cwd: this.projectRoot});
 		this.projectContextOptions = options.projectContextOptions;
 	}
 
@@ -182,7 +184,7 @@ export class SubagentExecutor {
 			const recalled = await appendRelevantProjectContextWithCount(
 				context.systemMessage,
 				this.buildTaskPrompt(task),
-				this.memoryFinder ?? new SemanticMemoryManager({cwd: this.projectRoot}),
+				this.memoryFinder,
 				{
 					...getProjectContextPreferences(),
 					...this.projectContextOptions,

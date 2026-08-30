@@ -1,3 +1,4 @@
+import {getLogger} from '@/utils/logging';
 import type {SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
@@ -100,7 +101,8 @@ export async function appendRelevantProjectContextWithCount(
 			systemPrompt: `${systemPrompt}\n\n${projectContext.content}`,
 			memoryCount: projectContext.memoryCount,
 		};
-	} catch {
+	} catch (error) {
+		getLogger().warn('Failed to recall project memories', {error});
 		return {systemPrompt, memoryCount: 0};
 	}
 }

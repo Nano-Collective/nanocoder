@@ -1002,8 +1002,8 @@ function cyclePreset(presets: number[], current: number): number {
 	return presets[(index + 1) % presets.length] ?? presets[0] ?? current;
 }
 
-// Advanced settings panel
-export function SettingsAdvancedPanel({
+// Semantic memory settings panel
+export function SettingsSemanticMemoryPanel({
 	onBack,
 	onCancel,
 }: {
@@ -1073,7 +1073,7 @@ export function SettingsAdvancedPanel({
 		}
 	};
 
-	const title = isNarrow ? 'Advanced' : 'Advanced Settings';
+	const title = isNarrow ? 'Memory' : 'Semantic Memory';
 
 	return (
 		<TitledBoxWithPreferences

@@ -53,7 +53,6 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
-import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {TimelineManager} from '@/services/timeline-manager';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
@@ -344,7 +343,7 @@ export class AcpAgent implements Agent {
 			const projectContext = await appendRelevantProjectContextWithCount(
 				session.baseSystemMessage.content,
 				userText,
-				new SemanticMemoryManager({cwd: session.cwd}),
+				session.getMemoryFinder(),
 				getProjectContextPreferences(),
 			);
 			session.systemMessage = {
