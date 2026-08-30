@@ -3,6 +3,7 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
+import {TIPS} from '@/constants';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import WelcomeMessage from './welcome-message';
 
@@ -61,6 +62,17 @@ test('WelcomeMessage shows quick tips in narrow layout', t => {
 	t.regex(output!, /\/help for commands/);
 	t.regex(output!, /Ctrl\+C to quit/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows a tip of the day in narrow layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 50;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const output = lastFrame() ?? '';
+
+	t.true(TIPS.some(tip => output.includes(`Tip: ${tip}`)));
 	process.stdout.columns = originalColumns;
 });
 
@@ -137,6 +149,17 @@ test('WelcomeMessage shows help command for normal terminal', t => {
 	t.truthy(output);
 	t.regex(output!, /\/help for help/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows a tip of the day in full layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const output = lastFrame() ?? '';
+
+	t.true(TIPS.some(tip => output.includes(`Tip: ${tip}`)));
 	process.stdout.columns = originalColumns;
 });
 

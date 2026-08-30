@@ -35,6 +35,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
+| `/tip` | Show a random usage tip, shortcut, or slash command |
 | `/lsp` | List connected LSP servers |
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |

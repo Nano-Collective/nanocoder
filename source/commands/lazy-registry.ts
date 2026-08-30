@@ -150,6 +150,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
 	},
 	{
+		name: 'tip',
+		description: 'Show a random Nanocoder usage tip',
+		load: () => import('@/commands/tip').then(m => m.tipCommand),
+	},
+	{
 		name: 'checkpoint',
 		description:
 			'Manage conversation checkpoints - save and restore session snapshots',
