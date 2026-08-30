@@ -40,7 +40,7 @@ export function handlePaste(
 	pastedText: string,
 	currentDisplayValue: string,
 	currentPlaceholderContent: Record<string, PlaceholderContent>,
-	detectionMethod?: 'rate' | 'size' | 'multiline',
+	detectionMethod?: 'rate' | 'size' | 'multiline' | 'bracketed',
 ): InputState | null {
 	if (pastedText.length === 0) {
 		return null;

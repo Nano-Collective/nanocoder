@@ -5,6 +5,7 @@ import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
@@ -1105,6 +1106,61 @@ test('UserInput does not show completions when input is empty', t => {
 	const output = lastFrame()!;
 	t.truthy(output);
 	t.notRegex(output, /Available commands:/);
+	unmount();
+});
+
+// pasteEvents is a module singleton, so these run serially: a concurrently
+// mounted UserInput would also receive the payload and corrupt its frame.
+
+test.serial(
+	'UserInput collapses a multi-line terminal paste into a placeholder without submitting',
+	async t => {
+		// The bug this guards: without bracketed paste the CR between lines
+		// reached Ink as Enter and submitted the prompt mid-paste.
+		let submitted = 0;
+
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} onSubmit={() => submitted++} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', 'line one\nline two\nline three');
+		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]/);
+
+		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
+		unmount();
+	},
+);
+
+test.serial('UserInput inserts a short single-line paste literally', async t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	pasteEvents.emit('paste', 'pasted inline');
+	await waitForFrame(lastFrame, /pasted inline/);
+
+	t.notRegex(lastFrame()!, /\[Paste #/, 'short pastes stay visible as text');
+	unmount();
+});
+
+test.serial('UserInput ignores terminal pastes while disabled', async t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} disabled={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	pasteEvents.emit('paste', 'should not appear');
+	await wait(100);
+
+	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
 

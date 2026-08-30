@@ -265,6 +265,45 @@ export function useInputState() {
 		[currentState, pushToUndoStack],
 	);
 
+	// Insert a paste the terminal told us about (bracketed paste, DECSET
+	// 2004). This bypasses updateInput's heuristics entirely: the payload
+	// never reached the keypress parser, so there is nothing to guess at
+	// and no risk of a pasted newline having submitted the prompt first.
+	// The text lands at the end of the input rather than at the cursor —
+	// the payload arrives out of band, so the cursor offset TextInput owns
+	// isn't part of the event. Callers remount TextInput afterwards so the
+	// cursor follows the appended text.
+	const insertPaste = useCallback(
+		(pastedText: string) => {
+			if (!pastedText) {
+				return;
+			}
+
+			const pasteResult = handlePaste(
+				pastedText,
+				currentState.displayValue,
+				currentState.placeholderContent,
+				'bracketed',
+			);
+
+			if (pasteResult) {
+				// Multi-line or over the threshold: collapsed to a placeholder.
+				pushToUndoStack(pasteResult);
+				pasteDetectorRef.current.updateState(pasteResult.displayValue);
+				return;
+			}
+
+			// Short single-line paste: insert it literally.
+			const newDisplayValue = currentState.displayValue + pastedText;
+			pushToUndoStack({
+				displayValue: newDisplayValue,
+				placeholderContent: currentState.placeholderContent,
+			});
+			pasteDetectorRef.current.updateState(newDisplayValue);
+		},
+		[currentState, pushToUndoStack],
+	);
+
 	// Undo function (Ctrl+_)
 	const undo = useCallback(() => {
 		if (undoStack.length > 0) {
@@ -392,6 +431,7 @@ export function useInputState() {
 			redo,
 			deletePlaceholder,
 			setInputState,
+			insertPaste,
 
 			// Legacy interface for compatibility
 			input: currentState.displayValue,
@@ -414,6 +454,7 @@ export function useInputState() {
 			redo,
 			deletePlaceholder,
 			setInputState,
+			insertPaste,
 			originalInput,
 			historyIndex,
 			setInput,
