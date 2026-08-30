@@ -38,7 +38,7 @@ importers:
         version: 1.29.0(zod@4.4.3)
       '@nanocollective/get-md':
         specifier: ^1.6.0
-        version: 1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.91(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
+        version: 1.7.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.91(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(@napi-rs/canvas@0.1.80)(ai@6.0.193(zod@4.4.3))(pdfjs-dist@5.4.296)
       '@nanocollective/prompt-scrub':
         specifier: ^1.0.1
         version: 1.0.1
@@ -941,16 +941,19 @@ packages:
     resolution: {integrity: sha512-juG5VWh4qAivzTAeMzvY9xs9HY5rAcr2E4I7tiSSCokRFi7XIZCAu92ZkSTsIj1OPceCifL3cpfteP3pDT9/QQ==}
     engines: {node: '>=14.0.0'}
 
-  '@nanocollective/get-md@1.6.0':
-    resolution: {integrity: sha512-1pO3JEaLrfa1cCl1jBsXaA2cAxWkaqvnLajLM++DvE3eXXYuIBPbLn2ujtpQ6qWWKtTQapiPfutdO1N4GFT1Fw==}
+  '@nanocollective/get-md@1.7.0':
+    resolution: {integrity: sha512-FfFNkVb8d+r6WdqZygzXnyCoExEoxMQAjXGf6eLsJrW2e31aUZWF2SjO4iRRz8odAk7/lVNaEqdI7cUlHq1JaA==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       '@ai-sdk/anthropic': ^3.0.0
       '@ai-sdk/google': ^3.0.0
       '@ai-sdk/openai-compatible': ^2.0.0
+      '@napi-rs/canvas': ^0.1.0
       ai: ^6.0.0
+      mermaid: ^11.0.0
       node-llama-cpp: ^3.15.0
+      pdfjs-dist: ^5.0.0
     peerDependenciesMeta:
       '@ai-sdk/anthropic':
         optional: true
@@ -958,9 +961,15 @@ packages:
         optional: true
       '@ai-sdk/openai-compatible':
         optional: true
+      '@napi-rs/canvas':
+        optional: true
       ai:
         optional: true
+      mermaid:
+        optional: true
       node-llama-cpp:
+        optional: true
+      pdfjs-dist:
         optional: true
 
   '@nanocollective/prompt-scrub@1.0.1':
@@ -3187,8 +3196,8 @@ packages:
     resolution: {integrity: sha512-tGnJW6OKRii9u/b2WiUViTJS+h7Apxx17qsMUjsUeNDiMMX5ZFf8F8Fcz7PAQ6omvOxHZtvDTmOYKJQwmfpjeg==}
     engines: {node: '>=20'}
 
-  node-stream-zip@1.15.0:
-    resolution: {integrity: sha512-LN4fydt9TqhZhThkZIVQnF9cwjU3qmUH9h78Mx/K7d3VvfRqqwthLwJEUOEL0QPZ0XQmNN7be5Ggit5+4dq3Bw==}
+  node-stream-zip@1.16.0:
+    resolution: {integrity: sha512-ObaRrRoR8T68wF6suxHd7R4XQNamij6ZQHrwG7Dx1D2zeHcDNLsIOBcWrIwtDm7AsCXBguaPHgXhcjxDa2szrg==}
     engines: {node: '>=0.12.0'}
 
   nopt@8.1.0:
@@ -4935,7 +4944,7 @@ snapshots:
 
   '@mozilla/readability@0.6.0': {}
 
-  '@nanocollective/get-md@1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.91(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
+  '@nanocollective/get-md@1.7.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.91(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(@napi-rs/canvas@0.1.80)(ai@6.0.193(zod@4.4.3))(pdfjs-dist@5.4.296)':
     dependencies:
       '@mozilla/readability': 0.6.0
       cheerio: 1.2.0
@@ -4943,7 +4952,7 @@ snapshots:
       commander: 14.0.3
       domhandler: 5.0.3
       happy-dom-without-node: 14.12.3
-      node-stream-zip: 1.15.0
+      node-stream-zip: 1.16.0
       pdf-parse: 2.4.5
       turndown: 7.2.4
       turndown-plugin-gfm: 1.0.2
@@ -4951,7 +4960,9 @@ snapshots:
       '@ai-sdk/anthropic': 3.0.85(zod@4.4.3)
       '@ai-sdk/google': 3.0.91(zod@4.4.3)
       '@ai-sdk/openai-compatible': 2.0.51(zod@4.4.3)
+      '@napi-rs/canvas': 0.1.80
       ai: 6.0.193(zod@4.4.3)
+      pdfjs-dist: 5.4.296
 
   '@nanocollective/prompt-scrub@1.0.1':
     dependencies:
@@ -7117,7 +7128,7 @@ snapshots:
       '@types/sarif': 2.1.7
       fs-extra: 11.3.5
 
-  node-stream-zip@1.15.0: {}
+  node-stream-zip@1.16.0: {}
 
   nopt@8.1.0:
     dependencies:
