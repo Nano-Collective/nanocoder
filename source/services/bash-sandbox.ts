@@ -45,10 +45,17 @@ export function macSandboxProfile(projectRoot: string): string {
 `;
 }
 
+function shDashC(spawnCommand: string, cwdCaptureFile?: string): string[] {
+	return cwdCaptureFile
+		? ['-c', spawnCommand, 'sh', cwdCaptureFile]
+		: ['-c', spawnCommand];
+}
+
 function bwrapArgs(
 	cwd: string,
 	projectRoot: string,
 	spawnCommand: string,
+	cwdCaptureFile?: string,
 ): string[] {
 	return [
 		'--die-with-parent',
@@ -66,27 +73,42 @@ function bwrapArgs(
 		'--chdir',
 		cwd,
 		'sh',
-		'-c',
-		spawnCommand,
+		...shDashC(spawnCommand, cwdCaptureFile),
 	];
 }
 
-export function planBashSpawn(input: {
+export type JailSpawnPlan = Extract<
+	BashSpawnPlan,
+	{bin: 'sandbox-exec' | 'bwrap'}
+>;
+
+type PlanInput = {
 	platform: string;
 	sandbox: boolean;
 	command: string;
 	spawnCommand: string;
 	cwd: string;
 	projectRoot: string;
+	cwdCaptureFile?: string;
 	bwrapPath?: BwrapBin | null;
-}): BashSpawnPlan {
+};
+
+export function planBashSpawn(
+	input: PlanInput & {sandbox: true},
+): JailSpawnPlan | {error: string};
+export function planBashSpawn(input: PlanInput): BashSpawnPlan;
+export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 	const {platform, sandbox, command, spawnCommand, cwd, projectRoot} = input;
 
 	if (!sandbox) {
 		if (platform === 'win32') {
 			return {bin: 'cmd', args: ['/c', command], detached: false};
 		}
-		return {bin: 'sh', args: ['-c', spawnCommand], detached: true};
+		return {
+			bin: 'sh',
+			args: shDashC(spawnCommand, input.cwdCaptureFile),
+			detached: true,
+		};
 	}
 
 	if (platform === 'win32') {
@@ -104,7 +126,12 @@ export function planBashSpawn(input: {
 		}
 		return {
 			bin: 'sandbox-exec',
-			args: ['-p', macSandboxProfile(projectRoot), 'sh', '-c', spawnCommand],
+			args: [
+				'-p',
+				macSandboxProfile(projectRoot),
+				'sh',
+				...shDashC(spawnCommand, input.cwdCaptureFile),
+			],
 			detached: true,
 		};
 	}
@@ -123,29 +150,19 @@ export function planBashSpawn(input: {
 	return {
 		bin: 'bwrap',
 		bwrap,
-		args: bwrapArgs(cwd, projectRoot, spawnCommand),
+		args: bwrapArgs(cwd, projectRoot, spawnCommand, input.cwdCaptureFile),
 		detached: true,
 	};
 }
 
-export function spawnPlanned(
-	plan: Exclude<BashSpawnPlan, {error: string}>,
-	cwd: string,
-): ChildProcess {
+export function spawnPlanned(plan: JailSpawnPlan, cwd: string): ChildProcess {
 	// `detached` makes the child a process-group leader so cancel() can
 	// signal the whole tree, not just the wrapper.
-	const detached = plan.detached || undefined;
-	if (plan.bin === 'cmd') {
-		return spawn('cmd', plan.args, {cwd});
-	}
-	if (plan.bin === 'sh') {
-		return spawn('sh', plan.args, {cwd, detached});
-	}
 	if (plan.bin === 'sandbox-exec') {
-		return spawn('/usr/bin/sandbox-exec', plan.args, {cwd, detached});
+		return spawn('/usr/bin/sandbox-exec', plan.args, {cwd, detached: true});
 	}
 	if (plan.bwrap === '/usr/bin/bwrap') {
-		return spawn('/usr/bin/bwrap', plan.args, {cwd, detached});
+		return spawn('/usr/bin/bwrap', plan.args, {cwd, detached: true});
 	}
-	return spawn('/usr/local/bin/bwrap', plan.args, {cwd, detached});
+	return spawn('/usr/local/bin/bwrap', plan.args, {cwd, detached: true});
 }

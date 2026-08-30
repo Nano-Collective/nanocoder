@@ -6,6 +6,25 @@ import {
 
 console.log('\nbash-sandbox.spec.ts');
 
+test('planBashSpawn passes the cwd capture path as $1, not inside -c', t => {
+	const spawnCommand =
+		'echo hi\n\n__nc_ec=$?\ncommand pwd -P > "$1" 2>/dev/null\nexit $__nc_ec';
+	const plan = planBashSpawn({
+		platform: 'darwin',
+		sandbox: false,
+		command: 'echo hi',
+		spawnCommand,
+		cwd: '/tmp/proj',
+		projectRoot: '/tmp/proj',
+		cwdCaptureFile: '/tmp/cap',
+	});
+	if ('error' in plan) {
+		t.fail(plan.error);
+		return;
+	}
+	t.deepEqual(plan.args, ['-c', spawnCommand, 'sh', '/tmp/cap']);
+});
+
 test('planBashSpawn off on unix is sh -c, detached', t => {
 	const plan = planBashSpawn({
 		platform: 'darwin',
