@@ -414,16 +414,32 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 });
 
 // ============================================================================
-// Todo indicator badge
+// Task indicator badge
 // ============================================================================
 
-test('DevelopmentModeIndicator shows Todo (~2/5 Ctrl-t) when hidden with in-progress tasks', t => {
-	const {lastFrame} = render(
+const WIDE = 200;
+
+function renderWithWidth(
+	element: React.ReactElement,
+	columns: number = WIDE,
+): string {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = columns;
+	try {
+		const {lastFrame} = render(element);
+		return lastFrame()!;
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+}
+
+test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
+	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{
+			taskInfo={{
 				totalCount: 5,
 				completedCount: 2,
 				inProgressCount: 1,
@@ -432,16 +448,16 @@ test('DevelopmentModeIndicator shows Todo (~2/5 Ctrl-t) when hidden with in-prog
 			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(~2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5 Ctrl-t\)/);
 });
 
-test('DevelopmentModeIndicator shows Todo (2/5 Ctrl-t) when hidden with no in-progress tasks', t => {
-	const {lastFrame} = render(
+test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no in-progress tasks', t => {
+	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{
+			taskInfo={{
 				totalCount: 5,
 				completedCount: 2,
 				inProgressCount: 0,
@@ -450,16 +466,16 @@ test('DevelopmentModeIndicator shows Todo (2/5 Ctrl-t) when hidden with no in-pr
 			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
 });
 
-test('DevelopmentModeIndicator shows Todo (~2/5* Ctrl-t) when hidden with in-progress and unread updates', t => {
-	const {lastFrame} = render(
+test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in-progress and unread updates', t => {
+	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{
+			taskInfo={{
 				totalCount: 5,
 				completedCount: 2,
 				inProgressCount: 1,
@@ -468,16 +484,16 @@ test('DevelopmentModeIndicator shows Todo (~2/5* Ctrl-t) when hidden with in-pro
 			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(~2\/5\* Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5\* Ctrl-t\)/);
 });
 
-test('DevelopmentModeIndicator shows Todo (hide Ctrl-t) when visible on wide terminal', t => {
-	const {lastFrame} = render(
+test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide terminal', t => {
+	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{
+			taskInfo={{
 				totalCount: 5,
 				completedCount: 2,
 				inProgressCount: 1,
@@ -486,16 +502,16 @@ test('DevelopmentModeIndicator shows Todo (hide Ctrl-t) when visible on wide ter
 			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(hide Ctrl-t\)/);
+	t.regex(output, /Tasks \(hide Ctrl-t\)/);
 });
 
-test('DevelopmentModeIndicator does not show todo badge when totalCount is 0 or todoInfo is null', t => {
-	const {lastFrame: frame1} = render(
+test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
+	const zero = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{
+			taskInfo={{
 				totalCount: 0,
 				completedCount: 0,
 				inProgressCount: 0,
@@ -504,16 +520,84 @@ test('DevelopmentModeIndicator does not show todo badge when totalCount is 0 or 
 			}}
 		/>,
 	);
-	t.notRegex(frame1()!, /Todo/);
+	t.notRegex(zero, /Tasks/);
 
-	const {lastFrame: frame2} = render(
+	const missing = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={null}
+			taskInfo={null}
 		/>,
 	);
-	t.notRegex(frame2()!, /Todo/);
+	t.notRegex(missing, /Tasks/);
 });
 
+// ============================================================================
+// Task badge width budget
+// ============================================================================
+
+test('expanded task badge is dropped entirely when the row is under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+		40,
+	);
+	// The expanded badge is pure help text - it goes before anything else does,
+	// and never squeezes the segments that carry information.
+	t.notRegex(output, /Tasks/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps its progress readout and drops only the key hint under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+		40,
+	);
+	// Progress survives - it is the only trace of the collapsed list on screen.
+	t.regex(output, /Tasks \(~2\/5\*\)/);
+	t.notRegex(output, /Ctrl-t/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps the key hint when there is room for it', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+		60,
+	);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+});

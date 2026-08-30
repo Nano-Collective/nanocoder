@@ -285,11 +285,13 @@ export interface LSPConnectionStatus {
 	errorMessage?: string;
 }
 
-export interface TodoIndicatorInfo {
+/** Status-bar summary of the live task list, shown while it is collapsed. */
+export interface TaskIndicatorInfo {
 	totalCount: number;
 	completedCount: number;
 	/** When > 0 the badge prefix '~' is shown (work in flight). */
 	inProgressCount: number;
 	isHidden: boolean;
-	hasUnread?: boolean;
+	/** The list changed while collapsed - badge renders in the warning colour. */
+	hasUnread: boolean;
 }
