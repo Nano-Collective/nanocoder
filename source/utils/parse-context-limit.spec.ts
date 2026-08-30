@@ -44,3 +44,13 @@ test('parseContextLimit - large value with k suffix', t => {
 test('parseContextLimit - decimal without k suffix', t => {
 	t.is(parseContextLimit('1024.5'), 1025);
 });
+
+test('parseContextLimit - rejects trailing junk after k suffix', t => {
+	t.is(parseContextLimit('10kg'), null);
+	t.is(parseContextLimit('128kb'), null);
+});
+
+test('parseContextLimit - rejects trailing junk after number', t => {
+	t.is(parseContextLimit('128abc'), null);
+	t.is(parseContextLimit('1024.5tokens'), null);
+});

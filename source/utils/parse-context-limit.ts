@@ -7,18 +7,18 @@
  */
 export function parseContextLimit(value: string): number | null {
 	const trimmed = value.trim().toLowerCase();
-	let multiplier = 1;
-	let numStr = trimmed;
+	const match = /^(\d+(?:\.\d+)?)(k)?$/.exec(trimmed);
 
-	if (trimmed.endsWith('k')) {
-		multiplier = 1000;
-		numStr = trimmed.slice(0, -1);
-	}
-
-	const parsed = Number.parseFloat(numStr);
-	if (Number.isNaN(parsed) || parsed <= 0) {
+	if (!match) {
 		return null;
 	}
 
+	const [, numStr, suffix] = match;
+	const parsed = Number.parseFloat(numStr);
+	if (parsed <= 0) {
+		return null;
+	}
+
+	const multiplier = suffix === 'k' ? 1000 : 1;
 	return Math.round(parsed * multiplier);
 }
