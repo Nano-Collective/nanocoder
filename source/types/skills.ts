@@ -15,7 +15,7 @@ import type {SubagentConfig} from '@/subagents/types';
 import type {CustomCommand} from '@/types/commands';
 import type {ToolEntry} from '@/types/core';
 
-export type SkillMemberKind = 'command' | 'agent' | 'tool';
+export type SkillMemberKind = 'command' | 'agent' | 'tool' | 'skill';
 
 /**
  * Resolved reference to a single skill member. The string form used in YAML
