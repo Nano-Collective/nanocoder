@@ -6,6 +6,7 @@ on:
     branches: [main]
 
 permissions:
+  contents: read
   issues: write
   pull-requests: write
 
@@ -19,19 +20,47 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const labels = {
+            const colors = {
               'area:tools': ['1d76db', 'Tool implementations and tool-calling'],
               'area:tui': ['fbca04', 'Terminal UI'],
-              'area:ci': ['d93f0b', 'GitHub Actions and CI'],
-              'area:docs': ['0075ca', 'Documentation'],
+              'area:ci': ['e99695', 'GitHub Actions and CI'],
+              'area:docs': ['0e8a16', 'Documentation'],
               'area:vscode': ['5319e7', 'VS Code extension and host integration'],
             };
             const {owner, repo} = context.repo;
-            for (const [name, [color, description]] of Object.entries(labels)) {
+            const {data} = await github.rest.repos.getContent({
+              owner,
+              repo,
+              path: '.github/labeler.yml',
+              ref: context.payload.pull_request.base.sha,
+            });
+            if (data.type !== 'file' || typeof data.content !== 'string') {
+              throw new Error('labeler.yml is not a file');
+            }
+            const yaml = Buffer.from(data.content, 'base64').toString('utf8');
+            const names = [...yaml.matchAll(/^(\S+):\s*$/gm)].map(m => m[1]);
+            if (names.length === 0) {
+              throw new Error('labeler.yml had no top-level label keys');
+            }
+            for (const name of names) {
+              const meta = colors[name];
+              if (!meta) {
+                throw new Error(
+                  `labeler.yml has ${name} but no colour map entry`,
+                );
+              }
               try {
-                await github.rest.issues.updateLabel({owner, repo, name, color, description});
-              } catch {
-                await github.rest.issues.createLabel({owner, repo, name, color, description});
+                await github.rest.issues.getLabel({owner, repo, name});
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                const [color, description] = meta;
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color,
+                  description,
+                });
               }
             }
 
