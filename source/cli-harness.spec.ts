@@ -1,4 +1,5 @@
 import test from 'ava';
+import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
 	CLITestHarness,
 	createCLITestHarness,
@@ -275,10 +276,10 @@ test('CLI args parsing: nonInteractiveMode is false without run command', t => {
 	t.false(nonInteractiveMode);
 });
 
-type ExitReason = 'complete' | 'timeout' | 'error' | 'tool-approval' | null;
+type ExitReason = 'complete' | 'timeout' | 'error' | typeof TOOL_APPROVAL_REQUIRED_KIND | null;
 
 function getExitCodeForReason(reason: ExitReason): number {
-	return reason === 'error' || reason === 'tool-approval' ? 1 : 0;
+	return reason === 'error' || reason === TOOL_APPROVAL_REQUIRED_KIND ? 1 : 0;
 }
 
 test('Exit code mapping: complete reason uses exit code 0', t => {
@@ -291,8 +292,8 @@ test('Exit code mapping: error reason uses exit code 1', t => {
 	t.is(getExitCodeForReason(reason), 1);
 });
 
-test('Exit code mapping: tool-approval reason uses exit code 1', t => {
-	const reason: ExitReason = 'tool-approval';
+test('Exit code mapping: tool-approval-required reason uses exit code 1', t => {
+	const reason: ExitReason = TOOL_APPROVAL_REQUIRED_KIND;
 	t.is(getExitCodeForReason(reason), 1);
 });
 

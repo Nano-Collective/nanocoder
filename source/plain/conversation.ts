@@ -8,6 +8,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
@@ -72,7 +73,7 @@ export type PlainConversationOutcome =
 			usage?: PlainConversationUsage;
 	  }
 	| {
-			kind: 'tool-approval-required';
+			kind: typeof TOOL_APPROVAL_REQUIRED_KIND;
 			toolNames: string[];
 			finalText: string;
 			reasoning: string | null;
@@ -519,7 +520,7 @@ export async function runPlainConversation(
 
 		if (toolsNeedingApproval.length > 0) {
 			return {
-				kind: 'tool-approval-required',
+				kind: TOOL_APPROVAL_REQUIRED_KIND,
 				toolNames: toolsNeedingApproval,
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,

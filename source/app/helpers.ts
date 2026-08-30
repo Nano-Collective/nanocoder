@@ -1,4 +1,7 @@
-import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
+import {
+	TOOL_APPROVAL_REQUIRED_KIND,
+	TOOL_APPROVAL_REQUIRED_PREFIX,
+} from '@/constants';
 import type {
 	NonInteractiveCompletionResult,
 	NonInteractiveModeState,
@@ -35,7 +38,7 @@ export function isNonInteractiveModeComplete(
 	}
 
 	if (hasToolApprovalRequired) {
-		return {shouldExit: true, reason: 'tool-approval'};
+		return {shouldExit: true, reason: TOOL_APPROVAL_REQUIRED_KIND};
 	}
 
 	if (hasErrorMessages) {

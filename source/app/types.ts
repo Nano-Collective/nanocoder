@@ -1,3 +1,4 @@
+import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import type {Session} from '@/session/session-manager';
 import type {DevelopmentMode} from '@/types/core';
 
@@ -63,7 +64,7 @@ export type NonInteractiveExitReason =
 	| 'complete'
 	| 'timeout'
 	| 'error'
-	| 'tool-approval'
+	| typeof TOOL_APPROVAL_REQUIRED_KIND
 	| null;
 
 /**

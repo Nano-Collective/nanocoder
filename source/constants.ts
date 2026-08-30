@@ -106,9 +106,15 @@ export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 // === NON-INTERACTIVE NOTICES ===
 // Non-interactive runs can't prompt, so a tool needing approval ends the run.
 // The notice is display-only chrome, but `isNonInteractiveModeComplete` detects
-// it by content to pick exit reason "tool-approval" — share the prefix so a
-// reword can't silently break that exit path.
+// it by content to pick exit reason "tool-approval-required" — share the prefix
+// so a reword can't silently break that exit path.
 export const TOOL_APPROVAL_REQUIRED_PREFIX = 'Tool approval required for: ';
+
+// Canonical string literal for the tool-approval-required outcome/exit-reason.
+// Single source of truth — use this constant instead of a bare string in both
+// PlainConversationOutcome.kind and NonInteractiveExitReason so that
+// comparisons and grep patterns never diverge.
+export const TOOL_APPROVAL_REQUIRED_KIND = 'tool-approval-required' as const;
 
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
