@@ -49,7 +49,7 @@ Prefix any command with **`!`** to run it directly in your shell without leaving
 !npm test
 ```
 
-With `nanocoder.sandbox` set (see [Configuration](../configuration/index.md#os-sandbox)), those commands run in an OS jail. Off by default.
+With `nanocoder.sandbox` set (see [Configuration](../configuration/index.md#os-sandbox)), those commands run in an OS jail (writes + network; reads are not blocked). Off by default.
 
 ### Attaching Images
 

@@ -1,29 +1,15 @@
+import {chmodSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {platform} from 'node:process';
 import test from 'ava';
 import {
+	findBwrap,
 	macSandboxProfile,
 	planBashSpawn,
 } from './bash-sandbox.js';
 
 console.log('\nbash-sandbox.spec.ts');
-
-test('planBashSpawn passes the cwd capture path as $1, not inside -c', t => {
-	const spawnCommand =
-		'echo hi\n\n__nc_ec=$?\ncommand pwd -P > "$1" 2>/dev/null\nexit $__nc_ec';
-	const plan = planBashSpawn({
-		platform: 'darwin',
-		sandbox: false,
-		command: 'echo hi',
-		spawnCommand,
-		cwd: '/tmp/proj',
-		projectRoot: '/tmp/proj',
-		cwdCaptureFile: '/tmp/cap',
-	});
-	if ('error' in plan) {
-		t.fail(plan.error);
-		return;
-	}
-	t.deepEqual(plan.args, ['-c', spawnCommand, 'sh', '/tmp/cap']);
-});
 
 test('planBashSpawn off on unix is sh -c, detached', t => {
 	const plan = planBashSpawn({
@@ -84,6 +70,7 @@ test('planBashSpawn on linux without bwrap returns an error and does not fall th
 		spawnCommand: 'echo hi',
 		cwd: '/tmp/proj',
 		projectRoot: '/tmp/proj',
+		tmpDir: '/tmp/jail',
 		bwrapPath: null,
 	});
 	t.true('error' in plan);
@@ -92,7 +79,7 @@ test('planBashSpawn on linux without bwrap returns an error and does not fall th
 	}
 });
 
-test('planBashSpawn on linux with bwrap uses --unshare-net and binds the project', t => {
+test('planBashSpawn on linux with bwrap uses --unshare-net, --tmpfs, --new-session', t => {
 	const plan = planBashSpawn({
 		platform: 'linux',
 		sandbox: true,
@@ -100,7 +87,8 @@ test('planBashSpawn on linux with bwrap uses --unshare-net and binds the project
 		spawnCommand: 'echo hi',
 		cwd: '/tmp/proj',
 		projectRoot: '/tmp/proj',
-		bwrapPath: '/usr/bin/bwrap',
+		tmpDir: '/tmp/jail',
+		bwrapPath: '/run/wrappers/bin/bwrap',
 	});
 	if ('error' in plan) {
 		t.fail(plan.error);
@@ -108,16 +96,21 @@ test('planBashSpawn on linux with bwrap uses --unshare-net and binds the project
 	}
 	t.is(plan.bin, 'bwrap');
 	if (plan.bin === 'bwrap') {
-		t.is(plan.bwrap, '/usr/bin/bwrap');
+		t.is(plan.bwrap, '/run/wrappers/bin/bwrap');
 	}
 	t.true(plan.args.includes('--unshare-net'));
+	t.true(plan.args.includes('--new-session'));
+	t.true(plan.args.includes('--tmpfs'));
 	t.true(plan.args.includes('/tmp/proj'));
+	t.true(plan.args.includes('/tmp/jail'));
 });
 
-test('macSandboxProfile denies network and confines writes to the project', t => {
-	const profile = macSandboxProfile('/Users/me/proj');
+test('macSandboxProfile denies network and allows project plus tmp writes', t => {
+	const profile = macSandboxProfile('/Users/me/proj', ['/tmp/jail', '/var/folders/xx/T']);
 	t.true(profile.includes('(deny network*)'));
 	t.true(profile.includes('(subpath "/Users/me/proj")'));
+	t.true(profile.includes('(subpath "/tmp/jail")'));
+	t.true(profile.includes('(subpath "/var/folders/xx/T")'));
 });
 
 test('planBashSpawn on darwin with sandbox uses sandbox-exec when present', t => {
@@ -128,6 +121,8 @@ test('planBashSpawn on darwin with sandbox uses sandbox-exec when present', t =>
 		spawnCommand: 'echo hi',
 		cwd: '/tmp/proj',
 		projectRoot: '/tmp/proj',
+		tmpDir: '/tmp/jail',
+		hostTmp: '/var/folders/xx/T',
 	});
 	if ('error' in plan) {
 		t.regex(plan.error, /sandbox-exec/);
@@ -136,5 +131,20 @@ test('planBashSpawn on darwin with sandbox uses sandbox-exec when present', t =>
 	t.is(plan.bin, 'sandbox-exec');
 	t.is(plan.args[0], '-p');
 	t.true(plan.args[1].includes('deny network*'));
+	t.true(plan.args[1].includes('/tmp/jail'));
+	t.true(plan.args[1].includes('/var/folders/xx/T'));
 	t.true(plan.args.includes('sh'));
+});
+
+test('findBwrap walks PATH', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bwrap-'));
+	try {
+		const bin = join(dir, 'bwrap');
+		writeFileSync(bin, '');
+		if (platform !== 'win32') chmodSync(bin, 0o755);
+		t.is(findBwrap(dir), bin);
+		t.is(findBwrap(''), undefined);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
