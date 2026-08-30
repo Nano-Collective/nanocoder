@@ -29,6 +29,11 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
+	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
+	// provider has no effect, since those either prefix-cache automatically
+	// (OpenAI, OpenRouter) or have no cache to address (local models).
+	promptCaching?: boolean;
 	// Model mode defaults for this provider
 	tune?: Partial<TuneConfig>;
 	// OpenRouter-specific request body fields (provider routing, plugins,
@@ -96,6 +101,28 @@ export interface AutoCompactConfig {
 // Paste handling configuration
 export interface PasteConfig {
 	singleLineThreshold: number;
+}
+
+// Agent-loop retry limits: caps on how many times the conversation loop
+// auto-retries a failing pattern without user intervention. Distinct from the
+// per-provider `maxRetries` setting, which governs network request retries.
+export interface RetryLimitsConfig {
+	// Consecutive turns emitting the identical tool call(s) before the loop
+	// pauses and asks the user whether to continue (interactive) or stops
+	// (--plain, headless, subagent runs). The check fires before the Nth
+	// repeat runs, so the default of 3 executes it twice. Unknown-tool calls
+	// count toward the streak too.
+	maxRepeatedToolCalls: number;
+	// Consecutive empty assistant turns auto-nudged before the loop gives up.
+	// The interactive loop additionally compacts the context and retries once;
+	// --plain stops straight after the nudges. Not used by subagent runs,
+	// whose loop ends on its own when a turn has no tool calls.
+	maxEmptyTurns: number;
+	// Malformed self-correction retries allowed for text-parsed tool calls
+	// before the loop gives up. Covers the XML fallback path in both runtimes,
+	// plus (interactive only) native responses that emit tool-call text
+	// instead of native tool calls. Not used by subagent runs.
+	maxMalformedRetries: number;
 }
 
 // Custom system prompt configuration
@@ -230,6 +257,9 @@ export interface AppConfig {
 		// Maximum LLM turns before the loop forces a final, tool-free answer.
 		maxTurns?: number;
 	};
+
+	// Agent-loop retry limits (interactive conversation loop)
+	retries?: RetryLimitsConfig;
 }
 
 // MCP Server configuration with source tracking
@@ -439,4 +469,11 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * "Boring" output mode. false (default): playful touches stay, e.g. the
+	 * "Worked for a plucky 12s." completion note. true: progress text is
+	 * strictly functional and the system prompt gains a section telling the
+	 * model to be terse — no filler, no preamble, no celebratory wrap-ups.
+	 */
+	professionalTone?: boolean;
 }

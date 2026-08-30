@@ -115,9 +115,10 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	// Cancel mid-flight, then the agent tears the stream down and prompt rejects.
 	await client.cancel();
 	rejectPrompt(new Error('Operation was cancelled'));
-	await promptPromise;
+	const cancelledResult = await promptPromise;
 
 	t.is(shownError, undefined, 'Cancelling is not a failure the user needs to be told about');
+	t.is(cancelledResult?.stopReason, 'cancelled', 'The webview needs the cancelled terminal state');
 
 	// The flag must not leak into the next turn, or a real failure goes unreported.
 	rejectPrompt = () => {};
@@ -128,13 +129,72 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	t.regex(shownError ?? '', /RequestError/, 'A genuine failure must still surface');
 });
 
+test('NanocoderAcpClient - listTimeline returns entries from extMethod', async (t) => {
+	const client = makeClient({
+		extMethod: async (method: string, params: Record<string, unknown>) => {
+			t.is(method, 'timeline/list');
+			t.is(params.sessionId, 'session-1');
+			return {
+				entries: [
+					{
+						id: 'cp-1',
+						seq: 1,
+						toolCallId: 'call-1',
+						toolName: 'write_file',
+						title: 'write_file: a.ts',
+						timestamp: '2026-01-01T00:00:00.000Z',
+						filesChanged: ['a.ts'],
+					},
+				],
+			};
+		},
+	});
+
+	const entries = await client.listTimeline();
+	t.is(entries.length, 1);
+	t.is(entries[0].id, 'cp-1');
+});
+
+test('NanocoderAcpClient - revertTimeline calls timeline/revert', async (t) => {
+	let called: {method?: string; params?: Record<string, unknown>} = {};
+	const client = makeClient({
+		extMethod: async (method: string, params: Record<string, unknown>) => {
+			called = {method, params};
+			return {revertedTo: {id: 'cp-1'}, filesRestored: ['a.ts']};
+		},
+	});
+
+	await client.revertTimeline('cp-1');
+	t.is(called.method, 'timeline/revert');
+	t.deepEqual(called.params, {sessionId: 'session-1', checkpointId: 'cp-1'});
+});
+
+test('NanocoderAcpClient - revertTimeline throws when there is no session', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
+
+	// Returning quietly here would let the caller clear the chat view for a
+	// revert that never happened.
+	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /Not connected/});
+});
+
+test('NanocoderAcpClient - revertTimeline rethrows a refused revert', async (t) => {
+	const client = makeClient({
+		extMethod: async () => {
+			throw new Error('Cannot revert the timeline while a prompt is in progress');
+		},
+	});
+
+	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /in progress/});
+});
+
 test('NanocoderAcpClient - reconnecting clears permissions left by the dead process', async (t) => {
-	const outputChannel = { appendLine: () => {} } as any;
+	const outputChannel = {appendLine: () => {}} as any;
 	const stateManager = new AcpStateManager();
 	const client = new NanocoderAcpClient(outputChannel, stateManager);
 
 	const requestPromise = client.handlePermissionRequest({
-		toolCall: { toolCallId: 'call_456', name: 'test_tool', arguments: {} },
+		toolCall: {toolCallId: 'call_456', name: 'test_tool', arguments: {}},
 	});
 
 	client.setConnection({} as any);

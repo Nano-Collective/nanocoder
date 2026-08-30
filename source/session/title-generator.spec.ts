@@ -367,5 +367,5 @@ test('deriveTitleFromFirstMessage returns null when nothing usable is left', t =
 
 test('deriveTitleFromFirstMessage caps the title length', t => {
 	const title = deriveTitleFromFirstMessage('x'.repeat(200));
-	t.is(title?.length, 50);
+	t.is(title, `${'x'.repeat(50)}...`);
 });

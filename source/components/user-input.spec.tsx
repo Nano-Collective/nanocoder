@@ -760,6 +760,104 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	unmount();
 });
 
+test('UserInput renders the task badge when taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 4,
+					completedCount: 2,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: false,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~2\/4 Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput renders the task badge when disabled and taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 3,
+					completedCount: 1,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: true,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~1\/3\* Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed', async t => {
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => toggles++} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed while disabled', async t => {
+	// The task list is on screen precisely while the agent is working, which is
+	// when the input is disabled - so the binding has to survive that guard.
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				disabled={true}
+				onToggleTaskList={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput does not insert a literal character when ctrl+t is pressed', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => {}} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hi');
+	await waitForFrame(lastFrame, /hi/);
+	stdin.write('\u0014');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /hit/);
+	unmount();
+});
 
 // ============================================================================
 // Command Completion Navigation Tests

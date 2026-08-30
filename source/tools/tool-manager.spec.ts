@@ -4,6 +4,7 @@ import type {
 } from '@/types/index';
 import test from 'ava';
 import {ToolManager} from './tool-manager';
+import {getToolsForProfile} from './tool-profiles';
 
 console.log('\ntool-manager.spec.ts');
 
@@ -735,9 +736,9 @@ test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 // in plan mode — so a newly-added mutating tool can't silently leak in. agent
 // and ask_user are the deliberate non-readOnly exceptions (delegation / asking
 // the user are themselves read-only-ish in plan).
-test('plan mode hides every mutating built-in tool (except agent/ask_user)', t => {
+test('plan mode hides every mutating built-in tool except its safe interaction and artifact tools', t => {
 	const manager = new ToolManager();
-	const allowedNonReadOnly = new Set(['agent', 'ask_user']);
+	const allowedNonReadOnly = new Set(['agent', 'ask_user', 'write_plan']);
 	const planTools = new Set(manager.getAvailableToolNames(undefined, 'plan'));
 
 	for (const name of manager.getToolNames()) {
@@ -755,7 +756,14 @@ test('getAvailableToolNames - plan + minimal excludes mutation tools from minima
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
 	// Plan mode excludes write_file, string_replace, execute_bash from minimal
-	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
+	t.deepEqual(result, [
+		'read_file',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'agent',
+		'write_plan',
+	]);
 });
 
 // ============================================================================
@@ -821,7 +829,7 @@ test('getAvailableToolNames - disabledTools layered with plan mode exclusion', t
 test('getAvailableToolNames - empty disabledTools is a no-op', t => {
 	const manager = new ToolManager();
 	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
-	const expected = manager.getToolNames();
+	const expected = manager.getToolNames().filter(name => name !== 'write_plan');
 	t.deepEqual(baseline.sort(), [...expected].sort());
 });
 
@@ -1037,4 +1045,45 @@ test('XML fallback - tool definitions include examples per tool', t => {
 	// Should include XML examples
 	t.true(defs.includes('**Example:**'));
 	t.true(defs.includes('```xml'));
+});
+
+// ============================================================================
+// Plan-mode write_plan injection
+// ============================================================================
+
+test('plan mode does not mutate the shared tool profile array', t => {
+	const manager = new ToolManager();
+	const before = [...getToolsForProfile('nano')];
+
+	manager.getAvailableToolNames(
+		{enabled: true, toolProfile: 'nano'} as never,
+		'plan',
+		[],
+	);
+
+	t.deepEqual(
+		getToolsForProfile('nano'),
+		before,
+		'entering plan mode must not append write_plan to the shared profile',
+	);
+	t.false(
+		manager
+			.getAvailableToolNames({enabled: true, toolProfile: 'nano'} as never)
+			.includes('write_plan'),
+		'a later profile lookup with no mode must not see write_plan',
+	);
+});
+
+test('plan mode still exposes write_plan under a slim profile', t => {
+	const manager = new ToolManager();
+
+	t.true(
+		manager
+			.getAvailableToolNames(
+				{enabled: true, toolProfile: 'nano'} as never,
+				'plan',
+				[],
+			)
+			.includes('write_plan'),
+	);
 });

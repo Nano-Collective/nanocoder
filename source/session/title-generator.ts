@@ -46,6 +46,8 @@ export function normalizeFirstMessage(content: string): string {
  * The plain title used until a generated one lands. Shared by the ACP save
  * path and the CLI autosave, which write to the same store. Null, never '',
  * so a message opening with a newline cannot persist a nameless session.
+ * An over-long first line keeps the trailing ellipsis, so a clipped title
+ * still reads as clipped in the history list.
  */
 export function deriveTitleFromFirstMessage(content: string): string | null {
 	const firstLine = content
@@ -53,7 +55,9 @@ export function deriveTitleFromFirstMessage(content: string): string | null {
 		.split('\n')[0]
 		.trim();
 	if (!firstLine) return null;
-	return firstLine.slice(0, MAX_HEURISTIC_TITLE_CHARS);
+	return firstLine.length > MAX_HEURISTIC_TITLE_CHARS
+		? `${firstLine.slice(0, MAX_HEURISTIC_TITLE_CHARS)}...`
+		: firstLine;
 }
 
 /**

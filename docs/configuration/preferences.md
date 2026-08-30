@@ -103,6 +103,28 @@ You can change this via `/settings` → **Behavior** → **Tool Results and Thin
 
 The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
 
+### Professional Tone
+
+Professional ("boring") tone is stored in the preferences file with the `professionalTone` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `professionalTone` | boolean | `false` | When true, progress text is strictly functional (`Completed in 12s.` instead of `Worked for a plucky 12s.`) and the system prompt gains a TONE section telling the model to be terse — no filler, no preamble, no celebratory wrap-ups. |
+
+You can change this via `/settings` → **Behavior** → **Professional Tone**, or by editing the preferences file directly:
+
+```json
+{
+  "professionalTone": true
+}
+```
+
+Toggling it from `/settings` applies to both halves straight away - the progress text on the next turn, and the TONE section on the next system prompt rebuild, which the toggle itself triggers. Editing the preferences file by hand needs a restart, since nothing is watching the file.
+
+Under the `nano` tool profile the TONE section is swapped for a shortened variant, the same way every other section is slimmed for tiny models.
+
+One exception: if you have replaced the system prompt entirely with a [`systemPrompt` override](index.md#custom-system-prompt) in `mode: "replace"`, the TONE section is not added - your override is used verbatim. The progress text still changes. In `mode: "append"` the section is kept, and your appended text lands after it, so your wording wins on any conflict.
+
 ### Notification Configuration
 
 Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
