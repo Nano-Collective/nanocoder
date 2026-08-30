@@ -1,7 +1,7 @@
 import {mkdirSync, rmSync, symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import test from 'ava';
+import test, {type ExecutionContext} from 'ava';
 import {buildHandler, expandVars, mergeEnv, resolveCwd, runScript} from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
@@ -66,52 +66,92 @@ test('resolveCwd handles missing paths by falling back to projectRoot', t => {
 	t.is(resolveCwd(undefined, projectRoot), projectRoot);
 });
 
+// Creating a directory symlink on Windows needs elevated privileges or
+// developer mode, so the symlink cases can't run there. CI is Linux-only; this
+// keeps the suite green for Windows contributors running it locally.
+const symlinkTest = process.platform === 'win32' ? test.skip : test;
+
+let tempCounter = 0;
+
+// Each case needs its own throwaway tree. Returns a unique dir under tmpdir
+// registered for teardown; `label` only exists to make a stray leftover
+// directory traceable to the test that made it.
+function tempDir(t: ExecutionContext, label: string): string {
+	const dir = join(
+		tmpdir(),
+		`nanocoder-custom-tools-${label}-${Date.now()}-${tempCounter++}`,
+	);
+	mkdirSync(dir, {recursive: true});
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	return dir;
+}
+
+const ESCAPES = /escapes the project directory/;
+
 test('resolveCwd keeps an in-project relative directory', t => {
-	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-in-${Date.now()}`);
+	const root = tempDir(t, 'cwd-in');
 	mkdirSync(join(root, 'scripts'), {recursive: true});
-	t.teardown(() => rmSync(root, {recursive: true, force: true}));
 	t.is(resolveCwd('./scripts', root), resolve(root, 'scripts'));
 });
 
-test('resolveCwd falls back when cwd is a symlink out of the project', t => {
-	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-link-${Date.now()}`);
-	const outside = join(tmpdir(), `nanocoder-custom-tools-cwd-out-${Date.now()}`);
-	mkdirSync(root);
-	mkdirSync(outside);
-	t.teardown(() => {
-		rmSync(root, {recursive: true, force: true});
-		rmSync(outside, {recursive: true, force: true});
-	});
+test('resolveCwd keeps the project root itself', t => {
+	const root = tempDir(t, 'cwd-dot');
+	t.is(resolveCwd('.', root), root);
+});
+
+symlinkTest('resolveCwd throws when cwd is a symlink out of the project', t => {
+	const root = tempDir(t, 'cwd-link');
+	const outside = tempDir(t, 'cwd-out');
 	symlinkSync(outside, join(root, 'scripts'));
-	t.is(resolveCwd('./scripts', root), root);
+	t.throws(() => resolveCwd('./scripts', root), {message: ESCAPES});
 });
 
-test('resolveCwd falls back for an absolute path outside the project', t => {
-	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-root-${Date.now()}`);
-	const outside = join(tmpdir(), `nanocoder-custom-tools-cwd-abs-${Date.now()}`);
-	mkdirSync(root);
-	mkdirSync(outside);
-	t.teardown(() => {
-		rmSync(root, {recursive: true, force: true});
-		rmSync(outside, {recursive: true, force: true});
-	});
-	t.is(resolveCwd(outside, root), root);
+symlinkTest(
+	'resolveCwd throws when a parent segment of cwd is a symlink out of the project',
+	t => {
+		const root = tempDir(t, 'cwd-deep-link');
+		const outside = tempDir(t, 'cwd-deep-out');
+		mkdirSync(join(outside, 'scripts'), {recursive: true});
+		mkdirSync(join(root, 'nested'), {recursive: true});
+		symlinkSync(outside, join(root, 'nested', 'link'));
+		t.throws(() => resolveCwd('./nested/link/scripts', root), {
+			message: ESCAPES,
+		});
+	},
+);
+
+test('resolveCwd throws for an absolute path outside the project', t => {
+	const root = tempDir(t, 'cwd-root');
+	const outside = tempDir(t, 'cwd-abs');
+	t.throws(() => resolveCwd(outside, root), {message: ESCAPES});
 });
 
-test('resolveCwd falls back for ${HOME} outside the project', t => {
-	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-home-root-${Date.now()}`);
-	const fakeHome = join(tmpdir(), `nanocoder-custom-tools-home-${Date.now()}`);
-	mkdirSync(root);
-	mkdirSync(fakeHome);
+test('resolveCwd throws for a ../ traversal out of the project', t => {
+	const root = tempDir(t, 'cwd-traversal');
+	mkdirSync(join(root, 'scripts'), {recursive: true});
+	t.throws(() => resolveCwd('../', root), {message: ESCAPES});
+});
+
+test('resolveCwd throws for a sibling directory sharing the root prefix', t => {
+	// `/proj-evil` must not pass containment for project `/proj`: the guard is
+	// the trailing separator in the prefix comparison.
+	const root = tempDir(t, 'cwd-sibling');
+	const sibling = `${root}-evil`;
+	mkdirSync(sibling, {recursive: true});
+	t.teardown(() => rmSync(sibling, {recursive: true, force: true}));
+	t.throws(() => resolveCwd(sibling, root), {message: ESCAPES});
+});
+
+test('resolveCwd throws for ${HOME} outside the project', t => {
+	const root = tempDir(t, 'cwd-home-root');
+	const fakeHome = tempDir(t, 'home');
 	const prev = process.env.HOME;
 	t.teardown(() => {
-		rmSync(root, {recursive: true, force: true});
-		rmSync(fakeHome, {recursive: true, force: true});
 		if (prev === undefined) delete process.env.HOME;
 		else process.env.HOME = prev;
 	});
 	process.env.HOME = fakeHome;
-	t.is(resolveCwd('${HOME}', root), root);
+	t.throws(() => resolveCwd('${HOME}', root), {message: ESCAPES});
 });
 
 test('runScript: captures stdout', async t => {
