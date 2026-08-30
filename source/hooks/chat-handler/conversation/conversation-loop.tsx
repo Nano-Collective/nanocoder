@@ -34,7 +34,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
-import {performAutoCompact} from '@/utils/auto-compact';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
@@ -593,40 +593,24 @@ export const processAssistantResponse = async (
 	// could overwrite newer state updates that happen while compression is in progress
 	let compactionOccurred = false;
 	try {
-		const config = getAppConfig();
-		const autoCompactConfig = config.autoCompact;
-
-		if (autoCompactConfig) {
-			const compressed = await performAutoCompact(
-				updatedMessages,
-				systemMessage,
-				currentProvider,
-				currentModel,
-				autoCompactConfig,
-				notification => {
-					// Show notification
+		const beforeCompact = updatedMessages;
+		updatedMessages = await maybeAutoCompact(
+			updatedMessages,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{
+				signal: controller.signal,
+				onNotify: notification => {
 					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
-				client,
-				// Native tool definitions occupy context out-of-band. Pass them so
-				// the gate matches the ctx% indicator; under XML/JSON fallback they
-				// already live inside systemMessage, so pass nothing to avoid
-				// double-counting.
-				result.toolsDisabled ? undefined : tools,
-			);
+			},
+		);
 
-			if (compressed) {
-				// Compression was performed — update React state and replace the
-				// local array so subsequent tool-result builders and recursive
-				// calls see the compressed messages instead of the pre-compression
-				// copy.
-				setMessages(compressed);
-				updatedMessages = compressed;
-				// Reset stale streaming token count to avoid double-counting
-				// with calculateTokenBreakdown which already counts compacted tokens
-				setTokenCount(0);
-				compactionOccurred = true;
-			}
+		if (updatedMessages !== beforeCompact) {
+			setMessages(updatedMessages);
+			setTokenCount(0);
+			compactionOccurred = true;
 		}
 	} catch (_error) {
 		// Silently fail auto-compact, don't interrupt the conversation
