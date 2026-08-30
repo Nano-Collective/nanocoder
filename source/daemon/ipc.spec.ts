@@ -52,14 +52,43 @@ test.serial('request rejects and releases the pending slot when write throws', a
 			socket: {write: (payload: string) => boolean};
 			pending: Map<number, unknown>;
 		};
+		const write = internals.socket.write;
 		internals.socket.write = () => {
-			throw new Error('socket already closed');
+			throw new Error('serialization failed');
 		};
 
-		await t.throwsAsync(client.ping(), {message: 'socket already closed'});
-		t.is(internals.pending.size, 0);
+		try {
+			await t.throwsAsync(client.ping(), {message: 'serialization failed'});
+			t.is(internals.pending.size, 0);
+		} finally {
+			internals.socket.write = write;
+		}
 	} finally {
 		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial('a closing socket rejects and drains every pending request', async t => {
+	const path = await makeSocketPath();
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		const internals = client as unknown as {
+			socket: {destroy: () => void};
+			pending: Map<number, unknown>;
+		};
+		const inFlight = client.ping();
+		internals.socket.destroy();
+
+		await t.throwsAsync(inFlight, {message: 'IPC connection closed'});
+		t.is(internals.pending.size, 0);
+	} finally {
 		await server.stop();
 		await rm(join(path, '..'), {recursive: true, force: true});
 	}
