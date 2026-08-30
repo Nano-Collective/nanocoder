@@ -1,0 +1,85 @@
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync} from 'node:fs';
+import {homedir, tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {platform} from 'node:process';
+import test from 'ava';
+import {getAppConfig} from '@/config/index';
+import {BashExecutor} from './bash-executor.js';
+import {getSessionCwd, resetSessionCwd, setProjectRoot, setSessionCwd} from './session-cwd.js';
+
+console.log('\nbash-executor-sandbox.spec.ts');
+
+const executors: BashExecutor[] = [];
+
+function createExecutor(): BashExecutor {
+	const executor = new BashExecutor();
+	executors.push(executor);
+	return executor;
+}
+
+test.afterEach(() => {
+	for (const executor of executors) {
+		for (const id of executor.getActiveExecutionIds()) {
+			executor.cancel(id);
+		}
+		executor.removeAllListeners();
+	}
+	executors.length = 0;
+	resetSessionCwd();
+});
+
+test.serial('sandbox off keeps the unix spawn on sh', async t => {
+	if (platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const previous = getAppConfig().sandbox;
+	getAppConfig().sandbox = false;
+	try {
+		const executor = createExecutor();
+		const result = await executor.execute('echo unsandboxed').promise;
+		t.is(result.exitCode, 0);
+		t.true(result.fullOutput.includes('unsandboxed'));
+		t.is(result.error, null);
+	} finally {
+		getAppConfig().sandbox = previous;
+	}
+});
+
+test.serial('sandbox on macOS writes inside the project and blocks home', async t => {
+	if (platform !== 'darwin') {
+		t.pass();
+		return;
+	}
+	const previous = getAppConfig().sandbox;
+	const base = realpathSync(mkdtempSync(join(tmpdir(), 'nc-jail-')));
+	const probe = join(homedir(), `.nanocoder-sandbox-probe-${Date.now()}`);
+	getAppConfig().sandbox = true;
+	setProjectRoot(base);
+	setSessionCwd(base);
+	try {
+		const executor = createExecutor();
+		const inside = await executor.execute('echo ok > inside.txt').promise;
+		t.is(inside.exitCode, 0, inside.stderr || inside.error || '');
+		t.is(readFileSync(join(base, 'inside.txt'), 'utf8').trim(), 'ok');
+
+		const outside = await executor.execute(`echo no > '${probe}'`).promise;
+		t.false(existsSync(probe), 'sandbox must not write into $HOME');
+		t.true(
+			outside.exitCode !== 0 || Boolean(outside.stderr) || Boolean(outside.error),
+		);
+
+		const nested = join(base, 'nested');
+		mkdirSync(nested);
+		await executor.execute('cd nested').promise;
+		t.is(getSessionCwd(), nested);
+	} finally {
+		getAppConfig().sandbox = previous;
+		try {
+			if (existsSync(probe)) rmSync(probe);
+		} catch {
+			// best-effort cleanup
+		}
+		rmSync(base, {recursive: true, force: true});
+	}
+});
