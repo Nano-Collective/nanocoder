@@ -2,6 +2,18 @@ import type {InputState, PlaceholderContent} from '../types/hooks';
 import {findPlaceholderOccurrences} from './placeholders';
 
 /**
+ * Returns true when two half-open ranges, [start, end), share any characters.
+ */
+function rangesOverlap(
+	firstStart: number,
+	firstEnd: number,
+	secondStart: number,
+	secondEnd: number,
+): boolean {
+	return firstStart < secondEnd && firstEnd > secondStart;
+}
+
+/**
  * Detect if a text change represents a deletion that should be atomic
  * Returns the modified InputState if atomic deletion occurred, null otherwise
  */
@@ -43,11 +55,7 @@ export function handleAtomicDeletion(
 	for (const occurrence of occurrences) {
 		const {start, end} = occurrence;
 
-		if (
-			(deletionStart >= start && deletionStart < end) ||
-			(deletionEnd > start && deletionEnd <= end) ||
-			(deletionStart <= start && deletionEnd >= end)
-		) {
+		if (rangesOverlap(deletionStart, deletionEnd, start, end)) {
 			// Deletion affects this placeholder - remove it atomically
 			const newDisplayValue =
 				previousText.slice(0, start) + previousText.slice(end);
@@ -84,7 +92,7 @@ export function findPlaceholderAtPosition(
 		text,
 		placeholderContent,
 	)) {
-		if (position >= start && position <= end) {
+		if (position > start && position <= end) {
 			return id;
 		}
 	}
@@ -108,13 +116,7 @@ export function wouldPartiallyDeletePlaceholder(
 		text,
 		placeholderContent,
 	)) {
-		// Check for overlap
-		const overlapsStart = deletionStart >= start && deletionStart < end;
-		const overlapsEnd = deletionEnd > start && deletionEnd <= end;
-		const spansPast = deletionStart < start && deletionEnd > start;
-		const spansOver = deletionStart < end && deletionEnd > end;
-
-		const hasOverlap = overlapsStart || overlapsEnd || spansPast || spansOver;
+		const hasOverlap = rangesOverlap(deletionStart, deletionEnd, start, end);
 		const completeOverlap = deletionStart <= start && deletionEnd >= end;
 
 		if (hasOverlap && !completeOverlap) {
