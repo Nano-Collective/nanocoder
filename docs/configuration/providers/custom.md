@@ -32,7 +32,7 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 
 ## Setup via Wizard
 
-Select "Custom Provider" in the `/setup-providers` wizard to add one interactively. The wizard will prompt for:
+Select "Custom Provider" in the `/settings providers` wizard to add one interactively. The wizard will prompt for:
 
 1. Provider name
 2. Base URL

@@ -21,41 +21,39 @@ export type PartitionedToolCalls = {
 	errorResults: ToolResult[];
 };
 
-export const filterValidToolCalls = (
+/** Marker name the XML tool-call parser emits for a call it could not validate. */
+const XML_VALIDATION_ERROR_TOOL = '__xml_validation_error__';
+
+/**
+ * Shared partition. The two exported wrappers differ only in the feedback text
+ * they send the model, so the rules for what counts as unknown live here once:
+ * a call with no usable id or name is dropped outright (it can never be paired
+ * with a result), and the XML validation marker is always unknown even if a
+ * tool by that name somehow resolves.
+ */
+const partitionToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager | null,
+	describeUnknown: (toolCall: ToolCall) => ToolResult,
 ): PartitionedToolCalls => {
 	const validToolCalls: ToolCall[] = [];
 	const unknownToolCalls: ToolCall[] = [];
 	const errorResults: ToolResult[] = [];
 
 	for (const toolCall of toolCalls) {
-		// Filter out completely empty tool calls
-		if (!toolCall.id || !toolCall.function?.name) {
+		// Drop calls that could never be answered: an absent id leaves the
+		// result unpairable, and an absent or blank name is unroutable.
+		if (!toolCall.id || !toolCall.function?.name?.trim()) {
 			continue;
 		}
 
-		// Filter out tool calls with empty names
-		if (toolCall.function.name.trim() === '') {
-			continue;
-		}
+		const isUnknown =
+			toolCall.function.name === XML_VALIDATION_ERROR_TOOL ||
+			(!!toolManager && !toolManager.hasTool(toolCall.function.name));
 
-		// Filter out tool calls for tools that don't exist
-		if (toolManager && !toolManager.hasTool(toolCall.function.name)) {
-			// Listing the valid tool names gives small models a concrete recovery
-			// target instead of leaving them to re-guess the same wrong name.
-			const available = toolManager.getToolNames?.() ?? [];
-			const availableHint =
-				available.length > 0
-					? ` Available tools are: ${available.join(', ')}.`
-					: '';
+		if (isUnknown) {
 			unknownToolCalls.push(toolCall);
-			errorResults.push({
-				tool_call_id: toolCall.id,
-				role: 'tool' as const,
-				name: toolCall.function.name,
-				content: `The tool "${toolCall.function.name}" does not exist. Use only the tools that are available in the system.${availableHint}`,
-			});
+			errorResults.push(describeUnknown(toolCall));
 			continue;
 		}
 
@@ -65,8 +63,25 @@ export const filterValidToolCalls = (
 	return {validToolCalls, unknownToolCalls, errorResults};
 };
 
-/** Marker name the XML tool-call parser emits for a call it could not validate. */
-const XML_VALIDATION_ERROR_TOOL = '__xml_validation_error__';
+export const filterValidToolCalls = (
+	toolCalls: ToolCall[],
+	toolManager: ToolManager | null,
+): PartitionedToolCalls =>
+	partitionToolCalls(toolCalls, toolManager, toolCall => {
+		// Listing the valid tool names gives small models a concrete recovery
+		// target instead of leaving them to re-guess the same wrong name.
+		const available = toolManager?.getToolNames?.() ?? [];
+		const availableHint =
+			available.length > 0
+				? ` Available tools are: ${available.join(', ')}.`
+				: '';
+		return {
+			tool_call_id: toolCall.id,
+			role: 'tool' as const,
+			name: toolCall.function.name,
+			content: `The tool "${toolCall.function.name}" does not exist. Use only the tools that are available in the system.${availableHint}`,
+		};
+	});
 
 /**
  * Same partition as `filterValidToolCalls`, with the compact
@@ -76,31 +91,14 @@ const XML_VALIDATION_ERROR_TOOL = '__xml_validation_error__';
 export const partitionUnknownToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager,
-): PartitionedToolCalls => {
-	const validToolCalls: ToolCall[] = [];
-	const unknownToolCalls: ToolCall[] = [];
-	const errorResults: ToolResult[] = [];
-
-	for (const toolCall of toolCalls) {
-		if (
-			toolCall.function.name === XML_VALIDATION_ERROR_TOOL ||
-			!toolManager.hasTool(toolCall.function.name)
-		) {
-			unknownToolCalls.push(toolCall);
-			errorResults.push({
-				tool_call_id: toolCall.id,
-				role: 'tool' as const,
-				name: toolCall.function.name,
-				content: `Unknown tool: ${toolCall.function.name}`,
-				isError: true,
-			});
-			continue;
-		}
-		validToolCalls.push(toolCall);
-	}
-
-	return {validToolCalls, unknownToolCalls, errorResults};
-};
+): PartitionedToolCalls =>
+	partitionToolCalls(toolCalls, toolManager, toolCall => ({
+		tool_call_id: toolCall.id,
+		role: 'tool' as const,
+		name: toolCall.function.name,
+		content: `Unknown tool: ${toolCall.function.name}`,
+		isError: true,
+	}));
 
 /**
  * Builds the message payload for a turn that carried an unknown tool call.

@@ -5,6 +5,8 @@
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
+	const artifactBar = document.getElementById('artifact-bar');
+	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
@@ -33,6 +35,19 @@
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
+
+	// ── Slash command autocomplete state ────────────────────
+	const slashDropdown = document.getElementById('slash-dropdown');
+	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
+
+	let slashSuggestions = [];
+	let slashSelectedIndex = 0;
+	/**
+	 * Set after a selection lands and after Escape, so the caret move we just
+	 * made doesn't immediately reopen the menu on the name we just completed.
+	 * Cleared by the next real keystroke.
+	 */
+	let slashSuppressed = false;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -350,9 +365,171 @@
 		});
 	}
 
+	const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit', 'file_op']);
+	const EXECUTE_TOOLS = new Set(['execute_bash']);
+
+	function timelineKind(toolName) {
+		if (EDIT_TOOLS.has(toolName)) return 'edit';
+		if (EXECUTE_TOOLS.has(toolName)) return 'execute';
+		return 'other';
+	}
+
+	function timelineRelativeTime(timestamp) {
+		const diffMs = Date.now() - new Date(timestamp).getTime();
+		const minutes = Math.floor(diffMs / 60000);
+		if (minutes < 1) return 'just now';
+		if (minutes < 60) return `${minutes}m ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours}h ago`;
+		return `${Math.floor(hours / 24)}d ago`;
+	}
+
+	const timelineStrip = (function createTimelineStrip() {
+		const root = document.getElementById('timeline-strip');
+		const nodesEl = document.getElementById('timeline-nodes');
+		const trackEl = document.getElementById('timeline-track');
+		const hintEl = document.getElementById('timeline-hint');
+		const confirmEl = document.getElementById('timeline-confirm');
+		if (!root || !nodesEl || !confirmEl) {
+			return {
+				setEntries() {},
+				setDisabled() {},
+				clear() {},
+			};
+		}
+
+		let entries = [];
+
+		function setHint(text) {
+			if (hintEl) hintEl.textContent = text || '';
+		}
+
+		function hideConfirm() {
+			confirmEl.classList.add('hidden');
+			confirmEl.innerHTML = '';
+		}
+
+		function showConfirm(entry) {
+			const files = (entry.filesChanged || []).slice(0, 3).join(', ');
+			const extra = (entry.filesChanged || []).length > 3 ? '…' : '';
+			confirmEl.innerHTML = '';
+
+			const text = document.createElement('div');
+			text.textContent =
+				`Revert workspace and conversation to before step ${entry.seq} (${entry.title || entry.toolName})? ` +
+				`This deletes later chat messages and undoes later file changes.` +
+				(files ? ` Files: ${files}${extra}` : '');
+			confirmEl.appendChild(text);
+
+			const actions = document.createElement('div');
+			actions.className = 'timeline-confirm-actions';
+
+			const revertBtn = document.createElement('button');
+			revertBtn.textContent = 'Revert';
+			revertBtn.style.background = 'var(--vscode-button-background)';
+			revertBtn.style.color = 'var(--vscode-button-foreground)';
+			revertBtn.addEventListener('click', () => {
+				vscode.postMessage({ type: 'revertToCheckpoint', checkpointId: entry.id });
+				hideConfirm();
+			});
+
+			const cancelBtn = document.createElement('button');
+			cancelBtn.textContent = 'Cancel';
+			cancelBtn.style.background = 'var(--vscode-button-secondaryBackground)';
+			cancelBtn.style.color = 'var(--vscode-button-secondaryForeground, inherit)';
+			cancelBtn.addEventListener('click', hideConfirm);
+
+			actions.appendChild(revertBtn);
+			actions.appendChild(cancelBtn);
+			confirmEl.appendChild(actions);
+			confirmEl.classList.remove('hidden');
+		}
+
+		// The label goes in a dedicated line under the strip rather than an
+		// absolutely-positioned bubble: the track has to clip horizontally to
+		// scroll, and a clipping box clips both axes, so a bubble above the dot
+		// would be cut off. A static line also reads on focus, not just hover.
+		function bindHint(el, text) {
+			el.addEventListener('mouseenter', () => setHint(text));
+			el.addEventListener('focus', () => setHint(text));
+			el.addEventListener('mouseleave', () => setHint(''));
+			el.addEventListener('blur', () => setHint(''));
+		}
+
+		function render() {
+			nodesEl.innerHTML = '';
+			setHint('');
+			if (entries.length === 0) {
+				root.classList.add('hidden');
+				hideConfirm();
+				return;
+			}
+			root.classList.remove('hidden');
+
+			const line = document.createElement('div');
+			line.className = 'timeline-line';
+			nodesEl.appendChild(line);
+
+			for (const entry of entries) {
+				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
+				const label = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
+					(files ? ` · ${files}` : '') +
+					` · ${timelineRelativeTime(entry.timestamp)}`;
+
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'timeline-node';
+				btn.dataset.kind = timelineKind(entry.toolName);
+				btn.dataset.id = entry.id;
+				btn.setAttribute('aria-label', label);
+				btn.title = label;
+
+				const dot = document.createElement('span');
+				dot.className = 'timeline-dot';
+				btn.appendChild(dot);
+
+				bindHint(btn, label);
+				btn.addEventListener('click', () => showConfirm(entry));
+				nodesEl.appendChild(btn);
+			}
+
+			const nowBtn = document.createElement('button');
+			nowBtn.type = 'button';
+			nowBtn.className = 'timeline-node is-selected';
+			nowBtn.dataset.kind = 'now';
+			nowBtn.setAttribute('aria-label', 'Current state');
+			nowBtn.title = 'Current state';
+			const nowDot = document.createElement('span');
+			nowDot.className = 'timeline-dot';
+			nowBtn.appendChild(nowDot);
+			bindHint(nowBtn, 'Now');
+			nowBtn.addEventListener('click', hideConfirm);
+			nodesEl.appendChild(nowBtn);
+
+			// The scroller is the track, not the flex row inside it.
+			if (trackEl) trackEl.scrollLeft = trackEl.scrollWidth;
+		}
+
+		return {
+			setEntries(next) {
+				entries = Array.isArray(next) ? next : [];
+				hideConfirm();
+				render();
+			},
+			setDisabled(disabled) {
+				root.classList.toggle('timeline-disabled', Boolean(disabled));
+			},
+			clear() {
+				this.setEntries([]);
+			},
+		};
+	})();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -365,8 +542,10 @@
 
 	function showChatView() {
 		isHistoryView = false;
-		document.getElementById('chat-view').classList.remove('hidden');
+		isSettingsView = false;
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
+		document.getElementById('chat-view').classList.remove('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -381,8 +560,26 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
-	let currentAggregator = null;
-	let currentThoughtBox = null;
+	// True from the moment Stop/Escape is pressed until the next prompt starts.
+	// Cancellation is a round trip: the agent keeps emitting updates for the
+	// turn it was told to stop (a tool already in flight, the queued calls it
+	// then marks cancelled), and those land after the UI has already closed the
+	// turn. Without this flag they rebuild a second tool card group that looks
+	// like the cancelled work restarting.
+	let turnCancelled = false;
+	// The one collapsible box holding this turn's thoughts, tool groups, edit
+	// cards and plan. Null between turns.
+	let currentWorkSummary = null;
+	// Which summary owns a given tool card / plan card, so a late update lands
+	// back in the turn it belongs to rather than opening a new one. Cleared per
+	// turn, because ids are only unique within a turn.
+	const workSummaryByToolCallId = new Map();
+	const workSummaryByPlanId = new Map();
+	// When the turn started, so the summary reports the whole turn and not just
+	// the stretch from its first thought. Recorded on the user message rather
+	// than in the summary's constructor, which runs later and lazily.
+	let turnStartedAt = 0;
+	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
 	let toastTimeout = null;
@@ -447,7 +644,7 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
@@ -497,24 +694,22 @@
 	}
 
 	// --- Send / Stop toggle logic ---
-	function setProcessing(active) {
+	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
+		timelineStrip.setDisabled(active);
 		if (!active) {
-			// Globally cancel any stuck spinners across all tool cards, 
-			// in case multiple aggregators were created in the same session
+			// Globally settle any stuck spinners across all tool cards, in case
+			// several tool groups were created in the same session.
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
 				const status = statusEl.dataset.status;
 				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
+					statusEl.dataset.status = 'cancelled';
 				}
 			});
 			stopVisualLoader();
-
-			if (currentAggregator) {
-				currentAggregator.close();
-			}
-			currentAggregator = null;
+			finishCurrentWorkSummary(outcome);
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
@@ -522,10 +717,123 @@
 		}
 	}
 
+	function setPlanReviewActive(active) {
+		if (active) {
+			if (typeof closeMention === 'function') closeMention();
+			if (typeof closeAllDropdowns === 'function') closeAllDropdowns();
+		}
+		chatInput.disabled = active;
+		composerBox.classList.toggle('opacity-60', active);
+		composerBox.classList.toggle('pointer-events-none', active);
+	}
+
+	function removePlanReview() {
+		const existing = document.getElementById('plan-review-card');
+		if (existing) existing.remove();
+		setPlanReviewActive(false);
+	}
+
+	function renderArtifacts(artifacts) {
+		if (!artifactBar || !artifactLinks) return;
+		artifactLinks.innerHTML = '';
+		const labels = {
+			implementation_plan: 'Plan',
+			task: 'Tasks',
+			walkthrough: 'Walkthrough',
+		};
+		for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+			if (!artifact || !labels[artifact.kind] || typeof artifact.path !== 'string') continue;
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-2 py-1 cursor-pointer font-vscode text-[0.78em] text-vscode-fg';
+			button.textContent = labels[artifact.kind];
+			button.title = artifact.path;
+			button.onclick = () => {
+				vscode.postMessage({type: 'openPath', path: artifact.path, kind: 'file'});
+			};
+			artifactLinks.appendChild(button);
+		}
+		const hasArtifacts = artifactLinks.childElementCount > 0;
+		artifactBar.classList.toggle('hidden', !hasArtifacts);
+		artifactBar.classList.toggle('flex', hasArtifacts);
+	}
+
+	function renderPlanReview(artifactPath) {
+		removePlanReview();
+		endCurrentTextBlock();
+
+		const card = document.createElement('div');
+		card.id = 'plan-review-card';
+		card.className = 'my-3 border border-vscode-focusBorder rounded-lg bg-vscode-widget-bg overflow-hidden shrink-0';
+
+		const header = document.createElement('div');
+		header.className = 'px-3 py-2 bg-vscode-widget-header border-b border-vscode-widget-border';
+		const title = document.createElement('div');
+		title.className = 'font-vscode text-[0.95em] font-semibold';
+		title.textContent = 'Implementation plan ready';
+		const subtitle = document.createElement('div');
+		subtitle.className = 'font-vscode text-[0.82em] opacity-65 mt-0.5';
+		subtitle.textContent = 'Review the saved plan before implementation begins.';
+		header.appendChild(title);
+		header.appendChild(subtitle);
+
+		const body = document.createElement('div');
+		body.className = 'px-3 py-3 flex flex-col gap-2.5';
+		const openButton = document.createElement('button');
+		openButton.type = 'button';
+		openButton.className = 'w-full text-left bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] transition-colors';
+		openButton.textContent = 'Open implementation_plan.md';
+		openButton.title = artifactPath;
+		openButton.onclick = () => {
+			vscode.postMessage({type: 'openPath', path: artifactPath, kind: 'file'});
+		};
+
+		const actions = document.createElement('div');
+		actions.className = 'flex flex-col gap-1.5';
+		const approveButton = document.createElement('button');
+		approveButton.type = 'button';
+		approveButton.className = 'w-full border-none rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
+		approveButton.textContent = 'Yes, execute this plan';
+		approveButton.onclick = () => {
+			removePlanReview();
+			// Show the approval as a real user turn. The extension host sends the
+			// approved-plan prompt straight through acpClient.prompt(), bypassing
+			// submitMessage(), so nothing else would put a bubble in the
+			// transcript and the turn would appear to start from nowhere.
+			appendMessage('Approved the implementation plan. Proceeding.', 'user');
+			currentTurnEl = null;
+			currentTextEl = null;
+			setProcessing(true);
+			startVisualLoader();
+			vscode.postMessage({type: 'approvePlan'});
+		};
+
+		const reviseButton = document.createElement('button');
+		reviseButton.type = 'button';
+		reviseButton.className = 'w-full bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em]';
+		reviseButton.textContent = 'No, tell Nanocoder what to change';
+		reviseButton.onclick = () => {
+			removePlanReview();
+			vscode.postMessage({type: 'revisePlan'});
+			chatInput.focus();
+		};
+
+		actions.appendChild(approveButton);
+		actions.appendChild(reviseButton);
+		body.appendChild(openButton);
+		body.appendChild(actions);
+		card.appendChild(header);
+		card.appendChild(body);
+		messagesContainer.appendChild(card);
+		setPlanReviewActive(true);
+		scrollToBottom();
+	}
+
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
-		setProcessing(false);
+		turnCancelled = true;
+		setProcessing(false, 'cancelled');
 	}
 
 	if (sendStopBtn) {
@@ -712,14 +1020,174 @@
 		});
 	}
 
+	// ── Slash command functions ──────────────────────────────
+
+	function hideSlashDropdown() {
+		if (!slashDropdown) return;
+		const wasOpen = !slashDropdown.classList.contains('hidden');
+		slashDropdown.classList.add('hidden');
+		slashDropdown.innerHTML = '';
+		slashSuggestions = [];
+		slashSelectedIndex = 0;
+		// The textarea is a single combobox shared with the @-mention listbox,
+		// so only reset its aria state when this dropdown is what set it.
+		// Otherwise every keystroke typed into an open mention list would
+		// announce the list as collapsed.
+		if (wasOpen && !mentionOpen) {
+			chatInput.removeAttribute('aria-activedescendant');
+			chatInput.setAttribute('aria-expanded', 'false');
+		}
+	}
+
+	/** @returns {boolean} whether the command was actually applied. */
+	function applySlashSelection(command) {
+		const result = applySlashCommand(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+			command,
+		);
+		hideSlashDropdown();
+		if (!result) return false;
+
+		// Set before the caret moves, because that move fires selectionchange.
+		// A command with no template completes to its own name, which is itself
+		// a valid token, so without this the menu would reopen on top of it and
+		// swallow the Enter that runs it.
+		slashSuppressed = true;
+		chatInput.value = result.text;
+		chatInput.setSelectionRange(result.cursor, result.cursor);
+		// Resized here rather than by dispatching a synthetic input event: that
+		// would clear the suppression flag and re-run the mention search.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
+		chatInput.focus();
+		return true;
+	}
+
+	function renderSlashDropdown(commands) {
+		if (!slashDropdown) return;
+		slashDropdown.innerHTML = '';
+		slashSuggestions = commands;
+		commands.forEach((command, index) => {
+			const item = document.createElement('button');
+			item.type = 'button';
+			item.id = 'slash-option-' + index;
+			item.setAttribute('role', 'option');
+			item.setAttribute('aria-selected', index === slashSelectedIndex ? 'true' : 'false');
+			item.className = 'w-full text-left bg-transparent border-none px-3 py-2 cursor-pointer transition-colors flex items-start justify-between gap-3';
+			if (index === slashSelectedIndex) {
+				item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+				chatInput.setAttribute('aria-activedescendant', item.id);
+			} else {
+				item.classList.add('hover:bg-vscode-list-hover', 'text-vscode-dropdown-foreground');
+			}
+			const left = document.createElement('span');
+			left.className = 'font-semibold text-[0.9em]';
+			left.textContent = command.name;
+			const right = document.createElement('span');
+			right.className = 'text-[0.8em] opacity-70';
+			right.textContent = command.description;
+			item.appendChild(left);
+			item.appendChild(right);
+			// mousedown rather than click, matching the mention rows: click
+			// would let the textarea blur first, and the blur handler closes
+			// the dropdown before the selection lands.
+			item.addEventListener('mousedown', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				applySlashSelection(command);
+			});
+			slashDropdown.appendChild(item);
+		});
+		slashDropdown.classList.remove('hidden');
+		chatInput.setAttribute('aria-expanded', 'true');
+	}
+
+	function updateSlashAutocomplete() {
+		if (!slashDropdown || slashSuppressed) {
+			hideSlashDropdown();
+			return;
+		}
+		const token = findSlashCommandToken(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+		);
+		if (!token) {
+			hideSlashDropdown();
+			return;
+		}
+		const filtered = SLASH_COMMANDS.filter(command =>
+			command.name.slice(1).toLowerCase().startsWith(token.query)
+		);
+		if (filtered.length === 0) {
+			hideSlashDropdown();
+			return;
+		}
+		slashSelectedIndex = 0;
+		renderSlashDropdown(filtered);
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
+		// Typing is what lifts a dismissal, so this runs before the update.
+		slashSuppressed = false;
+		updateSlashAutocomplete();
 	});
+
+	if (slashDropdown) {
+		chatInput.addEventListener('blur', hideSlashDropdown);
+		// Catches caret moves that fire no input event, which would otherwise
+		// leave the menu open over a token that is no longer under the caret.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				updateSlashAutocomplete();
+			}
+		});
+	}
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Slash command navigation wins before mention navigation.
+		if (slashDropdown && !slashDropdown.classList.contains('hidden') && slashSuggestions.length > 0) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex + 1) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey) {
+				// Only claim the key if the completion actually landed. If the
+				// caret has moved off the token the menu was opened for, this
+				// falls through to submit instead of silently eating the Enter.
+				if (applySlashSelection(slashSuggestions[slashSelectedIndex])) {
+					e.preventDefault();
+					return;
+				}
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				// Same reason as the mention dropdown below: the document-level
+				// handler cancels the in-flight request on Escape whenever
+				// isProcessing, so without this, dismissing the menu mid-stream
+				// would also kill the run.
+				e.stopPropagation();
+				// Stays dismissed until the next keystroke; without this the
+				// caret move from Escape would reopen it via selectionchange.
+				slashSuppressed = true;
+				hideSlashDropdown();
+				return;
+			}
+		}
+
 		// Mention navigation has to win over Enter-to-submit. Handled at the top
 		// of this same listener rather than in a second one, because two
 		// listeners on the same element would race and Enter could submit the
@@ -818,13 +1286,6 @@
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: imagesToSubmit
-		});
-
 		// Clear input. Close the mention first — its token offsets point into
 		// text that is about to disappear.
 		closeMention();
@@ -837,8 +1298,27 @@
 		attachedPaths = [];
 		renderChips();
 
+		dispatchPrompt(text, imagesToSubmit);
+	}
+
+	// Send `text` to the agent as a turn of its own. Split out of
+	// submitMessage so an editor-driven prompt can bypass the composer: going
+	// through it would overwrite a draft the user is typing and sweep up chips
+	// and images they staged for a different question.
+	function dispatchPrompt(text, images) {
+		// A new turn re-opens the door to tool updates that the previous
+		// cancel closed.
+		turnCancelled = false;
+
+		// Send message to extension host
+		vscode.postMessage({
+			type: 'submitMessage',
+			text: text,
+			images: images
+		});
+
 		// Optimistically append user message
-		appendMessage(text, 'user', imagesToSubmit);
+		appendMessage(text, 'user', images);
 		pendingUserMessageText = text;
 
 		if (!isProcessing) {
@@ -937,6 +1417,19 @@
 			e.preventDefault();
 			e.stopPropagation();
 		};
+
+		// Editor tab drags carry a JSON array of URI strings under
+		// `ResourceURLs` instead of a uri-list. Flatten it to the same
+		// newline-separated shape so there is one parser downstream.
+		const resourceUrlsToUriList = (raw) => {
+			if (!raw) return '';
+			try {
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter(u => typeof u === 'string').join('\n') : '';
+			} catch {
+				return '';
+			}
+		};
 		
 		// Prevent default on window to stop VS Code's native drop handler
 		window.addEventListener('dragover', (e) => e.preventDefault(), true);
@@ -965,41 +1458,19 @@
 		composerBox.addEventListener('drop', e => {
 			handleDrag(e);
 			composerBox.classList.remove('drag-over');
-			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+
+			// VS Code's explorer publishes text/uri-list; some sources only set
+			// text/plain. resource-urls is what the editor uses for tab drags.
+			const uris =
+				e.dataTransfer.getData('text/uri-list') ||
+				e.dataTransfer.getData('text/plain') ||
+				resourceUrlsToUriList(e.dataTransfer.getData('resourceurls'));
 			if (!uris) return;
-			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
-			const paths = uris.split('\n')
-				.map(u => u.trim())
-				.filter(u => u && !u.startsWith('#'))
-				.map(u => {
-					if (u.startsWith('file://')) {
-						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p.match(/^[a-zA-Z]:/)) {
-							// Already dropped leading slash via the regex above if it had exactly three slashes. 
-							// But if it had two slashes e.g. file://C:/ it would become C:/
-							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
-							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
-							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
-							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
-							// For UNC `file://server/share`, `replace` makes it `server/share`. 
-							// So we need to put `//` back for UNC on Windows? 
-							// Let's implement Will's explicit advice:
-							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
-						}
-						// Let's strictly follow Will's suggestion:
-						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
-							p2 = p2.substring(1);
-						}
-						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
-						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
-						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
-						// If we don't mess with it too much, let's just do exactly what Will said.
-						return p2;
-					}
-					return u;
-				});
+
+			const isWindows =
+				navigator.userAgentData?.platform?.toLowerCase().includes('win') ||
+				navigator.userAgent.includes('Windows');
+			const paths = NanocoderUriUtils.parseDropPayload(uris, isWindows);
 
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -1047,7 +1518,18 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			// Close the previous turn's summary before the new message is
+			// inserted, so it can never swallow work from the turn after it.
+			// The ownership maps deliberately survive: a tool the agent was told
+			// to stop still reports back after the next turn has started, and
+			// that update belongs in the turn that ran it. They are cleared with
+			// the transcript instead.
+			finishCurrentWorkSummary('completed');
+			turnStartedAt = Date.now();
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -1235,8 +1717,15 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
+			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -1246,8 +1735,8 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
 			}
 
 			if (typeof marked !== 'undefined') {
@@ -1427,7 +1916,8 @@
 			case 'clear':
 				// Session reset (new chat or resume) should return to the active
 				// chat view, not leave the panel stuck on the history list.
-				showChatView();
+				if (isHistoryView) showChatView();
+				if (isSettingsView) hideSettingsView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1437,22 +1927,28 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				removePlanReview();
+				currentTurnFooter = null;
 				toolKinds.clear();
+				turnCancelled = false;
 				agentTurnId = 0;
+				turnStartedAt = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
 				lastAgentRawText = '';
-				if (currentThoughtBox) {
-					clearInterval(currentThoughtBox.timer);
-					currentThoughtBox = null;
+				// The transcript was just wiped, so the summary has no DOM left to
+				// close - drop it rather than stamping a duration on a box the
+				// user can no longer see.
+				discardCurrentWorkSummary();
+				workSummaryByToolCallId.clear();
+				workSummaryByPlanId.clear();
+				if (!message.isLoading) {
+					timelineStrip.clear();
 				}
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
-				if (currentThoughtBox) {
-					currentThoughtBox.pause();
-					currentThoughtBox = null;
-				}
+				finishCurrentWorkSummary('completed');
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -1463,16 +1959,51 @@
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
 				break;
+			case 'planReviewRequested':
+				setProcessing(false);
+				renderPlanReview(message.artifactPath);
+				break;
+			case 'planReviewError':
+				setProcessing(false);
+				// Surface it in the transcript too. A toast alone is easy to miss,
+				// and the approval bubble above it would otherwise sit there with
+				// no visible outcome.
+				appendMessage(
+					`Could not approve the plan: ${message.message}`,
+					'assistant',
+				);
+				break;
+			case 'artifactsUpdated':
+				renderArtifacts(message.artifacts);
+				break;
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
 				break;
-
+			case 'toggleSettings':
+				toggleSettingsView();
+				break;
+			case 'settingsData':
+				renderSettingsData(message.settings);
+				break;
+			case 'settingsUpdated':
+				if (!message.success) {
+					console.error('Failed to update setting:', message.error);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'updateTimeline':
+				timelineStrip.setEntries(message.entries || []);
+				break;
+			case 'runPrompt':
+				if (isHistoryView) showChatView();
+				dispatchPrompt(message.text);
+				chatInput.focus();
 				break;
 			case 'copyLastCodeBlock':
 				copyLastCodeBlock();
@@ -1651,9 +2182,9 @@
 
 	// Close the current streamed-text block: flush any pending throttled
 	// render, then reset so the next agent_message_chunk starts a fresh
-	// markdown block. Called whenever another element (tool card, thought
-	// box, user message) is inserted - without this, text streamed after a
-	// tool call is appended to the block ABOVE the card, fusing pre-tool
+	// markdown block. Called whenever another element (the work summary or a
+	// user message) is inserted - without this, text streamed after a tool
+	// call is appended to the block ABOVE the summary, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
 		flushPendingRender();
@@ -1668,10 +2199,6 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1683,53 +2210,348 @@
 				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
+			// Prose ends the current thought and tool group, so the next thought
+			// or tool starts a fresh activity rather than extending one the
+			// agent has already moved on from.
+			currentWorkSummary?.endActivityGroup();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
-			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+			const thoughtText = update.content && update.content.text;
+			// Whitespace-only reasoning is not worth a section of its own: it
+			// would reveal an empty summary and split the answer around it. Once
+			// a thought is open, whitespace is real content and keeps flowing.
+			if (thoughtText && (currentWorkSummary?.hasOpenThought() || thoughtText.trim())) {
+				if (!currentWorkSummary?.hasOpenThought()) endCurrentTextBlock();
+				ensureCurrentWorkSummary().appendThought(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
-			setProcessing(false);
+			setProcessing(false, update.outcome || 'completed');
 		}
 		keepVisualLoaderAtBottom();
 	}
 
-	class ThoughtAggregator {
-		constructor() {
-			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
+	// ─── Settings Panel Logic ───────────────────────────────────────
 
-			this.header = document.createElement('div');
-			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
+	let isSettingsView = false;
+
+	function showSettingsView() {
+		isSettingsView = true;
+		isHistoryView = false;
+		document.getElementById('chat-view').classList.add('hidden');
+		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.remove('hidden');
+		// Request fresh settings data from extension host
+		vscode.postMessage({ type: 'requestSettings' });
+	}
+
+	function hideSettingsView() {
+		isSettingsView = false;
+		document.getElementById('settings-view').classList.add('hidden');
+		showChatView();
+	}
+
+	function toggleSettingsView() {
+		if (isSettingsView) {
+			hideSettingsView();
+		} else {
+			showSettingsView();
+		}
+	}
+
+	// Settings tab switching
+	document.querySelectorAll('.settings-tab').forEach(tab => {
+		tab.addEventListener('click', () => {
+			document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+			tab.classList.add('active');
+			const tabId = tab.dataset.tab;
+			document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+			const content = document.getElementById('settings-tab-' + tabId);
+			if (content) content.classList.remove('hidden');
+		});
+	});
+
+	// Settings action buttons (edit config, restart, etc.)
+	document.querySelectorAll('.settings-action-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const action = btn.dataset.action;
+			if (action === 'edit-mcp') {
+				// MCP servers live in .mcp.json, not agents.config.json.
+				vscode.postMessage({ type: 'openConfigFile', file: '.mcp.json' });
+			} else if (action === 'edit-providers' || action === 'edit-tools' || action === 'open-agents-config') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
+			} else if (action === 'open-preferences') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
+			} else if (action === 'restart-acp') {
+				vscode.postMessage({ type: 'restartAcp' });
+			}
+		});
+	});
+
+	// Behavior tab — interactive controls change handlers
+	function initSettingsControls() {
+		// Default mode
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) {
+			modeSelect.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'defaultMode', value: modeSelect.value || null });
+			});
+		}
+
+		// Auto-compact enabled
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) {
+			acEnabled.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.enabled', value: acEnabled.checked });
+			});
+		}
+
+		// Auto-compact threshold
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) {
+			acThreshold.addEventListener('change', () => {
+				const val = parseInt(acThreshold.value, 10);
+				if (!isNaN(val) && val >= 50 && val <= 95) {
+					vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.threshold', value: val });
+				}
+			});
+		}
+
+		// Auto-compact mode
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) {
+			acMode.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.mode', value: acMode.value });
+			});
+		}
+
+		// Reasoning traces
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) {
+			rtToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'reasoningTraces', value: rtToggle.checked });
+			});
+		}
+
+		// Sessions auto-save
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) {
+			saToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
+			});
+		}
+	}
+	initSettingsControls();
+
+	/**
+	 * Populate the settings UI with data received from the extension host.
+	 */
+	function renderSettingsData(settings) {
+		// ── Providers list ──
+		const providersList = document.getElementById('settings-providers-list');
+		if (providersList) {
+			if (settings.providers.length === 0) {
+				providersList.innerHTML = '<div class="settings-list-empty">No providers configured</div>';
+			} else {
+				providersList.innerHTML = settings.providers.map(p => {
+					const detail = p.baseUrl || 'default endpoint';
+					const models = p.models.length > 0
+						? p.models[0] + (p.models.length > 1 ? ` +${p.models.length - 1}` : '')
+						: 'no models';
+					const keyBadge = p.apiKeySet
+						? '<span class="settings-badge settings-badge-ok">Key ✓</span>'
+						: '<span class="settings-badge settings-badge-off">No key</span>';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(p.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(detail)} · ${escapeHtml(models)}</span>
+						${keyBadge}
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── MCP Servers list ──
+		const mcpList = document.getElementById('settings-mcp-list');
+		if (mcpList) {
+			if (settings.mcpServers.length === 0) {
+				mcpList.innerHTML = '<div class="settings-list-empty">No MCP servers configured</div>';
+			} else {
+				mcpList.innerHTML = settings.mcpServers.map(s => {
+					const detail = s.command || s.url || '(no endpoint)';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(s.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(s.transport)} · ${escapeHtml(detail)}</span>
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── Tool auto-approval list ──
+		const toolsList = document.getElementById('settings-tools-list');
+		if (toolsList) {
+			if (settings.alwaysAllow.length === 0) {
+				toolsList.innerHTML = '<div class="settings-list-empty">No tools auto-approved</div>';
+			} else {
+				toolsList.innerHTML = settings.alwaysAllow.map(t =>
+					`<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(t)}</span>
+					</div>`
+				).join('');
+			}
+		}
+
+		// ── Web search status ──
+		const wsStatus = document.getElementById('settings-websearch-status');
+		if (wsStatus) {
+			wsStatus.innerHTML = settings.webSearch.configured
+				? '<div class="settings-list-item"><span class="settings-badge settings-badge-ok">API key configured ✓</span></div>'
+				: '<div class="settings-list-item"><span class="settings-badge settings-badge-off">Not configured</span></div>';
+		}
+
+		// ── Behavior controls ──
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) modeSelect.value = settings.defaultMode || 'normal';
+
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) acEnabled.checked = settings.autoCompact.enabled;
+
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) acThreshold.value = settings.autoCompact.threshold;
+
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) acMode.value = settings.autoCompact.mode;
+
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) rtToggle.checked = settings.reasoningTraces;
+
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+	}
+
+	function escapeHtml(str) {
+		const div = document.createElement('div');
+		div.textContent = str;
+		return div.innerHTML;
+	}
+
+	// ─── End Settings Panel Logic ───────────────────────────────────
+
+	function formatWorkDuration(elapsedMs) {
+		const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+		if (totalSeconds < 60) return `${totalSeconds}s`;
+
+		const totalMinutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (totalMinutes < 60) {
+			return seconds ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+		}
+
+		const hours = Math.floor(totalMinutes / 60);
+		const minutes = totalMinutes % 60;
+		return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+
+	/**
+	 * Open the turn's work summary, creating it on first use.
+	 *
+	 * Refuses to open one after a cancel: the agent keeps emitting updates for
+	 * the turn it was told to stop (a tool already in flight, the calls queued
+	 * behind it that it then marks cancelled), and those land after the UI has
+	 * closed the turn. Without this they raise a second "Working..." box, with a
+	 * live timer nothing will ever stop, for work the user just stopped.
+	 *
+	 * Deliberately not gated on `isProcessing`: resuming a session replays its
+	 * whole thread as ACP updates with no turn running, and that history still
+	 * has to render.
+	 */
+	function ensureCurrentWorkSummary() {
+		if (!currentWorkSummary) {
+			if (turnCancelled) return NULL_WORK_SUMMARY;
+			currentWorkSummary = new WorkSummary(turnStartedAt || Date.now());
+		}
+		return currentWorkSummary;
+	}
+
+	function finishCurrentWorkSummary(outcome) {
+		if (!currentWorkSummary) return;
+		const summary = currentWorkSummary;
+		// Cleared first: finish() collapses the box, and a collapse must not be
+		// able to route more activity back into the turn it just closed.
+		currentWorkSummary = null;
+		summary.finish(outcome);
+	}
+
+	/** Drop the summary without stamping a duration, for a wiped transcript. */
+	function discardCurrentWorkSummary() {
+		if (!currentWorkSummary) return;
+		currentWorkSummary.dispose();
+		currentWorkSummary = null;
+	}
+
+	/**
+	 * Absorbs activity that arrives with no turn to put it in - trailing updates
+	 * after a cancel, mostly. Every call is a no-op and nothing is rendered.
+	 */
+	const NULL_WORK_SUMMARY = {
+		el: null,
+		hasOpenThought: () => false,
+		appendThought() {},
+		endThought() {},
+		endActivityGroup() {},
+		addOrUpdateTool() {},
+		addStandaloneActivity() {},
+		removeActivity(element) { element.remove(); },
+		openForInteraction() {},
+		finish() {},
+		dispose() {},
+	};
+
+	/**
+	 * One collapsible box per turn holding everything the agent did to answer:
+	 * thoughts, tool groups, edit cards and the plan, in the order they arrived.
+	 * The agent's prose stays outside it, so the answer is never hidden behind a
+	 * collapsed header.
+	 *
+	 * The box is inserted at first activity rather than at turn start, so a turn
+	 * that opens with prose and only then runs a tool keeps its transcript order.
+	 */
+	class WorkSummary {
+		constructor(startedAt) {
+			this.startedAt = startedAt;
+			this.activityCount = 0;
+			this.isOpen = true;
+			this.isFinished = false;
+			this.isAttached = false;
+			// Set by a click on the header. Once the user has taken a view on
+			// whether this box is open, the end of the turn does not overrule it.
+			this.userToggled = false;
+			this.currentThought = null;
+			this.currentToolGroup = null;
+			this.toolGroups = new Map();
+
+			this.el = document.createElement('div');
+			this.el.className = 'my-2 flex flex-col shrink-0 work-summary';
+
+			// A button, not a div: the header is the only control on the box, so
+			// it has to be reachable and toggleable from the keyboard.
+			this.header = document.createElement('button');
+			this.header.type = 'button';
+			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit bg-transparent border-none p-0';
+			this.header.setAttribute('aria-expanded', 'true');
 			this.header.onclick = () => this.toggle();
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.85em] font-medium';
-			this.title.textContent = 'Thinking...';
+			this.title.textContent = 'Working...';
 
 			this.chevron = document.createElement('span');
 			this.chevron.className = 'flex items-center justify-center opacity-70';
@@ -1741,29 +2563,99 @@
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
-			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border opacity-70 text-vscode-fg markdown-body text-[0.95em]';
+			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border flex flex-col gap-2 min-w-0';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
-			this.userToggled = false;
-			this.text = '';
-			this.renderTimeout = null;
-			this.thinkingMs = 0;
-			this.segmentStart = Date.now();
-
 			this.timer = setInterval(() => this.updateTimer(), 1000);
-
-			messagesContainer.appendChild(this.el);
-			scrollToBottom();
 		}
 
-		elapsedSeconds() {
-			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
-			return Math.floor((this.thinkingMs + active) / 1000);
+		elapsedMs() {
+			return Date.now() - this.startedAt;
 		}
 
 		updateTimer() {
-			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
+			if (this.isFinished || !this.isAttached) return;
+			this.title.textContent = `Working for ${formatWorkDuration(this.elapsedMs())}`;
+		}
+
+		attach() {
+			if (this.isAttached) return;
+			this.isAttached = true;
+			messagesContainer.appendChild(this.el);
+		}
+
+		addActivity(element) {
+			this.attach();
+			this.activityCount++;
+			// The header stays on 'Working...' until the first tick: a box that
+			// opens on 'Working for 0s' reads worse than one that opens on a
+			// label and grows a duration a second later.
+			this.body.appendChild(element);
+			scrollToBottom();
+		}
+
+		removeActivity(element) {
+			if (element.parentElement !== this.body) return;
+			element.remove();
+			this.activityCount = Math.max(0, this.activityCount - 1);
+			// An emptied box is noise, and finish() would stamp a duration on it.
+			if (this.activityCount === 0 && this.isAttached) {
+				this.isAttached = false;
+				this.el.remove();
+			}
+		}
+
+		hasOpenThought() {
+			return this.currentThought !== null;
+		}
+
+		appendThought(chunk) {
+			this.currentToolGroup = null;
+			if (!this.currentThought) {
+				this.currentThought = new WorkThought();
+				this.addActivity(this.currentThought.el);
+			}
+			this.currentThought.append(chunk);
+		}
+
+		endThought() {
+			if (!this.currentThought) return;
+			this.currentThought.finish();
+			this.currentThought = null;
+		}
+
+		/** Anything that is not another tool ends the run of tools before it. */
+		endActivityGroup() {
+			this.endThought();
+			this.currentToolGroup = null;
+		}
+
+		addOrUpdateTool(toolCallId, update) {
+			this.endThought();
+			let group = this.toolGroups.get(toolCallId);
+			if (!group) {
+				if (!this.currentToolGroup) {
+					this.currentToolGroup = new ToolAggregator();
+					this.addActivity(this.currentToolGroup.el);
+				}
+				group = this.currentToolGroup;
+				this.toolGroups.set(toolCallId, group);
+			}
+			group.addOrUpdateTool(toolCallId, update);
+		}
+
+		/** An edit or plan card: its own row, and it breaks the tool run. */
+		addStandaloneActivity(element) {
+			this.endActivityGroup();
+			this.addActivity(element);
+		}
+
+		/**
+		 * A pending approval is the one thing the user has to act on, so it wins
+		 * over a collapse - including on a turn that has already been closed.
+		 */
+		openForInteraction() {
+			if (this.activityCount > 0) this.toggle(true);
 		}
 
 		toggle(force) {
@@ -1771,12 +2663,71 @@
 				this.userToggled = true;
 			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
-			this.body.style.display = this.isOpen ? 'block' : 'none';
+			this.body.style.display = this.isOpen ? '' : 'none';
+			this.header.setAttribute('aria-expanded', String(this.isOpen));
 
 			const svg = this.chevron.querySelector('svg');
 			if (svg) {
 				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 			}
+		}
+
+		finish(outcome) {
+			if (this.isFinished) return;
+			this.isFinished = true;
+			this.endActivityGroup();
+			clearInterval(this.timer);
+			this.timer = null;
+
+			if (this.activityCount === 0) {
+				if (this.isAttached) this.el.remove();
+				this.isAttached = false;
+				return;
+			}
+
+			const terminalOutcome = outcome === 'cancelled' || outcome === 'failed'
+				? outcome
+				: 'completed';
+			this.el.dataset.outcome = terminalOutcome;
+			const duration = formatWorkDuration(this.elapsedMs());
+			if (terminalOutcome === 'cancelled') {
+				this.title.textContent = `Stopped after ${duration}`;
+			} else if (terminalOutcome === 'failed') {
+				this.title.textContent = `Failed after ${duration}`;
+			} else {
+				this.title.textContent = `Worked for ${duration}`;
+			}
+			if (!this.userToggled) this.toggle(false);
+		}
+
+		dispose() {
+			this.currentThought?.dispose();
+			this.currentThought = null;
+			clearInterval(this.timer);
+			this.timer = null;
+			this.el.remove();
+			this.isAttached = false;
+		}
+	}
+
+	/** One stretch of reasoning inside a work summary. */
+	class WorkThought {
+		constructor() {
+			this.text = '';
+			this.renderTimeout = null;
+
+			this.el = document.createElement('div');
+			this.el.className = 'work-summary-thought py-1 min-w-0';
+
+			this.label = document.createElement('div');
+			this.label.className = 'font-vscode text-[0.78em] font-medium opacity-60 mb-1';
+			this.label.textContent = 'Thought';
+
+			this.body = document.createElement('div');
+			this.body.className = 'markdown-body text-[0.95em] opacity-70 text-vscode-fg min-w-0';
+
+			this.el.appendChild(this.label);
+			this.el.appendChild(this.body);
 		}
 
 		render() {
@@ -1788,7 +2739,6 @@
 		}
 
 		append(chunk) {
-			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
@@ -1804,85 +2754,52 @@
 			}
 		}
 
-		resume() {
-			if (this.segmentStart) return;
-			if (this.text && !this.text.endsWith('\n\n')) {
-				this.text += '\n\n';
-			}
-			this.segmentStart = Date.now();
-			this.timer = setInterval(() => this.updateTimer(), 1000);
-			this.updateTimer();
-			if (!this.userToggled) {
-				this.toggle(true);
-			}
-		}
-
-		pause() {
-			if (!this.segmentStart) return;
-			this.thinkingMs += Date.now() - this.segmentStart;
-			this.segmentStart = null;
-			clearInterval(this.timer);
-			this.timer = null;
+		/** Flush the throttled render so the last chunk is never dropped. */
+		finish() {
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
 			this.render();
-			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
-			if (!this.userToggled) {
-				this.toggle(false);
-			}
+		}
+
+		dispose() {
+			if (this.renderTimeout) clearTimeout(this.renderTimeout);
+			this.renderTimeout = null;
 		}
 	}
 
+	/**
+	 * One uninterrupted run of tool calls, rendered as a single card inside the
+	 * turn's work summary. Collapse lives on the summary, not here: nesting a
+	 * second collapsible inside a collapsed box gives the user two headers to
+	 * fight with to reach one tool.
+	 */
 	class ToolAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator';
+			this.el.className = 'border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator work-summary-tool-group';
 
 			this.header = document.createElement('div');
-			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2 cursor-pointer select-none';
-			this.header.onclick = () => this.toggle();
+			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2';
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.9em] opacity-80';
-			this.title.textContent = 'Exploring...';
-
-			this.chevron = document.createElement('span');
-			this.chevron.className = 'ml-auto flex items-center justify-center';
-			this.chevron.innerHTML = ICONS.chevron;
+			this.title.textContent = 'Tools';
 
 			this.header.appendChild(this.title);
-			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
 			this.body.className = 'flex flex-col';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
 			this.toolCount = 0;
 			this.toolItems = new Map();
-
-			messagesContainer.appendChild(this.el);
-		}
-
-		toggle() {
-			this.isOpen = !this.isOpen;
-			this.body.style.display = this.isOpen ? '' : 'none';
-
-			const svg = this.chevron.querySelector('svg');
-			if (svg) {
-				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
-			}
-		}
-
-		close() {
-			this.toggle(false);
 		}
 
 		updateTitle() {
-			this.title.textContent = `Exploring ${this.toolCount} tools...`;
+			this.title.textContent = `Tools (${this.toolCount})`;
 		}
 
 		addOrUpdateTool(toolCallId, update) {
@@ -1930,12 +2847,13 @@
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
 				} else if (update.status === 'pending') {
+					// Queued, not yet running.
 					statusEl.innerHTML = ICONS.circle;
 				} else {
 					statusEl.innerHTML = ICONS.pending;
@@ -1951,17 +2869,26 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById(`plan-card-${agentTurnId}`);
+		const planId = `plan-card-${agentTurnId}`;
+		let card = document.getElementById(planId);
+		const owner = workSummaryByPlanId.get(planId);
 
 		if (entries.length === 0) {
-			if (card) card.remove();
+			if (card) {
+				// Through the owner, so the summary's activity count drops with
+				// the card and an emptied summary can retire itself.
+				if (owner) owner.removeActivity(card);
+				else card.remove();
+			}
+			workSummaryByPlanId.delete(planId);
 			return;
 		}
 
 		if (!card) {
 			endCurrentTextBlock();
+			const summary = ensureCurrentWorkSummary();
 			card = document.createElement('div');
-			card.id = `plan-card-${agentTurnId}`;
+			card.id = planId;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -1982,8 +2909,8 @@
 			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
-			messagesContainer.appendChild(card);
-			scrollToBottom();
+			summary.addStandaloneActivity(card);
+			workSummaryByPlanId.set(planId, summary);
 		}
 
 		const body = card.querySelector('.plan-body');
@@ -2021,29 +2948,35 @@
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
 
+		const existingCard = document.getElementById(`tool-card-${toolCallId}`);
+		// A card the user can already see keeps taking updates in the turn that
+		// drew it, even after a cancel: that is how a tool still in flight when
+		// Stop was pressed gets to report its real outcome. Only a card that
+		// does not exist yet has to go through ensureCurrentWorkSummary(), which
+		// refuses to open a new turn for work the user just stopped.
+		const summary = workSummaryByToolCallId.get(toolCallId) || ensureCurrentWorkSummary();
+		summary.endThought();
+
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
 		// below the card instead of appending to the paragraph above it.
-		if (!document.getElementById(`tool-card-${toolCallId}`)) {
+		if (!existingCard) {
 			endCurrentTextBlock();
 		}
 
 		if (update.kind) toolKinds.set(toolCallId, update.kind);
 
 		if (toolKinds.get(toolCallId) === 'edit') {
-			let card = document.getElementById(`tool-card-${toolCallId}`);
+			let card = existingCard;
 			if (!card) {
 				card = createEditCard(toolCallId, update);
-				messagesContainer.appendChild(card);
-				scrollToBottom();
+				summary.addStandaloneActivity(card);
 			}
 			updateEditCard(card, update);
 		} else {
-			if (!currentAggregator) {
-				currentAggregator = new ToolAggregator();
-			}
-			currentAggregator.addOrUpdateTool(toolCallId, update);
+			summary.addOrUpdateTool(toolCallId, update);
 		}
+		workSummaryByToolCallId.set(toolCallId, summary);
 	}
 
 	// Verb per tool for the aggregated tool list. An entry only fires when the
@@ -2238,6 +3171,9 @@
 	function handlePermissionRequested(toolCallId, toolCall, options) {
 		const card = document.getElementById(`tool-card-${toolCallId}`);
 		if (!card) return;
+		// The approval buttons are inside the summary, so a collapsed summary
+		// would hide the one thing the user has to act on.
+		workSummaryByToolCallId.get(toolCallId)?.openForInteraction();
 
 		// Check if actions already exist
 		if (card.querySelector('.tool-actions')) return;
@@ -2303,7 +3239,11 @@
 
 			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
 			const statusEl = card.querySelector('.tool-status, .ml-auto');
-			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+			if (statusEl) {
+				statusEl.innerHTML = ICONS.cancelled;
+				// So the end-of-turn spinner sweep does not treat it as stuck.
+				statusEl.dataset.status = 'cancelled';
+			}
 		}
 	}
 

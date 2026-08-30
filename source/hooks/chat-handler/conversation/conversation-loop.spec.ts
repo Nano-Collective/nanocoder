@@ -240,6 +240,30 @@ test.serial('processAssistantResponse - exits in non-interactive mode when appro
 	t.pass('Non-interactive exit requires proper mock setup');
 });
 
+test.serial('processAssistantResponse - marks the non-interactive approval notice display-only', async t => {
+	const captured: Message[][] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			toolCalls: [{id: 'call_1', function: {name: 'some_tool', arguments: {}}}],
+		}),
+		toolManager: createMockToolManager({
+			tools: ['some_tool'],
+			needsApproval: true,
+		}),
+		nonInteractiveMode: true,
+		setMessages: (msgs: Message[]) => captured.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	const latest = captured[captured.length - 1];
+	const notice = latest[latest.length - 1];
+	t.is(notice.role, 'assistant');
+	t.regex(notice.content, /Tool approval required for: some_tool/);
+	t.true(notice.displayOnly, 'the approval notice must never reach the model');
+});
+
 // ============================================================================
 // Auto-Nudge Tests (lines 469-506)
 // ============================================================================
@@ -1170,6 +1194,52 @@ test.serial('processAssistantResponse - compactRetryCount parameter is passed th
 // Conversation Complete Tests (lines 509-510)
 // ============================================================================
 
+test.serial('processAssistantResponse - nudges once for an approved plan without a walkthrough', async t => {
+	let chatCallCount = 0;
+	let nudge = '';
+	let completionCount = 0;
+	const client = {
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount++;
+			if (chatCallCount === 2) {
+				nudge = messages.at(-1)?.content ?? '';
+			}
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content:
+								chatCallCount === 1 ? 'Implementation complete.' : 'Confirmed.',
+						},
+					},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			messages: [
+				{
+					role: 'user',
+					content: '<approved_plan>Implement artifacts.</approved_plan>',
+				},
+			],
+			toolManager: createMockToolManager({tools: ['write_walkthrough']}),
+			onConversationComplete: () => {
+				completionCount++;
+			},
+		}),
+	);
+
+	t.is(chatCallCount, 2);
+	t.true(nudge.includes('write_walkthrough'));
+	t.is(completionCount, 1);
+});
+
 test.serial('processAssistantResponse - calls onConversationComplete when done', async t => {
 	let conversationCompleteCalled = false;
 
@@ -2005,6 +2075,93 @@ test.serial('processAssistantResponse - does not start request on orphaned tool 
 	}
 });
 
+test.serial('processAssistantResponse - a synthetic diagnostics prompt does not cancel the walkthrough', async t => {
+	// Reproduces the real approved-plan flow: the model edits files, the loop
+	// injects a synthetic user message (auto diagnostics, compaction, an
+	// empty-turn nudge), and only then does the model answer. The walkthrough
+	// requirement must survive that — it describes how the turn STARTED, so
+	// recreating it from the message tail would read the synthetic message as
+	// "the latest user message" and silently drop the requirement.
+	let chatCallCount = 0;
+	let nudge = '';
+	const client = {
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount++;
+			if (chatCallCount === 1) {
+				// Model calls a tool, which drives the loop through its
+				// tool-execution recursion.
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'edit-1',
+										function: {name: 'some_tool', arguments: {}},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			if (chatCallCount === 2) {
+				return {
+					choices: [
+						{
+							message: {role: 'assistant', content: 'Implementation complete.'},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			nudge = messages.at(-1)?.content ?? '';
+			return {
+				choices: [{message: {role: 'assistant', content: 'Walkthrough saved.'}}],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	// Mirrors the state the loop reaches after the model edits files: the
+	// post-edit diagnostics prompt is appended with role 'user', so a naive
+	// "what did the user last say" scan sees it instead of the approval.
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: '<approved_plan>Implement artifacts.</approved_plan>',
+		},
+		{
+			role: 'user',
+			content:
+				'Automatic diagnostics after the recent edits found issues. Please fix the diagnostics you introduced before finishing.\n\nPaths needing attention:\n- a.ts',
+		},
+	];
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			messages,
+			// yolo so the tool auto-executes and the loop takes its
+			// tool-execution recursion, which is where the lifecycle used to be
+			// dropped.
+			developmentMode: 'yolo',
+			toolManager: createMockToolManager({
+				tools: ['some_tool', 'write_walkthrough'],
+				needsApproval: false,
+			}),
+		}),
+	);
+
+	t.is(chatCallCount, 3, 'tool turn, answer turn, then the nudged turn');
+	t.true(
+		nudge.includes('write_walkthrough'),
+		'the walkthrough nudge must still fire once the real work is done',
+	);
+});
 // ============================================================================
 // Configurable Retry Limits (issue #897)
 // ============================================================================
@@ -2607,4 +2764,63 @@ test.serial('empty-turn limit honors a custom configured value', async t => {
 			c.props.message.includes('produced no output'),
 	);
 	t.truthy(giveUpMessage, 'Should queue the give-up ErrorMessage');
+});
+
+test.serial('repeated-tool-call limit still pauses in yolo mode', async t => {
+	// Yolo skips every tool confirmation, so the repeated-call pause is the one
+	// remaining safeguard there. Documented in docs/features/development-modes.md.
+	let chatCallCount = 0;
+	let questionCount = 0;
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			developmentMode: 'yolo' as const,
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should stop at the limit in yolo mode too');
+	t.is(questionCount, 1, 'Yolo must still get the repeated-call pause');
+});
+
+test.serial('repeated-tool-call limit hard-stops without prompting in headless mode', async t => {
+	// Headless is the daemon's mode for triggered skill runs. Like
+	// nonInteractiveMode there is nobody to ask, but it is a separate branch of
+	// the same guard, so it needs its own coverage.
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[1];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			developmentMode: 'headless' as const,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should hard-stop at the limit');
+	t.is(questionCount, 0, 'Must not prompt in headless mode');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
 });

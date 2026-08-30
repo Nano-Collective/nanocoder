@@ -1,30 +1,31 @@
 /**
- * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
- * the panel's rendering can be driven and inspected from tests. Shared by the
- * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
+ * Boots the chat panel scripts inside a VM against a stub DOM so the panel's
+ * rendering can be driven and inspected from tests. Shared by the chat-panel
+ * specs. Mirrors production load order in chat-panel.html: the helper scripts
+ * must run first because chat-panel.js reads `globalThis.NanocoderMentionUtils`
+ * and `globalThis.NanocoderSlashCommandUtils` at IIFE eval time.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createContext, runInContext} from 'node:vm';
 
-const PANEL_SOURCE = readFileSync(
+const mediaUrl = (filename: string) =>
 	fileURLToPath(
-		new URL('../../plugins/vscode/media/chat-panel.js', import.meta.url),
-	),
-	'utf8',
-);
+		new URL(`../../plugins/vscode/media/${filename}`, import.meta.url),
+	);
 
-// The real webview loads mention-utils.js before chat-panel.js (see
-// chat-panel.html); the panel reads globalThis.NanocoderMentionUtils at boot.
-const MENTION_UTILS_SOURCE = readFileSync(
-	fileURLToPath(
-		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
-	),
+const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
+const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
+const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
+	mediaUrl('slash-command-utils.js'),
 	'utf8',
 );
+const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
 	'add-image-btn',
+	'add-menu-btn',
+	'add-menu-dropdown',
 	'attach-btn',
 	'chat-input',
 	'chat-view',
@@ -38,7 +39,11 @@ const SHELL_IDS = [
 	'image-modal',
 	'image-preview-container',
 	'image-upload',
+	'menu-attach-file',
+	'menu-upload-image',
+	'mention-dropdown',
 	'messages-container',
+	'slash-dropdown',
 	'modal-image',
 	'mode-dropdown',
 	'mode-trigger',
@@ -50,11 +55,16 @@ const SHELL_IDS = [
 	'provider-trigger',
 	'provider-trigger-label',
 	'send-stop-btn',
+	'timeline-confirm',
+	'timeline-hint',
+	'timeline-nodes',
+	'timeline-strip',
+	'timeline-track',
 ];
 
-// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes
-// it builds, so the stub has to stay open-ended.
-// biome-ignore lint/suspicious/noExplicitAny: see above
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
+// builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: stub nodes are intentionally open-ended
 export type StubElement = any;
 
 /**
@@ -82,6 +92,9 @@ function queryAll(root: StubElement, selector: string): StubElement[] {
 export function createElement(tagName: string): StubElement {
 	const classes = new Set<string>();
 	const attributes = new Map<string, string>();
+	// Registered handlers, so a test can drive a real listener rather than only
+	// the `onclick` properties the panel assigns directly.
+	const listeners = new Map<string, ((event: StubElement) => void)[]>();
 	let html = '';
 	let text = '';
 
@@ -108,8 +121,13 @@ export function createElement(tagName: string): StubElement {
 			},
 		},
 		appendChild(child: StubElement) {
+			// Real appendChild moves a node rather than cloning it, and the panel
+			// relies on that when a card is re-homed into the work summary.
+			if (child.parentElement && child.parentElement !== element) {
+				child.parentElement.removeChild(child);
+			}
 			child.parentElement = element;
-			element.children.push(child);
+			if (!element.children.includes(child)) element.children.push(child);
 			return child;
 		},
 		removeChild(child: StubElement) {
@@ -127,12 +145,29 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
-		addEventListener: () => {},
-		removeEventListener: () => {},
+		addEventListener: (type: string, fn: (event: StubElement) => void) => {
+			const registered = listeners.get(type);
+			if (registered) registered.push(fn);
+			else listeners.set(type, [fn]);
+		},
+		removeEventListener: (type: string, fn: (event: StubElement) => void) => {
+			listeners.set(
+				type,
+				(listeners.get(type) ?? []).filter(candidate => candidate !== fn),
+			);
+		},
 		focus: () => {},
-		click: () => {},
+		click: (event: StubElement = {}) => {
+			for (const fn of listeners.get('click') ?? []) fn(event);
+		},
+		/** Drive any registered listener, not just click. */
+		dispatch: (type: string, event: StubElement = {}) => {
+			for (const fn of listeners.get(type) ?? []) fn(event);
+		},
 		scrollTop: 0,
 		scrollHeight: 0,
+		scrollLeft: 0,
+		scrollWidth: 0,
 	};
 
 	Object.defineProperty(element, 'className', {
@@ -149,6 +184,9 @@ export function createElement(tagName: string): StubElement {
 		get: () => html,
 		set: (value: string) => {
 			html = String(value);
+			// Detached children must not keep claiming this node as their parent,
+			// or remove() on one of them would corrupt the new child list.
+			for (const child of element.children) child.parentElement = null;
 			element.children = [];
 		},
 	});
@@ -207,6 +245,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const messageListeners: ((event: {data: unknown}) => void)[] = [];
 	// Everything the panel posts back to the extension host.
 	const sent: unknown[] = [];
+	// Everything a copy button has put on the clipboard, newest last.
+	const copied: string[] = [];
 	const sandbox: Record<string, unknown> = {
 		document: {
 			body,
@@ -226,7 +266,14 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				if (type === 'message') messageListeners.push(fn);
 			},
 		},
-		navigator: {userAgent: '', clipboard: {writeText: async () => {}}},
+		navigator: {
+			userAgent: '',
+			clipboard: {
+				writeText: async (value: string) => {
+					copied.push(value);
+				},
+			},
+		},
 		acquireVsCodeApi: () => ({
 			postMessage: (message: unknown) => {
 				sent.push(message);
@@ -245,8 +292,11 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		sandbox.marked = {parse: (value: string) => `<md>${value}</md>`};
 	}
 
+	sandbox.globalThis = sandbox;
 	createContext(sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
+	runInContext(URI_UTILS_SOURCE, sandbox);
+	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
@@ -254,6 +304,11 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	return {
 		container,
 		sent,
+		copied,
+		/** Any shell element by id, for panels rendered outside the transcript. */
+		byId(id: string): StubElement | null {
+			return findById(root, id);
+		},
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});
 		},
@@ -280,14 +335,25 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				status: 'pending',
 			});
 		},
-		finish() {
-			this.update({sessionUpdate: 'prompt_response'});
+		finish(outcome: string = 'completed') {
+			this.update({sessionUpdate: 'prompt_response', outcome});
 		},
 		userMessage(value: string) {
 			this.update({
 				sessionUpdate: 'user_message_chunk',
 				content: {type: 'text', text: value},
 			});
+		},
+		/**
+		 * Start a real turn, so `isProcessing` is set and the Stop button is
+		 * live. `userMessage` only replays a message; it starts no turn.
+		 */
+		startTurn(text: string) {
+			this.post({type: 'runPrompt', text});
+		},
+		/** Press Stop, the way the user cancels a turn. */
+		stop() {
+			(findById(root, 'send-stop-btn') as StubElement).click();
 		},
 		advance(ms: number) {
 			clock.now += ms;
@@ -298,10 +364,23 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				timer.fn();
 			}
 		},
-		boxes(): StubElement[] {
+		/** The per-turn work summaries, in the order they were inserted. */
+		summaries(): StubElement[] {
 			return container.children.filter((child: StubElement) =>
-				child.className.includes('thought-aggregator'),
+				child.className.includes('work-summary'),
 			);
+		},
+		/** Every stretch of reasoning, across all summaries. */
+		thoughts(): StubElement[] {
+			return container.querySelectorAll('.work-summary-thought');
+		},
+		/** The tool-call group cards, in the order they were inserted. */
+		aggregators(): StubElement[] {
+			return container.querySelectorAll('.tool-aggregator');
+		},
+		/** The copy/timestamp footers currently in the transcript. */
+		footers(): StubElement[] {
+			return container.querySelectorAll('.message-footer');
 		},
 	};
 }

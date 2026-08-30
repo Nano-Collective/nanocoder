@@ -83,6 +83,12 @@
 				"icon": "$(add)"
 			},
 			{
+				"command": "nanocoder.toggleSettings",
+				"title": "Settings",
+				"category": "Nanocoder",
+				"icon": "$(gear)"
+			},
+			{
 				"command": "nanocoder.cancel",
 				"title": "Cancel Current Response",
 				"category": "Nanocoder"
@@ -90,6 +96,16 @@
 			{
 				"command": "nanocoder.copyLastCodeBlock",
 				"title": "Copy Last Code Block",
+				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.explainCode",
+				"title": "Explain Code",
+				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.generateTests",
+				"title": "Generate Tests",
 				"category": "Nanocoder"
 			}
 		],
@@ -112,6 +128,21 @@
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
 					"group": "navigation@2"
+				},
+				{
+					"command": "nanocoder.toggleSettings",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@3"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "nanocoder.explainCode",
+					"when": "false"
+				},
+				{
+					"command": "nanocoder.generateTests",
+					"when": "false"
 				}
 			]
 		},
@@ -158,6 +189,12 @@
 					"type": "string",
 					"scope": "resource",
 					"description": "Working directory for the Nanocoder CLI. Defaults to the current VS Code workspace root."
+				},
+				"nanocoder.codeLens": {
+					"type": "boolean",
+					"default": true,
+					"scope": "resource",
+					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
 				}
 			}
 		}
@@ -183,7 +220,7 @@
 		"eslint": "^10.1.0",
 		"postcss": "^8.4.38",
 		"tailwindcss": "^3.4.4",
-		"typescript": "^5.3.0"
+		"typescript": "^7.0.2"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^1.3.0",

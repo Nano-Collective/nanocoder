@@ -29,6 +29,11 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
+	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
+	// provider has no effect, since those either prefix-cache automatically
+	// (OpenAI, OpenRouter) or have no cache to address (local models).
+	promptCaching?: boolean;
 	// Model mode defaults for this provider
 	tune?: Partial<TuneConfig>;
 	// OpenRouter-specific request body fields (provider routing, plugins,
@@ -442,6 +447,12 @@ export interface UserPreferences {
 	paste?: PasteConfig;
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/**
+	 * Show the per-response usage footer under each assistant message
+	 * (provider-reported tokens + estimated cost). Defaults to true. When
+	 * false the message ends after its content, with no footer line.
+	 */
+	showUsageFooter?: boolean;
 	enablePromptScrubbing?: boolean;
 	/**
 	 * Interactive TUI screen mode. true (default): fullscreen on the

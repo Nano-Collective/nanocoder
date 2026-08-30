@@ -219,13 +219,14 @@ export function buildSystemPrompt(
 		sections.push(loadSection('core-principles'));
 	}
 
-	// Mode-specific task approach (nano variant when active)
+	// Mode-specific task approach (nano variant when active). Retain a read-only
+	// fallback for clients or tool profiles where write_plan is unavailable.
+	const planSuffix =
+		developmentMode === 'plan' && !toolSet.has('write_plan')
+			? '-plan-readonly'
+			: `-${developmentMode}`;
 	sections.push(
-		loadSection(
-			nano
-				? `task-approach-nano-${developmentMode}`
-				: `task-approach-${developmentMode}`,
-		),
+		loadSection(`task-approach${nano ? '-nano' : ''}${planSuffix}`),
 	);
 
 	// Tool rules — XML variant when native tool calling is disabled
@@ -264,6 +265,10 @@ export function buildSystemPrompt(
 	// Task management — only if write_tasks is available AND not in plan mode
 	if (toolSet.has('write_tasks') && developmentMode !== 'plan') {
 		sections.push(loadSection('task-management'));
+	}
+
+	if (toolSet.has('write_walkthrough') && developmentMode !== 'plan') {
+		sections.push(loadSection('walkthrough'));
 	}
 
 	// Web tools — only if web_search or fetch_url are available

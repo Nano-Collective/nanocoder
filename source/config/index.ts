@@ -343,6 +343,11 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 	// A fresh tool-call signature already counts as 1 repeat, so a cap below 2
 	// would pause on every single tool call. The nudge/self-correction caps may
 	// go to 0 (= give up on the first failing turn).
+	//
+	// Deliberately unbounded above: a very large value is the supported way to
+	// opt out (a workflow that legitimately polls the same command). That also
+	// means a typo like 1000 silently disables the guard, which is the tradeoff
+	// taken over capping and second-guessing an explicit setting.
 	const normalizeLimit = (
 		value: unknown,
 		min: number,

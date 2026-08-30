@@ -1,10 +1,17 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+	type WalkthroughLifecycle,
+} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig, getRetryLimits} from '@/config/index';
-import {MAX_COMPACT_RETRIES} from '@/constants';
+import {getShowUsageFooter} from '@/config/preferences';
+import {MAX_COMPACT_RETRIES, TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -99,7 +106,11 @@ interface ProcessAssistantResponseParams {
 	tune?: TuneConfig;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	sessionId?: string;
+	workingDirectory?: string;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	onToolExecuted?: (toolName: string) => void;
+	onFinalAssistantText?: (content: string) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -125,6 +136,7 @@ interface ProcessAssistantResponseParams {
 	// total, across every window the user granted. Never reset by a granted
 	// continuation, so user-facing counts report the true repetition streak.
 	repeatedToolCallTotal?: number;
+	walkthroughLifecycle?: WalkthroughLifecycle;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -197,7 +209,12 @@ export const processAssistantResponse = async (
 		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
+		onToolExecuted,
+		sessionId,
+		workingDirectory,
 	} = params;
+	const walkthroughLifecycle =
+		params.walkthroughLifecycle ?? createWalkthroughLifecycle(messages);
 
 	const startTime = conversationStartTime ?? Date.now();
 
@@ -209,7 +226,7 @@ export const processAssistantResponse = async (
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {
 		if (!onSetLiveTaskList) return;
-		const tasks = await loadTasks();
+		const tasks = await loadTasks(sessionId);
 		if (tasks.length > 0) {
 			const {TaskListDisplay} = await import('@/components/task-list-display');
 			addToChatQueue(
@@ -451,6 +468,7 @@ export const processAssistantResponse = async (
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
 			repeatedToolCallTotal: 0,
+			walkthroughLifecycle,
 		});
 		return;
 	}
@@ -512,16 +530,21 @@ export const processAssistantResponse = async (
 		// are known synchronously and always render; the cost segment joins
 		// only if (memoized) pricing resolves within the ceiling, so a cold
 		// or offline models.dev fetch can never hold up the message swap.
-		const responseUsage = await buildResponseUsageBounded(
-			result.usage,
-			currentModel,
-		);
+		// Skipped entirely when the footer is off, so the pricing lookup
+		// never runs for users who opted out.
+		// Read per message rather than snapshotting at launch, so toggling the
+		// setting mid-session takes effect on the very next response.
+		const showUsageFooter = getShowUsageFooter();
+		const responseUsage = showUsageFooter
+			? await buildResponseUsageBounded(result.usage, currentModel)
+			: undefined;
 		addToChatQueue(
 			<AssistantMessage
 				key={generateKey('assistant')}
 				message={cleanedContent}
 				model={currentModel}
 				usage={responseUsage}
+				showUsageFooter={showUsageFooter}
 			/>,
 		);
 	}
@@ -641,6 +664,8 @@ export const processAssistantResponse = async (
 				inputTokens: usage.inputTokens,
 				outputTokens: usage.outputTokens,
 				totalTokens: usage.totalTokens,
+				cacheReadTokens: usage.cacheReadTokens,
+				cacheWriteTokens: usage.cacheWriteTokens,
 				timestamp: Date.now(),
 			});
 		}
@@ -654,7 +679,12 @@ export const processAssistantResponse = async (
 	// This turn's repeated-call streak, computed over every call the model
 	// emitted — unknown tools included, so a model stuck calling a nonexistent
 	// tool trips the same cap as one re-running a real call.
-	const currentToolSignature = computeToolCallSignature(allToolCalls);
+	//
+	// Keyed on emittedToolCalls rather than allToolCalls: filterValidToolCalls
+	// silently discards calls with no id or no name, and those never reach the
+	// model's history. Including them would let a stray empty call break an
+	// otherwise identical streak (`[A]` then `[A, <empty>]` reads as a change).
+	const currentToolSignature = computeToolCallSignature(emittedToolCalls);
 	const currentRepeatedCount =
 		currentToolSignature && currentToolSignature === lastToolSignature
 			? repeatedToolCallCount + 1
@@ -768,6 +798,7 @@ export const processAssistantResponse = async (
 			lastToolSignature: currentToolSignature,
 			repeatedToolCallCount: repeatedCountForNextTurn,
 			repeatedToolCallTotal: currentRepeatedTotal,
+			walkthroughLifecycle,
 		});
 		return;
 	}
@@ -842,11 +873,15 @@ export const processAssistantResponse = async (
 					onSetCompactToolCounts?.({...counts});
 				}
 			},
-			onLiveTaskUpdate: () => {
+			onLiveTaskUpdate: (tasks?: Task[]) => {
 				hasLiveTaskUpdates = true;
-				loadTasks().then(tasks => {
+				if (tasks) {
 					onSetLiveTaskList?.(tasks);
-				});
+				} else {
+					loadTasks(sessionId).then(loaded => {
+						onSetLiveTaskList?.(loaded);
+					});
+				}
 			},
 			nonInteractiveMode,
 		};
@@ -861,16 +896,30 @@ export const processAssistantResponse = async (
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				{...displayOptions, setLiveComponent, signal: controller.signal},
+				{
+					...displayOptions,
+					setLiveComponent,
+					signal: controller.signal,
+					executionContext: {sessionId, workingDirectory},
+				},
 			);
 			turnResults.push(...directResults);
+			for (const [index, result] of directResults.entries()) {
+				if (!result.isError) {
+					onToolExecuted?.(result.name);
+					const toolCall = autoTools[index];
+					if (toolCall) {
+						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+					}
+				}
+			}
 		}
 
 		// 2) Non-interactive mode can't prompt, so exit when approval is needed.
 		if (confirmTools.length > 0 && nonInteractiveMode) {
 			await flushAll();
 			const toolNames = confirmTools.map(tc => tc.function.name).join(', ');
-			const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+			const errorMsg = `${TOOL_APPROVAL_REQUIRED_PREFIX}${toolNames}. Exiting non-interactive mode`;
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('tool-approval-required')}
@@ -886,7 +935,11 @@ export const processAssistantResponse = async (
 				...turnResults,
 				...createApprovalUnavailableResults(confirmTools),
 			]);
-			builder.addMessage({role: 'assistant', content: errorMsg});
+			builder.addMessage({
+				role: 'assistant',
+				content: errorMsg,
+				displayOnly: true,
+			});
 			setMessages(builder.build());
 			setIsGenerating(false);
 			onConversationComplete?.();
@@ -901,6 +954,12 @@ export const processAssistantResponse = async (
 			await flushAll();
 			setIsGenerating(false);
 			const {processToolUse} = await import('@/message-handler');
+			const processToolWithContext = (toolCall: ToolCall) =>
+				processToolUse(toolCall, {
+					abortSignal: controller.signal,
+					sessionId,
+					workingDirectory,
+				});
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
@@ -934,11 +993,15 @@ export const processAssistantResponse = async (
 				const execution = await executeApprovedTool(
 					toolCall,
 					toolManager,
-					processToolUse,
+					processToolWithContext,
 					setLiveComponent,
 					controller.signal,
 				);
 				turnResults.push(execution.result);
+				if (!execution.result.isError) {
+					onToolExecuted?.(execution.result.name);
+					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+				}
 				await displayExecutedTool(
 					execution,
 					toolManager,
@@ -994,6 +1057,7 @@ export const processAssistantResponse = async (
 				lastToolSignature: currentToolSignature,
 				repeatedToolCallCount: repeatedCountForNextTurn,
 				repeatedToolCallTotal: currentRepeatedTotal,
+				walkthroughLifecycle,
 			});
 			return;
 		}
@@ -1057,6 +1121,7 @@ export const processAssistantResponse = async (
 						lastToolSignature: undefined,
 						repeatedToolCallCount: 0,
 						repeatedToolCallTotal: 0,
+						walkthroughLifecycle,
 					});
 					return;
 				} catch (_err) {
@@ -1143,13 +1208,43 @@ export const processAssistantResponse = async (
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
 			repeatedToolCallTotal: 0,
+			walkthroughLifecycle,
 		});
 		return;
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
+		// Never spend an extra model turn on a walkthrough the user just
+		// cancelled out of.
+		const walkthroughFallback = controller.signal.aborted
+			? null
+			: takeWalkthroughFallback(
+					walkthroughLifecycle,
+					availableNames.includes('write_walkthrough'),
+				);
+		if (walkthroughFallback) {
+			const messagesWithFallback = [...updatedMessages, walkthroughFallback];
+			setMessages(messagesWithFallback);
+			// Lock the prior turn's live task panel into scrollback before the
+			// nudge turn starts, same as every other recursion site here.
+			await flushAll();
+			await processAssistantResponse({
+				...params,
+				abortController: controller,
+				messages: messagesWithFallback,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+				lastToolSignature: undefined,
+				repeatedToolCallCount: 0,
+				walkthroughLifecycle,
+			});
+			return;
+		}
+
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
+		params.onFinalAssistantText?.(cleanedContent);
 		await flushAll();
 
 		setIsGenerating(false);

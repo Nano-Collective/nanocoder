@@ -4,7 +4,12 @@ import {getAppConfig} from '@/config/index';
 import {getModelContextLimit} from '@/models';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, LLMChatResponse, Message} from '@/types/core';
+import type {
+	LLMClient,
+	LLMChatResponse,
+	Message,
+	ToolExecutionContext,
+} from '@/types/core';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
@@ -12,7 +17,17 @@ console.log('\nsubagent-executor.spec.ts');
 
 // Helper to create a mock tool manager
 function createMockToolManager(
-	tools: Record<string, {handler: (args: unknown) => Promise<string>; readOnly: boolean; needsApproval?: boolean}> = {},
+	tools: Record<
+		string,
+		{
+			handler: (
+				args: unknown,
+				options?: ToolExecutionContext,
+			) => Promise<string>;
+			readOnly: boolean;
+			needsApproval?: boolean;
+		}
+	> = {},
 ): ToolManager {
 	return {
 		getAllTools: () => {
@@ -160,6 +175,47 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
+test.serial('forwards the parent execution context to subagent tools', async t => {
+	let receivedContext: ToolExecutionContext | undefined;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async (_args, options) => {
+				receivedContext = options;
+				return 'file contents';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'read',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Track the work'},
+		undefined,
+		0,
+		'context-agent',
+		{
+			sessionId: '11111111-1111-4111-8111-111111111111',
+			workingDirectory: '/workspace',
+		},
+	);
+
+	t.true(result.success);
+	t.is(receivedContext?.sessionId, '11111111-1111-4111-8111-111111111111');
+	t.is(receivedContext?.workingDirectory, '/workspace');
+});
+
 test.serial('caps tool output before the next subagent model turn', async t => {
 	const largeOutput = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
 	const toolManager = createMockToolManager({
@@ -204,9 +260,15 @@ test.serial('caps tool output before the next subagent model turn', async t => {
 });
 
 test.serial('tools needing approval are surfaced via signalToolApproval', async t => {
-	const writeHandler = async () => 'written';
+	// git_status is on `explore`'s allow-list; the mock marks it as needing
+	// approval so this exercises the approval path without depending on a
+	// subagent being able to run a tool it was never granted.
 	const toolManager = createMockToolManager({
-		write_file: {handler: writeHandler, readOnly: false, needsApproval: true},
+		git_status: {
+			handler: async () => 'clean',
+			readOnly: false,
+			needsApproval: true,
+		},
 		read_file: {handler: async () => 'content', readOnly: true},
 	});
 
@@ -223,7 +285,7 @@ test.serial('tools needing approval are surfaced via signalToolApproval', async 
 			content: '',
 			tool_calls: [{
 				id: 'tc1',
-				function: {name: 'write_file', arguments: '{"path": "x.ts", "content": "hello"}'},
+				function: {name: 'git_status', arguments: '{}'},
 			}],
 		},
 		{content: 'Done'},
@@ -237,7 +299,7 @@ test.serial('tools needing approval are surfaced via signalToolApproval', async 
 	});
 
 	t.true(result.success);
-	t.true(approvalRequested, 'Approval should have been requested for write_file');
+	t.true(approvalRequested, 'Approval should have been requested for git_status');
 
 	// Restore auto-approve handler for other tests
 	setGlobalToolApprovalHandler(async () => true);
@@ -959,4 +1021,108 @@ test('without a resolver, approval falls back to the static parentMode', async t
 	}).needsApprovalForTool('execute_bash', {});
 
 	t.false(await needsApproval);
+});
+
+test.serial('subagents never receive the session-artifact tools', async t => {
+	const called: string[] = [];
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				called.push('read_file');
+				return 'ok';
+			},
+			readOnly: true,
+		},
+		write_plan: {
+			handler: async () => {
+				called.push('write_plan');
+				return 'plan saved';
+			},
+			readOnly: false,
+		},
+		write_tasks: {
+			handler: async () => {
+				called.push('write_tasks');
+				return 'tasks saved';
+			},
+			readOnly: false,
+		},
+		write_walkthrough: {
+			handler: async () => {
+				called.push('write_walkthrough');
+				return 'walkthrough saved';
+			},
+			readOnly: false,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'plan',
+					function: {name: 'write_plan', arguments: '{"content":"clobber"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	await executor.execute(
+		{subagent_type: 'explore', description: 'Try to clobber the plan'},
+		undefined,
+		0,
+		'artifact-agent',
+		{sessionId: '11111111-1111-4111-8111-111111111111'},
+	);
+
+	t.deepEqual(called, [], 'no session-artifact tool may run inside a subagent');
+});
+
+test.serial('a subagent cannot execute a tool outside its allow-list', async t => {
+	let wrote = false;
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'contents', readOnly: true},
+		write_file: {
+			handler: async () => {
+				wrote = true;
+				return 'written';
+			},
+			readOnly: false,
+		},
+	});
+	let toolResult = '';
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'sneak',
+						function: {
+							name: 'write_file',
+							arguments: '{"path":"x.ts","content":"hi"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			const result = messages.find(message => message.role === 'tool');
+			if (result) toolResult = result.content;
+		},
+	);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	// `explore` declares a read-only tool list; write_file is not on it.
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Try to write a file',
+	});
+
+	t.true(result.success);
+	t.false(wrote, 'a read-only subagent must not be able to write files');
+	t.regex(toolResult, /not available to this subagent/);
 });

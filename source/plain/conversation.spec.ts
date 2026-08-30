@@ -343,6 +343,210 @@ test("alwaysAllow list bypasses needsApproval", async (t) => {
 	t.is(outcome.kind, "success");
 });
 
+test("forwards the plain session context to artifact tools", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-artifact",
+		function: {name: "write_walkthrough", arguments: {}},
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			{choices: [{message: {role: "assistant", content: "done"}}]},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_walkthrough"]),
+	});
+	let receivedSessionId: string | undefined;
+	let receivedWorkingDirectory: string | undefined;
+	setToolRegistryGetter(() => ({
+		write_walkthrough: (async (_args, options) => {
+			receivedSessionId = options?.sessionId;
+			receivedWorkingDirectory = options?.workingDirectory;
+			return "Walkthrough saved";
+		}) as ToolHandler,
+	}));
+
+	await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		sessionId: "11111111-1111-4111-8111-111111111111",
+		workingDirectory: "/tmp/plain-artifacts",
+	});
+
+	t.is(receivedSessionId, "11111111-1111-4111-8111-111111111111");
+	t.is(receivedWorkingDirectory, "/tmp/plain-artifacts");
+});
+
+test("does not nudge task-only plain work for a walkthrough", async (t) => {
+	let callCount = 0;
+	let nudge = "";
+	const client = {
+		...makeFakeClient({responses: []}),
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "tasks",
+										function: {
+											name: "write_tasks",
+											arguments: {tasks: [{title: "Implement"}]},
+										},
+									},
+								],
+							},
+						},
+					],
+				};
+			}
+			if (callCount === 2) {
+				return {
+					choices: [
+						{message: {role: "assistant", content: "Implementation complete."}},
+					],
+				};
+			}
+			if (callCount === 3) {
+				nudge = messages.at(-1)?.content ?? "";
+				return {
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "walkthrough",
+										function: {
+											name: "write_walkthrough",
+											arguments: {},
+										},
+									},
+								],
+							},
+						},
+					],
+				};
+			}
+			return {
+				choices: [{message: {role: "assistant", content: "Confirmed."}}],
+			};
+		},
+	} as LLMClient;
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_tasks", "write_walkthrough"]),
+	});
+	setToolRegistryGetter(() => ({
+		write_tasks: (async () => "Tasks updated") as ToolHandler,
+		write_walkthrough: (async () => "Walkthrough saved") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		sessionId: "11111111-1111-4111-8111-111111111111",
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(callCount, 2);
+	t.false(nudge.includes("write_walkthrough"));
+});
+
+test("keeps the pre-nudge answer as plain JSON finalText", async (t) => {
+	let callCount = 0;
+	const client = {
+		...makeFakeClient({responses: []}),
+		chat: async (_messages: Message[], _tools: unknown, callbacks: any) => {
+			callCount++;
+			if (callCount === 1) {
+				callbacks.onToken?.("Implementation complete.");
+				return {
+					choices: [
+						{message: {role: "assistant", content: "Implementation complete."}},
+					],
+				};
+			}
+			if (callCount === 2) {
+				return {
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "walkthrough",
+										function: {
+											name: "write_walkthrough",
+											arguments: {},
+										},
+									},
+								],
+							},
+						},
+					],
+				};
+			}
+			callbacks.onToken?.("Confirmed.");
+			return {
+				choices: [{message: {role: "assistant", content: "Confirmed."}}],
+			};
+		},
+	} as LLMClient;
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_walkthrough"]),
+	});
+	setToolRegistryGetter(() => ({
+		write_walkthrough: (async () => "Walkthrough saved") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [
+			{role: "user", content: "<approved_plan>Implement it.</approved_plan>"},
+		],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "json",
+		sessionId: "11111111-1111-4111-8111-111111111111",
+		enforceWalkthrough: true,
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(outcome.finalText, "Implementation complete.");
+	t.is(callCount, 3);
+});
+
 test("unknown tool produces an error result that is fed back to the model", async (t) => {
 	const toolCall: ToolCall = {
 		id: "call-1",
@@ -1630,3 +1834,39 @@ test.serial(
 		t.is(outcome.finalText, "the real answer");
 	},
 );
+test("plain runs do not force a walkthrough by default", async t => {
+	let callCount = 0;
+	const client = {
+		...makeFakeClient({responses: []}),
+		chat: async (): Promise<LLMChatResponse> => {
+			callCount++;
+			return {
+				choices: [
+					{message: {role: "assistant", content: "Implementation complete."}},
+				],
+			};
+		},
+	} as LLMClient;
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_walkthrough"]),
+	});
+	setToolRegistryGetter(() => ({
+		write_walkthrough: (async () => "Walkthrough saved") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [
+			{role: "user", content: "<approved_plan>Implement it.</approved_plan>"},
+		],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		sessionId: "11111111-1111-4111-8111-111111111111",
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(callCount, 1, "the ephemeral plain run must not spend a nudge turn");
+});

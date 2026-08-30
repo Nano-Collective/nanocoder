@@ -4,6 +4,7 @@ import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
+import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
@@ -91,6 +92,7 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	ensureCurrentSessionId,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -214,7 +216,13 @@ export function useChatHandler({
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
-		async (systemMessage: Message, msgs: Message[]) => {
+		async (
+			systemMessage: Message,
+			msgs: Message[],
+			sessionId?: string,
+			onToolExecuted?: (toolName: string) => void,
+			onFinalAssistantText?: (content: string) => void,
+		) => {
 			if (!client) return;
 
 			try {
@@ -250,6 +258,10 @@ export function useChatHandler({
 					tune,
 					privacySessionMapRef,
 					privacyEnabled,
+					sessionId,
+					workingDirectory: process.cwd(),
+					onToolExecuted,
+					onFinalAssistantText,
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.
@@ -305,6 +317,9 @@ export function useChatHandler({
 		images?: ImageAttachment[],
 	) => {
 		if (!client || !toolManager) return;
+		const sessionId = ensureCurrentSessionId?.();
+		let wrotePlan = false;
+		let finalAssistantText = '';
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
@@ -369,7 +384,41 @@ export function useChatHandler({
 			await processAssistantResponseWithErrorHandling(
 				systemMessage,
 				updatedMessages,
+				sessionId,
+				toolName => {
+					if (toolName === 'write_plan') wrotePlan = true;
+				},
+				content => {
+					finalAssistantText = content;
+				},
 			);
+
+			if (
+				developmentMode === 'plan' &&
+				!wrotePlan &&
+				!controller.signal.aborted &&
+				finalAssistantText.trim()
+			) {
+				const fallbackResult = await processToolUse(
+					{
+						id: 'write-plan-fallback',
+						function: {
+							name: 'write_plan',
+							arguments: {content: finalAssistantText},
+						},
+					},
+					{
+						abortSignal: controller.signal,
+						sessionId,
+						workingDirectory: process.cwd(),
+					},
+				);
+				if (fallbackResult.isError) {
+					displayError(new Error(fallbackResult.content), 'plan-fallback');
+				} else {
+					wrotePlan = true;
+				}
+			}
 
 			// If this turn STARTED in plan mode (closure value, captured at submit
 			// time) and ran to completion without being interrupted, a plan was
@@ -377,7 +426,11 @@ export function useChatHandler({
 			// the start mode and the abort signal both in hand, avoids the race
 			// where toggling modes mid-generation makes an unrelated completing turn
 			// look like a finished plan.
-			if (developmentMode === 'plan' && !controller.signal.aborted) {
+			if (
+				developmentMode === 'plan' &&
+				wrotePlan &&
+				!controller.signal.aborted
+			) {
 				onPlanTurnComplete?.();
 			}
 		} catch (error) {

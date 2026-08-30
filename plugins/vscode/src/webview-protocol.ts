@@ -82,11 +82,32 @@ export interface ExtensionMessageCopyLastCodeBlock {
 	type: 'copyLastCodeBlock';
 }
 
+/** Prompt built by an editor code lens; the composer submits it verbatim. */
+export interface ExtensionMessageRunPrompt {
+	type: 'runPrompt';
+	text: string;
+}
+
 export interface ExtensionMessageCopyResult {
 	type: 'copyResult';
 	ok: boolean;
 	chars?: number;
 	error?: string;
+}
+
+export interface TimelineCheckpoint {
+	id: string;
+	seq: number;
+	toolCallId: string;
+	toolName: string;
+	title: string;
+	timestamp: string;
+	filesChanged: string[];
+}
+
+export interface ExtensionMessageUpdateTimeline {
+	type: 'updateTimeline';
+	entries: TimelineCheckpoint[];
 }
 
 export interface ExtensionMessageUpdateSessions {
@@ -99,11 +120,54 @@ export interface ExtensionMessageUpdateSessions {
 	}>;
 }
 
+export interface ExtensionMessageSettingsData {
+	type: 'settingsData';
+	settings: {
+		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
+		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
+		alwaysAllow: string[];
+		defaultMode: string | null;
+		autoCompact: { enabled: boolean; threshold: number; mode: string };
+		reasoningTraces: boolean;
+		sessions: { autoSave: boolean };
+		webSearch: { configured: boolean };
+	};
+}
+
+export interface ExtensionMessageSettingsUpdated {
+	type: 'settingsUpdated';
+	key: string;
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageToggleSettings {
+	type: 'toggleSettings';
+}
+
 export interface ExtensionMessagePathInfoResolved {
 	type: 'pathInfoResolved';
 	path: string;
 	name: string;
 	kind: 'file' | 'folder';
+}
+
+export interface ExtensionMessagePlanReviewRequested {
+	type: 'planReviewRequested';
+	artifactPath: string;
+}
+
+export interface ExtensionMessagePlanReviewError {
+	type: 'planReviewError';
+	message: string;
+}
+
+export interface ExtensionMessageArtifactsUpdated {
+	type: 'artifactsUpdated';
+	artifacts: Array<{
+		kind: 'implementation_plan' | 'task' | 'walkthrough';
+		path: string;
+	}>;
 }
 
 /** One `@` autocomplete suggestion. */
@@ -147,10 +211,18 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSettingsData
+	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
+	| ExtensionMessagePlanReviewRequested
+	| ExtensionMessagePlanReviewError
+	| ExtensionMessageArtifactsUpdated
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
-	| ExtensionMessageMentionCompletions;
+	| ExtensionMessageRunPrompt
+	| ExtensionMessageMentionCompletions
+	| ExtensionMessageUpdateTimeline;
 
 
 // ---------------------------------------------------------
@@ -223,6 +295,25 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRequestSettings {
+	type: 'requestSettings';
+}
+
+export interface WebviewMessageUpdateSetting {
+	type: 'updateSetting';
+	key: string;
+	value: unknown;
+}
+
+export interface WebviewMessageOpenConfigFile {
+	type: 'openConfigFile';
+	file: 'agents.config.json' | 'nanocoder-preferences.json' | '.mcp.json';
+}
+
+export interface WebviewMessageRestartAcp {
+	type: 'restartAcp';
+}
+
 export interface WebviewMessageRenameSession {
 	type: 'renameSession';
 	sessionId: string;
@@ -248,6 +339,14 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageApprovePlan {
+	type: 'approvePlan';
+}
+
+export interface WebviewMessageRevisePlan {
+	type: 'revisePlan';
+}
+
 export interface WebviewMessageCopyToClipboard {
 	type: 'copyToClipboard';
 	text: string;
@@ -267,6 +366,15 @@ export interface WebviewMessageRequestMentionCompletions {
 	requestId: number;
 }
 
+export interface WebviewMessageRequestTimeline {
+	type: 'requestTimeline';
+}
+
+export interface WebviewMessageRevertToCheckpoint {
+	type: 'revertToCheckpoint';
+	checkpointId: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -281,10 +389,18 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
+	| WebviewMessageRequestSettings
+	| WebviewMessageUpdateSetting
+	| WebviewMessageOpenConfigFile
+	| WebviewMessageRestartAcp
 	| WebviewMessageRenameSession
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageApprovePlan
+	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions;
+	| WebviewMessageRequestMentionCompletions
+	| WebviewMessageRequestTimeline
+	| WebviewMessageRevertToCheckpoint;

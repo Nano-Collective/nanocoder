@@ -1,212 +1,426 @@
 import test from 'ava';
 import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
 
-const titleOf = (box: StubElement) => box.children[0].children[0].textContent;
-const bodyOf = (box: StubElement) => box.children[1].textContent;
-const isOpen = (box: StubElement) => box.children[1].style.display !== 'none';
-const clickHeader = (box: StubElement) => box.children[0].onclick();
+const titleOf = (summary: StubElement) =>
+	summary.children[0].children[0].textContent;
+const bodyOf = (summary: StubElement) => summary.children[1];
+const thoughtText = (thought: StubElement) => thought.children[1].textContent;
+const isOpen = (summary: StubElement) =>
+	bodyOf(summary).style.display !== 'none';
+const clickHeader = (summary: StubElement) => summary.children[0].onclick();
 
-test('groups every thought of one response into a single section', t => {
+const activityKind = (element: StubElement) => {
+	if (element.classList.contains('work-summary-thought')) return 'thought';
+	if (element.classList.contains('tool-aggregator')) return 'tools';
+	if (element.classList.contains('tool-card')) return 'edit';
+	if (String(element.id).startsWith('plan-card-')) return 'plan';
+	return 'unknown';
+};
+
+const isInside = (element: StubElement, ancestor: StubElement) => {
+	let current = element.parentElement;
+	while (current) {
+		if (current === ancestor) return true;
+		current = current.parentElement;
+	}
+	return false;
+};
+
+test('groups one turn execution activity into a single ordered summary', t => {
 	const panel = createPanel();
 
-	panel.thought('first thought');
-	panel.text('some answer');
-	panel.tool('call-1');
-	panel.thought('second thought');
-	panel.text('more answer');
-	panel.thought('third thought');
+	panel.userMessage('please inspect and edit the project');
+	panel.thought('inspect first');
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'read-1',
+		title: 'read_file: source/a.ts',
+		kind: 'read',
+		status: 'pending',
+	});
+	panel.text('I found the relevant file.');
+	panel.thought('now edit it');
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'edit-1',
+		title: 'write_file: source/a.ts',
+		kind: 'edit',
+		status: 'pending',
+	});
+	panel.update({
+		sessionUpdate: 'plan',
+		entries: [{content: 'Run tests', status: 'in_progress'}],
+	});
 	panel.finish();
 
-	const boxes = panel.boxes();
-	t.is(boxes.length, 1);
-	t.true(bodyOf(boxes[0]).includes('first thought'));
-	t.true(bodyOf(boxes[0]).includes('second thought'));
-	t.true(bodyOf(boxes[0]).includes('third thought'));
+	const summaries = panel.summaries();
+	t.is(summaries.length, 1);
+	t.deepEqual(bodyOf(summaries[0]).children.map(activityKind), [
+		'thought',
+		'tools',
+		'thought',
+		'edit',
+		'plan',
+	]);
 });
 
-test('counts only the stretches actually spent thinking', t => {
+test('does not merge tool groups across intervening thoughts', t => {
 	const panel = createPanel();
+	panel.userMessage('inspect two areas');
 
-	panel.thought('reasoning');
-	panel.advance(3_000);
-	panel.text('answer');
-	panel.advance(60_000);
-	panel.tool('call-1');
-	panel.advance(30_000);
-	panel.thought('more reasoning');
-	panel.advance(2_500);
-	panel.finish();
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'first',
+		title: 'read_file: source/first.ts',
+		kind: 'read',
+		status: 'pending',
+	});
+	panel.thought('the second area needs a separate check');
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'first',
+		status: 'completed',
+	});
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'second',
+		title: 'read_file: source/second.ts',
+		kind: 'read',
+		status: 'pending',
+	});
 
-	t.is(titleOf(panel.boxes()[0]), 'Thought for 5s');
+	const groups = bodyOf(panel.summaries()[0]).children.filter(
+		(child: StubElement) => child.classList.contains('tool-aggregator'),
+	);
+	t.is(groups.length, 2);
+	t.deepEqual(
+		groups[0]
+			.querySelectorAll('.tool-label')
+			.map((label: StubElement) => label.textContent),
+		['Reading source/first.ts'],
+	);
+	t.deepEqual(
+		groups[1]
+			.querySelectorAll('.tool-label')
+			.map((label: StubElement) => label.textContent),
+		['Reading source/second.ts'],
+	);
 });
 
-test('separates interrupted thought stretches with a blank line', t => {
-	const panel = createPanel();
-
-	panel.thought('first');
-	panel.text('answer');
-	panel.thought('second');
-	panel.finish();
-
-	t.is(bodyOf(panel.boxes()[0]), 'first\n\nsecond');
-});
-
-test('keeps consecutive chunks of one stretch unseparated', t => {
+test('keeps streaming chunks together and starts a new thought after work', t => {
 	const panel = createPanel();
 
 	panel.thought('let me ');
 	panel.thought('check that');
-	panel.finish();
-
-	t.is(bodyOf(panel.boxes()[0]), 'let me check that');
-});
-
-test('starts a new section for the next response', t => {
-	const panel = createPanel();
-
-	panel.thought('first response thought');
-	panel.text('first answer');
-	panel.finish();
-	panel.thought('second response thought');
-	panel.finish();
-
-	const boxes = panel.boxes();
-	t.is(boxes.length, 2);
-	t.is(bodyOf(boxes[0]), 'first response thought');
-	t.is(bodyOf(boxes[1]), 'second response thought');
-});
-
-test('collapses while paused and reopens when thoughts resume', t => {
-	const panel = createPanel();
-
-	panel.thought('reasoning');
-	const box = panel.boxes()[0];
-	t.true(isOpen(box));
-	t.is(titleOf(box), 'Thinking...');
-
-	panel.advance(2_000);
-	panel.text('answer');
-	t.false(isOpen(box));
-	t.is(titleOf(box), 'Thought for 2s');
-
-	panel.thought('more reasoning');
-	t.true(isOpen(box));
-	t.is(titleOf(box), 'Thinking for 2s');
-
-	panel.advance(1_000);
-	panel.finish();
-	t.false(isOpen(box));
-	t.is(titleOf(box), 'Thought for 3s');
-});
-
-test('respects a manual toggle for the rest of the response', t => {
-	const panel = createPanel();
-
-	panel.thought('reasoning');
-	const box = panel.boxes()[0];
-	clickHeader(box);
-	t.false(isOpen(box));
-
-	panel.thought('still reasoning');
-	t.false(isOpen(box));
-
-	panel.text('answer');
-	t.false(isOpen(box));
-
-	clickHeader(box);
-	panel.thought('more reasoning');
-	panel.finish();
-	t.true(isOpen(box));
-});
-
-test('keeps the live timer running while thoughts stream', t => {
-	const panel = createPanel();
-
-	panel.thought('reasoning');
-	panel.advance(4_000);
-	panel.runTimers();
-	t.is(titleOf(panel.boxes()[0]), 'Thinking for 4s');
-
-	panel.text('answer');
-	panel.advance(10_000);
-	panel.runTimers();
-	t.is(titleOf(panel.boxes()[0]), 'Thought for 4s');
-});
-
-test('renders answer text and tool cards after the thought section', t => {
-	const panel = createPanel();
-
-	panel.thought('reasoning');
-	panel.text('answer');
 	panel.tool('call-1');
-	panel.thought('more reasoning');
-	panel.finish();
+	panel.thought('one more detail');
 
-	t.is(panel.boxes().length, 1);
-	t.true(panel.container.children[0].className.includes('thought-aggregator'));
-	t.true(panel.container.children.length > 2);
+	const thoughts = panel.thoughts();
+	t.is(thoughts.length, 2);
+	t.is(thoughtText(thoughts[0]), 'let me check that');
+	t.is(thoughtText(thoughts[1]), 'one more detail');
 });
 
-test('renders the grouped thoughts as markdown when marked is loaded', t => {
+test('measures the whole turn rather than only thought stretches', t => {
+	const panel = createPanel();
+
+	panel.userMessage('do the work');
+	panel.advance(5_000);
+	panel.thought('reasoning');
+	panel.runTimers();
+
+	const summary = panel.summaries()[0];
+	t.is(titleOf(summary), 'Working for 5s');
+
+	panel.text('progress update');
+	panel.advance(60_000);
+	panel.runTimers();
+	t.is(titleOf(summary), 'Working for 1m 5s');
+
+	panel.finish();
+	t.is(titleOf(summary), 'Worked for 1m 5s');
+});
+
+test('stays open while streaming and collapses when the turn completes', t => {
+	const panel = createPanel();
+
+	panel.userMessage('run a task');
+	panel.thought('reasoning');
+	const summary = panel.summaries()[0];
+	t.true(isOpen(summary));
+
+	panel.finish();
+	t.false(isOpen(summary));
+	t.is(summary.children[0].getAttribute('aria-expanded'), 'false');
+
+	clickHeader(summary);
+	t.true(isOpen(summary));
+	clickHeader(summary);
+	t.false(isOpen(summary));
+});
+
+test('keeps the final answer outside the work summary', t => {
+	const panel = createPanel();
+
+	panel.userMessage('answer after checking');
+	panel.thought('checking');
+	panel.tool('call-1');
+	panel.text('This is the final answer.');
+	panel.finish();
+
+	const summary = panel.summaries()[0];
+	const answer = panel.container.querySelector('.agent-markdown');
+	t.false(isInside(answer, summary));
+	t.is(bodyOf(summary).querySelectorAll('.agent-markdown').length, 0);
+	t.true(
+		panel.container.children.indexOf(summary) <
+			panel.container.children.indexOf(answer.parentElement.parentElement),
+	);
+});
+
+test('does not leave an empty summary for a direct answer', t => {
+	const panel = createPanel();
+
+	panel.userMessage('say hello');
+	panel.text('Hello.');
+	panel.finish();
+
+	t.is(panel.summaries().length, 0);
+	t.is(panel.container.querySelectorAll('.agent-markdown').length, 1);
+});
+
+test('labels cancelled and failed terminal states', t => {
+	const cancelled = createPanel();
+	cancelled.userMessage('stop this');
+	cancelled.thought('working');
+	cancelled.advance(2_000);
+	cancelled.finish('cancelled');
+
+	const cancelledSummary = cancelled.summaries()[0];
+	t.is(titleOf(cancelledSummary), 'Stopped after 2s');
+	t.is(cancelledSummary.dataset.outcome, 'cancelled');
+
+	const failed = createPanel();
+	failed.userMessage('this will fail');
+	failed.tool('call-1');
+	failed.advance(3_000);
+	failed.finish('failed');
+
+	const failedSummary = failed.summaries()[0];
+	t.is(titleOf(failedSummary), 'Failed after 3s');
+	t.is(failedSummary.dataset.outcome, 'failed');
+});
+
+test('keeps late tool updates in their original cancelled turn', t => {
+	const panel = createPanel();
+
+	panel.userMessage('start the first task');
+	panel.tool('first-tool');
+	panel.finish('cancelled');
+
+	panel.userMessage('start another task');
+	panel.thought('new ');
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'first-tool',
+		status: 'failed',
+		rawOutput: 'Cancelled by user',
+	});
+	panel.thought('thought');
+
+	const summaries = panel.summaries();
+	t.is(summaries.length, 2);
+	t.is(titleOf(summaries[0]), 'Stopped after 0s');
+	t.is(summaries[0].querySelectorAll('.tool-label').length, 1);
+	t.is(summaries[1].querySelectorAll('.work-summary-thought').length, 1);
+	t.is(thoughtText(summaries[1].querySelector('.work-summary-thought')), 'new thought');
+});
+
+test('reopens the summary when a tool needs approval', t => {
+	const panel = createPanel();
+
+	panel.userMessage('inspect a file');
+	panel.tool('call-1');
+	const summary = panel.summaries()[0];
+	clickHeader(summary);
+	t.false(isOpen(summary));
+
+	panel.post({
+		type: 'permissionRequested',
+		toolCallId: 'call-1',
+		toolCall: {},
+	});
+
+	t.true(isOpen(summary));
+	t.truthy(bodyOf(summary).querySelector('.tool-actions'));
+});
+
+test('renders thoughts as markdown when marked is loaded', t => {
 	const panel = createPanel({marked: true});
 
-	panel.thought('first');
-	const box = panel.boxes()[0];
-	t.is(box.children[1].innerHTML, '');
+	panel.thought('**inspect** the code');
+	const thought = panel.thoughts()[0];
+	t.is(thought.children[1].innerHTML, '');
 
 	panel.runTimers();
-	t.is(box.children[1].innerHTML, '<md>first</md>');
-
-	panel.text('answer');
-	panel.thought('second');
-	panel.finish();
-	t.is(box.children[1].innerHTML, '<md>first\n\nsecond</md>');
+	t.is(thought.children[1].innerHTML, '<md>**inspect** the code</md>');
 });
 
-test('keeps one section per response when a session is replayed', t => {
+test('keeps one summary per turn when a session is replayed', t => {
 	const panel = createPanel();
 
 	panel.post({type: 'clear', isLoading: true});
 	panel.userMessage('first question');
-	panel.thought('first response thought');
+	panel.thought('first thought');
 	panel.text('first answer');
 	panel.userMessage('second question');
-	panel.thought('second response thought');
+	panel.tool('second-tool');
 	panel.text('second answer');
 	panel.post({type: 'sessionLoaded'});
 
-	const boxes = panel.boxes();
-	t.is(boxes.length, 2);
-	t.is(bodyOf(boxes[0]), 'first response thought');
-	t.is(bodyOf(boxes[1]), 'second response thought');
+	const summaries = panel.summaries();
+	t.is(summaries.length, 2);
+	t.is(thoughtText(summaries[0].querySelector('.work-summary-thought')), 'first thought');
+	t.is(summaries[1].querySelectorAll('.tool-label').length, 1);
+	t.false(isOpen(summaries[0]));
+	t.false(isOpen(summaries[1]));
 });
 
-test('closes a still-open section once the replayed session is loaded', t => {
+test('drops the active summary when the session is cleared', t => {
 	const panel = createPanel();
 
 	panel.userMessage('question');
-	panel.thought('trailing thought');
-	panel.advance(6_000);
-	panel.post({type: 'sessionLoaded'});
+	panel.thought('reasoning');
+	t.is(panel.summaries().length, 1);
 
-	const box = panel.boxes()[0];
-	t.is(titleOf(box), 'Thought for 6s');
-	t.false(isOpen(box));
+	panel.post({type: 'clear'});
+	t.is(panel.summaries().length, 0);
 
-	panel.advance(60_000);
-	panel.runTimers();
-	t.is(titleOf(box), 'Thought for 6s');
+	panel.userMessage('fresh question');
+	panel.thought('fresh reasoning');
+	t.is(panel.summaries().length, 1);
+	t.is(thoughtText(panel.thoughts()[0]), 'fresh reasoning');
 });
 
-test('drops the section when the session is cleared', t => {
+test('opens no summary for whitespace-only reasoning', t => {
 	const panel = createPanel();
 
-	panel.thought('reasoning');
-	panel.post({type: 'clear'});
-	t.is(panel.boxes().length, 0);
+	panel.thought('\n\n');
+	t.is(panel.summaries().length, 0);
 
-	panel.thought('fresh reasoning');
-	const boxes = panel.boxes();
-	t.is(boxes.length, 1);
-	t.is(bodyOf(boxes[0]), 'fresh reasoning');
+	panel.thought('   ');
+	t.is(panel.summaries().length, 0);
+
+	panel.text('answer');
+	panel.finish();
+	t.is(panel.summaries().length, 0);
+});
+
+test('opens the summary on the first thought that has content', t => {
+	const panel = createPanel();
+
+	panel.thought('\n\n');
+	panel.thought('actual reasoning');
+	panel.finish();
+
+	const thoughts = panel.thoughts();
+	t.is(thoughts.length, 1);
+	t.is(thoughtText(thoughts[0]), 'actual reasoning');
+});
+
+test('keeps appending whitespace once the thought is open', t => {
+	const panel = createPanel();
+
+	panel.thought('first line');
+	panel.thought('\n\n');
+	panel.thought('second line');
+	panel.finish();
+
+	t.is(thoughtText(panel.thoughts()[0]), 'first line\n\nsecond line');
+});
+
+test('an empty thought chunk neither opens a summary nor splits the answer', t => {
+	const panel = createPanel();
+
+	panel.text('answer ');
+	const blocks = panel.container.children.length;
+
+	panel.thought('');
+	panel.text('continues');
+
+	// Ending the text block would start a second agent bubble for 'continues',
+	// so the answer has to still be one child of the container.
+	t.is(panel.summaries().length, 0);
+	t.is(panel.container.children.length, blocks);
+});
+
+test('a tool queued behind a cancelled one opens no second summary', t => {
+	const panel = createPanel();
+
+	panel.startTurn('do a long job');
+	panel.tool('in-flight');
+	panel.stop();
+
+	const summary = panel.summaries()[0];
+	t.is(titleOf(summary), 'Stopped after 0s');
+
+	// The agent only learns about the cancel after the fact: the call already
+	// running reports its outcome, and the ones queued behind it arrive as
+	// fresh ids marked cancelled. None of that may reopen the turn.
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'in-flight',
+		status: 'failed',
+		rawOutput: 'Cancelled by user',
+	});
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'queued-behind-it',
+		title: 'read_file: source/b.ts',
+		kind: 'read',
+		status: 'cancelled',
+	});
+	panel.thought('trailing reasoning');
+
+	t.is(panel.summaries().length, 1);
+	t.is(titleOf(summary), 'Stopped after 0s');
+
+	// The next real turn is unaffected.
+	panel.startTurn('try again');
+	panel.thought('starting over');
+	t.is(panel.summaries().length, 2);
+	t.is(titleOf(panel.summaries()[1]), 'Working...');
+});
+
+test('a turn that answers before it works keeps the transcript in order', t => {
+	const panel = createPanel();
+
+	panel.userMessage('check something');
+	panel.text('Let me look.');
+	panel.tool('call-1');
+	panel.finish();
+
+	// The summary is inserted where the work actually started, so the prose
+	// that preceded it is not left stranded underneath.
+	const summary = panel.summaries()[0];
+	const answer = panel.container.querySelector('.agent-markdown');
+	t.true(
+		panel.container.children.indexOf(answer.parentElement.parentElement) <
+			panel.container.children.indexOf(summary),
+	);
+});
+
+test('an emptied plan retires the summary it was the only activity in', t => {
+	const panel = createPanel();
+
+	panel.userMessage('plan the work');
+	panel.update({
+		sessionUpdate: 'plan',
+		entries: [{content: 'Run tests', status: 'in_progress'}],
+	});
+	t.is(panel.summaries().length, 1);
+
+	panel.update({sessionUpdate: 'plan', entries: []});
+	panel.finish();
+	t.is(panel.summaries().length, 0);
 });

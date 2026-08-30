@@ -348,6 +348,35 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
 
+## Ignoring Files
+
+Nanocoder already respects your `.gitignore`, so `node_modules`, `dist` and friends stay out of the way. But some files are tracked in git and still not worth spending context on: lockfiles, generated fixtures, vendored bundles, big snapshot files.
+
+Create a `.nanocoderignore` at your project root to exclude those too. It uses the same pattern syntax as `.gitignore`:
+
+```
+# Tracked, but not worth the tokens
+package-lock.json
+pnpm-lock.yaml
+tests/__fixtures__/
+docs/generated/
+```
+
+**What it affects:** the `list_directory`, `find_files` and `search_file_contents` tools, the `@` file autocomplete, and the interactive file explorer. Matching files stop showing up in listings and search results, which is what keeps them out of the model's context.
+
+**What it does not affect:** `read_file` and `execute_bash`. If the model is given an exact path it can still read the file, and nothing stops a `cat` in a shell command.
+
+> **Important:** `.nanocoderignore` is a context-hygiene tool, not a secrets boundary. Listing `.env` in it makes the file harder for the model to stumble across, but it does not prevent the file being read. Keep real secrets out of the workspace, or out of files the agent has any reason to open.
+
+Patterns are applied after `.gitignore` and Nanocoder's built-in defaults, so a leading `!` can un-ignore something:
+
+```
+# Nanocoder ignores dist/ by default; opt back in for this project
+!dist
+```
+
+Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings is still snapshotted, so restoring a checkpoint reverts it like anything else. See [Checkpointing](../features/checkpointing.md).
+
 ## Sections
 
 - [Providers](providers/index.md) - AI provider setup and configuration
