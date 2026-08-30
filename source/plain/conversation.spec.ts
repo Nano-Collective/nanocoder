@@ -1,6 +1,7 @@
 import test from "ava";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
+import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
 import {
 	resetSessionContextLimit,
@@ -253,8 +254,8 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 		abortSignal: new AbortController().signal,
 	});
 
-	t.is(outcome.kind, "tool-approval-required");
-	if (outcome.kind === "tool-approval-required") {
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
 	}
 });
