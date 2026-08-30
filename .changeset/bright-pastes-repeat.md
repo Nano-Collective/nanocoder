@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Replace every matching pasted-text occurrence with a placeholder and restore repeated placeholders before model submission.
+Preserve every copy of repeated pasted text through placeholder display, chunked updates, and prompt assembly.

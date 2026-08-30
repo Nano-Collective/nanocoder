@@ -122,7 +122,7 @@ export function useInputState() {
 					};
 
 					// Replace old placeholder with updated one in display value
-					const newDisplayValue = currentState.displayValue.replace(
+					const newDisplayValue = currentState.displayValue.replaceAll(
 						oldPlaceholder,
 						newPlaceholder,
 					);
@@ -188,7 +188,7 @@ export function useInputState() {
 							},
 						};
 
-						const newDisplayValue = currentState.displayValue.replace(
+						const newDisplayValue = currentState.displayValue.replaceAll(
 							oldPlaceholder,
 							newPlaceholder,
 						);
@@ -302,21 +302,25 @@ export function useInputState() {
 				return;
 			}
 
-			// Locate the placeholder by its own display text rather than rebuilding
-			// a pattern from the id: ids are namespaced keys, not display labels.
-			const occurrence = findPlaceholderOccurrences(
+			// Locate every occurrence by its display text rather than rebuilding a
+			// pattern from the id: ids are namespaced keys, not display labels.
+			const occurrences = findPlaceholderOccurrences(
 				currentState.displayValue,
 				currentState.placeholderContent,
-			).find(candidate => candidate.id === placeholderId);
+			).filter(candidate => candidate.id === placeholderId);
+
+			let newDisplayValue = currentState.displayValue;
+			for (let i = occurrences.length - 1; i >= 0; i--) {
+				const {start, end} = occurrences[i];
+				newDisplayValue =
+					newDisplayValue.slice(0, start) + newDisplayValue.slice(end);
+			}
 
 			const newPlaceholderContent = {...currentState.placeholderContent};
 			delete newPlaceholderContent[placeholderId];
 
 			pushToUndoStack({
-				displayValue: occurrence
-					? currentState.displayValue.slice(0, occurrence.start) +
-						currentState.displayValue.slice(occurrence.end)
-					: currentState.displayValue,
+				displayValue: newDisplayValue,
 				placeholderContent: newPlaceholderContent,
 			});
 		},

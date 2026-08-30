@@ -5,6 +5,7 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
 import {handlePaste} from './paste-utils';
+import {assemblePrompt} from './prompt-processor';
 import {clearAppConfig, reloadAppConfig} from '../config';
 
 // Tests for handlePaste utility function
@@ -101,7 +102,7 @@ test('handlePaste replaces pasted text with placeholder in display value', t => 
 	t.false(result!.displayValue.includes('x'.repeat(10))); // Original text should be gone
 });
 
-test('handlePaste replaces every occurrence of repeated pasted text', t => {
+test('repeated pasted text survives the complete prompt round trip', t => {
 	const pastedText = 'x'.repeat(802);
 	const currentDisplayValue = `prefix ${pastedText} middle ${pastedText} suffix`;
 	const currentPlaceholderContent: Record<string, PlaceholderContent> = {};
@@ -113,12 +114,13 @@ test('handlePaste replaces every occurrence of repeated pasted text', t => {
 	);
 
 	t.truthy(result);
-	const placeholder = result!.placeholderContent['1'].displayText;
+	const placeholder = result!.placeholderContent.paste_1.displayText;
 	t.is(
 		result!.displayValue,
 		`prefix ${placeholder} middle ${placeholder} suffix`,
 	);
 	t.false(result!.displayValue.includes(pastedText));
+	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
 test('handlePaste preserves existing pasted content', t => {

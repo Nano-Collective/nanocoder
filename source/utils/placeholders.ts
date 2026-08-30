@@ -89,9 +89,10 @@ function resolveDisplayText(id: string, content: PlaceholderContent): string {
 /**
  * Locate every placeholder in `text` by scanning for its display text.
  *
- * Each entry claims at most one occurrence, so two placeholders that render
- * identically (the same file mentioned twice) map to distinct positions
- * instead of both resolving to the first match.
+ * Entries with the same display text claim distinct positions first. Once all
+ * matching entries have been claimed, later occurrences reuse the first entry.
+ * This keeps duplicate file mentions distinct while allowing one paste entry
+ * to represent repeated copies of the same pasted text.
  */
 export function findPlaceholderOccurrences(
 	text: string,
@@ -109,10 +110,15 @@ export function findPlaceholderOccurrences(
 
 	let index = 0;
 	while (index < text.length) {
-		const hit = candidates.find(
-			([id, displayText]) =>
-				!claimed.has(id) && text.startsWith(displayText, index),
+		const firstMatch = candidates.find(([, displayText]) =>
+			text.startsWith(displayText, index),
 		);
+		const hit = firstMatch
+			? (candidates.find(
+					([id, displayText]) =>
+						displayText === firstMatch[1] && !claimed.has(id),
+				) ?? firstMatch)
+			: undefined;
 
 		if (!hit) {
 			index++;
