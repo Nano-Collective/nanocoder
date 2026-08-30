@@ -2,8 +2,40 @@
  * Composer chrome: model stays on the input row; provider and approval mode
  * live behind the settings popover (#859).
  */
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {createPanel} from './chat-panel-harness';
+
+const PANEL_HTML = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/chat-panel.html', import.meta.url),
+	),
+	'utf8',
+);
+
+const slice = (source: string, startId: string, endId: string) => {
+	const start = source.indexOf(`id="${startId}"`);
+	const end = source.indexOf(`id="${endId}"`);
+	if (start < 0 || end < 0 || end <= start) {
+		throw new Error(`could not slice ${startId}..${endId}`);
+	}
+	return source.slice(start, end);
+};
+
+test('markup keeps model on the row and moves provider and mode into settings', t => {
+	const row = slice(PANEL_HTML, 'add-menu-btn', 'send-stop-btn');
+	t.true(row.includes('id="model-trigger"'));
+	t.true(row.includes('id="composer-settings-trigger"'));
+	t.false(row.includes('id="provider-trigger"'));
+	t.false(row.includes('id="mode-trigger"'));
+
+	const settings = slice(PANEL_HTML, 'composer-settings', 'provider-dropdown');
+	t.true(settings.includes('id="provider-trigger"'));
+	t.true(settings.includes('id="mode-trigger"'));
+	t.false(settings.includes('id="model-trigger"'));
+	t.false(settings.includes('id="settings-view"'));
+});
 
 test('settings trigger opens the composer settings popover', t => {
 	const panel = createPanel();
@@ -12,7 +44,10 @@ test('settings trigger opens the composer settings popover', t => {
 	panel.byId('composer-settings-trigger')?.click();
 
 	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
-	t.is(panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'), 'true');
+	t.is(
+		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
+		'true',
+	);
 });
 
 test('opening a nested provider list keeps composer settings open', t => {
@@ -24,6 +59,15 @@ test('opening a nested provider list keeps composer settings open', t => {
 	t.false(panel.byId('provider-dropdown')?.classList.contains('hidden'));
 });
 
+test('opening a nested mode list keeps composer settings open', t => {
+	const panel = createPanel();
+	panel.byId('composer-settings-trigger')?.click();
+	panel.byId('mode-trigger')?.click();
+
+	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.false(panel.byId('mode-dropdown')?.classList.contains('hidden'));
+});
+
 test('opening the model list closes composer settings', t => {
 	const panel = createPanel();
 	panel.byId('composer-settings-trigger')?.click();
@@ -31,4 +75,50 @@ test('opening the model list closes composer settings', t => {
 
 	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
 	t.false(panel.byId('model-dropdown')?.classList.contains('hidden'));
+	t.is(
+		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
+		'false',
+	);
+});
+
+test('opening the add menu closes composer settings', t => {
+	const panel = createPanel();
+	panel.byId('composer-settings-trigger')?.click();
+	panel.byId('add-menu-btn')?.click();
+
+	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.false(panel.byId('add-menu-dropdown')?.classList.contains('hidden'));
+});
+
+test('provider and mode still post the existing extension messages', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'syncState',
+		availableProviders: ['claude', 'openai'],
+		provider: 'claude',
+		availableModes: ['normal', 'auto'],
+		mode: 'normal',
+		availableModels: ['sonnet'],
+		model: 'sonnet',
+	});
+
+	panel.byId('composer-settings-trigger')?.click();
+	panel.byId('provider-trigger')?.click();
+	panel.byId('provider-dropdown')?.children[1].click();
+	t.true(
+		panel.sent.some(
+			(message: {type?: string; provider?: string}) =>
+				message.type === 'setProvider' && message.provider === 'openai',
+		),
+	);
+
+	panel.byId('composer-settings-trigger')?.click();
+	panel.byId('mode-trigger')?.click();
+	panel.byId('mode-dropdown')?.children[1].click();
+	t.true(
+		panel.sent.some(
+			(message: {type?: string; mode?: string}) =>
+				message.type === 'setMode' && message.mode === 'auto',
+		),
+	);
 });

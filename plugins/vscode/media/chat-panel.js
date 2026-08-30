@@ -169,12 +169,11 @@
 			}
 		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		const composerSettings = document.getElementById('composer-settings');
 		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
 		if (composerSettingsTrigger) {
-			composerSettingsTrigger.setAttribute(
-				'aria-expanded',
-				keepId === 'composer-settings' ? 'true' : 'false',
-			);
+			const open = composerSettings && !composerSettings.classList.contains('hidden');
+			composerSettingsTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
 		}
 	}
 
