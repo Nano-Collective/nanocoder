@@ -98,14 +98,27 @@ export function matchesFilter(sub: Subscription, event: Event): boolean {
 	return false;
 }
 
+/**
+ * Rewrite Windows separators to `/` so patterns and paths meet on one shape.
+ *
+ * Subscription globs are always authored with `/`, but chokidar reports
+ * changes using the platform separator — on Windows `docs/**` would be asked
+ * to match `docs\guide.md` and never could. The matcher below also leans on
+ * `/` to stop `*` at a directory boundary, so an un-normalized path makes
+ * `*.md` match the nested `sub\a.md` as well.
+ */
+export function toPosixPath(path: string): string {
+	return path.split('\\').join('/');
+}
+
 // Minimal glob -> regex matcher: enough for `docs/<star><star>`,
 // `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, and `?`
 // single-character wildcards. Step 9 brings chokidar (and its picomatch dep)
 // into the tree, at which point we can swap this for picomatch and delete
 // the helper. Until then this is sufficient to make the router unit-testable.
 export function matchGlob(pattern: string, path: string): boolean {
-	const regex = globToRegex(pattern);
-	return regex.test(path);
+	const regex = globToRegex(toPosixPath(pattern));
+	return regex.test(toPosixPath(path));
 }
 
 function globToRegex(pattern: string): RegExp {
