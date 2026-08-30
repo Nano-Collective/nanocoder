@@ -3,6 +3,7 @@ import {assertPublicHttpUrl} from './fetch-url-guard.js';
 
 test('assertPublicHttpUrl allows public http(s)', t => {
 	t.notThrows(() => assertPublicHttpUrl('https://example.com/docs'));
+	t.notThrows(() => assertPublicHttpUrl('https://example.com./docs'));
 	t.notThrows(() => assertPublicHttpUrl('http://8.8.8.8'));
 	t.notThrows(() => assertPublicHttpUrl('http://10.example.com'));
 	t.notThrows(() => assertPublicHttpUrl('http://fc.google.com'));
@@ -22,7 +23,9 @@ test('assertPublicHttpUrl rejects loopback, metadata, RFC1918, IPv6 local', t =>
 		'http://100.64.0.1',
 		'http://169.254.169.254/latest/meta-data/',
 		'http://metadata.google.internal',
+		'http://metadata.google.internal./',
 		'http://localhost:3000',
+		'http://localhost./',
 		'http://10.0.0.1',
 		'http://192.168.1.1',
 		'http://172.16.0.1',

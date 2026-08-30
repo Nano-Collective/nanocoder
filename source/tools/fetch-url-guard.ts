@@ -49,7 +49,9 @@ function isBlockedIpv6(host: string): boolean {
 }
 
 function isBlockedFetchHost(hostname: string): boolean {
-	const host = hostname.toLowerCase();
+	// Trailing-dot FQDNs (`localhost.`, `metadata.google.internal.`) are a
+	// different hostname string; Node does not strip them.
+	const host = hostname.toLowerCase().replace(/\.$/, '');
 	if (host === 'localhost' || host === 'metadata.google.internal') return true;
 
 	const bare = host.replace(/^\[|\]$/g, '');
