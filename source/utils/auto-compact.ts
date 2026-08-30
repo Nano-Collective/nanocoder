@@ -1,9 +1,11 @@
+import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
+import {getLogger} from '@/utils/logging';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {compressMessages} from './message-compression';
@@ -75,7 +77,12 @@ export async function performAutoCompact(
 	onNotify?: (message: string) => void,
 	client?: LLMClient,
 	nativeTools?: Record<string, AISDKCoreTool>,
+	signal?: AbortSignal,
 ): Promise<Message[] | null> {
+	if (signal?.aborted) {
+		return null;
+	}
+
 	// Check if auto compact is enabled
 	const enabled =
 		autoCompactSessionOverrides.enabled !== null
@@ -123,6 +130,10 @@ export async function performAutoCompact(
 		return null;
 	}
 
+	if (signal?.aborted) {
+		return null;
+	}
+
 	// Create tokenizer
 	let tokenizer: Tokenizer | undefined;
 	try {
@@ -164,13 +175,24 @@ export async function performAutoCompact(
 		// (network error, malformed response, etc.) so a transient model issue
 		// never blocks compaction.
 		if (strategy === 'llm' && client) {
+			if (signal?.aborted) {
+				return null;
+			}
+			if (config.notifyUser && onNotify) {
+				onNotify('auto-compacting context...');
+			}
 			try {
 				const llmCompressed = await summariseWithLLM({
 					messages,
 					systemMessage,
 					client,
 					tokenizer,
+					signal,
 				});
+
+				if (signal?.aborted) {
+					return null;
+				}
 
 				if (llmCompressed) {
 					// Tool definitions are constant across compaction, so include them on
@@ -196,8 +218,15 @@ export async function performAutoCompact(
 					return llmCompressed;
 				}
 			} catch (_error) {
+				if (signal?.aborted) {
+					return null;
+				}
 				// fall through to mechanical
 			}
+		}
+
+		if (signal?.aborted) {
+			return null;
 		}
 
 		// Include system message in compression input so compressMessages()
@@ -226,6 +255,41 @@ export async function performAutoCompact(
 		if (tokenizer?.free) {
 			tokenizer.free();
 		}
+	}
+}
+
+export async function maybeAutoCompact(
+	messages: Message[],
+	systemMessage: Message,
+	client: LLMClient,
+	nativeTools?: Record<string, AISDKCoreTool>,
+	options?: {signal?: AbortSignal; onNotify?: (message: string) => void},
+): Promise<Message[]> {
+	if (options?.signal?.aborted) {
+		return messages;
+	}
+
+	const autoCompactConfig = getAppConfig().autoCompact;
+	if (!autoCompactConfig) {
+		return messages;
+	}
+
+	try {
+		const compressed = await performAutoCompact(
+			messages,
+			systemMessage,
+			client.getProviderConfig().name,
+			client.getCurrentModel(),
+			autoCompactConfig,
+			options?.onNotify,
+			client,
+			nativeTools,
+			options?.signal,
+		);
+		return compressed ?? messages;
+	} catch (error) {
+		getLogger().debug('auto-compact failed; leaving history unchanged', error);
+		return messages;
 	}
 }
 
