@@ -43,6 +43,8 @@ Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `coding
 
 When you send a message, Nanocoder ranks saved memories by relevance to that message (keyword overlap, with common words filtered out) and injects the most relevant ones into the system prompt under a `## Project Context` heading, up to a token budget. Low-relevance memories are dropped rather than injected as noise.
 
+A memory is kept when it covers at least 10% of the query's keywords, and either the category matched, at least two keywords overlapped, or a single overlapping keyword is at least half the query. That last rule is why `auth` and `fix auth` both recall a Clerk/auth memory, while a one-word hit in a long prompt still does not. Memories that do not fit the remaining token budget are skipped so a later, shorter memory can still be injected.
+
 Retrieval is keyword-based, not a true embeddings/vector search. The "semantic" in the name refers to the kind of facts stored (durable project knowledge), not the matching technique.
 
 ### Where recall is active

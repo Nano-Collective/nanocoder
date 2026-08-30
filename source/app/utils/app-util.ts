@@ -14,7 +14,6 @@ import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
-import {clearAllTasks} from '@/tools/tasks/storage';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -314,9 +313,7 @@ async function handleSpecialCommand(
 		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			await clearAllTasks();
 			sharedProposalStore.clear();
-			onAddToChatQueue(successMsg('Chat and tasks cleared.', 'clear-success'));
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;

@@ -161,6 +161,24 @@ test('SemanticMemoryManager ranks by query coverage, not memory length', async t
 	);
 });
 
+test('SemanticMemoryManager recalls a memory on a single keyword when it covers half the query', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const auth = await manager.addMemory({
+		content:
+			'The auth module uses Clerk and avoids middleware in the edge runtime.',
+	});
+
+	t.deepEqual(await manager.findRelevantMemories('auth', 3), [auth]);
+	t.deepEqual(await manager.findRelevantMemories('fix auth', 3), [auth]);
+	t.deepEqual(await manager.findRelevantMemories('update clerk auth flow', 3), [
+		auth,
+	]);
+});
+
 test('SemanticMemoryManager serializes concurrent writes so none are lost', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');

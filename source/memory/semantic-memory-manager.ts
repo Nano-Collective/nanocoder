@@ -241,6 +241,7 @@ const STOPWORDS = new Set([
 ]);
 
 const MIN_RELEVANCE_RATIO = 0.1;
+const SINGLE_HIT_MIN_RATIO = 0.5;
 
 function tokenize(value: string): Set<string> {
 	return new Set(
@@ -361,7 +362,9 @@ export class SemanticMemoryManager {
 			.filter(
 				result =>
 					result.relevanceRatio >= MIN_RELEVANCE_RATIO &&
-					(result.categoryHit || result.matchedQueryTerms >= 2),
+					(result.categoryHit ||
+						result.matchedQueryTerms >= 2 ||
+						result.relevanceRatio >= SINGLE_HIT_MIN_RATIO),
 			)
 			.sort((a, b) => {
 				if (a.matchedQueryTerms !== b.matchedQueryTerms) {

@@ -40,13 +40,6 @@ function fenceFor(body: string): string {
 	return '`'.repeat(Math.max(3, longest + 1));
 }
 
-export function formatProjectContext(
-	memories: SemanticMemory[],
-	options: ProjectContextOptions = {},
-): string {
-	return formatProjectContextWithCount(memories, options).content;
-}
-
 function formatProjectContextWithCount(
 	memories: SemanticMemory[],
 	options: ProjectContextOptions = {},
@@ -65,7 +58,7 @@ function formatProjectContextWithCount(
 			.replace(/^[-*]\s+/u, '');
 		const bullet = `- ${text}`;
 		const bulletTokens = estimateTokens(`${bullet}\n`);
-		if (usedTokens + bulletTokens > tokenBudget) break;
+		if (usedTokens + bulletTokens > tokenBudget) continue;
 
 		bullets.push(bullet);
 		usedTokens += bulletTokens;
@@ -80,36 +73,6 @@ function formatProjectContextWithCount(
 		content: `## Project Context\n\n${fence}\n${body}\n${fence}`,
 		memoryCount: bullets.length,
 	};
-}
-
-export function appendProjectContext(
-	systemPrompt: string,
-	memories: SemanticMemory[],
-	options?: ProjectContextOptions,
-): string {
-	const projectContext = formatProjectContextWithCount(
-		memories,
-		options,
-	).content;
-	if (!projectContext) return systemPrompt;
-
-	return `${systemPrompt}\n\n${projectContext}`;
-}
-
-export async function appendRelevantProjectContext(
-	systemPrompt: string,
-	query: string,
-	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
-	options: ProjectContextOptions = {},
-): Promise<string> {
-	return (
-		await appendRelevantProjectContextWithCount(
-			systemPrompt,
-			query,
-			memoryFinder,
-			options,
-		)
-	).systemPrompt;
 }
 
 export async function appendRelevantProjectContextWithCount(
