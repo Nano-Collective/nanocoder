@@ -465,6 +465,7 @@ test('AcpAgent.prompt - rejects an overlapping prompt before the first async bou
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'first'}],
 	});
+	const controller = agent['sessions'].get(session.sessionId)!.abortController;
 
 	await t.throwsAsync(
 		agent.prompt({
@@ -474,9 +475,12 @@ test('AcpAgent.prompt - rejects an overlapping prompt before the first async bou
 		{message: `Prompt already in progress for session: ${session.sessionId}`},
 	);
 
-	await first;
+	t.is(
+		agent['sessions'].get(session.sessionId)!.abortController,
+		controller,
+	);
+	t.is((await first).stopReason, 'end_turn');
 });
-
 
 test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	const {agent} = createAgent();
@@ -619,6 +623,28 @@ test('AcpAgent.prompt - a built-in command exchange stays out of model context',
 	t.is(messages.length, 2);
 	t.true(messages.every(m => m.displayOnly));
 	t.deepEqual(convertToModelMessages(messages), []);
+});
+
+test.serial('AcpAgent.prompt - built-in replies are not persisted', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'real prompt'}],
+	});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: '/help'}],
+	});
+
+	const persisted = await sessionManager.readSession(session.sessionId);
+	t.truthy(persisted);
+	t.true(
+		persisted!.messages.every(m => !m.displayOnly),
+		'display-only built-in replies must not be written to disk',
+	);
 });
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {

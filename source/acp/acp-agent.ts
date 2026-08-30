@@ -881,7 +881,7 @@ export class AcpAgent implements Agent {
 
 			// We only want user/assistant messages for the title generation/saving
 			const saveableMessages = session.messages.filter(
-				m => m.role === 'user' || m.role === 'assistant',
+				m => (m.role === 'user' || m.role === 'assistant') && !m.displayOnly,
 			);
 
 			if (saveableMessages.length === 0) {
@@ -911,15 +911,17 @@ export class AcpAgent implements Agent {
 				provider: this.initContext.client.getProviderConfig().name || 'openai',
 				model: this.initContext.client.getCurrentModel() || 'gpt-4o',
 				workingDirectory: session.cwd,
-				messages: session.messages.map(m => {
-					if (m.role === 'user' && typeof m.content === 'string') {
-						return {
-							...m,
-							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
-						};
-					}
-					return m;
-				}), // We save the raw AcpSession messages with UI prefix stripped
+				messages: session.messages
+					.filter(m => !m.displayOnly)
+					.map(m => {
+						if (m.role === 'user' && typeof m.content === 'string') {
+							return {
+								...m,
+								content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+							};
+						}
+						return m;
+					}), // We save the raw AcpSession messages with UI prefix stripped
 			});
 		} catch (error) {
 			logger.error(`Failed to save session to disk: ${error}`);
