@@ -134,6 +134,74 @@ test.serial(
 	},
 );
 
+test.serial(
+	'findMatchingPaths and searchProjectContents respect .nanocoderignore',
+	async t => {
+		const testDir = createTempDir('test-file-search-nanocoderignore-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.nanocoderignore'), 'secret.txt\n');
+			writeFileSync(testDir + '/secret.txt', 'findme_secret');
+			writeFileSync(join(testDir, 'visible.txt'), 'findme_visible');
+
+			const pathResult = await findMatchingPaths('*.txt', testDir, 50);
+			t.deepEqual(pathResult.files, ['visible.txt']);
+
+			const contentResult = await searchProjectContents(
+				'findme_',
+				testDir,
+				50,
+				false,
+			);
+			t.deepEqual(
+				contentResult.matches.map(m => m.file),
+				['visible.txt'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths lets .nanocoderignore un-ignore a DEFAULT_IGNORE_DIRS entry',
+	async t => {
+		const testDir = createTempDir('test-file-search-nanocoderignore-unignore-temp');
+
+		try {
+			mkdirSync(join(testDir, 'dist'), {recursive: true});
+			writeFileSync(join(testDir, 'dist', 'bundle.js'), 'kept');
+			writeFileSync(join(testDir, '.nanocoderignore'), '!dist\n!dist/**\n');
+
+			const result = await findMatchingPaths('bundle.js', testDir, 50);
+			t.deepEqual(result.files, ['dist/bundle.js']);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths lets .nanocoderignore un-ignore an empty dir hidden by root .gitignore',
+	async t => {
+		const testDir = createTempDir(
+			'test-file-search-nanocoderignore-empty-dir-temp',
+		);
+
+		try {
+			mkdirSync(join(testDir, 'build-cache'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'build-cache\n');
+			writeFileSync(join(testDir, '.nanocoderignore'), '!build-cache\n');
+
+			const result = await findMatchingPaths('build-cache', testDir, 50);
+			t.deepEqual(result.files, ['build-cache']);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 // Symlinks are deliberately never followed - one could point anywhere outside the project.
 
 test.serial(

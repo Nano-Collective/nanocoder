@@ -5,7 +5,7 @@ import path from 'node:path';
 import ignore from 'ignore';
 
 import {BINARY_FILE_EXTENSIONS} from '@/constants';
-import {DEFAULT_IGNORE_DIRS} from '@/utils/gitignore-loader';
+import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
 import {getLogger} from '@/utils/logging';
 import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 
@@ -211,11 +211,14 @@ export function matchesGlob(
 	);
 }
 
-// `-g '!name'` always wins over .gitignore, so a project can't re-include these via `!dist`.
-function defaultIgnoreGlobs(): string[] {
+function defaultIgnoreGlobs(
+	projectIgnore: ReturnType<typeof loadGitignore>,
+): string[] {
 	const globs: string[] = [];
 	for (const dir of DEFAULT_IGNORE_DIRS) {
-		globs.push('-g', `!${dir}`);
+		if (projectIgnore.ignores(dir)) {
+			globs.push('-g', `!${dir}`);
+		}
 	}
 	return globs;
 }
@@ -386,11 +389,16 @@ async function walkEmptyDirectories(
 	rootPath: string,
 	seenDirs: Set<string>,
 	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	projectIgnore: ReturnType<typeof loadGitignore>,
+	nanocoderignoreContent?: string,
 	signal?: AbortSignal,
 ): Promise<boolean> {
 	// Grows as nested .gitignore files are found; prefixing keeps them scoped.
 	const ig = ignore();
 	ig.add(DEFAULT_IGNORE_DIRS);
+	if (nanocoderignoreContent !== undefined) {
+		ig.add(nanocoderignoreContent);
+	}
 	let loggedDepthCap = false;
 
 	const visit = async (
@@ -444,7 +452,9 @@ async function walkEmptyDirectories(
 				path.relative(cwd, childAbsolutePath),
 			);
 
-			if (ig.ignores(childRelativePath)) {
+			const unignoredByProject =
+				projectIgnore.test(childRelativePath).unignored;
+			if (ig.ignores(childRelativePath) && !unignoredByProject) {
 				continue;
 			}
 
@@ -478,6 +488,11 @@ export async function walkProjectEntries(
 	signal?: AbortSignal,
 ): Promise<void> {
 	const rootPath = startPath ?? cwd;
+	const projectIgnore = loadGitignore(cwd);
+	const nanocoderignoreContent = await readFile(
+		path.join(cwd, '.nanocoderignore'),
+		'utf-8',
+	).catch(() => undefined);
 	const args = [
 		'--files',
 		'--hidden',
@@ -487,7 +502,7 @@ export async function walkProjectEntries(
 		'--no-config',
 		'--sort',
 		'path',
-		...defaultIgnoreGlobs(),
+		...defaultIgnoreGlobs(projectIgnore),
 		'--',
 		rootPath,
 	];
@@ -504,6 +519,10 @@ export async function walkProjectEntries(
 		}
 
 		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
+		if (projectIgnore.ignores(relativeFile)) {
+			continue;
+		}
+
 		const parts = relativeFile.split('/');
 
 		let dirRelative = '';
@@ -533,7 +552,15 @@ export async function walkProjectEntries(
 		}
 	}
 
-	await walkEmptyDirectories(cwd, rootPath, seenDirs, onEntry, signal);
+	await walkEmptyDirectories(
+		cwd,
+		rootPath,
+		seenDirs,
+		onEntry,
+		projectIgnore,
+		nanocoderignoreContent,
+		signal,
+	);
 }
 
 export async function findMatchingPaths(
@@ -759,6 +786,7 @@ export async function searchProjectContents(
 
 	// No --max-count - it overshoots with --context. runRipgrep's own streamed count is the real cutoff.
 	const rgMaxCount = Math.max(0, maxResults);
+	const projectIgnore = loadGitignore(cwd);
 
 	const args = [
 		'--json',
@@ -777,7 +805,7 @@ export async function searchProjectContents(
 	if (include) {
 		args.push('-g', include);
 	}
-	args.push(...defaultIgnoreGlobs(), ...binaryExcludeGlobs());
+	args.push(...defaultIgnoreGlobs(projectIgnore), ...binaryExcludeGlobs());
 	const normalizedContextLines = Math.max(0, contextLines ?? 0);
 	if (normalizedContextLines > 0) {
 		args.push('--context', String(normalizedContextLines));
@@ -785,7 +813,9 @@ export async function searchProjectContents(
 	args.push('--regexp', query, '--', searchPath ?? cwd);
 
 	const stdout = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);
-	const rgLines = parseRgJsonLines(stdout);
+	const rgLines = parseRgJsonLines(stdout).filter(
+		line => !projectIgnore.ignores(toRelativeFile(cwd, line.file)),
+	);
 
 	return normalizedContextLines > 0
 		? buildMatchesWithContext(rgLines, cwd, maxResults, normalizedContextLines)
