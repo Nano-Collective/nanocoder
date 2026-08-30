@@ -140,17 +140,41 @@ const NEGATION_LOOKBEHIND = 24;
 
 /** True when `pattern` matches `text` at a position not preceded by a negation. */
 function assertsTerm(text: string, pattern: RegExp): boolean {
-	const global = new RegExp(
-		pattern.source,
-		`${pattern.flags.replace('g', '')}g`,
-	);
-	for (const match of text.matchAll(global)) {
-		const start = match.index ?? 0;
+	let from = 0;
+	while (from < text.length) {
+		const match = text.slice(from).match(pattern);
+		if (!match || match.index === undefined) return false;
+		const start = from + match.index;
 		const preceding = text.slice(
 			Math.max(0, start - NEGATION_LOOKBEHIND),
 			start,
 		);
 		if (!NEGATION_PATTERN.test(preceding)) return true;
+		from = start + Math.max(match[0].length, 1);
+	}
+	return false;
+}
+
+/** Whole-word match for a token already split out of the text (no regex). */
+function assertsTermWord(text: string, term: string): boolean {
+	const haystack = text.toLowerCase();
+	let from = 0;
+	while (from <= haystack.length - term.length) {
+		const start = haystack.indexOf(term, from);
+		if (start < 0) return false;
+		const before = start === 0 ? '' : haystack[start - 1];
+		const after = haystack[start + term.length] ?? '';
+		const bounded =
+			(start === 0 || /[^a-z0-9]/i.test(before ?? '')) &&
+			(after === '' || /[^a-z0-9]/i.test(after));
+		if (bounded) {
+			const preceding = text.slice(
+				Math.max(0, start - NEGATION_LOOKBEHIND),
+				start,
+			);
+			if (!NEGATION_PATTERN.test(preceding)) return true;
+		}
+		from = start + 1;
 	}
 	return false;
 }
@@ -233,10 +257,9 @@ function isContradiction(earlier: string, later: string): boolean {
 		}
 	}
 
-	return shared.some(term => {
-		const pattern = new RegExp(`\\b${term}\\b`, 'i');
-		return assertsTerm(earlier, pattern) !== assertsTerm(later, pattern);
-	});
+	return shared.some(
+		term => assertsTermWord(earlier, term) !== assertsTermWord(later, term),
+	);
 }
 
 export class SummarizerService {
