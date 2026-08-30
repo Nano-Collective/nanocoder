@@ -7,6 +7,13 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {getProjectContextPreferences} from '@/config/preferences';
+import {
+	appendRelevantProjectContextWithCount,
+	type MemoryFinder,
+	type ProjectContextOptions,
+} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	appendSubagentTool,
 	getSubagentProgress,
@@ -59,17 +66,25 @@ export class SubagentExecutor {
 	 * that don't supply a resolver (plain shell, tests).
 	 */
 	private modeResolver?: () => DevelopmentMode;
+	private memoryFinder?: MemoryFinder;
+	private projectContextOptions?: ProjectContextOptions;
 
 	constructor(
 		toolManager: ToolManager,
 		parentClient: LLMClient,
 		projectRoot: string = process.cwd(),
 		parentMode: DevelopmentMode = 'normal',
+		options: {
+			memoryFinder?: MemoryFinder;
+			projectContextOptions?: ProjectContextOptions;
+		} = {},
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
 		this.parentMode = parentMode;
+		this.memoryFinder = options.memoryFinder;
+		this.projectContextOptions = options.projectContextOptions;
 	}
 
 	/**
@@ -137,9 +152,18 @@ export class SubagentExecutor {
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
+			const recalled = await appendRelevantProjectContextWithCount(
+				context.systemMessage,
+				this.buildTaskPrompt(task),
+				this.memoryFinder ?? new SemanticMemoryManager({cwd: this.projectRoot}),
+				{
+					...getProjectContextPreferences(),
+					...this.projectContextOptions,
+				},
+			);
 
 			const messages: Message[] = [
-				{role: 'system', content: context.systemMessage},
+				{role: 'system', content: recalled.systemPrompt},
 				...context.initialMessages,
 			];
 

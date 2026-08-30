@@ -154,6 +154,53 @@ test('SemanticMemoryManager serializes concurrent writes so none are lost', asyn
 	t.is(memories.length, 10);
 });
 
+test('SemanticMemoryManager serializes concurrent writes across manager instances', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const first = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const second = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	await Promise.all([
+		...Array.from({length: 10}, (_, i) =>
+			first.addMemory({content: `First instance memory ${i}.`}),
+		),
+		...Array.from({length: 10}, (_, i) =>
+			second.addMemory({content: `Second instance memory ${i}.`}),
+		),
+	]);
+
+	t.is((await first.listMemories()).length, 20);
+});
+
+test('SemanticMemoryManager drops oldest memories when the store cap is exceeded', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({
+		memoryDir: dir,
+		cwd,
+		maxStoredMemories: 3,
+	});
+
+	for (const index of [1, 2, 3, 4, 5]) {
+		await manager.addMemory({
+			content: `Auth adapter numbered convention ${index}.`,
+		});
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+
+	const memories = await manager.listMemories();
+	t.deepEqual(
+		memories.map(memory => memory.content),
+		[
+			'Auth adapter numbered convention 3.',
+			'Auth adapter numbered convention 4.',
+			'Auth adapter numbered convention 5.',
+		],
+	);
+});
+
 test('SemanticMemoryManager rejects empty memory content', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');
