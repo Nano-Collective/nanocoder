@@ -63,4 +63,6 @@ When loading a checkpoint that would overwrite current work, Nanocoder prompts y
 
 Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`.
 
+Snapshots skip anything matched by `.gitignore`, but deliberately ignore [`.nanocoderignore`](../configuration/index.md#ignoring-files). Hiding a file from the model's listings shouldn't quietly exclude it from restore, so a file in `.nanocoderignore` is still snapshotted and still reverted.
+
 > **Note:** Loading a checkpoint restores files immediately, but restoring conversation history requires restarting Nanocoder.

@@ -124,7 +124,7 @@ export class CheckpointManager {
 		// nothing was dropped by the cap in that case.
 		const {files: filesToSnapshot, truncatedCount} = modifiedFiles
 			? {files: modifiedFiles, truncatedCount: 0}
-			: this.fileSnapshotService.getModifiedFiles();
+			: this.fileSnapshotService.getModifiedFilesResult();
 
 		// Capture file snapshots
 		const {snapshots: fileSnapshots, skipped} =

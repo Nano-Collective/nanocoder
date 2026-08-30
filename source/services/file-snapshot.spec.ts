@@ -488,13 +488,44 @@ test.serial(
 	},
 );
 
+test.serial('FileSnapshotService refuses to restore outside the workspace', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const service = new FileSnapshotService(tempDir);
+		// Snapshot keys come back from user-writable metadata on disk, so a
+		// corrupted index must not be able to write anywhere it likes.
+		await t.throwsAsync(
+			service.restoreFiles(new Map([['../escaped.txt', 'owned']])),
+			{message: /outside workspace/},
+		);
+		t.false(existsSync(path.join(path.dirname(tempDir), 'escaped.txt')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('FileSnapshotService reports whether a scan was truncated', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const service = new FileSnapshotService(tempDir);
+		const result = service.getModifiedFilesResult();
+
+		t.true(Array.isArray(result.files));
+		t.is(typeof result.truncated, 'boolean');
+		t.is(typeof result.truncatedCount, 'number');
+		t.is(typeof result.available, 'boolean');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 	// Note: This test runs in a git directory, so it may return files.
 	// The important thing is that it returns an array and doesn't throw.
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const {files} = service.getModifiedFiles();
+		const files = service.getModifiedFiles();
 
 		t.true(Array.isArray(files));
 		// Files should all be strings
@@ -584,7 +615,7 @@ test.serial('FileSnapshotService getModifiedFiles handles git not available', as
 		await fs.mkdir(nonGitDir, {recursive: true});
 
 		const service = new FileSnapshotService(nonGitDir);
-		const {files} = service.getModifiedFiles();
+		const files = service.getModifiedFiles();
 
 		// Should return empty array or array when git is not available
 		// (may return files from parent git repo in some environments)
@@ -733,7 +764,7 @@ test.serial(
 			}
 
 			const service = new FileSnapshotService(tempDir);
-			const {files, truncatedCount} = service.getModifiedFiles();
+			const {files, truncatedCount} = service.getModifiedFilesResult();
 
 			t.is(files.length, MAX_CHECKPOINT_FILES);
 			t.is(truncatedCount, 3);

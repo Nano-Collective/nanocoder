@@ -12,12 +12,6 @@ export interface CaptureResult {
 	skipped: SkippedFile[];
 }
 
-/** Modified files to snapshot, and how many the cap dropped. */
-export interface ModifiedFiles {
-	files: string[];
-	truncatedCount: number;
-}
-
 export interface CheckpointMetadata {
 	name: string;
 	timestamp: string; // ISO 8601 format
