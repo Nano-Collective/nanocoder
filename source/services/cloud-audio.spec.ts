@@ -96,6 +96,42 @@ test('transcribeCloudAudio successfully posts to transcription endpoint and pars
 	}
 });
 
+test('transcribeCloudAudio throws ABORTED error when AbortSignal triggers', async t => {
+	const tmpAudio = join(tmpdir(), `test-audio-abort-${Date.now()}.wav`);
+	writeFileSync(tmpAudio, Buffer.from('RIFF mock wav data'));
+
+	const openaiConfig: AIProviderConfig = {
+		name: 'openai',
+		sdkProvider: 'openai',
+		models: ['gpt-4o'],
+		config: { apiKey: 'sk-test-key' },
+	};
+
+	const abortController = new AbortController();
+	const mockSlowFetch = (async () => {
+		abortController.abort();
+		const err = new Error('The operation was aborted');
+		err.name = 'AbortError';
+		throw err;
+	}) as typeof fetch;
+
+	try {
+		const err = await t.throwsAsync(
+			async () => {
+				await transcribeCloudAudio(tmpAudio, {
+					providerConfig: openaiConfig,
+					fetchFn: mockSlowFetch,
+					signal: abortController.signal,
+				});
+			},
+			{ instanceOf: CloudAudioError },
+		);
+		t.is((err as CloudAudioError).code, 'ABORTED');
+	} finally {
+		if (existsSync(tmpAudio)) unlinkSync(tmpAudio);
+	}
+});
+
 test('synthesizeCloudSpeech successfully posts to speech endpoint and writes output file', async t => {
 	const tmpOut = join(tmpdir(), `test-tts-out-${Date.now()}.wav`);
 
