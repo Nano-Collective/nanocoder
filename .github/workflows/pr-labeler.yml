@@ -6,7 +6,6 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
   issues: write
   pull-requests: write
 
@@ -16,34 +15,24 @@ jobs:
     # Skip the automated "Version Packages" PR.
     if: github.head_ref != 'changeset-release/main'
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-      - name: Ensure area labels exist
+      - name: Color area labels
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const wanted = [
-              'area:tools',
-              'area:tui',
-              'area:ci',
-              'area:docs',
-              'area:vscode',
-            ];
+            const labels = {
+              'area:tools': ['1d76db', 'Tool implementations and tool-calling'],
+              'area:tui': ['fbca04', 'Terminal UI'],
+              'area:ci': ['d93f0b', 'GitHub Actions and CI'],
+              'area:docs': ['0075ca', 'Documentation'],
+              'area:vscode': ['5319e7', 'VS Code extension and host integration'],
+            };
             const {owner, repo} = context.repo;
-            const existing = await github.paginate(
-              github.rest.issues.listLabelsForRepo,
-              {owner, repo, per_page: 100},
-            );
-            const names = new Set(existing.map(l => l.name));
-            for (const name of wanted) {
-              if (names.has(name)) continue;
-              await github.rest.issues.createLabel({
-                owner,
-                repo,
-                name,
-                color: '0e8a16',
-              });
+            for (const [name, [color, description]] of Object.entries(labels)) {
+              try {
+                await github.rest.issues.updateLabel({owner, repo, name, color, description});
+              } catch {
+                await github.rest.issues.createLabel({owner, repo, name, color, description});
+              }
             }
 
       - name: Label by path

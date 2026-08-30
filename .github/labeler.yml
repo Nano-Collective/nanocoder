@@ -25,3 +25,4 @@ area:vscode:
   - changed-files:
       - any-glob-to-any-file:
           - plugins/vscode/**
+          - source/vscode/**
