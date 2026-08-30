@@ -447,7 +447,13 @@ function mergeSubscriptions(
 				errors.push(`subscribe[${i}].target "${target ?? ''}" is malformed.`);
 				return;
 			}
-			if (!target.startsWith('skill:') && !memberRefs.has(target)) {
+			if (target.startsWith('skill:')) {
+				errors.push(
+					`subscribe[${i}].target "${target}" is not supported yet; use a command, agent, or tool member target instead.`,
+				);
+				return;
+			}
+			if (!memberRefs.has(target)) {
 				errors.push(
 					`subscribe[${i}].target "${target}" does not resolve to a member of this bundle.`,
 				);

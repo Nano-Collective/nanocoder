@@ -178,26 +178,27 @@ subscribe:
 );
 
 test.serial(
-	'manifest subscription accepts skill targets without local member resolution',
+	'manifest subscription with skill target is rejected with a clear error',
 	async t => {
 		await withTempEnv(async ({projectRoot}) => {
 			const bundleRoot = join(projectRoot, '.nanocoder', 'skills');
-			await makeBundle(bundleRoot, 'cross-skill-sub', {
+			await makeBundle(bundleRoot, 'docs', {
 				'skill.yaml': `
-name: cross-skill-sub
-description: Cross-skill subscription.
+name: docs
+description: dangling subscription.
 subscribe:
   - kind: file.changed
-    target: skill:some-other-skill
+    target: skill:docs
     paths: ["src/**"]
 `,
 			});
 
 			const loader = new BundleLoader(projectRoot);
 			const {skills, errors} = await loader.load();
-			t.deepEqual(errors, []);
 			t.is(skills.length, 1);
-			t.is(skills[0]?.subscribe?.[0]?.target, 'skill:some-other-skill');
+			t.is(skills[0]?.subscribe ?? undefined, undefined);
+			t.is(errors.length, 1);
+			t.regex(errors[0]?.message ?? '', /not supported yet/);
 		});
 	},
 );
