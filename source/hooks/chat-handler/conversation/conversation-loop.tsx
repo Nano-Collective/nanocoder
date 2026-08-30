@@ -616,16 +616,15 @@ export const processAssistantResponse = async (
 			);
 
 			if (compressed) {
-				// Compression was performed — update both React state AND the local
-				// variable so downstream tool execution builds on compacted messages.
+				// Compression was performed — update React state and replace the
+				// local array so subsequent tool-result builders and recursive
+				// calls see the compressed messages instead of the pre-compression
+				// copy.
 				setMessages(compressed);
 				updatedMessages = compressed;
 				// Reset stale streaming token count to avoid double-counting
 				// with calculateTokenBreakdown which already counts compacted tokens
 				setTokenCount(0);
-				// Replace the local array so subsequent tool-result builders
-				// and recursive calls see the compressed messages instead of
-				// the pre-compression copy.
 				compactionOccurred = true;
 			}
 		}
