@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
-import {existsSync} from 'node:fs';
-import {isAbsolute, resolve} from 'node:path';
+import {existsSync, realpathSync} from 'node:fs';
+import {isAbsolute, resolve, sep} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
@@ -127,7 +127,8 @@ function formatScriptOutput(
  * Resolve the working directory with `${VAR}` substitution from process.env.
  * Relative paths resolve against the project root. Returns the project root
  * if the configured directory doesn't exist (so we don't hard-fail on a
- * stale checkout).
+ * stale checkout), or if the real path leaves the project (symlink, absolute,
+ * or `${HOME}` — same containment file tools already enforce).
  */
 export function resolveCwd(
 	configured: string | undefined,
@@ -138,7 +139,18 @@ export function resolveCwd(
 	const absolute = isAbsolute(expanded)
 		? expanded
 		: resolve(projectRoot, expanded);
-	return existsSync(absolute) ? absolute : projectRoot;
+	if (!existsSync(absolute)) return projectRoot;
+	return isInsideProject(absolute, projectRoot) ? absolute : projectRoot;
+}
+
+function isInsideProject(target: string, projectRoot: string): boolean {
+	try {
+		const realRoot = realpathSync(projectRoot);
+		const realTarget = realpathSync(target);
+		return realTarget === realRoot || realTarget.startsWith(realRoot + sep);
+	} catch {
+		return false;
+	}
 }
 
 /**
