@@ -10,10 +10,16 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
-import type {
-	LLMClient,
-	ToolCall,
-} from '@/types/core';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/models-dev-client.js';
+import type {LLMClient, Message, ToolCall} from '@/types/core';
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact.js';
 
 console.log('\nacp-conversation.spec.ts');
 
@@ -2001,4 +2007,81 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 
 	t.deepEqual(await session.timeline.list(), []);
 });
+
+test.serial(
+	'runAcpConversation - compacts history before the next model turn when over the token threshold',
+	async t => {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+		setSessionContextLimit(100);
+		setAutoCompactStrategy('mechanical');
+		setAutoCompactThreshold(50);
+
+		const filler = 'old context sentence. '.repeat(60);
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {
+			devMode: 'yolo',
+			messages: [
+				{role: 'user', content: filler},
+				{role: 'assistant', content: 'ack'},
+				{role: 'user', content: 'call the tool'},
+			],
+		});
+		const toolManager = {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		};
+		setToolRegistryGetter(() => ({
+			read_file: async () => 'ok',
+		}));
+
+		const payloads: Message[][] = [];
+		let callCount = 0;
+		const client = {
+			getCurrentModel: () => 'gpt-4',
+			getProviderConfig: () => ({name: 'openai'}),
+			chat: async (messages: Message[]) => {
+				payloads.push(messages);
+				callCount++;
+				if (callCount === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('read_file', {path: 'a.ts'}, 'call-1'),
+									],
+								},
+							},
+						],
+					};
+				}
+				return {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+
+		try {
+			const result = await runAcpConversation({
+				session,
+				client,
+				toolManager: toolManager as any,
+				conn,
+				nonInteractiveAlwaysAllow: [],
+			});
+
+			t.is(result.stopReason, 'end_turn');
+			t.is(payloads.length, 2);
+			const secondHistory = payloads[1]
+				.slice(1)
+				.map(m => (typeof m.content === 'string' ? m.content : ''))
+				.join('');
+			t.true(secondHistory.length < filler.length);
+		} finally {
+			resetAutoCompactSession();
+			resetSessionContextLimit();
+		}
+	},
+);
 

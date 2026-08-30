@@ -42,6 +42,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsage} from '@/usage/response-usage';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
@@ -276,6 +277,12 @@ export async function runAcpConversation(
 				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
+		messages = await maybeAutoCompact(
+			messages,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+		);
 
 		if (errorResults.length > 0) {
 			messages = [...messages, ...resultsForAbandonedTurn];

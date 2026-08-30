@@ -4,6 +4,7 @@ import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
+	maybeAutoCompact,
 	performAutoCompact,
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
@@ -632,4 +633,44 @@ test('performAutoCompact honours contextWindow from the client provider config',
 		result,
 		'Compaction must trigger when client provider config supplies contextWindow',
 	);
+});
+
+test('maybeAutoCompact returns the same array when auto-compact is off', async t => {
+	setAutoCompactEnabled(false);
+
+	const messages: Message[] = [{role: 'user', content: 'hi'}];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+	);
+
+	t.is(result, messages);
+});
+
+test('maybeAutoCompact returns history without a system role when over threshold', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [{role: 'user', content: oldContent}];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+	);
+
+	t.not(result, messages);
+	t.false(result.some(msg => msg.role === 'system'));
 });

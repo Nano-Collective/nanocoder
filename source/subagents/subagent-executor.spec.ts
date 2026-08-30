@@ -1126,3 +1126,75 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.false(wrote, 'a read-only subagent must not be able to write files');
 	t.regex(toolResult, /not available to this subagent/);
 });
+
+test.serial(
+	'caps subagent history before client.chat without starting on a tool row',
+	async t => {
+		const originalMaxMessages = getAppConfig().sessions?.maxMessages;
+		if (getAppConfig().sessions) {
+			getAppConfig().sessions!.maxMessages = 3;
+		}
+
+		const payloads: Message[][] = [];
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'ok', readOnly: true},
+		});
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't1',
+							function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't2',
+							function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't3',
+							function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+						},
+					],
+				},
+				{content: 'done'},
+			],
+			messages => {
+				payloads.push(messages);
+			},
+		);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		try {
+			const result = await executor.execute({
+				subagent_type: 'explore',
+				description: 'Read a few files',
+			});
+
+			t.true(result.success);
+			t.is(payloads.length, 4);
+			const last = payloads[3];
+			t.is(last[0]?.role, 'system');
+			t.not(last[1]?.role, 'tool');
+			t.true(
+				last.length < 8,
+				'uncapped history would be system + user + 3 assistant/tool pairs',
+			);
+		} finally {
+			if (getAppConfig().sessions && originalMaxMessages !== undefined) {
+				getAppConfig().sessions!.maxMessages = originalMaxMessages;
+			}
+		}
+	},
+);

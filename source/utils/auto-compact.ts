@@ -1,3 +1,4 @@
+import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
@@ -226,6 +227,34 @@ export async function performAutoCompact(
 		if (tokenizer?.free) {
 			tokenizer.free();
 		}
+	}
+}
+
+export async function maybeAutoCompact(
+	messages: Message[],
+	systemMessage: Message,
+	client: LLMClient,
+	nativeTools?: Record<string, AISDKCoreTool>,
+): Promise<Message[]> {
+	const autoCompactConfig = getAppConfig().autoCompact;
+	if (!autoCompactConfig) {
+		return messages;
+	}
+
+	try {
+		const compressed = await performAutoCompact(
+			messages,
+			systemMessage,
+			client.getProviderConfig().name,
+			client.getCurrentModel(),
+			autoCompactConfig,
+			undefined,
+			client,
+			nativeTools,
+		);
+		return compressed ?? messages;
+	} catch {
+		return messages;
 	}
 }
 

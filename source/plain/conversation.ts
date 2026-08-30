@@ -27,6 +27,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
@@ -411,6 +412,12 @@ export async function runPlainConversation(
 					reasoning: streamedReasoning || undefined,
 				},
 			];
+			messages = await maybeAutoCompact(
+				messages,
+				systemMessage,
+				client,
+				result.toolsDisabled ? undefined : tools,
+			);
 		}
 
 		if (errorResults.length > 0) {

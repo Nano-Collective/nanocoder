@@ -31,7 +31,9 @@ import type {
 	ToolCall,
 	ToolExecutionContext,
 } from '@/types/core';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
+import {capMessagesForModel} from '@/utils/message-capping';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -483,8 +485,18 @@ export class SubagentExecutor {
 			emitProgress('running');
 			await new Promise(resolve => setTimeout(resolve, 50));
 
+			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+			const systemMessage = messages[0];
+			const history =
+				systemMessage?.role === 'system' ? messages.slice(1) : messages;
+			const cappedHistory = capMessagesForModel(history, maxMessages);
+			const modelMessages =
+				systemMessage?.role === 'system'
+					? [systemMessage, ...cappedHistory]
+					: cappedHistory;
+
 			const response = await client.chat(
-				messages,
+				modelMessages,
 				tools,
 				{
 					onToken: token => {
@@ -572,6 +584,15 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
+			if (systemMessage?.role === 'system') {
+				const compacted = await maybeAutoCompact(
+					messages.slice(1),
+					systemMessage,
+					client,
+					tools,
+				);
+				messages = [systemMessage, ...compacted];
+			}
 			if (agentId) {
 				streamingText = '';
 				streamingReasoning = '';
