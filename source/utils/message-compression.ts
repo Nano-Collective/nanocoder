@@ -301,12 +301,13 @@ function extractErrorInfo(content: string): {
 				}
 			}
 
-			// Check if resolved
+			// Check if resolved after the error occurred
+			const resolutionContext = content.slice(
+				content.indexOf(match[0]) + match[0].length,
+			);
 			const resolved =
-				/fixed|resolved|success|working/i.test(content) &&
-				!/failed|error|broken/i.test(
-					content.slice(content.indexOf(match[0]) + match[0].length),
-				);
+				/fixed|resolved|success|working/i.test(resolutionContext) &&
+				!/failed|error|broken/i.test(resolutionContext);
 
 			return {
 				type: errorType,
