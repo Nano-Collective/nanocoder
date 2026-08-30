@@ -20,7 +20,21 @@ if (typeof nodeModule.enableCompileCache === 'function') {
 }
 
 const require = nodeModule.createRequire(import.meta.url);
-const {version} = require('../package.json');
+
+// Resolved inline rather than through `@/utils/package-version` to keep the
+// fast path import-free (see the note above). A missing or malformed
+// package.json must not throw here: this runs at module load, before any
+// error handling exists, so it would take the whole CLI down.
+const version = ((): string => {
+	try {
+		const packageJson = require('../package.json') as {version?: unknown};
+		return typeof packageJson.version === 'string' && packageJson.version
+			? packageJson.version
+			: 'unknown';
+	} catch {
+		return 'unknown';
+	}
+})();
 
 // Parse CLI arguments
 const args = process.argv.slice(2);

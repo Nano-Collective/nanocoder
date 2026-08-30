@@ -48,6 +48,7 @@ Each session captures:
 - Provider and model used
 - Working directory
 - Timestamps and message count
+- Its artifacts: the implementation plan, the task list, and the completion walkthrough
 
 Sessions are saved every 30 seconds by default and retained for 30 days.
 
@@ -62,6 +63,17 @@ Sessions are stored in the platform-specific app data directory:
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
 This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+
+### Session Artifacts
+
+Alongside `sessions/`, each session gets an `artifacts/<session id>/` directory holding the files behind the **Plan**, **Tasks**, and **Walkthrough** shortcuts above the prompt. They are written with owner-only permissions and never placed in your project directory.
+
+- Resuming a session restores its artifact shortcuts
+- Deleting a session, or letting retention expire it, deletes its artifacts too
+- Directories belonging to sessions that were never saved — because `autoSave` is off, or because `/clear` retired the session id — are swept at startup once they are more than a day old
+- `nanocoder --plain` runs get a session for the duration of the run and delete their artifacts on exit, so headless runs leave nothing behind
+
+See [Development Modes](development-modes.md) for how the artifacts are produced and [Task Management](task-management.md) for the task list specifically.
 
 ## Configuration
 

@@ -8,7 +8,21 @@ import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {beginTimelineCapture, finishTimelineCapture} from '@/acp/acp-timeline';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
+import type {
+	ArtifactDescriptor,
+	UserArtifactKind,
+} from '@/artifacts/artifact-manager';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+} from '@/artifacts/walkthrough-lifecycle';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {
+	buildAbandonedTurnMessages,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
 	getAllSubagentProgress,
@@ -29,6 +43,7 @@ import type {
 } from '@/types/core';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
 // On the last allowed turn we strip tools and inject this so the model
@@ -37,6 +52,18 @@ const FINAL_TURN_INSTRUCTION =
 	'You have reached the maximum number of tool-execution turns for this run. ' +
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
+
+const ARTIFACT_TOOL_KINDS: Record<string, UserArtifactKind> = {
+	write_plan: 'implementation_plan',
+	write_tasks: 'task',
+	write_walkthrough: 'walkthrough',
+};
+
+const ARTIFACT_TITLES: Record<UserArtifactKind, string> = {
+	implementation_plan: 'Implementation plan ready',
+	task: 'Tasks updated',
+	walkthrough: 'Walkthrough ready',
+};
 
 export interface RunAcpConversationOptions {
 	session: AcpSession;
@@ -54,6 +81,8 @@ export async function runAcpConversation(
 	const {developmentMode, abortController} = session;
 
 	let messages = session.messages;
+	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
+	let wrotePlan = false;
 
 	// Provider-reported usage accumulated across this prompt's model calls,
 	// returned on the PromptResponse (experimental ACP `usage` field) so
@@ -191,13 +220,22 @@ export async function runAcpConversation(
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
-		const result = await client.chat(
-			[systemMessage, ...cappedMessages, ...finalTurnNotice],
-			tools,
-			callbacks,
-			abortController.signal,
-			modeOverrides,
-		);
+		let result: Awaited<ReturnType<LLMClient['chat']>>;
+		try {
+			result = await client.chat(
+				[systemMessage, ...cappedMessages, ...finalTurnNotice],
+				tools,
+				callbacks,
+				abortController.signal,
+				modeOverrides,
+			);
+		} catch (error) {
+			if (abortController.signal.aborted) {
+				session.messages = messages;
+				return withTurnUsage({stopReason: 'cancelled'});
+			}
+			throw error;
+		}
 
 		recordUsage(result?.usage);
 
@@ -224,40 +262,66 @@ export async function runAcpConversation(
 		];
 		const cleanedContent = xmlParse.cleanedContent;
 
-		const validToolCalls: ToolCall[] = [];
-		const errorResults: ToolResult[] = [];
-		for (const toolCall of allToolCalls) {
-			if (
-				toolCall.function.name === '__xml_validation_error__' ||
-				!toolManager.hasTool(toolCall.function.name)
-			) {
-				errorResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolCall.function.name,
-					content: `Unknown tool: ${toolCall.function.name}`,
-				});
-				continue;
-			}
-			validToolCalls.push(toolCall);
-		}
+		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
+		const {validToolCalls, errorResults} = partition;
+		const {emittedToolCalls, resultsForAbandonedTurn} =
+			buildAbandonedTurnMessages(partition);
 
 		messages = [
 			...messages,
 			{
 				role: 'assistant',
 				content: cleanedContent,
-				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
 
 		if (errorResults.length > 0) {
-			messages = [...messages, ...errorResults];
+			messages = [...messages, ...resultsForAbandonedTurn];
 			continue;
 		}
 
 		if (validToolCalls.length === 0) {
+			if (
+				developmentMode === 'plan' &&
+				!wrotePlan &&
+				availableNames.includes('write_plan') &&
+				cleanedContent.trim().length > 0
+			) {
+				const fallbackCall: ToolCall = {
+					id: `write-plan-fallback-${session.sessionId}-${turn}`,
+					function: {
+						name: 'write_plan',
+						arguments: {content: cleanedContent},
+					},
+				};
+				const fallbackResult = await executePlanFallback(
+					session,
+					conn,
+					fallbackCall,
+				);
+				messages = [
+					...messages.slice(0, -1),
+					{
+						...messages[messages.length - 1],
+						tool_calls: [fallbackCall],
+					},
+					fallbackResult,
+				];
+				wrotePlan = !fallbackResult.isError;
+			}
+
+			const fallback = finalTurn
+				? null
+				: takeWalkthroughFallback(
+						walkthroughLifecycle,
+						availableNames.includes('write_walkthrough'),
+					);
+			if (fallback) {
+				messages = [...messages, fallback];
+				continue;
+			}
 			session.messages = messages;
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
@@ -365,9 +429,6 @@ export async function runAcpConversation(
 						'failed',
 						'Cancelled by user',
 					);
-					// This branch returns instead of falling through to the
-					// aborted check at the top of the loop, so the calls
-					// announced behind this one would stay pending forever.
 					if (announcedBatch) {
 						for (const queued of validToolCalls.slice(index + 1)) {
 							await emitToolCallUpdate(
@@ -379,6 +440,9 @@ export async function runAcpConversation(
 							);
 						}
 					}
+					toolResults.push(
+						...createCancellationResults(validToolCalls.slice(index)),
+					);
 					session.messages = [...messages, ...toolResults];
 					return withTurnUsage({stopReason: 'cancelled'});
 				}
@@ -461,6 +525,8 @@ export async function runAcpConversation(
 
 			const toolResult = await processToolUse(toolCall, {
 				abortSignal: abortController.signal,
+				sessionId: session.sessionId,
+				workingDirectory: session.cwd,
 			});
 			await finishTimelineCapture(session, timelineCapture);
 			isPolling = false;
@@ -477,6 +543,12 @@ export async function runAcpConversation(
 				toolResult.content,
 			);
 			toolResults.push(toolResult);
+			if (status === 'completed') {
+				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+				if (toolCall.function.name === 'write_plan') {
+					wrotePlan = true;
+				}
+			}
 
 			// write_tasks replaces the whole task list; mirror it to the client
 			// as an ACP plan update so GUIs can render a live checklist.
@@ -499,6 +571,29 @@ export async function runAcpConversation(
 	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
+async function executePlanFallback(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	toolCall: ToolCall,
+): Promise<ToolResult> {
+	const meta = await buildToolCallMeta(toolCall);
+	await emitToolCall(session, conn, toolCall, 'pending', meta);
+	await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+	const result = await processToolUse(toolCall, {
+		abortSignal: session.abortController.signal,
+		sessionId: session.sessionId,
+		workingDirectory: session.cwd,
+	});
+	await emitToolCallUpdate(
+		session,
+		conn,
+		toolCall,
+		result.isError ? 'failed' : 'completed',
+		result.content,
+	);
+	return result;
+}
+
 /**
  * Mirror a successful `write_tasks` call to the client as an ACP `plan`
  * session update. The tool's args carry the complete replacement task list
@@ -515,11 +610,19 @@ async function emitPlanUpdate(
 	};
 	const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
 	const validStatuses = ['pending', 'in_progress', 'completed'] as const;
+	const taskArtifactPath = artifactManager.tryGetArtifactPath(
+		session.sessionId,
+		'task',
+	);
+	const taskArtifact: ArtifactDescriptor | undefined = taskArtifactPath
+		? {kind: 'task', path: taskArtifactPath}
+		: undefined;
 
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
 			sessionUpdate: 'plan',
+			_meta: taskArtifact ? {'nanocoder/artifact': taskArtifact} : undefined,
 			entries: tasks
 				.filter(t => typeof t?.title === 'string')
 				.map(t => ({
@@ -571,6 +674,26 @@ async function emitToolCallUpdate(
 	rawOutput?: unknown,
 	title?: string,
 ): Promise<void> {
+	const artifactKind = ARTIFACT_TOOL_KINDS[toolCall.function.name];
+	const artifactPath = artifactKind
+		? artifactManager.tryGetArtifactPath(session.sessionId, artifactKind)
+		: undefined;
+	const artifact: ArtifactDescriptor | undefined =
+		status === 'completed' && artifactKind && artifactPath
+			? {
+					kind: artifactKind,
+					path: artifactPath,
+				}
+			: undefined;
+	const meta = artifact
+		? {
+				'nanocoder/artifact': artifact,
+				...(artifact.kind === 'implementation_plan'
+					? {'nanocoder/planArtifact': {path: artifact.path}}
+					: {}),
+			}
+		: undefined;
+
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
@@ -578,7 +701,9 @@ async function emitToolCallUpdate(
 			toolCallId: toolCall.id,
 			status,
 			rawOutput,
-			title,
+			title: artifact ? ARTIFACT_TITLES[artifact.kind] : title,
+			locations: artifact ? [{path: artifact.path}] : undefined,
+			_meta: meta,
 		},
 	});
 }
@@ -594,8 +719,8 @@ async function handleAskUser(
 	const options = normalizeQuestionOptions(args.options);
 
 	let content: string;
-	if (!question || options.length < 2 || options.length > 4) {
-		content = 'Error: ask_user requires a question and 2-4 string options.';
+	if (!question || options.length < 2 || options.length > 6) {
+		content = 'Error: ask_user requires a question and 2-6 string options.';
 		await emitToolCallUpdate(session, conn, toolCall, 'failed', content);
 	} else {
 		await emitToolCallUpdate(session, conn, toolCall, 'in_progress');

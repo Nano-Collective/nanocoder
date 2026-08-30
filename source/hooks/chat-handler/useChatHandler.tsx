@@ -3,7 +3,13 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
+import {
+	getPreferencesVersion,
+	getProfessionalTone,
+	subscribeToPreferences,
+} from '@/config/preferences';
 import {CommandIntegration} from '@/custom-commands/command-integration';
+import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
@@ -91,6 +97,7 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	ensureCurrentSessionId,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -119,11 +126,21 @@ export function useChatHandler({
 	const fallbackToolFormat: 'xml' | 'json' =
 		tuneToolMode === 'json' ? 'json' : 'xml';
 
-	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
+	// Prompt-affecting preferences (Professional Tone) are written straight to
+	// disk by the settings panel, so subscribe to those writes explicitly.
+	// Without this the memo below only picks the change up on the next mode or
+	// model switch, which reads as the toggle silently not working.
+	const preferencesVersion = React.useSyncExternalStore(
+		subscribeToPreferences,
+		getPreferencesVersion,
+	);
+
+	// Cache the base system prompt — only rebuild when mode, tune, tools, toolsDisabled
+	// or a prompt-affecting preference change
 	// This preserves KV cache by keeping the system message stable across turns
 	// When native tools are disabled, XML tool definitions are included in the prompt
 	// so token counting reflects the full system message the model actually sees.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: subagentsReady isn't read in the callback, but flipping it must invalidate the memo so buildSystemPrompt re-reads the module-level subagent cache populated by setAvailableSubagents.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: subagentsReady and preferencesVersion aren't read in the callback, but flipping either must invalidate the memo — subagentsReady so buildSystemPrompt re-reads the module-level subagent cache populated by setAvailableSubagents, preferencesVersion so it re-reads getProfessionalTone().
 	const cachedBasePrompt = React.useMemo(() => {
 		if (!toolManager) return null;
 		const availableNames = toolManager.getAvailableToolNames(
@@ -139,6 +156,7 @@ export function useChatHandler({
 			toolsDisabled,
 			getAppConfig().systemPrompt,
 			currentModel,
+			getProfessionalTone(),
 		);
 
 		const tools = toolsDisabled
@@ -163,6 +181,7 @@ export function useChatHandler({
 		fallbackToolFormat,
 		subagentsReady,
 		currentModel,
+		preferencesVersion,
 	]);
 
 	// Track when the current conversation started for elapsed time display
@@ -214,7 +233,13 @@ export function useChatHandler({
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
-		async (systemMessage: Message, msgs: Message[]) => {
+		async (
+			systemMessage: Message,
+			msgs: Message[],
+			sessionId?: string,
+			onToolExecuted?: (toolName: string) => void,
+			onFinalAssistantText?: (content: string) => void,
+		) => {
 			if (!client) return;
 
 			try {
@@ -250,6 +275,10 @@ export function useChatHandler({
 					tune,
 					privacySessionMapRef,
 					privacyEnabled,
+					sessionId,
+					workingDirectory: process.cwd(),
+					onToolExecuted,
+					onFinalAssistantText,
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.
@@ -305,6 +334,9 @@ export function useChatHandler({
 		images?: ImageAttachment[],
 	) => {
 		if (!client || !toolManager) return;
+		const sessionId = ensureCurrentSessionId?.();
+		let wrotePlan = false;
+		let finalAssistantText = '';
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
@@ -369,7 +401,41 @@ export function useChatHandler({
 			await processAssistantResponseWithErrorHandling(
 				systemMessage,
 				updatedMessages,
+				sessionId,
+				toolName => {
+					if (toolName === 'write_plan') wrotePlan = true;
+				},
+				content => {
+					finalAssistantText = content;
+				},
 			);
+
+			if (
+				developmentMode === 'plan' &&
+				!wrotePlan &&
+				!controller.signal.aborted &&
+				finalAssistantText.trim()
+			) {
+				const fallbackResult = await processToolUse(
+					{
+						id: 'write-plan-fallback',
+						function: {
+							name: 'write_plan',
+							arguments: {content: finalAssistantText},
+						},
+					},
+					{
+						abortSignal: controller.signal,
+						sessionId,
+						workingDirectory: process.cwd(),
+					},
+				);
+				if (fallbackResult.isError) {
+					displayError(new Error(fallbackResult.content), 'plan-fallback');
+				} else {
+					wrotePlan = true;
+				}
+			}
 
 			// If this turn STARTED in plan mode (closure value, captured at submit
 			// time) and ran to completion without being interrupted, a plan was
@@ -377,7 +443,11 @@ export function useChatHandler({
 			// the start mode and the abort signal both in hand, avoids the race
 			// where toggling modes mid-generation makes an unrelated completing turn
 			// look like a finished plan.
-			if (developmentMode === 'plan' && !controller.signal.aborted) {
+			if (
+				developmentMode === 'plan' &&
+				wrotePlan &&
+				!controller.signal.aborted
+			) {
 				onPlanTurnComplete?.();
 			}
 		} catch (error) {

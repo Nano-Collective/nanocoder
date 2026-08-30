@@ -165,3 +165,33 @@ test('matchGlob: basic patterns', t => {
 	t.true(matchGlob('file.txt', 'file.txt'));
 	t.false(matchGlob('file.txt', 'other.txt'));
 });
+
+// Chokidar reports the platform separator, so on Windows a `/`-authored
+// pattern is asked to match `docs\guide.md`. Both directions matter: a
+// segment pattern must still match, and `*` must not cross a backslash any
+// more than it crosses a slash.
+test('matchGlob: paths using Windows separators', t => {
+	const cases: Array<[pattern: string, path: string, expected: boolean]> = [
+		['docs/**', 'docs\\guide.md', true],
+		['docs/**', 'docs\\api\\ref.md', true],
+		['docs/*.md', 'docs\\guide.md', true],
+		['k8s/**/*.yaml', 'k8s\\deploy.yaml', true],
+		['k8s/**/*.yaml', 'k8s\\prod\\deploy.yaml', true],
+		['src/**/*.ts', 'src\\deep\\file.ts', true],
+		['**/*.md', 'docs\\intro.md', true],
+		['docs/**', 'src\\index.ts', false],
+		// `*` stops at a directory boundary, whichever separator draws it
+		['*.md', 'sub\\a.md', false],
+		['src/*.ts', 'src\\deep\\file.ts', false],
+		['?.md', 'sub\\a.md', false],
+	];
+	for (const [pattern, path, expected] of cases) {
+		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
+	}
+});
+
+test('matchGlob: patterns authored with Windows separators', t => {
+	t.true(matchGlob('docs\\**', 'docs/guide.md'));
+	t.true(matchGlob('docs\\**', 'docs\\guide.md'));
+	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
+});
