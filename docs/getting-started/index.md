@@ -62,6 +62,7 @@ nanocoder -h
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust` |
 | `run` | | Run in non-interactive mode |
+| `review` | | Review a branch or PR diff for bugs, security, and style violations |
 
 **Provider/Model Flags:**
 
@@ -177,6 +178,21 @@ nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
 ```
+
+## Code Review
+
+Nanocoder provides AI-powered code review for branches and pull requests:
+
+```bash
+# Review a branch
+nanocoder review main
+nanocoder review feature/auth
+
+# Review a PR (requires gh CLI)
+nanocoder review 42
+```
+
+This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI.
 
 **Non-interactive mode behavior:**
 

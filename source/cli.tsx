@@ -134,6 +134,7 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
 
@@ -178,6 +179,9 @@ Examples:
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
+  nanocoder review main
+  nanocoder review feature/auth
+  nanocoder review 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -361,7 +365,55 @@ async function main(): Promise<void> {
 		nonInteractivePrompt = promptArgs.join(' ');
 	}
 
-	const nonInteractiveMode = runCommandIndex !== -1;
+	let nonInteractiveMode = runCommandIndex !== -1;
+
+	// Check for `nanocoder review <target>` — syntactic sugar for
+	// `nanocoder run /review <target>`. The target is the branch or PR number
+	// to review. Flags between `review` and the target are filtered the same
+	// way as `run`.
+	const reviewCommandIndex = args.findIndex(arg => arg === 'review');
+	if (reviewCommandIndex !== -1) {
+		const afterReviewArgs = args.slice(reviewCommandIndex + 1);
+		const reviewArgs: string[] = [];
+		for (let i = 0; i < afterReviewArgs.length; i++) {
+			const arg = afterReviewArgs[i];
+			if (
+				arg === '--vscode' ||
+				arg === '--json' ||
+				arg === '--trust-directory' ||
+				arg === '--plain' ||
+				arg === '--no-plain' ||
+				arg === '--no-alt-screen' ||
+				arg === '--alt-screen'
+			) {
+				continue;
+			} else if (
+				arg === '--vscode-port' ||
+				arg === '--provider' ||
+				arg === '--model' ||
+				arg === '--context-max' ||
+				arg === '--output-format'
+			) {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--mode=')) {
+				continue;
+			} else if (arg.startsWith('--output-format=')) {
+				continue;
+			} else {
+				reviewArgs.push(arg);
+			}
+		}
+		if (reviewArgs.length === 0) {
+			console.error(
+				'Usage: nanocoder review <branch-or-pr-number>\n\nExamples:\n  nanocoder review main\n  nanocoder review feature/auth\n  nanocoder review 42',
+			);
+			process.exit(1);
+		}
+		// Inject as a slash command prompt
+		nonInteractivePrompt = `/review ${reviewArgs.join(' ')}`;
+		nonInteractiveMode = true;
+	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.

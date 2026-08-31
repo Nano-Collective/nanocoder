@@ -75,6 +75,13 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
 	},
 	{
+		name: 'review',
+		description:
+			'Review a branch or PR diff for bugs, security issues, and style violations',
+		progressLabel: 'Reviewing code',
+		load: () => import('@/commands/review').then(m => m.reviewCommand),
+	},
+	{
 		name: 'doctor',
 		description: 'Show environment health report for bug reports',
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
