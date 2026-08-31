@@ -50,6 +50,10 @@ nanocoder --mode plan run "audit the auth module"
 
 # Fullscreen mode with in-app scrolling instead of the inline default
 nanocoder --alt-screen
+
+# Review a branch or PR for bugs, security issues, and style violations
+nanocoder review main
+nanocoder review 42
 ```
 
 ### Screen Modes
