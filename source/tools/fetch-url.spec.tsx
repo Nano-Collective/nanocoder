@@ -72,15 +72,22 @@ test('handler rejects loopback aliases without fetching', async t => {
 		return;
 	}
 
-	await t.throwsAsync(
-		async () => {
-			await fetchUrlTool.tool.execute!(
-				{url: 'http://127.0.0.2/'},
-				{toolCallId: 'test', messages: []},
-			);
-		},
-		{message: /internal\/private network/},
-	);
+	for (const url of [
+		'http://127.0.0.2/',
+		'http://metadata.google.internal/',
+		'http://metadata.goog/',
+	]) {
+		await t.throwsAsync(
+			async () => {
+				await fetchUrlTool.tool.execute!(
+					{url},
+					{toolCallId: 'test', messages: []},
+				);
+			},
+			{message: /internal\/private network/},
+			url,
+		);
+	}
 });
 
 test('validator accepts valid HTTP URLs', async t => {
@@ -248,6 +255,8 @@ test('validator rejects 127.0.0.2 and cloud metadata hosts', async t => {
 		'http://127.0.0.2',
 		'http://169.254.169.254/latest/meta-data/',
 		'http://metadata.google.internal',
+		'http://metadata.goog',
+		'http://metadata/',
 		'http://[::ffff:127.0.0.2]',
 	]) {
 		const result = await fetchUrlTool.validator!({url});

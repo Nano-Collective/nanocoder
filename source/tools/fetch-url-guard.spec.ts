@@ -24,6 +24,10 @@ test('assertPublicHttpUrl rejects loopback, metadata, RFC1918, IPv6 local', t =>
 		'http://169.254.169.254/latest/meta-data/',
 		'http://metadata.google.internal',
 		'http://metadata.google.internal./',
+		'http://metadata.goog',
+		'http://metadata.goog./',
+		'http://metadata/',
+		'http://metadata./',
 		'http://localhost:3000',
 		'http://localhost./',
 		'http://10.0.0.1',
@@ -32,6 +36,8 @@ test('assertPublicHttpUrl rejects loopback, metadata, RFC1918, IPv6 local', t =>
 		'http://[::1]',
 		'http://[::ffff:127.0.0.2]',
 		'http://[fe80::1]',
+		'http://[fec0::1]',
+		'http://[ff02::1]',
 		'http://[fd12:3456:789a::1]',
 	];
 	for (const url of blocked) {

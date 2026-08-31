@@ -1,4 +1,14 @@
-/** Reject fetch_url targets that are loopback, private, link-local, or cloud metadata. */
+/**
+ * Reject fetch_url targets that are loopback, private, link-local, or cloud
+ * metadata — on the *request* URL only.
+ *
+ * Known gaps (not this file):
+ * - HTTP redirects: `@nanocollective/get-md` fetches with `redirect: "follow"`,
+ *   so `http://attacker.example/r` → `http://169.254.169.254/` still returns
+ *   the private body. Tracked in #1089.
+ * - DNS rebinding: a public name can resolve to a blocked address at request
+ *   time; this check is hostname-string / parsed IP, not a pinned lookup.
+ */
 
 function parseIpv4(host: string): number | null {
 	const parts = host.split('.');
@@ -43,16 +53,25 @@ function ipv4FromMappedIpv6(host: string): number | null {
 function isBlockedIpv6(host: string): boolean {
 	if (!host.includes(':')) return false;
 	if (host === '::1' || host === '::') return true;
-	if (/^fe[89ab]/i.test(host)) return true; // fe80::/10
-	if (/^f[cd]/i.test(host)) return true; // fc00::/7
+	if (/^fe[89ab]/i.test(host)) return true; // fe80::/10 link-local
+	if (/^fe[cdef]/i.test(host)) return true; // fec0::/10 site-local
+	if (/^ff/i.test(host)) return true; // ff00::/8 multicast
+	if (/^f[cd]/i.test(host)) return true; // fc00::/7 unique-local
 	return false;
 }
+
+const METADATA_HOSTS = new Set([
+	'localhost',
+	'metadata',
+	'metadata.goog',
+	'metadata.google.internal',
+]);
 
 function isBlockedFetchHost(hostname: string): boolean {
 	// Trailing-dot FQDNs (`localhost.`, `metadata.google.internal.`) are a
 	// different hostname string; Node does not strip them.
 	const host = hostname.toLowerCase().replace(/\.$/, '');
-	if (host === 'localhost' || host === 'metadata.google.internal') return true;
+	if (METADATA_HOSTS.has(host)) return true;
 
 	const bare = host.replace(/^\[|\]$/g, '');
 	const v4 = parseIpv4(bare) ?? ipv4FromMappedIpv6(bare);
