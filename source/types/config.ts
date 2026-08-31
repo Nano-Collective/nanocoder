@@ -443,6 +443,12 @@ export interface UserPreferences {
 	};
 	lastUpdateCheck?: number;
 	selectedTheme?: ThemePreset;
+	/**
+	 * Theme whose palette colours syntax highlighting in code blocks, diffs, and
+	 * file previews. Defaults to `selectedTheme`; set it only to give code a
+	 * palette of its own. An unknown name falls back to `selectedTheme`.
+	 */
+	syntaxTheme?: ThemePreset;
 	trustedDirectories?: string[];
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
