@@ -601,3 +601,79 @@ test('collapsed task badge keeps the key hint when there is room for it', t => {
 	);
 	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
 });
+
+// ============================================================================
+// Auto-save indicator tests (Issue #932)
+// ============================================================================
+
+test('DevelopmentModeIndicator renders saving indicator when isSaving is true', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			isSaving={true}
+		/>,
+	);
+	t.regex(output, /saving/);
+});
+
+test('DevelopmentModeIndicator omits saving indicator when isSaving is false or undefined', t => {
+	const falseOutput = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			isSaving={false}
+		/>,
+	);
+	t.notRegex(falseOutput, /saving/);
+
+	const undefOutput = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+		/>,
+	);
+	t.notRegex(undefOutput, /saving/);
+});
+
+test('saving indicator drops under narrow width pressure without shrinking session name', t => {
+	const fullSession = 'feature-authentication-token';
+	// Render at a tight width of 40 columns
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={40}
+			contextSource="api"
+			sessionName={fullSession}
+			isSaving={true}
+		/>,
+		42,
+	);
+
+	// saving indicator must drop when width is tight
+	t.notRegex(output, /saving/);
+	// Session name must still have room and not be shrunk away
+	t.regex(output, /feature/);
+});
+
+test('saving indicator renders when there is sufficient width', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={40}
+			contextSource="api"
+			sessionName="my-session"
+			isSaving={true}
+		/>,
+		100,
+	);
+
+	t.regex(output, /my-session/);
+	t.regex(output, /saving/);
+	t.regex(output, /ctx: 40%/);
+});
