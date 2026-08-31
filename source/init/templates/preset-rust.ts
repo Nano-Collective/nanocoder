@@ -16,8 +16,7 @@ export const rustPreset = {
 	files: [
 		{
 			path: '.nanocoderignore',
-			content: `# Cargo lockfile and generated build output
-Cargo.lock
+			content: `# Generated Cargo build output
 target/
 
 # Generated coverage and profiling data

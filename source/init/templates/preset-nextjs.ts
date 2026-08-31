@@ -15,6 +15,12 @@ export const nextjsPreset = {
 		Test: 'npm run test',
 		Lint: 'npm run lint',
 	},
+	packageScripts: {
+		Development: 'dev',
+		Build: 'build',
+		Test: 'test',
+		Lint: 'lint',
+	},
 	files: [
 		{
 			path: '.nanocoderignore',

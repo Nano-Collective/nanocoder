@@ -104,10 +104,12 @@ nanocoder init --preset rust
 ```
 
 Every preset creates an analyzed `AGENTS.md`, a `.nanocoderignore`, and
-`.nanocoder/commands/check.md`. Detected project details take precedence over
-preset defaults. Existing files are never silently replaced: an already
-initialized project is refused unless `--force` is passed, `--force` only
-regenerates `AGENTS.md`, and existing preset files are preserved.
+`.nanocoder/commands/check.md`. The selected preset supplies the project type
+and fills in stack defaults while detected languages, package scripts, and
+commands remain authoritative where applicable. Existing files are never
+silently replaced: an already initialized project is refused unless `--force`
+is passed, `--force` only regenerates `AGENTS.md`, and existing preset files are
+preserved.
 
 The interactive `/init` command accepts the same options, including
 `/init --preset nextjs`, `/init --force`, and `/init --lean`.

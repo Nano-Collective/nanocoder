@@ -14,5 +14,7 @@ export interface PresetDefinition {
 	primaryLanguage: string;
 	frameworks: ProjectAnalysis['dependencies']['frameworks'];
 	buildCommands: Record<string, string>;
+	/** Build-command label to the package.json script required for that command. */
+	packageScripts?: Record<string, string>;
 	files: PresetFile[];
 }

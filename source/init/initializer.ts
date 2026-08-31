@@ -1,5 +1,5 @@
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
-import {dirname, isAbsolute, join, normalize} from 'node:path';
+import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {AgentsTemplateGenerator} from '@/init/agents-template-generator';
 import {ExistingRulesExtractor} from '@/init/existing-rules-extractor';
 import {applyPresetToAnalysis, resolvePreset} from '@/init/preset-registry';
@@ -29,15 +29,13 @@ export class ProjectAlreadyInitializedError extends Error {
 }
 
 function resolvePresetPath(projectPath: string, relativePath: string): string {
-	const normalizedPath = normalize(relativePath);
-	if (
-		isAbsolute(relativePath) ||
-		normalizedPath === '..' ||
-		normalizedPath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
-	) {
+	const projectRoot = resolve(projectPath);
+	const destination = resolve(projectRoot, relativePath);
+	const relativeDestination = relative(projectRoot, destination);
+	if (relativeDestination.startsWith('..') || isAbsolute(relativeDestination)) {
 		throw new Error(`Invalid preset file path: ${relativePath}`);
 	}
-	return join(projectPath, normalizedPath);
+	return destination;
 }
 
 export function initializeProject(

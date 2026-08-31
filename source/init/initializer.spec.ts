@@ -107,6 +107,76 @@ test.serial('initializeProject rejects an invalid preset before writing files', 
 	}
 });
 
+test.serial(
+	'initializeProject only includes React preset commands backed by package scripts',
+	t => {
+		const projectPath = createTestProject();
+		try {
+			writeFileSync(
+				join(projectPath, 'package.json'),
+				JSON.stringify({
+					dependencies: {react: '^19.0.0'},
+					scripts: {
+						build: 'vite build',
+						test: 'vitest run',
+					},
+				}),
+			);
+
+			const result = initializeProject({projectPath, preset: 'react'});
+			const agents = readFileSync(join(projectPath, 'AGENTS.md'), 'utf-8');
+
+			t.deepEqual(result.analysis.buildCommands, {
+				Build: 'npm run build',
+				Test: 'npm run test',
+			});
+			t.true(agents.includes('npm run build'));
+			t.true(agents.includes('npm run test'));
+			t.false(agents.includes('npm run dev'));
+			t.false(agents.includes('npm run lint'));
+		} finally {
+			removeTestProject(projectPath);
+		}
+	},
+);
+
+test.serial(
+	'initializeProject includes React preset commands whose package scripts exist',
+	t => {
+		const projectPath = createTestProject();
+		try {
+			writeFileSync(
+				join(projectPath, 'package.json'),
+				JSON.stringify({
+					dependencies: {react: '^19.0.0'},
+					scripts: {
+						dev: 'vite',
+						build: 'vite build',
+						test: 'vitest run',
+						lint: 'eslint .',
+					},
+				}),
+			);
+
+			const result = initializeProject({projectPath, preset: 'React'});
+			const agents = readFileSync(join(projectPath, 'AGENTS.md'), 'utf-8');
+
+			t.deepEqual(result.analysis.buildCommands, {
+				Development: 'npm run dev',
+				Build: 'npm run build',
+				Test: 'npm run test',
+				Lint: 'npm run lint',
+			});
+			t.is(result.preset, 'react');
+			for (const command of Object.values(result.analysis.buildCommands)) {
+				t.true(agents.includes(command));
+			}
+		} finally {
+			removeTestProject(projectPath);
+		}
+	},
+);
+
 test.serial('initializeProject preserves existing preset files with --force', t => {
 	const projectPath = createTestProject();
 	const existingAgents = '# Existing instructions';

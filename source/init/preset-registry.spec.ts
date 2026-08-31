@@ -1,9 +1,11 @@
 import test from 'ava';
 import {
+	applyPresetToAnalysis,
 	resolvePreset,
 	supportedPresetNames,
 	UnknownPresetError,
 } from '@/init/preset-registry';
+import type {ProjectAnalysis} from '@/init/project-analyzer';
 
 test('preset registry exposes the supported preset names', t => {
 	t.deepEqual(supportedPresetNames, ['react', 'nextjs', 'rust']);
@@ -27,4 +29,62 @@ test('preset registry reports unknown presets and all supported names', t => {
 		error.message,
 		'Unknown preset "vue". Supported presets: react, nextjs, rust.',
 	);
+});
+
+for (const inheritedName of ['constructor', 'toString', '__proto__']) {
+	test(`preset registry rejects inherited property ${inheritedName}`, t => {
+		const error = t.throws(() => resolvePreset(inheritedName));
+		t.true(error instanceof UnknownPresetError);
+		t.is(
+			error.message,
+			`Unknown preset "${inheritedName}". Supported presets: react, nextjs, rust.`,
+		);
+	});
+}
+
+test('preset registry normalizes case and whitespace', t => {
+	t.is(resolvePreset('  React  ').name, 'react');
+});
+
+test('preset registry preserves the user-provided value in errors', t => {
+	const error = t.throws(() => resolvePreset('  Vue  '));
+	t.true(error instanceof UnknownPresetError);
+	t.is(
+		error.message,
+		'Unknown preset "  Vue  ". Supported presets: react, nextjs, rust.',
+	);
+});
+
+test('preset commands require package scripts and detected commands win', t => {
+	const analysis: ProjectAnalysis = {
+		projectPath: '/project',
+		projectName: 'example',
+		languages: {primary: null, secondary: [], all: []},
+		dependencies: {
+			frameworks: [],
+			buildTools: [],
+			testingFrameworks: [],
+			buildInfo: {scripts: {build: 'custom-build'}},
+		},
+		projectType: 'Unknown',
+		keyFiles: {config: [], documentation: [], build: [], test: []},
+		structure: {
+			totalFiles: 0,
+			scannedFiles: 0,
+			directories: [],
+			importantDirectories: [],
+		},
+		buildCommands: {Build: 'pnpm run custom-build'},
+	};
+
+	const result = applyPresetToAnalysis(analysis, resolvePreset('react'));
+	t.deepEqual(result.buildCommands, {Build: 'pnpm run custom-build'});
+});
+
+test('Rust preset keeps Cargo.lock available as project context', t => {
+	const ignoreFile = resolvePreset('rust').files.find(
+		file => file.path === '.nanocoderignore',
+	);
+	t.truthy(ignoreFile);
+	t.false(ignoreFile?.content.includes('Cargo.lock'));
 });

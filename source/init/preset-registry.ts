@@ -24,9 +24,11 @@ export class UnknownPresetError extends Error {
 }
 
 export function resolvePreset(name: string): PresetDefinition {
-	const preset = presets[name as PresetName];
-	if (!preset) throw new UnknownPresetError(name);
-	return preset;
+	const normalizedName = name.trim().toLowerCase();
+	if (!Object.hasOwn(presets, normalizedName)) {
+		throw new UnknownPresetError(name);
+	}
+	return presets[normalizedName as PresetName];
 }
 
 export function applyPresetToAnalysis(
@@ -46,6 +48,16 @@ export function applyPresetToAnalysis(
 		percentage: 100,
 		files: [],
 	};
+	const detectedPackageScripts = analysis.dependencies.buildInfo.scripts ?? {};
+	const presetBuildCommands = Object.fromEntries(
+		Object.entries(preset.buildCommands).filter(([action]) => {
+			const packageScript = preset.packageScripts?.[action];
+			return (
+				packageScript === undefined ||
+				Object.hasOwn(detectedPackageScripts, packageScript)
+			);
+		}),
+	);
 
 	return {
 		...analysis,
@@ -61,7 +73,7 @@ export function applyPresetToAnalysis(
 			frameworks: [...presetFrameworks, ...analysis.dependencies.frameworks],
 		},
 		buildCommands: {
-			...preset.buildCommands,
+			...presetBuildCommands,
 			...analysis.buildCommands,
 		},
 	};
