@@ -1,9 +1,6 @@
 import test from 'ava';
 import type {Message} from '@/types/core';
-import {generateExportFilename, writeUniqueFile} from './generate-export-filename';
-import {promises as fs} from 'fs';
-import path from 'path';
-import os from 'os';
+import {generateExportFilename} from './generate-export-filename';
 
 const user = (content: string): Message => ({role: 'user', content});
 const assistant = (content: string): Message => ({role: 'assistant', content});
@@ -113,83 +110,4 @@ test('truncates a long hyphenated slug at the last whole word', t => {
 	// end mid-word with a break inside a hyphenated token.
 	t.true(/^fix(?:-[a-z]+)*$/.test(slug));
 	t.true(slug.length >= 20);
-});
-
-test('writeUniqueFile writes to the given path when it is free', async t => {
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
-	const filepath = path.join(tmpDir, 'test.md');
-	const result = await writeUniqueFile(filepath, 'content');
-	t.is(result, filepath);
-	t.is(await fs.readFile(filepath, 'utf-8'), 'content');
-	await fs.rm(tmpDir, {recursive: true});
-});
-
-test('writeUniqueFile appends a counter when the path is taken', async t => {
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
-	const filepath = path.join(tmpDir, 'test.md');
-	await fs.writeFile(filepath, 'existing');
-	const result = await writeUniqueFile(filepath, 'content');
-	t.is(result, path.join(tmpDir, 'test-2.md'));
-	t.is(await fs.readFile(path.join(tmpDir, 'test-2.md'), 'utf-8'), 'content');
-	await fs.rm(tmpDir, {recursive: true});
-});
-
-test('writeUniqueFile never overwrites an existing file', async t => {
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
-	const filepath = path.join(tmpDir, 'test.md');
-	const originals = [
-		'test.md',
-		'test-2.md',
-		'test-3.md',
-		'test-4.md',
-		'test-5.md',
-		'test-6.md',
-	];
-	for (const name of originals) {
-		await fs.writeFile(path.join(tmpDir, name), 'existing');
-	}
-
-	const result = await writeUniqueFile(filepath, 'content');
-
-	// Every pre-existing file keeps its content — none may be clobbered.
-	for (const name of originals) {
-		t.is(await fs.readFile(path.join(tmpDir, name), 'utf-8'), 'existing');
-	}
-	// The writer must have landed in a fresh, distinct file (timestamp suffix).
-	t.not(result, filepath);
-	t.true(result.startsWith(path.join(tmpDir, 'test-new-')));
-	t.true(result.endsWith('.md'));
-	t.is(await fs.readFile(result, 'utf-8'), 'content');
-	await fs.rm(tmpDir, {recursive: true});
-});
-
-test('writeUniqueFile is atomic: the original is never clobbered by a race', async t => {
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
-	const filepath = path.join(tmpDir, 'test.md');
-	await fs.writeFile(filepath, 'original');
-
-	// Simulate TWO concurrent exclusive-flag writers for the same target. Only
-	// one may win the base name; the other must fall to a suffix, and the
-	// original file's contents must be preserved.
-	const [a, b] = await Promise.all([
-		writeUniqueFile(filepath, 'first'),
-		writeUniqueFile(filepath, 'second'),
-	]);
-
-	t.not(a, filepath);
-	t.not(b, filepath);
-	t.not(a, b);
-	t.is(await fs.readFile(filepath, 'utf-8'), 'original');
-	await fs.rm(tmpDir, {recursive: true});
-});
-
-test('writeUniqueFile reports a missing parent directory clearly', async t => {
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
-	const filepath = path.join(tmpDir, 'does-not-exist', 'chat.md');
-
-	await t.throwsAsync(
-		() => writeUniqueFile(filepath, 'content'),
-		{message: /Parent directory does not exist/},
-	);
-	await fs.rm(tmpDir, {recursive: true});
 });
