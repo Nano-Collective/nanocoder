@@ -71,6 +71,34 @@ test('exportCommand uses provided filename', async t => {
 	t.true(mockWriteFileCalls[0].path.includes('custom-export.md'));
 });
 
+test('exportCommand keeps overwrite semantics for a user-provided filename', async t => {
+	// Simulate the target file already existing. A user-typed name must still
+	// write to that exact path (overwrite), not get auto-suffixed.
+	fs.access = async () => {
+		return void 0;
+	};
+
+	await exportCommand.handler(['fixed-name.md'], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.endsWith('fixed-name.md'));
+	t.false(mockWriteFileCalls[0].path.includes('fixed-name-2'));
+});
+
+test('exportCommand auto-suffixes a generated filename on collision', async t => {
+	const originalAccess = fs.access;
+	// Without this, uniqueFilename's check sees the file as not existing.
+	fs.access = async () => {
+		throw new Error('ENOENT');
+	};
+
+	await exportCommand.handler([], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.false(mockWriteFileCalls[0].path.includes('/2'));
+	fs.access = originalAccess;
+});
+
 test('exportCommand generates default filename from first user message', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
 

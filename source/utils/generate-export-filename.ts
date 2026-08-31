@@ -4,11 +4,12 @@ import type {Message} from '@/types/core';
 
 const MAX_WORDS = 4;
 const MAX_SLUG_LENGTH = 40;
+const MAX_COLLISION_ATTEMPTS = 5;
 
 function sanitizeSlug(input: string): string {
 	return input
 		.toLowerCase()
-		.replace(/[^\w\s-]/g, '')
+		.replace(/[^\p{L}\p{N}\s-]/gu, '')
 		.replace(/\s+/g, '-')
 		.replace(/-+/g, '-')
 		.replace(/^-|-$/g, '');
@@ -60,7 +61,7 @@ export async function uniqueFilename(filepath: string): Promise<string> {
 	const ext = path.extname(filepath);
 	const base = path.basename(filepath, ext);
 
-	for (let i = 2; i < 1000; i++) {
+	for (let i = 2; i < MAX_COLLISION_ATTEMPTS + 2; i++) {
 		const candidate = path.join(dir, `${base}-${i}${ext}`);
 		try {
 			await fs.access(candidate);
@@ -69,7 +70,10 @@ export async function uniqueFilename(filepath: string): Promise<string> {
 		}
 	}
 
-	return filepath;
+	// Bounded attempts failed, fall back to a timestamp suffix. This must
+	// never return the original path: fs.writeFile would clobber the existing
+	// file, violating the "never overwrites" guarantee.
+	return path.join(dir, `${base}-new-${Date.now()}${ext}`);
 }
 
 export function generateExportFilename(messages: Message[]): string {

@@ -70,6 +70,7 @@ export const exportCommand: Command = {
 		messages: Message[],
 		{provider, model, tokens},
 	) => {
+		const userProvided = args.length > 0;
 		const requestedFilename = args[0] || generateExportFilename(messages);
 
 		if (!isValidFilePath(requestedFilename, process.cwd())) {
@@ -80,7 +81,11 @@ export const exportCommand: Command = {
 		}
 
 		const filepath = path.resolve(process.cwd(), requestedFilename); // nosemgrep
-		const safeFilepath = await uniqueFilename(filepath);
+		// A name the user typed keeps overwrite semantics (least surprise). Only
+		// generated names get auto-suffixed so repeated exports never clobber.
+		const safeFilepath = userProvided
+			? filepath
+			: await uniqueFilename(filepath);
 		const filename = path.basename(safeFilepath);
 
 		const frontmatter = `---

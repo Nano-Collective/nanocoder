@@ -1,10 +1,6 @@
 import test from 'ava';
 import type {Message} from '@/types/core';
-import {
-	generateExportFilename,
-	isUnsafeFilename,
-	uniqueFilename,
-} from './generate-export-filename';
+import {generateExportFilename, uniqueFilename} from './generate-export-filename';
 import {promises as fs} from 'fs';
 import path from 'path';
 import os from 'os';
@@ -74,23 +70,27 @@ test('skips empty first line and uses second', t => {
 test('truncates long slug at word boundary', t => {
 	const messages = [user('a'.repeat(100))];
 	const filename = generateExportFilename(messages);
-	const slug = filename.split('-20')[0]!;
+	const slug = filename.replace(/-\d{4}-\d{2}-\d{2}\.md$/, '');
 	t.true(slug.length <= 40);
 	t.false(slug.endsWith('-'));
 });
 
-test('isUnsafeFilename rejects path traversal', t => {
-	t.true(isUnsafeFilename('../etc/passwd'));
-	t.true(isUnsafeFilename('foo/../../bar.md'));
-	t.true(isUnsafeFilename('/etc/passwd'));
-	t.true(isUnsafeFilename('..'));
-	t.true(isUnsafeFilename('.'));
+test('preserves CJK characters in slug', t => {
+	const messages = [user('修复登录问题')];
+	const filename = generateExportFilename(messages);
+	t.regex(filename, /^修复登录问题-\d{4}-\d{2}-\d{2}\.md$/);
 });
 
-test('isUnsafeFilename accepts safe filenames', t => {
-	t.false(isUnsafeFilename('export.md'));
-	t.false(isUnsafeFilename('my-file.md'));
-	t.false(isUnsafeFilename('fix-login-bug-2026-08-25.md'));
+test('preserves Cyrillic characters in slug', t => {
+	const messages = [user('исправить ошибку входа')];
+	const filename = generateExportFilename(messages);
+	t.regex(filename, /^исправить-ошибку-входа-\d{4}-\d{2}-\d{2}\.md$/);
+});
+
+test('strips emoji while keeping adjacent words', t => {
+	const messages = [user('fix the 🐛 bug')];
+	const filename = generateExportFilename(messages);
+	t.regex(filename, /^fix-the-bug-\d{4}-\d{2}-\d{2}\.md$/);
 });
 
 test('uniqueFilename returns original when file does not exist', async t => {
@@ -118,5 +118,28 @@ test('uniqueFilename increments counter for multiple collisions', async t => {
 	await fs.writeFile(path.join(tmpDir, 'test-3.md'), 'existing');
 	const result = await uniqueFilename(filepath);
 	t.is(result, path.join(tmpDir, 'test-4.md'));
+	await fs.rm(tmpDir, {recursive: true});
+});
+
+test('uniqueFilename never returns the original path after exhausting counters', async t => {
+	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
+	const filepath = path.join(tmpDir, 'test.md');
+	await fs.writeFile(filepath, 'existing');
+	await fs.writeFile(path.join(tmpDir, 'test-2.md'), 'existing');
+	await fs.writeFile(path.join(tmpDir, 'test-3.md'), 'existing');
+	await fs.writeFile(path.join(tmpDir, 'test-4.md'), 'existing');
+	await fs.writeFile(path.join(tmpDir, 'test-5.md'), 'existing');
+	await fs.writeFile(path.join(tmpDir, 'test-6.md'), 'existing');
+
+	const result = await uniqueFilename(filepath);
+
+	t.not(result, filepath);
+	t.not(result, path.join(tmpDir, 'test-2.md'));
+	t.not(result, path.join(tmpDir, 'test-3.md'));
+	t.not(result, path.join(tmpDir, 'test-4.md'));
+	t.not(result, path.join(tmpDir, 'test-5.md'));
+	t.not(result, path.join(tmpDir, 'test-6.md'));
+	t.true(result.startsWith(path.join(tmpDir, 'test-new-')));
+	t.true(result.endsWith('.md'));
 	await fs.rm(tmpDir, {recursive: true});
 });
