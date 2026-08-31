@@ -12,13 +12,16 @@
  *   - `--required` is NOT used, so loader-defaulted sub-objects
  *     (autoCompact, tune, headless) stay all-optional. Genuinely required
  *     fields are added by hand (ProviderConfig.name/models,
- *     MCPServerConfig.name/transport).
+ *     MCPServerConfig.name/transport, OpenRouterPlugin.id, and lspServers
+ *     item name/command/languages).
  *   - `--noExtraProps` is NOT used: it corrupts `Record<string, X>` into
  *     `{type:object, additionalProperties:false}` which rejects every key.
  *     Instead `additionalProperties: false` is applied eagerly to every
  *     `type: object` node that lacks one (index-signature types keep their
  *     permissive `additionalProperties: {}`), and `Record` types are rewritten
- *     to their proper `additionalProperties: {type}` form.
+ *     to their proper `additionalProperties: {type}` form. `Record<string,
+ *     unknown>` is kept fully permissive (`additionalProperties: true`) so
+ *     escape-hatch fields like OpenRouterParameters.extraBody keep working.
  *   - Passing `tsconfig.json` as the first argument makes typescript-json-schema
  *     resolve the `@/*` path aliases and bundler module settings exactly like
  *     tsc does, so nested types (ModeProviders, AutoCompactConfig, TuneConfig)
@@ -127,6 +130,20 @@ function renameDefinitions(definitions: Record<string, unknown>): void {
 
 // Record<string, X> => { type: object, additionalProperties: { type: X } }.
 function expandRecords(definitions: Record<string, unknown>): void {
+	// Record<string, unknown> must stay permissive — additionalProperties
+	// defaults to true for unknown values.  Without this entry applyStrictness
+	// would stamp additionalProperties:false onto it, which would reject every
+	// key (breaks OpenRouterParameters.extraBody).
+	const unknownRecord = definitions['RecordStringUnknown'] as
+		| JsonNode
+		| undefined;
+	if (unknownRecord && unknownRecord.type === 'object') {
+		definitions['RecordStringUnknown'] = {
+			type: 'object',
+			additionalProperties: true,
+		};
+	}
+
 	const records: Record<string, string> = {
 		RecordStringString: 'string',
 		RecordStringNumber: 'number',
@@ -210,6 +227,17 @@ function main(): void {
 	applyStrictness(raw.properties);
 	setRequired(definitions, 'ProviderConfig', ['name', 'models']);
 	setRequired(definitions, 'MCPServerConfig', ['name', 'transport']);
+	setRequired(definitions, 'OpenRouterPlugin', ['id']);
+
+	// lspServers is an inline array with an anonymous item schema (not a
+	// named definition).  The type requires name, command, languages.
+	const diskConfig = definitions['DiskNanocoderConfig'] as JsonNode | undefined;
+	const lspItems = (
+		diskConfig?.properties as Record<string, unknown> | undefined
+	)?.lspServers as JsonNode | undefined;
+	if (lspItems?.items && typeof lspItems.items === 'object') {
+		(lspItems.items as JsonNode).required = ['name', 'command', 'languages'];
+	}
 
 	const finalSchema: JsonNode = {
 		$schema: 'http://json-schema.org/draft-07/schema#',

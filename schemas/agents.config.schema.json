@@ -78,7 +78,8 @@
 							}
 						},
 						"type": "object",
-						"additionalProperties": false
+						"additionalProperties": false,
+						"required": ["name", "command", "languages"]
 					},
 					"type": "array"
 				},
@@ -304,7 +305,8 @@
 					"type": "string"
 				}
 			},
-			"type": "object"
+			"type": "object",
+			"required": ["id"]
 		},
 		"OpenRouterProviderRouting": {
 			"properties": {
@@ -581,7 +583,7 @@
 		},
 		"RecordStringUnknown": {
 			"type": "object",
-			"additionalProperties": false
+			"additionalProperties": true
 		},
 		"SystemPromptConfig": {
 			"properties": {

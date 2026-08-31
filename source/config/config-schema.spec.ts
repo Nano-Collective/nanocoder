@@ -184,6 +184,69 @@ test('provider contextWindows must map to numbers', t => {
 });
 
 // ---------------------------------------------------------------------------
+// OpenRouter / RecordStringUnknown
+// ---------------------------------------------------------------------------
+
+test('RecordStringUnknown (extraBody) accepts arbitrary keys', t => {
+	// OpenRouterParameters.extraBody is Record<string, unknown>: any key/value.
+	assertValid(t, 'extraBody with content', {
+		nanocoder: {
+			providers: [
+				{
+					name: 'openrouter',
+					models: ['a'],
+					openrouter: {extraBody: {custom_field: 'value', nested: {ok: true}}},
+				},
+			],
+		},
+	});
+});
+
+test('OpenRouterPlugin requires id', t => {
+	assertInvalid(t, 'plugin missing id', {
+		nanocoder: {
+			providers: [
+				{
+					name: 'openrouter',
+					models: ['a'],
+					openrouter: {plugins: [{engine: 'middle-out'}]},
+				},
+			],
+		},
+	});
+	assertValid(t, 'plugin with id', {
+		nanocoder: {
+			providers: [
+				{
+					name: 'openrouter',
+					models: ['a'],
+					openrouter: {plugins: [{id: 'context-compression', engine: 'middle-out'}]},
+				},
+			],
+		},
+	});
+});
+
+// ---------------------------------------------------------------------------
+// lspServers
+// ---------------------------------------------------------------------------
+
+test('lspServers requires name, command, languages', t => {
+	assertInvalid(t, 'lsp missing name', {
+		nanocoder: {lspServers: [{command: 'c', languages: ['ts']}]},
+	});
+	assertInvalid(t, 'lsp missing command', {
+		nanocoder: {lspServers: [{name: 'n', languages: ['ts']}]},
+	});
+	assertInvalid(t, 'lsp missing languages', {
+		nanocoder: {lspServers: [{name: 'n', command: 'c'}]},
+	});
+	assertValid(t, 'lsp complete', {
+		nanocoder: {lspServers: [{name: 'n', command: 'c', languages: ['ts']}]},
+	});
+});
+
+// ---------------------------------------------------------------------------
 // mcpServers (MCPServerConfig)
 // ---------------------------------------------------------------------------
 
