@@ -262,3 +262,109 @@ test('review uses the review system prompt', async t => {
 	t.true(systemPrompt.includes('Correctness bugs'));
 	t.true(systemPrompt.includes('Security vulnerabilities'));
 });
+
+test('review handles PR number target with gh available', async t => {
+	let executedGhArgs: string[][] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'remote') return 'git@github.com:user/repo.git';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => true,
+		execGh: async args => {
+			executedGhArgs.push(args);
+			return 'diff --git a/pr-file.ts b/pr-file.ts\n+const y = 2;';
+		},
+	});
+
+	const result = await command.handler(['42'], baseMessages, {
+		...testMetadata,
+		client: createClient('PR review looks good.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('PR review looks good.'));
+	// Should have called gh pr diff with the PR number and repo slug
+	t.deepEqual(executedGhArgs, [['pr', 'diff', '42', '--repo', 'user/repo']]);
+});
+
+test('review handles PR number target with gh unavailable', async t => {
+	let executedGitArgs: string[][] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			executedGitArgs.push(args);
+			if (args[0] === 'rev-parse') return '';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => false,
+		execGh: async () => {
+			throw new Error('gh not available');
+		},
+	});
+
+	const result = await command.handler(['42'], baseMessages, {
+		...testMetadata,
+		client: createClient('Branch fallback review.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('Branch fallback review.'));
+	// Should have fallen back to branch diff
+	t.true(
+		executedGitArgs.some(
+			args => args[0] === 'diff' && args.includes('main...42'),
+		),
+	);
+});
+
+test('review handles PR number target when gh fails', async t => {
+	let executedGitArgs: string[][] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			executedGitArgs.push(args);
+			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'remote') return 'git@github.com:user/repo.git';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => true,
+		execGh: async () => {
+			throw new Error('gh pr diff failed');
+		},
+	});
+
+	const result = await command.handler(['42'], baseMessages, {
+		...testMetadata,
+		client: createClient('Fallback after gh failure.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('Fallback after gh failure.'));
+	// Should have fallen back to branch diff after gh failure
+	t.true(
+		executedGitArgs.some(
+			args => args[0] === 'diff' && args.includes('main...42'),
+		),
+	);
+});

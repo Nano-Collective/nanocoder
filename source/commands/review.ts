@@ -28,12 +28,26 @@ type ReviewDependencies = {
 	execGit: (args: string[]) => Promise<string>;
 	getCurrentBranch: () => Promise<string>;
 	getDefaultBranch: () => Promise<string>;
+	isGhAvailable: () => boolean;
+	execGh: (args: string[]) => Promise<string>;
 };
 
 const defaultDependencies: ReviewDependencies = {
 	execGit,
 	getCurrentBranch,
 	getDefaultBranch,
+	isGhAvailable: () => {
+		try {
+			const {isGhAvailable: check} = require('@/tools/git/utils');
+			return check();
+		} catch {
+			return false;
+		}
+	},
+	execGh: (args: string[]) => {
+		const {execGh: run} = require('@/tools/git/utils');
+		return run(args);
+	},
 };
 
 export function createReviewCommand(
@@ -70,14 +84,24 @@ export function createReviewCommand(
 				const isPRNumber = /^\d+$/.test(target);
 				if (isPRNumber) {
 					try {
-						const {execGh, isGhAvailable} = await import('@/tools/git/utils');
-						if (isGhAvailable()) {
-							diff = await execGh([
+						if (dependencies.isGhAvailable()) {
+							const remote = await dependencies.execGit([
+								'remote',
+								'get-url',
+								'origin',
+							]);
+							const match = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
+							if (!match?.[1]) {
+								throw new Error(
+									'Cannot determine GitHub repository slug from remote URL.',
+								);
+							}
+							diff = await dependencies.execGh([
 								'pr',
 								'diff',
 								target,
 								'--repo',
-								await getRepoSlug(),
+								match[1],
 							]);
 							targetDescription = `PR #${target}`;
 						} else {
@@ -145,19 +169,6 @@ async function getBranchDiff(
 		'--no-color',
 		`${defaultBranch}...${branch}`,
 	]);
-}
-
-async function getRepoSlug(): Promise<string> {
-	const remote = await execGit(['remote', 'get-url', 'origin']);
-	const match = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
-	if (!match) {
-		throw new Error('Cannot determine GitHub repository slug from remote URL.');
-	}
-	const slug = match[1];
-	if (!slug) {
-		throw new Error('Cannot determine GitHub repository slug from remote URL.');
-	}
-	return slug;
 }
 
 export const reviewCommand = createReviewCommand();
