@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
-import React from 'react';
+import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
 import QuestionPrompt from '@/components/question-prompt';
 import {TaskListDisplay} from '@/components/task-list-display';
@@ -17,6 +17,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 	ToolCall,
 	TuneConfig,
 } from '@/types';
@@ -74,6 +75,9 @@ export interface ChatInputProps {
 	onToggleCompactDisplay?: () => void;
 	compactToolDisplay?: boolean;
 	liveTaskList?: Task[] | null;
+	showTaskList?: boolean;
+	taskListHasUnread?: boolean;
+	onToggleTaskList?: () => void;
 
 	// Handlers
 	onSubmit: (
@@ -140,6 +144,9 @@ export function ChatInput({
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
+	showTaskList = true,
+	taskListHasUnread = false,
+	onToggleTaskList,
 	onSubmit,
 	onToggleMode,
 	onToggleReasoningExpanded,
@@ -157,6 +164,25 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
+	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
+	// object on every keystroke would re-render it for nothing.
+	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
+		if (!liveTaskList || liveTaskList.length === 0) return null;
+		let completedCount = 0;
+		let inProgressCount = 0;
+		for (const task of liveTaskList) {
+			if (task.status === 'completed') completedCount++;
+			else if (task.status === 'in_progress') inProgressCount++;
+		}
+		return {
+			totalCount: liveTaskList.length,
+			completedCount,
+			inProgressCount,
+			isHidden: !showTaskList,
+			hasUnread: taskListHasUnread,
+		};
+	}, [liveTaskList, showTaskList, taskListHasUnread]);
+
 	return (
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
@@ -165,7 +191,7 @@ export function ChatInput({
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
-			{liveTaskList && liveTaskList.length > 0 && (
+			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
 				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
 			)}
 
@@ -216,6 +242,8 @@ export function ChatInput({
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
+					onToggleTaskList={onToggleTaskList}
+					taskInfo={taskInfo}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}

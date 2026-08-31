@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
@@ -33,13 +36,32 @@ const createMockConn = (): {conn: AgentSideConnection; updates: any[]} => {
 	return {conn, updates};
 };
 
+// Mutating tools capture an action-timeline checkpoint under the session cwd,
+// so give every session a throwaway workspace instead of writing into /tmp.
+const createWorkspace = (): string => {
+	const dir = join(
+		tmpdir(),
+		`nanocoder-queued-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(dir, {recursive: true});
+	workspaces.push(dir);
+	return dir;
+};
+const workspaces: string[] = [];
+
+test.afterEach.always(() => {
+	while (workspaces.length > 0) {
+		rmSync(workspaces.pop() as string, {recursive: true, force: true});
+	}
+});
+
 const createMockSession = (
 	conn: AgentSideConnection,
 	devMode: any = 'auto-accept',
 ): AcpSession => {
 	const session = new AcpSession({
-		sessionId: 'test-session',
-		cwd: '/tmp',
+		sessionId: `test-session-${Math.random().toString(36).slice(2, 8)}`,
+		cwd: createWorkspace(),
 		conn,
 		initialMode: devMode,
 	});
@@ -53,6 +75,7 @@ const createMockToolManager = () => ({
 	getFilteredTools: () => ({}),
 	hasTool: () => true,
 	getToolEntry: () => ({approval: false}),
+	isReadOnly: (name: string) => name !== 'write_file' && name !== 'execute_bash',
 });
 
 /** Every update carrying this tool call id, in emission order. */
@@ -359,4 +382,67 @@ test('runAcpConversation - the queued announcement carries no content', async t 
 	);
 	t.truthy(withDiff, 'the diff is emitted before the tool runs');
 	t.is(withDiff.content[0].type, 'diff');
+});
+
+test('runAcpConversation - cancelled batch tool permission updates ACP cards and balances history without triggering second LLM call', async t => {
+	const {conn, updates} = createMockConn();
+	(conn as any).requestPermission = async () => ({
+		outcome: {outcome: 'cancelled'},
+	});
+
+	const session = createMockSession(conn, 'normal');
+	const executed: string[] = [];
+	setToolRegistryGetter(() => ({
+		dangerous_tool: async () => {
+			executed.push('dangerous_tool');
+			return 'ran';
+		},
+	}));
+
+	let llmCallCount = 0;
+	const result = await runAcpConversation({
+		session,
+		client: {
+			chat: async () => {
+				llmCallCount++;
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('dangerous_tool', {}, 'call-1'),
+									createMockToolCall('dangerous_tool', {}, 'call-2'),
+									createMockToolCall('dangerous_tool', {}, 'call-3'),
+								],
+							},
+						},
+					],
+				};
+			},
+		} as unknown as LLMClient,
+		toolManager: {
+			...createMockToolManager(),
+			getToolEntry: () => ({approval: true}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+	t.is(executed.length, 0, 'nothing runs once permission is cancelled');
+	t.is(llmCallCount, 1, 'no second LLM call is triggered');
+
+	for (const id of ['call-1', 'call-2', 'call-3']) {
+		const last = updatesFor(updates, id).at(-1);
+		t.is(last.status, 'failed', `${id} card status must be failed`);
+		t.is(last.rawOutput, 'Cancelled by user');
+	}
+
+	const results = session.messages.filter((m: any) => m.role === 'tool');
+	for (const id of ['call-1', 'call-2', 'call-3']) {
+		const matches = results.filter((m: any) => m.tool_call_id === id);
+		t.is(matches.length, 1, `exactly one tool result message for ${id}`);
+		t.regex(matches[0].content, /cancel/i, `${id} tool result content mentions cancellation`);
+	}
 });

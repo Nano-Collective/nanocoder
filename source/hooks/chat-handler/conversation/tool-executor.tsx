@@ -10,11 +10,13 @@ import {
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
+import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {ToolCall, ToolResult} from '@/types/core';
+import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {
 	runStreamingBashTool,
@@ -90,7 +92,7 @@ const executeBashStreaming = async (
 export interface ToolDisplayOptions {
 	compactDisplay?: boolean;
 	onCompactToolCount?: (toolName: string) => void;
-	onLiveTaskUpdate?: () => void;
+	onLiveTaskUpdate?: (tasks?: Task[]) => void;
 	nonInteractiveMode?: boolean;
 }
 
@@ -159,7 +161,13 @@ export const displayExecutedTool = async (
 		!result.content.startsWith('Error: ')
 	) {
 		// Task tools render in the live area (updating in-place)
-		options?.onLiveTaskUpdate?.();
+		const structured = result.structuredContent as
+			| {tasks?: unknown}
+			| undefined;
+		const tasks = Array.isArray(structured?.tasks)
+			? (structured.tasks as Task[])
+			: undefined;
+		options?.onLiveTaskUpdate?.(tasks);
 	} else if (
 		options?.compactDisplay &&
 		!ALWAYS_EXPANDED_TOOLS.has(result.name)
@@ -273,6 +281,18 @@ const groupForParallelExecution = (
 };
 
 /**
+ * Renders a failed subagent run for the parent model.
+ *
+ * The `Error: ` prefix is load-bearing: callers detect a failed agent result
+ * by it. The rest is shared with the native agent tool's failure path.
+ */
+const buildFailedAgentContent = (agentResult: {
+	content: string;
+	error?: string;
+}): string =>
+	`Error: ${buildSubagentFailureMessage(agentResult.error, agentResult.content)}`;
+
+/**
  * Execute a batch of agent tool calls in parallel.
  * Returns tool results for all agents.
  */
@@ -285,6 +305,7 @@ const executeAgentBatch = async (
 	onCompactToolCount?: (toolName: string) => void,
 	nonInteractiveMode?: boolean,
 	signal?: AbortSignal,
+	executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -324,7 +345,7 @@ const executeAgentBatch = async (
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,
-			signal,
+			{...executionContext, abortSignal: signal},
 		);
 		resetSubagentProgressById(agentId);
 
@@ -396,7 +417,7 @@ const executeAgentBatch = async (
 			name: e.toolCall.function.name,
 			content: agentResult.success
 				? agentResult.content
-				: `Error: ${agentResult.error || 'Subagent execution failed'}`,
+				: buildFailedAgentContent(agentResult),
 		};
 
 		results.push({toolCall: e.toolCall, result});
@@ -479,7 +500,7 @@ export const executeToolsDirectly = async (
 	options?: {
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
-		onLiveTaskUpdate?: () => void;
+		onLiveTaskUpdate?: (tasks?: Task[]) => void;
 		setLiveComponent?: (component: React.ReactNode) => void;
 		/**
 		 * When true, compact tool results push a one-liner directly to the
@@ -493,10 +514,16 @@ export const executeToolsDirectly = async (
 		 * cancel (escape) propagates into running subagents.
 		 */
 		signal?: AbortSignal;
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
 	const {processToolUse} = await import('@/message-handler');
+	const processToolWithContext = (toolCall: ToolCall) =>
+		processToolUse(toolCall, {
+			...options?.executionContext,
+			abortSignal: options?.signal,
+		});
 
 	// Group consecutive parallelizable tools
 	const groups = groupForParallelExecution(toolsToExecuteDirectly, toolManager);
@@ -523,6 +550,7 @@ export const executeToolsDirectly = async (
 				options?.onCompactToolCount,
 				options?.nonInteractiveMode,
 				options?.signal,
+				options?.executionContext,
 			);
 
 			// Agent results are already displayed by executeAgentBatch
@@ -539,7 +567,7 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall => executeOne(toolCall, processToolUse)),
+				group.map(toolCall => executeOne(toolCall, processToolWithContext)),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
@@ -549,7 +577,7 @@ export const executeToolsDirectly = async (
 					await executeApprovedTool(
 						toolCall,
 						toolManager,
-						processToolUse,
+						processToolWithContext,
 						options?.setLiveComponent,
 						options?.signal,
 					),

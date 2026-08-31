@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React, {memo} from 'react';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
@@ -134,20 +135,29 @@ export function buildSessionHistoryComponents(
 	// client-side estimate. Honour the same preference the live footer uses so
 	// a resumed session looks like the session it resumes.
 	const showUsageFooter = getShowUsageFooter();
+	// The walkthrough nudge is an internal protocol message, never something the
+	// user typed, so it must not surface when a session is replayed.
+	const visibleMessages = messages.filter(
+		message => !isInternalWalkthroughMessage(message),
+	);
 
 	// Map every tool result by its tool_call_id across the FULL history, so an
 	// in-window assistant tool call can still find its result even if windowing
 	// trims nearby messages.
 	const resultsById = new Map<string, string>();
-	for (const message of messages) {
+	for (const message of visibleMessages) {
 		if (message.role === 'tool' && message.tool_call_id) {
 			resultsById.set(message.tool_call_id, message.content);
 		}
 	}
 
 	// Replay only the trailing window; note how many earlier messages are hidden.
-	const hiddenCount = Math.max(0, messages.length - MAX_REPLAYED_MESSAGES);
-	const replayed = hiddenCount > 0 ? messages.slice(hiddenCount) : messages;
+	const hiddenCount = Math.max(
+		0,
+		visibleMessages.length - MAX_REPLAYED_MESSAGES,
+	);
+	const replayed =
+		hiddenCount > 0 ? visibleMessages.slice(hiddenCount) : visibleMessages;
 
 	if (hiddenCount > 0) {
 		components.push(

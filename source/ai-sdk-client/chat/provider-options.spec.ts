@@ -1,6 +1,9 @@
 import test from 'ava';
 import type {AIProviderConfig, OpenRouterParameters} from '@/types/index';
-import {buildProviderOptions} from './provider-options.js';
+import {
+	buildProviderOptions,
+	isPromptCachingEnabled,
+} from './provider-options.js';
 
 function makeProvider(
 	overrides: Partial<AIProviderConfig> = {},
@@ -275,4 +278,44 @@ test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
 	});
 	const result = buildProviderOptions(provider, '', undefined);
 	t.deepEqual(result, {openrouter: {experimental_flag: true}});
+});
+
+test('isPromptCachingEnabled is on by default for the anthropic SDK', t => {
+	t.true(
+		isPromptCachingEnabled(makeProvider({sdkProvider: 'anthropic'})),
+	);
+});
+
+test('isPromptCachingEnabled honours an explicit opt-out', t => {
+	t.false(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'anthropic', promptCaching: false}),
+		),
+	);
+});
+
+test('isPromptCachingEnabled honours an explicit opt-in', t => {
+	t.true(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'anthropic', promptCaching: true}),
+		),
+	);
+});
+
+test('isPromptCachingEnabled is off for every non-anthropic SDK', t => {
+	t.false(isPromptCachingEnabled(makeProvider()));
+	t.false(
+		isPromptCachingEnabled(makeProvider({sdkProvider: 'openai-compatible'})),
+	);
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'google'})));
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'chatgpt-codex'})));
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'github-copilot'})));
+});
+
+test('isPromptCachingEnabled stays off for non-anthropic providers that opt in', t => {
+	t.false(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'openai-compatible', promptCaching: true}),
+		),
+	);
 });

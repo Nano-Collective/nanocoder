@@ -56,6 +56,8 @@ export interface UseChatHandlerProps {
 	subagentsReady?: boolean;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	/** Ensure tool calls in this turn share the persisted conversation ID. */
+	ensureCurrentSessionId?: () => string;
 }
 
 export interface ChatHandlerReturn {
