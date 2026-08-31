@@ -249,23 +249,6 @@ function binaryExcludeGlobs(): string[] {
 	return globs;
 }
 
-const FATAL_RIPGREP_ERROR_PATTERNS = [
-	/regex parse error/,
-	/error parsing glob/,
-	/PCRE2: error compiling pattern/,
-	/PCRE2 is not available in this build of ripgrep/,
-	/grep config error: unknown encoding/,
-];
-
-/** @internal Exported for direct unit testing only. */
-export function isFatalRipgrepError(stderr: string): boolean {
-	const firstLine = stderr.split('\n')[0]?.trim() ?? '';
-	if (firstLine.startsWith('the literal')) {
-		return true;
-	}
-	return FATAL_RIPGREP_ERROR_PATTERNS.some(pattern => pattern.test(stderr));
-}
-
 interface RunRipgrepResult {
 	stdout: string;
 	hitMaxLines: boolean;
@@ -396,14 +379,22 @@ async function runRipgrep(
 				reject(new Error(`ripgrep terminated by signal ${closeSignal}`));
 				return;
 			}
-			// Exit 1 = no matches. Exit 2 can be a recoverable mid-scan warning; only fail if empty.
-			if (
-				code !== null &&
-				code > 1 &&
-				stdout.length === 0 &&
-				isFatalRipgrepError(stderr)
-			) {
-				reject(new Error(`ripgrep exited with code ${code}: ${stderr.trim()}`));
+			// Exit 1 = no matches. Exit 2 with output is a recoverable mid-scan warning
+			// (one unreadable subdirectory, say) - rg scanned the rest, so keep it.
+			//
+			// Exit 2 with nothing on stdout means the search never produced anything:
+			// an unreadable root, a rejected argument, a build without PCRE2 (real on
+			// Linux ARM). Deliberately no stderr allowlist here - anything rg says that
+			// nobody enumerated would otherwise fall through to `resolve('')`, and every
+			// caller reads that as a genuine "no results" rather than a failure.
+			if (code !== null && code > 1 && stdout.length === 0) {
+				reject(
+					new Error(
+						`ripgrep exited with code ${code}: ${
+							stderr.trim() || 'no error output'
+						}`,
+					),
+				);
 				return;
 			}
 			resolve({stdout, hitMaxLines: false});

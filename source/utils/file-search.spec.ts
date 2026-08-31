@@ -1,4 +1,4 @@
-import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -8,7 +8,6 @@ import {
 	findMatchingPaths,
 	GLOB_TOKEN_CACHE_MAX_TOKENS,
 	globTokenCache,
-	isFatalRipgrepError,
 	matchesGlob,
 	searchProjectContents,
 	SearchTimeoutError,
@@ -1101,14 +1100,34 @@ test.serial(
 	},
 );
 
-test(
-	'isFatalRipgrepError recognizes a build of ripgrep with no PCRE2 support (real on Linux ARM)',
-	t => {
-		t.true(
-			isFatalRipgrepError(
-				'rg: PCRE2 is not available in this build of ripgrep',
-			),
-		);
+// chmod 0o000 does not stop root, and Windows ignores the mode entirely.
+const unreadableDirTest =
+	process.platform === 'win32' || process.getuid?.() === 0
+		? test.serial.skip
+		: test.serial;
+
+unreadableDirTest(
+	'walkProjectEntries surfaces an unreadable search root instead of reporting no files',
+	async t => {
+		const testDir = createTempDir('test-file-search-unreadable-temp');
+		const lockedDir = join(testDir, 'locked');
+
+		try {
+			mkdirSync(lockedDir, {recursive: true});
+			writeFileSync(join(lockedDir, 'a.txt'), 'hello\n');
+			// rg exits 2 with "Permission denied (os error 13)" on an empty stdout. That
+			// message is in no allowlist, so gating rejection on recognized stderr would
+			// report this as an ordinary empty result.
+			chmodSync(lockedDir, 0o000);
+
+			await t.throwsAsync(
+				() => walkProjectEntries(testDir, lockedDir, () => false),
+				{message: /ripgrep exited with code 2/},
+			);
+		} finally {
+			chmodSync(lockedDir, 0o755);
+			rmSync(testDir, {recursive: true, force: true});
+		}
 	},
 );
 
