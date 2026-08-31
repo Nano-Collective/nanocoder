@@ -74,6 +74,7 @@ interface ChatProps {
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
+	isSaving?: boolean;
 }
 
 export default function UserInput({
@@ -102,6 +103,7 @@ export default function UserInput({
 	forceFocus = false,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
+	isSaving,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -1007,6 +1009,7 @@ export default function UserInput({
 					tune={tune}
 					currentModel={currentModel}
 					taskInfo={taskInfo}
+					isSaving={isSaving}
 				/>
 			</Box>
 		);
@@ -1177,6 +1180,7 @@ export default function UserInput({
 				currentModel={currentModel}
 				activeEditor={activeEditor}
 				taskInfo={taskInfo}
+				isSaving={isSaving}
 			/>
 		</>
 	);
