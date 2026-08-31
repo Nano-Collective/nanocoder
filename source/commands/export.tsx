@@ -8,7 +8,7 @@ import {
 	generateExportFilename,
 	writeUniqueFile,
 } from '@/utils/generate-export-filename';
-import {isValidFilePath} from '@/utils/path-validation';
+import {resolveFilePath} from '@/utils/path-validation';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';
@@ -73,14 +73,18 @@ export const exportCommand: Command = {
 		const userProvided = args.length > 0;
 		const requestedFilename = args[0] || generateExportFilename(messages);
 
-		if (!isValidFilePath(requestedFilename, process.cwd())) {
+		// resolveFilePath validates the path (traversal, null bytes, ~, absolute
+		// escapes), then enforces symlink-aware containment within the project so
+		// an in-project symlink cannot redirect the write outside it.
+		let filepath: string;
+		try {
+			filepath = resolveFilePath(requestedFilename, process.cwd());
+		} catch {
 			return React.createElement(ExportError, {
 				key: generateKey('export'),
-				message: 'Invalid filename: path traversal detected',
+				message: 'Invalid export path: outside the project directory',
 			});
 		}
-
-		const filepath = path.resolve(process.cwd(), requestedFilename); // nosemgrep
 
 		const frontmatter = `---
 session_date: ${new Date().toISOString()}

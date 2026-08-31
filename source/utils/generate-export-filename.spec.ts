@@ -93,6 +93,17 @@ test('strips emoji while keeping adjacent words', t => {
 	t.regex(filename, /^fix-the-bug-\d{4}-\d{2}-\d{2}\.md$/);
 });
 
+test('truncates a long multi-byte slug to stay within the byte budget', t => {
+	// 40 CJK chars would exceed 96 UTF-8 bytes, so the slug must be trimmed at a
+	// word boundary while the whole filename stays well under 255 bytes.
+	const messages = [user('修'.repeat(40))];
+	const filename = generateExportFilename(messages);
+	const slug = filename.replace(/-\d{4}-\d{2}-\d{2}\.md$/, '');
+	t.true(Buffer.byteLength(slug, 'utf-8') <= 96);
+	t.true(Buffer.byteLength(filename, 'utf-8') < 255);
+	t.false(slug.endsWith('-'));
+});
+
 test('writeUniqueFile writes to the given path when it is free', async t => {
 	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
 	const filepath = path.join(tmpDir, 'test.md');

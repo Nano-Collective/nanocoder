@@ -2,6 +2,7 @@ import test from 'ava';
 import type {Message} from '@/types/index';
 import {exportCommand} from './export';
 import {promises as fs} from 'fs';
+import path from 'path';
 import React from 'react';
 import {render} from 'ink-testing-library';
 import {themes} from '../config/themes';
@@ -248,7 +249,7 @@ test('exportCommand rejects path traversal in filename', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid filename/);
+	t.regex(output!, /Invalid export path/);
 	t.false(output!.includes('Chat exported'));
 });
 
@@ -283,7 +284,7 @@ test('exportCommand rejects a filename with a null byte', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid filename/);
+	t.regex(output!, /Invalid export path/);
 });
 
 test('exportCommand rejects a home-directory shorthand path', async t => {
@@ -298,5 +299,37 @@ test('exportCommand rejects a home-directory shorthand path', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid filename/);
+	t.regex(output!, /Invalid export path/);
+});
+
+test('exportCommand rejects a path escaping the project directory', async t => {
+	const result = (await exportCommand.handler(
+		['../../outside.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Invalid export path/);
+	t.false(output!.includes('Chat exported'));
+});
+
+test('exportCommand rejects an absolute path outside the project', async t => {
+	const outside = path.resolve(process.cwd(), '..', 'outside.md');
+	const result = (await exportCommand.handler(
+		[outside],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Invalid export path/);
 });
