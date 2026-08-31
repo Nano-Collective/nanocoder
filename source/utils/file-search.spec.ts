@@ -1,4 +1,5 @@
 import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -187,12 +188,15 @@ test.serial(
 		const testDir = createTempDir('test-file-search-chunk-overshoot-temp');
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// Needs enough files that a single ~8-64KB stdout chunk from rg
-			// contains far more lines than the cap - smaller counts never
-			// exercise the chunk boundary and would pass even with the bug.
-			for (let i = 0; i < 2_000; i++) {
-				writeFileSync(join(testDir, `file${i}.txt`), 'x');
-			}
+			// 200 files is enough for rg's first stdout chunk to contain far
+			// more lines than the cap - the bug reproduces even at 50 files,
+			// since a whole small listing fits in one chunk. Batched async
+			// writes instead of sequential writeFileSync so setup stays fast.
+			await Promise.all(
+				Array.from({length: 200}, (_, i) =>
+					writeFile(join(testDir, `f${i}.txt`), 'x'),
+				),
+			);
 			let fileCount = 0;
 			const result = await walkProjectEntries(
 				testDir,
