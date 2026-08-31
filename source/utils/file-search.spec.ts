@@ -1,13 +1,18 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 
 import {
 	findMatchingPaths,
+	GLOB_TOKEN_CACHE_MAX_TOKENS,
+	globTokenCache,
+	isFatalRipgrepError,
 	matchesGlob,
 	searchProjectContents,
 	SearchTimeoutError,
+	walkProjectEntries,
 } from './file-search';
 
 function createTempDir(name: string): string {
@@ -28,6 +33,98 @@ test('matchesGlob normalizes Windows-style separators in path and pattern', t =>
 	t.true(matchesGlob('src/components/Button.tsx', 'src\\**\\*.tsx'));
 	t.true(matchesGlob('src\\components\\Button.tsx', 'src\\**\\*.tsx'));
 });
+
+test('matchesGlob handles glob edge cases found during the regex-to-DP rewrite', t => {
+	// Leading '**/' can vanish entirely (zero directories).
+	t.true(matchesGlob('index.ts', '**/*.ts'));
+	t.true(matchesGlob('a/b/c/index.ts', '**/*.ts'));
+	// Embedded '**/' can also vanish entirely.
+	t.true(matchesGlob('a/index.ts', 'a/**/index.ts'));
+	t.true(matchesGlob('a/b/c/index.ts', 'a/**/index.ts'));
+	// Trailing '/**' requires a literal '/' to be present.
+	t.false(matchesGlob('a', 'a/**'));
+	t.true(matchesGlob('a/', 'a/**'));
+	t.true(matchesGlob('a/b', 'a/**'));
+	// '**' with no adjacent '/' still has slash-crossing power.
+	t.true(matchesGlob('x/xx/xxx', '*x**x'));
+	t.false(matchesGlob('a', '*a**a')); // needs two 'a's, only has one
+	t.true(matchesGlob('a/a', '*a**a'));
+	// Single '*' never crosses '/', even adjacent to '**'.
+	t.false(matchesGlob('a', 'a*/**'));
+	t.true(matchesGlob('ab/', 'a*/**'));
+});
+
+test('matchesGlob stays fast on a pattern shape that hangs a naive regex engine', t => {
+	// This shape hung for 20+ seconds against the old regex-based implementation.
+	const pathologicalPattern = `${'*a'.repeat(25)}b`;
+	const start = Date.now();
+	const result = matchesGlob('a'.repeat(2000), pathologicalPattern);
+	t.true(Date.now() - start < 100);
+	t.false(result);
+});
+
+test('matchesGlob rejects a pattern longer than the sanity length cap', t => {
+	const error = t.throws(() => matchesGlob('a.ts', 'a'.repeat(1001)));
+	t.true(error instanceof Error);
+	t.regex(error?.message ?? '', /too long/);
+});
+
+test('matchesGlob rejects a pattern with too many brace-expansion combinations', t => {
+	// 200 sequential {a,b} groups hung for 30+ seconds before this cap existed.
+	const pattern = '{a,b}'.repeat(200);
+	const start = Date.now();
+	const error = t.throws(() => matchesGlob('a'.repeat(400), pattern));
+	t.true(Date.now() - start < 100);
+	t.true(error instanceof Error);
+	t.regex(error?.message ?? '', /too many brace-expansion combinations/);
+});
+
+test.serial(
+	'globTokenCache stays bounded by total token count across many worst-case-sized entries',
+	t => {
+		// 6 sequential {aaaa,bbbb} groups is exactly MAX_BRACE_EXPANSIONS (2^6 = 64), padded near MAX_GLOB_PATTERN_LENGTH so each branch tokenizes to ~900+ tokens - a worst-case-sized entry.
+		const filler = 'a'.repeat(900);
+		const groups = '{aaaa,bbbb}'.repeat(6);
+
+		for (let i = 0; i < 30; i++) {
+			const pattern = `p${i}_${filler}${groups}`;
+			matchesGlob('irrelevant/path.ts', pattern);
+		}
+
+		t.true(globTokenCache.calculatedSize <= GLOB_TOKEN_CACHE_MAX_TOKENS);
+	},
+);
+
+test.serial(
+	'matchesGlob reuses the cached tokenization for a repeated pattern',
+	t => {
+		const pattern = 'src/**/*.repeated-pattern-test.ts';
+		matchesGlob('src/foo/repeated-pattern-test.ts', pattern);
+		t.true(globTokenCache.has(pattern));
+
+		const sizeBefore = globTokenCache.size;
+		matchesGlob('src/bar/repeated-pattern-test.ts', pattern);
+		t.is(globTokenCache.size, sizeBefore);
+	},
+);
+
+test.serial(
+	'globTokenCache silently drops an entry whose own size exceeds the cache budget, and matchesGlob still works',
+	t => {
+		// Not reachable through matchesGlob itself (the two caps keep real patterns well under budget) - exercise the cache directly instead.
+		const oversized = [
+			Array.from({length: GLOB_TOKEN_CACHE_MAX_TOKENS + 1}, () => ({
+				type: 'literal' as const,
+				char: 'a',
+			})),
+		];
+
+		globTokenCache.set('oversized-entry-test-key', oversized);
+		t.false(globTokenCache.has('oversized-entry-test-key'));
+
+		t.true(matchesGlob('a.ts', '*.ts'));
+	},
+);
 
 test.serial('findMatchingPaths returns files and directories cross-platform', async t => {
 	const testDir = createTempDir('test-file-search-find-temp');
@@ -54,6 +151,419 @@ test.serial('findMatchingPaths returns files and directories cross-platform', as
 	}
 });
 
+test.serial('findMatchingPaths finds an empty, nested directory', async t => {
+	const testDir = createTempDir('test-file-search-empty-dir-temp');
+
+	try {
+		mkdirSync(join(testDir, 'src', 'emptydir', 'nested', 'deeper'), {
+			recursive: true,
+		});
+		writeFileSync(join(testDir, 'src', 'placeholder.ts'), 'export {};');
+
+		const shallow = await findMatchingPaths('emptydir', testDir, 50);
+		t.true(shallow.files.includes('src/emptydir'));
+
+		const deep = await findMatchingPaths('deeper', testDir, 50);
+		t.true(deep.files.includes('src/emptydir/nested/deeper'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'walkProjectEntries with includeDirectories=false never reports a directory, even an empty one',
+	async t => {
+		const testDir = createTempDir('test-file-search-no-dirs-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'emptydir'), {recursive: true});
+			writeFileSync(join(testDir, 'src', 'placeholder.ts'), 'export {};');
+
+			const entries: {relativePath: string; isDirectory: boolean}[] = [];
+			await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					entries.push(entry);
+					return false;
+				},
+				{includeDirectories: false},
+			);
+
+			t.false(entries.some(e => e.isDirectory));
+			t.true(entries.some(e => e.relativePath === 'src/placeholder.ts'));
+			t.false(entries.some(e => e.relativePath === 'src/emptydir'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries reports truncated when the raw file-scan cap is hit',
+	async t => {
+		const testDir = createTempDir('test-file-search-raw-cap-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			for (let i = 0; i < 30; i++) {
+				writeFileSync(join(testDir, `f${i}.txt`), 'x');
+			}
+
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				{maxRawFilesScanned: 5},
+			);
+			t.true(result.truncated);
+
+			const untruncated = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				{maxRawFilesScanned: 1000},
+			);
+			t.false(untruncated.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries does not let stdout overshoot the raw file-scan cap within a single oversized chunk',
+	async t => {
+		const testDir = createTempDir('test-file-search-chunk-overshoot-temp');
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// 200 files is enough for one stdout chunk to hold far more lines than the cap; batched async writes keep setup fast.
+			await Promise.all(
+				Array.from({length: 200}, (_, i) =>
+					writeFile(join(testDir, `f${i}.txt`), 'x'),
+				),
+			);
+			let fileCount = 0;
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					if (!entry.isDirectory) fileCount++;
+					return false;
+				},
+				{includeDirectories: false, maxRawFilesScanned: 10},
+			);
+			t.is(fileCount, 10);
+			t.true(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries reports truncated when the empty-directory walk cap is hit, even with zero files',
+	async t => {
+		const testDir = createTempDir('test-file-search-dir-cap-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// No files at all, so only the JS-side empty-directory recursion can trip a cap here.
+			for (let i = 0; i < 30; i++) {
+				mkdirSync(join(testDir, `d${i}`), {recursive: true});
+			}
+
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				{maxRawFilesScanned: 5},
+			);
+			t.true(result.truncated);
+
+			const untruncated = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				{maxRawFilesScanned: 1000},
+			);
+			t.false(untruncated.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries skips the empty-directory walk once the raw file-scan cap already fired',
+	async t => {
+		const testDir = createTempDir('test-file-search-skip-dir-walk-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			for (let i = 0; i < 30; i++) {
+				writeFileSync(join(testDir, `f${i}.txt`), 'x');
+			}
+			mkdirSync(join(testDir, 'empty-dir'), {recursive: true});
+
+			const seenDirectories: string[] = [];
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					if (entry.isDirectory) {
+						seenDirectories.push(entry.relativePath);
+					}
+					return false;
+				},
+				{maxRawFilesScanned: 5},
+			);
+
+			t.true(result.truncated);
+			// The empty-dir walk should have been skipped once the raw scan cap made the result incomplete.
+			t.false(seenDirectories.includes('empty-dir'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths hides an empty directory ignored by a nested .gitignore',
+	async t => {
+		const testDir = createTempDir('test-file-search-nested-gitignore-empty-temp');
+
+		try {
+			mkdirSync(join(testDir, 'pkg'), {recursive: true});
+			writeFileSync(join(testDir, 'pkg', '.gitignore'), 'should-be-hidden\n');
+			mkdirSync(join(testDir, 'pkg', 'should-be-hidden'), {recursive: true});
+			mkdirSync(join(testDir, 'pkg', 'sub', 'should-be-hidden'), {
+				recursive: true,
+			});
+			mkdirSync(join(testDir, 'pkg', 'still-visible'), {recursive: true});
+			writeFileSync(join(testDir, 'pkg', 'kept.ts'), 'export {};');
+
+			const hidden = await findMatchingPaths('should-be-hidden', testDir, 50);
+			t.deepEqual(hidden.files, []);
+
+			const visible = await findMatchingPaths('still-visible', testDir, 50);
+			t.true(visible.files.includes('pkg/still-visible'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths hides an empty directory ignored by a trailing-slash .gitignore pattern',
+	async t => {
+		// Uses a name outside DEFAULT_IGNORE_DIRS (not "dist") so the hardcoded exclusion list can't mask a regression in the trailing-slash check.
+		const testDir = createTempDir(
+			'test-file-search-trailing-slash-gitignore-temp',
+		);
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'ignoredslash/\n');
+			mkdirSync(join(testDir, 'ignoredslash'), {recursive: true});
+			mkdirSync(join(testDir, 'empty'), {recursive: true});
+
+			const hidden = await findMatchingPaths('ignoredslash', testDir, 50);
+			t.deepEqual(hidden.files, []);
+
+			const visible = await findMatchingPaths('empty', testDir, 50);
+			t.true(visible.files.includes('empty'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths and searchProjectContents respect .nanocoderignore',
+	async t => {
+		const testDir = createTempDir('test-file-search-nanocoderignore-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.nanocoderignore'), 'secret.txt\n');
+			writeFileSync(testDir + '/secret.txt', 'findme_secret');
+			writeFileSync(join(testDir, 'visible.txt'), 'findme_visible');
+
+			const pathResult = await findMatchingPaths('*.txt', testDir, 50);
+			t.deepEqual(pathResult.files, ['visible.txt']);
+
+			const contentResult = await searchProjectContents(
+				'findme_',
+				testDir,
+				50,
+				false,
+			);
+			t.deepEqual(
+				contentResult.matches.map(m => m.file),
+				['visible.txt'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths lets .nanocoderignore un-ignore a DEFAULT_IGNORE_DIRS entry',
+	async t => {
+		const testDir = createTempDir('test-file-search-nanocoderignore-unignore-temp');
+
+		try {
+			mkdirSync(join(testDir, 'dist'), {recursive: true});
+			writeFileSync(join(testDir, 'dist', 'bundle.js'), 'kept');
+			writeFileSync(join(testDir, '.nanocoderignore'), '!dist\n!dist/**\n');
+
+			const result = await findMatchingPaths('bundle.js', testDir, 50);
+			t.deepEqual(result.files, ['dist/bundle.js']);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths lets .nanocoderignore un-ignore an empty dir hidden by root .gitignore',
+	async t => {
+		const testDir = createTempDir(
+			'test-file-search-nanocoderignore-empty-dir-temp',
+		);
+
+		try {
+			mkdirSync(join(testDir, 'build-cache'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'build-cache\n');
+			writeFileSync(join(testDir, '.nanocoderignore'), '!build-cache\n');
+
+			const result = await findMatchingPaths('build-cache', testDir, 50);
+			t.deepEqual(result.files, ['build-cache']);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// Symlinks are deliberately never followed - one could point anywhere outside the project.
+
+test.serial(
+	'findMatchingPaths does not descend into a symlinked directory',
+	async t => {
+		const testDir = createTempDir('test-file-search-symlink-dir-temp');
+
+		try {
+			mkdirSync(join(testDir, 'real-target'), {recursive: true});
+			writeFileSync(join(testDir, 'real-target', 'inner.ts'), 'export {};');
+			symlinkSync(
+				join(testDir, 'real-target'),
+				join(testDir, 'linked-dir'),
+				'junction',
+			);
+
+			const result = await findMatchingPaths('linked-dir', testDir, 50);
+			t.deepEqual(result.files, []);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths tolerates a symlink near an ancestor without hanging',
+	async t => {
+		const testDir = createTempDir('test-file-search-symlink-cycle-temp');
+
+		try {
+			mkdirSync(join(testDir, 'a', 'b'), {recursive: true});
+			writeFileSync(join(testDir, 'normal.ts'), 'export {};');
+			symlinkSync(testDir, join(testDir, 'a', 'b', 'loop'), 'junction');
+
+			const result = await findMatchingPaths('normal.ts', testDir, 50);
+			t.true(result.files.includes('normal.ts'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents does not read content behind a symlinked file',
+	async t => {
+		const testDir = createTempDir('test-file-search-symlink-file-temp');
+		const targetDir = createTempDir('test-file-search-symlink-target-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			mkdirSync(targetDir, {recursive: true});
+			writeFileSync(join(targetDir, 'real.ts'), 'searchTarget here');
+			symlinkSync(join(targetDir, 'real.ts'), join(testDir, 'linked.ts'), 'file');
+
+			const result = await searchProjectContents('searchTarget', testDir, 10, false);
+			t.deepEqual(result.matches, []);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+			rmSync(targetDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'a symlink pointing outside the project directory cannot leak content or paths',
+	async t => {
+		const projectDir = createTempDir('test-file-search-sandbox-project-temp');
+		const outsideDir = createTempDir('test-file-search-sandbox-outside-temp');
+
+		try {
+			mkdirSync(join(projectDir, 'src'), {recursive: true});
+			mkdirSync(outsideDir, {recursive: true});
+			writeFileSync(
+				join(outsideDir, 'secret.txt'),
+				'SECRET_OUTSIDE_CONTENT findme_outside',
+			);
+			symlinkSync(outsideDir, join(projectDir, 'src', 'escape'), 'junction');
+
+			const contentResult = await searchProjectContents(
+				'SECRET_OUTSIDE_CONTENT',
+				projectDir,
+				10,
+				false,
+			);
+			t.deepEqual(contentResult.matches, []);
+
+			const fileResult = await findMatchingPaths('secret.txt', projectDir, 50);
+			t.deepEqual(fileResult.files, []);
+		} finally {
+			rmSync(projectDir, {recursive: true, force: true});
+			rmSync(outsideDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('findMatchingPaths finds binary-extension files', async t => {
+	const testDir = createTempDir('test-file-search-binary-ext-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'icon.svg'), '<svg></svg>');
+		writeFileSync(join(testDir, 'photo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+		writeFileSync(join(testDir, 'module.wasm'), Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+
+		const svgResult = await findMatchingPaths('*.svg', testDir, 50);
+		t.deepEqual(svgResult.files, ['icon.svg']);
+
+		const pngResult = await findMatchingPaths('*.png', testDir, 50);
+		t.deepEqual(pngResult.files, ['photo.png']);
+
+		const wasmResult = await findMatchingPaths('*.wasm', testDir, 50);
+		t.deepEqual(wasmResult.files, ['module.wasm']);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test.serial('findMatchingPaths enforces maxResults and truncation', async t => {
 	const testDir = createTempDir('test-file-search-max-temp');
 
@@ -70,6 +580,150 @@ test.serial('findMatchingPaths enforces maxResults and truncation', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'findMatchingPaths and searchProjectContents return nothing for a non-positive maxResults',
+	async t => {
+		const testDir = createTempDir('test-file-search-nonpositive-max-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'file.ts'), 'searchTarget');
+
+			for (const maxResults of [0, -1, -5]) {
+				const findResult = await findMatchingPaths('*.ts', testDir, maxResults);
+				t.deepEqual(
+					findResult,
+					{files: [], truncated: false},
+					`findMatchingPaths maxResults=${maxResults}`,
+				);
+
+				const searchResult = await searchProjectContents(
+					'searchTarget',
+					testDir,
+					maxResults,
+					false,
+				);
+				t.deepEqual(
+					searchResult,
+					{matches: [], truncated: false},
+					`searchProjectContents maxResults=${maxResults}`,
+				);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('searchProjectContents rejects an empty or whitespace-only query', async t => {
+	const testDir = createTempDir('test-file-search-empty-query-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'a.ts'), 'content');
+
+		await t.throwsAsync(() => searchProjectContents('', testDir, 10, false));
+		await t.throwsAsync(() => searchProjectContents('   ', testDir, 10, false));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'searchProjectContents stops early instead of buffering every match before truncating',
+	async t => {
+		const testDir = createTempDir('test-file-search-maxcount-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// rg should be killed once enough matches have streamed in, not left running.
+			const lines = Array.from({length: 500}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'big.ts'), lines.join('\n'));
+
+			const result = await searchProjectContents('searchTarget', testDir, 5, false);
+			t.is(result.matches.length, 5);
+			t.true(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents stays bounded when context lines themselves also match (rg --max-count overshoot case)',
+	async t => {
+		const testDir = createTempDir('test-file-search-dense-context-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Every line matches, so rg's own --max-count overshoots with --context (ripgrep#2843).
+			const lines = Array.from({length: 5000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'dense.ts'), lines.join('\n'));
+
+			const start = Date.now();
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				undefined,
+				undefined,
+				3,
+			);
+			const elapsed = Date.now() - start;
+
+			t.is(result.matches.length, 5);
+			t.true(result.truncated);
+			t.true(elapsed < 5000, `expected a fast bounded search, took ${elapsed}ms`);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents keeps the full context window on the last match even when every context line is itself a match',
+	async t => {
+		const testDir = createTempDir('test-file-search-dense-context-headroom-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Every line matches, so the Nth match's trailing context lines stream in as type:"match" entries too, not type:"context".
+			const lines = Array.from({length: 5000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'dense.ts'), lines.join('\n'));
+
+			const contextLines = 3;
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				undefined,
+				undefined,
+				contextLines,
+			);
+
+			t.is(result.matches.length, 5);
+			const lastMatch = result.matches[result.matches.length - 1];
+			t.truthy(lastMatch);
+			for (
+				let line = lastMatch.line - contextLines;
+				line <= lastMatch.line + contextLines;
+				line++
+			) {
+				t.true(
+					lastMatch.content.includes(`${line}: `),
+					`expected line ${line} in last match's context, got:\n${lastMatch.content}`,
+				);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial('searchProjectContents respects include, path, wholeWord and context', async t => {
 	const testDir = createTempDir('test-file-search-search-temp');
@@ -113,6 +767,43 @@ test.serial('searchProjectContents respects include, path, wholeWord and context
 	}
 });
 
+test.serial(
+	'searchProjectContents gives each nearby match its own context block even when windows overlap',
+	async t => {
+		const testDir = createTempDir('test-file-search-context-overlap-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			const lines = Array.from({length: 12}, (_, i) => `line${i}`);
+			lines[4] = 'TARGET one';
+			lines[6] = 'TARGET two';
+			writeFileSync(join(testDir, 'a.txt'), lines.join('\n'));
+
+			const result = await searchProjectContents(
+				'TARGET',
+				testDir,
+				10,
+				false,
+				undefined,
+				undefined,
+				undefined,
+				2,
+			);
+
+			t.is(result.matches.length, 2);
+			t.is(result.matches[0]?.line, 5);
+			t.is(result.matches[1]?.line, 7);
+			// Both blocks share lines 5-7, which rg streams only once - each still gets its own block.
+			t.true(result.matches[0]?.content.includes('5: TARGET one'));
+			t.true(result.matches[0]?.content.includes('7: TARGET two'));
+			t.true(result.matches[1]?.content.includes('5: TARGET one'));
+			t.true(result.matches[1]?.content.includes('7: TARGET two'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial('searchProjectContents skips ignored and binary files', async t => {
 	const testDir = createTempDir('test-file-search-ignore-temp');
 
@@ -141,13 +832,103 @@ test.serial('searchProjectContents skips ignored and binary files', async t => {
 	}
 });
 
+test.serial(
+	'searchProjectContents respects a .gitignore nested in a subdirectory',
+	async t => {
+		const testDir = createTempDir('test-file-search-nested-gitignore-temp');
+
+		try {
+			mkdirSync(join(testDir, 'pkg'), {recursive: true});
+			writeFileSync(join(testDir, 'pkg', '.gitignore'), 'ignored.ts\n');
+			writeFileSync(join(testDir, 'pkg', 'ignored.ts'), 'searchTarget');
+			writeFileSync(join(testDir, 'pkg', 'kept.ts'), 'searchTarget');
+
+			const result = await searchProjectContents('searchTarget', testDir, 10, false);
+
+			t.deepEqual(
+				result.matches.map(match => match.file),
+				['pkg/kept.ts'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents keeps binary excludes even under a broad include pattern',
+	async t => {
+		const testDir = createTempDir('test-file-search-include-order-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'code.ts'), 'searchTarget');
+			writeFileSync(join(testDir, 'image.png'), 'searchTarget');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				10,
+				false,
+				'**/*',
+			);
+
+			t.deepEqual(
+				result.matches.map(match => match.file),
+				['code.ts'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents skips a file with NUL bytes even without a matching extension',
+	async t => {
+		const testDir = createTempDir('test-file-search-nul-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'weird.log'),
+				Buffer.from('searchTarget\0garbage\0bytes'),
+			);
+			writeFileSync(join(testDir, 'clean.log'), 'searchTarget in a clean file');
+
+			const result = await searchProjectContents('searchTarget', testDir, 10, false);
+
+			t.deepEqual(
+				result.matches.map(match => match.file),
+				['clean.log'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths rejects quickly on a spawn failure instead of waiting out the timeout',
+	async t => {
+		// A nonexistent cwd makes spawn fail (ENOENT); this must not wait out the 30s timeout.
+		const bogusDir = join(
+			createTempDir('nonexistent-cwd'),
+			'definitely',
+			'does-not-exist',
+		);
+		const start = Date.now();
+		await t.throwsAsync(() => findMatchingPaths('a.ts', bogusDir, 50));
+		t.true(Date.now() - start < 5000);
+	},
+);
+
 test.serial('searchProjectContents throws SearchTimeoutError when timeout elapses', async t => {
 	const testDir = createTempDir('test-file-search-timeout-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		// Many files with a query that never matches — walker keeps going,
-		// giving the abort timer a chance to fire between async I/O yields.
+		// Many files, query never matches - gives the timeout a chance to fire mid-walk.
 		for (let i = 0; i < 500; i++) {
 			writeFileSync(join(testDir, `file${i}.ts`), 'line a\nline b\nline c\n');
 		}
@@ -171,3 +952,212 @@ test.serial('searchProjectContents throws SearchTimeoutError when timeout elapse
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'searchProjectContents rejects with the caller-supplied abort reason, not a generic AbortError',
+	async t => {
+		const testDir = createTempDir('test-file-search-abort-reason-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			for (let i = 0; i < 2000; i++) {
+				writeFileSync(
+					join(testDir, `file${i}.ts`),
+					'line a\nline b\nline c\n'.repeat(20),
+				);
+			}
+
+			const controller = new AbortController();
+			const customReason = new Error('custom-abort-reason');
+			setTimeout(() => controller.abort(customReason), 5);
+
+			const error = await t.throwsAsync(() =>
+				searchProjectContents(
+					'no-such-thing-anywhere',
+					testDir,
+					100000,
+					false,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					30000,
+					controller.signal,
+				),
+			);
+			t.is(error, customReason);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents still throws on a genuinely invalid regex',
+	async t => {
+		const testDir = createTempDir('test-file-search-badregex-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'f.ts'), 'content');
+
+			// rg exits 2 for an invalid regex too; must still reject, not return no matches.
+			await t.throwsAsync(() =>
+				searchProjectContents('[invalid(regex', testDir, 10, false),
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents supports lookahead and backreferences (rg auto-selects pcre2)',
+	async t => {
+		const testDir = createTempDir('test-file-search-pcre2-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foobar\nfoofoo\n');
+
+			const lookahead = await searchProjectContents(
+				'foo(?=bar)',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				lookahead.matches.map(m => m.content),
+				['foobar'],
+			);
+
+			const backreference = await searchProjectContents(
+				`(foo)${String.fromCharCode(92)}1`,
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				backreference.matches.map(m => m.content),
+				['foofoo'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents supports Python-style and Perl-style named backreferences (rg auto-selects pcre2)',
+	async t => {
+		const testDir = createTempDir('test-file-search-named-backref-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foofoo\nfoobar\n');
+
+			const pythonStyle = await searchProjectContents(
+				'(?P<n>foo)(?P=n)',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				pythonStyle.matches.map(m => m.content),
+				['foofoo'],
+			);
+
+			const perlQuoteStyle = await searchProjectContents(
+				`(?<n>foo)${String.fromCharCode(92)}k'n'`,
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				perlQuoteStyle.matches.map(m => m.content),
+				['foofoo'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents does not misjudge a possessive quantifier as an ordinary greedy one',
+	async t => {
+		const testDir = createTempDir('test-file-search-possessive-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'aaa\n');
+
+			// a++a is possessive - a++ leaves nothing for the trailing 'a' to match.
+			const result = await searchProjectContents('a++a', testDir, 10, false);
+			t.deepEqual(result.matches, []);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test(
+	'isFatalRipgrepError recognizes a build of ripgrep with no PCRE2 support (real on Linux ARM)',
+	t => {
+		t.true(
+			isFatalRipgrepError(
+				'rg: PCRE2 is not available in this build of ripgrep',
+			),
+		);
+	},
+);
+
+test.serial(
+	'searchProjectContents still matches an ordinary named capture group',
+	async t => {
+		const testDir = createTempDir('test-file-search-named-group-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foobar\n');
+
+			// Looks like lookbehind syntax at a glance but isn't.
+			const result = await searchProjectContents(
+				'(?<n>foo)bar',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				result.matches.map(m => m.content),
+				['foobar'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents throws on a nonexistent searchPath instead of returning no matches',
+	async t => {
+		const testDir = createTempDir('test-file-search-bad-searchpath-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+
+			await t.throwsAsync(() =>
+				searchProjectContents(
+					'foo',
+					testDir,
+					10,
+					false,
+					undefined,
+					join(testDir, 'does-not-exist'),
+				),
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
