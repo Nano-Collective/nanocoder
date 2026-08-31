@@ -57,7 +57,7 @@
 		"changeset:version": "changeset version && node scripts/normalize-changelog.js",
 		"format": "biome check --write .",
 		"format:check": "biome check .",
-		"build:vscode": "cd plugins/vscode && pnpm run build && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
+		"build:vscode": "cd plugins/vscode && pnpm run build && mkdir -p ../../assets && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
 		"prepare": "husky"
