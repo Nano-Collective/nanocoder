@@ -82,14 +82,7 @@ test('matchesGlob rejects a pattern with too many brace-expansion combinations',
 test.serial(
 	'globTokenCache stays bounded by total token count across many worst-case-sized entries',
 	t => {
-		// Each pattern hits both caps at once: 6 sequential {aaaa,bbbb} groups
-		// is exactly MAX_BRACE_EXPANSIONS (2^6 = 64) combinations, padded with
-		// literal filler up to just under MAX_GLOB_PATTERN_LENGTH so every one
-		// of those 64 expanded branches tokenizes to ~900+ tokens. Entry-count
-		// bounding alone let total cache memory scale with
-		// (entry count) x (tokens per branch) x (branches per entry) - this
-		// asserts the size-based bound holds even under repeated worst-case
-		// entries, not just typical ones.
+		// 6 sequential {aaaa,bbbb} groups is exactly MAX_BRACE_EXPANSIONS (2^6 = 64), padded near MAX_GLOB_PATTERN_LENGTH so each branch tokenizes to ~900+ tokens - a worst-case-sized entry.
 		const filler = 'a'.repeat(900);
 		const groups = '{aaaa,bbbb}'.repeat(6);
 
@@ -118,12 +111,7 @@ test.serial(
 test.serial(
 	'globTokenCache silently drops an entry whose own size exceeds the cache budget, and matchesGlob still works',
 	t => {
-		// MAX_GLOB_PATTERN_LENGTH and MAX_BRACE_EXPANSIONS together bound any
-		// real pattern's tokenized size well under GLOB_TOKEN_CACHE_MAX_TOKENS,
-		// so this scenario isn't reachable through matchesGlob itself - exercise
-		// the cache directly to confirm an oversized entry is a silent no-op
-		// (per lru-cache's own documented behavior) rather than a crash or a
-		// cache that grows past its budget.
+		// Not reachable through matchesGlob itself (the two caps keep real patterns well under budget) - exercise the cache directly instead.
 		const oversized = [
 			Array.from({length: GLOB_TOKEN_CACHE_MAX_TOKENS + 1}, () => ({
 				type: 'literal' as const,
@@ -134,8 +122,6 @@ test.serial(
 		globTokenCache.set('oversized-entry-test-key', oversized);
 		t.false(globTokenCache.has('oversized-entry-test-key'));
 
-		// Unrelated to the cache internals above - just confirms matchesGlob
-		// keeps working normally afterward.
 		t.true(matchesGlob('a.ts', '*.ts'));
 	},
 );
@@ -251,10 +237,7 @@ test.serial(
 		const testDir = createTempDir('test-file-search-chunk-overshoot-temp');
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// 200 files is enough for rg's first stdout chunk to contain far
-			// more lines than the cap - the bug reproduces even at 50 files,
-			// since a whole small listing fits in one chunk. Batched async
-			// writes instead of sequential writeFileSync so setup stays fast.
+			// 200 files is enough for one stdout chunk to hold far more lines than the cap; batched async writes keep setup fast.
 			await Promise.all(
 				Array.from({length: 200}, (_, i) =>
 					writeFile(join(testDir, `f${i}.txt`), 'x'),
@@ -285,8 +268,7 @@ test.serial(
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// No files at all, so the rg --files raw-scan cap never fires -
-			// only the JS-side empty-directory recursion can trip a cap here.
+			// No files at all, so only the JS-side empty-directory recursion can trip a cap here.
 			for (let i = 0; i < 30; i++) {
 				mkdirSync(join(testDir, `d${i}`), {recursive: true});
 			}
@@ -338,8 +320,7 @@ test.serial(
 			);
 
 			t.true(result.truncated);
-			// The empty-dir walk should have been skipped entirely once the
-			// raw file-scan cap already made the result incomplete.
+			// The empty-dir walk should have been skipped once the raw scan cap made the result incomplete.
 			t.false(seenDirectories.includes('empty-dir'));
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
@@ -367,6 +348,31 @@ test.serial(
 
 			const visible = await findMatchingPaths('still-visible', testDir, 50);
 			t.true(visible.files.includes('pkg/still-visible'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'findMatchingPaths hides an empty directory ignored by a trailing-slash .gitignore pattern',
+	async t => {
+		// Uses a name outside DEFAULT_IGNORE_DIRS (not "dist") so the hardcoded exclusion list can't mask a regression in the trailing-slash check.
+		const testDir = createTempDir(
+			'test-file-search-trailing-slash-gitignore-temp',
+		);
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'ignoredslash/\n');
+			mkdirSync(join(testDir, 'ignoredslash'), {recursive: true});
+			mkdirSync(join(testDir, 'empty'), {recursive: true});
+
+			const hidden = await findMatchingPaths('ignoredslash', testDir, 50);
+			t.deepEqual(hidden.files, []);
+
+			const visible = await findMatchingPaths('empty', testDir, 50);
+			t.true(visible.files.includes('empty'));
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -684,9 +690,7 @@ test.serial(
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// Every line matches, so a flat +1 headroom under-provisions the kill
-			// once contextLines > 1: the Nth match's own trailing context lines
-			// stream in as type:"match" entries too, not type:"context".
+			// Every line matches, so the Nth match's trailing context lines stream in as type:"match" entries too, not type:"context".
 			const lines = Array.from({length: 5000}, (_, i) => `searchTarget line ${i}`);
 			writeFileSync(join(testDir, 'dense.ts'), lines.join('\n'));
 
@@ -1117,8 +1121,7 @@ test.serial(
 			mkdirSync(testDir, {recursive: true});
 			writeFileSync(join(testDir, 'a.txt'), 'foobar\n');
 
-			// Looks like lookbehind syntax at a glance but isn't - should still
-			// match under --engine auto, whichever engine rg picks for it.
+			// Looks like lookbehind syntax at a glance but isn't.
 			const result = await searchProjectContents(
 				'(?<n>foo)bar',
 				testDir,

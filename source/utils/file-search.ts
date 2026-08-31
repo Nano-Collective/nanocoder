@@ -14,7 +14,6 @@ const MAX_CONTEXT_CONTENT_LENGTH = 1500;
 const MAX_MATCH_CONTENT_LENGTH = 300;
 const DEFAULT_SEARCH_TIMEOUT_MS = 30_000;
 const MAX_RAW_FILES_SCANNED = 50_000;
-// Sanity cap on pattern length, not a backtracking defense (matchTokens has none).
 const MAX_GLOB_PATTERN_LENGTH = 1000;
 
 export class SearchTimeoutError extends Error {
@@ -46,7 +45,6 @@ function normalizePathForMatch(filePath: string): string {
 
 const MAX_BRACE_EXPANSIONS = 64;
 
-// Braces aren't nesting-aware; `{a,{b,c}}` expands wrong.
 function expandBraces(pattern: string): string[] {
 	let combinationCount = 0;
 
@@ -81,7 +79,6 @@ type GlobToken =
 	| {type: 'globstar'}
 	| {type: 'globstarSlash'};
 
-// '**/' is its own token - unlike a bare '**', it can vanish entirely.
 function tokenizeGlob(pattern: string): GlobToken[] {
 	const tokens: GlobToken[] = [];
 	let index = 0;
@@ -181,15 +178,7 @@ function matchTokens(text: string, tokens: GlobToken[]): boolean {
 	return previousRow[tokenCount];
 }
 
-// Same pattern is checked per candidate path during a walk - cache the tokenized form.
-//
-// Bounds the cache by total token count across all cached entries, not
-// entry count - a single entry can hold up to MAX_BRACE_EXPANSIONS
-// tokenized arrays, so bounding by entry count alone let total memory
-// scale with (entry count) x (max tokens per entry) x (max combinations
-// per entry), measured at 1.4GB in the worst case. This budget allows
-// roughly a dozen worst-case-sized entries to coexist for real caching
-// benefit, while keeping worst-case total memory in the tens of MB.
+// Bounds total tokens, not entry count - one entry can hold up to MAX_BRACE_EXPANSIONS arrays.
 /** @internal Exported for direct unit testing only. */
 export const GLOB_TOKEN_CACHE_MAX_TOKENS = 1_000_000;
 
@@ -249,11 +238,7 @@ async function assertPathExists(candidatePath: string): Promise<void> {
 	await lstat(candidatePath);
 }
 
-// Rust regex (rg's default engine) parses this as an ordinary greedy
-// quantifier instead of erroring, silently changing match semantics - so
-// --engine auto never realizes it needs PCRE2. Every other unsupported
-// construct fails to parse under the default engine and --engine auto
-// escalates to PCRE2 on its own; this is the one exception.
+// Possessive quantifiers parse under rg's default engine with different (wrong) semantics - the one case --engine auto can't self-detect.
 const POSSESSIVE_QUANTIFIER_PATTERN = /[*+?]\+|\}\+/;
 
 function binaryExcludeGlobs(): string[] {
@@ -264,7 +249,6 @@ function binaryExcludeGlobs(): string[] {
 	return globs;
 }
 
-// Real rg error strings, not guesses.
 const FATAL_RIPGREP_ERROR_PATTERNS = [
 	/regex parse error/,
 	/error parsing glob/,
@@ -284,8 +268,6 @@ export function isFatalRipgrepError(stderr: string): boolean {
 
 interface RunRipgrepResult {
 	stdout: string;
-	// True when killed by maxLines specifically - the raw scan was cut short
-	// before finishing, so a caller can't trust an empty/short result as final.
 	hitMaxLines: boolean;
 }
 
@@ -296,11 +278,6 @@ async function runRipgrep(
 	signal?: AbortSignal,
 	maxMatches?: number,
 	maxLines?: number,
-	// Synchronous only, by design: this exists for findMatchingPaths's pattern
-	// check, which never awaits anything. This mirrors VS Code's own
-	// RipgrepParser, which kills its rg process from a synchronous per-line
-	// callback with no async iteration involved. A future caller needing an
-	// async per-line decision would need a different, larger change - not this one.
 	onLine?: (line: string) => boolean,
 ): Promise<RunRipgrepResult> {
 	const rgPath = await resolveRipgrepPath();
@@ -320,7 +297,6 @@ async function runRipgrep(
 			timedOut = true;
 			child.kill();
 		}, timeoutMs);
-		// Buffers a chunk boundary that splits mid-line.
 		let lineRemainder = '';
 
 		child.stdout.setEncoding('utf8');
@@ -338,16 +314,7 @@ async function runRipgrep(
 				return;
 			}
 
-			// A single chunk can hold far more lines than the cap allows (Node
-			// delivers pipe data in ~8-64KB chunks, not line-by-line), so appending
-			// the whole chunk up front let stdout overshoot the cap by however many
-			// extra lines happened to share that chunk - confirmed empirically: a
-			// cap of 10 let through 200+ lines from one chunk. Build stdout from
-			// this same per-line loop instead, so it stops at exactly the line that
-			// reaches the cap. This matches how VS Code's RipgrepParser and
-			// OpenCode's ripgrep.ts both handle the same problem: split into lines
-			// before counting/limiting, never accumulate a raw buffer and truncate
-			// it after the fact.
+			// Chunks aren't line-aligned - build stdout here so it can't overshoot the cap.
 			lineRemainder += chunk;
 			let newlineIndex = lineRemainder.indexOf('\n');
 			while (newlineIndex >= 0) {
@@ -371,7 +338,7 @@ async function runRipgrep(
 								matchCount++;
 							}
 						} catch {
-							// ignore malformed/partial line
+							// no-op
 						}
 					}
 				}
@@ -444,7 +411,6 @@ async function runRipgrep(
 	});
 }
 
-// rg --files skips empty directories; walked separately below, without following symlinks.
 const MAX_WALK_DEPTH = 200;
 
 // Unanchored `foo` matches any depth (dirPrefix/**/foo); anchored patterns stay scoped (dirPrefix/foo).
@@ -479,10 +445,7 @@ async function walkEmptyDirectories(
 	signal?: AbortSignal,
 	maxDirsWalked: number = MAX_RAW_FILES_SCANNED,
 ): Promise<{truncated: boolean}> {
-	// Seeded from projectIgnore (defaults + root .gitignore + root
-	// .nanocoderignore, correctly ordered) instead of rebuilding that from
-	// scratch. Nested .gitignore files are merged in as they're found during
-	// the walk, taking precedence over the seeded rules - same as git.
+	// Seeded from projectIgnore for correct rule order; nested .gitignore merges in with higher precedence, same as git.
 	const ig = ignore();
 	ig.add(projectIgnore);
 	let loggedDepthCap = false;
@@ -516,9 +479,7 @@ async function walkEmptyDirectories(
 		}
 
 		const dirPrefix = normalizePathForMatch(path.relative(cwd, absolutePath));
-		// cwd's own .gitignore is already folded into projectIgnore above;
-		// re-reading it here would duplicate it AFTER .nanocoderignore in
-		// ig's rule order, inverting the negation precedence.
+		// cwd's .gitignore is already in projectIgnore - re-reading it would duplicate and invert precedence.
 		if (dirPrefix !== '') {
 			const gitignoreContent = await readFile(
 				path.join(absolutePath, '.gitignore'),
@@ -552,7 +513,8 @@ async function walkEmptyDirectories(
 				path.relative(cwd, childAbsolutePath),
 			);
 
-			if (ig.ignores(childRelativePath)) {
+			// child is a directory; ignore needs a trailing slash to match directory-only patterns like "dist/".
+			if (ig.ignores(`${childRelativePath}/`)) {
 				continue;
 			}
 
@@ -584,22 +546,10 @@ export interface WalkProjectEntriesOptions {
 	includeDirectories?: boolean;
 	signal?: AbortSignal;
 	maxRawFilesScanned?: number;
-	// Sorting requires rg to see every result before emitting the first byte
-	// (measured: 71ms of an 83ms run spent sorting before any output), which
-	// defeats early-stopping callers like findMatchingPaths entirely. Defaults
-	// to true - repo-map and file-autocomplete depend on stable path order.
-	//
-	// Unsorted streaming wins the large majority of calls (measured: 94% of
-	// filename/run combinations, ~2x mean improvement) but isn't a guaranteed
-	// win per-call - rg's own non-deterministic parallel discovery order means
-	// an unlucky call can occasionally land modestly slower (worst measured:
-	// ~17% over), most often for early-alphabetically-sorting target names.
+	// Unsorted streams results early but isn't guaranteed faster - rg's discovery order is non-deterministic.
 	sorted?: boolean;
 }
 
-// Only used when sorted: false, where onEntry must be able to run inline
-// from runRipgrep's synchronous onLine callback (see runRipgrep's onLine
-// param) - an async onEntry has nowhere to be awaited from there.
 function emitEntrySync(
 	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
 	entry: ProjectEntry,
@@ -613,10 +563,6 @@ function emitEntrySync(
 	return stop;
 }
 
-// Streams rg's unsorted --files output directly into onEntry as lines
-// arrive, instead of buffering the whole run and iterating afterward -
-// lets an early-satisfied caller (findMatchingPaths) kill the still-running
-// rg process instead of waiting for it to finish scanning the whole tree.
 async function walkUnsortedFileStream(
 	cwd: string,
 	rootPath: string,
@@ -687,8 +633,6 @@ async function walkUnsortedFileStream(
 		onLine,
 	);
 
-	// Caller was satisfied early (e.g. findMatchingPaths hit maxResults) -
-	// don't pay for an empty-directory walk it never asked for.
 	if (stoppedEarly) {
 		return {truncated: hitMaxLines};
 	}
@@ -805,8 +749,6 @@ export async function walkProjectEntries(
 		}
 	}
 
-	// If the raw --files scan already got cut short, the result set is already
-	// incomplete - skip paying for a full empty-directory walk on top of that.
 	let hitDirCap = false;
 	if (includeDirectories && !hitMaxLines) {
 		({truncated: hitDirCap} = await walkEmptyDirectories(
@@ -870,12 +812,10 @@ interface RgJsonMatch {
 	data: {
 		path?: {text?: string};
 		line_number?: number;
-		// rg sends `text` for valid UTF-8, `bytes` otherwise - absent `text` signals binary content.
 		lines?: {text?: string};
 	};
 }
 
-// A `match` or (`--context`) `context` line - both carry the text directly.
 function parseRgJsonLines(stdout: string): Array<{
 	type: 'match' | 'context';
 	file: string;
@@ -923,7 +863,6 @@ function toRelativeFile(cwd: string, file: string): string {
 	return normalizePathForMatch(path.relative(cwd, absolutePath));
 }
 
-// rg already hands us the matched line's text - no file re-read, no race with concurrent edits.
 function buildMatchesWithoutContext(
 	rgLines: RgLine[],
 	cwd: string,
@@ -934,7 +873,6 @@ function buildMatchesWithoutContext(
 
 	for (const {file, lineNumber, text} of rgLines) {
 		if (text === undefined) {
-			// No `lines.text` means rg sent `lines.bytes` instead - not valid UTF-8.
 			continue;
 		}
 
@@ -956,7 +894,6 @@ function buildMatchesWithoutContext(
 	return {matches, truncated};
 }
 
-// rg streams the surrounding context lines itself, deduped across overlapping matches.
 function buildMatchesWithContext(
 	rgLines: RgLine[],
 	cwd: string,
@@ -995,7 +932,6 @@ function buildMatchesWithContext(
 
 		for (const lineNumber of matchLines) {
 			if (byLine?.get(lineNumber) === undefined) {
-				// The match line isn't valid UTF-8 (rg sent `bytes`, not `text`).
 				continue;
 			}
 
@@ -1046,7 +982,6 @@ export async function searchProjectContents(
 		return {matches: [], truncated: false};
 	}
 	if (!query.trim()) {
-		// Empty pattern matches everything - rg would buffer the whole repo.
 		throw new Error('Search query cannot be empty');
 	}
 	await assertPathExists(searchPath ?? cwd);
@@ -1066,9 +1001,6 @@ export async function searchProjectContents(
 	if (wholeWord) {
 		args.push('--word-regexp');
 	}
-	// Let rg pick its own engine per-pattern instead of us guessing its
-	// grammar - except possessive quantifiers, which it silently mishandles
-	// under auto (see POSSESSIVE_QUANTIFIER_PATTERN).
 	args.push(
 		'--engine',
 		POSSESSIVE_QUANTIFIER_PATTERN.test(query) ? 'pcre2' : 'auto',
@@ -1084,10 +1016,7 @@ export async function searchProjectContents(
 	}
 	args.push('--regexp', query, '--', searchPath ?? cwd);
 
-	// No --max-count - it overshoots with --context. Headroom of contextLines
-	// so the kill doesn't fire before the Nth match's own trailing context
-	// lines stream in, even if every one of those lines is itself a match
-	// (streamed as its own type:"match" entry, not type:"context").
+	// No --max-count (overshoots with --context) - headroom of contextLines covers each match's own trailing context.
 	const rgMaxCount = Math.max(0, maxResults) + normalizedContextLines;
 
 	const {stdout} = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);

@@ -320,8 +320,7 @@ async function scanFiles(
 			if (!language) {
 				return false;
 			}
-			// Checked before the push so a repo holding exactly `maxFiles` indexable
-			// files is not reported as truncated.
+			// Checked before the push so exactly `maxFiles` files isn't reported as truncated.
 			if (files.length >= maxFiles) {
 				truncated = true;
 				return true;
