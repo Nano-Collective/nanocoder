@@ -1,8 +1,15 @@
-import {mkdirSync, rmSync, symlinkSync} from 'node:fs';
+import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test, {type ExecutionContext} from 'ava';
-import {buildHandler, expandVars, mergeEnv, resolveCwd, runScript} from './handler';
+import {
+	buildHandler,
+	expandVars,
+	mergeEnv,
+	resolveCwd,
+	runScript,
+	shellArgs,
+} from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
@@ -52,6 +59,35 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	t.is(expandVars('${NCT_MISSING}'), '');
 	if (prev === undefined) delete process.env.NCT_FOO;
 	else process.env.NCT_FOO = prev;
+});
+
+test('shellArgs uses /d /s /c for cmd.exe and -c for posix shells', t => {
+	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
+	t.deepEqual(shellArgs('cmd', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
+	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
+		'/d',
+		'/s',
+		'/c',
+		'echo hi',
+	]);
+	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
+	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
+});
+
+// Prove runScript forwards shellArgs, not a hardcoded -c. A POSIX script
+// named cmd.exe is enough: isWindowsCmd keys off the basename.
+const spawnArgTest = process.platform === 'win32' ? test.skip : test;
+spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
+	const bin = join(testDir, 'cmd.exe');
+	writeFileSync(bin, '#!/bin/sh\nprintf "%s\\n" "$@"\n');
+	chmodSync(bin, 0o755);
+	const result = await runScript('echo hi', {
+		cwd: testDir,
+		env: process.env,
+		shell: bin,
+		timeoutMs: 5_000,
+	});
+	t.is(result, 'EXIT_CODE: 0\n/d\n/s\n/c\necho hi');
 });
 
 test('mergeEnv overlays configured vars onto process.env', t => {

@@ -101,6 +101,7 @@ export interface ChatInputProps {
 	 * transcript and isn't clipped by the scroll viewport's overflow="hidden".
 	 */
 	fullscreen?: boolean;
+	isSaving?: boolean;
 }
 
 /**
@@ -155,6 +156,7 @@ export function ChatInput({
 	activeEditor,
 	onDismissActiveEditor,
 	fullscreen = false,
+	isSaving,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -253,6 +255,7 @@ export function ChatInput({
 					currentModel={currentModel}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
+					isSaving={isSaving}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

@@ -215,11 +215,9 @@
 		"@types/vscode": "^1.125.0",
 		"@types/ws": "^8.5.10",
 		"@vscode/vsce": "^3.9.1",
-		"autoprefixer": "^10.4.19",
 		"concurrently": "^8.2.2",
 		"esbuild": "^0.28.1",
 		"eslint": "^10.1.0",
-		"postcss": "^8.4.38",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2"
 	},
