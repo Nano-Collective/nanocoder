@@ -557,7 +557,9 @@ test('UserInput renders help text when not disabled', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /What would you like me to help with\?/);
+	// New design: heading removed, shorter placeholder inside rounded border
+	t.regex(output!, /Ask anything\.\.\./);
+	t.notRegex(output!, /What would you like me to help with\?/);
 	unmount();
 });
 
@@ -571,6 +573,7 @@ test('UserInput hides help text when disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /What would you like me to help with\?/);
+	t.notRegex(output!, /Ask anything\.\.\./);
 	unmount();
 });
 

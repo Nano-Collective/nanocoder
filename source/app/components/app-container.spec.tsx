@@ -19,9 +19,8 @@ test('createStaticComponents includes welcome message when shouldShowWelcome is 
 	};
 
 	const components = createStaticComponents(props);
-	t.is(components.length, 2); // Welcome + BootSummary
+	t.is(components.length, 1); // Only welcome — boot summary is suppressed when welcome is shown
 	t.is((components[0] as React.ReactElement).key, 'welcome');
-	t.is((components[1] as React.ReactElement).key, 'boot-summary');
 
 	// Render and verify the components display correctly
 	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);

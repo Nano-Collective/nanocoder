@@ -145,10 +145,10 @@ export function createStaticComponents({
 		components.push(<WelcomeMessage key="welcome" />);
 	}
 
-	// Boot summary header: always in interactive mode (for config path
-	// visibility), and in run mode we include the active development mode
-	// so it's obvious what the agent is executing under.
-	if (currentProvider || currentModel) {
+	// Boot summary header: only in non-interactive / run mode. The welcome
+	// already shows cwd, branch, and version, so the boot summary would just
+	// duplicate that info when the user is at the welcome screen.
+	if (!shouldShowWelcome && (currentProvider || currentModel)) {
 		components.push(
 			<Box key="boot-summary" flexDirection="column" marginBottom={1}>
 				<BootSummary
