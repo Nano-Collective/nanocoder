@@ -6,7 +6,7 @@ import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {
 	generateExportFilename,
-	uniqueFilename,
+	writeUniqueFile,
 } from '@/utils/generate-export-filename';
 import {isValidFilePath} from '@/utils/path-validation';
 
@@ -81,12 +81,6 @@ export const exportCommand: Command = {
 		}
 
 		const filepath = path.resolve(process.cwd(), requestedFilename); // nosemgrep
-		// A name the user typed keeps overwrite semantics (least surprise). Only
-		// generated names get auto-suffixed so repeated exports never clobber.
-		const safeFilepath = userProvided
-			? filepath
-			: await uniqueFilename(filepath);
-		const filename = path.basename(safeFilepath);
 
 		const frontmatter = `---
 session_date: ${new Date().toISOString()}
@@ -99,9 +93,26 @@ total_tokens: ${tokens}
 
 `;
 
-		const markdownContent = messages.map(formatMessageContent).join('');
+		const markdownContent =
+			frontmatter + messages.map(formatMessageContent).join('');
 
-		await fs.writeFile(safeFilepath, frontmatter + markdownContent);
+		// A name the user typed keeps overwrite semantics (least surprise). Only
+		// generated names get auto-suffixed so repeated exports never clobber --
+		// and the write is atomic ('wx') so concurrent exports can't race.
+		let writtenFilepath: string;
+		try {
+			writtenFilepath = userProvided
+				? await fs.writeFile(filepath, markdownContent).then(() => filepath)
+				: await writeUniqueFile(filepath, markdownContent);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return React.createElement(ExportError, {
+				key: generateKey('export'),
+				message: `Failed to export chat: ${message}`,
+			});
+		}
+
+		const filename = path.basename(writtenFilepath);
 
 		return React.createElement(Export, {
 			key: generateKey('export'),

@@ -50,30 +50,57 @@ function generateSlugFromMessages(messages: Message[]): string {
 	return truncateAtWordBoundary(sanitizeSlug(truncated), MAX_SLUG_LENGTH);
 }
 
-export async function uniqueFilename(filepath: string): Promise<string> {
-	try {
-		await fs.access(filepath);
-	} catch {
-		return filepath;
-	}
-
+/**
+ * Deterministically finds a free filename for a generated export and writes it
+ * atomically.
+ *
+ * The write uses the exclusive flag 'wx' so the free-check and the create are
+ * a single atomic step: two concurrent exports for the same slug can never
+ * both succeed on the same path (no TOCTOU race, no clobbering). On EEXIST we
+ * try the next collision suffix; once the bounded attempts are exhausted we
+ * fall back to a timestamp suffix. This function never falls through to
+ * overwriting an existing file.
+ *
+ * Unlike /export with an explicit filename (which keeps overwrite semantics),
+ * generated names must never destroy a previous export.
+ */
+export async function writeUniqueFile(
+	filepath: string,
+	content: string,
+): Promise<string> {
 	const dir = path.dirname(filepath);
 	const ext = path.extname(filepath);
 	const base = path.basename(filepath, ext);
 
-	for (let i = 2; i < MAX_COLLISION_ATTEMPTS + 2; i++) {
-		const candidate = path.join(dir, `${base}-${i}${ext}`);
+	const tryWrite = async (candidate: string): Promise<string | null> => {
 		try {
-			await fs.access(candidate);
-		} catch {
+			await fs.writeFile(candidate, content, {flag: 'wx'});
 			return candidate;
+		} catch (error) {
+			if (error && typeof error === 'object' && 'code' in error) {
+				if (error.code === 'EEXIST') return null;
+			}
+			throw error;
 		}
+	};
+
+	for (let i = 1; i < MAX_COLLISION_ATTEMPTS + 1; i++) {
+		const suffix = i === 1 ? '' : `-${i}`;
+		const candidate = path.join(dir, `${base}${suffix}${ext}`);
+		const written = await tryWrite(candidate);
+		if (written) return written;
 	}
 
-	// Bounded attempts failed, fall back to a timestamp suffix. This must
-	// never return the original path: fs.writeFile would clobber the existing
-	// file, violating the "never overwrites" guarantee.
-	return path.join(dir, `${base}-new-${Date.now()}${ext}`);
+	// Bounded attempts all collided, drop a timestamp and try once more. If the
+	// astronomically-unlikely timestamp collision happens, surface the error
+	// rather than clobber anything.
+	const timestamped = path.join(dir, `${base}-new-${Date.now()}${ext}`);
+	return tryWrite(timestamped).then(result => {
+		if (!result) {
+			throw new Error('Unable to allocate a unique export filename');
+		}
+		return result;
+	});
 }
 
 export function generateExportFilename(messages: Message[]): string {

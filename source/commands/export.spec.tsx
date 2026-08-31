@@ -9,7 +9,6 @@ import {ThemeContext} from '../hooks/useTheme';
 
 // Mock fs module
 const originalWriteFile = fs.writeFile;
-const originalAccess = fs.access;
 let mockWriteFileCalls: Array<{path: string; content: string}> = [];
 
 test.beforeEach(() => {
@@ -18,14 +17,10 @@ test.beforeEach(() => {
 		mockWriteFileCalls.push({path: filepath, content});
 		return Promise.resolve(void 0);
 	};
-	fs.access = async () => {
-		throw new Error('ENOENT');
-	};
 });
 
 test.afterEach(() => {
 	fs.writeFile = originalWriteFile;
-	fs.access = originalAccess;
 });
 
 // Mock ThemeProvider for testing
@@ -72,12 +67,8 @@ test('exportCommand uses provided filename', async t => {
 });
 
 test('exportCommand keeps overwrite semantics for a user-provided filename', async t => {
-	// Simulate the target file already existing. A user-typed name must still
-	// write to that exact path (overwrite), not get auto-suffixed.
-	fs.access = async () => {
-		return void 0;
-	};
-
+	// A user-typed name must always write to that exact path (overwrite), never
+	// be auto-suffixed, no matter what already exists on disk.
 	await exportCommand.handler(['fixed-name.md'], testMessages, testMetadata);
 
 	t.is(mockWriteFileCalls.length, 1);
@@ -85,18 +76,33 @@ test('exportCommand keeps overwrite semantics for a user-provided filename', asy
 	t.false(mockWriteFileCalls[0].path.includes('fixed-name-2'));
 });
 
-test('exportCommand auto-suffixes a generated filename on collision', async t => {
-	const originalAccess = fs.access;
-	// Without this, uniqueFilename's check sees the file as not existing.
-	fs.access = async () => {
-		throw new Error('ENOENT');
-	};
-
+test('exportCommand writes a generated filename that is free', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
 
 	t.is(mockWriteFileCalls.length, 1);
-	t.false(mockWriteFileCalls[0].path.includes('/2'));
-	fs.access = originalAccess;
+	// No auto-suffix (matches -2, -3 etc.) when the target does not exist.
+	t.regex(mockWriteFileCalls[0].path, /hello-\d{4}-\d{2}-\d{2}\.md$/);
+});
+
+test('exportCommand surfaces a write failure instead of a false success', async t => {
+	const originalWriteFile = fs.writeFile;
+	fs.writeFile = async () => {
+		throw new Error('ENOSPC: no space left on device');
+	};
+
+	const result = (await exportCommand.handler(
+		['big.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Failed to export chat/);
+	t.regex(output!, /ENOSPC/);
+	t.false(output!.includes('Chat exported'));
+	fs.writeFile = originalWriteFile;
 });
 
 test('exportCommand generates default filename from first user message', async t => {
