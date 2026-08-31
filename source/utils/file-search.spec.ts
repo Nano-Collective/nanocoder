@@ -6,6 +6,8 @@ import test from 'ava';
 
 import {
 	findMatchingPaths,
+	GLOB_TOKEN_CACHE_MAX_TOKENS,
+	globTokenCache,
 	isFatalRipgrepError,
 	matchesGlob,
 	searchProjectContents,
@@ -76,6 +78,67 @@ test('matchesGlob rejects a pattern with too many brace-expansion combinations',
 	t.true(error instanceof Error);
 	t.regex(error?.message ?? '', /too many brace-expansion combinations/);
 });
+
+test.serial(
+	'globTokenCache stays bounded by total token count across many worst-case-sized entries',
+	t => {
+		// Each pattern hits both caps at once: 6 sequential {aaaa,bbbb} groups
+		// is exactly MAX_BRACE_EXPANSIONS (2^6 = 64) combinations, padded with
+		// literal filler up to just under MAX_GLOB_PATTERN_LENGTH so every one
+		// of those 64 expanded branches tokenizes to ~900+ tokens. Entry-count
+		// bounding alone let total cache memory scale with
+		// (entry count) x (tokens per branch) x (branches per entry) - this
+		// asserts the size-based bound holds even under repeated worst-case
+		// entries, not just typical ones.
+		const filler = 'a'.repeat(900);
+		const groups = '{aaaa,bbbb}'.repeat(6);
+
+		for (let i = 0; i < 30; i++) {
+			const pattern = `p${i}_${filler}${groups}`;
+			matchesGlob('irrelevant/path.ts', pattern);
+		}
+
+		t.true(globTokenCache.calculatedSize <= GLOB_TOKEN_CACHE_MAX_TOKENS);
+	},
+);
+
+test.serial(
+	'matchesGlob reuses the cached tokenization for a repeated pattern',
+	t => {
+		const pattern = 'src/**/*.repeated-pattern-test.ts';
+		matchesGlob('src/foo/repeated-pattern-test.ts', pattern);
+		t.true(globTokenCache.has(pattern));
+
+		const sizeBefore = globTokenCache.size;
+		matchesGlob('src/bar/repeated-pattern-test.ts', pattern);
+		t.is(globTokenCache.size, sizeBefore);
+	},
+);
+
+test.serial(
+	'globTokenCache silently drops an entry whose own size exceeds the cache budget, and matchesGlob still works',
+	t => {
+		// MAX_GLOB_PATTERN_LENGTH and MAX_BRACE_EXPANSIONS together bound any
+		// real pattern's tokenized size well under GLOB_TOKEN_CACHE_MAX_TOKENS,
+		// so this scenario isn't reachable through matchesGlob itself - exercise
+		// the cache directly to confirm an oversized entry is a silent no-op
+		// (per lru-cache's own documented behavior) rather than a crash or a
+		// cache that grows past its budget.
+		const oversized = [
+			Array.from({length: GLOB_TOKEN_CACHE_MAX_TOKENS + 1}, () => ({
+				type: 'literal' as const,
+				char: 'a',
+			})),
+		];
+
+		globTokenCache.set('oversized-entry-test-key', oversized);
+		t.false(globTokenCache.has('oversized-entry-test-key'));
+
+		// Unrelated to the cache internals above - just confirms matchesGlob
+		// keeps working normally afterward.
+		t.true(matchesGlob('a.ts', '*.ts'));
+	},
+);
 
 test.serial('findMatchingPaths returns files and directories cross-platform', async t => {
 	const testDir = createTempDir('test-file-search-find-temp');

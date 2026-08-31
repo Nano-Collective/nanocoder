@@ -96,6 +96,9 @@ importers:
       llama-tokenizer-js:
         specifier: ^1.2.2
         version: 1.2.2
+      lru-cache:
+        specifier: ^11.5.1
+        version: 11.5.1
       pino:
         specifier: ^10.1.0
         version: 10.3.1

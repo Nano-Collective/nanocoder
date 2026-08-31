@@ -3,6 +3,7 @@ import type {Dirent} from 'node:fs';
 import {lstat, readdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import ignore from 'ignore';
+import {LRUCache} from 'lru-cache';
 
 import {BINARY_FILE_EXTENSIONS} from '@/constants';
 import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
@@ -181,14 +182,27 @@ function matchTokens(text: string, tokens: GlobToken[]): boolean {
 }
 
 // Same pattern is checked per candidate path during a walk - cache the tokenized form.
-const GLOB_TOKEN_CACHE_LIMIT = 500;
-const globTokenCache = new Map<string, GlobToken[][]>();
+//
+// Bounds the cache by total token count across all cached entries, not
+// entry count - a single entry can hold up to MAX_BRACE_EXPANSIONS
+// tokenized arrays, so bounding by entry count alone let total memory
+// scale with (entry count) x (max tokens per entry) x (max combinations
+// per entry), measured at 1.4GB in the worst case. This budget allows
+// roughly a dozen worst-case-sized entries to coexist for real caching
+// benefit, while keeping worst-case total memory in the tens of MB.
+/** @internal Exported for direct unit testing only. */
+export const GLOB_TOKEN_CACHE_MAX_TOKENS = 1_000_000;
+
+/** @internal Exported for direct unit testing only. */
+export const globTokenCache = new LRUCache<string, GlobToken[][]>({
+	maxSize: GLOB_TOKEN_CACHE_MAX_TOKENS,
+	sizeCalculation: tokenized =>
+		tokenized.reduce((sum, tokens) => sum + tokens.length, 0),
+});
 
 function tokenizeExpandedPattern(pattern: string): GlobToken[][] {
 	const cached = globTokenCache.get(pattern);
 	if (cached) {
-		globTokenCache.delete(pattern);
-		globTokenCache.set(pattern, cached);
 		return cached;
 	}
 
@@ -202,13 +216,6 @@ function tokenizeExpandedPattern(pattern: string): GlobToken[][] {
 	const tokenized = expandBraces(normalizedPattern).map(tokenizeGlob);
 
 	globTokenCache.set(pattern, tokenized);
-	if (globTokenCache.size > GLOB_TOKEN_CACHE_LIMIT) {
-		const oldest = globTokenCache.keys().next().value;
-		if (oldest !== undefined) {
-			globTokenCache.delete(oldest);
-		}
-	}
-
 	return tokenized;
 }
 
