@@ -6,7 +6,11 @@ import ignore from 'ignore';
 import {LRUCache} from 'lru-cache';
 
 import {BINARY_FILE_EXTENSIONS} from '@/constants';
-import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
+import {
+	DEFAULT_IGNORE_DIRS,
+	findNanocoderIgnoreFile,
+	loadGitignore,
+} from '@/utils/gitignore-loader';
 import {getLogger} from '@/utils/logging';
 import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 
@@ -234,6 +238,23 @@ function defaultIgnoreGlobs(
 	return globs;
 }
 
+/**
+ * Hands .nanocoderignore to rg so it prunes during traversal.
+ *
+ * The JS-side `projectIgnore.ignores()` filter downstream would drop these
+ * paths anyway, but only after rg had walked them and after they had already
+ * spent budget against `maxRawFilesScanned` - a large ignored fixtures
+ * directory could crowd real files out of the results entirely.
+ *
+ * rg applies `--ignore-file` rules after .gitignore and after `.ignore`, which
+ * is the layering {@link loadGitignore} documents. Omitted when the file does
+ * not exist: rg warns on a missing path, and every search would carry it.
+ */
+function nanocoderIgnoreFileArgs(cwd: string): string[] {
+	const ignoreFile = findNanocoderIgnoreFile(cwd);
+	return ignoreFile ? ['--ignore-file', ignoreFile] : [];
+}
+
 async function assertPathExists(candidatePath: string): Promise<void> {
 	await lstat(candidatePath);
 }
@@ -284,6 +305,21 @@ async function runRipgrep(
 
 		child.stdout.setEncoding('utf8');
 		child.stdout.on('data', (chunk: string) => {
+			// This runs on the stream's event loop turn, not inside the promise
+			// executor, so a throw from onLine would escape as an uncaught
+			// exception and take the process down instead of failing the search.
+			try {
+				consumeChunk(chunk);
+			} catch (err) {
+				// Reusing killedForLimit to ignore any chunks still in flight. The
+				// promise is already rejected, so the close handler's resolve is a no-op.
+				killedForLimit = true;
+				child.kill();
+				reject(err instanceof Error ? err : new Error(String(err)));
+			}
+		});
+
+		function consumeChunk(chunk: string): void {
 			if (killedForLimit) {
 				return;
 			}
@@ -340,7 +376,7 @@ async function runRipgrep(
 
 				newlineIndex = lineRemainder.indexOf('\n');
 			}
-		});
+		}
 
 		child.stderr.setEncoding('utf8');
 		child.stderr.on('data', (chunk: string) => {
@@ -534,15 +570,34 @@ async function walkEmptyDirectories(
 }
 
 export interface WalkProjectEntriesOptions {
+	/** Emit directory entries alongside files. Defaults to true. */
 	includeDirectories?: boolean;
 	signal?: AbortSignal;
 	maxRawFilesScanned?: number;
-	// Unsorted streams results early but isn't guaranteed faster - rg's discovery order is non-deterministic.
+	/**
+	 * Sort entries by path. Defaults to true.
+	 *
+	 * Unsorted streams results early but isn't guaranteed faster - rg's
+	 * discovery order is non-deterministic.
+	 *
+	 * `sorted: false` reads entries off rg's stdout as it arrives, so `onEntry`
+	 * MUST be synchronous there: returning a promise would let the stream run
+	 * ahead of the callback. The overloads below make that a compile error, and
+	 * {@link emitEntrySync} throws if a JS caller slips one through anyway.
+	 */
 	sorted?: boolean;
 }
 
+/** `onEntry` shape accepted when entries stream in unsorted - no promises. */
+export type SyncProjectEntryVisitor = (entry: ProjectEntry) => boolean;
+
+/** `onEntry` shape accepted when entries are sorted and emitted one at a time. */
+export type ProjectEntryVisitor = (
+	entry: ProjectEntry,
+) => boolean | Promise<boolean>;
+
 function emitEntrySync(
-	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	onEntry: ProjectEntryVisitor,
 	entry: ProjectEntry,
 ): boolean {
 	const stop = onEntry(entry);
@@ -558,7 +613,7 @@ async function walkUnsortedFileStream(
 	cwd: string,
 	rootPath: string,
 	args: string[],
-	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	onEntry: ProjectEntryVisitor,
 	includeDirectories: boolean,
 	projectIgnore: ReturnType<typeof loadGitignore>,
 	signal: AbortSignal | undefined,
@@ -574,6 +629,8 @@ async function walkUnsortedFileStream(
 		}
 
 		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
+		// rg already pruned these via --ignore-file; kept as a backstop because
+		// its matcher and the `ignore` package are separate implementations.
 		if (projectIgnore.ignores(relativeFile)) {
 			return false;
 		}
@@ -644,10 +701,29 @@ async function walkUnsortedFileStream(
 	return {truncated: hitMaxLines || hitDirCap};
 }
 
+/**
+ * Walk every non-ignored file (and, by default, directory) under `startPath`,
+ * calling `onEntry` for each. Return true from `onEntry` to stop the walk.
+ *
+ * With `sorted: false`, entries stream straight off rg's stdout and `onEntry`
+ * must be synchronous - see {@link WalkProjectEntriesOptions.sorted}.
+ */
 export async function walkProjectEntries(
 	cwd: string,
 	startPath: string | undefined,
-	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	onEntry: SyncProjectEntryVisitor,
+	options: WalkProjectEntriesOptions & {sorted: false},
+): Promise<{truncated: boolean}>;
+export async function walkProjectEntries(
+	cwd: string,
+	startPath: string | undefined,
+	onEntry: ProjectEntryVisitor,
+	options?: WalkProjectEntriesOptions & {sorted?: true},
+): Promise<{truncated: boolean}>;
+export async function walkProjectEntries(
+	cwd: string,
+	startPath: string | undefined,
+	onEntry: ProjectEntryVisitor,
 	options: WalkProjectEntriesOptions = {},
 ): Promise<{truncated: boolean}> {
 	const {
@@ -667,6 +743,7 @@ export async function walkProjectEntries(
 		'--no-require-git',
 		'--no-config',
 		...(sorted ? ['--sort', 'path'] : []),
+		...nanocoderIgnoreFileArgs(cwd),
 		...defaultIgnoreGlobs(projectIgnore),
 		'--',
 		rootPath,
@@ -1000,7 +1077,11 @@ export async function searchProjectContents(
 	if (include) {
 		args.push('-g', include);
 	}
-	args.push(...defaultIgnoreGlobs(projectIgnore), ...binaryExcludeGlobs());
+	args.push(
+		...nanocoderIgnoreFileArgs(cwd),
+		...defaultIgnoreGlobs(projectIgnore),
+		...binaryExcludeGlobs(),
+	);
 	const normalizedContextLines = Math.max(0, contextLines ?? 0);
 	if (normalizedContextLines > 0) {
 		args.push('--context', String(normalizedContextLines));
