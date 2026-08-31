@@ -72,12 +72,67 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder init` without booting the interactive app. The shared
+// initializer is also used by /init, so both entry points keep identical file
+// generation and overwrite behavior.
+if (args[0] === 'init') {
+	if (args.includes('--help') || args.includes('-h')) {
+		console.log(`
+Usage: nanocoder init [options]
+
+Options:
+  --preset <type>   Apply a bundled project preset (react, nextjs, rust)
+  -f, --force       Regenerate AGENTS.md if it already exists
+  --lean            Skip CLAUDE.md when merging existing project guidance
+  -h, --help        Show help for the init command
+
+Examples:
+  nanocoder init
+  nanocoder init --preset react
+  nanocoder init --preset nextjs
+  nanocoder init --preset rust
+  `);
+		process.exit(0);
+	}
+
+	const [{parseInitArguments}, initializer] = await Promise.all([
+		import('@/init/init-args'),
+		import('@/init/initializer'),
+	]);
+	try {
+		const options = parseInitArguments(args.slice(1));
+		const result = initializer.initializeProject({
+			projectPath: process.cwd(),
+			...options,
+		});
+
+		console.log('Nanocoder project initialized successfully.');
+		if (result.preset) console.log(`Preset: ${result.preset}`);
+		for (const file of result.created) console.log(`Created: ${file}`);
+		for (const file of result.preserved) {
+			console.log(`Preserved existing file: ${file}`);
+		}
+		process.exit(0);
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message : 'Unknown initialization error';
+		const suffix =
+			error instanceof initializer.ProjectAlreadyInitializedError
+				? ' Use nanocoder init --force to regenerate.'
+				: '';
+		console.error(`${message}${suffix}`);
+		process.exit(1);
+	}
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
 Commands:
+  init [options]                  Analyze the project and create AGENTS.md.
+                                  Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
@@ -115,6 +170,7 @@ Options:
   run                 Run in non-interactive mode
 
 Examples:
+  nanocoder init --preset nextjs
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"

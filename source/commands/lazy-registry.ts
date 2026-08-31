@@ -104,7 +104,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'init',
 		description:
-			'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md.',
+			'Initialize nanocoder configuration and analyze project structure. Use --preset <react|nextjs|rust>, --force to regenerate AGENTS.md, or --lean to skip CLAUDE.md.',
 		load: () => import('@/commands/init').then(m => m.initCommand),
 	},
 	{
