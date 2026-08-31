@@ -46,6 +46,9 @@ Preferences follow the same location hierarchy as configuration files:
 | `nanocoderShape` | The nanocoder ASCII art shape |
 | `trustedDirectories` | Directories you've approved through the first-run security disclaimer |
 | `lastUpdateCheck` | Timestamp of the last update check (used to avoid checking too frequently) |
+| `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
+| `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |
+| `semanticMemoryLimit` | Maximum memories considered for a single prompt. Default `8`, clamped to 1-50. Adjustable from `/settings` → **Advanced**. |
 | `alternateScreen` | When `true`, starts in fullscreen mode (alternate screen buffer with in-app scrolling) by default. The `--alt-screen`/`--no-alt-screen` CLI flags override this for a single run. See [CLI Options](../getting-started/index.md#cli-options). |
 
 ### Paste Configuration

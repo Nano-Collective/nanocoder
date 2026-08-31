@@ -464,6 +464,12 @@ export interface UserPreferences {
 	 */
 	showUsageFooter?: boolean;
 	enablePromptScrubbing?: boolean;
+	/** Whether semantic memory is active. Default true to preserve existing behavior. */
+	semanticMemoryEnabled?: boolean;
+	/** Max memories recalled into one prompt. Defaults and bounds live in project-context.ts. */
+	semanticMemoryLimit?: number;
+	/** Approximate token ceiling for the injected Project Context block. */
+	semanticMemoryTokenBudget?: number;
 	/**
 	 * Interactive TUI screen mode. true (default): fullscreen on the
 	 * alternate screen buffer with in-app scrolling (wheel / PgUp / PgDn).

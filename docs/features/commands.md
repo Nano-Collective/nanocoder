@@ -46,6 +46,8 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
+| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber will remove from your prompts |
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |
