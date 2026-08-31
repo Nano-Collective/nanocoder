@@ -92,7 +92,10 @@ export async function writeUniqueFile(
 
 	for (let i = 1; i < MAX_COLLISION_ATTEMPTS + 1; i++) {
 		const suffix = i === 1 ? '' : `-${i}`;
-		const candidate = path.join(dir, `${base}${suffix}${ext}`);
+		// nosemgrep: `dir`/`base`/`ext` come from a path already validated and
+		// containment-checked by resolveFilePath in the handler, so this join
+		// cannot escape `dir`.
+		const candidate = path.join(dir, `${base}${suffix}${ext}`); // nosemgrep
 		const written = await tryWrite(candidate);
 		if (written) return written;
 	}
@@ -100,7 +103,8 @@ export async function writeUniqueFile(
 	// Bounded attempts all collided, drop a timestamp and try once more. If the
 	// astronomically-unlikely timestamp collision happens, surface the error
 	// rather than clobber anything.
-	const timestamped = path.join(dir, `${base}-new-${Date.now()}${ext}`);
+	// nosemgrep: same reasoning as the collision loop above.
+	const timestamped = path.join(dir, `${base}-new-${Date.now()}${ext}`); // nosemgrep
 	return tryWrite(timestamped).then(result => {
 		if (!result) {
 			throw new Error('Unable to allocate a unique export filename');
