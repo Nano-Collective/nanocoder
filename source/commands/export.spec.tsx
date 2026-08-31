@@ -203,12 +203,17 @@ test('exportCommand renders Export component with correct filename', async t => 
 });
 
 test('exportCommand rejects path traversal in filename', async t => {
-	const result = await exportCommand.handler(
+	const result = (await exportCommand.handler(
 		['../../../etc/passwd'],
 		testMessages,
 		testMetadata,
-	);
+	)) as React.ReactElement;
 
 	t.is(mockWriteFileCalls.length, 0);
-	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Invalid filename/);
+	t.false(output!.includes('Chat exported'));
 });

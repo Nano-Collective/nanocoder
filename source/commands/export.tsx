@@ -1,14 +1,14 @@
 import fs from 'fs/promises';
 import path from 'path';
 import React from 'react';
-import {SuccessMessage} from '@/components/message-box';
+import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {
 	generateExportFilename,
-	isUnsafeFilename,
 	uniqueFilename,
 } from '@/utils/generate-export-filename';
+import {isValidFilePath} from '@/utils/path-validation';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';
@@ -51,6 +51,17 @@ function Export({filename}: {filename: string}) {
 	);
 }
 
+function ExportError({message}: {message: string}) {
+	return (
+		<ErrorMessage
+			hideBox={true}
+			marginTop={1}
+			marginBottom={1}
+			message={message}
+		></ErrorMessage>
+	);
+}
+
 export const exportCommand: Command = {
 	name: 'export',
 	description: 'Export the chat history to a markdown file',
@@ -61,10 +72,10 @@ export const exportCommand: Command = {
 	) => {
 		const requestedFilename = args[0] || generateExportFilename(messages);
 
-		if (isUnsafeFilename(requestedFilename)) {
-			return React.createElement(Export, {
+		if (!isValidFilePath(requestedFilename, process.cwd())) {
+			return React.createElement(ExportError, {
 				key: generateKey('export'),
-				filename: 'Error: invalid filename',
+				message: 'Invalid filename: path traversal detected',
 			});
 		}
 

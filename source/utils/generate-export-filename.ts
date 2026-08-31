@@ -49,17 +49,7 @@ function generateSlugFromMessages(messages: Message[]): string {
 	return truncateAtWordBoundary(sanitizeSlug(truncated), MAX_SLUG_LENGTH);
 }
 
-function isUnsafeFilename(filename: string): boolean {
-	const basename = path.basename(filename);
-	return (
-		basename !== filename ||
-		basename === '..' ||
-		basename === '.' ||
-		basename.includes('\0')
-	);
-}
-
-async function uniqueFilename(filepath: string): Promise<string> {
+export async function uniqueFilename(filepath: string): Promise<string> {
 	try {
 		await fs.access(filepath);
 	} catch {
@@ -81,8 +71,6 @@ async function uniqueFilename(filepath: string): Promise<string> {
 
 	return filepath;
 }
-
-export {isUnsafeFilename, uniqueFilename};
 
 export function generateExportFilename(messages: Message[]): string {
 	const slug = generateSlugFromMessages(messages);
