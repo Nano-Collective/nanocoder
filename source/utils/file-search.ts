@@ -588,6 +588,12 @@ export interface WalkProjectEntriesOptions {
 	// (measured: 71ms of an 83ms run spent sorting before any output), which
 	// defeats early-stopping callers like findMatchingPaths entirely. Defaults
 	// to true - repo-map and file-autocomplete depend on stable path order.
+	//
+	// Unsorted streaming wins the large majority of calls (measured: 94% of
+	// filename/run combinations, ~2x mean improvement) but isn't a guaranteed
+	// win per-call - rg's own non-deterministic parallel discovery order means
+	// an unlucky call can occasionally land modestly slower (worst measured:
+	// ~17% over), most often for early-alphabetically-sorting target names.
 	sorted?: boolean;
 }
 
