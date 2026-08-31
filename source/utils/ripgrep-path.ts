@@ -9,3 +9,7 @@ export async function resolveRipgrepPath(): Promise<string> {
 	cachedPath = rgPath;
 	return cachedPath;
 }
+
+export function resetRipgrepPathCache(): void {
+	cachedPath = undefined;
+}
