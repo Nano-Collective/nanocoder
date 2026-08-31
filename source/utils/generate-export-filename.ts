@@ -4,10 +4,6 @@ import type {Message} from '@/types/core';
 
 const MAX_WORDS = 4;
 const MAX_SLUG_LENGTH = 40;
-// Keep the whole filename comfortably under the 255-byte filesystem limit even
-// for multi-byte (CJK) slugs. 40 chars x 3 bytes + "-" + "new-" + 13-digit
-// timestamp + ".md" stays far below it.
-const MAX_SLUG_BYTES = 96;
 const MAX_COLLISION_ATTEMPTS = 5;
 
 function sanitizeSlug(input: string): string {
@@ -19,41 +15,14 @@ function sanitizeSlug(input: string): string {
 		.replace(/^-|-$/g, '');
 }
 
-function truncateAtWordBoundary(slug: string, maxChars: number): string {
-	if (
-		slug.length <= maxChars &&
-		Buffer.byteLength(slug, 'utf-8') <= MAX_SLUG_BYTES
-	) {
+function truncateAtWordBoundary(slug: string, maxLength: number): string {
+	if (slug.length <= maxLength) {
 		return slug;
 	}
 
-	// Prefer the byte limit (the real constraint); fall back to the char limit
-	// when it is stricter. The character slice must not split the slug mid-word,
-	// and cutting UTF-8 at an arbitrary byte can split a code point, so operate
-	// on character boundaries and then verify the result fits.
-	const truncated = slug.substring(0, maxChars);
-	let candidate =
-		Buffer.byteLength(slug, 'utf-8') > MAX_SLUG_BYTES ? slug : truncated;
-
-	// Trim toward the last word boundary until it fits the byte budget.
-	while (Buffer.byteLength(candidate, 'utf-8') > MAX_SLUG_BYTES) {
-		const hyphen = candidate.lastIndexOf('-');
-		if (hyphen <= 0) {
-			candidate = candidate.slice(0, Math.max(0, candidate.length - 1));
-			if (candidate.length === 0) break;
-			continue;
-		}
-		candidate = candidate.slice(0, hyphen);
-	}
-
-	// Then apply the character bound at a word boundary if still too long.
-	if (candidate.length > maxChars) {
-		const bound = candidate.substring(0, maxChars);
-		const lastHyphen = bound.lastIndexOf('-');
-		candidate = lastHyphen > 0 ? bound.slice(0, lastHyphen) : bound;
-	}
-
-	return candidate;
+	const truncated = slug.substring(0, maxLength);
+	const lastHyphen = truncated.lastIndexOf('-');
+	return lastHyphen > 0 ? truncated.substring(0, lastHyphen) : truncated;
 }
 
 function generateSlugFromMessages(messages: Message[]): string {
@@ -109,7 +78,13 @@ export async function writeUniqueFile(
 			return candidate;
 		} catch (error) {
 			if (error && typeof error === 'object' && 'code' in error) {
+				// Collision: try the next candidate.
 				if (error.code === 'EEXIST') return null;
+				// Missing parent directory: report it plainly so the user knows
+				// the export failed because a directory doesn't exist.
+				if (error.code === 'ENOENT') {
+					throw new Error(`Parent directory does not exist: ${dir}`);
+				}
 			}
 			throw error;
 		}

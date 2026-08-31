@@ -93,15 +93,26 @@ test('strips emoji while keeping adjacent words', t => {
 	t.regex(filename, /^fix-the-bug-\d{4}-\d{2}-\d{2}\.md$/);
 });
 
-test('truncates a long multi-byte slug to stay within the byte budget', t => {
-	// 40 CJK chars would exceed 96 UTF-8 bytes, so the slug must be trimmed at a
-	// word boundary while the whole filename stays well under 255 bytes.
-	const messages = [user('修'.repeat(40))];
+test('truncates a long CJK slug at the 40-character limit', t => {
+	const messages = [user('修'.repeat(100))];
 	const filename = generateExportFilename(messages);
 	const slug = filename.replace(/-\d{4}-\d{2}-\d{2}\.md$/, '');
-	t.true(Buffer.byteLength(slug, 'utf-8') <= 96);
-	t.true(Buffer.byteLength(filename, 'utf-8') < 255);
+	// 40 CJK characters still keep the whole filename well under 255 bytes, so
+	// no byte budget is needed -- the char limit alone suffices.
+	t.is(slug.length, 40);
 	t.false(slug.endsWith('-'));
+	t.true(Buffer.byteLength(filename, 'utf-8') < 255);
+});
+
+test('truncates a long hyphenated slug at the last whole word', t => {
+	const messages = [user('fix-the-login-logout-registration-authentication')];
+	const filename = generateExportFilename(messages);
+	const slug = filename.replace(/-\d{4}-\d{2}-\d{2}\.md$/, '');
+	t.true(slug.length <= 40);
+	// Must not split a word: trimming stops at a word boundary, so it must not
+	// end mid-word with a break inside a hyphenated token.
+	t.true(/^fix(?:-[a-z]+)*$/.test(slug));
+	t.true(slug.length >= 20);
 });
 
 test('writeUniqueFile writes to the given path when it is free', async t => {
@@ -169,5 +180,16 @@ test('writeUniqueFile is atomic: the original is never clobbered by a race', asy
 	t.not(b, filepath);
 	t.not(a, b);
 	t.is(await fs.readFile(filepath, 'utf-8'), 'original');
+	await fs.rm(tmpDir, {recursive: true});
+});
+
+test('writeUniqueFile reports a missing parent directory clearly', async t => {
+	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-test-'));
+	const filepath = path.join(tmpDir, 'does-not-exist', 'chat.md');
+
+	await t.throwsAsync(
+		() => writeUniqueFile(filepath, 'content'),
+		{message: /Parent directory does not exist/},
+	);
 	await fs.rm(tmpDir, {recursive: true});
 });
