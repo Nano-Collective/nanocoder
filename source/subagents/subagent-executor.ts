@@ -765,7 +765,10 @@ export class SubagentExecutor {
 			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
-			const content = typeof result === 'string' ? result : result.llmContent;
+			const content =
+				typeof result === 'string'
+					? result
+					: (result.llmContent ?? JSON.stringify(result));
 			return truncateToolResult(content);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
