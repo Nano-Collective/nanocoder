@@ -5,6 +5,7 @@ import test from 'ava';
 
 import {
 	findMatchingPaths,
+	isFatalRipgrepError,
 	matchesGlob,
 	searchProjectContents,
 	SearchTimeoutError,
@@ -866,7 +867,7 @@ test.serial(
 );
 
 test.serial(
-	'searchProjectContents supports lookahead and backreferences via --pcre2',
+	'searchProjectContents supports lookahead and backreferences (rg auto-selects pcre2)',
 	async t => {
 		const testDir = createTempDir('test-file-search-pcre2-temp');
 
@@ -902,7 +903,7 @@ test.serial(
 );
 
 test.serial(
-	'searchProjectContents supports Python-style and Perl-style named backreferences via --pcre2',
+	'searchProjectContents supports Python-style and Perl-style named backreferences (rg auto-selects pcre2)',
 	async t => {
 		const testDir = createTempDir('test-file-search-named-backref-temp');
 
@@ -955,8 +956,19 @@ test.serial(
 	},
 );
 
+test(
+	'isFatalRipgrepError recognizes a build of ripgrep with no PCRE2 support (real on Linux ARM)',
+	t => {
+		t.true(
+			isFatalRipgrepError(
+				'rg: PCRE2 is not available in this build of ripgrep',
+			),
+		);
+	},
+);
+
 test.serial(
-	'searchProjectContents does not force --pcre2 for an ordinary named capture group',
+	'searchProjectContents still matches an ordinary named capture group',
 	async t => {
 		const testDir = createTempDir('test-file-search-named-group-temp');
 
@@ -964,7 +976,8 @@ test.serial(
 			mkdirSync(testDir, {recursive: true});
 			writeFileSync(join(testDir, 'a.txt'), 'foobar\n');
 
-			// Looks like lookbehind syntax at a glance but isn't.
+			// Looks like lookbehind syntax at a glance but isn't - should still
+			// match under --engine auto, whichever engine rg picks for it.
 			const result = await searchProjectContents(
 				'(?<n>foo)bar',
 				testDir,

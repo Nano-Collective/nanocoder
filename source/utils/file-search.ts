@@ -242,27 +242,12 @@ async function assertPathExists(candidatePath: string): Promise<void> {
 	await lstat(candidatePath);
 }
 
-// Rust regex (rg's default engine) rejects all of these outright, except
-// possessive quantifiers - those silently degrade to ordinary greedy ones
-// instead of erroring, so detection matters more here than for the rest.
-const LOOKAROUND_PATTERN = /\(\?(?:[!=]|<[=!])/;
-const BACKREFERENCE_PATTERN = /\\[1-9]/;
-// \k<name>, \k'name', \k{name} (PCRE forms) and (?P=name) (Python form).
-const NAMED_BACKREFERENCE_PATTERN = /\\k[<'{]|\(\?P=/;
-const ATOMIC_GROUP_PATTERN = /\(\?>/;
-const CONDITIONAL_PATTERN = /\(\?\(/;
+// Rust regex (rg's default engine) parses this as an ordinary greedy
+// quantifier instead of erroring, silently changing match semantics - so
+// --engine auto never realizes it needs PCRE2. Every other unsupported
+// construct fails to parse under the default engine and --engine auto
+// escalates to PCRE2 on its own; this is the one exception.
 const POSSESSIVE_QUANTIFIER_PATTERN = /[*+?]\+|\}\+/;
-
-function needsPcre2(query: string): boolean {
-	return (
-		LOOKAROUND_PATTERN.test(query) ||
-		BACKREFERENCE_PATTERN.test(query) ||
-		NAMED_BACKREFERENCE_PATTERN.test(query) ||
-		ATOMIC_GROUP_PATTERN.test(query) ||
-		CONDITIONAL_PATTERN.test(query) ||
-		POSSESSIVE_QUANTIFIER_PATTERN.test(query)
-	);
-}
 
 function binaryExcludeGlobs(): string[] {
 	const globs: string[] = [];
@@ -277,10 +262,12 @@ const FATAL_RIPGREP_ERROR_PATTERNS = [
 	/regex parse error/,
 	/error parsing glob/,
 	/PCRE2: error compiling pattern/,
+	/PCRE2 is not available in this build of ripgrep/,
 	/grep config error: unknown encoding/,
 ];
 
-function isFatalRipgrepError(stderr: string): boolean {
+/** @internal Exported for direct unit testing only. */
+export function isFatalRipgrepError(stderr: string): boolean {
 	const firstLine = stderr.split('\n')[0]?.trim() ?? '';
 	if (firstLine.startsWith('the literal')) {
 		return true;
@@ -902,9 +889,13 @@ export async function searchProjectContents(
 	if (wholeWord) {
 		args.push('--word-regexp');
 	}
-	if (needsPcre2(query)) {
-		args.push('--pcre2');
-	}
+	// Let rg pick its own engine per-pattern instead of us guessing its
+	// grammar - except possessive quantifiers, which it silently mishandles
+	// under auto (see POSSESSIVE_QUANTIFIER_PATTERN).
+	args.push(
+		'--engine',
+		POSSESSIVE_QUANTIFIER_PATTERN.test(query) ? 'pcre2' : 'auto',
+	);
 	// Must precede the exclude globs: rg's `-g` is last-wins, so an include after would re-include them.
 	if (include) {
 		args.push('-g', include);
