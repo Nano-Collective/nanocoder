@@ -41,6 +41,7 @@ test.serial('SettingsManager - returns fallback values for empty or missing conf
 	t.is(settings.reasoningTraces, false);
 	t.is(settings.sessions.autoSave, true);
 	t.is(settings.webSearch.configured, false);
+	t.is(settings.showTokenUsage, false);
 	
 	fs.rmSync(tempDir, { recursive: true, force: true });
 });

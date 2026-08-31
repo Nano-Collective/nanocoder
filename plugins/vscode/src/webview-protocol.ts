@@ -131,6 +131,7 @@ export interface ExtensionMessageSettingsData {
 		reasoningTraces: boolean;
 		sessions: { autoSave: boolean };
 		webSearch: { configured: boolean };
+		showTokenUsage: boolean;
 	};
 }
 
