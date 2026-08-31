@@ -2289,6 +2289,26 @@ test('runAcpConversation - a denied sub-agent tool call is reported as failed', 
 		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
 	);
 	t.is(failed.length, 1);
+	t.is(failed[0].rawOutput, 'Denied by user');
+});
+
+test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'cancelled'}}),
+	);
+
+	// t.false(approved) alone would pass with no handler installed at all,
+	// since the slot's fallback already denies. The request reaching the
+	// connection and the call being settled are the parts that need one.
+	t.false(approved);
+	t.is(permissionRequests.length, 1);
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+	// Distinct from the deny path, so a client can tell a user's refusal from
+	// a turn that was torn down under it.
+	t.is(failed[0].rawOutput, 'Cancelled by user');
 });
 
 test('runAcpConversation - a transport failure denies the tool rather than aborting the sub-agent', async t => {

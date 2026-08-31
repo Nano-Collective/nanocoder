@@ -118,7 +118,10 @@ function createSubagentApprovalHandler(
 
 			if (permission === 'approved') {
 				// The sub-agent layer does not report its results back here, so
-				// settle the card now rather than leave it spinning forever.
+				// settle the card on approval rather than leave it spinning
+				// forever. This does claim success before the tool has run: a
+				// call that then fails still shows completed. Reporting the
+				// real outcome means threading results out of the executor.
 				await emitToolCall(
 					session,
 					conn,
@@ -150,11 +153,18 @@ function createSubagentApprovalHandler(
 export async function runAcpConversation(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
-	// The slot is a module singleton with last-writer-wins semantics, and two
-	// sessions can have turns in flight at once, so the handler is scoped to
-	// this turn. Without the teardown a second session's closure would answer
-	// the first session's approvals against the wrong session id and abort
-	// controller, and a finished turn's session would stay reachable.
+	// The slot is a module singleton with last-writer-wins semantics, so the
+	// handler is scoped to this turn: without the teardown a finished turn's
+	// session, connection and aborted controller stay reachable, and the last
+	// turn to run would keep answering approvals for every later one.
+	//
+	// This does not make overlapping turns safe. turnActive is per session
+	// (acp-session.ts), so two sessions can be mid-turn at once, and for that
+	// window the later installer answers the earlier session's approvals
+	// against the wrong session id and abort controller. The restore is
+	// LIFO-correct, so routing rights hand back once the later turn ends.
+	// Closing the window itself needs the slot keyed by session id, or an
+	// approval channel threaded through SubagentExecutor.
 	const restoreApprovalHandler = setGlobalToolApprovalHandler(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
