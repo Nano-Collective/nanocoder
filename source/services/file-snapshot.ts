@@ -9,6 +9,21 @@ import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
 
 /**
+ * `git diff --name-only HEAD` lists files deleted in the working tree, so a
+ * deleted path reaches captureFiles and fails with ENOENT. That is ordinary
+ * work - delete a file, take a checkpoint - and recording it as a gap would
+ * make every later restore of that checkpoint warn about something that is
+ * not missing at all.
+ */
+function isMissingFile(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOENT'
+	);
+}
+
+/**
  * Service for capturing and restoring file snapshots for checkpoints
  */
 export class FileSnapshotService {
@@ -29,22 +44,30 @@ export class FileSnapshotService {
 	 *
 	 * Files that cannot be read are reported alongside the ones that could, not
 	 * just logged: the caller records them so a later restore can say what it
-	 * did not put back.
+	 * did not put back. A file that is simply gone is not one of them - see
+	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
 	 */
 	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
 		const snapshots = new Map<string, Buffer>();
 		const skipped: SkippedFile[] = [];
 
 		for (const filePath of filePaths) {
+			// Normalized up front so a skipped file is keyed the same way a
+			// captured one is; filesChanged and skippedFiles are read side by side.
+			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
+			const relativePath = path.relative(this.workspaceRoot, absolutePath);
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 				const content = await fs.readFile(absolutePath);
-				const relativePath = path.relative(this.workspaceRoot, absolutePath);
-				const normalizedPath = relativePath.split(path.sep).join('/');
 				snapshots.set(normalizedPath, content);
 			} catch (error) {
 				const reason = formatError(error);
-				skipped.push({path: filePath, reason});
+				if (!isMissingFile(error)) {
+					skipped.push({path: normalizedPath, reason});
+				}
+				// Logged either way: a deleted file is not a gap, but it is still
+				// worth seeing in the log when a capture comes out short.
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,

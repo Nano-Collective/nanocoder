@@ -8,10 +8,7 @@ import {
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
-import {
-	describeCheckpointGaps,
-	describeGapsMessage,
-} from '@/utils/checkpoint-utils';
+import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {
 	errorMsg,
@@ -159,9 +156,7 @@ async function loadCheckpoint(
 				validateIntegrity: true,
 			});
 
-			await manager.restoreFiles(checkpointData);
-
-			const gaps = describeCheckpointGaps(checkpointData);
+			const gaps = await manager.restoreFiles(checkpointData);
 
 			return React.createElement(
 				React.Fragment,
@@ -243,7 +238,7 @@ async function loadCheckpoint(
 							validateIntegrity: true,
 						});
 
-						await manager.restoreFiles(checkpointData);
+						const gaps = await manager.restoreFiles(checkpointData);
 
 						addToMessageQueue(
 							successMsg(
@@ -252,7 +247,6 @@ async function loadCheckpoint(
 							),
 						);
 
-						const gaps = describeCheckpointGaps(checkpointData);
 						if (gaps.length > 0) {
 							addToMessageQueue(
 								warningMsg(describeGapsMessage(gaps), 'restore-gaps'),

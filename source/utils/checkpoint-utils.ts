@@ -2,6 +2,31 @@ import {MAX_CHECKPOINT_FILES} from '@/constants';
 import type {CheckpointData} from '@/types/checkpoint';
 
 /**
+ * The bullet describeGapsMessage puts in front of each gap, and the indent
+ * its detail lines hang under. One owner for the layout: change the bullet
+ * and the detail lines follow instead of drifting out of alignment.
+ */
+const GAP_BULLET = '  • ';
+const GAP_DETAIL_INDENT = ' '.repeat(GAP_BULLET.length + 2);
+
+/**
+ * A checkpoint can carry the file cap's worth of paths, each with a full
+ * error string. Listing every one buries the summary it belongs to, so the
+ * tail is counted rather than printed.
+ */
+const MAX_GAP_DETAIL_LINES = 10;
+
+function formatGapDetail(lines: string[]): string {
+	const shown = lines.slice(0, MAX_GAP_DETAIL_LINES);
+	const rendered = shown.map(line => `${GAP_DETAIL_INDENT}- ${line}`);
+	const remaining = lines.length - shown.length;
+	if (remaining > 0) {
+		rendered.push(`${GAP_DETAIL_INDENT}- ...and ${remaining} more`);
+	}
+	return rendered.join('\n');
+}
+
+/**
  * Format timestamp to relative time string
  */
 export function formatRelativeTime(timestamp: string): string {
@@ -113,17 +138,18 @@ export function describeCheckpointGaps(
 	const skipped = metadata.skippedFiles ?? [];
 
 	if (skipped.length > 0) {
-		const detail = skipped
-			.map(file => `      - ${file.path} (${file.reason})`)
-			.join('\n');
+		const detail = formatGapDetail(
+			skipped.map(file => `${file.path} (${file.reason})`),
+		);
 		gaps.push(
 			`${skipped.length} file(s) could not be read when this checkpoint was taken, so they were never captured and have NOT been restored:\n${detail}`,
 		);
 	}
 
-	if (metadata.truncatedFileCount) {
+	const truncatedCount = metadata.truncatedFileCount ?? 0;
+	if (truncatedCount > 0) {
 		gaps.push(
-			`${metadata.truncatedFileCount} further modified file(s) exceeded the ${MAX_CHECKPOINT_FILES}-file limit and were never captured, so they have NOT been restored.`,
+			`${truncatedCount} further modified file(s) exceeded the ${MAX_CHECKPOINT_FILES}-file limit and were never captured, so they have NOT been restored.`,
 		);
 	}
 
@@ -134,7 +160,7 @@ export function describeCheckpointGaps(
 		file => !fileSnapshots.has(file),
 	);
 	if (unreadable.length > 0) {
-		const detail = unreadable.map(file => `      - ${file}`).join('\n');
+		const detail = formatGapDetail(unreadable);
 		gaps.push(
 			`${unreadable.length} file(s) recorded in this checkpoint could not be read back out of it and have NOT been restored:\n${detail}`,
 		);
@@ -150,6 +176,6 @@ export function describeCheckpointGaps(
 export function describeGapsMessage(gaps: string[]): string {
 	return [
 		'This restore did not put back the whole workspace:',
-		...gaps.map(gap => `  • ${gap}`),
+		...gaps.map(gap => `${GAP_BULLET}${gap}`),
 	].join('\n');
 }

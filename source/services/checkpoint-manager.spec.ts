@@ -640,8 +640,94 @@ test.serial(
 	},
 );
 
+// restoreFiles owns the gap report so a restore path cannot forget to ask for
+// it. There are three callers today; the fourth gets it for free.
+test.serial('CheckpointManager restoreFiles returns the gaps it found', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await fs.writeFile(path.join(tempDir, 'kept.txt'), 'kept');
+		await fs.mkdir(path.join(tempDir, 'unreadable.txt'), {recursive: true});
+
+		const manager = new CheckpointManager(tempDir);
+		await manager.saveCheckpoint(
+			'gappy',
+			createMockMessages(2),
+			'TestProvider',
+			'test-model',
+			['kept.txt', 'unreadable.txt'],
+		);
+
+		const loaded = await manager.loadCheckpoint('gappy');
+		const gaps = await manager.restoreFiles(loaded);
+
+		t.is(gaps.length, 1);
+		t.regex(gaps[0]!, /unreadable\.txt/);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+// A checkpoint whose every file was skipped has no snapshots to write back, but
+// it is exactly the case that most needs reporting.
+test.serial(
+	'CheckpointManager restoreFiles reports gaps with nothing to write back',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			await manager.saveCheckpoint(
+				'empty',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				[],
+			);
+
+			const loaded = await manager.loadCheckpoint('empty');
+			loaded.metadata.truncatedFileCount = 4;
+
+			const gaps = await manager.restoreFiles(loaded);
+
+			t.is(gaps.length, 1);
+			t.regex(gaps[0]!, /4 further modified file/);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
 // An incomplete capture has to outlive the process that made it: the warning at
 // save time is gone by the time anyone restores, so the gap goes in metadata.
+// Deleting a file and then checkpointing is routine, especially with the
+// daemon's automatic pre-trigger checkpoint. It must not leave a warning behind
+// on every later restore.
+test.serial(
+	'CheckpointManager does not record a deleted file as a gap',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempDir, 'kept.txt'), 'kept');
+
+			const manager = new CheckpointManager(tempDir);
+			const metadata = await manager.saveCheckpoint(
+				'with-deletion',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				['kept.txt', 'deleted.txt'],
+			);
+
+			t.deepEqual(metadata.filesChanged, ['kept.txt']);
+			t.is(metadata.skippedFiles, undefined);
+
+			const restored = await manager.loadCheckpoint('with-deletion');
+			t.deepEqual(await manager.restoreFiles(restored), []);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
 test.serial(
 	'CheckpointManager records files it could not capture',
 	async t => {
@@ -649,6 +735,9 @@ test.serial(
 		try {
 			const kept = path.join(tempDir, 'kept.txt');
 			await fs.writeFile(kept, 'kept');
+			// A real read failure, not a missing file: a directory where a file is
+			// expected gives EISDIR everywhere, and Windows cannot chmod away read.
+			await fs.mkdir(path.join(tempDir, 'locked.txt'), {recursive: true});
 
 			const manager = new CheckpointManager(tempDir);
 			const metadata = await manager.saveCheckpoint(

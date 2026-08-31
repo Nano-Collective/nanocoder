@@ -11,7 +11,10 @@ import type {
 	CheckpointValidationResult,
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
-import {validateCheckpointName} from '@/utils/checkpoint-utils';
+import {
+	describeCheckpointGaps,
+	validateCheckpointName,
+} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
@@ -395,11 +398,21 @@ export class CheckpointManager {
 	}
 
 	/**
-	 * Restore files from a checkpoint
+	 * Restore files from a checkpoint.
+	 *
+	 * Returns every way this restore put back less than the whole workspace, so
+	 * a caller cannot report plain success over an incomplete one. Derived here
+	 * rather than left to each restore path: there are three of them today and
+	 * the fourth would have to remember.
 	 */
-	async restoreFiles(checkpointData: CheckpointData): Promise<void> {
+	async restoreFiles(checkpointData: CheckpointData): Promise<string[]> {
+		// Independent of whether there is anything to write back - a checkpoint
+		// whose every file was skipped at capture has no snapshots and nothing
+		// but gaps.
+		const gaps = describeCheckpointGaps(checkpointData);
+
 		if (checkpointData.fileSnapshots.size === 0) {
-			return; // No files to restore
+			return gaps; // No files to restore
 		}
 
 		// Validate restore paths
@@ -412,6 +425,8 @@ export class CheckpointManager {
 
 		// Restore files
 		await this.fileSnapshotService.restoreFiles(checkpointData.fileSnapshots);
+
+		return gaps;
 	}
 
 	/**

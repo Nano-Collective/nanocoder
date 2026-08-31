@@ -2,6 +2,7 @@ import test from 'ava';
 import type {CheckpointMetadata} from '@/types/checkpoint';
 import {
 	describeCheckpointGaps,
+	describeGapsMessage,
 	formatRelativeTime,
 	validateCheckpointName,
 } from './checkpoint-utils';
@@ -292,4 +293,48 @@ test('describeCheckpointGaps stays quiet when every recorded file loaded', t => 
 	);
 
 	t.deepEqual(gaps, []);
+});
+
+// With the 50-file cap plus a full error string each, an uncapped list would
+// dump the whole capture into the chat and bury the summary it belongs to.
+test('describeCheckpointGaps caps a long skipped list and counts the rest', t => {
+	const gaps = gapsFor({
+		skippedFiles: Array.from({length: 25}, (_, i) => ({
+			path: `file-${i}.bin`,
+			reason: 'EBUSY: resource busy',
+		})),
+	});
+
+	t.is(gaps.length, 1);
+	t.regex(gaps[0]!, /file-0\.bin/);
+	t.regex(gaps[0]!, /file-9\.bin/);
+	// The 11th onwards are counted, not listed.
+	t.notRegex(gaps[0]!, /file-10\.bin/);
+	t.regex(gaps[0]!, /\.\.\.and 15 more/);
+	// Still reports the true total in the summary line.
+	t.regex(gaps[0]!, /^25 file\(s\)/);
+});
+
+test('describeCheckpointGaps caps a long unreadable list too', t => {
+	const gaps = gapsFor({
+		filesChanged: Array.from({length: 14}, (_, i) => `lost-${i}.txt`),
+	});
+
+	t.is(gaps.length, 1);
+	t.regex(gaps[0]!, /\.\.\.and 4 more/);
+});
+
+// The detail lines hang under the bullet describeGapsMessage adds, so the two
+// have to agree; they read from one constant rather than both hard-coding it.
+test('describeGapsMessage indents detail lines past its own bullet', t => {
+	const gaps = gapsFor({
+		skippedFiles: [{path: 'a.bin', reason: 'EBUSY'}],
+	});
+	const lines = describeGapsMessage(gaps).split('\n');
+
+	const bulleted = lines.find(line => line.includes('could not be read'));
+	const detail = lines.find(line => line.includes('a.bin'));
+
+	t.true(bulleted!.startsWith('  • '));
+	t.true(detail!.startsWith('      - '));
 });

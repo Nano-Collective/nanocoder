@@ -690,24 +690,78 @@ test.serial(
 
 // Gap 1: a file git reported but that could not be read used to vanish with only
 // a log line, so a later restore silently put back less than the user thought.
+//
+// A directory standing where a file is expected fails with EISDIR on every
+// platform, which is a genuine read failure and not a missing file. chmod 0o000
+// would not do it: Windows cannot drop read permission that way.
 test.serial(
 	'FileSnapshotService reports files it could not capture',
 	async t => {
 		const tempDir = await createTempDir();
 		try {
 			await createTestFile(tempDir, 'readable.txt', 'kept');
+			await fs.mkdir(path.join(tempDir, 'unreadable.txt'), {recursive: true});
 
 			const service = new FileSnapshotService(tempDir);
 			const {snapshots, skipped} = await service.captureFiles([
 				'readable.txt',
-				'missing.txt',
+				'unreadable.txt',
 			]);
 
 			t.is(snapshots.size, 1);
 			t.is(skipped.length, 1);
-			t.is(skipped[0]?.path, 'missing.txt');
+			t.is(skipped[0]?.path, 'unreadable.txt');
 			// The reason travels with it, so a restore can say why.
 			t.true((skipped[0]?.reason.length ?? 0) > 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// `git diff --name-only HEAD` lists deleted files, so they reach captureFiles
+// and fail with ENOENT. Recording those would make deleting a file and taking a
+// checkpoint produce a permanent gap warning on every later restore - the
+// failure this feature exists to prevent, inverted.
+test.serial(
+	'FileSnapshotService does not record a deleted file as a gap',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'kept.txt', 'kept');
+
+			const service = new FileSnapshotService(tempDir);
+			const {snapshots, skipped} = await service.captureFiles([
+				'kept.txt',
+				'deleted.txt',
+			]);
+
+			t.is(snapshots.size, 1);
+			t.deepEqual(skipped, []);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// skippedFiles and filesChanged are read side by side at restore, so a skipped
+// path has to be keyed the same way a captured one is.
+test.serial(
+	'FileSnapshotService normalizes the path of a file it skipped',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.mkdir(path.join(tempDir, 'nested', 'dir.txt'), {
+				recursive: true,
+			});
+
+			const service = new FileSnapshotService(tempDir);
+			const {skipped} = await service.captureFiles([
+				path.join('nested', 'dir.txt'),
+			]);
+
+			t.is(skipped.length, 1);
+			t.is(skipped[0]?.path, 'nested/dir.txt');
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -744,6 +798,9 @@ test.serial(
 			await execFileAsync('git', ['init'], {cwd: tempDir});
 			await createTestFile(tempDir, 'committed.txt', 'base');
 			await execFileAsync('git', ['add', '-A'], {cwd: tempDir});
+			// A contributor with commit signing, a global core.hooksPath, or any
+			// commit-msg hook would otherwise fail this commit and take the test
+			// with it. None of them have anything to say about a temp fixture.
 			await execFileAsync(
 				'git',
 				[
@@ -751,10 +808,13 @@ test.serial(
 					'user.email=test@example.com',
 					'-c',
 					'user.name=test',
+					'-c',
+					'core.hooksPath=',
 					'commit',
 					'-m',
 					'base',
 					'--no-gpg-sign',
+					'--no-verify',
 				],
 				{cwd: tempDir},
 			);
