@@ -409,6 +409,73 @@ test.serial(
 );
 
 test.serial(
+	'a .nanocoderignore directory is pruned during traversal, not just filtered from results',
+	async t => {
+		const testDir = createTempDir('test-file-search-nanocoderignore-prune-temp');
+
+		try {
+			mkdirSync(join(testDir, 'fixtures'), {recursive: true});
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			writeFileSync(join(testDir, '.nanocoderignore'), 'fixtures/\n');
+			// Sorts before src/, so a JS-side filter alone would let these 20 spend
+			// the whole scan budget and crowd keep.ts out of the results entirely.
+			for (let index = 0; index < 20; index++) {
+				writeFileSync(
+					join(testDir, 'fixtures', `f${String(index).padStart(2, '0')}.txt`),
+					'noise',
+				);
+			}
+			writeFileSync(join(testDir, 'src', 'keep.ts'), 'export {};');
+
+			const seen: string[] = [];
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					seen.push(entry.relativePath);
+					return false;
+				},
+				{includeDirectories: false, maxRawFilesScanned: 5},
+			);
+
+			t.true(seen.includes('src/keep.ts'));
+			t.false(seen.some(entry => entry.startsWith('fixtures/')));
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries rejects an async onEntry under sorted: false rather than racing it',
+	async t => {
+		const testDir = createTempDir('test-file-search-async-visitor-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'hello\n');
+
+			// The overloads make this a compile error; this guards the runtime
+			// backstop for callers without type checking.
+			const asyncVisitor = async () => false;
+			await t.throwsAsync(
+				() =>
+					walkProjectEntries(
+						testDir,
+						undefined,
+						asyncVisitor as unknown as () => boolean,
+						{sorted: false},
+					),
+				{message: /onEntry must be synchronous/},
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'findMatchingPaths lets .nanocoderignore un-ignore a DEFAULT_IGNORE_DIRS entry',
 	async t => {
 		const testDir = createTempDir('test-file-search-nanocoderignore-unignore-temp');
