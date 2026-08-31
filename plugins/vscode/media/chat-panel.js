@@ -52,8 +52,27 @@
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
+		const formatDropdownLabel = (value, triggerId) => {
+			if (triggerId === 'mode-trigger') {
+				const modeLabels = {
+					normal: 'Chat',
+					'auto-accept': 'Auto-Accept',
+					yolo: 'YOLO',
+					plan: 'Plan',
+				};
+				return modeLabels[value] || value;
+			}
+
+			if (value.includes('/')) {
+				return value.split('/').pop();
+			}
+
+			return value;
+		};
+
 		class CustomDropdown {
 			constructor(triggerId, dropdownId, labelId, onChange) {
+				this.triggerId = triggerId;
 				this.trigger = document.getElementById(triggerId);
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
@@ -64,7 +83,7 @@
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
+					const nested = triggerId === 'provider-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
@@ -74,12 +93,8 @@
 
 			syncModeBadge() {
 				if (this.label?.id !== 'mode-trigger-label') return;
-				const badge = document.getElementById('composer-mode-badge');
-				if (badge) badge.textContent = this.label.textContent || '';
-				const settingsTrigger = document.getElementById('composer-settings-trigger');
-				if (settingsTrigger && this.label.textContent) {
-					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
-					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
+				if (this.trigger && this.label.textContent) {
+					this.trigger.title = this.label.textContent;
 				}
 			}
 
@@ -103,16 +118,13 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					item.textContent = opt;
+					item.textContent = formatDropdownLabel(opt, this.triggerId);
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
 						
-						let displayValue = opt;
-						if (displayValue.includes('/')) {
-							displayValue = displayValue.split('/').pop();
-						}
+						const displayValue = formatDropdownLabel(opt, this.triggerId);
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -129,10 +141,7 @@
 				});
 
 				if (!hasSelected && options.length > 0) {
-					let displayValue = options[0];
-					if (displayValue.includes('/')) {
-						displayValue = displayValue.split('/').pop();
-					}
+					const displayValue = formatDropdownLabel(options[0], this.triggerId);
 					this.label.textContent = displayValue || 'Loading...';
 				}
 				this.syncModeBadge();
