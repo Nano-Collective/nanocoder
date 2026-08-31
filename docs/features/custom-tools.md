@@ -87,7 +87,7 @@ parameters:                     # optional, default {}
 approval: never | always | destructive   # default: always
 read_only: true | false         # default: (approval == never)
 timeout_ms: 30000               # default 30000, max 300000
-cwd: ./scripts                  # default: project root; supports ${VAR}
+cwd: ./scripts                  # default: project root; supports ${VAR}; must stay in the project
 env:
   FOO: bar                      # extra env vars; values support ${VAR}
 shell: bash | sh                # default: bash if available, else sh
@@ -107,6 +107,16 @@ Tools listed in the top-level `alwaysAllow` config field skip the prompt regardl
 ### read_only
 
 Tools marked `read_only: true` can run in parallel with other read-only tools. The default is `true` when `approval: never`, otherwise `false`. Set it explicitly if your tool reads state but still needs approval, or vice versa.
+
+### Working directory
+
+`cwd` defaults to the project root. Relative paths resolve against it, and `${VAR}` is substituted from the environment first.
+
+The resolved directory has to stay inside the project once symlinks are resolved. A `cwd` that escapes - an absolute path elsewhere, `${HOME}`, a `../` traversal, or a `./scripts` that is a symlink pointing out of the repo - fails the tool call with `Custom tool cwd escapes the project directory`. The tool is not run somewhere else instead: silently relocating a script that expects a scratch directory is how a `rm -rf ./*` body ends up pointed at your project.
+
+A `cwd` that does not exist is not an error - it falls back to the project root, so a tool referencing a directory a teammate has not checked out yet still runs.
+
+This is containment against misconfiguration, not a sandbox. The script body is arbitrary shell and can `cd` wherever it likes; the check only governs where the shell starts.
 
 ## Template Syntax
 
@@ -136,7 +146,7 @@ When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
 2. The body is rendered, then handed to the chosen shell via `-c`.
-3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`).
+3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
 5. On exit code 0, stdout (and any stderr) is returned to the model, truncated at the standard output limit.
 6. On non-zero exit, the conversation surfaces `Custom tool failed (exit N): <stderr>` to the model.

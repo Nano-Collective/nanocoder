@@ -11,7 +11,7 @@ import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
+import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
@@ -219,7 +219,7 @@ export async function formatStringReplacePreview(
 			} else if (
 				oldLine !== null &&
 				newLine !== null &&
-				areLinesSimlar(oldLine, newLine)
+				areLinesSimilar(oldLine, newLine)
 			) {
 				const truncatedOldLine = truncateLine(oldLine, availableWidth);
 				const truncatedNewLine = truncateLine(newLine, availableWidth);

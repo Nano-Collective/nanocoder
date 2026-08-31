@@ -69,7 +69,9 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'commit',
-		description: 'Generate a conventional commit message from staged changes',
+		description:
+			'Generate a conventional commit message from staged changes (--copy)',
+		progressLabel: 'Generating commit message',
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
 	},
 	{
@@ -148,6 +150,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
 	},
 	{
+		name: 'tip',
+		description: 'Show a random Nanocoder usage tip',
+		load: () => import('@/commands/tip').then(m => m.tipCommand),
+	},
+	{
 		name: 'checkpoint',
 		description:
 			'Manage conversation checkpoints - save and restore session snapshots',
@@ -215,6 +222,13 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
+	},
+	{
+		name: 'repomap',
+		description:
+			'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+		progressLabel: 'Building repo map',
+		load: () => import('@/commands/repomap').then(m => m.repomapCommand),
 	},
 	{
 		name: 'privacy',
