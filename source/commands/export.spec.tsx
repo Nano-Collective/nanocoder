@@ -245,3 +245,52 @@ test('exportCommand rejects path traversal in filename', async t => {
 	t.regex(output!, /Invalid filename/);
 	t.false(output!.includes('Chat exported'));
 });
+
+	test('exportCommand allows exporting into a subdirectory', async t => {
+	// isValidFilePath is segment-aware, so a subdirectory export must work while
+	// traversal is still blocked.
+	await exportCommand.handler(
+		['reports/chat.md'],
+		testMessages,
+		testMetadata,
+	);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.endsWith('chat.md'));
+	t.true(
+		mockWriteFileCalls[0].path
+			.split(/[\\/]/)
+			.slice(-2)
+			.join('/') === 'reports/chat.md',
+	);
+});
+
+test('exportCommand rejects a filename with a null byte', async t => {
+	const result = (await exportCommand.handler(
+		['evil\u0000.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Invalid filename/);
+});
+
+test('exportCommand rejects a home-directory shorthand path', async t => {
+	const result = (await exportCommand.handler(
+		['~/notes.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Invalid filename/);
+});
