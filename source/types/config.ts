@@ -179,6 +179,8 @@ export interface ModeProviderConfig {
 //   • excludes notifications, sessions, paste (read from nanocoder-preferences.json)
 //
 // The JSON schema generator (`pnpm run generate:schema`) targets this type.
+// These types are consumed exclusively by that tooling and are not part of
+// the runtime surface, hence @internal.
 // ---------------------------------------------------------------------------
 
 /** Valid default mode values for agents.config.json. */
@@ -191,6 +193,7 @@ export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
  * Fields that live in nanocoder-preferences.json (notifications, sessions,
  * paste) are intentionally absent: the schema should not advertise keys the
  * loader silently ignores.
+ * @internal
  */
 export interface DiskNanocoderConfig {
 	/** AI provider configurations (all OpenAI-compatible). */
@@ -239,6 +242,7 @@ export interface DiskNanocoderConfig {
  * The schema wraps DiskNanocoderConfig under the `nanocoder` key to match
  * the actual on-disk layout. The optional `$schema` property enables
  * editor autocompletion without being read by the loader.
+ * @internal
  */
 export interface DiskConfig {
 	/** JSON Schema URI for editor autocompletion. Ignored by the loader. */
