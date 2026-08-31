@@ -8,6 +8,7 @@ on:
 env:
   ENABLE_COVERAGE_THRESHOLD: '80'
   FAIL_ON_COVERAGE_DROP: 'true'
+  COVERAGE_DROP_MAX: '1.0'
   ENABLE_SECURITY_SCAN: 'true'
 
 jobs:
@@ -170,6 +171,8 @@ jobs:
 
       - name: Extract coverage percentage
         id: coverage
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -f coverage/coverage-summary.json ]; then
             COVERAGE=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct')
@@ -185,6 +188,34 @@ jobs:
             fi
           else
             echo "❌ No coverage report found"
+            exit 1
+          fi
+
+          if [ "${FAIL_ON_COVERAGE_DROP}" != "true" ]; then
+            exit 0
+          fi
+
+          HEAD="${COVERAGE}"
+          git fetch --no-tags origin "${BASE_SHA}" || true
+          if ! git checkout --force "${BASE_SHA}"; then
+            echo "No base coverage summary; skipping drop check"
+            exit 0
+          fi
+          rm -rf coverage
+          pnpm install --frozen-lockfile
+          pnpm run build:credits
+          pnpm build
+          npx c8 ava
+          pnpm exec c8 report --reporter=json-summary
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "No base coverage summary; skipping drop check"
+            exit 0
+          fi
+          BASE=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
+          echo "HEAD coverage: ${HEAD}%"
+          echo "Base coverage: ${BASE}%"
+          if (( $(echo "${BASE} - ${HEAD} > ${COVERAGE_DROP_MAX}" | bc -l) )); then
+            echo "Coverage dropped vs base (max ${COVERAGE_DROP_MAX})"
             exit 1
           fi
 
