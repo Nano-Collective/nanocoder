@@ -54,6 +54,15 @@ const GIT_PR_ALL_ACTIONS: readonly GitPrAction[] = [
 
 // Read/investigate tools — safe at every trust level, never touch the
 // working tree or push anything.
+//
+// Deliberately excludes `web_search`/`fetch_url`: every consumer of this
+// allowlist runs headless/auto-execute (no tool-approval-queue handler is
+// registered — see `signalToolApproval` in `source/utils/tool-approval-queue.ts`),
+// and the text these tools investigate (a PR diff, a CI log) is attacker-
+// controlled. An injected instruction could have either tool exfiltrate
+// local file contents to an external URL with no confirmation step, and the
+// result can end up posted publicly (e.g. `verify --post-review`). A
+// read-only reviewer doesn't need to browse to do its job.
 const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'read_file'},
 	{tool: 'find_files'},
@@ -63,8 +72,6 @@ const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'git_diff'},
 	{tool: 'git_log'},
 	{tool: 'lsp_get_diagnostics'},
-	{tool: 'web_search'},
-	{tool: 'fetch_url'},
 ];
 
 // File-mutation tools — the write access the issue calls out explicitly as
@@ -92,21 +99,22 @@ const MUTATION_TOOLS: readonly ToolAllowance[] = [
  * - full-commit: everything auto-fix has; the same tool surface, gated
  *   instead by explicit user opt-in and warnings at the CLI layer (Phase 4).
  */
+const AUTO_FIX_TOOLS: readonly ToolAllowance[] = [
+	...INVESTIGATION_TOOLS,
+	...MUTATION_TOOLS,
+	{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
+];
+
 const TRUST_POLICIES: Record<TrustLevel, readonly ToolAllowance[]> = {
 	'comment-only': [
 		...INVESTIGATION_TOOLS,
 		{tool: 'git_pr', actions: GIT_PR_READ_AND_REVIEW_ACTIONS},
 	],
-	'auto-fix': [
-		...INVESTIGATION_TOOLS,
-		...MUTATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
-	],
-	'full-commit': [
-		...INVESTIGATION_TOOLS,
-		...MUTATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
-	],
+	// full-commit has the same tool surface as auto-fix by design (see the
+	// doc comment above) — shares the same array so the two levels can't
+	// silently drift apart.
+	'auto-fix': AUTO_FIX_TOOLS,
+	'full-commit': AUTO_FIX_TOOLS,
 };
 
 function findAllowance(

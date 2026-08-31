@@ -8,6 +8,7 @@
 import {execSync, spawn} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 import {isAbsolute, join} from 'node:path';
+import {TIMEOUT_GH_METADATA_MS} from '@/constants';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -401,6 +402,63 @@ export async function getCurrentBranch(): Promise<string> {
 		logger.debug('Failed to get current branch', {error});
 		return 'HEAD'; // Detached HEAD state
 	}
+}
+
+/**
+ * Get the current commit SHA. Used to confirm the local working tree
+ * actually matches a PR's head commit — robust to detached-HEAD checkouts
+ * (common in CI) and to local branches named differently than the PR's
+ * head branch, unlike comparing branch names.
+ */
+export async function getCurrentCommitSha(): Promise<string> {
+	return execGit(['rev-parse', 'HEAD']);
+}
+
+/**
+ * Head/base branch names and the head commit SHA for a PR, resolved via
+ * `gh pr view`.
+ */
+export interface PrRefs {
+	headRefName: string;
+	baseRefName: string;
+	headRefOid: string;
+}
+
+/**
+ * Resolve a PR's head/base branch names and head commit SHA. Used to
+ * confirm the local working tree actually matches the PR being reviewed
+ * before scanning it. Bounded by TIMEOUT_GH_METADATA_MS since this backs a
+ * headless/unattended command (`nanocoder verify`) that must not hang
+ * indefinitely on a stalled `gh` call.
+ */
+export async function getPrRefs(pr: number): Promise<PrRefs> {
+	const output = await execGh(
+		[
+			'pr',
+			'view',
+			pr.toString(),
+			'--json',
+			'headRefName,baseRefName,headRefOid',
+		],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return JSON.parse(output) as PrRefs;
+}
+
+/**
+ * List the file paths changed by a PR, for scoping tools (e.g. semgrep) to
+ * just what the PR touches instead of the whole repo. Bounded by
+ * TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function getPrChangedFiles(pr: number): Promise<string[]> {
+	const output = await execGh(
+		['pr', 'diff', pr.toString(), '--name-only'],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return output
+		.split('\n')
+		.map(line => line.trim())
+		.filter(Boolean);
 }
 
 /**

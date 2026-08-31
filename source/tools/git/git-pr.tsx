@@ -758,7 +758,7 @@ function GitPrFormatter({
 				</Box>
 			)}
 
-			{result?.includes('Error:') && (
+			{result?.startsWith('Error:') && (
 				<Box marginTop={1}>
 					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
@@ -779,12 +779,18 @@ export const gitPrTool: NanocoderToolExport = {
 	name: 'git_pr' as const,
 	tool: gitPrCoreTool,
 	formatter,
-	// Safe for the parallel-execution batching in tool-executor.tsx: that
-	// grouping only ever runs on calls `resolveToolApproval` already routed
-	// to auto-execute (see the `approval` fn below), so mutating actions
-	// (create/comment/review) never reach it regardless of this flag — they
-	// go through the confirmation path one at a time either way.
-	readOnly: true,
+	// Deliberately NOT readOnly: true. That would let tool-executor.tsx's
+	// classifyTool() batch consecutive git_pr calls into a parallel
+	// Promise.all group (see isReadOnly()'s one consumer, classifyTool, in
+	// source/hooks/chat-handler/conversation/tool-executor.tsx). That's safe
+	// for every mode EXCEPT yolo: resolveToolApproval short-circuits to "no
+	// approval needed" for every tool when mode === 'yolo' (before the
+	// `approval` fn below is ever consulted), so in yolo mode a mutating
+	// action (create/comment/review) reaches the same auto-executed path as
+	// view/list/diff/checks/logs — and would then run concurrently with
+	// other git_pr calls instead of one at a time. Since git_pr can't be
+	// split per-action here (one tool name covers reads and writes), the
+	// whole tool stays non-readOnly and every call keeps running serially.
 	// Approval varies by action: actions that write to GitHub (create,
 	// comment, review) always prompt; read-only inspection (view, list,
 	// diff, checks, logs) auto-runs.

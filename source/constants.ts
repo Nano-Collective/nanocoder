@@ -22,6 +22,15 @@ export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
 // gh run view --log/--log-failed can be slow and the log itself huge; bound
 // the fetch so a hung request doesn't hang the tool call indefinitely.
 export const TIMEOUT_GH_LOG_MS = 60_000;
+// Bound for quick `gh pr view`/`gh pr diff --name-only` metadata calls (used
+// by `nanocoder verify`, a headless/unattended command) — shorter than
+// TIMEOUT_GH_LOG_MS since these return small JSON/text payloads and should
+// never legitimately take long; a hang here (auth prompt, network stall)
+// should fail fast rather than block an unattended caller indefinitely.
+export const TIMEOUT_GH_METADATA_MS = 30_000;
+// `semgrep scan --config auto` can fetch/update its rule registry on first
+// run, which is slower than a typical local scan.
+export const TIMEOUT_SEMGREP_MS = 120_000;
 // Ceiling on the pricing lookup for the per-response usage footer: past
 // this the message renders with token counts only rather than holding the
 // streaming-to-static swap hostage to a cold models.dev fetch.

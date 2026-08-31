@@ -58,6 +58,18 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder verify --pr <n> [--post-review]` — fast path. Headless
+// PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
+// above) but never Ink.
+if (args[0] === 'verify') {
+	const {runVerifyCli} = await import('@/verify/cli');
+	const result = await runVerifyCli(args.slice(1), {
+		projectRoot: process.cwd(),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -67,6 +79,11 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
+                                  subagent plus a semgrep pass. Prints the review to stdout
+                                  by default; posts it as a PR comment with --post-review.
+                                  --provider/--model select the LLM (see Options below).
 
 Options:
   -v, --version       Show version number
@@ -111,6 +128,8 @@ Examples:
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder verify --pr 861
+  nanocoder verify --pr 861 --post-review
   `);
 	process.exit(0);
 }

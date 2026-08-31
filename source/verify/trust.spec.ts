@@ -3,6 +3,7 @@
  */
 
 import test from 'ava';
+import {SubagentLoader} from '@/subagents/subagent-loader';
 import {getAllowedToolNames, isActionAllowed} from './trust';
 
 console.log('\ntrust.spec.ts – Trust Levels');
@@ -37,8 +38,11 @@ test('comment-only allows read/investigate tools', t => {
 	t.true(isActionAllowed('comment-only', 'git_diff'));
 	t.true(isActionAllowed('comment-only', 'git_log'));
 	t.true(isActionAllowed('comment-only', 'lsp_get_diagnostics'));
-	t.true(isActionAllowed('comment-only', 'web_search'));
-	t.true(isActionAllowed('comment-only', 'fetch_url'));
+});
+
+test('comment-only denies web_search and fetch_url (headless + untrusted-diff exfiltration risk)', t => {
+	t.false(isActionAllowed('comment-only', 'web_search'));
+	t.false(isActionAllowed('comment-only', 'fetch_url'));
 });
 
 test('comment-only allows git_pr read/comment/review actions but not create', t => {
@@ -118,3 +122,29 @@ test('getAllowedToolNames includes git_pr exactly once per level', t => {
 		t.is(names.filter(n => n === 'git_pr').length, 1);
 	}
 });
+
+// ============================================================================
+// Drift guard: verify-pr-review.md's frontmatter tools list is the default
+// used outside of `verify` (e.g. if invoked via /agent), so it should stay
+// in lockstep with the comment-only allowlist that `verify/cli.ts` enforces
+// at runtime via SubagentExecutor.execute()'s toolOverride.
+// ============================================================================
+
+test.serial(
+	"verify-pr-review's frontmatter tools match trust.ts's comment-only allowlist",
+	async t => {
+		const loader = new SubagentLoader();
+		await loader.initialize();
+		const config = await loader.getSubagent('verify-pr-review');
+
+		t.truthy(config, 'verify-pr-review subagent should exist');
+		const frontmatterTools = new Set(config?.tools ?? []);
+		const trustTools = new Set(getAllowedToolNames('comment-only'));
+
+		t.deepEqual(
+			frontmatterTools,
+			trustTools,
+			'verify-pr-review.md tools: list has drifted from trust.ts comment-only allowlist',
+		);
+	},
+);

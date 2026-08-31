@@ -109,12 +109,19 @@ export class SubagentExecutor {
 	 * @param agentId - Optional unique ID for concurrent progress tracking.
 	 *                  When provided, progress is written to the agent-specific
 	 *                  slot in the progress map instead of the global singleton.
+	 * @param toolOverride - Optional runtime narrowing of the subagent's
+	 *                  `tools`/`disallowedTools`, applied on top of whatever
+	 *                  the loaded config (frontmatter) declares. Lets a
+	 *                  caller enforce a trust-level allowlist (see
+	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  hand-maintained tool list in the subagent's own file.
 	 */
 	async execute(
 		task: SubagentTask,
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
+		toolOverride?: {tools?: string[]; disallowedTools?: string[]},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -130,9 +137,9 @@ export class SubagentExecutor {
 
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const config = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = await loader.getSubagent(task.subagent_type);
 
-			if (!config) {
+			if (!loadedConfig) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -141,6 +148,15 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			}
+
+			const config: SubagentConfigWithSource = toolOverride
+				? {
+						...loadedConfig,
+						tools: toolOverride.tools ?? loadedConfig.tools,
+						disallowedTools:
+							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+					}
+				: loadedConfig;
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
