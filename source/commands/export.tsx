@@ -6,11 +6,9 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {
-	generateExportFilename,
-	writeUniqueFile,
-} from '@/utils/generate-export-filename';
+import {generateExportFilename} from '@/utils/generate-export-filename';
 import {resolveFilePath} from '@/utils/path-validation';
+import {writeUniqueFile} from '@/utils/write-unique-file';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';
@@ -64,6 +62,32 @@ function ExportError({message}: {message: string}) {
 	);
 }
 
+/**
+ * `resolveFilePath` throws a single generic "Invalid file path" for several
+ * distinct causes, which leaves the user guessing (a null byte and a `~` are
+ * very different mistakes). Re-derive the specific reason so the message names
+ * what was actually wrong and how to fix it.
+ *
+ * Exports are deliberately contained to the project directory, the same as
+ * `read_file` / `write_file` / `string_replace`. `~` is not expanded and paths
+ * outside the root are refused rather than silently redirected.
+ */
+function explainInvalidPath(filename: string, root: string): string {
+	if (!filename.trim()) {
+		return 'the filename is empty';
+	}
+	if (filename.includes('\0')) {
+		return 'the filename contains a null byte';
+	}
+	if (filename.startsWith('~')) {
+		return "'~' is not expanded; use a path relative to the project, or an absolute path inside it";
+	}
+	if (filename.split(/[/\\]/).some(segment => segment === '..')) {
+		return "'..' segments are not allowed; exports stay inside the project";
+	}
+	return `it is outside the project directory (${root})`;
+}
+
 export const exportCommand: Command = {
 	name: 'export',
 	description: 'Export the chat history to a markdown file',
@@ -78,17 +102,21 @@ export const exportCommand: Command = {
 		// Resolve against the session cwd (which honours bash `cd`) and enforce
 		// containment within the project root (which does not shrink as `cd`
 		// descends) -- the same convention as read_file / write_file / string_replace.
+		const projectRoot = getProjectRoot();
 		let filepath: string;
 		try {
 			filepath = resolveFilePath(
 				requestedFilename,
 				getSafeSessionCwd(),
-				getProjectRoot(),
+				projectRoot,
 			);
 		} catch {
 			return React.createElement(ExportError, {
 				key: generateKey('export'),
-				message: 'Invalid export path: outside the project directory',
+				message: `Invalid export path: ${explainInvalidPath(
+					requestedFilename,
+					projectRoot,
+				)}`,
 			});
 		}
 
@@ -132,9 +160,8 @@ total_tokens: ${tokens}
 
 		// Show the exported file relative to the project root so subdirectory
 		// exports (e.g. reports/chat.md) are recognisable rather than a bare basename.
-		const root = getProjectRoot();
-		const displayPath = writtenFilepath.startsWith(root + path.sep)
-			? writtenFilepath.slice(root.length + 1)
+		const displayPath = writtenFilepath.startsWith(projectRoot + path.sep)
+			? writtenFilepath.slice(projectRoot.length + 1)
 			: writtenFilepath;
 
 		return React.createElement(Export, {

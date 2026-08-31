@@ -1,10 +1,7 @@
-import fs from 'fs/promises';
-import path from 'path';
 import type {Message} from '@/types/core';
 
 const MAX_WORDS = 4;
 const MAX_SLUG_LENGTH = 40;
-const MAX_COLLISION_ATTEMPTS = 5;
 
 function sanitizeSlug(input: string): string {
 	return input
@@ -50,72 +47,13 @@ function generateSlugFromMessages(messages: Message[]): string {
 	return truncateAtWordBoundary(sanitizeSlug(truncated), MAX_SLUG_LENGTH);
 }
 
-/**
- * Deterministically finds a free filename for a generated export and writes it
- * atomically.
- *
- * The write uses the exclusive flag 'wx' so the free-check and the create are
- * a single atomic step: two concurrent exports for the same slug can never
- * both succeed on the same path (no TOCTOU race, no clobbering). On EEXIST we
- * try the next collision suffix; once the bounded attempts are exhausted we
- * fall back to a timestamp suffix. This function never falls through to
- * overwriting an existing file.
- *
- * Unlike /export with an explicit filename (which keeps overwrite semantics),
- * generated names must never destroy a previous export.
- */
-export async function writeUniqueFile(
-	filepath: string,
-	content: string,
-): Promise<string> {
-	const dir = path.dirname(filepath);
-	const ext = path.extname(filepath);
-	const base = path.basename(filepath, ext);
-
-	const tryWrite = async (candidate: string): Promise<string | null> => {
-		try {
-			await fs.writeFile(candidate, content, {flag: 'wx'});
-			return candidate;
-		} catch (error) {
-			if (error && typeof error === 'object' && 'code' in error) {
-				// Collision: try the next candidate.
-				if (error.code === 'EEXIST') return null;
-				// Missing parent directory: report it plainly so the user knows
-				// the export failed because a directory doesn't exist.
-				if (error.code === 'ENOENT') {
-					throw new Error(`Parent directory does not exist: ${dir}`);
-				}
-			}
-			throw error;
-		}
-	};
-
-	for (let i = 1; i < MAX_COLLISION_ATTEMPTS + 1; i++) {
-		const suffix = i === 1 ? '' : `-${i}`;
-		// `filepath` was already validated and containment-checked by
-		// resolveFilePath in the handler, so `dir`/`base`/`ext` cannot contain a
-		// separator or `..` and this join can never leave `dir`.
-		// nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-		const candidate = path.join(dir, `${base}${suffix}${ext}`);
-		const written = await tryWrite(candidate);
-		if (written) return written;
-	}
-
-	// Bounded attempts all collided, drop a timestamp and try once more. If the
-	// astronomically-unlikely timestamp collision happens, surface the error
-	// rather than clobber anything.
-	// nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-	const timestamped = path.join(dir, `${base}-new-${Date.now()}${ext}`);
-	return tryWrite(timestamped).then(result => {
-		if (!result) {
-			throw new Error('Unable to allocate a unique export filename');
-		}
-		return result;
-	});
-}
-
 export function generateExportFilename(messages: Message[]): string {
 	const slug = generateSlugFromMessages(messages);
+	// Deliberately UTC, not local: the date is only there to disambiguate
+	// exports, and a UTC stamp keeps a session that crosses local midnight (or
+	// is exported from a different timezone than it was recorded in) ordering
+	// consistently. Collisions within the same day are handled by
+	// writeUniqueFile, so a local date would buy nothing.
 	const date = new Date().toISOString().split('T')[0];
 
 	if (!slug) {

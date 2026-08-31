@@ -257,11 +257,11 @@ test('exportCommand rejects path traversal in filename', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid export path/);
+	t.regex(output!, /'\.\.' segments are not allowed/);
 	t.false(output!.includes('Chat exported'));
 });
 
-	test('exportCommand allows exporting into a subdirectory', async t => {
+test('exportCommand allows exporting into a subdirectory', async t => {
 	// isValidFilePath is segment-aware, so a subdirectory export must work while
 	// traversal is still blocked.
 	await exportCommand.handler(
@@ -292,7 +292,8 @@ test('exportCommand rejects a filename with a null byte', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid export path/);
+	// The message must name the actual cause, not a generic "invalid path".
+	t.regex(output!, /Invalid export path: the filename contains a null byte/);
 });
 
 test('exportCommand rejects a home-directory shorthand path', async t => {
@@ -307,7 +308,9 @@ test('exportCommand rejects a home-directory shorthand path', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid export path/);
+	// `~` is not expanded, so say so and point at what does work.
+	t.regex(output!, /'~' is not expanded/);
+	t.regex(output!, /absolute path inside it/);
 });
 
 test('exportCommand rejects a path escaping the project directory', async t => {
@@ -322,7 +325,7 @@ test('exportCommand rejects a path escaping the project directory', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid export path/);
+	t.regex(output!, /'\.\.' segments are not allowed/);
 	t.false(output!.includes('Chat exported'));
 });
 
@@ -339,14 +342,19 @@ test('exportCommand rejects an absolute path outside the project', async t => {
 	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Invalid export path/);
+	// Containment is deliberate: name the boundary that was crossed.
+	t.regex(output!, /outside the project directory/);
 });
 
 test('exportCommand resolves a relative path against the session cwd (honours cd)', async t => {
 	// Pin the session cwd to a subdirectory, as a bash `cd` would, and confirm a
 	// bare relative export lands there -- not in the launch dir (process.cwd()).
+	// Must live under the project root for the containment check to pass, so
+	// register cleanup up front — a mid-test failure would otherwise leave the
+	// directory behind in the working tree.
 	const subdir = path.join(process.cwd(), 'tmp-session-cwd-test');
 	await fs.mkdir(subdir, {recursive: true});
+	t.teardown(() => fs.rm(subdir, {recursive: true, force: true}));
 	setSessionCwd(subdir);
 
 	await exportCommand.handler(['chat.md'], testMessages, testMetadata);
@@ -354,7 +362,6 @@ test('exportCommand resolves a relative path against the session cwd (honours cd
 	t.is(mockWriteFileCalls.length, 1);
 	const expected = path.join(subdir, 'chat.md');
 	t.is(mockWriteFileCalls[0].path, expected);
-	await fs.rm(subdir, {recursive: true});
 });
 
 test('exportCommand contains writes to the project root even when the session cwd is deeper', async t => {
@@ -365,6 +372,7 @@ test('exportCommand contains writes to the project root even when the session cw
 	const root = path.join(process.cwd(), 'tmp-prjroot-test');
 	const subdir = path.join(root, 'worktree');
 	await fs.mkdir(subdir, {recursive: true});
+	t.teardown(() => fs.rm(root, {recursive: true, force: true}));
 	setProjectRoot(root);
 	setSessionCwd(subdir);
 
@@ -383,9 +391,7 @@ test('exportCommand contains writes to the project root even when the session cw
 	)) as React.ReactElement;
 	t.is(mockWriteFileCalls.length, 1);
 	const {lastFrame} = render(<MockThemeProvider>{escape}</MockThemeProvider>);
-	t.regex(lastFrame()!, /Invalid export path/);
-
-	await fs.rm(root, {recursive: true});
+	t.regex(lastFrame()!, /outside the project directory/);
 });
 
 test('exportCommand reports a missing parent directory clearly', async t => {
