@@ -296,6 +296,12 @@ async function runRipgrep(
 	signal?: AbortSignal,
 	maxMatches?: number,
 	maxLines?: number,
+	// Synchronous only, by design: this exists for findMatchingPaths's pattern
+	// check, which never awaits anything. This mirrors VS Code's own
+	// RipgrepParser, which kills its rg process from a synchronous per-line
+	// callback with no async iteration involved. A future caller needing an
+	// async per-line decision would need a different, larger change - not this one.
+	onLine?: (line: string) => boolean,
 ): Promise<RunRipgrepResult> {
 	const rgPath = await resolveRipgrepPath();
 
@@ -323,7 +329,11 @@ async function runRipgrep(
 				return;
 			}
 
-			if (maxMatches === undefined && maxLines === undefined) {
+			if (
+				maxMatches === undefined &&
+				maxLines === undefined &&
+				onLine === undefined
+			) {
 				stdout += chunk;
 				return;
 			}
@@ -344,6 +354,12 @@ async function runRipgrep(
 				const line = lineRemainder.slice(0, newlineIndex);
 				lineRemainder = lineRemainder.slice(newlineIndex + 1);
 				stdout += line + '\n';
+
+				if (onLine?.(line)) {
+					killedForLimit = true;
+					child.kill();
+					return;
+				}
 
 				if (line) {
 					if (maxLines !== undefined) {
@@ -568,6 +584,123 @@ export interface WalkProjectEntriesOptions {
 	includeDirectories?: boolean;
 	signal?: AbortSignal;
 	maxRawFilesScanned?: number;
+	// Sorting requires rg to see every result before emitting the first byte
+	// (measured: 71ms of an 83ms run spent sorting before any output), which
+	// defeats early-stopping callers like findMatchingPaths entirely. Defaults
+	// to true - repo-map and file-autocomplete depend on stable path order.
+	sorted?: boolean;
+}
+
+// Only used when sorted: false, where onEntry must be able to run inline
+// from runRipgrep's synchronous onLine callback (see runRipgrep's onLine
+// param) - an async onEntry has nowhere to be awaited from there.
+function emitEntrySync(
+	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	entry: ProjectEntry,
+): boolean {
+	const stop = onEntry(entry);
+	if (stop instanceof Promise) {
+		throw new Error(
+			'walkProjectEntries: onEntry must be synchronous when sorted: false',
+		);
+	}
+	return stop;
+}
+
+// Streams rg's unsorted --files output directly into onEntry as lines
+// arrive, instead of buffering the whole run and iterating afterward -
+// lets an early-satisfied caller (findMatchingPaths) kill the still-running
+// rg process instead of waiting for it to finish scanning the whole tree.
+async function walkUnsortedFileStream(
+	cwd: string,
+	rootPath: string,
+	args: string[],
+	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	includeDirectories: boolean,
+	projectIgnore: ReturnType<typeof loadGitignore>,
+	signal: AbortSignal | undefined,
+	maxRawFilesScanned: number,
+): Promise<{truncated: boolean}> {
+	const seenDirs = new Set<string>();
+	let stoppedEarly = false;
+
+	const onLine = (line: string): boolean => {
+		const file = normalizePathForMatch(line);
+		if (!file) {
+			return false;
+		}
+
+		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
+		if (projectIgnore.ignores(relativeFile)) {
+			return false;
+		}
+
+		if (includeDirectories) {
+			const parts = relativeFile.split('/');
+			let dirRelative = '';
+			for (let index = 0; index < parts.length - 1; index++) {
+				dirRelative = index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
+				if (seenDirs.has(dirRelative)) {
+					continue;
+				}
+				seenDirs.add(dirRelative);
+				if (
+					emitEntrySync(onEntry, {
+						absolutePath: path.join(cwd, dirRelative),
+						relativePath: dirRelative,
+						isDirectory: true,
+					})
+				) {
+					stoppedEarly = true;
+					return true;
+				}
+			}
+		}
+
+		if (
+			emitEntrySync(onEntry, {
+				absolutePath: path.join(cwd, relativeFile),
+				relativePath: relativeFile,
+				isDirectory: false,
+			})
+		) {
+			stoppedEarly = true;
+			return true;
+		}
+
+		return false;
+	};
+
+	const {hitMaxLines} = await runRipgrep(
+		args,
+		cwd,
+		DEFAULT_SEARCH_TIMEOUT_MS,
+		signal,
+		undefined,
+		maxRawFilesScanned,
+		onLine,
+	);
+
+	// Caller was satisfied early (e.g. findMatchingPaths hit maxResults) -
+	// don't pay for an empty-directory walk it never asked for.
+	if (stoppedEarly) {
+		return {truncated: hitMaxLines};
+	}
+
+	let hitDirCap = false;
+	if (includeDirectories && !hitMaxLines) {
+		({truncated: hitDirCap} = await walkEmptyDirectories(
+			cwd,
+			rootPath,
+			seenDirs,
+			onEntry,
+			projectIgnore,
+			signal,
+			maxRawFilesScanned,
+		));
+	}
+
+	return {truncated: hitMaxLines || hitDirCap};
 }
 
 export async function walkProjectEntries(
@@ -580,6 +713,7 @@ export async function walkProjectEntries(
 		includeDirectories = true,
 		signal,
 		maxRawFilesScanned = MAX_RAW_FILES_SCANNED,
+		sorted = true,
 	} = options;
 	const rootPath = startPath ?? cwd;
 	await assertPathExists(rootPath);
@@ -591,12 +725,25 @@ export async function walkProjectEntries(
 		'--no-ignore-parent',
 		'--no-require-git',
 		'--no-config',
-		'--sort',
-		'path',
+		...(sorted ? ['--sort', 'path'] : []),
 		...defaultIgnoreGlobs(projectIgnore),
 		'--',
 		rootPath,
 	];
+
+	if (!sorted) {
+		return walkUnsortedFileStream(
+			cwd,
+			rootPath,
+			args,
+			onEntry,
+			includeDirectories,
+			projectIgnore,
+			signal,
+			maxRawFilesScanned,
+		);
+	}
+
 	const {stdout, hitMaxLines} = await runRipgrep(
 		args,
 		cwd,
@@ -684,17 +831,22 @@ export async function findMatchingPaths(
 	const files: string[] = [];
 	let truncated = false;
 
-	const walkResult = await walkProjectEntries(cwd, undefined, entry => {
-		if (matchesGlob(entry.relativePath, pattern, !hasSlash)) {
-			files.push(normalizePathForMatch(entry.relativePath));
-			if (files.length >= maxResults) {
-				truncated = true;
-				return true;
+	const walkResult = await walkProjectEntries(
+		cwd,
+		undefined,
+		entry => {
+			if (matchesGlob(entry.relativePath, pattern, !hasSlash)) {
+				files.push(normalizePathForMatch(entry.relativePath));
+				if (files.length >= maxResults) {
+					truncated = true;
+					return true;
+				}
 			}
-		}
 
-		return false;
-	});
+			return false;
+		},
+		{sorted: false},
+	);
 	truncated = truncated || walkResult.truncated;
 
 	return {files, truncated};
