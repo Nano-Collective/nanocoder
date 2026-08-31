@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 import type {Dirent} from 'node:fs';
-import {readdir, readFile} from 'node:fs/promises';
+import {lstat, readdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import ignore from 'ignore';
 
@@ -12,6 +12,7 @@ import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 const MAX_CONTEXT_CONTENT_LENGTH = 1500;
 const MAX_MATCH_CONTENT_LENGTH = 300;
 const DEFAULT_SEARCH_TIMEOUT_MS = 30_000;
+const MAX_RAW_FILES_SCANNED = 50_000;
 // Sanity cap on pattern length, not a backtracking defense (matchTokens has none).
 const MAX_GLOB_PATTERN_LENGTH = 1000;
 
@@ -42,19 +43,33 @@ function normalizePathForMatch(filePath: string): string {
 	return filePath.replace(/\\/g, '/');
 }
 
+const MAX_BRACE_EXPANSIONS = 64;
+
 // Braces aren't nesting-aware; `{a,{b,c}}` expands wrong.
 function expandBraces(pattern: string): string[] {
-	const match = pattern.match(/\{([^{}]+)\}/);
-	if (!match || match.index === undefined) {
-		return [pattern];
-	}
+	let combinationCount = 0;
 
-	const before = pattern.slice(0, match.index);
-	const after = pattern.slice(match.index + match[0].length);
+	const expand = (current: string): string[] => {
+		const match = current.match(/\{([^{}]+)\}/);
+		if (!match || match.index === undefined) {
+			combinationCount++;
+			if (combinationCount > MAX_BRACE_EXPANSIONS) {
+				throw new Error(
+					`Glob pattern has too many brace-expansion combinations (max ${MAX_BRACE_EXPANSIONS}).`,
+				);
+			}
+			return [current];
+		}
 
-	return match[1]
-		.split(',')
-		.flatMap(part => expandBraces(`${before}${part.trim()}${after}`));
+		const before = current.slice(0, match.index);
+		const after = current.slice(match.index + match[0].length);
+
+		return match[1]
+			.split(',')
+			.flatMap(part => expand(`${before}${part.trim()}${after}`));
+	};
+
+	return expand(pattern);
 }
 
 type GlobToken =
@@ -223,6 +238,32 @@ function defaultIgnoreGlobs(
 	return globs;
 }
 
+async function assertPathExists(candidatePath: string): Promise<void> {
+	await lstat(candidatePath);
+}
+
+// Rust regex (rg's default engine) rejects all of these outright, except
+// possessive quantifiers - those silently degrade to ordinary greedy ones
+// instead of erroring, so detection matters more here than for the rest.
+const LOOKAROUND_PATTERN = /\(\?(?:[!=]|<[=!])/;
+const BACKREFERENCE_PATTERN = /\\[1-9]/;
+// \k<name>, \k'name', \k{name} (PCRE forms) and (?P=name) (Python form).
+const NAMED_BACKREFERENCE_PATTERN = /\\k[<'{]|\(\?P=/;
+const ATOMIC_GROUP_PATTERN = /\(\?>/;
+const CONDITIONAL_PATTERN = /\(\?\(/;
+const POSSESSIVE_QUANTIFIER_PATTERN = /[*+?]\+|\}\+/;
+
+function needsPcre2(query: string): boolean {
+	return (
+		LOOKAROUND_PATTERN.test(query) ||
+		BACKREFERENCE_PATTERN.test(query) ||
+		NAMED_BACKREFERENCE_PATTERN.test(query) ||
+		ATOMIC_GROUP_PATTERN.test(query) ||
+		CONDITIONAL_PATTERN.test(query) ||
+		POSSESSIVE_QUANTIFIER_PATTERN.test(query)
+	);
+}
+
 function binaryExcludeGlobs(): string[] {
 	const globs: string[] = [];
 	for (const ext of BINARY_FILE_EXTENSIONS) {
@@ -247,13 +288,21 @@ function isFatalRipgrepError(stderr: string): boolean {
 	return FATAL_RIPGREP_ERROR_PATTERNS.some(pattern => pattern.test(stderr));
 }
 
+interface RunRipgrepResult {
+	stdout: string;
+	// True when killed by maxLines specifically - the raw scan was cut short
+	// before finishing, so a caller can't trust an empty/short result as final.
+	hitMaxLines: boolean;
+}
+
 async function runRipgrep(
 	args: string[],
 	cwd: string,
 	timeoutMs: number,
 	signal?: AbortSignal,
 	maxMatches?: number,
-): Promise<string> {
+	maxLines?: number,
+): Promise<RunRipgrepResult> {
 	const rgPath = await resolveRipgrepPath();
 
 	return new Promise((resolve, reject) => {
@@ -261,9 +310,11 @@ async function runRipgrep(
 		const child = spawn(rgPath, args, {cwd});
 		let stdout = '';
 		let stderr = '';
-		let killedForMatchLimit = false;
+		let killedForLimit = false;
+		let hitMaxLines = false;
 		let timedOut = false;
 		let matchCount = 0;
+		let lineCount = 0;
 
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -275,11 +326,13 @@ async function runRipgrep(
 		child.stdout.setEncoding('utf8');
 		child.stdout.on('data', (chunk: string) => {
 			stdout += chunk;
-			if (maxMatches === undefined || killedForMatchLimit) {
+			if (
+				(maxMatches === undefined && maxLines === undefined) ||
+				killedForLimit
+			) {
 				return;
 			}
 
-			// rg's --max-count overshoots with --context, so count ourselves.
 			lineRemainder += chunk;
 			let newlineIndex = lineRemainder.indexOf('\n');
 			while (newlineIndex >= 0) {
@@ -287,17 +340,28 @@ async function runRipgrep(
 				lineRemainder = lineRemainder.slice(newlineIndex + 1);
 
 				if (line) {
-					try {
-						if ((JSON.parse(line) as {type?: string}).type === 'match') {
-							matchCount++;
+					if (maxLines !== undefined) {
+						lineCount++;
+					} else {
+						// rg's --max-count overshoots with --context, so count matches ourselves.
+						try {
+							if ((JSON.parse(line) as {type?: string}).type === 'match') {
+								matchCount++;
+							}
+						} catch {
+							// ignore malformed/partial line
 						}
-					} catch {
-						// ignore malformed/partial line
 					}
 				}
 
-				if (matchCount >= maxMatches) {
-					killedForMatchLimit = true;
+				if (maxLines !== undefined && lineCount >= maxLines) {
+					killedForLimit = true;
+					hitMaxLines = true;
+					child.kill();
+					return;
+				}
+				if (maxMatches !== undefined && matchCount >= maxMatches) {
+					killedForLimit = true;
 					child.kill();
 					return;
 				}
@@ -330,8 +394,8 @@ async function runRipgrep(
 				reject(signal.reason ?? new Error('Search aborted'));
 				return;
 			}
-			if (killedForMatchLimit) {
-				resolve(stdout);
+			if (killedForLimit) {
+				resolve({stdout, hitMaxLines});
 				return;
 			}
 			if (timedOut) {
@@ -353,7 +417,7 @@ async function runRipgrep(
 				reject(new Error(`ripgrep exited with code ${code}: ${stderr.trim()}`));
 				return;
 			}
-			resolve(stdout);
+			resolve({stdout, hitMaxLines: false});
 		});
 	});
 }
@@ -392,7 +456,8 @@ async function walkEmptyDirectories(
 	projectIgnore: ReturnType<typeof loadGitignore>,
 	nanocoderignoreContent?: string,
 	signal?: AbortSignal,
-): Promise<boolean> {
+	maxDirsWalked: number = MAX_RAW_FILES_SCANNED,
+): Promise<{truncated: boolean}> {
 	// Grows as nested .gitignore files are found; prefixing keeps them scoped.
 	const ig = ignore();
 	ig.add(DEFAULT_IGNORE_DIRS);
@@ -400,6 +465,8 @@ async function walkEmptyDirectories(
 		ig.add(nanocoderignoreContent);
 	}
 	let loggedDepthCap = false;
+	let dirsWalked = 0;
+	let hitDirCap = false;
 
 	const visit = async (
 		absolutePath: string,
@@ -418,6 +485,13 @@ async function walkEmptyDirectories(
 				);
 			}
 			return false;
+		}
+
+		// readdir itself is the expensive part; cap on that, not on discovered entries.
+		dirsWalked++;
+		if (dirsWalked > maxDirsWalked) {
+			hitDirCap = true;
+			return true;
 		}
 
 		const dirPrefix = normalizePathForMatch(path.relative(cwd, absolutePath));
@@ -478,21 +552,26 @@ async function walkEmptyDirectories(
 		return false;
 	};
 
-	return visit(rootPath, 0);
+	await visit(rootPath, 0);
+	return {truncated: hitDirCap};
 }
 
 export async function walkProjectEntries(
 	cwd: string,
 	startPath: string | undefined,
 	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
+	includeDirectories = true,
 	signal?: AbortSignal,
-): Promise<void> {
+	maxRawFilesScanned: number = MAX_RAW_FILES_SCANNED,
+): Promise<{truncated: boolean}> {
 	const rootPath = startPath ?? cwd;
+	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
-	const nanocoderignoreContent = await readFile(
-		path.join(cwd, '.nanocoderignore'),
-		'utf-8',
-	).catch(() => undefined);
+	const nanocoderignoreContent = includeDirectories
+		? await readFile(path.join(cwd, '.nanocoderignore'), 'utf-8').catch(
+				() => undefined,
+			)
+		: undefined;
 	const args = [
 		'--files',
 		'--hidden',
@@ -506,7 +585,14 @@ export async function walkProjectEntries(
 		'--',
 		rootPath,
 	];
-	const stdout = await runRipgrep(args, cwd, DEFAULT_SEARCH_TIMEOUT_MS, signal);
+	const {stdout, hitMaxLines} = await runRipgrep(
+		args,
+		cwd,
+		DEFAULT_SEARCH_TIMEOUT_MS,
+		signal,
+		undefined,
+		maxRawFilesScanned,
+	);
 	const files = stdout
 		.split(/\r?\n/)
 		.filter(Boolean)
@@ -523,22 +609,24 @@ export async function walkProjectEntries(
 			continue;
 		}
 
-		const parts = relativeFile.split('/');
+		if (includeDirectories) {
+			const parts = relativeFile.split('/');
 
-		let dirRelative = '';
-		for (let index = 0; index < parts.length - 1; index++) {
-			dirRelative = index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
-			if (seenDirs.has(dirRelative)) {
-				continue;
-			}
-			seenDirs.add(dirRelative);
-			const stop = await onEntry({
-				absolutePath: path.join(cwd, dirRelative),
-				relativePath: dirRelative,
-				isDirectory: true,
-			});
-			if (stop) {
-				return;
+			let dirRelative = '';
+			for (let index = 0; index < parts.length - 1; index++) {
+				dirRelative = index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
+				if (seenDirs.has(dirRelative)) {
+					continue;
+				}
+				seenDirs.add(dirRelative);
+				const stop = await onEntry({
+					absolutePath: path.join(cwd, dirRelative),
+					relativePath: dirRelative,
+					isDirectory: true,
+				});
+				if (stop) {
+					return {truncated: hitMaxLines};
+				}
 			}
 		}
 
@@ -548,19 +636,27 @@ export async function walkProjectEntries(
 			isDirectory: false,
 		});
 		if (stop) {
-			return;
+			return {truncated: hitMaxLines};
 		}
 	}
 
-	await walkEmptyDirectories(
-		cwd,
-		rootPath,
-		seenDirs,
-		onEntry,
-		projectIgnore,
-		nanocoderignoreContent,
-		signal,
-	);
+	// If the raw --files scan already got cut short, the result set is already
+	// incomplete - skip paying for a full empty-directory walk on top of that.
+	let hitDirCap = false;
+	if (includeDirectories && !hitMaxLines) {
+		({truncated: hitDirCap} = await walkEmptyDirectories(
+			cwd,
+			rootPath,
+			seenDirs,
+			onEntry,
+			projectIgnore,
+			nanocoderignoreContent,
+			signal,
+			maxRawFilesScanned,
+		));
+	}
+
+	return {truncated: hitMaxLines || hitDirCap};
 }
 
 export async function findMatchingPaths(
@@ -577,7 +673,7 @@ export async function findMatchingPaths(
 	const files: string[] = [];
 	let truncated = false;
 
-	await walkProjectEntries(cwd, undefined, entry => {
+	const walkResult = await walkProjectEntries(cwd, undefined, entry => {
 		if (matchesGlob(entry.relativePath, pattern, !hasSlash)) {
 			files.push(normalizePathForMatch(entry.relativePath));
 			if (files.length >= maxResults) {
@@ -588,6 +684,7 @@ export async function findMatchingPaths(
 
 		return false;
 	});
+	truncated = truncated || walkResult.truncated;
 
 	return {files, truncated};
 }
@@ -783,9 +880,8 @@ export async function searchProjectContents(
 		// Empty pattern matches everything - rg would buffer the whole repo.
 		throw new Error('Search query cannot be empty');
 	}
+	await assertPathExists(searchPath ?? cwd);
 
-	// No --max-count - it overshoots with --context. runRipgrep's own streamed count is the real cutoff.
-	const rgMaxCount = Math.max(0, maxResults);
 	const projectIgnore = loadGitignore(cwd);
 
 	const args = [
@@ -801,6 +897,9 @@ export async function searchProjectContents(
 	if (wholeWord) {
 		args.push('--word-regexp');
 	}
+	if (needsPcre2(query)) {
+		args.push('--pcre2');
+	}
 	// Must precede the exclude globs: rg's `-g` is last-wins, so an include after would re-include them.
 	if (include) {
 		args.push('-g', include);
@@ -812,7 +911,12 @@ export async function searchProjectContents(
 	}
 	args.push('--regexp', query, '--', searchPath ?? cwd);
 
-	const stdout = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);
+	// No --max-count - it overshoots with --context. One extra match of headroom with context,
+	// so the kill doesn't fire before the Nth match's own trailing context lines stream in.
+	const rgMaxCount =
+		Math.max(0, maxResults) + (normalizedContextLines > 0 ? 1 : 0);
+
+	const {stdout} = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);
 	const rgLines = parseRgJsonLines(stdout).filter(
 		line => !projectIgnore.ignores(toRelativeFile(cwd, line.file)),
 	);

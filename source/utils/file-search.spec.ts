@@ -8,6 +8,7 @@ import {
 	matchesGlob,
 	searchProjectContents,
 	SearchTimeoutError,
+	walkProjectEntries,
 } from './file-search';
 
 function createTempDir(name: string): string {
@@ -64,6 +65,16 @@ test('matchesGlob rejects a pattern longer than the sanity length cap', t => {
 	t.regex(error?.message ?? '', /too long/);
 });
 
+test('matchesGlob rejects a pattern with too many brace-expansion combinations', t => {
+	// 200 sequential {a,b} groups hung for 30+ seconds before this cap existed.
+	const pattern = '{a,b}'.repeat(200);
+	const start = Date.now();
+	const error = t.throws(() => matchesGlob('a'.repeat(400), pattern));
+	t.true(Date.now() - start < 100);
+	t.true(error instanceof Error);
+	t.regex(error?.message ?? '', /too many brace-expansion combinations/);
+});
+
 test.serial('findMatchingPaths returns files and directories cross-platform', async t => {
 	const testDir = createTempDir('test-file-search-find-temp');
 
@@ -107,6 +118,146 @@ test.serial('findMatchingPaths finds an empty, nested directory', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'walkProjectEntries with includeDirectories=false never reports a directory, even an empty one',
+	async t => {
+		const testDir = createTempDir('test-file-search-no-dirs-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'emptydir'), {recursive: true});
+			writeFileSync(join(testDir, 'src', 'placeholder.ts'), 'export {};');
+
+			const entries: {relativePath: string; isDirectory: boolean}[] = [];
+			await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					entries.push(entry);
+					return false;
+				},
+				false,
+			);
+
+			t.false(entries.some(e => e.isDirectory));
+			t.true(entries.some(e => e.relativePath === 'src/placeholder.ts'));
+			t.false(entries.some(e => e.relativePath === 'src/emptydir'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries reports truncated when the raw file-scan cap is hit',
+	async t => {
+		const testDir = createTempDir('test-file-search-raw-cap-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			for (let i = 0; i < 30; i++) {
+				writeFileSync(join(testDir, `f${i}.txt`), 'x');
+			}
+
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				true,
+				undefined,
+				5,
+			);
+			t.true(result.truncated);
+
+			const untruncated = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				true,
+				undefined,
+				1000,
+			);
+			t.false(untruncated.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries reports truncated when the empty-directory walk cap is hit, even with zero files',
+	async t => {
+		const testDir = createTempDir('test-file-search-dir-cap-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// No files at all, so the rg --files raw-scan cap never fires -
+			// only the JS-side empty-directory recursion can trip a cap here.
+			for (let i = 0; i < 30; i++) {
+				mkdirSync(join(testDir, `d${i}`), {recursive: true});
+			}
+
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				true,
+				undefined,
+				5,
+			);
+			t.true(result.truncated);
+
+			const untruncated = await walkProjectEntries(
+				testDir,
+				undefined,
+				() => false,
+				true,
+				undefined,
+				1000,
+			);
+			t.false(untruncated.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries skips the empty-directory walk once the raw file-scan cap already fired',
+	async t => {
+		const testDir = createTempDir('test-file-search-skip-dir-walk-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			for (let i = 0; i < 30; i++) {
+				writeFileSync(join(testDir, `f${i}.txt`), 'x');
+			}
+			mkdirSync(join(testDir, 'empty-dir'), {recursive: true});
+
+			const seenDirectories: string[] = [];
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					if (entry.isDirectory) {
+						seenDirectories.push(entry.relativePath);
+					}
+					return false;
+				},
+				true,
+				undefined,
+				5,
+			);
+
+			t.true(result.truncated);
+			// The empty-dir walk should have been skipped entirely once the
+			// raw file-scan cap already made the result incomplete.
+			t.false(seenDirectories.includes('empty-dir'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'findMatchingPaths hides an empty directory ignored by a nested .gitignore',
@@ -717,6 +868,146 @@ test.serial(
 			// rg exits 2 for an invalid regex too; must still reject, not return no matches.
 			await t.throwsAsync(() =>
 				searchProjectContents('[invalid(regex', testDir, 10, false),
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents supports lookahead and backreferences via --pcre2',
+	async t => {
+		const testDir = createTempDir('test-file-search-pcre2-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foobar\nfoofoo\n');
+
+			const lookahead = await searchProjectContents(
+				'foo(?=bar)',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				lookahead.matches.map(m => m.content),
+				['foobar'],
+			);
+
+			const backreference = await searchProjectContents(
+				`(foo)${String.fromCharCode(92)}1`,
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				backreference.matches.map(m => m.content),
+				['foofoo'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents supports Python-style and Perl-style named backreferences via --pcre2',
+	async t => {
+		const testDir = createTempDir('test-file-search-named-backref-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foofoo\nfoobar\n');
+
+			const pythonStyle = await searchProjectContents(
+				'(?P<n>foo)(?P=n)',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				pythonStyle.matches.map(m => m.content),
+				['foofoo'],
+			);
+
+			const perlQuoteStyle = await searchProjectContents(
+				`(?<n>foo)${String.fromCharCode(92)}k'n'`,
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				perlQuoteStyle.matches.map(m => m.content),
+				['foofoo'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents does not misjudge a possessive quantifier as an ordinary greedy one',
+	async t => {
+		const testDir = createTempDir('test-file-search-possessive-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'aaa\n');
+
+			// a++a is possessive - a++ leaves nothing for the trailing 'a' to match.
+			const result = await searchProjectContents('a++a', testDir, 10, false);
+			t.deepEqual(result.matches, []);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents does not force --pcre2 for an ordinary named capture group',
+	async t => {
+		const testDir = createTempDir('test-file-search-named-group-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'a.txt'), 'foobar\n');
+
+			// Looks like lookbehind syntax at a glance but isn't.
+			const result = await searchProjectContents(
+				'(?<n>foo)bar',
+				testDir,
+				10,
+				false,
+			);
+			t.deepEqual(
+				result.matches.map(m => m.content),
+				['foobar'],
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents throws on a nonexistent searchPath instead of returning no matches',
+	async t => {
+		const testDir = createTempDir('test-file-search-bad-searchpath-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+
+			await t.throwsAsync(() =>
+				searchProjectContents(
+					'foo',
+					testDir,
+					10,
+					false,
+					undefined,
+					join(testDir, 'does-not-exist'),
+				),
 			);
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
