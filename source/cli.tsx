@@ -510,6 +510,16 @@ async function main(): Promise<void> {
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
 
+	// Hard-error when `review` lands in a non-interactive context (piped
+	// stdout, CI). The plain shell has no slash-command dispatch, so
+	// `/review <target>` would be sent verbatim to the model as chat.
+	if (isReviewCommand && !process.stdout.isTTY) {
+		console.error(
+			'Error: `nanocoder review` requires an interactive terminal (TTY). Pipe the output to a file instead: nanocoder review <target> 2>&1 | tee out.md',
+		);
+		process.exit(1);
+	}
+
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
 
