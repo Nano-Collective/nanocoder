@@ -15,6 +15,8 @@ permissions:
 jobs:
   pr-checks:
     uses: Nano-Collective/.github/.github/workflows/pr-checks.yml@main
+    with:
+      fail-on-coverage-drop: true
 
   # Validates changeset package names to prevent main branch breakages.
   # Uses a custom script instead of `changeset status` to keep the check non-blocking.
