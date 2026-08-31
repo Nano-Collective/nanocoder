@@ -41,7 +41,6 @@ coverage/
 			path: '.nanocoder/commands/check.md',
 			content: `---
 description: Run the available Next.js project quality checks
-aliases: [verify]
 category: quality
 ---
 

@@ -36,7 +36,6 @@ dist/
 			path: '.nanocoder/commands/check.md',
 			content: `---
 description: Run the available React project quality checks
-aliases: [verify]
 category: quality
 ---
 

@@ -29,7 +29,6 @@ coverage/
 			path: '.nanocoder/commands/check.md',
 			content: `---
 description: Run the standard Rust project quality checks
-aliases: [verify]
 category: quality
 ---
 

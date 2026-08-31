@@ -88,3 +88,13 @@ test('Rust preset keeps Cargo.lock available as project context', t => {
 	t.truthy(ignoreFile);
 	t.false(ignoreFile?.content.includes('Cargo.lock'));
 });
+
+for (const presetName of supportedPresetNames) {
+	test(`${presetName} preset check command declares no aliases`, t => {
+		const checkFile = resolvePreset(presetName).files.find(
+			file => file.path === '.nanocoder/commands/check.md',
+		);
+		t.truthy(checkFile);
+		t.false(checkFile?.content.includes('aliases:'));
+	});
+}
