@@ -66,6 +66,40 @@ test('handler validates URL format', async t => {
 	);
 });
 
+test('handler does not follow redirects before validating the destination', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	const originalFetch = globalThis.fetch;
+	const requests: RequestInit[] = [];
+	globalThis.fetch = async (_input, init) => {
+		requests.push(init ?? {});
+		return new Response(null, {
+			status: 302,
+			statusText: 'Found',
+			headers: {location: 'http://127.0.0.1:8080/internal'},
+		});
+	};
+
+	try {
+		await t.throwsAsync(
+			async () => {
+				await fetchUrlTool.tool.execute!(
+					{url: 'https://public.example.test/redirect'},
+					{toolCallId: 'test', messages: []},
+				);
+			},
+			{message: /Failed to fetch URL/},
+		);
+		t.is(requests.length, 1);
+		t.is(requests[0]?.redirect, 'manual');
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');

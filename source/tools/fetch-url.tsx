@@ -27,7 +27,10 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		// so the ~100-module HTML-parsing graph only loads when the tool
 		// actually runs).
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
-		const result = await convertToMarkdown(args.url);
+		// This tool runs without approval, so never let the markdown fetcher
+		// follow a redirect before the destination has passed our URL validator.
+		// Callers can invoke fetch_url again with a safe destination when needed.
+		const result = await convertToMarkdown(args.url, {followRedirects: false});
 
 		const content = result.markdown;
 
