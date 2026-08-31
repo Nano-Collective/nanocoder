@@ -168,33 +168,87 @@ export interface ModeProviderConfig {
 	model: string;
 }
 
+// ---------------------------------------------------------------------------
+// On-disk shape of agents.config.json
+//
+// This is the schema source of truth. It differs from the runtime AppConfig:
+//   • includes $schema (editor-only, ignored by the loader)
+//   • includes defaultMode (read by loadDefaultMode(), not on AppConfig)
+//   • uses ProviderConfig for providers (superset of the AppConfig inline type)
+//   • autoCompact is Partial (the loader defaults each field)
+//   • excludes notifications, sessions, paste (read from nanocoder-preferences.json)
+//
+// The JSON schema generator (`pnpm run generate:schema`) targets this type.
+// ---------------------------------------------------------------------------
+
+/** Valid default mode values for agents.config.json. */
+export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
+
+/**
+ * On-disk representation of the `nanocoder` namespace in agents.config.json.
+ *
+ * Every field is optional — the loader applies sensible defaults for each one.
+ * Fields that live in nanocoder-preferences.json (notifications, sessions,
+ * paste) are intentionally absent: the schema should not advertise keys the
+ * loader silently ignores.
+ */
+export interface DiskNanocoderConfig {
+	/** AI provider configurations (all OpenAI-compatible). */
+	providers?: ProviderConfig[];
+	/** Default conversation mode when none is specified. */
+	defaultMode?: DiskDefaultMode;
+	/** Automatic context compression when usage exceeds threshold. All fields have defaults. */
+	autoCompact?: Partial<AutoCompactConfig>;
+	/** Model mode defaults (tool profile, tool mode, model parameters). */
+	tune?: Partial<TuneConfig>;
+	/** Maximum LLM turns for headless runs (--plain and ACP loops). */
+	headless?: {
+		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
+		maxTurns?: number;
+	};
+	/** Model Context Protocol server configurations. */
+	mcpServers?: MCPServerConfig[];
+	/** LSP server configurations (optional — auto-discovery enabled by default). */
+	lspServers?: {
+		name: string;
+		command: string;
+		args?: string[];
+		/** File extensions this server handles. */
+		languages: string[];
+		env?: Record<string, string>;
+	}[];
+	/** Tools that run automatically without confirmation in non-interactive mode. */
+	alwaysAllow?: string[];
+	/** Tools unavailable to the model — filtered out of chat, subagents, and tune profiles. */
+	disabledTools?: string[];
+	/** Custom system prompt — replaces or extends the built-in prompt. */
+	systemPrompt?: SystemPromptConfig;
+	/** Nanocoder-specific tool configurations. */
+	nanocoderTools?: {
+		webSearch?: {
+			apiKey?: string;
+		};
+	};
+	/** Per-development-mode provider/model overrides (e.g. use a fast model for plan mode). */
+	modeProviders?: Record<string, ModeProviderConfig>;
+}
+
+/**
+ * Root structure of agents.config.json.
+ *
+ * The schema wraps DiskNanocoderConfig under the `nanocoder` key to match
+ * the actual on-disk layout. The optional `$schema` property enables
+ * editor autocompletion without being read by the loader.
+ */
+export interface DiskConfig {
+	/** JSON Schema URI for editor autocompletion. Ignored by the loader. */
+	$schema?: string;
+	nanocoder?: DiskNanocoderConfig;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
-	providers?: {
-		name: string;
-		baseUrl?: string;
-		apiKey?: string;
-		caCertPath?: string;
-		models: string[];
-		contextWindow?: number;
-		contextWindows?: Record<string, number>;
-		requestTimeout?: number;
-		socketTimeout?: number;
-		maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
-		connectionPool?: {
-			idleTimeout?: number;
-			cumulativeMaxIdleTimeout?: number;
-		};
-		// Tool configuration
-		disableTools?: boolean; // Disable tools for entire provider
-		disableToolModels?: string[]; // List of model names to disable tools for
-		// SDK provider package to use (default: 'openai-compatible')
-		sdkProvider?: SdkProvider;
-		// OpenRouter-specific request body fields. Only applied when the
-		// provider is OpenRouter (name match, case-insensitive).
-		openrouter?: OpenRouterParameters;
-		[key: string]: unknown; // Allow additional provider-specific config
-	}[];
+	providers?: ProviderConfig[];
 
 	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
