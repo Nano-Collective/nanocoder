@@ -40,7 +40,11 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [preview, setPreview] = useState<string | null>(null);
+	// The plain, indentation-compressed source. Highlighting is derived from it
+	// below rather than stored, so switching theme with the preview open
+	// re-colours it instead of leaving the old palette until reselect.
+	const [previewSource, setPreviewSource] = useState<string | null>(null);
+	const [previewLanguage, setPreviewLanguage] = useState('plaintext');
 	const [previewError, setPreviewError] = useState<string | null>(null);
 	const [previewPath, setPreviewPath] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<ViewMode>('tree');
@@ -114,10 +118,24 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 		return Math.ceil(totalSize / CHARS_PER_TOKEN_ESTIMATE);
 	}, [selectedFiles, allNodes]);
 
+	// Re-runs when the palette changes, so a theme switch recolours an open
+	// preview. Highlighting failures fall back to the plain source.
+	const preview = useMemo(() => {
+		if (previewSource === null) return null;
+		try {
+			return highlight(previewSource, {
+				language: previewLanguage,
+				theme: getSyntaxTheme(colors),
+			});
+		} catch {
+			return previewSource;
+		}
+	}, [previewSource, previewLanguage, colors]);
+
 	// Load preview when entering preview mode
 	const loadPreviewForNode = async (node: FileNode) => {
 		if (node.isDirectory) {
-			setPreview(null);
+			setPreviewSource(null);
 			setPreviewError('Cannot preview directory');
 			return;
 		}
@@ -137,24 +155,13 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 			const compressedLines = compressIndentation(lines);
 			const compressedContent = compressedLines.join('\n');
 
-			// Apply syntax highlighting
-			let highlighted: string;
-			try {
-				highlighted = highlight(compressedContent, {
-					language: lang,
-					theme: getSyntaxTheme(colors),
-				});
-			} catch {
-				// Fallback to plain text if highlighting fails
-				highlighted = compressedContent;
-			}
-
-			setPreview(highlighted);
+			setPreviewLanguage(lang);
+			setPreviewSource(compressedContent);
 			setPreviewPath(node.path);
 			setPreviewError(null);
 			setPreviewScroll(0);
 		} catch {
-			setPreview(null);
+			setPreviewSource(null);
 			setPreviewError('Cannot preview (binary or unreadable)');
 		}
 	};

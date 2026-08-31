@@ -5,6 +5,7 @@ import test from 'ava';
 import chalk from 'chalk';
 import {DEFAULT_THEME, highlight} from 'cli-highlight';
 import {getSyntaxTheme, themes} from '@/config/themes';
+import {resetPreferencesCache, savePreferences} from '@/config/preferences';
 
 // AVA runs each spec in its own non-TTY process, where chalk disables colour and
 // every formatter becomes a no-op. Force truecolor so the escapes are assertable.
@@ -219,3 +220,48 @@ test('code follows the UI palette when syntaxTheme is unset', t => {
 
 	t.true(output.includes(ansiFor(ui.primary)));
 });
+
+// The cache used to key on NANOCODER_CONFIG_DIR alone, which never moves in a
+// real session - so syntaxTheme was read once per process and a later write was
+// ignored until restart. Keying on the preferences version as well fixes that,
+// and this pins it without touching the env var at all.
+test('a syntaxTheme written mid-session takes effect without a restart', t => {
+	useConfigDir('live-write', {selectedTheme: 'nord-frost'});
+
+	const ui = themes['nord-frost'].colors;
+	const before = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+	t.true(before.includes(ansiFor(ui.primary)), 'starts on the UI palette');
+
+	// Same config dir, new preferences: only the version counter moves.
+	resetPreferencesCache();
+	savePreferences({selectedTheme: 'nord-frost', syntaxTheme: 'dracula'});
+
+	const after = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+	t.true(
+		after.includes(ansiFor(themes['dracula'].colors.primary)),
+		'the write is picked up on the next highlight',
+	);
+});
+
+// `themes` comes from JSON.parse, so it carries Object.prototype: a `preset in
+// themes` check would accept these and resolve to a non-theme whose `.colors` is
+// undefined, leaving the fallback to rescue it by accident.
+for (const inherited of ['constructor', 'toString', 'valueOf', '__proto__']) {
+	test(`a syntaxTheme of '${inherited}' falls back to the UI palette`, t => {
+		useConfigDir(`inherited-${inherited}`, {syntaxTheme: inherited});
+
+		const ui = themes['one-light'].colors;
+		const output = highlight(snippet, {
+			language: 'typescript',
+			theme: getSyntaxTheme(ui),
+		});
+
+		t.true(output.includes(ansiFor(ui.primary)));
+	});
+}

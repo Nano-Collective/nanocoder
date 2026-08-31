@@ -188,11 +188,21 @@ test('parseMarkdown handles code blocks without language', t => {
 // `theme: 'default'`, a string where the library expects a token -> formatter
 // map, so the option was dropped. Colour must come from the caller's palette.
 test('parseMarkdown highlights code blocks with the supplied colors', t => {
+	// Two separate things are going on here, both load-bearing.
+	//
+	// chalk.level = 3 because the runner reports no colour support, so the
+	// assertion would otherwise compare two unstyled strings.
+	//
+	// A distinct palette object because chalk bakes the colour MODEL into a
+	// builder when the builder is created: chalk.hex() picks ansi16, ansi256
+	// or truecolor from chalk.level at that moment. Whether to emit codes is
+	// re-checked per call, but which codes is not. getSyntaxTheme memoises
+	// per palette identity, so reusing mockColors here would reuse builders
+	// frozen at the runner's default level - emitting [91m where the
+	// assertion builds [38;2;... and the two would not match.
 	const previousLevel = chalk.level;
 	chalk.level = 3;
 	try {
-		// A distinct palette object, so the memoised syntax theme for it is built
-		// while colour is forced on.
 		const colors: Colors = {...mockColors, primary: '#ff0000'};
 		const result = parseMarkdown('```javascript\nconst x = 5;\n```', colors);
 		t.true(result.includes(chalk.hex(colors.primary)('const')));
