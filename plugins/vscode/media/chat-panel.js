@@ -35,6 +35,7 @@
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
+	let showTokenUsage = false;
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -1906,6 +1907,7 @@
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
 	function appendUsageIndicator(usage, cost) {
+		if (!showTokenUsage) return;
 		if (!usage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
@@ -2396,6 +2398,14 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
 			});
 		}
+
+		// Token usage footer
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) {
+			tuToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2482,6 +2492,10 @@
 
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+
+		showTokenUsage = settings.showTokenUsage === true;
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) tuToggle.checked = showTokenUsage;
 	}
 
 	function escapeHtml(str) {

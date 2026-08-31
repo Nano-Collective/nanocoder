@@ -304,6 +304,7 @@ export class ChatWebviewProvider
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
+						this._handleRequestSettings();
 						this._initializeSessionIfReady();
 						break;
 					case 'submitMessage':
@@ -556,13 +557,16 @@ export class ChatWebviewProvider
 
 	private _handleRequestSettings() {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const settings = this._settingsManager.readSettings(cwd);
+		const settings = this._readWebviewSettings(cwd);
 		this.postMessage({type: 'settingsData', settings});
 	}
 
-	private _handleUpdateSetting(key: string, value: unknown) {
+	private async _handleUpdateSetting(key: string, value: unknown) {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const result = this._settingsManager.updateSetting(cwd, key, value);
+		const result =
+			key === 'showTokenUsage'
+				? await this._updateShowTokenUsage(value)
+				: this._settingsManager.updateSetting(cwd, key, value);
 		this.postMessage({
 			type: 'settingsUpdated',
 			key,
@@ -572,11 +576,29 @@ export class ChatWebviewProvider
 
 		// If successful, send refreshed settings so the UI stays in sync
 		if (result.success) {
-			const settings = this._settingsManager.readSettings(cwd);
+			const settings = this._readWebviewSettings(cwd);
 			this.postMessage({type: 'settingsData', settings});
 		} else {
 			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
 		}
+	}
+
+	private _readWebviewSettings(cwd: string) {
+		return {
+			...this._settingsManager.readSettings(cwd),
+			showTokenUsage: vscode.workspace
+				.getConfiguration('nanocoder')
+				.get<boolean>('showTokenUsage', false),
+		};
+	}
+
+	private async _updateShowTokenUsage(value: unknown): Promise<{ success: boolean; error?: string }> {
+		if (typeof value !== 'boolean') {
+			return {success: false, error: 'showTokenUsage must be a boolean'};
+		}
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		await config.update('showTokenUsage', value, vscode.ConfigurationTarget.Global);
+		return {success: true};
 	}
 
 	private async _handleOpenConfigFile(file: string) {
