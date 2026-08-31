@@ -318,11 +318,10 @@ async function main(): Promise<void> {
 
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const afterRunArgs =
-		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
+	const isRunCommand = args[0] === 'run';
+	const afterRunArgs = isRunCommand ? args.slice(1) : [];
+	if (isRunCommand && afterRunArgs.length > 0) {
+		// Filter out known flags when constructing the prompt
 		const promptArgs: string[] = [];
 		for (let i = 0; i < afterRunArgs.length; i++) {
 			const arg = afterRunArgs[i];
@@ -365,15 +364,15 @@ async function main(): Promise<void> {
 		nonInteractivePrompt = promptArgs.join(' ');
 	}
 
-	let nonInteractiveMode = runCommandIndex !== -1;
+	let nonInteractiveMode = isRunCommand;
 
 	// Check for `nanocoder review <target>` — syntactic sugar for
 	// `nanocoder run /review <target>`. The target is the branch or PR number
 	// to review. Flags between `review` and the target are filtered the same
 	// way as `run`.
-	const reviewCommandIndex = args.findIndex(arg => arg === 'review');
-	if (reviewCommandIndex !== -1) {
-		const afterReviewArgs = args.slice(reviewCommandIndex + 1);
+	const isReviewCommand = args[0] === 'review';
+	if (isReviewCommand) {
+		const afterReviewArgs = args.slice(1);
 		const reviewArgs: string[] = [];
 		for (let i = 0; i < afterReviewArgs.length; i++) {
 			const arg = afterReviewArgs[i];
@@ -396,6 +395,9 @@ async function main(): Promise<void> {
 			) {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg === '--mode') {
+				i++; // skip this flag and its value
+				continue;
 			} else if (arg.startsWith('--mode=')) {
 				continue;
 			} else if (arg.startsWith('--output-format=')) {
@@ -406,13 +408,18 @@ async function main(): Promise<void> {
 		}
 		if (reviewArgs.length === 0) {
 			console.error(
-				'Usage: nanocoder review <branch-or-pr-number>\n\nExamples:\n  nanocoder review main\n  nanocoder review feature/auth\n  nanocoder review 42',
+				'Usage: nanocoder review <branch-or-pr-number>\n\nExamples:\n  nanocoder review feature/auth\n  nanocoder review 42',
 			);
 			process.exit(1);
 		}
-		// Inject as a slash command prompt
+		// Inject as a slash command prompt.
 		nonInteractivePrompt = `/review ${reviewArgs.join(' ')}`;
 		nonInteractiveMode = true;
+	}
+
+	if (isRunCommand && isReviewCommand) {
+		console.error('Cannot use both "run" and "review" commands.');
+		process.exit(1);
 	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
@@ -470,7 +477,7 @@ async function main(): Promise<void> {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
 	}
-	if (plainRequested && !nonInteractiveMode) {
+	if (plainRequested && !isRunCommand) {
 		console.error(
 			'--plain requires the `run` subcommand in this version. Try: nanocoder --plain run "..."',
 		);
@@ -497,7 +504,7 @@ async function main(): Promise<void> {
 				process.env.JENKINS_URL,
 		);
 	const plainAuto =
-		nonInteractiveMode &&
+		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
 		(!process.stdout.isTTY || ciDetected);

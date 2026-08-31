@@ -5,36 +5,55 @@ import test from 'ava';
 
 // Helper function to parse prompt from args (mimics the logic in cli.tsx)
 function parsePrompt(args: string[]): string | undefined {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		const afterRunArgs = args.slice(runCommandIndex + 1);
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		return promptArgs.join(' ');
+	const isRunCommand = args[0] === 'run';
+	if (!isRunCommand) {
+		return undefined;
 	}
-	return undefined;
+	const afterRunArgs = args.slice(1);
+	if (afterRunArgs.length === 0) {
+		return undefined;
+	}
+	// Filter out known flags after 'run' when constructing the prompt
+	const promptArgs: string[] = [];
+	for (let i = 0; i < afterRunArgs.length; i++) {
+		const arg = afterRunArgs[i];
+		if (arg === '--vscode') {
+			continue; // skip this flag
+		} else if (arg === '--vscode-port') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--provider') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--model') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--context-max') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--mode') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg.startsWith('--mode=')) {
+			continue; // skip fused form
+		} else if (arg === '--json') {
+			continue; // skip this flag
+		} else if (arg === '--output-format') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg.startsWith('--output-format=')) {
+			continue; // skip fused form
+		} else if (arg === '--trust-directory') {
+			continue; // skip this flag
+		} else if (arg === '--plain' || arg === '--no-plain') {
+			continue; // skip this flag
+		} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
+			continue; // skip this flag
+		} else {
+			promptArgs.push(arg);
+		}
+	}
+	return promptArgs.length > 0 ? promptArgs.join(' ') : undefined;
 }
 
 test('CLI parsing: detects run command with single word prompt', t => {
@@ -73,7 +92,7 @@ test('CLI parsing: returns undefined when run command has no prompt', t => {
 });
 
 test('CLI parsing: handles mixed arguments with run command', t => {
-	const args = ['--vscode', 'run', 'create', 'a', 'new', 'file'];
+	const args = ['run', 'create', 'a', 'new', 'file'];
 	const prompt = parsePrompt(args);
 
 	t.is(prompt, 'create a new file');
@@ -236,7 +255,7 @@ function resolvePlainMode(opts: {
 	env: NodeJS.ProcessEnv;
 }): {plainMode: boolean; vscodeMode: boolean} {
 	const {args, stdoutIsTTY, env} = opts;
-	const nonInteractiveMode = args.includes('run');
+	const nonInteractiveMode = args[0] === 'run';
 	const vscodeMode = args.includes('--vscode');
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
@@ -262,9 +281,9 @@ test('plain mode: filters --plain and --no-plain from prompt args', t => {
 	t.is(parsePrompt(['run', 'do', '--no-plain', 'a', 'thing']), 'do a thing');
 });
 
-test('plain mode: explicit --plain enables it on a TTY without CI', t => {
+test('plain mode: explicit --plain enables it on a TTY without CI when run is args[0]', t => {
 	const {plainMode} = resolvePlainMode({
-		args: ['--plain', 'run', 'hi'],
+		args: ['run', 'hi', '--plain'],
 		stdoutIsTTY: true,
 		env: {},
 	});
@@ -300,7 +319,7 @@ test('plain mode: auto-enables for run when GITHUB_ACTIONS is set', t => {
 
 test('plain mode: --no-plain wins over auto-detection', t => {
 	const {plainMode} = resolvePlainMode({
-		args: ['--no-plain', 'run', 'hi'],
+		args: ['run', 'hi', '--no-plain'],
 		stdoutIsTTY: false,
 		env: {CI: 'true'},
 	});
@@ -318,7 +337,7 @@ test('plain mode: stays off for interactive sessions even on a non-TTY', t => {
 
 test('plain mode: --vscode suppresses auto-detection', t => {
 	const {plainMode, vscodeMode} = resolvePlainMode({
-		args: ['--vscode', 'run', 'hi'],
+		args: ['run', 'hi', '--vscode'],
 		stdoutIsTTY: false,
 		env: {CI: 'true'},
 	});
@@ -435,8 +454,7 @@ function resolveResumeFlags(args: string[]): {
 	mutuallyExclusiveError: boolean;
 	nonInteractiveError: boolean;
 } {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const nonInteractiveMode = runCommandIndex !== -1;
+	const nonInteractiveMode = args[0] === 'run';
 
 	const continueRequested =
 		args.includes('--continue') || args.includes('-c');
@@ -542,17 +560,189 @@ test('resume flags: neither flag alone is not a mutual-exclusion error', t => {
 	t.false(resolveResumeFlags([]).mutuallyExclusiveError);
 });
 
-test('resume flags: --continue combined with `run` is an error', t => {
+test('resume flags: --continue combined with `run` (not at args[0]) is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue', 'run', 'hi']);
-	t.true(nonInteractiveError);
+	t.false(nonInteractiveError);
 });
 
-test('resume flags: --resume combined with `run` is an error', t => {
+test('resume flags: --resume combined with `run` (not at args[0]) is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--resume', 'run', 'hi']);
-	t.true(nonInteractiveError);
+	t.false(nonInteractiveError);
 });
 
 test('resume flags: --continue without `run` is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue']);
 	t.false(nonInteractiveError);
+});
+
+// Review command parsing tests. Mirrors the review arg parsing in cli.tsx:
+// `nanocoder review <target>` injects `/review <target>` as the prompt.
+
+type ReviewParseResult = {
+	prompt: string | undefined;
+	error: boolean;
+};
+
+function parseReviewArgs(args: string[]): ReviewParseResult {
+	const isReviewCommand = args[0] === 'review';
+	if (!isReviewCommand) {
+		return {prompt: undefined, error: false};
+	}
+	const afterReviewArgs = args.slice(1);
+	const reviewArgs: string[] = [];
+	for (let i = 0; i < afterReviewArgs.length; i++) {
+		const arg = afterReviewArgs[i];
+		if (
+			arg === '--vscode' ||
+			arg === '--json' ||
+			arg === '--trust-directory' ||
+			arg === '--plain' ||
+			arg === '--no-plain' ||
+			arg === '--no-alt-screen' ||
+			arg === '--alt-screen'
+		) {
+			continue;
+		} else if (
+			arg === '--vscode-port' ||
+			arg === '--provider' ||
+			arg === '--model' ||
+			arg === '--context-max' ||
+			arg === '--output-format'
+		) {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--mode') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg.startsWith('--mode=')) {
+			continue;
+		} else if (arg.startsWith('--output-format=')) {
+			continue;
+		} else {
+			reviewArgs.push(arg);
+		}
+	}
+	if (reviewArgs.length === 0) {
+		return {prompt: undefined, error: true};
+	}
+	return {prompt: `/review ${reviewArgs.join(' ')}`, error: false};
+}
+
+test('review CLI: parses review with branch name', t => {
+	const result = parseReviewArgs(['review', 'feature/auth']);
+	t.is(result.prompt, '/review feature/auth');
+	t.false(result.error);
+});
+
+test('review CLI: parses review with PR number', t => {
+	const result = parseReviewArgs(['review', '42']);
+	t.is(result.prompt, '/review 42');
+	t.false(result.error);
+});
+
+test('review CLI: errors when no target provided', t => {
+	const result = parseReviewArgs(['review']);
+	t.is(result.prompt, undefined);
+	t.true(result.error);
+});
+
+test('review CLI: returns undefined when not a review command', t => {
+	const result = parseReviewArgs(['run', 'hello']);
+	t.is(result.prompt, undefined);
+	t.false(result.error);
+});
+
+test('review CLI: anchors on args[0], not findIndex', t => {
+	const result = parseReviewArgs(['--vscode', 'review', 'main']);
+	t.is(result.prompt, undefined);
+	t.false(result.error);
+});
+
+test('review CLI: filters --vscode flag', t => {
+	const result = parseReviewArgs(['review', 'main', '--vscode']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --provider flag and value', t => {
+	const result = parseReviewArgs([
+		'review',
+		'main',
+		'--provider',
+		'openrouter',
+	]);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --model flag and value', t => {
+	const result = parseReviewArgs(['review', 'main', '--model', 'gpt-4']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --mode flag and value (two-token)', t => {
+	const result = parseReviewArgs(['review', 'main', '--mode', 'plan']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --mode fused form', t => {
+	const result = parseReviewArgs(['review', 'main', '--mode=plan']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --json flag', t => {
+	const result = parseReviewArgs(['review', 'main', '--json']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --output-format flag and value', t => {
+	const result = parseReviewArgs([
+		'review',
+		'main',
+		'--output-format',
+		'json',
+	]);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --context-max flag and value', t => {
+	const result = parseReviewArgs([
+		'review',
+		'main',
+		'--context-max',
+		'128k',
+	]);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: filters --plain and --no-plain flags', t => {
+	const result1 = parseReviewArgs(['review', 'main', '--plain']);
+	t.is(result1.prompt, '/review main');
+
+	const result2 = parseReviewArgs(['review', 'main', '--no-plain']);
+	t.is(result2.prompt, '/review main');
+});
+
+test('review CLI: filters --no-alt-screen and --alt-screen flags', t => {
+	const result1 = parseReviewArgs(['review', 'main', '--no-alt-screen']);
+	t.is(result1.prompt, '/review main');
+
+	const result2 = parseReviewArgs(['review', 'main', '--alt-screen']);
+	t.is(result2.prompt, '/review main');
+});
+
+test('review CLI: filters --trust-directory flag', t => {
+	const result = parseReviewArgs(['review', 'main', '--trust-directory']);
+	t.is(result.prompt, '/review main');
+});
+
+test('review CLI: handles multiple mixed flags', t => {
+	const result = parseReviewArgs([
+		'review',
+		'feature',
+		'--provider',
+		'ollama',
+		'--mode',
+		'plan',
+		'--json',
+	]);
+	t.is(result.prompt, '/review feature');
 });
