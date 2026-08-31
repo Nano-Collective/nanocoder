@@ -25,6 +25,9 @@ coverage
 
 # Dependency directories
 node_modules/
+# Also match a bare `node_modules` entry: the trailing-slash form above only
+# matches directories, so a stray symlink of that name would slip through.
+node_modules
 jspm_packages/
 bower_components/
 web_modules/

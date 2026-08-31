@@ -98,21 +98,61 @@ export function matchesFilter(sub: Subscription, event: Event): boolean {
 	return false;
 }
 
+/**
+ * Rewrite Windows separators to `/` so patterns and paths meet on one shape.
+ *
+ * Subscription globs are always authored with `/`, but chokidar reports
+ * changes using the platform separator — on Windows `docs/**` would be asked
+ * to match `docs\guide.md` and never could. The matcher below also leans on
+ * `/` to stop `*` at a directory boundary, so an un-normalized path makes
+ * `*.md` match the nested `sub\a.md` as well.
+ */
+export function toPosixPath(path: string): string {
+	return path.split('\\').join('/');
+}
+
 // Minimal glob -> regex matcher: enough for `docs/<star><star>`,
-// `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, and `?`
-// single-character wildcards. Step 9 brings chokidar (and its picomatch dep)
-// into the tree, at which point we can swap this for picomatch and delete
-// the helper. Until then this is sufficient to make the router unit-testable.
+// `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, `?`
+// single-character wildcards, and `{a,b}` alternation. Negation (`!`) is not
+// supported. chokidar 5 depends only on readdirp, so picomatch is no longer in
+// the tree and swapping to it would mean taking a new direct dependency.
 export function matchGlob(pattern: string, path: string): boolean {
-	const regex = globToRegex(pattern);
-	return regex.test(path);
+	const regex = globToRegex(toPosixPath(pattern));
+	return regex.test(toPosixPath(path));
+}
+
+/**
+ * Whether every `{` in the pattern has a matching `}`. An unbalanced brace is
+ * treated as a literal, which is what the matcher did before alternation
+ * existed, rather than building a regex that would throw.
+ */
+function hasBalancedBraces(pattern: string): boolean {
+	let depth = 0;
+	for (const ch of pattern) {
+		if (ch === '{') depth++;
+		else if (ch === '}') {
+			depth--;
+			if (depth < 0) return false;
+		}
+	}
+	return depth === 0;
 }
 
 function globToRegex(pattern: string): RegExp {
+	const alternation = hasBalancedBraces(pattern);
+	let depth = 0;
 	let out = '';
 	for (let i = 0; i < pattern.length; i++) {
 		const ch = pattern[i];
-		if (ch === '*') {
+		if (alternation && ch === '{') {
+			out += '(?:';
+			depth++;
+		} else if (alternation && ch === '}' && depth > 0) {
+			out += ')';
+			depth--;
+		} else if (alternation && ch === ',' && depth > 0) {
+			out += '|';
+		} else if (ch === '*') {
 			const next = pattern[i + 1];
 			if (next === '*') {
 				// `**` matches any characters including `/`
@@ -147,7 +187,8 @@ function globToRegex(pattern: string): RegExp {
 	}
 	// `out` is built by the escape loop above: every character is either a
 	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `[^/]`. There is no user-supplied raw regex syntax in `out`.
+	// `[^/]*`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
+	// `out`, and the braces were checked for balance before any group opened.
 	// The shape is bounded by the glob length, so ReDoS is not reachable.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	return new RegExp(`^${out}$`);

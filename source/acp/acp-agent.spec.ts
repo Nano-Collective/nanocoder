@@ -2,6 +2,7 @@ import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig} from '@/config';
@@ -9,6 +10,7 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 
 console.log('\nacp-agent.spec.ts');
@@ -42,6 +44,7 @@ const createMockInitContext = (): AcpInitContext => ({
 		}),
 		getAvailableModels: async () => ['test-model', 'other-model'],
 		getCurrentModel: () => mockCurrentModel,
+		getProviderConfig: () => ({name: 'test-provider'}),
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
@@ -245,6 +248,111 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
 });
 
+test('AcpAgent.loadSession - hides internal walkthrough fallback messages', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const initContext = createMockInitContext();
+	initContext.toolManager = {
+		getAvailableToolNames: () => ['write_walkthrough'],
+		getFilteredTools: () => ({}),
+		hasTool: () => false,
+		getToolEntry: () => undefined,
+	} as any;
+	const agent = new AcpAgent(initContext, conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{
+				type: 'text',
+				text: '<approved_plan>Implement artifacts.</approved_plan>',
+			},
+		],
+	});
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	const replayedUserText = updates
+		.filter(update => update.update?.sessionUpdate === 'user_message_chunk')
+		.map(update => update.update.content.text);
+
+	t.true(replayedUserText.some(text => text.includes('<approved_plan>')));
+	t.false(
+		replayedUserText.some(text => text.includes('nanocoder-internal-walkthrough')),
+	);
+});
+
+test('AcpAgent.loadSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'implementation_plan',
+			'# Plan\n',
+		);
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'walkthrough',
+			'# Walkthrough\n',
+		);
+
+		const result = await agent.loadSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+
+		const artifacts = result._meta?.['nanocoder/artifacts'];
+		t.true(Array.isArray(artifacts));
+		t.deepEqual(
+			(artifacts as Array<{kind: string}>).map(artifact => artifact.kind),
+			['implementation_plan', 'walkthrough'],
+		);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent.resumeSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'task',
+			'# Tasks\n',
+		);
+		const result = await agent.resumeSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+		});
+		const artifacts = result._meta?.['nanocoder/artifacts'] as Array<{
+			kind: string;
+		}>;
+		t.deepEqual(artifacts.map(artifact => artifact.kind), ['task']);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
 test('AcpAgent.loadSession - replays reasoning but skips whitespace-only reasoning', async t => {
 	const conn = createMockConn();
 	const updates: any[] = [];
@@ -367,6 +475,10 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	
 	// Ensure turnActive is reset even on error
 	t.false(session.turnActive);
+
+	const notice = session.messages[session.messages.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
@@ -399,6 +511,11 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 				u.update?.content?.text?.includes('Cancelled by user'),
 		),
 	);
+
+	const persisted = agent['sessions'].get(session.sessionId)!.messages;
+	const notice = persisted[persisted.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {
@@ -467,6 +584,20 @@ test('AcpAgent.prompt - /copy points at the chat view instead of erroring', asyn
 test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/copy code');
 	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - a built-in command exchange stays out of model context', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: '/help'}],
+	});
+
+	const messages = agent['sessions'].get(session.sessionId)!.messages;
+	t.is(messages.length, 2);
+	t.true(messages.every(m => m.displayOnly));
+	t.deepEqual(convertToModelMessages(messages), []);
 });
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
@@ -737,6 +868,14 @@ test('AcpAgent.extMethod - timeline/revert truncates messages and restores files
 		t.is(session.messages[0].role, 'user');
 		t.true(
 			String(session.messages[1].content).includes('Reverted to before step 1'),
+		);
+		t.true(
+			session.messages[1].displayOnly,
+			'the revert notice must never reach the model',
+		);
+		t.deepEqual(
+			convertToModelMessages(session.messages).map((m: {role: string}) => m.role),
+			['user'],
 		);
 	} finally {
 		rmSync(cwd, {recursive: true, force: true});

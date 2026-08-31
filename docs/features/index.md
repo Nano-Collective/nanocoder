@@ -162,7 +162,7 @@ For multi-step tasks, the [task management](task-management.md) system keeps you
 /tasks add Update API documentation
 ```
 
-The AI also has access to task tools and will proactively create and update tasks when working on involved problems.
+The AI also has a task tool and will proactively create and update tasks when working on involved problems. Task state lives with the session rather than in your project directory, and is restored when you resume.
 
 ## Customizing Nanocoder
 
