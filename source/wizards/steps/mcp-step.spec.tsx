@@ -964,3 +964,50 @@ test.serial(
 		unmount();
 	},
 );
+
+// ============================================================================
+// Deep-linking straight into one server's edit/delete choice
+// ============================================================================
+
+const deepLinkServers = {
+	filesystem: {transport: 'stdio' as const, command: 'mcp-fs'},
+	github: {transport: 'stdio' as const, command: 'mcp-gh'},
+};
+
+test('McpStep with initialEditName opens that server edit/delete choice', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={deepLinkServers}
+			initialEditName="github"
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Edit this server/);
+	t.notRegex(
+		output,
+		/Add MCP servers/,
+		'should skip the initial menu entirely',
+	);
+});
+
+test('McpStep falls back to the menu when initialEditName is unknown', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={deepLinkServers}
+			initialEditName="not-a-configured-server"
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Add MCP servers/);
+});
+
+test('McpStep without initialEditName still opens the initial menu', t => {
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={deepLinkServers} />,
+	);
+
+	t.regex(lastFrame()!, /Add MCP servers/);
+});

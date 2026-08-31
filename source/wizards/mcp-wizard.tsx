@@ -9,6 +9,8 @@ interface McpWizardProps {
 	projectDir: string;
 	onComplete: (configPath: string) => void;
 	onCancel?: () => void;
+	/** Open straight into the edit/delete choice for this server. */
+	initialEditName?: string;
 }
 
 type McpServers = Record<string, McpServerConfig>;
@@ -42,7 +44,12 @@ function McpSummaryItems({items}: {items: McpServers}) {
 	);
 }
 
-export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
+export function McpWizard({
+	projectDir,
+	onComplete,
+	onCancel,
+	initialEditName,
+}: McpWizardProps) {
 	return (
 		<BaseConfigWizard<McpServers>
 			title="MCP Server Configuration"
@@ -65,6 +72,7 @@ export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
 					onBack={onBack}
 					onDelete={onDelete}
 					configExists={configExists}
+					initialEditName={initialEditName}
 				/>
 			)}
 			renderSummaryItems={items => <McpSummaryItems items={items} />}

@@ -1,16 +1,27 @@
 import {mkdtempSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 // CRITICAL: force chalk/ink to emit real ANSI escapes (inverse-video cursor,
-// border colors) even though the AVA worker has no TTY. Setting FORCE_COLOR
-// from here cannot work: chalk pins its level at import time and AVA's worker
-// bootstrap has already imported it, so the env var is read long before this
-// file runs. Re-level the shared chalk singleton instead — settings-tabs.tsx
-// imports that same instance — before ink or the component are loaded.
+// background colors, border colors) even though the AVA worker has no TTY.
+// Setting FORCE_COLOR from here cannot work: chalk pins its level at import
+// time and AVA's worker bootstrap has already imported it, so the env var is
+// read long before this file runs. Re-level the chalk singletons instead,
+// before ink or the component are loaded.
+//
+// There are TWO of them: the repo depends on chalk 6 (what settings-tabs.tsx
+// imports for its inverse-video cursor) while ink depends on chalk 5 (what
+// paints backgrounds and borders), so pnpm installs two copies with
+// independent levels. Levelling only one leaves half the assertions below
+// running against uncolored output. Resolve ink's copy through ink's own
+// resolution paths so this keeps working whichever versions the two land on.
 const {default: chalk} = await import('chalk');
 chalk.level = 1;
+const inkChalkPath = createRequire(import.meta.resolve('ink')).resolve('chalk');
+const {default: inkChalk} = await import(inkChalkPath);
+inkChalk.level = 1;
 
 const {render} = await import('ink-testing-library');
 // CRITICAL: redirect preference reads to a temp dir BEFORE settings-tabs (and
@@ -259,6 +270,7 @@ test('each tab lists its expected setting rows', async t => {
 	stdin.write(RIGHT);
 	await tick();
 	await expectRow('Tool Results and Thinking');
+	await expectRow('Professional Tone');
 
 	// Advanced.
 	stdin.write(RIGHT);

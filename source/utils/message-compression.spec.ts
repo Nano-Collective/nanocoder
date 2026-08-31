@@ -424,6 +424,25 @@ test('compressMessages extracts error information from tool results', t => {
 	t.true(toolMsg?.content?.includes('Error') ?? false);
 });
 
+test('compressMessages ignores resolution text that appears before an error', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'execute_bash',
+			'Earlier command completed successfully\nError: ENOENT\nNo such file or directory',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.true(toolMsg?.content?.includes('Resolved: no') ?? false);
+});
+
 test('compressMessages detects success in tool results', t => {
 	const tokenizer = createMockTokenizer();
 	const messages: Message[] = [

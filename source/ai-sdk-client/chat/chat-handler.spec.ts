@@ -361,3 +361,279 @@ test('privacy: scrubs outgoing prompts and rehydrates the response at the histor
 	t.is(content, 'Saved real@example.com');
 	t.false(content.includes('«'));
 });
+
+function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
+	return {
+		specificationVersion: 'v3',
+		provider: 'test-provider',
+		modelId: 'test-model',
+		doStream: async () => ({
+			stream: new ReadableStream({
+				start(controller) {
+					for (const part of parts) {
+						controller.enqueue(part);
+					}
+					controller.enqueue({
+						type: 'finish',
+						finishReason: 'stop',
+						usage: {inputTokens: 1, outputTokens: 1, totalTokens: 2},
+					});
+					controller.close();
+				},
+			}),
+		}),
+	} as unknown as LanguageModel;
+}
+
+async function streamRouting(parts: Record<string, unknown>[]): Promise<{
+	text: string[];
+	reasoning: string[];
+	content: string;
+	finalReasoning: string | undefined;
+}> {
+	const text: string[] = [];
+	const reasoning: string[] = [];
+	const result = await handleChat({
+		model: streamingModel(parts),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [{role: 'user', content: 'test'}],
+		tools: {},
+		callbacks: {
+			onToken: token => text.push(token),
+			onReasoningToken: token => reasoning.push(token),
+		},
+		maxRetries: 0,
+	});
+	return {
+		text,
+		reasoning,
+		content: result.choices[0]?.message.content ?? '',
+		finalReasoning: result.choices[0]?.message.reasoning,
+	};
+}
+
+test('streams reasoning and text to their own callbacks', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Checking the file'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Hello'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Checking the file']);
+	t.deepEqual(routed.text, ['Hello']);
+	t.is(routed.content, 'Hello');
+	t.is(routed.finalReasoning, 'Checking the file');
+});
+
+test('buffered reasoning reaches onReasoningToken when text starts without reasoning-end', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Thinking about it'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Hello'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Thinking about it']);
+	t.deepEqual(routed.text, ['Hello']);
+	t.is(routed.content, 'Hello');
+});
+
+test('buffered text reaches onToken when reasoning restarts without text-end', async t => {
+	const routed = await streamRouting([
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Let me check'},
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'internal thought'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'text-delta', id: '0', delta: ' done'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.text, ['Let me check', ' done']);
+	t.deepEqual(routed.reasoning, ['internal thought']);
+	t.is(routed.content, 'Let me check done');
+});
+
+test('consecutive reasoning parts stay on the reasoning callback', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0:0'},
+		{type: 'reasoning-delta', id: 'r0:0', delta: 'Part one'},
+		{type: 'reasoning-start', id: 'r0:1'},
+		{type: 'reasoning-delta', id: 'r0:1', delta: 'Part two'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Part one', 'Part two']);
+	t.deepEqual(routed.text, ['Answer']);
+});
+
+test('reasoning deltas route on the reasoning callback without a reasoning-start', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-delta', id: 'r0', delta: 'Unannounced thought'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Unannounced thought']);
+	t.deepEqual(routed.text, ['Answer']);
+	t.is(routed.content, 'Answer');
+});
+
+test('reasoning deltas after reasoning-end stay on the reasoning callback', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'First half'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Second half'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['First half', 'Second half']);
+	t.deepEqual(routed.text, ['Answer']);
+	t.is(routed.content, 'Answer');
+});
+
+test('alternating deltas with no start markers keep their own callbacks', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-delta', id: 'r0', delta: 'Thinking'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'More thinking'},
+		{type: 'text-delta', id: '0', delta: ' continues'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Thinking', 'More thinking']);
+	t.deepEqual(routed.text, ['Answer', ' continues']);
+});
+
+function capturingModel(captured: {prompt?: unknown}): LanguageModel {
+	return {
+		specificationVersion: 'v3',
+		provider: 'anthropic',
+		modelId: 'claude-sonnet-4-5',
+		doStream: async (options: {prompt: unknown}) => {
+			captured.prompt = options.prompt;
+			return {
+				stream: new ReadableStream({
+					start(controller) {
+						controller.enqueue({type: 'text-start', id: '0'});
+						controller.enqueue({type: 'text-delta', id: '0', delta: 'ok'});
+						controller.enqueue({type: 'text-end', id: '0'});
+						controller.enqueue({
+							type: 'finish',
+							finishReason: 'stop',
+							usage: {inputTokens: 5000, outputTokens: 10, totalTokens: 5010},
+						});
+						controller.close();
+					},
+				}),
+			};
+		},
+	} as unknown as LanguageModel;
+}
+
+const anthropicConfig: AIProviderConfig = {
+	name: 'Anthropic',
+	type: 'anthropic',
+	sdkProvider: 'anthropic',
+	models: ['claude-sonnet-4-5'],
+	config: {apiKey: 'test-key'},
+};
+
+const LONG_SYSTEM = 'SYSTEM '.repeat(1000);
+
+test('handleChat sends the system prompt as a cache-marked message on anthropic', async t => {
+	const captured: {prompt?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'claude-sonnet-4-5',
+		providerConfig: anthropicConfig,
+		messages: [
+			{role: 'system', content: LONG_SYSTEM},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+	});
+
+	const prompt = captured.prompt as Array<{
+		role: string;
+		providerOptions?: Record<string, unknown>;
+	}>;
+	t.is(prompt[0]?.role, 'system');
+	t.deepEqual(prompt[0]?.providerOptions, {
+		anthropic: {cacheControl: {type: 'ephemeral'}},
+	});
+	t.deepEqual(prompt[prompt.length - 1]?.providerOptions, {
+		anthropic: {cacheControl: {type: 'ephemeral'}},
+	});
+});
+
+test('handleChat does not emit the AI SDK system-in-messages warning', async t => {
+	const warnings: string[] = [];
+	const originalWarn = console.warn;
+	console.warn = (...args: unknown[]) => {
+		warnings.push(args.join(' '));
+	};
+	try {
+		await handleChat({
+			model: capturingModel({}),
+			currentModel: 'claude-sonnet-4-5',
+			providerConfig: anthropicConfig,
+			messages: [
+				{role: 'system', content: LONG_SYSTEM},
+				{role: 'user', content: 'hello'},
+			],
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	} finally {
+		console.warn = originalWarn;
+	}
+	t.false(warnings.some(w => w.includes('System messages in the prompt')));
+});
+
+test('handleChat keeps the system string for non-anthropic providers', async t => {
+	const captured: {prompt?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [
+			{role: 'system', content: LONG_SYSTEM},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+	});
+
+	const prompt = captured.prompt as Array<{
+		role: string;
+		providerOptions?: Record<string, unknown>;
+	}>;
+	t.is(prompt[0]?.role, 'system');
+	t.is(prompt[0]?.providerOptions, undefined);
+	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
+});

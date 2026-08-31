@@ -1,4 +1,4 @@
 ---
 ---
 
-CI only: fail PRs that drop line coverage vs the base branch.
+CI: pass fail-on-coverage-drop to the shared PR checks workflow.

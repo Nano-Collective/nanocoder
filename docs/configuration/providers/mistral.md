@@ -26,4 +26,4 @@ sidebar_order: 12
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your Mistral account.
+The `/settings providers` wizard can automatically fetch available models from your Mistral account.

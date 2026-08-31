@@ -37,9 +37,10 @@ interface Overrides {
 	developmentMode?: string;
 	planTurnCompleted?: boolean;
 	setPlanTurnCompleted?: (v: boolean) => void;
-	pendingPlanProceed?: boolean;
-	setPendingPlanProceed?: (v: boolean) => void;
+	pendingPlanProceed?: string | null;
+	setPendingPlanProceed?: (v: string | null) => void;
 	handleMessageSubmit?: (message: string) => Promise<void>;
+	currentSessionId?: string | null;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -51,6 +52,7 @@ function makeProps(o: Overrides = {}) {
 		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
+		currentSessionId: o.currentSessionId ?? null,
 		startChat: o.startChat ?? false,
 		mcpInitialized: true,
 		activeMode: o.activeMode ?? null,
@@ -71,7 +73,7 @@ function makeProps(o: Overrides = {}) {
 		setPlanReviewState: o.setPlanReviewState ?? noop,
 		planTurnCompleted: o.planTurnCompleted ?? false,
 		setPlanTurnCompleted: o.setPlanTurnCompleted ?? noop,
-		pendingPlanProceed: o.pendingPlanProceed ?? false,
+		pendingPlanProceed: o.pendingPlanProceed ?? null,
 		setPendingPlanProceed: o.setPendingPlanProceed ?? noop,
 		isConversationComplete: o.isConversationComplete ?? false,
 		developmentMode: o.developmentMode ?? 'normal',
@@ -81,6 +83,9 @@ function makeProps(o: Overrides = {}) {
 		compactToolCounts: null,
 		compactToolDisplay: false,
 		liveTaskList: null,
+		showTaskList: true,
+		taskListHasUnread: false,
+		toggleTaskList: noop,
 		tune: {enabled: false, toolProfile: 'minimal', aggressiveCompact: false},
 		reasoningExpanded: false,
 		chatComponents: o.chatComponents ?? [],
@@ -109,8 +114,6 @@ function makeProps(o: Overrides = {}) {
 			handleModelDatabaseCancel: noop,
 			handleConfigWizardComplete: noop,
 			handleConfigWizardCancel: noop,
-			handleMcpWizardComplete: noop,
-			handleMcpWizardCancel: noop,
 			handleSettingsCancel: noop,
 			handleTuneSelect: noop,
 			handleTuneCancel: noop,
@@ -124,7 +127,6 @@ function makeProps(o: Overrides = {}) {
 			handleToggleDevelopmentMode: noop,
 			handleMessageSubmit: o.handleMessageSubmit ?? noopAsync,
 			handlePlanProceed: noop,
-			handlePlanAskMore: noopAsync,
 			handlePlanModify: noop,
 		},
 		vscodeServer: {
@@ -524,6 +526,33 @@ test('plan review bar is shown when planReviewState.show is true', t => {
 	t.regex(lastFrame()!, /Plan ready/);
 });
 
+test('plan review bar receives the current session artifact path', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				currentSessionId: '11111111-1111-4111-8111-111111111111',
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+			})}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /implementation_plan\.md/);
+});
+
+test('plan review bar tolerates an invalid external session ID', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				currentSessionId: '../outside',
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+			})}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Plan ready/);
+	t.notRegex(lastFrame()!, /implementation_plan\.md/);
+});
+
 test('plan review bar shows when the planTurnCompleted signal fires', async t => {
 	let shown: {show: boolean; originalMessage: string} | null = null;
 	let resetToFalse = false;
@@ -577,10 +606,11 @@ test('Proceed dispatches the implement message once mode is normal', async t => 
 	renderWithTheme(
 		<InteractiveApp
 			{...makeProps({
-				pendingPlanProceed: true,
+				pendingPlanProceed:
+					'The persisted plan is approved. Proceed with implementing it.',
 				developmentMode: 'normal',
 				setPendingPlanProceed: v => {
-					if (v === false) pendingReset = true;
+					if (v === null) pendingReset = true;
 				},
 				handleMessageSubmit: async m => {
 					submitted.push(m);
@@ -599,7 +629,8 @@ test('Proceed does NOT dispatch while still in plan mode', async t => {
 	renderWithTheme(
 		<InteractiveApp
 			{...makeProps({
-				pendingPlanProceed: true,
+				pendingPlanProceed:
+					'The persisted plan is approved. Proceed with implementing it.',
 				developmentMode: 'plan',
 				handleMessageSubmit: async m => {
 					submitted.push(m);
