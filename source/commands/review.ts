@@ -12,6 +12,7 @@ import {
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {getLogger} from '@/utils/logging';
 import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,19 +20,24 @@ const __dirname = dirname(__filename);
 
 function loadReviewPrompt(): string {
 	try {
-		const promptPath = join(__dirname, '../app/prompts/sections/review.md');
+		const promptPath = join(
+			__dirname,
+			'../../source/app/prompts/sections/review.md',
+		);
 		return readFileSync(promptPath, 'utf-8').trim();
 	} catch {
+		const logger = getLogger();
+		logger.warn('Failed to load review prompt, using fallback');
 		return 'You are a senior software engineer performing a code review. Review the diff for bugs, security issues, and style violations. Be concise and actionable.';
 	}
 }
 
-type ReviewDependencies = {
+export type ReviewDependencies = {
 	execGit: (args: string[]) => Promise<string>;
 	getCurrentBranch: () => Promise<string>;
 	getDefaultBranch: () => Promise<string>;
-	isGhAvailable: () => boolean;
-	execGh: (args: string[]) => Promise<string>;
+	isGhAvailable?: () => boolean;
+	execGh?: (args: string[]) => Promise<string>;
 };
 
 const defaultDependencies: ReviewDependencies = {
@@ -41,6 +47,13 @@ const defaultDependencies: ReviewDependencies = {
 	isGhAvailable,
 	execGh,
 };
+
+function validateTarget(target: string): string | null {
+	if (target.startsWith('-')) {
+		return 'Target must not start with "-". Pass a branch name or PR number.';
+	}
+	return null;
+}
 
 export function createReviewCommand(
 	dependencies: ReviewDependencies = defaultDependencies,
@@ -53,12 +66,17 @@ export function createReviewCommand(
 		handler: async (args, _messages, metadata) => {
 			if (args.length === 0) {
 				return warningMsg(
-					'Usage: /review <branch-or-pr-number>\n\nExamples:\n  /review main\n  /review feature/auth\n  /review 42',
+					'Usage: /review <branch-or-pr-number>\n\nExamples:\n  /review feature/auth\n  /review 42',
 					'review',
 				);
 			}
 
 			const target = args[0] as string;
+
+			const validationError = validateTarget(target);
+			if (validationError) {
+				return errorMsg(validationError, 'review');
+			}
 
 			const client = metadata.client;
 			if (!client) {
@@ -66,17 +84,16 @@ export function createReviewCommand(
 			}
 
 			try {
-				const currentBranch = await dependencies.getCurrentBranch();
 				const defaultBranch = await dependencies.getDefaultBranch();
 
 				let diff: string;
 				let targetDescription: string;
 
-				// If target looks like a PR number and we have gh, use gh pr diff
 				const isPRNumber = /^\d+$/.test(target);
 				if (isPRNumber) {
-					try {
-						if (dependencies.isGhAvailable()) {
+					const ghAvailable = dependencies.isGhAvailable?.() ?? false;
+					if (ghAvailable && dependencies.execGh) {
+						try {
 							const remote = await dependencies.execGit([
 								'remote',
 								'get-url',
@@ -96,18 +113,21 @@ export function createReviewCommand(
 								match[1],
 							]);
 							targetDescription = `PR #${target}`;
-						} else {
-							// Treat as branch name fallback
-							diff = await getBranchDiff(dependencies, target, defaultBranch);
-							targetDescription = `branch "${target}" (treated as branch — gh CLI not available for PR lookup)`;
+						} catch (error) {
+							const message =
+								error instanceof Error ? error.message : String(error);
+							return errorMsg(
+								`Failed to fetch PR #${target} diff: ${message}`,
+								'review',
+							);
 						}
-					} catch {
-						// If gh fails, treat as branch name
-						diff = await getBranchDiff(dependencies, target, defaultBranch);
-						targetDescription = `branch "${target}" (PR lookup failed)`;
+					} else {
+						return errorMsg(
+							'PR review requires the gh CLI. Install it from https://cli.github.com or use a branch name instead.',
+							'review',
+						);
 					}
 				} else {
-					// Branch name
 					diff = await getBranchDiff(dependencies, target, defaultBranch);
 					targetDescription = `branch "${target}"`;
 				}
@@ -116,19 +136,26 @@ export function createReviewCommand(
 
 				if (!truncated.content.trim()) {
 					return warningMsg(
-						`No changes found between "${currentBranch}" and "${targetDescription}".`,
+						`No changes found between "${defaultBranch}" and "${targetDescription}".`,
 						'review',
 					);
 				}
 
 				const reviewPrompt = loadReviewPrompt();
 
+				const parts: string[] = [
+					`Reviewing changes from ${targetDescription} (compared to "${defaultBranch}"):\n`,
+				];
+				if (truncated.truncated) {
+					parts.push(
+						`[Note: diff truncated — reviewed first and last ${Math.ceil(truncated.totalLines / 2)} of ${truncated.totalLines} lines]\n`,
+					);
+				}
+				parts.push(truncated.content);
+
 				const messages: Message[] = [
 					{role: 'system', content: reviewPrompt},
-					{
-						role: 'user',
-						content: `Reviewing changes from ${targetDescription} into "${currentBranch}":\n\n${truncated.content}`,
-					},
+					{role: 'user', content: parts.join('\n')},
 				];
 
 				const response = await client.chat(messages, {}, {});
@@ -151,10 +178,8 @@ async function getBranchDiff(
 	branch: string,
 	defaultBranch: string,
 ): Promise<string> {
-	// Verify the branch exists
 	await dependencies.execGit(['rev-parse', '--verify', branch]);
 
-	// Diff the target branch against the default branch
 	return dependencies.execGit([
 		'diff',
 		'--no-ext-diff',

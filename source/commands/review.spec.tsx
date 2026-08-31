@@ -5,7 +5,7 @@ import type {Message} from '@/types/core';
 import {createReviewCommand} from './review';
 
 const baseMessages: Message[] = [
-	{role: 'user', content: '/review main'},
+	{role: 'user', content: '/review feature'},
 ];
 
 const testMetadata = {
@@ -58,7 +58,6 @@ test('review shows usage when no args provided', async t => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('Usage: /review <branch-or-pr-number>'));
-	t.true(output.includes('/review main'));
 });
 
 test('review returns an error when no client is available', async t => {
@@ -68,7 +67,7 @@ test('review returns an error when no client is available', async t => {
 		getDefaultBranch: async () => 'main',
 	});
 
-	const result = await command.handler(['main'], baseMessages, {
+	const result = await command.handler(['feature'], baseMessages, {
 		...testMetadata,
 		client: undefined,
 	});
@@ -86,9 +85,7 @@ test('review generates a review from the branch diff', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			// rev-parse to verify branch exists
 			if (args[0] === 'rev-parse') return '';
-			// diff command
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -292,30 +289,20 @@ test('review handles PR number target with gh available', async t => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('PR review looks good.'));
-	// Should have called gh pr diff with the PR number and repo slug
 	t.deepEqual(executedGhArgs, [['pr', 'diff', '42', '--repo', 'user/repo']]);
 });
 
-test('review handles PR number target with gh unavailable', async t => {
-	let executedGitArgs: string[][] = [];
-
+test('review returns error for PR number when gh is unavailable', async t => {
 	const command = createReviewCommand({
-		execGit: async args => {
-			executedGitArgs.push(args);
-			if (args[0] === 'rev-parse') return '';
-			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
-		},
+		execGit: async () => '',
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
 		isGhAvailable: () => false,
-		execGh: async () => {
-			throw new Error('gh not available');
-		},
 	});
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
-		client: createClient('Branch fallback review.'),
+		client: createClient('should not be called'),
 	});
 
 	t.truthy(React.isValidElement(result));
@@ -323,36 +310,26 @@ test('review handles PR number target with gh unavailable', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Branch fallback review.'));
-	// Should have fallen back to branch diff
-	t.true(
-		executedGitArgs.some(
-			args => args[0] === 'diff' && args.includes('main...42'),
-		),
-	);
+	t.true(output.includes('PR review requires the gh CLI'));
 });
 
-test('review handles PR number target when gh fails', async t => {
-	let executedGitArgs: string[][] = [];
-
+test('review returns error for PR number when gh fails', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			executedGitArgs.push(args);
-			if (args[0] === 'rev-parse') return '';
 			if (args[0] === 'remote') return 'git@github.com:user/repo.git';
-			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+			return '';
 		},
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
 		isGhAvailable: () => true,
 		execGh: async () => {
-			throw new Error('gh pr diff failed');
+			throw new Error('not authenticated');
 		},
 	});
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
-		client: createClient('Fallback after gh failure.'),
+		client: createClient('should not be called'),
 	});
 
 	t.truthy(React.isValidElement(result));
@@ -360,24 +337,15 @@ test('review handles PR number target when gh fails', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Fallback after gh failure.'));
-	// Should have fallen back to branch diff after gh failure
-	t.true(
-		executedGitArgs.some(
-			args => args[0] === 'diff' && args.includes('main...42'),
-		),
-	);
+	t.true(output.includes('Failed to fetch PR #42 diff'));
+	t.true(output.includes('not authenticated'));
 });
 
-test('review handles PR number with non-GitHub remote URL', async t => {
-	let executedGitArgs: string[][] = [];
-
+test('review returns error for PR number with non-GitHub remote', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			executedGitArgs.push(args);
-			if (args[0] === 'rev-parse') return '';
 			if (args[0] === 'remote') return 'git@gitlab.com:user/repo.git';
-			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+			return '';
 		},
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
@@ -387,7 +355,7 @@ test('review handles PR number with non-GitHub remote URL', async t => {
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
-		client: createClient('Fallback for non-GitHub.'),
+		client: createClient('should not be called'),
 	});
 
 	t.truthy(React.isValidElement(result));
@@ -395,10 +363,25 @@ test('review handles PR number with non-GitHub remote URL', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Fallback for non-GitHub.'));
-	t.true(
-		executedGitArgs.some(
-			args => args[0] === 'diff' && args.includes('main...42'),
-		),
-	);
+	t.true(output.includes('Cannot determine GitHub repository slug'));
+});
+
+test('review rejects target starting with dash', async t => {
+	const command = createReviewCommand({
+		execGit: async () => '',
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+
+	const result = await command.handler(['--ext-diff'], baseMessages, {
+		...testMetadata,
+		client: createClient('should not be called'),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('must not start with "-"'));
 });
