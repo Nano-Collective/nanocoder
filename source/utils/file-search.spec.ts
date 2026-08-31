@@ -614,6 +614,50 @@ test.serial(
 	},
 );
 
+test.serial(
+	'searchProjectContents keeps the full context window on the last match even when every context line is itself a match',
+	async t => {
+		const testDir = createTempDir('test-file-search-dense-context-headroom-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Every line matches, so a flat +1 headroom under-provisions the kill
+			// once contextLines > 1: the Nth match's own trailing context lines
+			// stream in as type:"match" entries too, not type:"context".
+			const lines = Array.from({length: 5000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'dense.ts'), lines.join('\n'));
+
+			const contextLines = 3;
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				undefined,
+				undefined,
+				contextLines,
+			);
+
+			t.is(result.matches.length, 5);
+			const lastMatch = result.matches[result.matches.length - 1];
+			t.truthy(lastMatch);
+			for (
+				let line = lastMatch.line - contextLines;
+				line <= lastMatch.line + contextLines;
+				line++
+			) {
+				t.true(
+					lastMatch.content.includes(`${line}: `),
+					`expected line ${line} in last match's context, got:\n${lastMatch.content}`,
+				);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial('searchProjectContents respects include, path, wholeWord and context', async t => {
 	const testDir = createTempDir('test-file-search-search-temp');
 

@@ -919,10 +919,11 @@ export async function searchProjectContents(
 	}
 	args.push('--regexp', query, '--', searchPath ?? cwd);
 
-	// No --max-count - it overshoots with --context. One extra match of headroom with context,
-	// so the kill doesn't fire before the Nth match's own trailing context lines stream in.
-	const rgMaxCount =
-		Math.max(0, maxResults) + (normalizedContextLines > 0 ? 1 : 0);
+	// No --max-count - it overshoots with --context. Headroom of contextLines
+	// so the kill doesn't fire before the Nth match's own trailing context
+	// lines stream in, even if every one of those lines is itself a match
+	// (streamed as its own type:"match" entry, not type:"context").
+	const rgMaxCount = Math.max(0, maxResults) + normalizedContextLines;
 
 	const {stdout} = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);
 	const rgLines = parseRgJsonLines(stdout).filter(
