@@ -43,21 +43,31 @@ test('reviewCommand has correct name and description', t => {
 	);
 });
 
-test('review shows usage when no args provided', async t => {
+test('review with no args reviews current branch (no usage error)', async t => {
+	let diffArgs: string[] = [];
+
 	const command = createReviewCommand({
-		execGit: async () => '',
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			diffArgs = args;
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
 	});
 
-	const result = await command.handler([], baseMessages, testMetadata);
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client: createClient('Looks good.'),
+	});
 
 	t.truthy(React.isValidElement(result));
-
-	const {lastFrame} = renderWithTheme(result as React.ReactElement);
-	const output = lastFrame() || '';
-
-	t.true(output.includes('Usage: /review <branch-or-pr-number>'));
+	t.deepEqual(diffArgs, [
+		'diff',
+		'--no-ext-diff',
+		'--no-color',
+		'main...feature',
+	]);
 });
 
 test('review returns an error when no client is available', async t => {
@@ -122,7 +132,9 @@ test('review generates a review from the branch diff', async t => {
 	t.is(receivedMessages[0]?.role, 'system');
 	t.is(receivedMessages[1]?.role, 'user');
 	t.true(
-		(receivedMessages[1]?.content as string).includes('branch "feature"'),
+		(receivedMessages[1]?.content as string).includes(
+			'branch "feature" against "main"',
+		),
 	);
 });
 
@@ -384,4 +396,99 @@ test('review rejects target starting with dash', async t => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('must not start with "-"'));
+});
+
+test('review with no args reviews current branch against default', async t => {
+	let diffArgs: string[] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			diffArgs = args;
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client: createClient('Looks good.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+	t.deepEqual(diffArgs, [
+		'diff',
+		'--no-ext-diff',
+		'--no-color',
+		'main...feature',
+	]);
+});
+
+test('review with default branch as target reviews current branch against it', async t => {
+	let diffArgs: string[] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			diffArgs = args;
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+
+	const result = await command.handler(['main'], baseMessages, {
+		...testMetadata,
+		client: createClient('Looks good.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+	t.deepEqual(diffArgs, [
+		'diff',
+		'--no-ext-diff',
+		'--no-color',
+		'main...feature',
+	]);
+});
+
+test('review surfaces truncation info when diff exceeds limit', async t => {
+	const bigDiff = Array.from({length: 1100}, (_, i) => `+line ${i}`).join(
+		'\n',
+	);
+
+	let userMessage = '';
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			return bigDiff;
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+
+	const client = {
+		chat: async (messages: Message[]) => {
+			userMessage = (messages[1]?.content as string) || '';
+			return {
+				choices: [
+					{
+						message: {
+							content: 'Looks good.',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	const result = await command.handler(['feature'], baseMessages, {
+		...testMetadata,
+		client,
+	});
+
+	t.truthy(React.isValidElement(result));
+	t.true(userMessage.includes('diff truncated'));
+	t.true(userMessage.includes('of 1100 lines'));
 });
