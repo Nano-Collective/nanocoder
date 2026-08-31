@@ -277,3 +277,21 @@ test('subscriptions are registered with the event router', async t => {
 	t.is(deps.dispatchCalls.length, 1);
 	t.is(deps.dispatchCalls[0]?.sub.id, r.subscriptionIds[0]);
 });
+
+test('skill targets are rejected with a clear message', t => {
+	const deps = makeDeps();
+	const skill = bundleSkill({
+		subscribe: [
+			{
+				kind: 'file.changed',
+				target: 'skill:docs',
+				paths: ['docs/**'],
+			},
+		],
+	});
+
+	const r = registerSkills([skill], deps);
+	t.deepEqual(r.subscriptionIds, []);
+	t.is(r.collisions.length, 1);
+	t.regex(r.collisions[0]?.message ?? '', /not supported yet/);
+});

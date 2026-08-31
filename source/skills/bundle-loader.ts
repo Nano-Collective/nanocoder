@@ -60,7 +60,7 @@ interface LoadedMember<T> {
 	frontmatterSubscribe?: SkillTrigger[];
 }
 
-const TARGET_REGEX = /^(command|agent|tool):([a-z][a-z0-9_-]*)$/;
+const TARGET_REGEX = /^(command|agent|tool|skill):([a-z][a-z0-9_-]*)$/;
 
 export class BundleLoader {
 	constructor(
@@ -445,6 +445,12 @@ function mergeSubscriptions(
 			const target = trig.target;
 			if (!target || !TARGET_REGEX.test(target)) {
 				errors.push(`subscribe[${i}].target "${target ?? ''}" is malformed.`);
+				return;
+			}
+			if (target.startsWith('skill:')) {
+				errors.push(
+					`subscribe[${i}].target "${target}" is not supported yet; use a command, agent, or tool member target instead.`,
+				);
 				return;
 			}
 			if (!memberRefs.has(target)) {
