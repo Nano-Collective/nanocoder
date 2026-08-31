@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.29.0",
+	"version": "1.30.0",
 	"description": "An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.",
 	"keywords": [
 		"cli",
@@ -46,6 +46,7 @@
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
+		"test:changesets": "node scripts/validate-changesets.js",
 		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
@@ -115,7 +116,7 @@
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
 		"ava": "^8.0.1",
-		"c8": "^11.0.0",
+		"c8": "^12.0.0",
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
 		"knip": "^6.0.0",

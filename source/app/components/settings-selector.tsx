@@ -12,6 +12,7 @@ import {
 	getPasteThreshold,
 	getPrivacyPreference,
 	getReasoningExpanded,
+	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
@@ -19,6 +20,7 @@ import {
 	updatePrivacyPreference,
 	updateReasoningExpanded,
 	updateSelectedTheme,
+	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -703,10 +705,12 @@ export function SettingsNotificationsPanel({
 		saved ?? {
 			enabled: false,
 			sound: false,
+			bell: false,
 			events: {
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -723,9 +727,11 @@ export function SettingsNotificationsPanel({
 	type ToggleKey =
 		| 'enabled'
 		| 'sound'
+		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -739,6 +745,10 @@ export function SettingsNotificationsPanel({
 				value: 'sound' as ToggleKey,
 			},
 			{
+				label: `  Terminal Bell: ${isOn(config.bell)}`,
+				value: 'bell' as ToggleKey,
+			},
+			{
 				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
 				value: 'toolConfirmation' as ToggleKey,
 			},
@@ -750,6 +760,12 @@ export function SettingsNotificationsPanel({
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
 			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
+			},
 		];
 	}, [config]);
 
@@ -759,6 +775,8 @@ export function SettingsNotificationsPanel({
 			next.enabled = !next.enabled;
 		} else if (item.value === 'sound') {
 			next.sound = !next.sound;
+		} else if (item.value === 'bell') {
+			next.bell = !next.bell;
 		} else {
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
@@ -809,6 +827,7 @@ export function SettingsDisplayPanel({
 
 	const currentReasoningExpanded = getReasoningExpanded();
 	const currentCompactToolDisplay = getCompactToolDisplay();
+	const currentShowUsageFooter = getShowUsageFooter();
 
 	useInput((_, key) => {
 		if (key.escape) {
@@ -819,7 +838,10 @@ export function SettingsDisplayPanel({
 		}
 	});
 
-	type ToggleKey = 'reasoningExpanded' | 'compactToolDisplay';
+	type ToggleKey =
+		| 'reasoningExpanded'
+		| 'compactToolDisplay'
+		| 'showUsageFooter';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -829,11 +851,21 @@ export function SettingsDisplayPanel({
 				value: 'reasoningExpanded' as ToggleKey,
 			},
 			{
-				label: `Expand Tool Results by default: ${isOn(currentCompactToolDisplay)}`,
+				// compactToolDisplay=true means results are COMPACT, so
+				// expansion is on exactly when the preference is false.
+				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
 				value: 'compactToolDisplay' as ToggleKey,
 			},
+			{
+				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
+				value: 'showUsageFooter' as ToggleKey,
+			},
 		];
-	}, [currentReasoningExpanded, currentCompactToolDisplay]);
+	}, [
+		currentReasoningExpanded,
+		currentCompactToolDisplay,
+		currentShowUsageFooter,
+	]);
 
 	const handleSelect = (item: {label: string; value: ToggleKey}) => {
 		if (item.value === 'reasoningExpanded') {
@@ -842,6 +874,10 @@ export function SettingsDisplayPanel({
 		} else if (item.value === 'compactToolDisplay') {
 			const newValue = !currentCompactToolDisplay;
 			updateCompactToolDisplay(newValue);
+		} else if (item.value === 'showUsageFooter') {
+			// Applies to the next response, no restart needed - the footer is
+			// read from preferences per message.
+			updateShowUsageFooter(!currentShowUsageFooter);
 		}
 		onBack();
 	};

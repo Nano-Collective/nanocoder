@@ -59,6 +59,20 @@ When typing `@` for file mentions or `/` for commands, Tab accepts the current s
 
 Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You can also attach an image by typing, pasting, or dragging an image file path into the input — quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
 
+## Copying & Pasting Text
+
+| Action | Shortcut |
+|--------|----------|
+| Paste text | Your terminal's own paste (Cmd+V on macOS, usually Ctrl+Shift+V on Linux) |
+| Copy last response to clipboard | `/copy` |
+| Toggle selection mode (fullscreen only) | Ctrl+P |
+
+Nanocoder enables **bracketed paste**, so the terminal hands over a pasted block in one piece rather than as a stream of keystrokes. Multi-line pastes no longer submit the prompt at the first line break. Pastes that are multi-line, or longer than the paste threshold, collapse into a `[Paste #1: 1234 chars]` placeholder to keep the input readable; the full text is still sent with your message. Adjust the threshold under `/settings`.
+
+Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste shortcut for text.
+
+**Selection mode** applies to fullscreen mode only. Fullscreen turns on mouse reporting so the wheel can scroll the chat viewport, and that takes click-drag selection away from the terminal. Ctrl+P suspends mouse reporting so you can select and copy with the mouse as normal; press it again to resume scrolling. Inline mode (the default) never enables mouse reporting, so selection works there without doing anything and Ctrl+P does nothing.
+
 ## History & Navigation
 
 | Action | Shortcut |
@@ -79,3 +93,4 @@ Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
 | Toggle expanded reasoning traces | Ctrl+R |
+| Toggle selection mode (fullscreen only) | Ctrl+P |
