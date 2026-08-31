@@ -136,7 +136,7 @@ test.serial(
 					entries.push(entry);
 					return false;
 				},
-				false,
+				{includeDirectories: false},
 			);
 
 			t.false(entries.some(e => e.isDirectory));
@@ -163,9 +163,7 @@ test.serial(
 				testDir,
 				undefined,
 				() => false,
-				true,
-				undefined,
-				5,
+				{maxRawFilesScanned: 5},
 			);
 			t.true(result.truncated);
 
@@ -173,9 +171,7 @@ test.serial(
 				testDir,
 				undefined,
 				() => false,
-				true,
-				undefined,
-				1000,
+				{maxRawFilesScanned: 1000},
 			);
 			t.false(untruncated.truncated);
 		} finally {
@@ -201,9 +197,7 @@ test.serial(
 				testDir,
 				undefined,
 				() => false,
-				true,
-				undefined,
-				5,
+				{maxRawFilesScanned: 5},
 			);
 			t.true(result.truncated);
 
@@ -211,9 +205,7 @@ test.serial(
 				testDir,
 				undefined,
 				() => false,
-				true,
-				undefined,
-				1000,
+				{maxRawFilesScanned: 1000},
 			);
 			t.false(untruncated.truncated);
 		} finally {
@@ -244,9 +236,7 @@ test.serial(
 					}
 					return false;
 				},
-				true,
-				undefined,
-				5,
+				{maxRawFilesScanned: 5},
 			);
 
 			t.true(result.truncated);

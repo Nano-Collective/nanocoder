@@ -454,16 +454,15 @@ async function walkEmptyDirectories(
 	seenDirs: Set<string>,
 	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
 	projectIgnore: ReturnType<typeof loadGitignore>,
-	nanocoderignoreContent?: string,
 	signal?: AbortSignal,
 	maxDirsWalked: number = MAX_RAW_FILES_SCANNED,
 ): Promise<{truncated: boolean}> {
-	// Grows as nested .gitignore files are found; prefixing keeps them scoped.
+	// Seeded from projectIgnore (defaults + root .gitignore + root
+	// .nanocoderignore, correctly ordered) instead of rebuilding that from
+	// scratch. Nested .gitignore files are merged in as they're found during
+	// the walk, taking precedence over the seeded rules - same as git.
 	const ig = ignore();
-	ig.add(DEFAULT_IGNORE_DIRS);
-	if (nanocoderignoreContent !== undefined) {
-		ig.add(nanocoderignoreContent);
-	}
+	ig.add(projectIgnore);
 	let loggedDepthCap = false;
 	let dirsWalked = 0;
 	let hitDirCap = false;
@@ -495,17 +494,22 @@ async function walkEmptyDirectories(
 		}
 
 		const dirPrefix = normalizePathForMatch(path.relative(cwd, absolutePath));
-		const gitignoreContent = await readFile(
-			path.join(absolutePath, '.gitignore'),
-			'utf-8',
-		).catch(() => undefined);
-		if (gitignoreContent !== undefined) {
-			const patterns = gitignoreContent
-				.split('\n')
-				.map(line => prefixGitignoreLine(line, dirPrefix))
-				.filter((line): line is string => line !== undefined);
-			if (patterns.length > 0) {
-				ig.add(patterns);
+		// cwd's own .gitignore is already folded into projectIgnore above;
+		// re-reading it here would duplicate it AFTER .nanocoderignore in
+		// ig's rule order, inverting the negation precedence.
+		if (dirPrefix !== '') {
+			const gitignoreContent = await readFile(
+				path.join(absolutePath, '.gitignore'),
+				'utf-8',
+			).catch(() => undefined);
+			if (gitignoreContent !== undefined) {
+				const patterns = gitignoreContent
+					.split('\n')
+					.map(line => prefixGitignoreLine(line, dirPrefix))
+					.filter((line): line is string => line !== undefined);
+				if (patterns.length > 0) {
+					ig.add(patterns);
+				}
 			}
 		}
 
@@ -526,9 +530,7 @@ async function walkEmptyDirectories(
 				path.relative(cwd, childAbsolutePath),
 			);
 
-			const unignoredByProject =
-				projectIgnore.test(childRelativePath).unignored;
-			if (ig.ignores(childRelativePath) && !unignoredByProject) {
+			if (ig.ignores(childRelativePath)) {
 				continue;
 			}
 
@@ -556,22 +558,26 @@ async function walkEmptyDirectories(
 	return {truncated: hitDirCap};
 }
 
+export interface WalkProjectEntriesOptions {
+	includeDirectories?: boolean;
+	signal?: AbortSignal;
+	maxRawFilesScanned?: number;
+}
+
 export async function walkProjectEntries(
 	cwd: string,
 	startPath: string | undefined,
 	onEntry: (entry: ProjectEntry) => boolean | Promise<boolean>,
-	includeDirectories = true,
-	signal?: AbortSignal,
-	maxRawFilesScanned: number = MAX_RAW_FILES_SCANNED,
+	options: WalkProjectEntriesOptions = {},
 ): Promise<{truncated: boolean}> {
+	const {
+		includeDirectories = true,
+		signal,
+		maxRawFilesScanned = MAX_RAW_FILES_SCANNED,
+	} = options;
 	const rootPath = startPath ?? cwd;
 	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
-	const nanocoderignoreContent = includeDirectories
-		? await readFile(path.join(cwd, '.nanocoderignore'), 'utf-8').catch(
-				() => undefined,
-			)
-		: undefined;
 	const args = [
 		'--files',
 		'--hidden',
@@ -650,7 +656,6 @@ export async function walkProjectEntries(
 			seenDirs,
 			onEntry,
 			projectIgnore,
-			nanocoderignoreContent,
 			signal,
 			maxRawFilesScanned,
 		));

@@ -346,7 +346,7 @@ async function scanFiles(
 
 			return false;
 		},
-		false,
+		{includeDirectories: false},
 	);
 	truncated = truncated || walkResult.truncated;
 

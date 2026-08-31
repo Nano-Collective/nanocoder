@@ -38,7 +38,7 @@ async function getAllFiles(cwd: string): Promise<string[]> {
 				allFiles.push(entry.relativePath.replace(/\\/g, '/'));
 				return false;
 			},
-			false,
+			{includeDirectories: false},
 		);
 
 		fileListCache = {
