@@ -182,6 +182,36 @@ test.serial(
 );
 
 test.serial(
+	'walkProjectEntries does not let stdout overshoot the raw file-scan cap within a single oversized chunk',
+	async t => {
+		const testDir = createTempDir('test-file-search-chunk-overshoot-temp');
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Needs enough files that a single ~8-64KB stdout chunk from rg
+			// contains far more lines than the cap - smaller counts never
+			// exercise the chunk boundary and would pass even with the bug.
+			for (let i = 0; i < 2_000; i++) {
+				writeFileSync(join(testDir, `file${i}.txt`), 'x');
+			}
+			let fileCount = 0;
+			const result = await walkProjectEntries(
+				testDir,
+				undefined,
+				entry => {
+					if (!entry.isDirectory) fileCount++;
+					return false;
+				},
+				{includeDirectories: false, maxRawFilesScanned: 10},
+			);
+			t.is(fileCount, 10);
+			t.true(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'walkProjectEntries reports truncated when the empty-directory walk cap is hit, even with zero files',
 	async t => {
 		const testDir = createTempDir('test-file-search-dir-cap-temp');

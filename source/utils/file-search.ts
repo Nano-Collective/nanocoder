@@ -312,19 +312,31 @@ async function runRipgrep(
 
 		child.stdout.setEncoding('utf8');
 		child.stdout.on('data', (chunk: string) => {
-			stdout += chunk;
-			if (
-				(maxMatches === undefined && maxLines === undefined) ||
-				killedForLimit
-			) {
+			if (killedForLimit) {
 				return;
 			}
 
+			if (maxMatches === undefined && maxLines === undefined) {
+				stdout += chunk;
+				return;
+			}
+
+			// A single chunk can hold far more lines than the cap allows (Node
+			// delivers pipe data in ~8-64KB chunks, not line-by-line), so appending
+			// the whole chunk up front let stdout overshoot the cap by however many
+			// extra lines happened to share that chunk - confirmed empirically: a
+			// cap of 10 let through 200+ lines from one chunk. Build stdout from
+			// this same per-line loop instead, so it stops at exactly the line that
+			// reaches the cap. This matches how VS Code's RipgrepParser and
+			// OpenCode's ripgrep.ts both handle the same problem: split into lines
+			// before counting/limiting, never accumulate a raw buffer and truncate
+			// it after the fact.
 			lineRemainder += chunk;
 			let newlineIndex = lineRemainder.indexOf('\n');
 			while (newlineIndex >= 0) {
 				const line = lineRemainder.slice(0, newlineIndex);
 				lineRemainder = lineRemainder.slice(newlineIndex + 1);
+				stdout += line + '\n';
 
 				if (line) {
 					if (maxLines !== undefined) {
