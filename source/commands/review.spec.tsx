@@ -368,3 +368,37 @@ test('review handles PR number target when gh fails', async t => {
 		),
 	);
 });
+
+test('review handles PR number with non-GitHub remote URL', async t => {
+	let executedGitArgs: string[][] = [];
+
+	const command = createReviewCommand({
+		execGit: async args => {
+			executedGitArgs.push(args);
+			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'remote') return 'git@gitlab.com:user/repo.git';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => true,
+		execGh: async () => 'diff from gh',
+	});
+
+	const result = await command.handler(['42'], baseMessages, {
+		...testMetadata,
+		client: createClient('Fallback for non-GitHub.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('Fallback for non-GitHub.'));
+	t.true(
+		executedGitArgs.some(
+			args => args[0] === 'diff' && args.includes('main...42'),
+		),
+	);
+});

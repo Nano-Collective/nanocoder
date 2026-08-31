@@ -2,9 +2,11 @@ import {readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
+	execGh,
 	execGit,
 	getCurrentBranch,
 	getDefaultBranch,
+	isGhAvailable,
 	truncateDiff,
 } from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
@@ -36,18 +38,8 @@ const defaultDependencies: ReviewDependencies = {
 	execGit,
 	getCurrentBranch,
 	getDefaultBranch,
-	isGhAvailable: () => {
-		try {
-			const {isGhAvailable: check} = require('@/tools/git/utils');
-			return check();
-		} catch {
-			return false;
-		}
-	},
-	execGh: (args: string[]) => {
-		const {execGh: run} = require('@/tools/git/utils');
-		return run(args);
-	},
+	isGhAvailable,
+	execGh,
 };
 
 export function createReviewCommand(
