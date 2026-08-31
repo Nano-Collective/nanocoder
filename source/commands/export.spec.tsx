@@ -7,6 +7,11 @@ import React from 'react';
 import {render} from 'ink-testing-library';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 
 // Mock fs module
 const originalWriteFile = fs.writeFile;
@@ -18,10 +23,13 @@ test.beforeEach(() => {
 		mockWriteFileCalls.push({path: filepath, content});
 		return Promise.resolve(void 0);
 	};
+	// Isolate each test from session-cwd state set by others.
+	resetSessionCwd();
 });
 
 test.afterEach(() => {
 	fs.writeFile = originalWriteFile;
+	resetSessionCwd();
 });
 
 // Mock ThemeProvider for testing
@@ -332,4 +340,81 @@ test('exportCommand rejects an absolute path outside the project', async t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Invalid export path/);
+});
+
+test('exportCommand resolves a relative path against the session cwd (honours cd)', async t => {
+	// Pin the session cwd to a subdirectory, as a bash `cd` would, and confirm a
+	// bare relative export lands there -- not in the launch dir (process.cwd()).
+	const subdir = path.join(process.cwd(), 'tmp-session-cwd-test');
+	await fs.mkdir(subdir, {recursive: true});
+	setSessionCwd(subdir);
+
+	await exportCommand.handler(['chat.md'], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	const expected = path.join(subdir, 'chat.md');
+	t.is(mockWriteFileCalls[0].path, expected);
+	await fs.rm(subdir, {recursive: true});
+});
+
+test('exportCommand contains writes to the project root even when the session cwd is deeper', async t => {
+	// A pinned project root is the non-shrinking containment boundary. With the
+	// session cwd inside a worktree, an absolute path inside the project root
+	// (but above the cwd) is still allowed, while one above the project root is
+	// rejected. Relative '..' is blocked outright by isValidFilePath.
+	const root = path.join(process.cwd(), 'tmp-prjroot-test');
+	const subdir = path.join(root, 'worktree');
+	await fs.mkdir(subdir, {recursive: true});
+	setProjectRoot(root);
+	setSessionCwd(subdir);
+
+	// Absolute path inside the project root but above the session cwd is allowed.
+	const insideRoot = path.join(root, 'chat.md');
+	await exportCommand.handler([insideRoot], testMessages, testMetadata);
+	t.is(mockWriteFileCalls.length, 1);
+	t.is(mockWriteFileCalls[0].path, insideRoot);
+
+	// Absolute path escaping above the project root is rejected.
+	const outside = path.join(root, '..', 'outside.md');
+	const escape = (await exportCommand.handler(
+		[outside],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+	t.is(mockWriteFileCalls.length, 1);
+	const {lastFrame} = render(<MockThemeProvider>{escape}</MockThemeProvider>);
+	t.regex(lastFrame()!, /Invalid export path/);
+
+	await fs.rm(root, {recursive: true});
+});
+
+test('exportCommand reports a missing parent directory clearly', async t => {
+	fs.writeFile = originalWriteFile;
+
+	const result = (await exportCommand.handler(
+		['no-such-folder/chat.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+	fs.writeFile = originalWriteFile;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	t.regex(lastFrame()!, /Failed to export chat/);
+	t.regex(lastFrame()!, /Parent directory does not exist/);
+});
+
+test('exportCommand renders a subdirectory export relative to the project root', async t => {
+	const result = (await exportCommand.handler(
+		['reports/chat.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame()!;
+	// Full relative path is shown (with the platform separator), not a bare
+	// basename.
+	t.true(output.includes(`Chat exported to reports${path.sep}chat.md`));
+	t.false(output.includes(`Chat exported to chat${path.sep}`));
+	t.false(output.includes('Chat exported to chat.md'));
 });
