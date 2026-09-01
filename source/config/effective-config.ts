@@ -235,18 +235,28 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 	]);
 }
 
+/**
+ * Read a nested value by path, following **own properties only**.
+ *
+ * Every segment here can originate in a user-written JSON file, so a plain
+ * `current[segment]` would resolve `constructor`, `toString`, `__proto__` and
+ * friends up the prototype chain and report a value that no config file ever
+ * set. `Object.hasOwn` keeps the walk to data the user actually wrote.
+ */
 function getAt(
 	data: Record<string, unknown> | null,
 	path: readonly string[],
 ): unknown {
-	let current: unknown = data;
-	for (const segment of path) {
-		if (!isPlainObject(current)) return undefined;
-		current = current[segment];
-	}
-	return current;
+	return path.reduce<unknown>(
+		(current, segment) =>
+			isPlainObject(current) && Object.hasOwn(current, segment)
+				? current[segment]
+				: undefined,
+		data,
+	);
 }
 
+/** Whether `path` is an own property all the way down. See `getAt`. */
 function hasAt(
 	data: Record<string, unknown> | null,
 	path: readonly string[],
@@ -254,7 +264,11 @@ function hasAt(
 	if (path.length === 0) return data !== null;
 	const parent = getAt(data, path.slice(0, -1));
 	const last = path[path.length - 1] as string;
-	return isPlainObject(parent) && parent[last] !== undefined;
+	return (
+		isPlainObject(parent) &&
+		Object.hasOwn(parent, last) &&
+		parent[last] !== undefined
+	);
 }
 
 /**
@@ -440,11 +454,13 @@ function resolveBlockEntries(
 	return leaves.map(leaf => {
 		const key = [...spec.path, ...leaf.path].join('.');
 		const keyHint = leaf.path[leaf.path.length - 1] ?? blockKey;
+		// `in` would traverse the prototype chain, so a config key named
+		// `toString` would be reported as having a built-in default.
 		const hasDefault =
 			spec.defaults !== undefined &&
 			leaf.path.length === 1 &&
 			leaf.path[0] !== undefined &&
-			leaf.path[0] in spec.defaults;
+			Object.hasOwn(spec.defaults, leaf.path[0]);
 		const defaultValue = hasDefault
 			? spec.defaults?.[leaf.path[0] as string]
 			: undefined;
@@ -567,14 +583,17 @@ function resolvePreferencesEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
  * one another, so each named entry gets its own row and its own winner.
  */
 function resolveProviderEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
-	const rawProviders = (layer: RawLayer): Record<string, unknown> => {
+	// Keyed by a Map, not an object: provider names come from user JSON, and a
+	// provider literally named `__proto__` would otherwise reassign the
+	// accumulator's prototype instead of storing an entry.
+	const rawProviders = (layer: RawLayer): Map<string, unknown> => {
 		const nested = getAt(layer.data, ['nanocoder', 'providers']);
 		const top = getAt(layer.data, ['providers']);
 		const list = Array.isArray(nested) ? nested : Array.isArray(top) ? top : [];
-		const byName: Record<string, unknown> = {};
+		const byName = new Map<string, unknown>();
 		for (const provider of list) {
 			if (isPlainObject(provider) && typeof provider.name === 'string') {
-				byName[provider.name] = provider;
+				byName.set(provider.name, provider);
 			}
 		}
 		return byName;
@@ -586,7 +605,7 @@ function resolveProviderEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
 	return (getAppConfig().providers ?? []).map(provider => {
 		const name = provider.name;
 		const found = fileLayers
-			.filter(layer => rawProviders(layer)[name] !== undefined)
+			.filter(layer => rawProviders(layer).has(name))
 			.reverse();
 		const {value, redacted} = redactValue(provider, name);
 
@@ -597,7 +616,7 @@ function resolveProviderEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
 		const shadowedLayers = fromEnv ? found : found.slice(1);
 
 		const shadowed: ConfigValueAt[] = shadowedLayers.map(layer => {
-			const raw = redactValue(rawProviders(layer)[name], name);
+			const raw = redactValue(rawProviders(layer).get(name), name);
 			return {
 				layer: layer.layer,
 				origin: layer.path,
