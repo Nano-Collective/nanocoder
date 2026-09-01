@@ -40,6 +40,16 @@ export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
 	private serverTools: Map<string, MCPTool[]> = new Map();
+	/**
+	 * Memoised getToolMapping() result. Plan mode calls that method on every
+	 * getAvailableToolNames() — both when building the prompt and per turn at
+	 * runtime — so rebuilding the Map each time is pure waste. Invalidated
+	 * wherever serverTools changes (connect, disconnect).
+	 */
+	private toolMappingCache: Map<
+		string,
+		{serverName: string; originalName: string}
+	> | null = null;
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
 	private logger = getLogger();
@@ -178,6 +188,7 @@ export class MCPClient {
 				this.transports.set(normalizedServer.name, transport);
 				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
+				this.toolMappingCache = null;
 
 				const finalMetrics = endMetrics(metrics);
 
@@ -382,7 +393,19 @@ export class MCPClient {
 
 		return nativeTools;
 	}
+
+	/**
+	 * Map every discovered tool name to the server that owns it.
+	 *
+	 * The result is memoised and returned by reference — treat it as read-only.
+	 * All callers only look tools up (`get`/`has`); mutating it would corrupt
+	 * the cache for everyone else until the next connect/disconnect.
+	 */
 	getToolMapping(): Map<string, {serverName: string; originalName: string}> {
+		if (this.toolMappingCache) {
+			return this.toolMappingCache;
+		}
+
 		const mapping = new Map<
 			string,
 			{serverName: string; originalName: string}
@@ -397,6 +420,7 @@ export class MCPClient {
 			}
 		}
 
+		this.toolMappingCache = mapping;
 		return mapping;
 	}
 
@@ -441,20 +465,25 @@ export class MCPClient {
 					};
 
 					// MCP tools take the same mode posture as built-in tools:
-					//   - read-only (server-annotated) has nothing to confirm;
-					//   - plan inspects without side effects, so a server's
-					//     alwaysAllow entry must not short-circuit it;
 					//   - auto-accept and headless both run unattended — headless is
 					//     daemon-driven, so there is no foreground prompt to answer
 					//     (mirrors createFileToolApproval in @/utils/tool-approval);
+					//   - plan inspects without side effects, so a server's
+					//     alwaysAllow entry must not short-circuit it; only a
+					//     server-annotated reader is safe to run there;
 					//   - normal prompts unless alwaysAllow covers the tool.
+					// readOnly deliberately does NOT skip approval in normal mode:
+					// `readOnlyHint` is a hint supplied by the very server being
+					// gated, so it must not be able to silence its own prompt.
+					// alwaysAllow — set by the user, not the server — stays the only
+					// way to skip a normal-mode prompt, exactly as
+					// docs/configuration/mcp-configuration.md describes.
 					// (Yolo is bypassed centrally by resolveToolApproval.)
 					const readOnly = mcpTool.readOnly === true;
 					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
 					const approval: ToolApprovalPolicy = (_args, mode) => {
-						if (readOnly) return false;
-						if (mode === 'plan') return true;
 						if (mode === 'auto-accept' || mode === 'headless') return false;
+						if (mode === 'plan') return !readOnly;
 						return !isAutoApproved;
 					};
 
@@ -666,6 +695,7 @@ export class MCPClient {
 			this.clients.clear();
 			this.transports.clear();
 			this.serverTools.clear();
+			this.toolMappingCache = null;
 			this.serverConfigs.clear();
 			this.isConnected = false;
 

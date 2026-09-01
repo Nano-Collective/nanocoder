@@ -231,7 +231,7 @@ export class ToolManager {
 					const meta = this.customTools.get(n);
 					if (!meta) {
 						if (mcpTools?.has(n)) {
-							return this.registry.getEntry(n)?.readOnly === true;
+							return this.isReadOnly(n);
 						}
 						return true;
 					}
