@@ -100,6 +100,7 @@ export function InteractiveApp({
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
 	const drainInProgressRef = React.useRef(false);
+	const [drainAttempt, setDrainAttempt] = React.useState(0);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -185,9 +186,22 @@ export function InteractiveApp({
 	// modal modes have closed. Command handlers and conversation completion can
 	// both signal completion, so keeping the drain here makes it idempotent and
 	// prevents nested or duplicate turns.
+	const queueDrainBlocked =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null ||
+		appState.isToolConfirmationMode ||
+		appState.isQuestionMode ||
+		pendingSubagentApproval !== null ||
+		pendingToolConfirmation !== null;
+
 	React.useEffect(() => {
+		// Re-run after a successful dispatch settles, once its queue update has
+		// rendered and the next item can be considered.
+		void drainAttempt;
 		if (
-			cancellable ||
+			queueDrainBlocked ||
 			appState.activeMode !== null ||
 			appState.isSettingsMode ||
 			!appState.isConversationComplete ||
@@ -211,9 +225,20 @@ export function InteractiveApp({
 					);
 					return true;
 				})
-				.finally(() => {
-					drainInProgressRef.current = false;
-				});
+				.then(
+					dispatched => {
+						drainInProgressRef.current = false;
+						// The queue state update happens before the dispatch resolves. A
+						// separate render is needed to notice and drain the next item after
+						// the dispatched turn returns to idle.
+						if (dispatched) {
+							setDrainAttempt(attempt => attempt + 1);
+						}
+					},
+					() => {
+						drainInProgressRef.current = false;
+					},
+				);
 		}, 0);
 
 		return () => {
@@ -226,10 +251,11 @@ export function InteractiveApp({
 		appState.isConversationComplete,
 		appState.isSettingsMode,
 		appState.toolManager,
-		cancellable,
+		queueDrainBlocked,
 		handleUserSubmit,
 		userMessageQueue.drainNextMessage,
 		userMessageQueue.queuedMessages.length,
+		drainAttempt,
 	]);
 
 	const recallableSubmittedDraft =

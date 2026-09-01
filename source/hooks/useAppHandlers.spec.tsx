@@ -35,7 +35,6 @@ interface ProbeOverrides {
 	developmentMode?: DevelopmentMode;
 	client?: LLMClient | null;
 	messages?: Message[];
-	onCommandComplete?: () => void;
 }
 
 let captured: AppHandlers | null = null;
@@ -103,7 +102,6 @@ function makeProps(overrides: ProbeOverrides) {
 		setIsCancelling,
 		setDevelopmentMode,
 		setIsConversationComplete,
-		onCommandComplete: overrides.onCommandComplete,
 		setIsToolExecuting,
 		setActiveMode,
 		setCheckpointLoadData,
@@ -192,14 +190,12 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.handleMessageSubmit, 'function');
 });
 
-test('forwards slash-command completion so queued work can resume', async t => {
-	const onCommandComplete = spy<[]>();
-	const {handlers, spies} = setup({onCommandComplete});
+test('signals slash-command completion so queued work can resume', async t => {
+	const {handlers, spies} = setup();
 
 	await handlers.handleMessageSubmit('/compact');
 
 	t.deepEqual(spies.setIsConversationComplete.calls, [[false], [true]]);
-	t.is(onCommandComplete.calls.length, 1);
 });
 
 test('handleCancel without an abort controller is a no-op', t => {
