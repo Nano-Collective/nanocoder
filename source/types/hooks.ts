@@ -21,7 +21,9 @@ export interface PastePlaceholderContent extends BasePlaceholderContent {
 	type: PlaceholderType.PASTE;
 	content: string; // The actual pasted text
 	originalSize: number;
-	detectionMethod?: 'rate' | 'size' | 'multiline';
+	// 'bracketed' is a real paste reported by the terminal (DECSET 2004);
+	// the others are heuristic guesses used when the terminal can't.
+	detectionMethod?: 'rate' | 'size' | 'multiline' | 'bracketed';
 	timestamp?: number; // When the paste occurred
 }
 

@@ -1,7 +1,8 @@
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig} from '@/config';
@@ -9,7 +10,9 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -42,6 +45,7 @@ const createMockInitContext = (): AcpInitContext => ({
 		}),
 		getAvailableModels: async () => ['test-model', 'other-model'],
 		getCurrentModel: () => mockCurrentModel,
+		getProviderConfig: () => ({name: 'test-provider'}),
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
@@ -55,6 +59,7 @@ const createMockInitContext = (): AcpInitContext => ({
 		getFilteredTools: () => ({}),
 		hasTool: () => false,
 		getToolEntry: () => undefined,
+		isReadOnly: () => true,
 	} as any,
 	customCommandLoader: null as any,
 	provider: 'test-provider',
@@ -244,6 +249,141 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
 });
 
+test('AcpAgent.loadSession - hides internal walkthrough fallback messages', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const initContext = createMockInitContext();
+	initContext.toolManager = {
+		getAvailableToolNames: () => ['write_walkthrough'],
+		getFilteredTools: () => ({}),
+		hasTool: () => false,
+		getToolEntry: () => undefined,
+	} as any;
+	const agent = new AcpAgent(initContext, conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{
+				type: 'text',
+				text: '<approved_plan>Implement artifacts.</approved_plan>',
+			},
+		],
+	});
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	const replayedUserText = updates
+		.filter(update => update.update?.sessionUpdate === 'user_message_chunk')
+		.map(update => update.update.content.text);
+
+	t.true(replayedUserText.some(text => text.includes('<approved_plan>')));
+	t.false(
+		replayedUserText.some(text => text.includes('nanocoder-internal-walkthrough')),
+	);
+});
+
+test('AcpAgent.loadSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'implementation_plan',
+			'# Plan\n',
+		);
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'walkthrough',
+			'# Walkthrough\n',
+		);
+
+		const result = await agent.loadSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+
+		const artifacts = result._meta?.['nanocoder/artifacts'];
+		t.true(Array.isArray(artifacts));
+		t.deepEqual(
+			(artifacts as Array<{kind: string}>).map(artifact => artifact.kind),
+			['implementation_plan', 'walkthrough'],
+		);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent.resumeSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'task',
+			'# Tasks\n',
+		);
+		const result = await agent.resumeSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+		});
+		const artifacts = result._meta?.['nanocoder/artifacts'] as Array<{
+			kind: string;
+		}>;
+		t.deepEqual(artifacts.map(artifact => artifact.kind), ['task']);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent.loadSession - replays reasoning but skips whitespace-only reasoning', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	const loaded = (agent as any).sessions.get(session.sessionId);
+	loaded.messages = [
+		{role: 'assistant', content: 'first', reasoning: '\n\n'},
+		{role: 'assistant', content: 'second', reasoning: 'weighing options'},
+	];
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+
+	const thoughts = updates.filter(
+		u => u.update?.sessionUpdate === 'agent_thought_chunk',
+	);
+	t.deepEqual(
+		thoughts.map(u => u.update.content.text),
+		['weighing options'],
+	);
+});
+
 // ============================================================================
 // setSessionConfigOption()
 // ============================================================================
@@ -326,19 +466,20 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 		throw new Error('RequestError: Internal error (500)');
 	};
 	
-	const session = agent.registerSession('session-1', {
-		conn: agent['conn'],
-		sessionId: 'session-1',
-		canReadTextFile: false,
-	});
+	const created = await agent.newSession({cwd: '/tmp'});
+	const session = agent['sessions'].get(created.sessionId);
 	
-	const error = await t.throwsAsync(
-		() => agent.prompt({sessionId: 'session-1', prompt: [{type: 'text', text: 'crash please'}]}),
+	await t.throwsAsync(
+		() => agent.prompt({sessionId: created.sessionId, prompt: [{type: 'text', text: 'crash please'}]}),
 		{message: /RequestError/}
 	);
 	
 	// Ensure turnActive is reset even on error
 	t.false(session.turnActive);
+
+	const notice = session.messages[session.messages.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
@@ -371,6 +512,11 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 				u.update?.content?.text?.includes('Cancelled by user'),
 		),
 	);
+
+	const persisted = agent['sessions'].get(session.sessionId)!.messages;
+	const notice = persisted[persisted.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {
@@ -441,6 +587,20 @@ test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
 	t.false(reply.includes('Unrecognized slash command'));
 });
 
+test('AcpAgent.prompt - a built-in command exchange stays out of model context', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: '/help'}],
+	});
+
+	const messages = agent['sessions'].get(session.sessionId)!.messages;
+	t.is(messages.length, 2);
+	t.true(messages.every(m => m.displayOnly));
+	t.deepEqual(convertToModelMessages(messages), []);
+});
+
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/definitelynotacommand');
 	t.true(reply.includes('Unrecognized slash command'));
@@ -465,6 +625,44 @@ test('AcpAgent.cancel - aborts session for known session', async t => {
 	// We can't directly check the session's abortController since it's internal,
 	// but we verify no error was thrown
 	t.pass();
+});
+
+test('AcpAgent.cancel - stops a turn cancelled before the loop reads the signal', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+
+	t.is((await turn).stopReason, 'cancelled');
+	t.is(chatCalls, 0);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const cancelled = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+	t.is((await cancelled).stopReason, 'cancelled');
+
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	t.is(next.stopReason, 'end_turn');
 });
 
 // ============================================================================
@@ -600,3 +798,183 @@ test.serial(
 		);
 	},
 );
+
+/** Throwaway workspace for the timeline tests, removed by the caller. */
+const createTimelineWorkspace = (label: string): string => {
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	return cwd;
+};
+
+test('AcpAgent.extMethod - timeline/list returns captured entries', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('list');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+
+		const result = await agent.extMethod('timeline/list', {
+			sessionId: created.sessionId,
+		});
+		t.is((result.entries as any[]).length, 1);
+		t.is((result.entries as any[])[0].toolName, 'write_file');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/revert truncates messages and restores files', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('revert');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		writeFileSync(join(cwd, 'a.ts'), 'after');
+
+		const result = await agent.extMethod('timeline/revert', {
+			sessionId: created.sessionId,
+			checkpointId: entry.id,
+		});
+		t.is((result.revertedTo as any).id, entry.id);
+		t.is(readFileSync(join(cwd, 'a.ts'), 'utf-8'), 'before');
+		t.is(session.messages.length, 2);
+		t.is(session.messages[0].role, 'user');
+		t.true(
+			String(session.messages[1].content).includes('Reverted to before step 1'),
+		);
+		t.true(
+			session.messages[1].displayOnly,
+			'the revert notice must never reach the model',
+		);
+		t.deepEqual(
+			convertToModelMessages(session.messages).map((m: {role: string}) => m.role),
+			['user'],
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/revert truncates by tool call, not a stale index', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('reindex');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 5,
+			files: new Map([['a.ts', 'before']]),
+		});
+		writeFileSync(join(cwd, 'a.ts'), 'after');
+
+		// History shorter than the captured index, as compaction would leave it.
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+
+		await agent.extMethod('timeline/revert', {
+			sessionId: created.sessionId,
+			checkpointId: entry.id,
+		});
+
+		// The stale index would have left the whole turn in history.
+		t.is(session.messages.length, 2);
+		t.is(session.messages[0].content, 'edit a.ts');
+		t.is(session.messages[1].role, 'assistant');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/revert rejects an active turn', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.turnActive = true;
+	await t.throwsAsync(
+		agent.extMethod('timeline/revert', {
+			sessionId: created.sessionId,
+			checkpointId: 'any',
+		}),
+		{message: /prompt is in progress/},
+	);
+});
+
+test('AcpAgent.extMethod - timeline/list throws on missing session', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('timeline/list', {sessionId: 'missing'}),
+		{message: /Session not found/},
+	);
+});
+
+test('AcpAgent.prompt - recalls relevant project memories scoped to the session cwd, without accumulating across turns', async t => {
+	await new SemanticMemoryManager({cwd: '/tmp'}).addMemory({
+		content: 'Auth uses Clerk and avoids middleware.',
+	});
+
+	const capturedSystemPrompts: string[] = [];
+	const conn = createMockConn();
+	const initContext = createMockInitContext();
+	initContext.client = {
+		...initContext.client,
+		chat: async (messages: Array<{content: string}>) => {
+			capturedSystemPrompts.push(messages[0]?.content ?? '');
+			return {choices: [{message: {content: 'Test response'}}]};
+		},
+	} as any;
+	const agent = new AcpAgent(initContext, conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'refactor auth middleware handling'}],
+	});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'unrelated question about docs'}],
+	});
+
+	t.true(capturedSystemPrompts[0]?.includes('## Project Context'));
+	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
+	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
+});

@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 
 /**
  * Shape of the settings data sent to the webview. This is a flattened,
- * UI-friendly view of agents.config.json + nanocoder-preferences.json.
+ * UI-friendly view of agents.config.json + .mcp.json + nanocoder-preferences.json.
  */
 export interface SettingsData {
 	providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
@@ -24,20 +24,28 @@ export interface SettingsData {
  *   1. Check <cwd>/agents.config.json
  *   2. Fall back to ~/.config/nanocoder/agents.config.json
  * Same for nanocoder-preferences.json.
+ *
+ * MCP servers are the exception: they never live in agents.config.json. The
+ * CLI reads them from .mcp.json (see config/mcp-config-loader.ts), merging
+ * project, global and env sources rather than picking one file.
  */
 export class SettingsManager {
 	constructor(private outputChannel: { appendLine: (msg: string) => void }) {}
 
 	/**
 	 * Discover the active config file paths, preferring project-level files.
+	 *
+	 * `mcpConfig` is the file the "Edit" button should open: the project
+	 * .mcp.json when it exists, otherwise the global one.
 	 */
-	getConfigPaths(cwd: string): { agentsConfig: string; preferences: string } {
+	getConfigPaths(cwd: string): { agentsConfig: string; preferences: string; mcpConfig: string } {
 		const globalDir = this.getGlobalConfigDir();
 
 		const agentsConfig = this.resolveConfigPath(cwd, globalDir, 'agents.config.json');
 		const preferences = this.resolveConfigPath(cwd, globalDir, 'nanocoder-preferences.json');
+		const mcpConfig = this.resolveConfigPath(cwd, globalDir, '.mcp.json');
 
-		return { agentsConfig, preferences };
+		return { agentsConfig, preferences, mcpConfig };
 	}
 
 	/**
@@ -58,13 +66,8 @@ export class SettingsManager {
 			apiKeySet: Boolean(p.apiKey),
 		})) : [];
 
-		// Parse MCP servers
-		const mcpServers = Array.isArray(nc.mcpServers) ? nc.mcpServers.map((s: any) => ({
-			name: s.name || 'unnamed',
-			transport: s.transport || 'stdio',
-			command: s.command,
-			url: s.url,
-		})) : [];
+		// MCP servers come from .mcp.json, never agents.config.json
+		const mcpServers = this.readMcpServers(cwd);
 
 		// Parse alwaysAllow
 		const alwaysAllow: string[] = Array.isArray(nc.alwaysAllow)
@@ -187,6 +190,90 @@ export class SettingsManager {
 
 	// ----- Private helpers -----
 
+	/**
+	 * Read MCP servers the way the CLI does: merge <cwd>/.mcp.json, the global
+	 * .mcp.json and NANOCODER_MCPSERVERS(_FILE), first writer of a given name
+	 * wins. Precedence is env > project > global, matching mergeMCPConfigs().
+	 */
+	private readMcpServers(cwd: string): SettingsData['mcpServers'] {
+		const globalDir = this.getGlobalConfigDir();
+		const byName = new Map<string, SettingsData['mcpServers'][number]>();
+
+		const add = (servers: SettingsData['mcpServers']) => {
+			for (const server of servers) {
+				if (!byName.has(server.name)) {
+					byName.set(server.name, server);
+				}
+			}
+		};
+
+		add(this.parseMcpServers(this.readEnvMcpConfig()));
+		// cwd is the workspace folder, and the joined segment is a string literal,
+		// so there is no attacker-controlled component to traverse with.
+		add(this.parseMcpServers(this.readJsonSafe(path.join(cwd, '.mcp.json')))); // nosemgrep
+		add(this.parseMcpServers(this.readJsonSafe(path.join(globalDir, '.mcp.json')))); // nosemgrep
+
+		return Array.from(byName.values());
+	}
+
+	/**
+	 * Pull the raw config out of NANOCODER_MCPSERVERS, or the file that
+	 * NANOCODER_MCPSERVERS_FILE points at.
+	 */
+	private readEnvMcpConfig(): any {
+		let rawData = process.env.NANOCODER_MCPSERVERS;
+
+		if (!rawData && process.env.NANOCODER_MCPSERVERS_FILE) {
+			const envPath = process.env.NANOCODER_MCPSERVERS_FILE;
+			try {
+				if (fs.existsSync(envPath)) {
+					rawData = fs.readFileSync(envPath, 'utf-8');
+				}
+			} catch (error) {
+				this.outputChannel.appendLine(`[Settings] Failed to read ${envPath}: ${error}`);
+			}
+		}
+
+		if (!rawData) return {};
+
+		try {
+			return JSON.parse(rawData);
+		} catch (error) {
+			this.outputChannel.appendLine(`[Settings] Failed to parse NANOCODER_MCPSERVERS: ${error}`);
+			return null;
+		}
+	}
+
+	/**
+	 * Accept the .mcp.json wrapper shape `{ mcpServers: { name: {...} } }`, plus
+	 * the bare array the env vars also allow.
+	 */
+	private parseMcpServers(config: any): SettingsData['mcpServers'] {
+		if (!config || typeof config !== 'object') return [];
+
+		let entries: Array<[string, any]>;
+
+		if (Array.isArray(config)) {
+			entries = config.map((s: any) => [s?.name, s]);
+		} else if (config.mcpServers && typeof config.mcpServers === 'object' && !Array.isArray(config.mcpServers)) {
+			entries = Object.entries(config.mcpServers);
+		} else {
+			return [];
+		}
+
+		return entries
+			.filter(([, server]) => server && typeof server === 'object')
+			.map(([name, server]) => ({
+				name: name || server.name || 'unnamed',
+				// transport is required by the CLI, but hand-written .mcp.json files
+				// routinely omit it, so infer the same way the transport factory
+				// would rather than mislabelling a remote server as stdio.
+				transport: server.transport || (server.url && !server.command ? 'http' : 'stdio'),
+				command: server.command,
+				url: server.url,
+			}));
+	}
+
 	private getGlobalConfigDir(): string {
 		if (process.env.NANOCODER_CONFIG_DIR) {
 			return process.env.NANOCODER_CONFIG_DIR;
@@ -211,11 +298,13 @@ export class SettingsManager {
 	 * If neither exists, return the global path (it will be created on write).
 	 */
 	private resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
-		const projectPath = path.join(cwd, fileName);
+		// fileName is never user input - both call sites pass a string literal.
+		// Same shape as getConfigPath() in source/config/index.ts.
+		const projectPath = path.join(cwd, fileName); // nosemgrep
 		if (fs.existsSync(projectPath)) {
 			return projectPath;
 		}
-		return path.join(globalDir, fileName);
+		return path.join(globalDir, fileName); // nosemgrep
 	}
 
 	private readJsonSafe(filePath: string): any {
@@ -275,7 +364,9 @@ export class SettingsManager {
 			if (!obj[pathArgs[i]] || typeof obj[pathArgs[i]] !== 'object') {
 				obj[pathArgs[i]] = {};
 			}
-			obj = obj[pathArgs[i]];
+			// Keys are string literals from this file's own call sites, never
+			// user input, so no __proto__ can reach the walk.
+			obj = obj[pathArgs[i]]; // nosemgrep
 		}
 		obj[pathArgs[pathArgs.length - 1]] = value;
 		this.atomicWrite(filePath, prefs);

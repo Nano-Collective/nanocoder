@@ -13,6 +13,10 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
 import {ChatWebviewProvider} from './chat-webview-provider';
+import {
+	NanocoderCodeLensProvider,
+	sendCodeLensPrompt,
+} from './code-lens-provider';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -55,6 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register Webview Provider
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
+		chatProvider,
 		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
 			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
 			// Without this VS Code destroys the webview on hide, wiping the transcript.
@@ -102,10 +107,11 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('nanocoder.newChat', () => {
 			acpClient.newChat();
+			chatProvider.resetSessionState();
 			chatProvider.postMessage({type: 'clear'});
+			chatProvider.postMessage({type: 'updateTimeline', entries: []});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),
-    
 		vscode.commands.registerCommand('nanocoder.cancel', () => {
 			outputChannel.appendLine('[Extension] Cancel requested.');
 			void acpClient.cancel();
@@ -113,6 +119,25 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nanocoder.copyLastCodeBlock', () => {
 			chatProvider.requestCopyLastCodeBlock();
 		}),
+	);
+
+	// Inline "Explain Code" / "Generate Tests" links above every function and
+	// class, so a symbol can be handed to the agent without leaving the editor.
+	const codeLensProvider = new NanocoderCodeLensProvider();
+	context.subscriptions.push(
+		codeLensProvider,
+		vscode.languages.registerCodeLensProvider({scheme: 'file'}, codeLensProvider),
+		vscode.workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration('nanocoder.codeLens')) {
+				codeLensProvider.refresh();
+			}
+		}),
+		vscode.commands.registerCommand('nanocoder.explainCode', (uri?: vscode.Uri, range?: vscode.Range) =>
+			sendCodeLensPrompt(chatProvider, 'Explain what this code does.', uri, range),
+		),
+		vscode.commands.registerCommand('nanocoder.generateTests', (uri?: vscode.Uri, range?: vscode.Range) =>
+			sendCodeLensPrompt(chatProvider, 'Write unit tests for this code.', uri, range),
+		),
 	);
 
 	// Push active editor state to the CLI so the input box can show an

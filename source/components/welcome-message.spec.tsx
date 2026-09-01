@@ -14,6 +14,25 @@ const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
+
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+/**
+ * Column the first non-space character of the line matching `pattern` sits in,
+ * with colour codes stripped so they do not count toward the offset.
+ */
+function indentOf(frame: string, pattern: RegExp): number {
+	const line = frame
+		.split('\n')
+		.map(l => l.replace(ANSI, ''))
+		.find(l => pattern.test(l));
+
+	if (line === undefined) {
+		throw new Error(`no line matched ${pattern}`);
+	}
+
+	return line.search(/\S/);
+}
 const VERSION = packageJson.version;
 
 // ============================================================================
@@ -61,6 +80,17 @@ test('WelcomeMessage shows quick tips in narrow layout', t => {
 	t.regex(output!, /\/help for commands/);
 	t.regex(output!, /Ctrl\+C to quit/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows the given tip in narrow layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 50;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('Tip: Short pinned tip.'));
 	process.stdout.columns = originalColumns;
 });
 
@@ -137,6 +167,54 @@ test('WelcomeMessage shows help command for normal terminal', t => {
 	t.truthy(output);
 	t.regex(output!, /\/help for help/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows the given tip in full layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('Tip: Short pinned tip.'));
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage aligns the tip with the left edge of the box above it', t => {
+	const originalColumns = process.stdout.columns;
+
+	for (const columns of [50, 120]) {
+		process.stdout.columns = columns;
+
+		const {lastFrame} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const output = lastFrame() ?? '';
+
+		t.is(
+			indentOf(output, /^\s*╰/),
+			indentOf(output, /Tip: Short pinned tip\./),
+			`tip is off the box's left edge at ${columns} columns`,
+		);
+	}
+
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage falls back to a catalogue tip when none is given', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const output = lastFrame() ?? '';
+
+	// Only the label is asserted. ink-testing-library renders to a fixed 100
+	// column stdout regardless of process.stdout.columns, so a long catalogue
+	// tip wraps and a full-string match would break on tip length rather than
+	// on anything this test cares about. getRandomTip's own spec covers which
+	// tip comes back.
+	t.regex(output, /Tip: \S/);
 	process.stdout.columns = originalColumns;
 });
 

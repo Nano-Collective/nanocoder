@@ -82,11 +82,32 @@ export interface ExtensionMessageCopyLastCodeBlock {
 	type: 'copyLastCodeBlock';
 }
 
+/** Prompt built by an editor code lens; the composer submits it verbatim. */
+export interface ExtensionMessageRunPrompt {
+	type: 'runPrompt';
+	text: string;
+}
+
 export interface ExtensionMessageCopyResult {
 	type: 'copyResult';
 	ok: boolean;
 	chars?: number;
 	error?: string;
+}
+
+export interface TimelineCheckpoint {
+	id: string;
+	seq: number;
+	toolCallId: string;
+	toolName: string;
+	title: string;
+	timestamp: string;
+	filesChanged: string[];
+}
+
+export interface ExtensionMessageUpdateTimeline {
+	type: 'updateTimeline';
+	entries: TimelineCheckpoint[];
 }
 
 export interface ExtensionMessageUpdateSessions {
@@ -129,6 +150,24 @@ export interface ExtensionMessagePathInfoResolved {
 	path: string;
 	name: string;
 	kind: 'file' | 'folder';
+}
+
+export interface ExtensionMessagePlanReviewRequested {
+	type: 'planReviewRequested';
+	artifactPath: string;
+}
+
+export interface ExtensionMessagePlanReviewError {
+	type: 'planReviewError';
+	message: string;
+}
+
+export interface ExtensionMessageArtifactsUpdated {
+	type: 'artifactsUpdated';
+	artifacts: Array<{
+		kind: 'implementation_plan' | 'task' | 'walkthrough';
+		path: string;
+	}>;
 }
 
 /** One `@` autocomplete suggestion. */
@@ -176,9 +215,14 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSettingsUpdated
 	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
+	| ExtensionMessagePlanReviewRequested
+	| ExtensionMessagePlanReviewError
+	| ExtensionMessageArtifactsUpdated
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
-	| ExtensionMessageMentionCompletions;
+	| ExtensionMessageRunPrompt
+	| ExtensionMessageMentionCompletions
+	| ExtensionMessageUpdateTimeline;
 
 
 // ---------------------------------------------------------
@@ -263,7 +307,7 @@ export interface WebviewMessageUpdateSetting {
 
 export interface WebviewMessageOpenConfigFile {
 	type: 'openConfigFile';
-	file: 'agents.config.json' | 'nanocoder-preferences.json';
+	file: 'agents.config.json' | 'nanocoder-preferences.json' | '.mcp.json';
 }
 
 export interface WebviewMessageRestartAcp {
@@ -295,6 +339,14 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageApprovePlan {
+	type: 'approvePlan';
+}
+
+export interface WebviewMessageRevisePlan {
+	type: 'revisePlan';
+}
+
 export interface WebviewMessageCopyToClipboard {
 	type: 'copyToClipboard';
 	text: string;
@@ -312,6 +364,15 @@ export interface WebviewMessageRequestMentionCompletions {
 	type: 'requestMentionCompletions';
 	query: string;
 	requestId: number;
+}
+
+export interface WebviewMessageRequestTimeline {
+	type: 'requestTimeline';
+}
+
+export interface WebviewMessageRevertToCheckpoint {
+	type: 'revertToCheckpoint';
+	checkpointId: string;
 }
 
 export type WebviewToExtensionMessage =
@@ -337,5 +398,9 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageApprovePlan
+	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions;
+	| WebviewMessageRequestMentionCompletions
+	| WebviewMessageRequestTimeline
+	| WebviewMessageRevertToCheckpoint;
