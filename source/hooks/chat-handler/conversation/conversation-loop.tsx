@@ -68,13 +68,19 @@ interface ProcessAssistantResponseParams {
 	addToChatQueue: (component: React.ReactNode) => void;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	developmentMode:
+		| 'normal'
+		| 'auto-accept'
+		| 'yolo'
+		| 'plan'
+		| 'architect'
+		| 'headless';
 	// Live mode ref, read per tool call so a mid-turn mode switch (e.g. flipping
 	// to yolo while tools execute) is honored immediately. Falls back to the
 	// snapshot `developmentMode` for callers that don't supply a ref (subagents,
 	// plain shell).
 	developmentModeRef?: React.RefObject<
-		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect' | 'headless'
 	>;
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;

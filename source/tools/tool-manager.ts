@@ -54,6 +54,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
 	headless: ['ask_user', 'agent'],
+	architect: [],
 };
 
 /**
