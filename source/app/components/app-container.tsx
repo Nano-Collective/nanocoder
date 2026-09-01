@@ -21,6 +21,24 @@ export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
 	return marker ? `⎇ ${branch} (${marker})` : `⎇ ${branch}`;
 }
 
+/**
+ * Format the project/workspace segment shown in the startup summary.
+ *
+ * Keep this compact and user-oriented: show the directory Nanocoder is
+ * operating in, then append the active branch when one is available.
+ */
+export function formatBootSummaryProjectLabel(
+	workingDirectory: string,
+	status: GitStatusSummary | null,
+): string {
+	const workspace = homeRelative(workingDirectory);
+	if (!status) return workspace;
+
+	const {branch, marker} = formatGitStatusSummary(status);
+	const branchLabel = marker ? `${branch} (${marker})` : branch;
+	return `${workspace} · ${branchLabel}`;
+}
+
 export interface AppContainerProps {
 	shouldShowWelcome: boolean;
 	currentProvider: string;
@@ -54,14 +72,16 @@ function BootSummary({
 }): React.ReactElement {
 	const {colors} = useTheme();
 	const {isNarrow} = useResponsiveTerminal();
-	const configPath = getClosestConfigFile('agents.config.json');
-	const shortConfig = homeRelative(configPath);
+	// Trigger config discovery as before, but avoid surfacing that unrelated
+	// file path as the primary startup context. Users need to see the workspace
+	// Nanocoder will operate in.
+	getClosestConfigFile('agents.config.json');
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
 	const gitStatus = getGitStatusSummarySync();
-	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
+	const projectLabel = formatBootSummaryProjectLabel(process.cwd(), gitStatus);
 
 	// Narrow terminals: provider + model + mode on the first line, with the
-	// branch (when present) underneath so the line doesn't overflow.
+	// workspace/branch underneath so the line doesn't overflow.
 	if (isNarrow) {
 		if (!provider || !model) return <></>;
 		return (
@@ -79,7 +99,7 @@ function BootSummary({
 						</>
 					)}
 				</Text>
-				{gitLabel && <Text color={colors.primary}>{gitLabel}</Text>}
+				<Text color={colors.primary}>{projectLabel}</Text>
 			</Box>
 		);
 	}
@@ -100,24 +120,10 @@ function BootSummary({
 						</>
 					)}
 					<Text color={colors.secondary}> · </Text>
-					<Text color={colors.secondary}>{shortConfig}</Text>
-					{gitLabel && (
-						<>
-							<Text color={colors.secondary}> · </Text>
-							<Text color={colors.primary}>{gitLabel}</Text>
-						</>
-					)}
+					<Text color={colors.primary}>{projectLabel}</Text>
 				</>
 			) : (
-				<>
-					<Text color={colors.secondary}>{shortConfig}</Text>
-					{gitLabel && (
-						<>
-							<Text color={colors.secondary}> · </Text>
-							<Text color={colors.primary}>{gitLabel}</Text>
-						</>
-					)}
-				</>
+				<Text color={colors.primary}>{projectLabel}</Text>
 			)}
 		</Text>
 	);
