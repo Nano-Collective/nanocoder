@@ -1,9 +1,28 @@
+import {mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
+import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
 import {parseMarkdown} from './index.js';
 
 console.log(`\nindex.spec.ts`);
+
+// Highlighting consults the `syntaxTheme` preference, so run against an empty
+// config directory — a contributor who sets that preference must not change
+// which colours these assertions see.
+const testConfigDir = join(tmpdir(), `nanocoder-md-spec-${process.pid}`);
+
+test.before(() => {
+	mkdirSync(testConfigDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+
+test.after.always(() => {
+	rmSync(testConfigDir, {recursive: true, force: true});
+	delete process.env.NANOCODER_CONFIG_DIR;
+});
 
 const mockColors: Colors = {
 	primary: '#3b82f6',
@@ -163,6 +182,33 @@ test('parseMarkdown handles code blocks without language', t => {
 	const text = '```\nPlain code\n```';
 	const result = parseMarkdown(text, mockColors);
 	t.true(result.includes('Plain code'));
+});
+
+// Code blocks used to render in cli-highlight's own palette: the parser passed
+// `theme: 'default'`, a string where the library expects a token -> formatter
+// map, so the option was dropped. Colour must come from the caller's palette.
+test('parseMarkdown highlights code blocks with the supplied colors', t => {
+	// Two separate things are going on here, both load-bearing.
+	//
+	// chalk.level = 3 because the runner reports no colour support, so the
+	// assertion would otherwise compare two unstyled strings.
+	//
+	// A distinct palette object because chalk bakes the colour MODEL into a
+	// builder when the builder is created: chalk.hex() picks ansi16, ansi256
+	// or truecolor from chalk.level at that moment. Whether to emit codes is
+	// re-checked per call, but which codes is not. getSyntaxTheme memoises
+	// per palette identity, so reusing mockColors here would reuse builders
+	// frozen at the runner's default level - emitting [91m where the
+	// assertion builds [38;2;... and the two would not match.
+	const previousLevel = chalk.level;
+	chalk.level = 3;
+	try {
+		const colors: Colors = {...mockColors, primary: '#ff0000'};
+		const result = parseMarkdown('```javascript\nconst x = 5;\n```', colors);
+		t.true(result.includes(chalk.hex(colors.primary)('const')));
+	} finally {
+		chalk.level = previousLevel;
+	}
 });
 
 // Edge case tests

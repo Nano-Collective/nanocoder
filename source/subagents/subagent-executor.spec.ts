@@ -1,7 +1,13 @@
 import test from 'ava';
 import {SubagentExecutor} from './subagent-executor.js';
-import {getModelContextLimit} from '@/models';
+import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {
+	getModelContextLimit,
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
+import type {MemoryFinder} from '@/memory/project-context';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	LLMClient,
@@ -10,6 +16,12 @@ import type {
 	ToolExecutionContext,
 } from '@/types/core';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
+import {
+	resetAutoCompactSession,
+	setAutoCompactEnabled,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
 console.log('\nsubagent-executor.spec.ts');
@@ -22,7 +34,7 @@ function createMockToolManager(
 			handler: (
 				args: unknown,
 				options?: ToolExecutionContext,
-			) => Promise<string>;
+			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
 		}
@@ -172,6 +184,42 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('stringifies structured tool output without llmContent', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({someField: 'value'}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-structured',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The tool returned structured data.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Read structured data',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'The tool returned structured data.');
+	t.is(toolResults[0]?.content, '{"someField":"value"}');
 });
 
 test.serial('forwards the parent execution context to subagent tools', async t => {
@@ -372,6 +420,132 @@ test.serial('handles unknown tool calls', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Handled missing tool');
+});
+
+// --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
+
+const repeatedCallResponse = (name = 'read_file') => ({
+	content: '',
+	tool_calls: [
+		{id: 'tc-loop', function: {name, arguments: '{"path": "x"}'}},
+	],
+});
+
+test.serial('repeated identical tool calls trip the retry cap', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	// Default maxRepeatedToolCalls = 3: the identical call executes on turns 1
+	// and 2; the third consecutive emission stops the run before executing.
+	const client = createMockClient([
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		{content: 'never reached'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop forever',
+	});
+
+	t.false(result.success);
+	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+	t.regex(result.error || '', /maxRepeatedToolCalls/);
+});
+
+test.serial('a tripped retry cap still returns the work done before the stop', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	const client = createMockClient([
+		{...repeatedCallResponse(), content: 'found the config file'},
+		{...repeatedCallResponse(), content: 'it sets the timeout to 30s'},
+		repeatedCallResponse(),
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop after doing useful work',
+	});
+
+	t.false(result.success);
+	t.regex(result.output, /found the config file/);
+	t.regex(result.output, /it sets the timeout to 30s/);
+});
+
+test.serial('identical tool calls one under the retry cap complete normally', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	const client = createMockClient([
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		{content: 'done after two repeats'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Repeat twice then finish',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'done after two repeats');
+});
+
+test.serial('repeated unknown-tool calls trip the retry cap', async t => {
+	// A subagent stuck calling a nonexistent tool must trip the cap too — the
+	// signature covers every emitted call, not just executable ones.
+	const toolManager = createMockToolManager();
+	const client = createMockClient([
+		repeatedCallResponse('ghost_tool'),
+		repeatedCallResponse('ghost_tool'),
+		repeatedCallResponse('ghost_tool'),
+		{content: 'never reached'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop on a missing tool',
+	});
+
+	t.false(result.success);
+	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+});
+
+test.serial('retry cap honors a custom configured maxRepeatedToolCalls', async t => {
+	const retries = getAppConfig().retries;
+	if (!retries) {
+		t.fail('resolved config must carry retry limits');
+		return;
+	}
+	const original = retries.maxRepeatedToolCalls;
+	retries.maxRepeatedToolCalls = 2;
+	try {
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'same output', readOnly: true},
+		});
+		const client = createMockClient([
+			repeatedCallResponse(),
+			repeatedCallResponse(),
+			{content: 'never reached'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Loop with a tight cap',
+		});
+
+		t.false(result.success);
+		t.regex(result.error || '', /repeated the same tool call 2 times/i);
+	} finally {
+		retries.maxRepeatedToolCalls = original;
+	}
 });
 
 test.serial('respects abort signal', async t => {
@@ -998,4 +1172,227 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.true(result.success);
 	t.false(wrote, 'a read-only subagent must not be able to write files');
 	t.regex(toolResult, /not available to this subagent/);
+});
+
+test.serial('injects relevant project memories into the subagent system prompt', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => [
+			{
+				id: 'mem-1',
+				content: 'Auth flow uses Clerk and avoids middleware.',
+				category: 'architecture',
+				timestamp: '2026-01-01T00:00:00.000Z',
+			},
+		],
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: true},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.true(systemPrompt.includes('## Project Context'));
+	t.true(systemPrompt.includes('Auth flow uses Clerk and avoids middleware.'));
+});
+
+test.serial('skips subagent memory recall when semantic memory is disabled', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	let finderCalls = 0;
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => {
+			finderCalls++;
+			return [
+				{
+					id: 'mem-1',
+					content: 'Auth flow uses Clerk and avoids middleware.',
+					category: 'architecture',
+					timestamp: '2026-01-01T00:00:00.000Z',
+				},
+			];
+		},
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: false},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.is(finderCalls, 0);
+	t.false(systemPrompt.includes('## Project Context'));
+});
+
+test.serial(
+	'caps subagent history before client.chat without starting on a tool row',
+	async t => {
+		if (getAppConfig().sessions) {
+			getAppConfig().sessions.maxMessages = 3;
+		}
+
+		const payloads: Message[][] = [];
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'ok', readOnly: true},
+		});
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't1',
+							function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't2',
+							function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+						},
+					],
+				},
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 't3',
+							function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+						},
+					],
+				},
+				{content: 'done'},
+			],
+			messages => {
+				payloads.push(messages);
+			},
+		);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		try {
+			const result = await executor.execute({
+				subagent_type: 'explore',
+				description: 'Read a few files',
+			});
+
+			t.true(result.success);
+			t.is(payloads.length, 4);
+			const last = payloads[3];
+			t.is(last[0]?.role, 'system');
+			t.not(last[1]?.role, 'tool');
+			t.true(
+				last.length <= 5,
+				'cap walks back to keep a full assistant/tool turn',
+			);
+		} finally {
+			reloadAppConfig();
+		}
+	},
+);
+
+test.serial('compacts subagent history after a tool turn', async t => {
+	resetSessionContextLimit();
+	setSessionContextLimit(80);
+	setAutoCompactEnabled(true);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const blob = 'old context sentence. '.repeat(80);
+	const payloads: Message[][] = [];
+	let reads = 0;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				reads += 1;
+				return reads === 1 ? blob : `ok-${reads}`;
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't1',
+						function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't2',
+						function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't3',
+						function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+					},
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			payloads.push(messages);
+		},
+	);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	try {
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read a file',
+		});
+		t.true(result.success);
+		t.true(payloads.length >= 4);
+		const last = payloads[3];
+		t.is(last[0]?.role, 'system');
+		t.false(
+			last.some(
+				message =>
+					typeof message.content === 'string' && message.content === blob,
+			),
+			'an earlier tool blob must be compressed out of the later model turn',
+		);
+	} finally {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+	}
 });

@@ -421,3 +421,91 @@ test('exposes setters for every state slice', t => {
 		t.is(typeof hook[name], 'function', `expected ${name} to be a function`);
 	}
 });
+
+test('toggleTaskList toggles showTaskList and clears the unread marker when expanding', t => {
+	const {hook, instance} = setup();
+
+	t.true(hook.showTaskList);
+	t.false(hook.taskListHasUnread);
+
+	// Collapse
+	hook.toggleTaskList();
+	instance.rerender(<Probe />);
+	t.false(captured!.showTaskList);
+
+	// Update tasks while collapsed -> sets the unread marker
+	captured!.setLiveTaskList([
+		{id: '1', title: 'Task 1', status: 'pending', createdAt: '', updatedAt: ''},
+	]);
+	instance.rerender(<Probe />);
+	t.true(captured!.taskListHasUnread);
+
+	// Expand -> clears the unread marker
+	captured!.toggleTaskList();
+	instance.rerender(<Probe />);
+	t.true(captured!.showTaskList);
+	t.false(captured!.taskListHasUnread);
+});
+
+test('setLiveTaskList clears the unread marker when tasks become empty or null', t => {
+	const {hook, instance} = setup();
+
+	// Collapse
+	hook.toggleTaskList();
+	instance.rerender(<Probe />);
+	t.false(captured!.showTaskList);
+
+	// Add tasks
+	captured!.setLiveTaskList([
+		{id: '1', title: 'Task 1', status: 'pending', createdAt: '', updatedAt: ''},
+	]);
+	instance.rerender(<Probe />);
+	t.true(captured!.taskListHasUnread);
+
+	// Clear tasks
+	captured!.setLiveTaskList(null);
+	instance.rerender(<Probe />);
+	t.false(captured!.taskListHasUnread);
+});
+
+test('setLiveTaskList does not mark unread when the list is unchanged', t => {
+	const {hook, instance} = setup();
+
+	const tasks = [
+		{
+			id: '1',
+			title: 'Task 1',
+			status: 'in_progress' as const,
+			createdAt: '',
+			updatedAt: '',
+		},
+	];
+
+	hook.setLiveTaskList(tasks);
+	hook.toggleTaskList();
+	instance.rerender(<Probe />);
+	t.false(captured!.showTaskList);
+	t.false(captured!.taskListHasUnread);
+
+	// Same ids and statuses - a re-set, not an update.
+	captured!.setLiveTaskList([{...tasks[0]}]);
+	instance.rerender(<Probe />);
+	t.false(captured!.taskListHasUnread);
+
+	// A status change is a real update.
+	captured!.setLiveTaskList([{...tasks[0], status: 'completed'}]);
+	instance.rerender(<Probe />);
+	t.true(captured!.taskListHasUnread);
+});
+
+test('setLiveTaskList does not mark unread while the list is expanded', t => {
+	const {hook, instance} = setup();
+
+	hook.setLiveTaskList([
+		{id: '1', title: 'Task 1', status: 'pending', createdAt: '', updatedAt: ''},
+	]);
+	instance.rerender(<Probe />);
+
+	t.true(captured!.showTaskList);
+	t.false(captured!.taskListHasUnread);
+});

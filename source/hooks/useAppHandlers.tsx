@@ -745,6 +745,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: props.developmentMode,
 					lastApiUsage: props.lastApiUsage,
 					apiCallHistory: props.apiCallHistory,
+					sessionId: props.ensureCurrentSessionId(),
 				},
 				// Injected hook context must not reach the transcript — fall back to
 				// the raw message so the user still sees what they typed.
@@ -779,6 +780,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.developmentMode,
 			props.lastApiUsage,
 			props.apiCallHistory,
+			props.ensureCurrentSessionId,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

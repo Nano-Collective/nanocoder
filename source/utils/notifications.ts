@@ -151,6 +151,21 @@ $notify.Dispose()
 	execFile('powershell', ['-NoProfile', '-Command', script], () => {});
 }
 
+// A terminal bell is delivered by the terminal emulator itself, so it still
+// lands over SSH or inside tmux where the desktop notifier daemons are not
+// reachable. BEL is non-printing, so writing it mid-render leaves Ink frames
+// intact.
+function ringTerminalBell(): void {
+	if (!process.stdout.isTTY) {
+		return;
+	}
+	try {
+		process.stdout.write('\x07');
+	} catch {
+		// stdout can already be closed during shutdown - a missed bell is harmless
+	}
+}
+
 function sendNativeNotification(title: string, message: string): void {
 	switch (process.platform) {
 		case 'darwin':
@@ -185,6 +200,10 @@ export function sendNotification(event: NotificationEvent): void {
 	// TUI, stdout is captured by Ink so this is harmless.
 	if (process.env.NANOCODER_DAEMON_PROCESS) {
 		console.log(`Notification fired: event=${event} title="${title}"`);
+	}
+
+	if (_config.bell) {
+		ringTerminalBell();
 	}
 
 	sendNativeNotification(title, message);

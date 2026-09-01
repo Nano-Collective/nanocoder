@@ -168,7 +168,7 @@ The AI also has a task tool and will proactively create and update tasks when wo
 
 ### Project Setup with `/init`
 
-Run `/init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `/init --force` to regenerate it.
+Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 
@@ -262,6 +262,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |

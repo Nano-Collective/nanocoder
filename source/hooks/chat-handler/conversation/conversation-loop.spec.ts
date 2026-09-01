@@ -1,4 +1,5 @@
 import test from 'ava';
+import {dropOrphanedToolResults} from '@/ai-sdk-client/converters/message-converter.js';
 import {clearAppConfig, getAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
@@ -9,6 +10,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import type {RetryLimitsConfig} from '@/types/index';
 import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
@@ -19,6 +21,7 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
+import {setGlobalQuestionHandler} from '@/utils/question-queue.js';
 import {setGlobalToolConfirmHandler} from '@/utils/tool-confirm-queue.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
@@ -1500,6 +1503,15 @@ function setupAutoCompactTestEnv() {
 	setAutoCompactThreshold(50);
 	resetSessionContextLimit();
 	clearAppConfig();
+	// Pin the agent-loop retry limits to their shipped defaults. Many tests here
+	// count exact chat calls, and a `nanocoder.retries` block in the developer's
+	// project or personal config would otherwise change those counts.
+	const retries = getAppConfig().retries;
+	if (retries) {
+		retries.maxRepeatedToolCalls = 3;
+		retries.maxEmptyTurns = 2;
+		retries.maxMalformedRetries = 2;
+	}
 	resetFallbackNotice();
 	resetLastTurnHadReasoning();
 }
@@ -2149,4 +2161,666 @@ test.serial('processAssistantResponse - a synthetic diagnostics prompt does not 
 		nudge.includes('write_walkthrough'),
 		'the walkthrough nudge must still fire once the real work is done',
 	);
+});
+// ============================================================================
+// Configurable Retry Limits (issue #897)
+// ============================================================================
+
+// Client that returns the identical tool call on every turn — the signature
+// the repeated-call loop detector keys on.
+const createRepeatingToolClient = (onChat?: () => void) => ({
+	chat: async (): Promise<LLMChatResponse> => {
+		onChat?.();
+		return {
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content: '',
+						tool_calls: [
+							{
+								id: 'call_loop',
+								function: {name: 'read_file', arguments: '{"path": "/tmp/x"}'},
+							},
+						],
+					},
+				},
+			],
+			toolsDisabled: false,
+		};
+	},
+});
+
+const repeatingToolManager = () =>
+	createMockToolManager({tools: ['read_file'], needsApproval: false});
+
+// Pin the resolved retry limits for the duration of a test and restore them
+// afterwards. Without this the assertions read whatever `nanocoder.retries` the
+// developer happens to have in their project or personal config, since the
+// per-test clearAppConfig() re-resolves from disk.
+const withRetryLimits = async (
+	overrides: Partial<RetryLimitsConfig>,
+	run: () => Promise<void>,
+) => {
+	const retries = getAppConfig().retries;
+	if (!retries) {
+		throw new Error('Resolved config should always carry retry limits');
+	}
+	const originals = {...retries};
+	Object.assign(retries, overrides);
+	try {
+		await run();
+	} finally {
+		Object.assign(retries, originals);
+	}
+};
+
+test.serial('repeated-tool-call limit pauses and stops when the user declines', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		t.regex(question.question, /repeated the same tool call 3 times in a row/);
+		// First option is the safe default: stop.
+		return question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	// Default maxRepeatedToolCalls = 3: turns 1 and 2 execute, turn 3 trips
+	// the limit and prompts. Declining stops the loop.
+	t.is(chatCallCount, 3, 'Loop should stop at the default limit of 3');
+	t.is(questionCount, 1, 'Should pause and ask exactly once');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call 3 times in a row'),
+	);
+	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
+});
+
+test.serial('repeated-tool-call limit grants another window when the user continues', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const questionTexts: string[] = [];
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		questionTexts.push(question.question);
+		// Continue on the first prompt, stop on the second.
+		return questionCount === 1 ? question.options[1] : question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	// Continuing resets the streak: 3 turns to the first prompt, then 3 more
+	// identical turns to the second prompt, where the user stops.
+	t.is(chatCallCount, 6, 'Continue should grant a full new window of turns');
+	t.is(questionCount, 2, 'Should re-prompt after the granted window is spent');
+	// The per-window streak resets on continue, but the reported count is the
+	// true cumulative streak, so the second prompt says 6 rather than 3 again.
+	t.regex(questionTexts[0], /repeated the same tool call 3 times in a row/);
+	t.regex(questionTexts[1], /repeated the same tool call 6 times in a row/);
+	const continueNotice = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('Continuing'),
+	);
+	t.truthy(continueNotice, 'Should queue an InfoMessage when continuing');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.regex(
+		stopMessage?.props?.message ?? '',
+		/repeated the same tool call 6 times in a row/,
+		'Stop message should report the cumulative streak, not the window count',
+	);
+});
+
+test.serial('repeated-tool-call limit does not fire one call under the limit', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	// Two identical tool turns (one under the default limit of 3), then a
+	// terminal text-only response.
+	const client = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount <= 2) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'call_loop',
+										function: {
+											name: 'read_file',
+											arguments: '{"path": "/tmp/x"}',
+										},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			return {
+				choices: [{message: {role: 'assistant', content: 'Done.'}}],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client,
+			toolManager: repeatingToolManager(),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'All three turns should run to natural completion');
+	t.is(questionCount, 0, 'Must not prompt below the limit');
+});
+
+test.serial('repeated-tool-call limit honors a custom configured value', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 2}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 2, 'Loop should stop at the configured limit of 2');
+	t.is(questionCount, 1, 'Should pause and ask at the configured limit');
+});
+
+test.serial('repeated-tool-call limit hard-stops without prompting in non-interactive mode', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[1];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			nonInteractiveMode: true,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should hard-stop at the limit');
+	t.is(questionCount, 0, 'Must not prompt when there is nobody to ask');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.truthy(stopMessage, 'Should still queue the loop-detected ErrorMessage');
+});
+
+// Client that always calls a tool the tool manager does not know — this goes
+// through the unknown-tool error branch rather than tool execution.
+const createUnknownToolClient = (onChat?: () => void) => ({
+	chat: async (): Promise<LLMChatResponse> => {
+		onChat?.();
+		return {
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content: '',
+						tool_calls: [
+							{
+								id: 'call_ghost',
+								function: {name: 'ghost_tool', arguments: '{"x": 1}'},
+							},
+						],
+					},
+				},
+			],
+			toolsDisabled: false,
+		};
+	},
+});
+
+test.serial('repeated unknown-tool calls count toward the repeated-call limit', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		t.regex(question.question, /repeated the same tool call 3 times in a row/);
+		// Stop: the safe default.
+		return question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createUnknownToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	// The unknown-tool self-correction branch must not recurse unbounded: the
+	// third identical unknown-tool turn trips the same cap as a real call.
+	t.is(chatCallCount, 3, 'Third identical unknown-tool turn trips the limit');
+	t.is(questionCount, 1, 'Should pause and ask instead of recursing unbounded');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call 3 times in a row'),
+	);
+	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
+});
+
+test.serial('repeated unknown-tool calls grant another window when the user continues', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const questionTexts: string[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		questionTexts.push(question.question);
+		// Continue on the first prompt, stop on the second.
+		return questionCount === 1 ? question.options[1] : question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createUnknownToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 6, 'Continue should grant a full new window of turns');
+	t.is(questionCount, 2, 'Should re-prompt after the granted window is spent');
+	t.regex(questionTexts[0], /repeated the same tool call 3 times in a row/);
+	t.regex(questionTexts[1], /repeated the same tool call 6 times in a row/);
+});
+
+test.serial('unknown-tool feedback is paired with its call so it reaches the model', async t => {
+	// The error result only reaches the model when its tool_call is in the
+	// assistant message: dropOrphanedToolResults strips results whose call is
+	// missing, leaving the next turn's context unchanged and the model repeating
+	// the same ghost call until the cap trips.
+	const messageSnapshots: Message[][] = [];
+
+	setGlobalQuestionHandler(async question => question.options[0]);
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createUnknownToolClient(),
+			toolManager: repeatingToolManager(),
+			setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant');
+	t.true(
+		(assistant?.tool_calls ?? []).some(tc => tc.id === 'call_ghost'),
+		'the ghost call must be in the assistant message',
+	);
+	const delivered = dropOrphanedToolResults(latest);
+	t.true(
+		delivered.some(m => m.role === 'tool' && m.tool_call_id === 'call_ghost'),
+		'the unknown-tool error must survive orphan pruning',
+	);
+});
+
+test.serial('non-interactive approval exit pairs unconfirmed tools with cancellation results', async t => {
+	const messageSnapshots: Message[][] = [];
+
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => ({
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: '',
+							tool_calls: [
+								{
+									id: 'call_guarded',
+									function: {name: 'guarded_tool', arguments: '{}'},
+								},
+							],
+						},
+					},
+				],
+				toolsDisabled: false,
+			}),
+		},
+		toolManager: createMockToolManager({
+			tools: ['guarded_tool'],
+			needsApproval: true,
+		}),
+		nonInteractiveMode: true,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	// The exit is terminal, so the saved history must pair the announced call
+	// with a result - a later resume would otherwise replay an assistant
+	// tool_call that never received one, which strict providers reject.
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant' && m.tool_calls);
+	t.true(
+		(assistant?.tool_calls ?? []).some(tc => tc.id === 'call_guarded'),
+		'the guarded call must be announced in the assistant message',
+	);
+	const result = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_guarded',
+	);
+	t.truthy(result, 'the unconfirmed tool must get a paired result');
+	// Not the user-cancellation wording: nobody declined this tool, and a
+	// resumed interactive session must not read the history as a refusal.
+	t.regex(String(result?.content), /approval unavailable in non-interactive/i);
+	t.notRegex(String(result?.content), /cancelled by the user/i);
+});
+
+test.serial('escape mid-execution pairs the tools the confirm loop never reached', async t => {
+	const messageSnapshots: Message[][] = [];
+	const controller = new AbortController();
+
+	// Approve the first tool, then abort before it finishes so the loop breaks
+	// with the second tool still pending.
+	setGlobalToolConfirmHandler(async () => {
+		controller.abort();
+		return true;
+	});
+
+	let chatCallCount = 0;
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => {
+				chatCallCount += 1;
+				if (chatCallCount > 1) {
+					return {
+						choices: [{message: {role: 'assistant', content: 'Done.'}}],
+						toolsDisabled: false,
+					};
+				}
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'call_first',
+										function: {name: 'guarded_tool', arguments: '{}'},
+									},
+									{
+										id: 'call_second',
+										function: {name: 'guarded_tool', arguments: '{}'},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: createMockToolManager({
+			tools: ['guarded_tool'],
+			needsApproval: true,
+		}),
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	setGlobalToolConfirmHandler(async () => false);
+
+	// The assistant message announces both calls, so the saved history must
+	// carry a result for the tool the abort skipped too.
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant' && m.tool_calls);
+	t.deepEqual(
+		(assistant?.tool_calls ?? []).map(tc => tc.id),
+		['call_first', 'call_second'],
+		'both calls must be announced in the assistant message',
+	);
+	for (const id of ['call_first', 'call_second']) {
+		t.truthy(
+			latest.find(m => m.role === 'tool' && m.tool_call_id === id),
+			`${id} must receive a paired tool result`,
+		);
+	}
+	const skipped = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_second',
+	);
+	t.regex(String(skipped?.content), /cancelled by the user/i);
+});
+
+test.serial('repeated unknown-tool calls hard-stop without prompting in non-interactive mode', async t => {
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[1];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createUnknownToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			nonInteractiveMode: true,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should hard-stop at the limit');
+	t.is(questionCount, 0, 'Must not prompt when there is nobody to ask');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.truthy(stopMessage, 'Should still queue the loop-detected ErrorMessage');
+});
+
+test.serial('malformed-retry limit honors a custom configured value', async t => {
+	let chatCallCount = 0;
+	const queuedComponents: any[] = [];
+
+	const alwaysMalformedClient = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: '[tool_use: read_file]',
+							tool_calls: undefined,
+						},
+					},
+				],
+				toolsDisabled: true,
+			};
+		},
+	};
+
+	await withRetryLimits({maxMalformedRetries: 0}, async () => {
+		const params = createDefaultParams({
+			client: alwaysMalformedClient,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 1, 'Limit 0 should give up after the first bad turn');
+	const giveUpMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('malformed tool calls 1 times'),
+	);
+	t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
+});
+
+test.serial('empty-turn limit honors a custom configured value', async t => {
+	let chatCallCount = 0;
+	const queuedComponents: any[] = [];
+
+	const alwaysEmptyClient = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			return {
+				choices: [
+					{message: {role: 'assistant', content: '', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	await withRetryLimits({maxEmptyTurns: 0}, async () => {
+		const params = createDefaultParams({
+			client: alwaysEmptyClient,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	// Limit 0 skips all nudges: at most the initial turn plus one
+	// compact-and-retry cycle (MAX_COMPACT_RETRIES = 1). The default limit
+	// would make at least 3 calls before giving up.
+	t.true(
+		chatCallCount <= 2,
+		`Limit 0 should give up within 2 calls; got ${chatCallCount}`,
+	);
+	const giveUpMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('produced no output'),
+	);
+	t.truthy(giveUpMessage, 'Should queue the give-up ErrorMessage');
+});
+
+test.serial('repeated-tool-call limit still pauses in yolo mode', async t => {
+	// Yolo skips every tool confirmation, so the repeated-call pause is the one
+	// remaining safeguard there. Documented in docs/features/development-modes.md.
+	let chatCallCount = 0;
+	let questionCount = 0;
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			developmentMode: 'yolo' as const,
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should stop at the limit in yolo mode too');
+	t.is(questionCount, 1, 'Yolo must still get the repeated-call pause');
+});
+
+test.serial('repeated-tool-call limit hard-stops without prompting in headless mode', async t => {
+	// Headless is the daemon's mode for triggered skill runs. Like
+	// nonInteractiveMode there is nobody to ask, but it is a separate branch of
+	// the same guard, so it needs its own coverage.
+	let chatCallCount = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[1];
+	});
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			developmentMode: 'headless' as const,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	t.is(chatCallCount, 3, 'Loop should hard-stop at the limit');
+	t.is(questionCount, 0, 'Must not prompt in headless mode');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
 });
