@@ -1,6 +1,7 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
@@ -306,7 +307,7 @@ test('bash-style live execution keeps the composer mounted', t => {
 		/>,
 	);
 
-	t.regex(lastFrame() ?? '', /\/ commands, ! bash/);
+	t.regex(stripAnsi(lastFrame() ?? ''), /\/ commands, ! bash/);
 });
 
 test('Escape cancels when only an abort controller is live (state flicker)', async t => {
