@@ -54,7 +54,7 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(options.shell, ['-c', script], {
+		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
@@ -188,6 +188,16 @@ export function expandVars(value: string): string {
 		if (v !== undefined) return v;
 		return def ?? '';
 	});
+}
+
+/** cmd.exe: /d (skip AutoRun), /s (deterministic quotes), /c. POSIX: -c. */
+export function shellArgs(shell: string, script: string): string[] {
+	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
+}
+
+function isWindowsCmd(shell: string): boolean {
+	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
+	return /^cmd(\.exe)?$/i.test(name);
 }
 
 function pickShell(configured: string | undefined): string {

@@ -1,8 +1,6 @@
 name: Pull Request Automated Checks
 
-# The shared org workflow covers the checks every repo runs. Everything
-# genuinely nanocoder-specific — the VS Code extension — stays in this file
-# rather than becoming an input on the shared workflow.
+# Nanocoder-specific checks (VS Code extension) that sit outside the shared org workflow.
 
 on:
   pull_request:
@@ -17,26 +15,18 @@ permissions:
 jobs:
   pr-checks:
     uses: Nano-Collective/.github/.github/workflows/pr-checks.yml@main
+    with:
+      fail-on-coverage-drop: true
 
-  # `changeset-check.yml` only asserts that a changeset file was added, never
-  # that the package name inside it resolves. A wrong name is accepted on the
-  # PR and then breaks `release-prepare` on every subsequent push to main,
-  # which is what #1065 did.
-  #
-  # This runs scripts/validate-changesets.js rather than `changeset status`:
-  # status also exits 1 when packages changed but no changeset was added, which
-  # would turn changeset-check.yml's deliberately non-blocking nudge into a hard
-  # requirement, and it needs a local `main` ref that this detached checkout
-  # does not have.
+  # Validates changeset package names to prevent main branch breakages.
+  # Uses a custom script instead of `changeset status` to keep the check non-blocking.
   changeset-validation:
     name: Changeset Validation
     runs-on: ubuntu-latest
-    # The automated "Version Packages" PR consumes changesets rather than
-    # adding them, matching the skip in changeset-check.yml.
+    # Skip for the automated "Version Packages" PR.
     if: github.head_ref != 'changeset-release/main'
     steps:
-      # The validator is dependency-free and reads only the working tree, so
-      # this job needs no pnpm install and no history beyond the head commit.
+      # Dependency-free check, no pnpm install needed.
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -50,9 +40,7 @@ jobs:
       - name: Validate every changeset resolves to a workspace package
         run: node scripts/validate-changesets.js
 
-  # nanocoder ships a VS Code extension alongside the CLI. It has its own
-  # tsconfig, so the root `test:types` does not cover it, and it produces the
-  # .vsix that the release consumes.
+  # Tests and builds the VS Code extension.
   vscode-extension:
     name: VS Code Extension
     runs-on: ubuntu-latest
@@ -75,16 +63,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The root tsconfig only includes source/**, so the extension's own
-      # sources and specs are checked by their own project or not at all.
+      # Type check extension separately from the root tsconfig.
       - name: Type check the extension
         run: pnpm test:types:vscode
 
       - name: Build the extension
         run: pnpm run build:vscode
 
+      # Verify .vsix existence. The next step will verify its CSS theme tokens.
       - name: Verify the .vsix was produced
         run: |
           set -euo pipefail
           test -f assets/nanocoder-vscode.vsix
           echo "VS Code extension packaged"
+
+      - name: Verify the theme tokens compiled into the CSS
+        run: node plugins/vscode/scripts/verify-theme-css.js

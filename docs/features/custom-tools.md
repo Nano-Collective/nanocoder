@@ -90,7 +90,7 @@ timeout_ms: 30000               # default 30000, max 300000
 cwd: ./scripts                  # default: project root; supports ${VAR}; must stay in the project
 env:
   FOO: bar                      # extra env vars; values support ${VAR}
-shell: bash | sh                # default: bash if available, else sh
+shell: bash | sh                # default: bash if available, else sh; Windows: ComSpec/cmd.exe
 ---
 
 # Body is a shell script. See "Template Syntax" below.
@@ -122,11 +122,13 @@ This is containment against misconfiguration, not a sandbox. The script body is 
 
 The body is a shell script with two placeholder forms:
 
-- **`{{ name }}`** — substitutes `args[name]`, shell-quoted. Arrays expand to space-separated quoted tokens.
+- **`{{ name }}`** — substitutes `args[name]`, POSIX-quoted. Arrays expand to space-separated quoted tokens. Not cmd-safe; see below.
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. This blocks shell injection through parameter values:
+All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. That is shell-safe under bash/sh. It is **not** shell-safe under cmd.exe: cmd does not treat `'` as a quote, so `type {{ file }}` becomes `type 'notes.txt'` (file not found) and `&`, `|`, `>`, `^`, `%VAR%` in a value can break out. Per-shell quoting in `renderValue` is a follow-up (#1084); until then the default Windows shell is cmd.
+
+This blocks shell injection through parameter values on POSIX:
 
 ```markdown
 echo {{ name }}
@@ -145,7 +147,7 @@ echo '; rm -rf /; #'
 When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
-2. The body is rendered, then handed to the chosen shell via `-c`.
+2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /s /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
 3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
 5. On exit code 0, stdout (and any stderr) is returned to the model, truncated at the standard output limit.
@@ -168,7 +170,7 @@ When the tool runs:
 
 ## Security Model
 
-A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are shell-escaped, but the script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
+A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are POSIX-quoted, which is not a cmd.exe injection barrier. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
 
 Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in `~/.config/nanocoder/tools/` and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
 

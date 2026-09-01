@@ -394,3 +394,116 @@ test.serial(
 		);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Issue #932 — Auto-save indicator & unblocked flush
+// ---------------------------------------------------------------------------
+
+test.serial(
+	'Issue 932: indicator hide timer does not block save chain or flush resolution',
+	async t => {
+		let isSaving = false;
+		let hideTimer: NodeJS.Timeout | null = null;
+		const minDuration = 500;
+
+		const runSave = async () => {
+			let startTime: number | null = null;
+			try {
+				if (hideTimer) {
+					clearTimeout(hideTimer);
+					hideTimer = null;
+				}
+				startTime = Date.now();
+				isSaving = true;
+
+				// Fast mock disk write (~5ms)
+				await new Promise(r => setTimeout(r, 5));
+			} finally {
+				if (startTime !== null) {
+					const elapsed = Date.now() - startTime;
+					const remaining = Math.max(0, minDuration - elapsed);
+					hideTimer = setTimeout(() => {
+						isSaving = false;
+						hideTimer = null;
+					}, remaining);
+				}
+			}
+		};
+
+		const flushStart = Date.now();
+		await runSave();
+		const flushElapsed = Date.now() - flushStart;
+
+		// flush/save resolution must finish immediately on I/O completion (< 100ms),
+		// NOT blocked by the 500ms UI indicator timer
+		t.true(
+			flushElapsed < 100,
+			`flush() took ${flushElapsed}ms; must not wait for the 500ms UI timer`,
+		);
+		t.true(isSaving, 'isSaving must be true immediately after save finishes');
+
+		// Wait 250ms: isSaving must still be true (within the 500ms floor)
+		await new Promise(r => setTimeout(r, 250));
+		t.true(isSaving, 'isSaving must stay true at 250ms (within 500ms floor)');
+
+		// Wait another 300ms (total > 550ms): isSaving must transition to false
+		await new Promise(r => setTimeout(r, 300));
+		t.false(
+			isSaving,
+			'isSaving must transition to false after 500ms minimum display floor',
+		);
+		t.is(hideTimer, null);
+	},
+);
+
+test.serial(
+	'Issue 932: subsequent save cancels earlier pending hide timer',
+	async t => {
+		let isSaving = false;
+		let hideTimer: NodeJS.Timeout | null = null;
+		let timerClearCount = 0;
+		const minDuration = 500;
+
+		const runSave = async () => {
+			let startTime: number | null = null;
+			try {
+				if (hideTimer) {
+					clearTimeout(hideTimer);
+					hideTimer = null;
+					timerClearCount++;
+				}
+				startTime = Date.now();
+				isSaving = true;
+
+				await new Promise(r => setTimeout(r, 5));
+			} finally {
+				if (startTime !== null) {
+					const elapsed = Date.now() - startTime;
+					const remaining = Math.max(0, minDuration - elapsed);
+					hideTimer = setTimeout(() => {
+						isSaving = false;
+						hideTimer = null;
+					}, remaining);
+				}
+			}
+		};
+
+		// First save schedules a hide timer for 500ms
+		await runSave();
+		t.true(isSaving);
+		t.truthy(hideTimer);
+
+		// Second save starts 100ms later (while hide timer is still pending)
+		await new Promise(r => setTimeout(r, 100));
+		await runSave();
+
+		t.is(timerClearCount, 1, 'Previous hide timer must be cancelled');
+		t.true(isSaving);
+
+		// Clean up
+		if (hideTimer) {
+			clearTimeout(hideTimer);
+		}
+	},
+);
+

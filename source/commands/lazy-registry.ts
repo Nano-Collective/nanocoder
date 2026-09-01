@@ -104,7 +104,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'init',
 		description:
-			'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md.',
+			'Initialize nanocoder configuration and analyze project structure. Use --preset <react|nextjs|rust>, --force to regenerate AGENTS.md, or --lean to skip CLAUDE.md.',
 		load: () => import('@/commands/init').then(m => m.initCommand),
 	},
 	{
@@ -176,6 +176,16 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Re-run the last user turn (use --model <id> to switch models first)',
 		load: () => import('@/commands/retry').then(m => m.retryCommand),
+	},
+	{
+		name: 'remember',
+		description: 'Save a durable project memory',
+		load: () => import('@/commands/remember').then(m => m.rememberCommand),
+	},
+	{
+		name: 'memory',
+		description: 'Manage project memories',
+		load: () => import('@/commands/memory').then(m => m.memoryCommand),
 	},
 	{
 		name: 'tasks',
