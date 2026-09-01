@@ -60,4 +60,5 @@ export interface MessageSubmissionOptions {
 	developmentMode?: DevelopmentMode;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	sessionId?: string;
 }

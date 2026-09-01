@@ -9,12 +9,13 @@ import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {resetStatsLedger} from '@/stats/record';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
-import {clearAllTasks} from '@/tools/tasks/storage';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -314,8 +315,7 @@ async function handleSpecialCommand(
 		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			await clearAllTasks();
-			// Increment clear counter to force re-render of static components
+			sharedProposalStore.clear();
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -586,27 +586,54 @@ async function handleBuiltInCommand(
 	const {
 		onAddToChatQueue,
 		onCommandComplete,
+		setLiveComponent,
 		messages,
 		lastApiUsage,
 		apiCallHistory,
 	} = options;
 
-	const totalTokens = messages.reduce(
-		(sum, msg) => sum + options.getMessageTokens(msg),
-		0,
-	);
+	// Commands that declare a progressLabel do slow work (LLM round-trip,
+	// network) before returning their result component. Hold a spinner in the
+	// live slot for the duration so the UI is not silent for seconds. Mount it
+	// before any other work here — tokenizing a long transcript is itself
+	// perceptible — and release it in `finally` so a throwing handler cannot
+	// strand a spinner that never resolves.
+	const commandName = message.slice(1).trim().split(/\s+/)[0];
+	const progressLabel = commandRegistry.get(commandName)?.progressLabel;
 
-	const result = await commandRegistry.execute(message.slice(1), messages, {
-		provider: options.provider,
-		model: options.model,
-		tokens: totalTokens,
-		getMessageTokens: options.getMessageTokens,
-		client: options.client,
-		tune: options.tune,
-		developmentMode: options.developmentMode,
-		lastApiUsage,
-		apiCallHistory,
-	});
+	if (progressLabel) {
+		setLiveComponent(
+			React.createElement(CommandProgress, {
+				key: generateKey(`${commandName}-progress`),
+				label: progressLabel,
+			}),
+		);
+	}
+
+	let result: Awaited<ReturnType<typeof commandRegistry.execute>>;
+	try {
+		const totalTokens = messages.reduce(
+			(sum, msg) => sum + options.getMessageTokens(msg),
+			0,
+		);
+
+		result = await commandRegistry.execute(message.slice(1), messages, {
+			provider: options.provider,
+			model: options.model,
+			tokens: totalTokens,
+			getMessageTokens: options.getMessageTokens,
+			client: options.client,
+			tune: options.tune,
+			developmentMode: options.developmentMode,
+			lastApiUsage,
+			apiCallHistory,
+			sessionId: options.sessionId,
+		});
+	} finally {
+		if (progressLabel) {
+			setLiveComponent(null);
+		}
+	}
 
 	if (!result) {
 		onCommandComplete?.();

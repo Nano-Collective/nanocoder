@@ -228,8 +228,15 @@ function createModelInfo(
 		cost: {
 			input: model.cost?.input ?? 0,
 			output: model.cost?.output ?? 0,
-			cacheRead: model.cost?.cache_read,
-			cacheWrite: model.cost?.cache_write,
+			// Left undefined rather than zeroed when models.dev omits them:
+			// pricing falls back to the input rate, and a 0 would price cache
+			// hits as free.
+			...(model.cost?.cache_read != null
+				? {cache_read: model.cost.cache_read}
+				: {}),
+			...(model.cost?.cache_write != null
+				? {cache_write: model.cost.cache_write}
+				: {}),
 		},
 	};
 }

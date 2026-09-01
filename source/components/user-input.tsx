@@ -18,6 +18,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 } from '@/types/core';
 import type {
 	InputState,
@@ -36,6 +37,8 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {isSelectionMode, toggleSelectionMode} from '@/utils/terminal-mouse';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -57,6 +60,7 @@ interface ChatProps {
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
+	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
@@ -66,9 +70,11 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
+	isSaving?: boolean;
 }
 
 export default function UserInput({
@@ -83,6 +89,7 @@ export default function UserInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
+	onToggleTaskList,
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
@@ -92,9 +99,11 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	taskInfo,
 	forceFocus = false,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
+	isSaving,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -129,6 +138,8 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	// True while mouse reporting is suspended so the terminal can select text.
+	const [selectionModeActive, setSelectionModeActive] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
@@ -141,6 +152,7 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		insertPaste,
 	} = inputState;
 
 	const {
@@ -167,6 +179,25 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Real pastes, as reported by the terminal via bracketed paste. The
+	// payload is lifted off stdin before Ink's keypress parser sees it, so
+	// a multi-line paste can no longer submit the prompt on its first
+	// newline — it arrives here whole, in one event.
+	useEffect(() => {
+		if (disabled || !effectiveFocus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			insertPaste(payload);
+			// Remount TextInput so its cursor follows the appended text.
+			setTextInputKey(prev => prev + 1);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (
@@ -709,6 +740,25 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+t to collapse/expand the live task list (always available -
+		// this sits above the disabled guard so it still works while the agent
+		// is working, which is when the task list is on screen)
+		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+			onToggleTaskList();
+			return;
+		}
+
+		// Ctrl+P suspends mouse reporting so the terminal can click-drag
+		// select again, and resumes it on the next press. Only fullscreen
+		// turns reporting on, so toggleSelectionMode reports false in inline
+		// mode and the key falls through unhandled. Sits above the disabled
+		// guard: selecting output while the agent works is exactly when you
+		// want this.
+		if (key.ctrl && inputChar === 'p' && toggleSelectionMode()) {
+			setSelectionModeActive(isSelectionMode());
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -722,8 +772,10 @@ export default function UserInput({
 		}
 
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
-		// Terminal paste of regular text arrives as a bracketed paste, not as
-		// Ctrl+V, so this binding is free to mean "paste image".
+		// Text pasted into the terminal arrives as a bracketed paste on stdin
+		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
+		// never as a Ctrl+V keypress, so this binding is free to mean
+		// "paste image".
 		if (key.ctrl && inputChar === 'v') {
 			const image = readClipboardImage();
 			if (image) {
@@ -956,6 +1008,8 @@ export default function UserInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
 				/>
 			</Box>
 		);
@@ -1009,6 +1063,15 @@ export default function UserInput({
 
 				{showClearMessage && (
 					<Text color={colors.secondary}>Press escape again to clear</Text>
+				)}
+
+				{selectionModeActive && (
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Selection mode: drag to select, wheel scrolling paused. Ctrl+P to
+							resume
+						</Text>
+					</Box>
 				)}
 
 				{showCompletions && completions.length > 0 && (
@@ -1116,6 +1179,8 @@ export default function UserInput({
 				tune={tune}
 				currentModel={currentModel}
 				activeEditor={activeEditor}
+				taskInfo={taskInfo}
+				isSaving={isSaving}
 			/>
 		</>
 	);

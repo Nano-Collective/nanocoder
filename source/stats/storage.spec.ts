@@ -310,8 +310,8 @@ test('recordApiCallForStats prices cached input at cache rates', async t => {
 			getPricing: async () => ({
 				input: 3,
 				output: 15,
-				cacheRead: 0.3,
-				cacheWrite: 0.6,
+				cache_read: 0.3,
+				cache_write: 0.6,
 			}),
 		},
 	);

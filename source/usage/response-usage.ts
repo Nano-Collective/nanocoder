@@ -5,16 +5,57 @@
 
 import {TIMEOUT_COST_LOOKUP_MS} from '@/constants';
 import {getModelPricing} from '@/models/index';
-import type {ModelInfo} from '@/models/models-types';
 import type {ApiUsage} from '@/types/core';
 import type {ResponseUsage} from '@/types/usage';
 
-type PricingLookup = (model: string) => Promise<ModelInfo['cost'] | null>;
+export interface TokenPricing {
+	input: number;
+	output: number;
+	cache_read?: number;
+	cache_write?: number;
+}
+
+type PricingLookup = (model: string) => Promise<TokenPricing | null>;
 
 function finiteTokenCount(value: number | undefined): number | undefined {
 	return Number.isFinite(value) && (value as number) >= 0
 		? (value as number)
 		: undefined;
+}
+
+/**
+ * Price a usage report, billing cache reads and writes at their own models.dev
+ * rates and the remainder at the full input rate.
+ *
+ * The subtraction below is only valid because `inputTokens` is *inclusive* of
+ * the cache counts: the AI SDK reports `inputTokens.total = noCache +
+ * cacheRead + cacheWrite` (see `convertAnthropicMessagesUsage`), and OpenAI's
+ * `prompt_tokens` likewise counts its cached tokens. Do not "fix" this into a
+ * plain addition without re-checking that invariant for the provider in hand.
+ * When models.dev publishes no cache rates the input rate is used for all
+ * three, which reproduces the pre-caching cost exactly.
+ */
+export function priceTokens(
+	pricing: TokenPricing,
+	usage: {
+		inputTokens?: number;
+		outputTokens?: number;
+		cacheReadTokens?: number;
+		cacheWriteTokens?: number;
+	},
+): number {
+	const inputTokens = finiteTokenCount(usage.inputTokens) ?? 0;
+	const outputTokens = finiteTokenCount(usage.outputTokens) ?? 0;
+	const cacheRead = finiteTokenCount(usage.cacheReadTokens) ?? 0;
+	const cacheWrite = finiteTokenCount(usage.cacheWriteTokens) ?? 0;
+	const uncachedInput = Math.max(0, inputTokens - cacheRead - cacheWrite);
+	return (
+		(pricing.input * uncachedInput +
+			(pricing.cache_read ?? pricing.input) * cacheRead +
+			(pricing.cache_write ?? pricing.input) * cacheWrite +
+			pricing.output * outputTokens) /
+		1_000_000
+	);
 }
 
 /**
@@ -47,7 +88,7 @@ function toReportedUsage(
 /** Calculate a best-effort USD cost from a provider usage report. */
 export function calculateUsageCost(
 	usage: ApiUsage,
-	pricing: ModelInfo['cost'],
+	pricing: TokenPricing,
 ): number | undefined {
 	const inputTokens = finiteTokenCount(usage.inputTokens);
 	const outputTokens = finiteTokenCount(usage.outputTokens);
@@ -73,8 +114,8 @@ export function calculateUsageCost(
 		);
 		return (
 			(pricing.input * uncachedInput +
-				(pricing.cacheRead ?? pricing.input) * (cacheReadTokens ?? 0) +
-				(pricing.cacheWrite ?? pricing.input) * (cacheWriteTokens ?? 0) +
+				(pricing.cache_read ?? pricing.input) * (cacheReadTokens ?? 0) +
+				(pricing.cache_write ?? pricing.input) * (cacheWriteTokens ?? 0) +
 				pricing.output * (outputTokens ?? 0)) /
 			1_000_000
 		);

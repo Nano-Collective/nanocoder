@@ -4,6 +4,8 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
@@ -48,6 +50,7 @@ interface InteractiveAppProps {
 	 * the inline Static-based flow with native scrollback.
 	 */
 	altScreenActive?: boolean;
+	isSaving?: boolean;
 }
 
 /**
@@ -74,6 +77,7 @@ export function InteractiveApp({
 	handleIdeSelect,
 	clearKey,
 	altScreenActive = false,
+	isSaving,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
 	// Tune / IDE are launched by closing settings first, so their exit has no way
@@ -149,14 +153,13 @@ export function InteractiveApp({
 	// has propagated, dispatch the "implement the plan" message. Deferring to this
 	// effect is essential — dispatching inside the handler would run the turn with
 	// the stale plan-mode system prompt and tools, so the model would refuse to
-	// edit. The plan is already in the conversation, so no request text is echoed.
+	// edit. The approved prompt embeds the plan loaded from the session artifact.
 	React.useEffect(() => {
 		if (!appState.pendingPlanProceed) return;
 		if (appState.developmentMode !== 'normal') return;
-		appState.setPendingPlanProceed(false);
-		void appHandlers.handleMessageSubmit(
-			'The plan above is approved. Proceed with implementing it now.',
-		);
+		const approvedPlanMessage = appState.pendingPlanProceed;
+		appState.setPendingPlanProceed(null);
+		void appHandlers.handleMessageSubmit(approvedPlanMessage);
 	}, [
 		appState.pendingPlanProceed,
 		appState.developmentMode,
@@ -272,6 +275,9 @@ export function InteractiveApp({
 	// with Static + native scrollback.
 	const fullscreen = altScreenActive;
 	const terminalRows = useTerminalRows();
+	const artifactRefreshKey = `${appState.isConversationComplete}:${
+		appState.planReviewState?.show ?? false
+	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
 
 	return (
 		// Fullscreen layout on the alternate screen buffer: the root Box is
@@ -308,10 +314,17 @@ export function InteractiveApp({
 			<Box flexDirection="column" flexShrink={0}>
 				{appState.planReviewState?.show && (
 					<PlanReviewPrompt
+						artifactPath={
+							appState.currentSessionId
+								? artifactManager.tryGetArtifactPath(
+										appState.currentSessionId,
+										'implementation_plan',
+									)
+								: undefined
+						}
 						onProceed={appHandlers.handlePlanProceed}
 						onAskMore={() => void appHandlers.handlePlanAskMore()}
 						onModify={appHandlers.handlePlanModify}
-						onDismiss={appHandlers.handlePlanModify}
 					/>
 				)}
 
@@ -421,6 +434,9 @@ export function InteractiveApp({
 								compactToolCounts={appState.compactToolCounts}
 								compactToolDisplay={appState.compactToolDisplay}
 								liveTaskList={appState.liveTaskList}
+								showTaskList={appState.showTaskList}
+								taskListHasUnread={appState.taskListHasUnread}
+								onToggleTaskList={appState.toggleTaskList}
 								onToggleCompactDisplay={handleToggleCompactDisplay}
 								pendingSubagentApproval={pendingSubagentApproval}
 								onSubagentToolApproval={handleSubagentToolApproval}
@@ -434,9 +450,21 @@ export function InteractiveApp({
 								tune={appState.tune}
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
+								isSaving={isSaving}
 							/>
 						</UIStateProvider>
 					)}
+
+				{/* Artifact shortcuts sit below the input alongside the mode
+				    indicator — everything ambient lives under the composer. The
+				    marginLeft mirrors ChatInput's own offset so the row lines up
+				    with the mode line rather than sitting one column in. */}
+				<Box marginLeft={fullscreen ? 0 : -1}>
+					<SessionArtifactLinks
+						sessionId={appState.currentSessionId}
+						refreshKey={artifactRefreshKey}
+					/>
+				</Box>
 			</Box>
 		</Box>
 	);

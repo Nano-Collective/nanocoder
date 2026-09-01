@@ -4,13 +4,14 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
+import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
+import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
@@ -174,7 +175,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {
@@ -218,7 +219,7 @@ export async function formatStringReplacePreview(
 			} else if (
 				oldLine !== null &&
 				newLine !== null &&
-				areLinesSimlar(oldLine, newLine)
+				areLinesSimilar(oldLine, newLine)
 			) {
 				const truncatedOldLine = truncateLine(oldLine, availableWidth);
 				const truncatedNewLine = truncateLine(newLine, availableWidth);
@@ -338,7 +339,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {

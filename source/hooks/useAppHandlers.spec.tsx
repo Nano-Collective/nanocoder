@@ -63,6 +63,9 @@ function makeProps(overrides: ProbeOverrides) {
 	const setCurrentProvider = spy<[string]>();
 	const setCurrentModel = spy<[string]>();
 	const setLiveTaskList = spy<[unknown]>();
+	const setPlanReviewState = spy<
+		[{show: boolean; originalMessage: string} | null]
+	>();
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const setChatComponents = spy<[React.ReactNode[]]>();
 	const setLiveComponent = spy<[React.ReactNode]>();
@@ -93,6 +96,9 @@ function makeProps(overrides: ProbeOverrides) {
 		customCommandCache: new Map<string, CustomCommand>(),
 		customCommandLoader: null,
 		customCommandExecutor: null,
+		currentSessionId: '11111111-1111-4111-8111-111111111111',
+		ensureCurrentSessionId: () =>
+			'11111111-1111-4111-8111-111111111111',
 		updateMessages,
 		setIsCancelling,
 		setDevelopmentMode,
@@ -106,6 +112,7 @@ function makeProps(overrides: ProbeOverrides) {
 		setCurrentProvider,
 		setCurrentModel,
 		setLiveTaskList,
+		setPlanReviewState,
 		addToChatQueue,
 		setChatComponents,
 		setLiveComponent,
@@ -143,6 +150,7 @@ function makeProps(overrides: ProbeOverrides) {
 			setCurrentSessionId,
 			setChatComponents,
 			addToChatQueue,
+			setPlanReviewState,
 			dismissActiveEditor,
 			handleModelSelect,
 		},
@@ -218,6 +226,28 @@ test('handleToggleDevelopmentMode cycles through modes', t => {
 	const { handlers: h4, spies: s4 } = setup({ developmentMode: 'plan' });
 	h4.handleToggleDevelopmentMode();
 	t.deepEqual(s4.setDevelopmentMode.calls, [['normal']]);
+});
+
+test('declining execution keeps Plan Mode active and asks for revisions', t => {
+	const {handlers, spies} = setup({developmentMode: 'plan'});
+
+	handlers.handlePlanModify();
+
+	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
+	t.deepEqual(spies.setDevelopmentMode.calls, []);
+	const notice = spies.addToChatQueue.calls.at(-1)?.[0];
+	t.true(
+		React.isValidElement(notice) &&
+			String((notice.props as {message?: string}).message).includes(
+				'Plan Mode remains active',
+			),
+	);
+	t.true(
+		React.isValidElement(notice) &&
+			String((notice.props as {message?: string}).message).includes(
+				'what to change',
+			),
+	);
 });
 
 async function withMockConfig(
