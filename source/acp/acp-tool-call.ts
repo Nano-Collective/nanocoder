@@ -6,6 +6,7 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import type {ToolCall} from '@/types/core';
+import {replaceFirstLiteral} from '@/utils/literal-replace';
 
 export interface AcpToolCallMeta {
 	title: string;
@@ -213,7 +214,7 @@ async function buildStringReplaceDiff(
 		type: 'diff',
 		path: absPath,
 		oldText: current,
-		newText: current.replace(oldStr, newStr),
+		newText: replaceFirstLiteral(current, oldStr, newStr),
 	};
 }
 

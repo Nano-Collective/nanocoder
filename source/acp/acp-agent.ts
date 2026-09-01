@@ -42,10 +42,17 @@ import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {
+	getProjectContextPreferences,
+	loadPreferences,
+	updateLastUsed,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {TimelineManager} from '@/services/timeline-manager';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
@@ -56,6 +63,20 @@ const logger = getLogger();
 
 // Stable id for the model selector config option (category `model`).
 const MODEL_CONFIG_ID = 'model';
+
+async function listSessionArtifacts(sessionId: string) {
+	try {
+		return await artifactManager.listArtifacts(sessionId);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith('Invalid session ID:')
+		) {
+			return [];
+		}
+		throw error;
+	}
+}
 
 export class AcpAgent implements Agent {
 	private sessions = new Map<string, AcpSession>();
@@ -147,6 +168,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -204,8 +228,12 @@ export class AcpAgent implements Agent {
 					const sendBuiltinReply = (msg: string) => {
 						session.messages = [
 							...session.messages,
-							{role: 'user', content: contextualUserText},
-							{role: 'assistant', content: msg},
+							{
+								role: 'user',
+								content: contextualUserText,
+								displayOnly: true,
+							},
+							{role: 'assistant', content: msg, displayOnly: true},
 						];
 						this.conn.sessionUpdate({
 							sessionId: params.sessionId,
@@ -311,6 +339,25 @@ export class AcpAgent implements Agent {
 			},
 		];
 
+		if (session.baseSystemMessage) {
+			const projectContext = await appendRelevantProjectContextWithCount(
+				session.baseSystemMessage.content,
+				userText,
+				session.getMemoryFinder(),
+				getProjectContextPreferences(),
+			);
+			session.systemMessage = {
+				role: 'system',
+				content: projectContext.systemPrompt,
+			};
+			setLastBuiltPrompt(projectContext.systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				logger.info(
+					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+				);
+			}
+		}
+
 		const config = getAppConfig();
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
@@ -339,7 +386,11 @@ export class AcpAgent implements Agent {
 						content: {type: 'text', text: cancelNotice},
 					},
 				});
-				session.messages.push({role: 'assistant', content: cancelNotice});
+				session.messages.push({
+					role: 'assistant',
+					content: cancelNotice,
+					displayOnly: true,
+				});
 				return {stopReason: 'cancelled'};
 			}
 
@@ -359,6 +410,7 @@ export class AcpAgent implements Agent {
 			session.messages.push({
 				role: 'assistant',
 				content: formattedError,
+				displayOnly: true,
 			});
 
 			throw error;
@@ -530,6 +582,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -591,9 +646,13 @@ export class AcpAgent implements Agent {
 				0,
 				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
+			// Harness chrome, not model output: it tells the user what the revert
+			// did. The model learns about the revert from the truncated history
+			// itself, so this must never come back as its own past turn.
 			session.messages.push({
 				role: 'assistant',
 				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+				displayOnly: true,
 			});
 			await this.saveAcpSessionToDisk(session);
 			await this.replaySessionHistory(session);
@@ -669,6 +728,7 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
+			if (isInternalWalkthroughMessage(message)) continue;
 			if (message.role === 'user') {
 				if (typeof message.content === 'string' && message.content.length > 0) {
 					await this.conn.sessionUpdate({
@@ -804,7 +864,8 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
-		session.systemMessage = {role: 'system', content: systemContent};
+		session.baseSystemMessage = {role: 'system', content: systemContent};
+		session.systemMessage = session.baseSystemMessage;
 	}
 
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {

@@ -243,3 +243,55 @@ test('ChatInput does not show task list when liveTaskList is null', t => {
 	t.notRegex(output!, /Tasks/);
 	unmount();
 });
+
+test('ChatInput hides live task list and shows collapsed badge when showTaskList is false', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+		],
+		showTaskList: false,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /First task/);
+	t.regex(output!, /Tasks \(~1\/2 Ctrl-t\)/);
+	unmount();
+});
+
+test('ChatInput shows unread badge when showTaskList is false and taskListHasUnread is true', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+		],
+		showTaskList: false,
+		taskListHasUnread: true,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /First task/);
+	t.regex(output!, /Tasks \(~1\/2\* Ctrl-t\)/);
+	unmount();
+});
+
+test('ChatInput renders the task list and no collapsed badge when showTaskList is true', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+		],
+		showTaskList: true,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /First task/);
+	t.notRegex(output!, /Tasks \(~1\/2/);
+	unmount();
+});
