@@ -5,6 +5,7 @@ import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
@@ -763,6 +764,104 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	unmount();
 });
 
+test('UserInput renders the task badge when taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 4,
+					completedCount: 2,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: false,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~2\/4 Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput renders the task badge when disabled and taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 3,
+					completedCount: 1,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: true,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~1\/3\* Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed', async t => {
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => toggles++} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed while disabled', async t => {
+	// The task list is on screen precisely while the agent is working, which is
+	// when the input is disabled - so the binding has to survive that guard.
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				disabled={true}
+				onToggleTaskList={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput does not insert a literal character when ctrl+t is pressed', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => {}} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hi');
+	await waitForFrame(lastFrame, /hi/);
+	stdin.write('\u0014');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /hit/);
+	unmount();
+});
 
 // ============================================================================
 // Command Completion Navigation Tests
@@ -1010,6 +1109,61 @@ test('UserInput does not show completions when input is empty', t => {
 	const output = lastFrame()!;
 	t.truthy(output);
 	t.notRegex(output, /Available commands:/);
+	unmount();
+});
+
+// pasteEvents is a module singleton, so these run serially: a concurrently
+// mounted UserInput would also receive the payload and corrupt its frame.
+
+test.serial(
+	'UserInput collapses a multi-line terminal paste into a placeholder without submitting',
+	async t => {
+		// The bug this guards: without bracketed paste the CR between lines
+		// reached Ink as Enter and submitted the prompt mid-paste.
+		let submitted = 0;
+
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} onSubmit={() => submitted++} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', 'line one\nline two\nline three');
+		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]/);
+
+		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
+		unmount();
+	},
+);
+
+test.serial('UserInput inserts a short single-line paste literally', async t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	pasteEvents.emit('paste', 'pasted inline');
+	await waitForFrame(lastFrame, /pasted inline/);
+
+	t.notRegex(lastFrame()!, /\[Paste #/, 'short pastes stay visible as text');
+	unmount();
+});
+
+test.serial('UserInput ignores terminal pastes while disabled', async t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} disabled={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	pasteEvents.emit('paste', 'should not appear');
+	await wait(100);
+
+	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
 

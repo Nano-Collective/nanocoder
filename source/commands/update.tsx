@@ -46,11 +46,6 @@ export function hasCommandFailed(output: string): boolean {
 
 	for (const pattern of criticalErrors) {
 		if (pattern.test(normalized)) {
-			// Additional check: avoid false positives for success messages
-			// like "0 errors", "error-free", "no errors found"
-			if (/0\s*errors?|error-?free|no\s*errors?\s*found/i.test(normalized)) {
-				continue;
-			}
 			return true;
 		}
 	}

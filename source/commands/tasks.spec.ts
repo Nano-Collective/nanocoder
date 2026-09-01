@@ -1,43 +1,57 @@
-import {mkdir, rm} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {tasksCommand} from './tasks.js';
-import {loadTasks, saveTasks} from '@/tools/tasks/storage.js';
+import type {Command} from '@/types/index';
 import type {Task} from '@/tools/tasks/types.js';
 
 // ============================================================================
 // /tasks Command Tests
 // ============================================================================
 // Tests for the /tasks slash command that provides interactive task management.
+//
+// Task state is session-scoped and stored under the app data directory, so
+// isolation here means (a) pointing NANOCODER_DATA_DIR at a temp dir before
+// anything imports the artifact manager, and (b) giving each test its own
+// session id. Nothing is written to the working directory any more.
 
-let testDir: string;
-let originalCwd: typeof process.cwd;
+const dataDir = join(tmpdir(), `nanocoder-tasks-command-${process.pid}`);
+process.env.NANOCODER_DATA_DIR = dataDir;
+
+// Imported lazily so the env var above is in place before the artifact
+// manager module initialises and resolves its root directory.
+let tasksCommand: Command;
+let loadTasks: typeof import('@/tools/tasks/storage.js').loadTasks;
+let saveTasks: typeof import('@/tools/tasks/storage.js').saveTasks;
+let setCliSessionId: typeof import('@/session/cli-session-context.js').setCliSessionId;
 
 test.before(async () => {
-	testDir = join(tmpdir(), `nanocoder-tasks-command-test-${Date.now()}`);
-	await mkdir(testDir, {recursive: true});
-	originalCwd = process.cwd;
+	// No mkdir needed: the artifact manager creates session directories on
+	// demand with the right permissions.
+	({tasksCommand} = await import('./tasks.js'));
+	({loadTasks, saveTasks} = await import('@/tools/tasks/storage.js'));
+	({setCliSessionId} = await import('@/session/cli-session-context.js'));
 });
 
 test.after.always(async () => {
-	process.cwd = originalCwd;
-	if (testDir) {
-		await rm(testDir, {recursive: true, force: true}).catch(() => {});
-	}
+	setCliSessionId?.(null);
+	await rm(dataDir, {recursive: true, force: true}).catch(() => {});
 });
 
+/**
+ * Give the test its own session so its task list is isolated from every other
+ * test in the file. `restore` clears the active session id again.
+ */
 async function setupTestEnv(
-	subDir: string,
-): Promise<{dir: string; restore: () => void}> {
-	const dir = join(testDir, subDir);
-	await mkdir(dir, {recursive: true});
-	const savedCwd = process.cwd;
-	process.cwd = () => dir;
+	_label: string,
+): Promise<{sessionId: string; restore: () => void}> {
+	const sessionId = randomUUID();
+	setCliSessionId(sessionId);
 	return {
-		dir,
+		sessionId,
 		restore: () => {
-			process.cwd = savedCwd;
+			setCliSessionId(null);
 		},
 	};
 }

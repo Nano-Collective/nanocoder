@@ -188,7 +188,12 @@ each get their own daemon.
 
 The daemon's IPC surface uses an `AF_UNIX` socket at
 `.nanocoder/daemon.sock` on macOS/Linux and a named pipe at
-`\\.\pipe\nanocoder-daemon-<hash>` on Windows. `nanocoder daemon stop`
+`\\.\pipe\nanocoder-daemon-<hash>` on Windows. Unix socket paths are
+capped by `sockaddr_un.sun_path` (104 bytes on macOS, 108 on Linux), and
+libuv silently truncates anything longer, so for deeply nested projects
+the socket moves to `<tmpdir>/nanocoder-daemon-<hash>.sock` instead. The
+bound path is recorded in the lockfile, so clients always read it back
+rather than recomputing it. `nanocoder daemon stop`
 prefers an IPC shutdown request (clean drain of the event loop) and
 falls back to `SIGTERM` only if the daemon is unreachable, so stops are
 graceful on Windows too where `SIGTERM` would otherwise be force-kill.
@@ -197,6 +202,12 @@ Internally, the daemon runs every triggered subagent in **`headless`**
 mode (no foreground prompts, no `ask_user`, no `agent`). The
 `confirm: true` opt-in below switches a specific subscription to plan
 mode instead.
+
+Triggered runs are subagent runs, so the
+[`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap
+applies: a triggered skill whose model gets stuck repeating the same
+tool call stops with an error instead of burning tokens unattended (see
+[Loop Protection](./subagents.md#loop-protection)).
 
 ## Inspecting and creating skills
 

@@ -49,7 +49,10 @@ nanocoder -h
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
+| `--plain` | | Use the lightweight, Ink-free runtime for non-interactive runs. Requires `run`; auto-enables in CI and non-TTY environments |
+| `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | |Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run`; incompatible with `--acp` and `--vscode`|
+| `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
@@ -57,6 +60,7 @@ nanocoder -h
 | `--no-alt-screen` | | Force inline mode (the default), even if `alternateScreen: true` is set in your preferences file. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
+| `init [--preset <type>]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust` |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
@@ -81,6 +85,34 @@ nanocoder --mode normal run "refactor db module"
 ```
 
 If `--mode` is omitted, interactive mode starts in `normal` and `run` mode starts in `auto-accept` (the previous defaults).
+
+## Project Initialization Presets
+
+Initialize a project from the terminal with automatic project analysis:
+
+```bash
+nanocoder init
+```
+
+Add `--preset` to seed stack-specific guidance, context ignore patterns, and a
+`/check` command skill:
+
+```bash
+nanocoder init --preset react
+nanocoder init --preset nextjs
+nanocoder init --preset rust
+```
+
+Every preset creates an analyzed `AGENTS.md`, a `.nanocoderignore`, and
+`.nanocoder/commands/check.md`. The selected preset supplies the project type
+and fills in stack defaults while detected languages, package scripts, and
+commands remain authoritative where applicable. Existing files are never
+silently replaced: an already initialized project is refused unless `--force`
+is passed, `--force` only regenerates `AGENTS.md`, and existing preset files are
+preserved.
+
+The interactive `/init` command accepts the same options, including
+`/init --preset nextjs`, `/init --force`, and `/init --lean`.
 
 ## Interactive Mode
 
