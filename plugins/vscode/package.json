@@ -195,6 +195,11 @@
 					"default": true,
 					"scope": "resource",
 					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
+				},
+				"nanocoder.showTokenUsage": {
+					"type": "boolean",
+					"default": false,
+					"description": "Show token usage and estimated cost below chat responses."
 				}
 			}
 		}
