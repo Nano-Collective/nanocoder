@@ -6,9 +6,12 @@ import {getAppConfig} from '@/config/index';
 import {
 	getPreferencesVersion,
 	getProfessionalTone,
+	getProjectContextPreferences,
 	subscribeToPreferences,
 } from '@/config/preferences';
 import {CommandIntegration} from '@/custom-commands/command-integration';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
@@ -98,10 +101,17 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	memoryFinder,
+	projectContextOptions,
 	ensureCurrentSessionId,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
+
+	const projectMemoryFinder = React.useMemo(
+		() => memoryFinder ?? new SemanticMemoryManager(),
+		[memoryFinder],
+	);
 
 	// Resolve the active fallback format when native tools are disabled. When
 	// native is on, this value is unused. The tune override takes priority over
@@ -391,6 +401,25 @@ export function useChatHandler({
 				systemPrompt = commandIntegration.enhanceSystemPrompt(
 					systemPrompt,
 					message,
+				);
+			}
+
+			const projectContext = await appendRelevantProjectContextWithCount(
+				systemPrompt,
+				message,
+				projectMemoryFinder,
+				// Preferences supply the defaults; an explicit prop still wins so
+				// callers (and tests) can override per session.
+				{...getProjectContextPreferences(), ...projectContextOptions},
+			);
+			systemPrompt = projectContext.systemPrompt;
+			setLastBuiltPrompt(systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				addToChatQueue(
+					infoMsg(
+						`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+						'memory-recall',
+					),
 				);
 			}
 

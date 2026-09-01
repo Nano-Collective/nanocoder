@@ -37,6 +37,23 @@ const DEFAULT_IGNORE_DIRS = [
 	'.hg', // Mercurial
 ];
 
+const NANOCODER_IGNORE_FILENAME = '.nanocoderignore';
+
+/**
+ * Absolute path to the workspace's .nanocoderignore, or undefined when there
+ * isn't one.
+ *
+ * Exists so callers that hand the file to an external tool - ripgrep's
+ * `--ignore-file`, say - resolve it the same way {@link loadGitignore} does
+ * rather than re-deriving the filename.
+ */
+export function findNanocoderIgnoreFile(
+	workspaceRoot: string,
+): string | undefined {
+	const candidate = join(workspaceRoot, NANOCODER_IGNORE_FILENAME);
+	return existsSync(candidate) ? candidate : undefined;
+}
+
 export interface LoadGitignoreOptions {
 	/**
 	 * Whether to layer .nanocoderignore on top of .gitignore. Defaults to true.
@@ -76,7 +93,7 @@ export function loadGitignore(
 	const {nanocoderIgnore = true} = options;
 	const ig = ignore();
 	const gitignorePath = join(workspaceRoot, '.gitignore');
-	const nanocoderignorePath = join(workspaceRoot, '.nanocoderignore');
+	const nanocoderignorePath = join(workspaceRoot, NANOCODER_IGNORE_FILENAME);
 
 	// Always ignore common directories
 	ig.add(DEFAULT_IGNORE_DIRS);

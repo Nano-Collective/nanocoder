@@ -653,6 +653,86 @@ test.serial(
 );
 
 test.serial(
+	"text mode recalls relevant project memories and surfaces the count on stderr",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		const calls: Array<{ systemPrompt: string; query: string }> = [];
+		try {
+			await runPlainShell({
+				prompt: "refactor the auth module",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendRelevantProjectContextWithCount: async (systemPrompt, query) => {
+						calls.push({ systemPrompt, query });
+						return {
+							systemPrompt: `${systemPrompt}\n\n## Project Context\n\n- Auth uses Clerk.`,
+							memoryCount: 2,
+						};
+					},
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.is(calls.length, 1);
+		t.is(calls[0]?.query, "refactor the auth module");
+		t.regex(stderr.get(), /Recalling 2 project memories\.\.\./);
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
+	"text mode stays silent when no relevant memories are recalled",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
+						systemPrompt,
+						memoryCount: 0,
+					}),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.false(stderr.get().includes("Recalling"));
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
 	"text error outcome writes the error message to stderr with exit code 1",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
