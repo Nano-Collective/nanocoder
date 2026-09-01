@@ -3,8 +3,6 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {MAX_URL_CONTENT_BYTES} from '../constants';
-import {formatSize} from '../components/file-explorer/utils';
 
 console.log(`\nfetch-url.spec.tsx – ${React.version}`);
 
@@ -327,8 +325,7 @@ test('formatter shows truncation warning when content is truncated', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	const expectedLabel = `Content was truncated to ${formatSize(MAX_URL_CONTENT_BYTES)}`;
-	t.regex(output!, new RegExp(expectedLabel.replace('.', '\\.')));
+	t.true(output!.includes('Content was truncated to 100,000 characters'));
 });
 
 test('formatter renders without result (before execution)', t => {
