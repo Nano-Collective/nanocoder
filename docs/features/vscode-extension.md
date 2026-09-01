@@ -70,6 +70,8 @@ nanocoder --vscode
 
    The row follows the rest of the file lifecycle too: deleting a file takes its chip away (including one you attached yourself, which would otherwise expand to nothing on your next message), and renaming one moves its chip to the new path. Only calls that actually completed count - a delete you denied leaves the row exactly as it was.
 
+   A turn that touches many files fills the row rather than growing the composer: it scrolls once it is a few lines deep, and a **Clear N changed files** control below it dismisses the whole run at once. That control only clears what the agent changed - files you attached stay until you remove them yourself.
+
 4. **Approvals**: In modes that require confirmation, tool cards show Approve / Deny buttons inline. When the AI asks you a question (the `ask_user` tool), the full question is shown with one button per answer.
 
 5. **Stop**: The send button becomes a stop button while a turn is running. Pressing it - or pressing **Escape** anywhere in the chat panel - cancels the current tool, skips any queued tools, and ends the turn. No further requests are made until you send another message.

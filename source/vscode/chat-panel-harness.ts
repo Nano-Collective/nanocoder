@@ -39,6 +39,7 @@ const SHELL_IDS = [
 	'composer-settings',
 	'composer-settings-trigger',
 	'context-chips',
+	'context-chips-clear',
 	'history-list',
 	'history-view',
 	'icon-send',
@@ -247,9 +248,13 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const root = createElement('html');
 	const body = createElement('body');
 	root.appendChild(body);
+	// Mirrors the `hidden` class these carry in chat-panel.html, so a panel that
+	// never renders a chip looks the same here as it does on load.
 	const hiddenOnLoad = new Set([
 		'add-menu-dropdown',
 		'composer-settings',
+		'context-chips',
+		'context-chips-clear',
 		'mention-dropdown',
 		'mode-dropdown',
 		'model-dropdown',

@@ -100,6 +100,9 @@ test('buildToolCallMeta - file_op mkdir is not an edit', async t => {
 	);
 	// It creates a directory, which is nothing for a client to open.
 	t.is(meta.kind, 'other');
+	// And so it reports no location either: clients follow `locations` to open
+	// what a call touched, and a directory would send them nowhere useful.
+	t.deepEqual(meta.locations, []);
 });
 
 test('buildToolCallMeta - unknown tool falls back to other', async t => {

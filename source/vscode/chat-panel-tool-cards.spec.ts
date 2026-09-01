@@ -1,3 +1,5 @@
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
 
@@ -373,7 +375,7 @@ test('the path falls back to the diff when locations are absent', t => {
 	t.deepEqual(chipNames(panel), ['a.ts']);
 });
 
-test('an edit that names no absolute path is skipped', t => {
+test('an edit that names no path at all is skipped', t => {
 	const panel = createPanel();
 	// The title alone is not enough: it holds the path as the model wrote it,
 	// and the host can only open an absolute one.
@@ -387,6 +389,140 @@ test('an edit that names no absolute path is skipped', t => {
 	completeEdit(panel, 'bare');
 
 	t.deepEqual(chipNames(panel), []);
+});
+
+// A tool is under no obligation to resolve its locations - an MCP or custom
+// tool can report a relative one. vscode.Uri.file() would resolve it against
+// the filesystem root, so the chip would open nothing and showTextDocument
+// would reject unhandled in the extension host.
+for (const relative of ['src/a.ts', './a.ts', '../up.ts', 'a.ts']) {
+	test(`a location that is not absolute is skipped: ${relative}`, t => {
+		const panel = createPanel();
+		panel.update({
+			sessionUpdate: 'tool_call',
+			toolCallId: 'rel',
+			title: `write_file: ${relative}`,
+			kind: 'edit',
+			status: 'pending',
+			locations: [{path: relative}],
+		});
+		completeEdit(panel, 'rel');
+
+		t.deepEqual(chipNames(panel), []);
+		t.true(chipsRow(panel).classList.contains('hidden'));
+	});
+}
+
+for (const absolute of [
+	'/repo/src/a.ts',
+	'C:\\repo\\src\\a.ts',
+	'\\\\server\\share\\a.ts',
+]) {
+	test(`an absolute location is kept: ${absolute}`, t => {
+		const panel = createPanel();
+		panel.update({
+			sessionUpdate: 'tool_call',
+			toolCallId: 'abs',
+			title: 'write_file: a.ts',
+			kind: 'edit',
+			status: 'pending',
+			locations: [{path: absolute}],
+		});
+		completeEdit(panel, 'abs');
+
+		t.deepEqual(chipNames(panel), ['a.ts']);
+	});
+}
+
+// The row is fed by two producers - resolve() in the ACP layer for the agent's
+// chips, uri.fsPath in the extension host for the user's - and on Windows they
+// can disagree about the case of the drive letter. Compared raw, that shows one
+// file twice and stops an attach from promoting the agent's chip.
+test('a drive letter in a different case is the same file, not a second chip', t => {
+	const panel = createPanel();
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'win',
+		title: 'write_file: a.ts',
+		kind: 'edit',
+		status: 'pending',
+		locations: [{path: 'c:\\repo\\src\\a.ts'}],
+	});
+	completeEdit(panel, 'win');
+	t.deepEqual(chipNames(panel), ['a.ts']);
+	t.true(chips(panel)[0].classList.contains('context-chip-edited'));
+
+	// The host spells the same file with an upper-case drive and forward slashes.
+	panel.post({
+		type: 'pathInfoResolved',
+		path: 'C:/repo/src/a.ts',
+		name: 'a.ts',
+		kind: 'file',
+	});
+
+	t.deepEqual(chipNames(panel), ['a.ts'], 'still one chip, not two');
+	t.false(
+		chips(panel)[0].classList.contains('context-chip-edited'),
+		'attaching it promotes the agent chip instead of duplicating it',
+	);
+});
+
+// `locations` is not the only way a path reaches the row: an edit that carries
+// a diff but announced no locations falls back to the diff block, and that path
+// needs the same guard.
+test('a relative path reaching the row through a diff block is skipped', t => {
+	const panel = createPanel();
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'reldiff',
+		title: 'write_file: src/a.ts',
+		kind: 'edit',
+		status: 'pending',
+		content: [{type: 'diff', path: 'src/a.ts', oldText: 'old', newText: 'new'}],
+	});
+	completeEdit(panel, 'reldiff');
+
+	t.deepEqual(chipNames(panel), []);
+	t.true(chipsRow(panel).classList.contains('hidden'));
+});
+
+test('two edits naming one file with different drive case make a single chip', t => {
+	const panel = createPanel();
+	for (const [toolCallId, path] of [
+		['e1', 'C:\\repo\\src\\a.ts'],
+		['e2', 'c:/repo/src/a.ts'],
+	]) {
+		panel.update({
+			sessionUpdate: 'tool_call',
+			toolCallId,
+			title: 'write_file: a.ts',
+			kind: 'edit',
+			status: 'pending',
+			locations: [{path}],
+		});
+		completeEdit(panel, toolCallId);
+	}
+
+	t.deepEqual(chipNames(panel), ['a.ts'], 'the second spelling is the same file');
+});
+
+test('a delete matches the chip whatever case its drive letter has', t => {
+	const panel = createPanel();
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'w1',
+		title: 'write_file: a.ts',
+		kind: 'edit',
+		status: 'pending',
+		locations: [{path: 'C:\\repo\\a.ts'}],
+	});
+	completeEdit(panel, 'w1');
+	t.deepEqual(chipNames(panel), ['a.ts']);
+
+	announceFileOp(panel, 'delete', ['c:/repo/a.ts'], 'd1');
+	completeEdit(panel, 'd1');
+
+	t.deepEqual(chipNames(panel), [], 'the differently-spelled delete still matched');
 });
 
 test('repeated edits to one file leave a single chip', t => {
@@ -516,7 +652,9 @@ const announceFileOp = (
 	panel.update({
 		sessionUpdate: 'tool_call',
 		toolCallId,
-		title: `file_op: ${kind} ${paths.join(' -> ')}`,
+		// The separator buildFileOpMeta actually emits, so the fixture does not
+		// drift from the titles this panel sees in a real session.
+		title: `file_op: ${kind} ${paths.join(' → ')}`,
 		kind,
 		status: 'pending',
 		locations: paths.map(path => ({path})),
@@ -617,5 +755,115 @@ test('a delete that names no file leaves the panel untouched', t => {
 	});
 	completeEdit(panel, 'op-2');
 
+	t.deepEqual(chipNames(panel), ['a.ts']);
+});
+
+// ============================================================================
+// A large turn stays inside the composer
+// ============================================================================
+
+const clearBtn = (panel: any): StubElement => panel.byId('context-chips-clear');
+
+/** Complete `count` edits, each touching its own file. */
+const editFiles = (panel: any, count: number) => {
+	for (let i = 0; i < count; i++) {
+		panel.update({
+			sessionUpdate: 'tool_call',
+			toolCallId: `bulk-${i}`,
+			title: `write_file: f${i}.ts`,
+			kind: 'edit',
+			status: 'pending',
+			locations: [{path: `/repo/src/f${i}.ts`}],
+		});
+		completeEdit(panel, `bulk-${i}`);
+	}
+};
+
+// The cap is markup, not behaviour, so it is asserted against the shipped
+// html rather than the harness - which builds its shell from ids and carries
+// no classes. Without it a thirty-file turn grows the composer until it
+// crowds out the message list, and the composer is shrink-0.
+test('the chip row is capped and scrolls instead of growing the composer', t => {
+	const html = readFileSync(
+		fileURLToPath(
+			new URL('../../plugins/vscode/media/chat-panel.html', import.meta.url),
+		),
+		'utf8',
+	);
+	const row = html.match(/<div id="context-chips"[^>]*>/);
+	t.truthy(row, 'the chip row is still in the markup');
+	t.true(row![0].includes('max-h-24'), 'the row is height-capped');
+	t.true(row![0].includes('overflow-y-auto'), 'and scrolls past the cap');
+
+	t.regex(
+		html,
+		/<button id="context-chips-clear"/,
+		'and the bulk-dismiss control ships with it',
+	);
+});
+
+test('a turn that touches thirty files offers one way to dismiss them', t => {
+	const panel = createPanel();
+	t.true(clearBtn(panel).classList.contains('hidden'), 'hidden with an empty row');
+
+	editFiles(panel, 30);
+	t.is(chipNames(panel).length, 30);
+	t.false(clearBtn(panel).classList.contains('hidden'));
+	t.is(clearBtn(panel).textContent, 'Clear 30 changed files');
+
+	clearBtn(panel).click();
+
+	t.deepEqual(chipNames(panel), [], 'one click clears the whole run');
+	t.true(clearBtn(panel).classList.contains('hidden'));
+	t.true(chipsRow(panel).classList.contains('hidden'));
+});
+
+test('the clear control counts one file in the singular', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+
+	t.is(clearBtn(panel).textContent, 'Clear 1 changed file');
+});
+
+test('clearing changed files keeps what the user attached', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'pathInfoResolved',
+		path: '/repo/src/mine.ts',
+		name: 'mine.ts',
+		kind: 'file',
+	});
+	editFiles(panel, 3);
+	t.is(chipNames(panel).length, 4);
+	t.is(clearBtn(panel).textContent, 'Clear 3 changed files');
+
+	clearBtn(panel).click();
+
+	t.deepEqual(
+		chipNames(panel),
+		['mine.ts'],
+		'the attachment is the user\u2019s to remove, not the agent\u2019s',
+	);
+	t.true(clearBtn(panel).classList.contains('hidden'));
+});
+
+test('a file promoted by attaching it is no longer counted as changed', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+	t.is(clearBtn(panel).textContent, 'Clear 1 changed file');
+
+	panel.post({
+		type: 'pathInfoResolved',
+		path: '/repo/src/a.ts',
+		name: 'a.ts',
+		kind: 'file',
+	});
+
+	t.true(
+		clearBtn(panel).classList.contains('hidden'),
+		'promotion leaves nothing for the clear control to clear',
+	);
 	t.deepEqual(chipNames(panel), ['a.ts']);
 });

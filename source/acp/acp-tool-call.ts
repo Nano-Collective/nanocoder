@@ -132,8 +132,10 @@ function buildFileOpMeta(args: Record<string, unknown>): AcpToolCallMeta {
 					: 'other';
 
 	const locations: ToolCallLocation[] = [];
-	// A copy leaves its source untouched, so only the new file is reported.
-	if (path && operation !== 'copy') {
+	// A copy leaves its source untouched, so only the new file is reported, and
+	// mkdir reports nothing at all: clients treat `locations` as things to open,
+	// and the directory it creates is not one of them.
+	if (path && operation !== 'copy' && operation !== 'mkdir') {
 		locations.push({path: resolve(path)});
 	}
 	if (destination && (operation === 'move' || operation === 'copy')) {

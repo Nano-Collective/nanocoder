@@ -8,6 +8,7 @@
 	const artifactBar = document.getElementById('artifact-bar');
 	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
+	const contextChipsClearBtn = document.getElementById('context-chips-clear');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
@@ -1428,12 +1429,36 @@
 	}
 
 	/**
+	 * Identity key for a path, for comparing chips only - never for display or
+	 * for anything sent to the host, which both keep the path as it arrived.
+	 *
+	 * The row is fed by two producers that spell the same file differently: the
+	 * agent's chips come from resolve() in the ACP layer, the user's from
+	 * uri.fsPath in the extension host, and on Windows those disagree about the
+	 * case of the drive letter and about separators. Compared raw, one file
+	 * shows up twice - once solid, once dashed - and attaching it fails to
+	 * promote the agent's chip. Only the drive letter is case-folded: the rest
+	 * is left alone so this stays correct on a case-sensitive filesystem, where
+	 * `/a/B.ts` and `/a/b.ts` really are two files.
+	 */
+	function pathKey(filePath) {
+		return String(filePath)
+			.replace(/\\/g, '/')
+			.replace(/^([A-Za-z]):/, (_match, drive) => `${drive.toLowerCase()}:`);
+	}
+
+	/** Whether two paths name the same file. */
+	function samePath(a, b) {
+		return pathKey(a) === pathKey(b);
+	}
+
+	/**
 	 * Attach a path the user picked. A file the agent already put in the row is
 	 * promoted rather than ignored, so attaching it deliberately still sends it
 	 * with the next message.
 	 */
 	function attachPath(item) {
-		const existing = attachedPaths.find(a => a.path === item.path);
+		const existing = attachedPaths.find(a => samePath(a.path, item.path));
 		if (existing) {
 			existing.agentEdited = false;
 		} else {
@@ -1449,7 +1474,7 @@
 	 * the file, and re-inlining it would spend context to say nothing new.
 	 */
 	function addChangedFileChip(filePath) {
-		if (attachedPaths.some(a => a.path === filePath)) return;
+		if (attachedPaths.some(a => samePath(a.path, filePath))) return;
 		attachedPaths.push({
 			path: filePath,
 			name: basename(filePath),
@@ -1465,19 +1490,51 @@
 	 * along on the next prompt and expand to nothing.
 	 */
 	function dropChip(filePath) {
-		const remaining = attachedPaths.filter(a => a.path !== filePath);
+		const remaining = attachedPaths.filter(a => !samePath(a.path, filePath));
 		if (remaining.length === attachedPaths.length) return;
 		attachedPaths = remaining;
 		renderChips();
+	}
+
+	// Only the agent's chips go: what the user attached is theirs to remove.
+	if (contextChipsClearBtn) {
+		contextChipsClearBtn.addEventListener('click', () => {
+			attachedPaths = attachedPaths.filter(a => !a.agentEdited);
+			renderChips();
+		});
+	}
+
+	/**
+	 * Label the bulk-dismiss control, or hide it when the row holds nothing the
+	 * agent put there. A refactor turn can add dozens of chips, and dismissing
+	 * them one x at a time is not a realistic ask - the row itself is capped and
+	 * scrolls, so this is the way out of a long one.
+	 */
+	function renderChipsClear() {
+		if (!contextChipsClearBtn) return;
+		const changed = attachedPaths.filter(a => a.agentEdited).length;
+		if (changed === 0) {
+			contextChipsClearBtn.classList.add('hidden');
+			contextChipsClearBtn.textContent = '';
+			return;
+		}
+		contextChipsClearBtn.classList.remove('hidden');
+		contextChipsClearBtn.textContent = `Clear ${changed} changed file${changed === 1 ? '' : 's'}`;
+		contextChipsClearBtn.setAttribute(
+			'title',
+			'Dismiss the files Nanocoder changed. Files you attached stay.',
+		);
 	}
 
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
+			renderChipsClear();
 			return;
 		}
 		contextChipsContainer.classList.remove('hidden');
+		renderChipsClear();
 		for (const item of attachedPaths) {
 			const chip = document.createElement('span');
 			chip.className = item.agentEdited
@@ -1512,7 +1569,7 @@
 			
 			chip.addEventListener('click', e => {
 				if (e.target.classList.contains('chip-remove')) {
-					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					attachedPaths = attachedPaths.filter(a => !samePath(a.path, item.path));
 					renderChips();
 					return;
 				}
@@ -3099,6 +3156,12 @@
 	// url/query rather than a path, so their title is the bare tool name; and the
 	// file editors (string_replace, write_file, diff_edit) report ACP kind
 	// 'edit', so they render as edit cards and never reach this list.
+	//
+	// file_op is a third case, and an unresolved one: its delete and move do
+	// reach this list, and with no entry here they show their raw ACP title
+	// ("file_op: move /a → /b"). One verb cannot cover four operations sharing
+	// a tool name, so fixing it means humanizing per operation rather than per
+	// tool. Left as it was before the changed-file chips landed.
 	const TOOL_VERBS = {
 		read_file: 'Reading',
 		list_directory: 'Listing',
@@ -3160,20 +3223,30 @@
 		return diffPath(update) !== null;
 	}
 
+	// A path the extension host can actually open: `vscode.Uri.file()` resolves
+	// a relative one against the filesystem root, so a chip built from it would
+	// point at a file that does not exist and reject inside showTextDocument.
+	// Absolute means a POSIX root, a UNC share, or a drive-qualified path.
+	function isAbsolutePath(filePath) {
+		return /^(?:[/\\]|[A-Za-z]:[/\\])/.test(filePath);
+	}
+
 	// Absolute paths an update names, in the order the agent reported them - for
 	// a move that is [source, destination]. `locations` is the ACP field for
 	// them, and the only source on a queued announcement, which withholds its
-	// content until the call is about to run.
+	// content until the call is about to run. A tool that reports a relative
+	// location - an MCP or custom tool is under no obligation to resolve one -
+	// contributes nothing rather than an unopenable chip.
 	function updateLocations(update) {
 		const reported =
 			update && Array.isArray(update.locations) ? update.locations : [];
 		const paths = reported
 			.map(location => location && location.path)
-			.filter(path => typeof path === 'string' && !!path);
+			.filter(path => typeof path === 'string' && isAbsolutePath(path));
 		if (paths.length > 0) return paths;
 
 		const fromDiff = diffPath(update);
-		return fromDiff ? [fromDiff] : [];
+		return fromDiff && isAbsolutePath(fromDiff) ? [fromDiff] : [];
 	}
 
 	/**
@@ -3191,6 +3264,10 @@
 		const reported = updateLocations(update);
 		if (reported.length > 0) toolLocations.set(toolCallId, reported);
 
+		// resolveEditCardState is named for the card it was written for, but the
+		// part used here is the status normalisation - 'success' folded into
+		// 'completed', and a denial or a cancel separated back out of 'failed'.
+		// That is the same question for a delete or a move as for an edit.
 		if (resolveEditCardState(update).status !== 'completed') return;
 
 		const paths = toolLocations.get(toolCallId);
@@ -3211,6 +3288,10 @@
 	// Resolve an edit card's label and icon from an update. The agent reports a
 	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
 	// separated back out here rather than all reading as an error.
+	//
+	// The `status` it returns is the general normalisation of an update's
+	// outcome, so trackFileChanges reads it for deletes and moves too - only the
+	// label and icon are specific to an edit card.
 	function resolveEditCardState(update) {
 		let status = (update && update.status) || 'pending';
 		if (status === 'success') status = 'completed';
