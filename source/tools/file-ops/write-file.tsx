@@ -5,6 +5,7 @@ import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
@@ -136,7 +137,10 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 						const language = getLanguageFromExtension(ext);
 
 						try {
-							const highlighted = highlight(line, {language, theme: 'default'});
+							const highlighted = highlight(line, {
+								language,
+								theme: getSyntaxTheme(colors),
+							});
 							const truncated = truncateAnsi(highlighted, availableWidth);
 							return (
 								<Box key={i}>

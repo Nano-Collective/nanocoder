@@ -18,6 +18,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 } from '@/types/core';
 import type {
 	InputState,
@@ -69,9 +70,12 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
+	isSaving?: boolean;
+	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 }
 
 export default function UserInput({
@@ -95,9 +99,12 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	taskInfo,
 	forceFocus = false,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
+	isSaving,
+	onToggleTaskList,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
