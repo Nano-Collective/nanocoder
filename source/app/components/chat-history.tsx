@@ -2,7 +2,7 @@ import {Box, measureElement, Text, useInput} from 'ink';
 import React from 'react';
 import ChatQueue from '@/components/chat-queue';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
-import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {usePromptWidth, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wheelEvents} from '@/utils/terminal-mouse';
 
@@ -61,6 +61,11 @@ export const ChatHistory = React.memo(function ChatHistory({
 }: ChatHistoryProps): React.ReactElement {
 	const {colors} = useTheme();
 	const terminalRows = useTerminalRows();
+	// Same left margin the input box gets from centering promptWidth inside
+	// actualWidth (see usePromptWidth), so the transcript tracks the input
+	// box's left border as the terminal resizes instead of sitting flush
+	// against the terminal edge.
+	const {promptMargin} = usePromptWidth();
 	const viewportRef = React.useRef(null);
 	const contentRef = React.useRef(null);
 	const [scrollOffset, setScrollOffset] = React.useState(0);
@@ -149,6 +154,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			renderLastQueuedComponentLive,
 			clearKey,
 			disableStatic: fullscreen || isFreshInline,
+			leftMargin: promptMargin,
 		}),
 		[
 			frozenComponents,
@@ -157,6 +163,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			clearKey,
 			fullscreen,
 			isFreshInline,
+			promptMargin,
 		],
 	);
 
@@ -167,7 +174,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			)}
 
 			{startChat && isFreshInline && (
-				<Box flexDirection="column">
+				<Box flexDirection="column" marginLeft={promptMargin}>
 					{staticComponents.map((c, i) => (
 						<RenderErrorBoundary key={`fresh-${i}`}>{c}</RenderErrorBoundary>
 					))}
@@ -178,11 +185,16 @@ export const ChatHistory = React.memo(function ChatHistory({
 
 			{liveComponent && (
 				// Inline: the live component sits below the absolutely-positioned
-				// <Static>, so it pulls back -1 to share that left edge. Fullscreen:
-				// it renders inside the overflow="hidden" scroll viewport, so it must
-				// stay at the padded column — a negative margin would push it left of
-				// the clip window and Ink would cut off its first character.
-				<Box marginLeft={fullscreen ? 0 : -1} flexDirection="column">
+				// <Static>, so it pulls back -1 to share that left edge, then adds
+				// promptMargin for the same left-align shift as the static items and
+				// the input box. Fullscreen: it renders inside the overflow="hidden"
+				// scroll viewport, so it must stay at/after the padded column — a
+				// negative margin would push it left of the clip window and Ink would
+				// cut off its first character.
+				<Box
+					marginLeft={fullscreen ? promptMargin : promptMargin - 1}
+					flexDirection="column"
+				>
 					<RenderErrorBoundary label="live">
 						{liveComponent}
 					</RenderErrorBoundary>
@@ -207,7 +219,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 		// after the (flexShrink=0) footer takes its natural height.
 		<Box flexGrow={1} flexBasis={0} flexDirection="column" minHeight={0}>
 			{scrollOffset > 0 && (
-				<Box flexShrink={0}>
+				<Box flexShrink={0} marginLeft={promptMargin}>
 					<Text color={colors.secondary}>
 						{`── ↑ ${scrollOffset} rows · PgUp/PgDn · new output returns to bottom ──`}
 					</Text>
