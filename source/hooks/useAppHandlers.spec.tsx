@@ -190,6 +190,14 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.handleMessageSubmit, 'function');
 });
 
+test('signals slash-command completion so queued work can resume', async t => {
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('/compact');
+
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false], [true]]);
+});
+
 test('handleCancel without an abort controller is a no-op', t => {
 	const { handlers, spies } = setup({ abortController: null });
 

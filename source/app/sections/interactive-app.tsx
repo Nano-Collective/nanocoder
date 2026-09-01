@@ -101,6 +101,8 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+	const drainInProgressRef = React.useRef(false);
+	const [drainAttempt, setDrainAttempt] = React.useState(0);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -181,6 +183,82 @@ export function InteractiveApp({
 			chatHandler.isGenerating ||
 			appState.isToolExecuting ||
 			appState.abortController !== null);
+
+	// Drain queued prompts only after the previous turn is fully idle and all
+	// modal modes have closed. Command handlers and conversation completion can
+	// both signal completion, so keeping the drain here makes it idempotent and
+	// prevents nested or duplicate turns.
+	const queueDrainBlocked =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null ||
+		appState.isToolConfirmationMode ||
+		appState.isQuestionMode ||
+		pendingSubagentApproval !== null ||
+		pendingToolConfirmation !== null;
+
+	React.useEffect(() => {
+		// Re-run after a successful dispatch settles, once its queue update has
+		// rendered and the next item can be considered.
+		void drainAttempt;
+		if (
+			queueDrainBlocked ||
+			appState.activeMode !== null ||
+			appState.isSettingsMode ||
+			!appState.isConversationComplete ||
+			userMessageQueue.queuedMessages.length === 0 ||
+			drainInProgressRef.current
+		) {
+			return;
+		}
+
+		drainInProgressRef.current = true;
+		let started = false;
+		const timeout = setTimeout(() => {
+			started = true;
+			void userMessageQueue
+				.drainNextMessage(async message => {
+					if (!appState.client || !appState.toolManager) return false;
+					await handleUserSubmit(
+						message.message,
+						message.displayValue,
+						message.images,
+					);
+					return true;
+				})
+				.then(
+					dispatched => {
+						drainInProgressRef.current = false;
+						// The queue state update happens before the dispatch resolves. A
+						// separate render is needed to notice and drain the next item after
+						// the dispatched turn returns to idle.
+						if (dispatched) {
+							setDrainAttempt(attempt => attempt + 1);
+						}
+					},
+					() => {
+						drainInProgressRef.current = false;
+					},
+				);
+		}, 0);
+
+		return () => {
+			clearTimeout(timeout);
+			if (!started) drainInProgressRef.current = false;
+		};
+	}, [
+		appState.activeMode,
+		appState.client,
+		appState.isConversationComplete,
+		appState.isSettingsMode,
+		appState.toolManager,
+		queueDrainBlocked,
+		handleUserSubmit,
+		userMessageQueue.drainNextMessage,
+		userMessageQueue.queuedMessages.length,
+		drainAttempt,
+	]);
 
 	const recallableSubmittedDraft =
 		cancellable &&

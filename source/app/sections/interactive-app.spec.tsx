@@ -1,6 +1,8 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
+import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
@@ -41,6 +43,13 @@ interface Overrides {
 	setPendingPlanProceed?: (v: string | null) => void;
 	handleMessageSubmit?: (message: string) => Promise<void>;
 	currentSessionId?: string | null;
+	toolManager?: unknown;
+	queuedMessages?: Array<{id: string; message: string; displayValue: string}>;
+	handleUserSubmit?: (message: string) => Promise<void>;
+	drainNextMessage?: (
+		dispatch: (message: {id: string; message: string; displayValue: string}) =>
+			boolean | Promise<boolean>,
+	) => boolean | Promise<boolean>;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -49,6 +58,7 @@ function makeProps(o: Overrides = {}) {
 
 	const appState = {
 		client: o.client ?? null,
+		toolManager: o.toolManager ?? null,
 		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
@@ -140,16 +150,16 @@ function makeProps(o: Overrides = {}) {
 		pendingToolConfirmation: null,
 		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
-		handleUserSubmit: noopAsync,
+		handleUserSubmit: o.handleUserSubmit ?? noopAsync,
 		userMessageQueue: {
-			queuedMessages: [],
+			queuedMessages: o.queuedMessages ?? [],
 			enqueueMessage: () => ({
 				id: 'queued-test',
 				message: '',
 				displayValue: '',
 			}),
 			removeMessage: noop,
-			drainNextMessage: () => false,
+			drainNextMessage: o.drainNextMessage ?? (() => false),
 		},
 		handleIdeSelect: noop,
 	} as never;
@@ -158,6 +168,141 @@ function makeProps(o: Overrides = {}) {
 test('renders without crashing in default state', t => {
 	const {lastFrame} = renderWithTheme(<InteractiveApp {...makeProps()} />);
 	t.truthy(lastFrame());
+});
+
+test('does not drain queued prompts while a turn is generating', async t => {
+	let submitted = false;
+	const {unmount} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isGenerating: true,
+				isConversationComplete: true,
+				queuedMessages: [
+					{id: 'queued-1', message: 'queued prompt', displayValue: 'queued prompt'},
+				],
+				handleUserSubmit: async () => {
+					submitted = true;
+				},
+			})}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.false(submitted);
+	unmount();
+});
+
+test('does not drain queued prompts while a modal mode is active', async t => {
+	let submitted = false;
+	const {unmount} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				client: {},
+				toolManager: {},
+				activeMode: 'model',
+				isConversationComplete: true,
+				queuedMessages: [
+					{id: 'queued-1', message: 'queued prompt', displayValue: 'queued prompt'},
+				],
+				handleUserSubmit: async () => {
+					submitted = true;
+				},
+			})}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.false(submitted);
+	unmount();
+});
+
+test('drains every queued prompt after each dispatched turn returns to idle', async t => {
+	const submitted: string[] = [];
+
+	const QueueDrainHarness = () => {
+		const userMessageQueue = useUserMessageQueue();
+		const [isConversationComplete, setIsConversationComplete] =
+			React.useState(true);
+
+		React.useEffect(() => {
+			userMessageQueue.enqueueMessage({message: 'first', displayValue: 'first'});
+			userMessageQueue.enqueueMessage({message: 'second', displayValue: 'second'});
+		}, [userMessageQueue.enqueueMessage]);
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					toolManager: {},
+					isConversationComplete,
+					handleUserSubmit: async message => {
+						submitted.push(message);
+						setIsConversationComplete(false);
+						await new Promise(resolve => setTimeout(resolve, 10));
+						setIsConversationComplete(true);
+					},
+				})}
+				userMessageQueue={userMessageQueue}
+			/>
+		);
+	};
+
+	const {unmount} = renderWithTheme(<QueueDrainHarness />);
+	await new Promise(resolve => setTimeout(resolve, 100));
+	t.deepEqual(submitted, ['first', 'second']);
+	unmount();
+});
+
+test('drains a prompt after delayed command completion when the app is idle', async t => {
+	const submitted: string[] = [];
+
+	const DelayedCommandHarness = () => {
+		const userMessageQueue = useUserMessageQueue();
+		const [isToolExecuting, setIsToolExecuting] = React.useState(true);
+		const [isConversationComplete, setIsConversationComplete] =
+			React.useState(false);
+
+		React.useEffect(() => {
+			userMessageQueue.enqueueMessage({
+				message: 'after compact',
+				displayValue: 'after compact',
+			});
+			const timeout = setTimeout(() => {
+				setIsToolExecuting(false);
+				setIsConversationComplete(true);
+			}, DELAY_COMMAND_COMPLETE_MS);
+
+			return () => clearTimeout(timeout);
+		}, [userMessageQueue.enqueueMessage]);
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					toolManager: {},
+					isToolExecuting,
+					isConversationComplete,
+					handleUserSubmit: async message => {
+						submitted.push(message);
+					},
+				})}
+				userMessageQueue={userMessageQueue}
+			/>
+		);
+	};
+
+	const {unmount} = renderWithTheme(<DelayedCommandHarness />);
+	await new Promise(resolve =>
+		setTimeout(resolve, DELAY_COMMAND_COMPLETE_MS + 40),
+	);
+	t.deepEqual(submitted, ['after compact']);
+	unmount();
 });
 
 test('renders the static-component marker through ChatHistory', t => {
