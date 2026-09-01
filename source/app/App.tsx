@@ -609,6 +609,10 @@ export default function App({
 						messageCount: session.messageCount,
 					}));
 			},
+			deleteSession: async sessionId => {
+				await sessionManager.initialize();
+				await sessionManager.deleteSession(sessionId);
+			},
 			loadSession: async sessionId => {
 				if (webRuntimeStateRef.current.isGenerating) {
 					throw new Error(

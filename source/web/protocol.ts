@@ -26,7 +26,8 @@ export type WebClientEvent =
 	| {type: 'question_response'; id: string; answer: string}
 	| {type: 'reset_session'; id: string}
 	| {type: 'list_sessions'; id: string}
-	| {type: 'load_session'; id: string; sessionId: string};
+	| {type: 'load_session'; id: string; sessionId: string}
+	| {type: 'delete_session'; id: string; sessionId: string};
 
 export type WebServerEvent =
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
@@ -181,6 +182,23 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 
 			return {
 				type: 'load_session',
+				id: parsed.id,
+				sessionId: parsed.sessionId,
+			};
+		case 'delete_session':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('Delete session id is required.');
+			}
+
+			if (
+				typeof parsed.sessionId !== 'string' ||
+				parsed.sessionId.length === 0
+			) {
+				throw new Error('Delete session sessionId is required.');
+			}
+
+			return {
+				type: 'delete_session',
 				id: parsed.id,
 				sessionId: parsed.sessionId,
 			};

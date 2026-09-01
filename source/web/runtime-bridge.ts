@@ -19,6 +19,7 @@ export interface WebRuntimeHandlers {
 	resetSession: () => void | Promise<void>;
 	listSessions: () => Promise<WebSessionSummary[]>;
 	loadSession: (sessionId: string) => Promise<WebSessionLoadResult | null>;
+	deleteSession: (sessionId: string) => Promise<void>;
 }
 
 export interface WebApprovalRequest {
@@ -246,6 +247,17 @@ export function createWebRuntimeBridge(
 					session: result.session,
 					messages: result.messages,
 				});
+				return;
+			}
+
+			if (event.type === 'delete_session') {
+				if (activeTurnId) {
+					throw new Error(
+						'Cannot delete session while a browser turn is active.',
+					);
+				}
+
+				await runtimeHandlers.deleteSession(event.sessionId);
 				return;
 			}
 

@@ -14,6 +14,7 @@ export const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" h
 export const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 export const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
 export const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+export const IconTrash = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
 export const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 export const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
 export const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
@@ -270,29 +271,55 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.thread-item {
 			display: flex;
 			align-items: center;
-			gap: 10px;
-			min-height: 36px;
+			justify-content: space-between;
 			width: 100%;
-			padding: 8px 12px;
-			border: 0;
-			border-radius: 8px;
+			padding: 12px 14px;
 			background: transparent;
-			color: var(--muted-foreground);
-			font-size: 13px;
+			border: 0;
+			color: var(--foreground);
+			font-family: inherit;
+			font-size: 15px;
 			text-align: left;
 			cursor: pointer;
-			transition: all 150ms ease;
+			border-radius: 8px;
+			transition: all 0.2s;
+			white-space: nowrap;
+			overflow: hidden;
+			flex-shrink: 0;
+		}
+		.thread-item-text {
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			text-align: left;
+		}
+		.thread-delete-btn {
+			display: none;
+			background: transparent;
+			color: var(--muted-foreground);
+			cursor: pointer;
+			padding: 4px;
+			border-radius: 4px;
+			flex-shrink: 0;
+			margin-left: 8px;
+		}
+		.thread-item:hover .thread-delete-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		.thread-delete-btn:hover {
+			color: #ef4444;
+		}
+		.thread-item:hover,
+		.thread-item:focus-visible {
+			background: rgba(128, 128, 128, 0.12);
 		}
 		.thread-item.active {
 			background: rgba(128, 128, 128, 0.12);
 			color: var(--foreground);
 			font-weight: 500;
-		}
-		.thread-item:hover,
-		.thread-item:focus-visible {
-			background: rgba(128, 128, 128, 0.08);
-			color: var(--primary);
-			outline: 0;
 		}
 		.sidebar-footer {
 			margin-top: auto;
@@ -581,17 +608,25 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.empty-state {
 			position: absolute;
-			z-index: 2;
-			top: 40%;
+			bottom: 100%;
 			left: 50%;
-			transform: translate(-50%, -50%);
+			transform: translateX(-50%);
 			width: min(760px, calc(100vw - 40px));
+			margin-bottom: 16px;
 			text-align: center;
 			color: var(--foreground);
+			opacity: 0;
+			visibility: hidden;
+			transition: all 0.4s ease;
+		}
+		.composer-wrap.is-empty .empty-state {
+			opacity: 1;
+			visibility: visible;
+			transform: translateX(-50%) translateY(0);
 		}
 		.empty-state strong {
 			display: block;
-			margin-bottom: 22px;
+			margin-bottom: 8px;
 			font-size: clamp(34px, 5vw, 48px);
 			font-weight: 780;
 			line-height: 1.05;
@@ -688,17 +723,18 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: #ffc4c4;
 		}
 		.meta {
-			color: rgba(245, 242, 235, 0.5);
+			color: var(--muted-foreground);
 			font-size: 11px;
-		}
-		.message.user .meta {
-			color: rgba(17, 20, 24, 0.62);
 		}
 		.composer-wrap {
 			position: relative;
 			z-index: 2;
 			width: min(680px, calc(100vw - 32px));
 			margin: 0 auto 24px;
+			transition: transform 0.6s cubic-bezier(0.2, 1, 0.2, 1);
+		}
+		.composer-wrap.is-empty {
+			transform: translateY(-42vh);
 		}
 		.composer {
 			display: grid;
@@ -830,7 +866,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 			
 			/* High Contrast Dark Theme */
-			--background: var(--background);
+			--background: #09090b;
 			--foreground: #fafafa;
 			--card: #18181b;
 			--card-foreground: #fafafa;
@@ -1062,10 +1098,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<button class="theme-toggle-btn" id="themeToggleButton" type="button" aria-label="Switch theme">${IconMoon}</button>
 			</header>
 			<section class="chat-stage" aria-label="Nanocoder browser chat">
-				<div class="empty-state" id="emptyState"></div>
 				<div class="messages" id="messageList" aria-live="polite"></div>
 			</section>
 			<form class="composer-wrap" id="messageForm">
+				<div class="empty-state" id="emptyState"></div>
 				<div class="composer-preview" id="imagePreviewContainer" hidden></div>
 				<div class="composer">
 					<div class="composer-inputs">
@@ -1130,18 +1166,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const storageKey = 'nanocoder.webMode.localSession.v1';
 			const pendingMessages = new Map();
 			const assistantMessages = new Map();
-			const modePrompts = [
-				['${IconCreate} Create', 'Draft a clean implementation plan for the next Nanocoder web mode step'],
-				['${IconExplore} Explore', 'Explore this repository and summarize the web mode architecture'],
-				['${IconCode} Code', 'Help me implement the next small, tested web mode change'],
-				['${IconLearn} Learn', 'Teach me how this browser session connects to the local CLI runtime'],
-			];
-			const promptSuggestions = [
-				'Summarize this repository and suggest the next clean change',
-				'Find the safest place to wire browser chat into the CLI',
-				'Review the current web mode implementation for edge cases',
-				'Explain how this local session sends messages to Nanocoder',
-			];
 			let messageCounter = 0;
 			let storedMessages = [];
 			let activeTurnId = null;
@@ -1154,8 +1178,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			// Initial load animation
 			gsap.from('.sidebar', { opacity: 0, x: -20, duration: 0.6, ease: 'power2.out' });
 			gsap.from('.topbar', { opacity: 0, y: -10, duration: 0.5, ease: 'power2.out', delay: 0.1 });
-			gsap.from('.composer-wrap', { opacity: 0, y: 20, duration: 0.6, ease: 'power2.out', delay: 0.2 });
-			gsap.from('.empty-state', { opacity: 0, y: 10, duration: 0.5, ease: 'power2.out', delay: 0.3 });
+			gsap.from('.composer-wrap', { opacity: 0, duration: 0.6, ease: 'power2.out', delay: 0.2 });
+
 
 			// Custom helper to animate elements in
 			function animateIn(element) {
@@ -1254,50 +1278,22 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
 			}
 
-			function setEmptyState(title, detail, includePrompts = false) {
+			function setEmptyState(title, detail) {
 				emptyState.innerHTML = '';
 				const titleElement = document.createElement('strong');
 				titleElement.textContent = title;
 				emptyState.append(titleElement);
 
-				if (includePrompts) {
-					const modePills = document.createElement('div');
-					modePills.className = 'mode-pills';
-					for (const [label, prompt] of modePrompts) {
-						const pill = document.createElement('button');
-						pill.className = 'mode-pill';
-						pill.type = 'button';
-						pill.innerHTML = label;
-						pill.dataset.action = 'fill';
-						pill.dataset.prompt = prompt;
-						modePills.append(pill);
-					}
-					emptyState.append(modePills);
-
-					const promptList = document.createElement('div');
-					promptList.className = 'prompt-list';
-					for (const prompt of promptSuggestions) {
-						const promptButton = document.createElement('button');
-						promptButton.className = 'prompt-button';
-						promptButton.type = 'button';
-						promptButton.textContent = prompt;
-						promptButton.dataset.action = 'submit';
-						promptButton.dataset.prompt = prompt;
-						promptList.append(promptButton);
-					}
-					emptyState.append(promptList);
-					emptyState.hidden = false;
-					return;
+				if (detail) {
+					const detailElement = document.createElement('span');
+					detailElement.textContent = detail;
+					emptyState.append(detailElement);
 				}
-
-				const detailElement = document.createElement('span');
-				detailElement.textContent = detail;
-				emptyState.append(detailElement);
-				emptyState.hidden = false;
+				messageForm.classList.add('is-empty');
 			}
 
 			function hideEmptyState() {
-				emptyState.hidden = true;
+				messageForm.classList.remove('is-empty');
 			}
 
 			const inlineCodeMarker = String.fromCharCode(96);
@@ -1529,7 +1525,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				pendingMessages.clear();
 				assistantMessages.clear();
 				messageList.replaceChildren();
-				setEmptyState('How can I help you?', '', true);
+				setEmptyState('How can I help you?', '');
 				messageInput.value = '';
 				messageInput.focus();
 				activeSessionId = null;
@@ -1575,17 +1571,45 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				for (const session of sessions) {
-					const button = document.createElement('button');
-					button.className =
-						'thread-item' + (session.id === activeSessionId ? ' active' : '');
-					button.type = 'button';
-					button.dataset.sessionId = session.id;
-					button.dataset.threadLabel = session.title;
+					const item = document.createElement('button');
+					item.className = 'thread-item' + (session.id === activeSessionId ? ' active' : '');
+					item.type = 'button';
+					item.dataset.sessionId = session.id;
+					item.dataset.threadLabel = session.title;
 					
+					const textSpan = document.createElement('span');
+					textSpan.className = 'thread-item-text';
 					const relative = formatRelativeTime(session.lastAccessedAt);
-					button.textContent =
-						session.title + (relative ? ' · ' + relative : '');
-					threadList.append(button);
+					textSpan.textContent = session.title + (relative ? ' · ' + relative : '');
+					
+					const deleteBtn = document.createElement('div');
+					deleteBtn.className = 'thread-delete-btn';
+					deleteBtn.title = 'Delete session';
+					deleteBtn.innerHTML = '${IconTrash}';
+					
+					deleteBtn.addEventListener('click', (event) => {
+						event.stopPropagation();
+						if (activeTurnId) {
+							addSystemNotice('Cannot delete a session while a turn is active.', 'Session switch');
+							return;
+						}
+						
+						sendClientEvent({
+							type: 'delete_session',
+							id: 'browser-delete-' + Date.now(),
+							sessionId: session.id,
+						});
+						
+						const updatedSessions = currentSessions.filter(s => s.id !== session.id);
+						renderThreadList(updatedSessions);
+						
+						if (session.id === activeSessionId) {
+							newChatButton.click();
+						}
+					});
+
+					item.append(textSpan, deleteBtn);
+					threadList.append(item);
 				}
 			}
 
@@ -1597,7 +1621,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageList.replaceChildren();
 
 				if (messages.length === 0) {
-					setEmptyState('How can I help you?', '', true);
+					setEmptyState('How can I help you?', '');
 				} else {
 					hideEmptyState();
 					for (const message of messages) {
@@ -1797,7 +1821,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					setStatus('Connected', 'connected');
 					setComposerEnabled(true);
 					if (storedMessages.length === 0) {
-						setEmptyState('How can I help you?', '', true);
+						setEmptyState('How can I help you?', '');
 					}
 					messageInput.focus();
 					sendClientEvent({type: 'list_sessions', id: 'browser-sessions-' + Date.now()});
@@ -1972,10 +1996,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					setActiveTurn(null);
 					setComposerEnabled(false);
 					setStatus('Reconnecting…', '');
-					setEmptyState(
-						'Reconnecting…',
-						'Trying to reach the local Nanocoder server again.',
-					);
 					scheduleReconnect();
 				});
 				socket.addEventListener('error', () => {
@@ -1998,7 +2018,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			applyTheme(initialTheme());
 			applySidebarCollapsed(window.localStorage.getItem(sidebarStorageKey) === 'true');
 
-			setEmptyState('How can I help you?', '', true);
+			setEmptyState('How can I help you?', '');
 			restoreStoredMessages();
 			connectSocket();
 
@@ -2012,6 +2032,18 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				submitUserMessage(messageInput.value);
+			});
+
+			function adjustMessageInputHeight() {
+				messageInput.style.height = 'auto';
+				messageInput.style.height = Math.min(messageInput.scrollHeight, 180) + 'px';
+			}
+
+			messageInput.addEventListener('input', () => {
+				adjustMessageInputHeight();
+				if (!activeTurnId) {
+					sendButton.disabled = messageInput.value.trim().length === 0 && pendingImages.length === 0;
+				}
 			});
 
 			messageInput.addEventListener('keydown', event => {
