@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {
 	getCachedFileContent,
 	invalidateCache,
+	isDerivedContentPath,
 	clearCache,
 	getCacheSize,
 	MAX_CACHE_SIZE,
@@ -473,6 +474,27 @@ test('getCachedFileContent - reads extensionless file as utf-8 text', async t =>
 
 		t.is(result.content, 'plain text\nno extension');
 		t.deepEqual(result.lines, ['plain text', 'no extension']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('isDerivedContentPath - true only for converted document formats', t => {
+	t.true(isDerivedContentPath('/tmp/spec.pdf'));
+	t.true(isDerivedContentPath('/tmp/spec.DOCX'));
+	t.false(isDerivedContentPath('/tmp/spec.md'));
+	t.false(isDerivedContentPath('/tmp/LICENSE'));
+});
+
+test('getCachedFileContent - marks plain text content as not derived', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'notes.md');
+		await writeFile(filePath, '# heading', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.false(result.derived);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}

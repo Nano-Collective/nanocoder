@@ -15,7 +15,7 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
+import {getCachedFileContent, isDerivedContentPath} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {markFileSeen} from '@/utils/read-tracker';
@@ -72,10 +72,7 @@ const executeReadFile = async (args: {
 					// Detect likely encoding (simple heuristic)
 					let encoding = 'UTF-8';
 					try {
-						if (
-							absPath.toLowerCase().endsWith('.pdf') ||
-							absPath.toLowerCase().endsWith('.docx')
-						) {
+						if (isDerivedContentPath(absPath)) {
 							encoding = 'Binary (Converted to Markdown)';
 						} else {
 							// Try to read as UTF-8
