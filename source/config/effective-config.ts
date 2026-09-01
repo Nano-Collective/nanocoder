@@ -718,6 +718,9 @@ export function resolveEffectiveConfig(options?: {
 }): EffectiveConfig {
 	const cwd = options?.cwd ?? process.cwd();
 	const configDir = options?.configDir ?? getConfigPath();
+	getAppConfig();
+	loadPreferences();
+
 	const rawLayers = readRawLayers(cwd, configDir);
 
 	const entries: EffectiveConfigEntry[] = [
