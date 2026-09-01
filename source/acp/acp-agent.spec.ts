@@ -457,6 +457,29 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 	);
 });
 
+test('AcpAgent.prompt - rejects overlapping prompts before async boundaries', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp'});
+
+	const p1 = agent.prompt({
+		sessionId: created.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+
+	// Fire a concurrent prompt immediately before p1 yields or completes
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'second'}],
+		}),
+		{message: `Prompt already in progress for session: ${created.sessionId}`},
+	);
+
+	// Let p1 finish
+	agent.cancel({sessionId: created.sessionId});
+	const result = await p1;
+	t.is(result.stopReason, 'cancelled');
+});
 
 test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	const {agent} = createAgent();
