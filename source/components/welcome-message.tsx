@@ -33,6 +33,15 @@ const LOGO_FONT = 'block';
 // used only for the 1/3-top vertical centering estimate.
 const LOGO_ROWS = 9;
 
+// The multi-row block wordmark needs LOGO_ROWS of vertical space, which
+// short terminals (VS Code's integrated panel, tmux splits, etc.) don't
+// have. Below MIN_ROWS_FOR_BLOCK_LOGO we still show the wordmark, just as a
+// single plain-text line instead of the BigText art, so the logo never
+// disappears entirely — it only degrades. Below MIN_ROWS_FOR_TEXT_LOGO there
+// truly isn't room for anything above the welcome text, so we drop it.
+const MIN_ROWS_FOR_BLOCK_LOGO = 16;
+const MIN_ROWS_FOR_TEXT_LOGO = 8;
+
 const MENU_FULL: Array<[string, string]> = [
 	['Resume session', '/resume'],
 	['Select model', '/model'],
@@ -55,11 +64,18 @@ export default memo(function WelcomeMessage() {
 	const gitStatus = getGitStatusSummarySync();
 
 	// Block wordmark in every screen — full NANOCODER on wide terminals, NC
-	// monogram on narrow (same block font, just shorter string). Short
-	// terminals (rows < 16) skip it to protect the menu rows.
+	// monogram on narrow (same block font, just shorter string). When the
+	// terminal is too short for the multi-row BigText art it falls back to a
+	// single-line plain-text wordmark instead of disappearing; only truly
+	// tiny terminals (rows < MIN_ROWS_FOR_TEXT_LOGO) drop it to protect the
+	// menu rows.
 	let logoText: string | null = null;
-	if (rows >= 16) {
+	let compactLogo = false;
+	if (rows >= MIN_ROWS_FOR_BLOCK_LOGO) {
 		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
+	} else if (rows >= MIN_ROWS_FOR_TEXT_LOGO) {
+		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
+		compactLogo = true;
 	}
 
 	let menu: Array<[string, string]> = [];
@@ -69,7 +85,7 @@ export default memo(function WelcomeMessage() {
 
 	// Vertical centering: roughly 1/3 of the empty space above the content
 	// and 2/3 below, when the terminal is tall enough
-	const logoRows = logoText ? LOGO_ROWS : 0;
+	const logoRows = logoText ? (compactLogo ? 1 : LOGO_ROWS) : 0;
 	const welcomeRows = 2; // Welcome + subtitle
 	const locationRows = 1;
 	const menuRows = menu.length;
@@ -123,7 +139,11 @@ export default memo(function WelcomeMessage() {
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
 					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text={logoText} font={LOGO_FONT} />
+						{compactLogo ? (
+							<Text bold>{logoText}</Text>
+						) : (
+							<BigText text={logoText} font={LOGO_FONT} />
+						)}
 					</Gradient>
 				</Box>
 			)}
