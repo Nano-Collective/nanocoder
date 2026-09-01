@@ -164,15 +164,23 @@ function loadHierarchicalConfig<T>(
 	return tryLoadConfig(join(getConfigPath(), fileName), label, extract); // nosemgrep
 }
 
+/**
+ * Built-in auto-compact defaults. Exported so the effective-config resolver
+ * (`config/effective-config.ts`) can label a value as coming from the
+ * `default` layer without re-declaring the numbers.
+ * @public
+ */
+export const DEFAULT_AUTO_COMPACT_CONFIG: AutoCompactConfig = {
+	enabled: true,
+	threshold: 60,
+	mode: 'conservative',
+	strategy: 'llm',
+	notifyUser: true,
+};
+
 // Load auto-compact configuration and Returns default config if not specified
 function loadAutoCompactConfig(): AutoCompactConfig {
-	const defaults: AutoCompactConfig = {
-		enabled: true,
-		threshold: 60,
-		mode: 'conservative',
-		strategy: 'llm',
-		notifyUser: true,
-	};
+	const defaults = DEFAULT_AUTO_COMPACT_CONFIG;
 
 	return (
 		loadHierarchicalConfig('agents.config.json', 'auto-compact', config => {
@@ -234,16 +242,23 @@ function validateStrategy(strategy: unknown): CompressionStrategy {
 	return 'llm';
 }
 
+/**
+ * Built-in session defaults. See DEFAULT_AUTO_COMPACT_CONFIG for why this is
+ * exported rather than inlined.
+ * @public
+ */
+export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
+	autoSave: true,
+	saveInterval: 30000, // 30 seconds
+	maxSessions: 100,
+	maxMessages: 1000,
+	retentionDays: 30,
+	directory: '',
+};
+
 // Load session configuration and Returns default config if not specified
 function loadSessionConfig(): AppConfig['sessions'] {
-	const defaults: NonNullable<AppConfig['sessions']> = {
-		autoSave: true,
-		saveInterval: 30000, // 30 seconds
-		maxSessions: 100,
-		maxMessages: 1000,
-		retentionDays: 30,
-		directory: '',
-	};
+	const defaults = DEFAULT_SESSION_CONFIG;
 
 	const normalizeSessionNumber = (
 		value: unknown,
@@ -301,10 +316,12 @@ export const DEFAULT_HEADLESS_MAX_TURNS = 200;
 
 // Load headless conversation limits. Env var wins (handy for CI), then
 // agents.config.json, then the default.
+export const DEFAULT_HEADLESS_CONFIG: NonNullable<AppConfig['headless']> = {
+	maxTurns: DEFAULT_HEADLESS_MAX_TURNS,
+};
+
 function loadHeadlessConfig(): AppConfig['headless'] {
-	const defaults: NonNullable<AppConfig['headless']> = {
-		maxTurns: DEFAULT_HEADLESS_MAX_TURNS,
-	};
+	const defaults = DEFAULT_HEADLESS_CONFIG;
 
 	const envValue = process.env['NANOCODER_MAX_TURNS'];
 	if (envValue !== undefined && envValue.trim() !== '') {
@@ -333,12 +350,14 @@ function loadHeadlessConfig(): AppConfig['headless'] {
 // Defaults mirror the historical hardcoded caps in constants.ts, so behaviour
 // is unchanged unless the user opts in. Distinct from the per-provider
 // `maxRetries` setting, which caps network request retries.
+export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
+	maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
+	maxEmptyTurns: MAX_EMPTY_TURNS,
+	maxMalformedRetries: MAX_MALFORMED_RETRIES,
+};
+
 function loadRetryLimitsConfig(): RetryLimitsConfig {
-	const defaults: RetryLimitsConfig = {
-		maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
-		maxEmptyTurns: MAX_EMPTY_TURNS,
-		maxMalformedRetries: MAX_MALFORMED_RETRIES,
-	};
+	const defaults = DEFAULT_RETRY_LIMITS;
 
 	// A fresh tool-call signature already counts as 1 repeat, so a cap below 2
 	// would pause on every single tool call. The nudge/self-correction caps may
@@ -386,11 +405,21 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 	);
 }
 
+/**
+ * Built-in paste defaults. A function rather than a const because
+ * `@/utils/paste-utils` imports this module back, and reading
+ * DEFAULT_SINGLE_LINE_PASTE_THRESHOLD at module-evaluation time hits the
+ * temporal dead zone on whichever side of the cycle loads second. Deferring
+ * the read to call time is what the loader below always did.
+ * @public
+ */
+export function getDefaultPasteConfig(): PasteConfig {
+	return {singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD};
+}
+
 // Load paste configuration and Returns default config if not specified
 function loadPasteConfig(): PasteConfig {
-	const defaults: PasteConfig = {
-		singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD,
-	};
+	const defaults = getDefaultPasteConfig();
 
 	return (
 		loadHierarchicalConfig('nanocoder-preferences.json', 'paste', config => {
