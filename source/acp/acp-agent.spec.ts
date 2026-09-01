@@ -470,15 +470,12 @@ test('AcpAgent.prompt - rejects an overlapping prompt before the first async bou
 	await t.throwsAsync(
 		agent.prompt({
 			sessionId: session.sessionId,
-		prompt: [{type: 'text', text: 'second'}],
+			prompt: [{type: 'text', text: 'second'}],
 		}),
 		{message: `Prompt already in progress for session: ${session.sessionId}`},
 	);
 
-	t.is(
-		agent['sessions'].get(session.sessionId)!.abortController,
-		controller,
-	);
+	t.is(agent['sessions'].get(session.sessionId)!.abortController, controller);
 	t.is((await first).stopReason, 'end_turn');
 });
 
@@ -625,27 +622,37 @@ test('AcpAgent.prompt - a built-in command exchange stays out of model context',
 	t.deepEqual(convertToModelMessages(messages), []);
 });
 
-test.serial('AcpAgent.prompt - built-in replies are not persisted', async t => {
-	const {agent} = createAgent();
-	await sessionManager.initialize();
-	const session = await agent.newSession({cwd: '/tmp'});
+test.serial(
+	'AcpAgent.prompt - built-in replies persist with sessions but do not create one alone',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const commandOnlySession = await agent.newSession({cwd: '/tmp'});
 
-	await agent.prompt({
-		sessionId: session.sessionId,
-		prompt: [{type: 'text', text: 'real prompt'}],
-	});
-	await agent.prompt({
-		sessionId: session.sessionId,
-		prompt: [{type: 'text', text: '/help'}],
-	});
+		await agent.prompt({
+			sessionId: commandOnlySession.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+		t.falsy(await sessionManager.readSession(commandOnlySession.sessionId));
 
-	const persisted = await sessionManager.readSession(session.sessionId);
-	t.truthy(persisted);
-	t.true(
-		persisted!.messages.every(m => !m.displayOnly),
-		'display-only built-in replies must not be written to disk',
-	);
-});
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'real prompt'}],
+		});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.truthy(persisted);
+		t.true(
+			persisted!.messages.some(m => m.displayOnly),
+			'display-only built-in replies must remain in session history',
+		);
+	},
+);
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/definitelynotacommand');
