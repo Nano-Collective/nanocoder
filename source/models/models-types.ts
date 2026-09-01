@@ -64,5 +64,7 @@ export interface ModelInfo {
 	cost: {
 		input: number;
 		output: number;
+		cacheRead?: number;
+		cacheWrite?: number;
 	};
 }

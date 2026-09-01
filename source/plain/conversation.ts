@@ -39,6 +39,8 @@ export interface PlainConversationUsage {
 	inputTokens: number;
 	outputTokens: number;
 	totalTokens: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 }
 
 export type PlainConversationOutcome =
@@ -144,6 +146,8 @@ async function runPlainConversationBody(
 	let accumulatedInputTokens = 0;
 	let accumulatedOutputTokens = 0;
 	let accumulatedTotalTokens = 0;
+	let accumulatedCacheReadTokens = 0;
+	let accumulatedCacheWriteTokens = 0;
 
 	const getUsage = (): PlainConversationUsage | undefined => {
 		if (!hasReportedUsage) return undefined;
@@ -151,6 +155,12 @@ async function runPlainConversationBody(
 			inputTokens: accumulatedInputTokens,
 			outputTokens: accumulatedOutputTokens,
 			totalTokens: accumulatedTotalTokens,
+			...(accumulatedCacheReadTokens > 0
+				? {cacheReadTokens: accumulatedCacheReadTokens}
+				: {}),
+			...(accumulatedCacheWriteTokens > 0
+				? {cacheWriteTokens: accumulatedCacheWriteTokens}
+				: {}),
 		};
 	};
 
@@ -245,11 +255,27 @@ async function runPlainConversationBody(
 				: null;
 		const totalTokens =
 			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+		const cacheReadTokens =
+			typeof turnUsage?.cacheReadTokens === 'number'
+				? turnUsage.cacheReadTokens
+				: null;
+		const cacheWriteTokens =
+			typeof turnUsage?.cacheWriteTokens === 'number'
+				? turnUsage.cacheWriteTokens
+				: null;
 
-		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+		if (
+			inputTokens !== null ||
+			outputTokens !== null ||
+			totalTokens !== null ||
+			cacheReadTokens !== null ||
+			cacheWriteTokens !== null
+		) {
 			hasReportedUsage = true;
 			accumulatedInputTokens += inputTokens ?? 0;
 			accumulatedOutputTokens += outputTokens ?? 0;
+			accumulatedCacheReadTokens += cacheReadTokens ?? 0;
+			accumulatedCacheWriteTokens += cacheWriteTokens ?? 0;
 			// Fall back to input+output so a missing total never reads as zero spend.
 			const turnTotal = totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
 			accumulatedTotalTokens += turnTotal;
@@ -262,6 +288,8 @@ async function runPlainConversationBody(
 					inputTokens: inputTokens ?? undefined,
 					outputTokens: outputTokens ?? undefined,
 					totalTokens: turnTotal,
+					cacheReadTokens: cacheReadTokens ?? undefined,
+					cacheWriteTokens: cacheWriteTokens ?? undefined,
 				});
 			} catch {
 				// Stats must never fail the plain loop.

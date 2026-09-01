@@ -150,7 +150,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'stats',
 		description:
-			'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch',
+			'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
 		load: () => import('@/commands/stats').then(m => m.statsCommand),
 	},
 	{

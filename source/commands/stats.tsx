@@ -11,16 +11,12 @@ import React from 'react';
 import {createStubCommand} from '@/commands/create-stub-command';
 import {StatsDisplay} from '@/components/stats/stats-display';
 import {generateKey} from '@/session/key-generator';
-import {
-	flushStatsLedgerSync,
-	getStatsLedgerCached,
-	STATS_RANGES,
-	type StatsRange,
-} from '@/stats/index';
+import {flushStatsLedgerSync, getStatsLedgerCached} from '@/stats/record';
+import {STATS_RANGES, type StatsRange} from '@/stats/types';
 
 export const statsCommand = createStubCommand(
 	'stats',
-	'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch',
+	'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
 );
 
 export function parseStatsRangeArg(args: string[]): StatsRange {

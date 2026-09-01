@@ -133,6 +133,8 @@ export function useAppState(
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
+	const [liveComponentCapturesInput, setLiveComponentCapturesInput] =
+		useState<boolean>(false);
 
 	// Flipped once subagent loading finishes so the cached system prompt
 	// can rebuild with the real agent list instead of "No subagents available."
@@ -365,6 +367,7 @@ export function useAppState(
 		sessionName,
 		isToolConfirmationMode,
 		isToolExecuting,
+		liveComponentCapturesInput,
 		subagentsReady,
 		compactToolDisplay,
 		compactToolDisplayRef,
@@ -423,6 +426,7 @@ export function useAppState(
 		setSessionName,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
+		setLiveComponentCapturesInput,
 		setSubagentsReady,
 		setCompactToolDisplay,
 		setCompactToolCounts,

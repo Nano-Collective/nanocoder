@@ -33,7 +33,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
-| `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`; `←`/`→` to switch, `Esc`/`Enter` to close |
+| `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`; `←`/`→` to switch, `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
 | `/lsp` | List connected LSP servers |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |

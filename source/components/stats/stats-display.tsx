@@ -7,13 +7,9 @@ import {useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {buildStatsViewModel} from '@/stats/aggregators';
 import {renderCumulativeChart} from '@/stats/chart';
-import {
-	buildStatsViewModel,
-	STATS_RANGES,
-	type StatsLedger,
-	type StatsRange,
-} from '@/stats/index';
+import {STATS_RANGES, type StatsLedger, type StatsRange} from '@/stats/types';
 import {formatCompactTokenCount, formatCost} from '@/usage/format';
 
 function formatSince(createdAt: number, days: number): string {
@@ -228,7 +224,7 @@ export function StatsDisplay({
 										key={`${pair.provider}-${pair.model}`}
 										width={contentWidth}
 									>
-										<Text color={colors.secondary}>
+										<Text color={colors.secondary} wrap="truncate-end">
 											{`${i + 1}.`.padEnd(3)}
 											{truncate(pair.provider, providerNameWidth).padEnd(
 												providerNameWidth,
@@ -251,7 +247,7 @@ export function StatsDisplay({
 				<Text color={colors.secondary}>
 					{interactive
 						? '←/→ switch range · Esc/Enter close · /usage for this chat'
-						: '←/→ switch range · /usage for this chat'}
+						: '/usage for this chat'}
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>

@@ -9,32 +9,39 @@
  * ShutdownManager, and plain/headless paths call `finalizeStatsForExit()`.
  */
 
+import type {ModelInfo} from '@/models/models-types';
 import {getShutdownManager} from '@/utils/shutdown';
 import {toLocalDateKey} from './date-utils';
 import {
 	applyPromptIncrement,
 	applySessionIncrement,
 	applyTokenIncrement,
+	clearStatsLedger,
+	createEmptyLedger,
 	readStatsLedger,
 	writeStatsLedger,
 } from './storage';
-import type {StatsLedger} from './types';
+import {parsePairKey, type StatsLedger} from './types';
 
 const FLUSH_DEBOUNCE_MS = 400;
 export const STATS_SHUTDOWN_HANDLER_NAME = 'stats-ledger-flush';
 
 let cached: StatsLedger | null = null;
+let pending: StatsLedger | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let dirty = false;
 let shutdownRegistered = false;
+let resetGeneration = 0;
 
 /** Test/helpers: reset module state. */
 export function _resetStatsRecorderForTests(): void {
+	resetGeneration += 1;
 	if (flushTimer) {
 		clearTimeout(flushTimer);
 		flushTimer = null;
 	}
 	cached = null;
+	pending = null;
 	dirty = false;
 	if (shutdownRegistered) {
 		try {
@@ -99,8 +106,35 @@ function scheduleFlush(): void {
 
 /** Force a synchronous flush (tests / shutdown). */
 export function flushStatsLedgerSync(): void {
-	if (!dirty || !cached) return;
-	writeStatsLedger(cached);
+	if (!dirty || !pending) return;
+
+	const merged = readStatsLedger();
+	for (const day of pending.daily) {
+		if (day.sessions > 0) {
+			applySessionIncrement(merged, day.date, day.sessions);
+		}
+		for (const [key, usage] of Object.entries(day.byPair)) {
+			const {provider, model} = parsePairKey(key);
+			if (usage.prompts > 0) {
+				applyPromptIncrement(merged, provider, model, day.date, usage.prompts);
+			}
+			if (usage.tokens > 0) {
+				applyTokenIncrement(
+					merged,
+					provider,
+					model,
+					usage.tokens,
+					usage.cost,
+					day.date,
+				);
+			}
+		}
+	}
+	if (!writeStatsLedger(merged)) {
+		return;
+	}
+	cached = merged;
+	pending = null;
 	dirty = false;
 }
 
@@ -116,9 +150,31 @@ export function finalizeStatsForExit(): void {
 	flushStatsLedgerSync();
 }
 
+/** Clear persisted and in-memory lifetime stats. */
+export function resetStatsLedger(): void {
+	resetGeneration += 1;
+	if (flushTimer) {
+		clearTimeout(flushTimer);
+		flushTimer = null;
+	}
+	cached = null;
+	pending = null;
+	dirty = false;
+	if (shutdownRegistered) {
+		try {
+			getShutdownManager().unregister(STATS_SHUTDOWN_HANDLER_NAME);
+		} catch {
+			// ignore
+		}
+		shutdownRegistered = false;
+	}
+	clearStatsLedger();
+}
+
 export function recordSessionCreated(dateKey?: string): void {
-	const ledger = getLedger();
-	applySessionIncrement(ledger, dateKey ?? toLocalDateKey());
+	const key = dateKey ?? toLocalDateKey();
+	applySessionIncrement(getLedger(), key);
+	applySessionIncrement((pending ??= createEmptyLedger()), key);
 	scheduleFlush();
 }
 
@@ -127,12 +183,15 @@ export function recordUserPrompt(
 	model: string,
 	dateKey?: string,
 ): void {
-	const ledger = getLedger();
+	const safeProvider = provider || 'unknown';
+	const safeModel = model || 'unknown';
+	const key = dateKey ?? toLocalDateKey();
+	applyPromptIncrement(getLedger(), safeProvider, safeModel, key);
 	applyPromptIncrement(
-		ledger,
-		provider || 'unknown',
-		model || 'unknown',
-		dateKey ?? toLocalDateKey(),
+		(pending ??= createEmptyLedger()),
+		safeProvider,
+		safeModel,
+		key,
 	);
 	scheduleFlush();
 }
@@ -146,14 +205,17 @@ export function recordTokenUsage(params: {
 }): void {
 	const {provider, model, tokens, cost = 0, dateKey} = params;
 	if (!Number.isFinite(tokens) || tokens <= 0) return;
-	const ledger = getLedger();
+	const safeProvider = provider || 'unknown';
+	const safeModel = model || 'unknown';
+	const key = dateKey ?? toLocalDateKey();
+	applyTokenIncrement(getLedger(), safeProvider, safeModel, tokens, cost, key);
 	applyTokenIncrement(
-		ledger,
-		provider || 'unknown',
-		model || 'unknown',
+		(pending ??= createEmptyLedger()),
+		safeProvider,
+		safeModel,
 		tokens,
 		cost,
-		dateKey ?? toLocalDateKey(),
+		key,
 	);
 	scheduleFlush();
 }
@@ -164,6 +226,8 @@ export type ApiUsageLike = {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 };
 
 /**
@@ -174,11 +238,10 @@ export async function recordApiCallForStats(
 	record: ApiUsageLike,
 	options?: {
 		dateKey?: string;
-		getPricing?: (
-			model: string,
-		) => Promise<{input: number; output: number} | null>;
+		getPricing?: (model: string) => Promise<ModelInfo['cost'] | null>;
 	},
 ): Promise<void> {
+	const generation = resetGeneration;
 	try {
 		const {buildResponseUsageBounded} = await import('@/usage/response-usage');
 		const usage = await buildResponseUsageBounded(
@@ -186,18 +249,50 @@ export async function recordApiCallForStats(
 				inputTokens: record.inputTokens,
 				outputTokens: record.outputTokens,
 				totalTokens: record.totalTokens,
+				cacheReadTokens: record.cacheReadTokens,
+				cacheWriteTokens: record.cacheWriteTokens,
 			},
 			record.model,
 			{getPricing: options?.getPricing},
 		);
+		// A reset may have happened while pricing was resolving. Do not let a
+		// pre-reset request repopulate the freshly cleared ledger.
+		if (generation !== resetGeneration) return;
 
-		const tokens =
-			(usage && Number.isFinite(usage.totalTokens)
+		const reportedTotal =
+			usage && Number.isFinite(usage.totalTokens)
 				? (usage.totalTokens as number)
-				: undefined) ??
-			(Number.isFinite(record.totalTokens)
-				? (record.totalTokens as number)
-				: undefined) ??
+				: undefined;
+		const reportedInputOutput =
+			(usage && Number.isFinite(usage.inputTokens)
+				? (usage.inputTokens as number)
+				: 0) +
+			(usage && Number.isFinite(usage.outputTokens)
+				? (usage.outputTokens as number)
+				: 0);
+		const reportedCacheOnly =
+			usage &&
+			!Number.isFinite(usage.inputTokens) &&
+			!Number.isFinite(usage.outputTokens)
+				? (Number.isFinite(usage.cacheReadTokens)
+						? (usage.cacheReadTokens as number)
+						: 0) +
+					(Number.isFinite(usage.cacheWriteTokens)
+						? (usage.cacheWriteTokens as number)
+						: 0)
+				: 0;
+		const tokens =
+			(reportedTotal !== undefined &&
+			(reportedTotal > 0 ||
+				(reportedInputOutput === 0 && reportedCacheOnly === 0))
+				? reportedTotal
+				: reportedInputOutput > 0
+					? reportedInputOutput
+					: reportedCacheOnly > 0
+						? reportedCacheOnly
+						: Number.isFinite(record.totalTokens)
+							? (record.totalTokens as number)
+							: undefined) ??
 			(Number(record.inputTokens) || 0) + (Number(record.outputTokens) || 0);
 
 		if (!tokens || tokens <= 0) return;
@@ -222,10 +317,4 @@ export async function recordApiCallForStats(
 /** Read-through for the UI (uses cache if warm). */
 export function getStatsLedgerCached(): StatsLedger {
 	return getLedger();
-}
-
-/** Invalidate cache after external clear (tests). */
-export function invalidateStatsCache(): void {
-	cached = null;
-	dirty = false;
 }

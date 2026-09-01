@@ -11,7 +11,7 @@ export function toLocalDateKey(date: Date = new Date()): string {
 }
 
 /** Parse YYYY-MM-DD as local midnight. */
-export function parseLocalDateKey(key: string): Date {
+function parseLocalDateKey(key: string): Date {
 	const [ys, ms, ds] = key.split('-');
 	const y = Number(ys);
 	const m = Number(ms);

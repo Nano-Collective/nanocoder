@@ -24,6 +24,8 @@ import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
+	ApiCallRecord,
+	ApiUsage,
 	DevelopmentMode,
 	LLMClient,
 	Message,
@@ -48,6 +50,34 @@ const MAX_SUBAGENT_DEPTH = 2;
 /** Maximum number of concurrent subagents */
 export const MAX_CONCURRENT_AGENTS = 5;
 
+/** Receives provider-reported usage for one subagent model invocation. */
+export type SubagentApiCallHandler = (
+	call: ApiCallRecord,
+) => void | Promise<void>;
+
+function hasReportedUsage(usage: ApiUsage | undefined): usage is ApiUsage {
+	return (
+		usage !== undefined &&
+		(Number.isFinite(usage.inputTokens) ||
+			Number.isFinite(usage.outputTokens) ||
+			Number.isFinite(usage.totalTokens) ||
+			Number.isFinite(usage.cacheReadTokens) ||
+			Number.isFinite(usage.cacheWriteTokens))
+	);
+}
+
+/** Stats adapter used by production subagent runtimes. */
+export async function recordSubagentApiCallForStats(
+	call: ApiCallRecord,
+): Promise<void> {
+	try {
+		const {recordApiCallForStats} = await import('@/stats/record');
+		await recordApiCallForStats(call);
+	} catch {
+		// Usage accounting must never affect subagent execution.
+	}
+}
+
 /**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
  * Each subagent runs in an isolated context with filtered tools.
@@ -57,6 +87,7 @@ export class SubagentExecutor {
 	private parentClient: LLMClient;
 	private projectRoot: string;
 	private parentMode: DevelopmentMode;
+	private onApiCallComplete?: SubagentApiCallHandler;
 	/**
 	 * Live source for the current development mode, read on every tool-approval
 	 * check. When set (the interactive app wires it to the same ref the main
@@ -72,11 +103,13 @@ export class SubagentExecutor {
 		parentClient: LLMClient,
 		projectRoot: string = process.cwd(),
 		parentMode: DevelopmentMode = 'normal',
+		onApiCallComplete?: SubagentApiCallHandler,
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
 		this.parentMode = parentMode;
+		this.onApiCallComplete = onApiCallComplete;
 	}
 
 	/**
@@ -158,6 +191,21 @@ export class SubagentExecutor {
 				config,
 				!!agentId,
 			);
+			const pendingUsageWrites: Promise<void>[] = [];
+			const recordUsage = (call: ApiCallRecord): void => {
+				if (!this.onApiCallComplete) {
+					return;
+				}
+
+				try {
+					const result = this.onApiCallComplete(call);
+					if (result) {
+						pendingUsageWrites.push(Promise.resolve(result).catch(() => {}));
+					}
+				} catch {
+					// Usage accounting must never affect subagent execution.
+				}
+			};
 
 			try {
 				const output = await this.runSubagentConversation(
@@ -167,35 +215,14 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					recordUsage,
 				);
 
-				// Read final token count from the correct progress source
+				// Read the final estimated progress count. Provider-reported usage is
+				// sent through recordUsage and is the source for lifetime accounting.
 				const finalTokenCount = agentId
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
-
-				// Lifetime /stats: count subagent runs (prompt + priced tokens).
-				try {
-					const {recordUserPrompt, recordApiCallForStats} = await import(
-						'@/stats/record'
-					);
-					const parentProvider = this.parentClient.getProviderConfig();
-					const provider = config.provider ?? parentProvider.name ?? 'unknown';
-					const model =
-						config.model && config.model !== 'inherit'
-							? config.model
-							: client.getCurrentModel() || 'unknown';
-					recordUserPrompt(provider, model);
-					if (finalTokenCount > 0) {
-						await recordApiCallForStats({
-							provider,
-							model,
-							totalTokens: finalTokenCount,
-						});
-					}
-				} catch {
-					// Stats must never fail the subagent.
-				}
 
 				return {
 					subagentName: config.name,
@@ -205,6 +232,7 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
+				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
 				}
@@ -402,6 +430,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		onApiCallComplete?: SubagentApiCallHandler,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -456,6 +485,10 @@ export class SubagentExecutor {
 			emitProgress('running');
 			await new Promise(resolve => setTimeout(resolve, 50));
 
+			// Capture these before the request so a concurrent parent-model change
+			// cannot misattribute the provider's usage to another model.
+			const provider = client.getProviderConfig().name || 'unknown';
+			const model = client.getCurrentModel() || 'unknown';
 			const response = await client.chat(
 				messages,
 				tools,
@@ -504,6 +537,23 @@ export class SubagentExecutor {
 				},
 				signal,
 			);
+
+			if (onApiCallComplete && hasReportedUsage(response.usage)) {
+				onApiCallComplete({
+					provider,
+					model,
+					inputTokens: response.usage.inputTokens,
+					outputTokens: response.usage.outputTokens,
+					totalTokens: response.usage.totalTokens,
+					...(response.usage.cacheReadTokens !== undefined && {
+						cacheReadTokens: response.usage.cacheReadTokens,
+					}),
+					...(response.usage.cacheWriteTokens !== undefined && {
+						cacheWriteTokens: response.usage.cacheWriteTokens,
+					}),
+					timestamp: Date.now(),
+				});
+			}
 
 			const responseContent = response.choices[0]?.message.content || '';
 

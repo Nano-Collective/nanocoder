@@ -6,10 +6,11 @@ export type StatsRange = '7d' | '3m' | 'all-time';
 
 export const STATS_RANGES: StatsRange[] = ['7d', '3m', 'all-time'];
 
+/** Version 2 adds lifetime monthly token rollups. */
 export const STATS_LEDGER_VERSION = 2 as const;
 
 /** Provider + model pair key separator (unlikely in names). */
-export const PAIR_KEY_SEP = '\u0000';
+const PAIR_KEY_SEP = '\u0000';
 
 export interface PairUsage {
 	tokens: number;
@@ -28,6 +29,16 @@ export interface DailyStats {
 	byPair: Record<string, PairUsage>;
 }
 
+/** Unpruned lifetime token history used by the all-time chart. */
+export interface MonthlyStats {
+	/** Local calendar month YYYY-MM */
+	month: string;
+	tokens: number;
+	cost: number;
+	/** Keyed by `${provider}${PAIR_KEY_SEP}${model}` */
+	byPair: Record<string, PairUsage>;
+}
+
 export interface StatsLedger {
 	version: typeof STATS_LEDGER_VERSION;
 	/** First time the ledger was created (ms since epoch). */
@@ -37,6 +48,8 @@ export interface StatsLedger {
 	totalTokens: number;
 	totalCost: number;
 	daily: DailyStats[];
+	/** Complete monthly token history; unlike daily, this is never pruned. */
+	monthly: MonthlyStats[];
 	lastUpdated: number;
 }
 
@@ -97,17 +110,6 @@ export function parsePairKey(key: string): {provider: string; model: string} {
 	};
 }
 
-export function createEmptyDailyStats(date: string): DailyStats {
-	return {
-		date,
-		sessions: 0,
-		prompts: 0,
-		tokens: 0,
-		cost: 0,
-		byPair: {},
-	};
-}
-
 export function createEmptyLedger(now: number = Date.now()): StatsLedger {
 	return {
 		version: STATS_LEDGER_VERSION,
@@ -117,6 +119,7 @@ export function createEmptyLedger(now: number = Date.now()): StatsLedger {
 		totalTokens: 0,
 		totalCost: 0,
 		daily: [],
+		monthly: [],
 		lastUpdated: now,
 	};
 }

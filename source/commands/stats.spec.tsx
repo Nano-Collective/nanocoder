@@ -93,6 +93,37 @@ test('StatsDisplay renders range tabs, chart, and top providers', t => {
 	t.true(ledger.daily[0]?.byPair[makePairKey('OpenRouter', 'gpt-5')] != null);
 });
 
+test('StatsDisplay changes range with arrow keys and closes on Escape', async t => {
+	const ledger = createEmptyLedger(Date.now());
+	const {lastFrame, stdin, unmount} = renderWithTheme(
+		<StatsDisplay ledger={ledger} initialRange="7d" interactive />,
+	);
+	const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+	stdin.write('\u001B[C');
+	await tick();
+	t.regex(stripAnsi(lastFrame() ?? ''), /\[3m\]/);
+
+	stdin.write('\u001B[C');
+	await tick();
+	t.regex(stripAnsi(lastFrame() ?? ''), /\[all-time\]/);
+
+	let closed = 0;
+	unmount();
+	renderWithTheme(
+		<StatsDisplay
+			ledger={ledger}
+			initialRange="7d"
+			interactive
+			onClose={() => {
+				closed++;
+			}}
+		/>,
+	).stdin.write('\u001B');
+	await tick();
+	t.is(closed, 1);
+});
+
 test('StatsDisplay empty state', t => {
 	const ledger = createEmptyLedger(Date.now());
 	const {lastFrame} = renderWithTheme(
@@ -100,14 +131,4 @@ test('StatsDisplay empty state', t => {
 	);
 	const frame = stripAnsi(lastFrame() ?? '');
 	t.regex(frame, /No activity/i);
-});
-
-test('app-util wires /stats as a live-component handler', async t => {
-	const src = await import('node:fs/promises').then(fs =>
-		fs.readFile(new URL('../app/utils/app-util.ts', import.meta.url), 'utf8'),
-	);
-	t.regex(src, /handleStatsCommand/);
-	t.regex(src, /createStatsDisplayElement/);
-	t.regex(src, /setLiveComponent/);
-	t.regex(src, /commandParts\[0\] !== 'stats'/);
 });

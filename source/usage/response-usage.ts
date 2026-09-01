@@ -5,12 +5,17 @@
 
 import {TIMEOUT_COST_LOOKUP_MS} from '@/constants';
 import {getModelPricing} from '@/models/index';
+import type {ModelInfo} from '@/models/models-types';
 import type {ApiUsage} from '@/types/core';
 import type {ResponseUsage} from '@/types/usage';
 
-type PricingLookup = (
-	model: string,
-) => Promise<{input: number; output: number} | null>;
+type PricingLookup = (model: string) => Promise<ModelInfo['cost'] | null>;
+
+function finiteTokenCount(value: number | undefined): number | undefined {
+	return Number.isFinite(value) && (value as number) >= 0
+		? (value as number)
+		: undefined;
+}
 
 /**
  * Extract the provider-reported token counts, or undefined when the report
@@ -22,17 +27,105 @@ function toReportedUsage(
 ): ResponseUsage | undefined {
 	const hasReportedUsage =
 		!!usage &&
-		(Number.isFinite(usage.inputTokens) ||
-			Number.isFinite(usage.outputTokens) ||
-			Number.isFinite(usage.totalTokens));
+		(finiteTokenCount(usage.inputTokens) !== undefined ||
+			finiteTokenCount(usage.outputTokens) !== undefined ||
+			finiteTokenCount(usage.totalTokens) !== undefined ||
+			finiteTokenCount(usage.cacheReadTokens) !== undefined ||
+			finiteTokenCount(usage.cacheWriteTokens) !== undefined);
 	if (!hasReportedUsage) {
 		return undefined;
 	}
 	return {
-		inputTokens: usage.inputTokens,
-		outputTokens: usage.outputTokens,
-		totalTokens: usage.totalTokens,
+		inputTokens: finiteTokenCount(usage.inputTokens),
+		outputTokens: finiteTokenCount(usage.outputTokens),
+		totalTokens: finiteTokenCount(usage.totalTokens),
+		cacheReadTokens: finiteTokenCount(usage.cacheReadTokens),
+		cacheWriteTokens: finiteTokenCount(usage.cacheWriteTokens),
 	};
+}
+
+/** Calculate a best-effort USD cost from a provider usage report. */
+export function calculateUsageCost(
+	usage: ApiUsage,
+	pricing: ModelInfo['cost'],
+): number | undefined {
+	const inputTokens = finiteTokenCount(usage.inputTokens);
+	const outputTokens = finiteTokenCount(usage.outputTokens);
+	const totalTokens = finiteTokenCount(usage.totalTokens);
+	const cacheReadTokens = finiteTokenCount(usage.cacheReadTokens);
+	const cacheWriteTokens = finiteTokenCount(usage.cacheWriteTokens);
+	const hasCacheDetail =
+		(cacheReadTokens ?? 0) > 0 || (cacheWriteTokens ?? 0) > 0;
+
+	if (hasCacheDetail) {
+		// AI SDK's inputTokens includes the cached input details. Price the
+		// uncached remainder at the normal input rate and use the provider's
+		// cache rates when available. If a provider has no cache-specific
+		// rate, the normal input rate is the conservative fallback.
+		const inputTotal =
+			inputTokens ??
+			(totalTokens !== undefined
+				? Math.max(0, totalTokens - (outputTokens ?? 0))
+				: 0);
+		const uncachedInput = Math.max(
+			0,
+			inputTotal - (cacheReadTokens ?? 0) - (cacheWriteTokens ?? 0),
+		);
+		return (
+			(pricing.input * uncachedInput +
+				(pricing.cacheRead ?? pricing.input) * (cacheReadTokens ?? 0) +
+				(pricing.cacheWrite ?? pricing.input) * (cacheWriteTokens ?? 0) +
+				pricing.output * (outputTokens ?? 0)) /
+			1_000_000
+		);
+	}
+
+	if (
+		inputTokens !== undefined &&
+		outputTokens !== undefined &&
+		(inputTokens > 0 ||
+			outputTokens > 0 ||
+			!(totalTokens !== undefined && totalTokens > 0))
+	) {
+		// A zero input+output pair alongside a positive total means the
+		// split is unknown (zero-filled), not free — handled below.
+		return (
+			(pricing.input * inputTokens + pricing.output * outputTokens) / 1_000_000
+		);
+	}
+
+	if (
+		totalTokens !== undefined &&
+		(inputTokens !== undefined || outputTokens !== undefined) &&
+		!(inputTokens === 0 && outputTokens === 0 && totalTokens > 0)
+	) {
+		// If one side of the split is missing, infer it from the provider
+		// total rather than silently dropping that side of the cost.
+		const inferredInput =
+			inputTokens ?? Math.max(0, totalTokens - (outputTokens ?? 0));
+		const inferredOutput =
+			outputTokens ?? Math.max(0, totalTokens - (inputTokens ?? 0));
+		return (
+			(pricing.input * inferredInput + pricing.output * inferredOutput) /
+			1_000_000
+		);
+	}
+
+	if (totalTokens !== undefined) {
+		// Lump-sum reports can't be split into input/output, so average
+		// the two rates — the same approximation used by /usage.
+		return (((pricing.input + pricing.output) / 2) * totalTokens) / 1_000_000;
+	}
+
+	if (inputTokens !== undefined || outputTokens !== undefined) {
+		return (
+			(pricing.input * (inputTokens ?? 0) +
+				pricing.output * (outputTokens ?? 0)) /
+			1_000_000
+		);
+	}
+
+	return undefined;
 }
 
 /**
@@ -56,27 +149,7 @@ export async function buildResponseUsage(
 	try {
 		const pricing = await getPricing(model);
 		if (pricing) {
-			// A zero input+output pair alongside a positive total means the
-			// split is unknown (zero-filled), not free — price the lump sum.
-			const hasUsableSplit =
-				Number.isFinite(usage.inputTokens) &&
-				Number.isFinite(usage.outputTokens) &&
-				((usage.inputTokens as number) > 0 ||
-					(usage.outputTokens as number) > 0 ||
-					!(usage.totalTokens && usage.totalTokens > 0));
-			if (hasUsableSplit) {
-				cost =
-					(pricing.input * (usage.inputTokens as number) +
-						pricing.output * (usage.outputTokens as number)) /
-					1_000_000;
-			} else if (Number.isFinite(usage.totalTokens)) {
-				// Lump-sum reports can't be split into input/output, so average
-				// the two rates — same approximation the /usage command uses.
-				cost =
-					(((pricing.input + pricing.output) / 2) *
-						(usage.totalTokens as number)) /
-					1_000_000;
-			}
+			cost = calculateUsageCost(usage, pricing);
 		}
 	} catch {
 		// Best-effort: no cost segment when the pricing lookup fails.

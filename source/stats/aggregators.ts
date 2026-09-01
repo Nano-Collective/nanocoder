@@ -13,6 +13,8 @@ import {
 import {
 	type CumulativePoint,
 	type DailyStats,
+	type MonthlyStats,
+	type PairUsage,
 	type PeakDay,
 	parsePairKey,
 	type StatsLedger,
@@ -25,7 +27,7 @@ import {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Resolve the inclusive start date key for a range (local). */
-export function rangeStartKey(
+function rangeStartKey(
 	range: StatsRange,
 	now: Date = new Date(),
 	ledgerCreatedAt?: number,
@@ -124,11 +126,17 @@ export function computeStreak(
 	return {current, best: Math.max(best, current)};
 }
 
-export function computeTopPairs(days: DailyStats[], limit = 5): TopPair[] {
+export function computeTopPairs(
+	days: DailyStats[],
+	limit = 5,
+	monthly?: MonthlyStats[],
+): TopPair[] {
 	const totals = new Map<string, number>();
 	let grand = 0;
-	for (const day of days) {
-		for (const [key, usage] of Object.entries(day.byPair ?? {})) {
+	const groups: Array<{byPair: Record<string, PairUsage>}> =
+		monthly && monthly.length > 0 ? monthly : days;
+	for (const group of groups) {
+		for (const [key, usage] of Object.entries(group.byPair ?? {})) {
 			const tokens = usage.tokens || 0;
 			if (tokens <= 0) continue;
 			totals.set(key, (totals.get(key) ?? 0) + tokens);
@@ -168,6 +176,8 @@ export function computeCumulative(
 	range: StatsRange,
 	now: Date = new Date(),
 	ledgerCreatedAt?: number,
+	monthly?: MonthlyStats[],
+	lifetimeTokens?: number,
 ): CumulativePoint[] {
 	const start = rangeStartKey(range, now, ledgerCreatedAt);
 	const end = toLocalDateKey(now);
@@ -188,20 +198,57 @@ export function computeCumulative(
 
 	// Monthly buckets for 3m and all-time
 	const monthTokens = new Map<string, number>();
-	for (const key of eachLocalDate(start, end)) {
-		const mk = toMonthKey(key);
-		monthTokens.set(mk, (monthTokens.get(mk) ?? 0) + (byDate.get(key) ?? 0));
+	if (range === 'all-time' && monthly && monthly.length > 0) {
+		const startMonth = toMonthKey(start);
+		const endMonth = toMonthKey(end);
+		for (const aggregate of monthly) {
+			if (aggregate.month >= startMonth && aggregate.month <= endMonth) {
+				monthTokens.set(aggregate.month, aggregate.tokens);
+			}
+		}
+	} else {
+		for (const key of eachLocalDate(start, end)) {
+			const mk = toMonthKey(key);
+			monthTokens.set(mk, (monthTokens.get(mk) ?? 0) + (byDate.get(key) ?? 0));
+		}
 	}
-	const monthKeys = [...monthTokens.keys()].sort();
-	let running = 0;
-	return monthKeys.map(mk => {
-		running += monthTokens.get(mk) ?? 0;
+	const monthKeys = [...new Set(eachLocalDate(start, end).map(toMonthKey))];
+	const chartTokens = monthKeys.reduce(
+		(sum, month) => sum + Math.max(0, monthTokens.get(month) ?? 0),
+		0,
+	);
+	const targetLifetimeTokens = Number.isFinite(lifetimeTokens)
+		? Math.max(0, lifetimeTokens as number)
+		: undefined;
+	const missingLifetimeTokens =
+		range === 'all-time' &&
+		targetLifetimeTokens !== undefined &&
+		targetLifetimeTokens > chartTokens
+			? targetLifetimeTokens - chartTokens
+			: 0;
+	let running = missingLifetimeTokens;
+	const points = monthKeys.map(mk => {
+		running += Math.max(0, monthTokens.get(mk) ?? 0);
+		if (targetLifetimeTokens !== undefined) {
+			running = Math.min(targetLifetimeTokens, running);
+		}
 		return {
 			key: mk,
 			label: monthLabel(mk),
 			cumulativeTokens: running,
 		};
 	});
+	if (missingLifetimeTokens > 0) {
+		return [
+			{
+				key: `${start}:earlier`,
+				label: 'Earlier',
+				cumulativeTokens: missingLifetimeTokens,
+			},
+			...points,
+		];
+	}
+	return points;
 }
 
 export function buildStatsViewModel(
@@ -239,8 +286,19 @@ export function buildStatsViewModel(
 			range === 'all-time'
 				? {createdAt: ledger.createdAt, days: sinceDays}
 				: null,
-		cumulative: computeCumulative(days, range, now, ledger.createdAt),
-		topPairs: computeTopPairs(days),
+		cumulative: computeCumulative(
+			days,
+			range,
+			now,
+			ledger.createdAt,
+			range === 'all-time' ? ledger.monthly : undefined,
+			ledger.totalTokens,
+		),
+		topPairs: computeTopPairs(
+			days,
+			5,
+			range === 'all-time' ? ledger.monthly : undefined,
+		),
 		isEmpty,
 	};
 }

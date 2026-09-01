@@ -490,6 +490,9 @@ export async function handleChat(
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,
 					totalTokens: usage.totalTokens,
+					cacheReadTokens:
+						usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+					cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
 				},
 			};
 		} catch (error) {

@@ -194,6 +194,66 @@ test('buildStatsViewModel all-time uses uncapped totals and since', t => {
 	t.false(vm.isEmpty);
 });
 
+test('buildStatsViewModel all-time chart ends at the lifetime total', t => {
+	const createdAt = new Date(2026, 0, 1).getTime();
+	const ledger: StatsLedger = {
+		...createEmptyLedger(createdAt),
+		totalTokens: 1000,
+		daily: [day('2026-08-25', {tokens: 100})],
+		monthly: [
+			{
+				month: '2026-01',
+				tokens: 900,
+				cost: 0,
+				byPair: {},
+			},
+			{
+				month: '2026-08',
+				tokens: 100,
+				cost: 0,
+				byPair: {},
+			},
+		],
+	};
+
+	const vm = buildStatsViewModel(ledger, 'all-time', NOW);
+
+	t.is(vm.cumulative.at(-1)?.cumulativeTokens, ledger.totalTokens);
+});
+
+test('buildStatsViewModel represents pre-rollup tokens as Earlier', t => {
+	const ledger: StatsLedger = {
+		...createEmptyLedger(new Date(2026, 0, 1).getTime()),
+		totalTokens: 1000,
+		daily: [day('2026-08-25', {tokens: 100})],
+		monthly: [],
+	};
+
+	const vm = buildStatsViewModel(ledger, 'all-time', NOW);
+
+	t.is(vm.cumulative[0]?.label, 'Earlier');
+	t.is(vm.cumulative.at(-1)?.cumulativeTokens, 1000);
+});
+
+test('buildStatsViewModel clamps an over-counted rollup to the lifetime total', t => {
+	const ledger: StatsLedger = {
+		...createEmptyLedger(new Date(2026, 0, 1).getTime()),
+		totalTokens: 1000,
+		monthly: [
+			{
+				month: '2026-08',
+				tokens: 1500,
+				cost: 0,
+				byPair: {},
+			},
+		],
+	};
+
+	const vm = buildStatsViewModel(ledger, 'all-time', NOW);
+
+	t.is(vm.cumulative.at(-1)?.cumulativeTokens, ledger.totalTokens);
+});
+
 test('buildStatsViewModel empty ledger', t => {
 	const vm = buildStatsViewModel(createEmptyLedger(NOW.getTime()), '7d', NOW);
 	t.true(vm.isEmpty);

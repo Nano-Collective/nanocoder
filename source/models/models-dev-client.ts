@@ -228,6 +228,8 @@ function createModelInfo(
 		cost: {
 			input: model.cost?.input ?? 0,
 			output: model.cost?.output ?? 0,
+			cacheRead: model.cost?.cache_read,
+			cacheWrite: model.cost?.cache_write,
 		},
 	};
 }

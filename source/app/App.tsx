@@ -514,6 +514,7 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
 		setIsToolExecuting: appState.setIsToolExecuting,
+		setLiveComponentCapturesInput: appState.setLiveComponentCapturesInput,
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
