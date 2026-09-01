@@ -218,11 +218,23 @@ export class ToolManager {
 			}
 
 			// Custom tools follow the same posture as built-ins but with policy
-			// applied per-tool from their approval/readOnly metadata.
+			// applied per-tool from their approval/readOnly metadata. MCP tools
+			// can't be enumerated in MODE_EXCLUDED_TOOLS (their names come from
+			// the server), so plan mode gates them on the server's read-only
+			// annotation instead — an unannotated tool may mutate, so it's hidden.
 			if (developmentMode === 'plan' || developmentMode === 'headless') {
+				const mcpTools =
+					developmentMode === 'plan'
+						? this.mcpClient?.getToolMapping()
+						: undefined;
 				names = names.filter(n => {
 					const meta = this.customTools.get(n);
-					if (!meta) return true;
+					if (!meta) {
+						if (mcpTools?.has(n)) {
+							return this.isReadOnly(n);
+						}
+						return true;
+					}
 					if (developmentMode === 'headless') {
 						return meta.approval === 'never';
 					}

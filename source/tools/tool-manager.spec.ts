@@ -752,6 +752,59 @@ test('plan mode hides every mutating built-in tool except its safe interaction a
 	}
 });
 
+// Regression: MCP tool names come from the server, so they can never appear in
+// MODE_EXCLUDED_TOOLS. They used to fall straight through the plan/headless
+// filter, leaving mutating MCP tools reachable in plan mode. Plan now gates
+// them on the server's read-only annotation; headless leaves them alone.
+test('plan mode hides MCP tools unless the server annotates them read-only', t => {
+	const manager = new ToolManager();
+
+	// Mirror initializeMCP: entries land in the same registry as built-ins and
+	// the manager keeps the client that maps a tool name back to its server.
+	const mcpEntry = (name: string, readOnly: boolean) => ({
+		name,
+		tool: {description: name, execute: async () => 'ok'} as never,
+		handler: async () => 'ok',
+		readOnly,
+	});
+	for (const entry of [
+		mcpEntry('create_issue', false),
+		mcpEntry('search_docs', true),
+	]) {
+		manager.registerSkillTool(entry);
+	}
+	(manager as any).mcpClient = {
+		getToolMapping: () =>
+			new Map([
+				['create_issue', {serverName: 'gh', originalName: 'create_issue'}],
+				['search_docs', {serverName: 'gh', originalName: 'search_docs'}],
+			]),
+	};
+
+	const plan = manager.getAvailableToolNames(undefined, 'plan');
+	t.false(
+		plan.includes('create_issue'),
+		'an unannotated MCP tool may mutate — plan mode must not expose it',
+	);
+	t.true(
+		plan.includes('search_docs'),
+		'a read-only MCP tool is safe to use while planning',
+	);
+
+	// Headless is daemon-driven and runs unattended, so MCP tools stay
+	// available there — the bug auto-denied them instead.
+	const headless = manager.getAvailableToolNames(undefined, 'headless');
+	t.true(headless.includes('create_issue'));
+	t.true(headless.includes('search_docs'));
+
+	// Every other mode is untouched.
+	for (const mode of ['normal', 'auto-accept', 'yolo'] as const) {
+		const names = manager.getAvailableToolNames(undefined, mode);
+		t.true(names.includes('create_issue'), `create_issue missing in ${mode}`);
+		t.true(names.includes('search_docs'), `search_docs missing in ${mode}`);
+	}
+});
+
 test('getAvailableToolNames - plan + minimal excludes mutation tools from minimal set', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
