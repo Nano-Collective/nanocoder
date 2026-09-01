@@ -30,8 +30,9 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {
-	addPendingHookContext,
+	beginSessionStartHooks,
 	runLifecycleHooks,
+	SESSION_END_HOOK_HANDLER,
 } from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
@@ -49,8 +50,6 @@ import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
 import {getShutdownManager} from '@/utils/shutdown';
 import {checkForUpdates} from '@/utils/update-checker';
-
-const SESSION_END_HOOK_HANDLER = 'lifecycle-hooks:session-end';
 
 interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
@@ -613,9 +612,9 @@ export function useAppInitialization({
 					await runLifecycleHooks('session-end');
 				},
 			});
-			void runLifecycleHooks('session-start').then(({output}) => {
-				if (output) addPendingHookContext(output);
-			});
+			// Not awaited: a slow session-start hook must not hold up the UI. The
+			// first prompt waits for it instead, when it drains the buffer.
+			void beginSessionStartHooks();
 
 			// === CRITICAL PATH ===
 			// LLM client + subagents are independent — run in parallel.

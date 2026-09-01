@@ -12,6 +12,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -676,15 +677,29 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
-			// user-prompt-submit hooks gate chat prompts only. Slash commands are
-			// local UI actions, and prepending context to one would break its
-			// argument parsing.
+			// user-prompt-submit hooks gate chat prompts only. A slash command and
+			// a `!` bash passthrough are local UI actions: they never reach the
+			// model, and prefixing either one breaks the routing that recognises it
+			// (handleMessageSubmission dispatches on parseInput, which keys bash off
+			// a leading `!`). Both must therefore leave the pending context buffer
+			// undrained, so it reaches the next prompt that actually goes to the model.
+			const isLocalAction = isSlashCommand || message.trim().startsWith('!');
 			let submittedMessage = message;
-			if (!isSlashCommand) {
+			if (!isLocalAction) {
 				const gate = await runLifecycleHooks('user-prompt-submit', {
 					prompt: message,
 				});
 				if (gate.blocked) {
+					// Echo the prompt first, so the denial that follows has a visible
+					// cause in the scrollback instead of appearing on its own.
+					props.addToChatQueue(
+						<UserMessage
+							key={generateKey('user')}
+							message={displayValue ?? message}
+							tokenContent={message}
+							imageCount={images?.length ?? 0}
+						/>,
+					);
 					props.addToChatQueue(
 						<ErrorMessage
 							key={generateKey('hook-blocked-prompt')}
@@ -698,7 +713,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				// Fold in whatever session-start left buffered plus this hook's own
 				// stdout. displayValue keeps the user's original text on screen.
-				const injected = [takePendingHookContext(), gate.output]
+				const injected = [await takePendingHookContext(), gate.output]
 					.filter(Boolean)
 					.join('\n\n');
 				if (injected) {

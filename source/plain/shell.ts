@@ -28,8 +28,9 @@ import {
 	writeStatus,
 } from '@/plain/writer';
 import {
-	addPendingHookContext,
+	beginSessionStartHooks,
 	runLifecycleHooks,
+	SESSION_END_HOOK_HANDLER,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {getTuneToolMode} from '@/types/config';
@@ -208,15 +209,14 @@ export async function runPlainShell(
 	// as the TUI. session-end goes through the shutdown manager (priority -5)
 	// so it runs on every exit path, including SIGINT.
 	deps.getShutdownManager().register({
-		name: 'lifecycle-hooks:session-end',
+		name: SESSION_END_HOOK_HANDLER,
 		priority: -5,
 		handler: async () => {
 			await runLifecycleHooks('session-end');
 		},
 	});
 
-	const sessionStart = await runLifecycleHooks('session-start');
-	if (sessionStart.output) addPendingHookContext(sessionStart.output);
+	await beginSessionStartHooks();
 
 	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
 	if (promptGate.blocked) {
@@ -238,7 +238,7 @@ export async function runPlainShell(
 		return;
 	}
 
-	const hookContext = [takePendingHookContext(), promptGate.output]
+	const hookContext = [await takePendingHookContext(), promptGate.output]
 		.filter(Boolean)
 		.join('\n\n');
 	const initialMessages: Message[] = [

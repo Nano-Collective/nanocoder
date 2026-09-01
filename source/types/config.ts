@@ -162,8 +162,10 @@ export interface NotificationsConfig {
 
 /**
  * Points in the agent lifecycle a user-defined shell command can be attached
- * to. `pre-tool-use` is the only vetoing point: a non-zero exit denies the
- * tool call and its stdout is handed back to the model as the reason.
+ * to. `pre-tool-use` and `user-prompt-submit` are the vetoing points: a
+ * non-zero exit denies the tool call (or the prompt) and its stdout is handed
+ * back to the model as the reason. The rest are observe-only — a non-zero exit
+ * there is logged, and the remaining hooks still run.
  */
 export const HOOK_EVENTS = [
 	'session-start',

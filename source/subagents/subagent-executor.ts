@@ -17,7 +17,7 @@ import {
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	appendPostToolUseOutput,
-	runLifecycleHooks,
+	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
 import {
 	appendSubagentTool,
@@ -736,21 +736,35 @@ export class SubagentExecutor {
 			return `Error: Tool '${toolName}' not found`;
 		}
 
+		// One ToolCall object for this call, shared by the approval prompt and
+		// the lifecycle gate so runPreToolUseGate can key its once-per-call
+		// suppression on it.
+		const parsedArgs =
+			parseToolArguments<Record<string, unknown>>(rawArguments);
+		const toolCall: ToolCall = {
+			id: toolCallId,
+			function: {
+				name: toolName,
+				arguments: parsedArgs,
+			},
+		};
+
+		// Subagents run their own loop rather than going through processToolUse,
+		// so the lifecycle gate has to be applied here too — a policy hook must
+		// hold for delegated work as much as for the main conversation. It runs
+		// before the approval prompt so a vetoed tool never asks the user to
+		// approve something that is about to be refused anyway.
+		const gate = await runPreToolUseGate(toolCall, parsedArgs);
+		if (gate.blocked) {
+			return `Error: ${gate.reason}`;
+		}
+
 		// Check if this tool needs user approval
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 		);
 		if (needsApproval) {
-			const parsedArgs = parseToolArguments(rawArguments);
-			const toolCall: ToolCall = {
-				id: toolCallId,
-				function: {
-					name: toolName,
-					arguments: parsedArgs,
-				},
-			};
-
 			const approved = await signalToolApproval({
 				toolCall,
 				subagentName: config.name,
@@ -762,20 +776,6 @@ export class SubagentExecutor {
 		}
 
 		try {
-			const parsedArgs = parseToolArguments(rawArguments);
-
-			// Subagents run their own loop rather than going through
-			// processToolUse, so the lifecycle gate has to be applied here too —
-			// a policy hook must hold for delegated work as much as for the main
-			// conversation.
-			const gate = await runLifecycleHooks('pre-tool-use', {
-				toolName,
-				toolArgs: parsedArgs,
-			});
-			if (gate.blocked) {
-				return `Error: ${gate.reason}`;
-			}
-
 			const result = await toolHandler(parsedArgs, {
 				...executionContext,
 				abortSignal: signal,
@@ -793,8 +793,15 @@ export class SubagentExecutor {
 			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
-			// validated), formatted with any structured detail.
-			return truncateToolResult(toolErrorToContent(error));
+			// validated), formatted with any structured detail. post-tool-use
+			// still fires: a failed delegated call is exactly what an audit-log
+			// hook needs to see, and dropping it would make this surface disagree
+			// with processToolUse.
+			return appendPostToolUseOutput(
+				toolName,
+				parsedArgs,
+				truncateToolResult(toolErrorToContent(error)),
+			);
 		}
 	}
 }

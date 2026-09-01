@@ -1,7 +1,7 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import {
 	appendPostToolUseOutput,
-	runLifecycleHooks,
+	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -80,10 +80,7 @@ export async function processToolUse(
 		// Lifecycle gate: a pre-tool-use hook that exits non-zero denies the
 		// call outright, and its output goes back to the model as the reason so
 		// it can adapt instead of retrying blindly.
-		const gate = await runLifecycleHooks('pre-tool-use', {
-			toolName: toolCall.function.name,
-			toolArgs: parsedArgs,
-		});
+		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
 			return {
 				tool_call_id: toolCall.id,
@@ -128,11 +125,23 @@ export async function processToolUse(
 		// content the model can see and correct. `isError: true` lets callers
 		// building telemetry/logs (e.g. the `--json` headless report) tell
 		// this apart from a normal result without re-parsing `content`.
+		//
+		// post-tool-use fires here too: the event is "after a tool returns",
+		// and a failed call is exactly what an audit-log or notification hook
+		// most wants to see. Argument parsing may itself be what threw, so the
+		// hook gets a best-effort lenient parse rather than nothing.
+		const failedArgs = parseToolArguments<Record<string, unknown>>(
+			toolCall.function.arguments,
+		);
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			content: truncateToolResult(toolErrorToContent(error)),
+			content: await appendPostToolUseOutput(
+				toolCall.function.name,
+				failedArgs,
+				truncateToolResult(toolErrorToContent(error)),
+			),
 			isError: true,
 		};
 	}

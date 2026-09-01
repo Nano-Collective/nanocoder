@@ -1,16 +1,29 @@
-import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {processToolUse, setToolRegistryGetter} from '@/message-handler';
+import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import type {ToolCall} from '@/types/core';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 import {
 	addPendingHookContext,
+	beginSessionStartHooks,
 	clearPendingHookContext,
+	drainPendingHookContext,
 	getConfiguredHooks,
+	resetSessionStartHooks,
 	runLifecycleHooks,
+	runPreToolUseGate,
 	takePendingHookContext,
 } from './lifecycle-hooks';
 
@@ -62,6 +75,7 @@ test.after.always(() => {
 
 test.beforeEach(() => {
 	clearPendingHookContext();
+	resetSessionStartHooks();
 });
 
 test.serial('no configured hooks is a no-op', async t => {
@@ -272,17 +286,21 @@ test.serial('hooks run in config order and their output is joined', async t => {
 	t.is(outcome.output, 'first\nsecond');
 });
 
-test.serial('pending hook context buffers and drains once', t => {
+test.serial('pending hook context buffers and drains once', async t => {
 	addPendingHookContext('  branch: main  ');
 	addPendingHookContext('');
 	addPendingHookContext('docker: 2 containers');
 
-	t.is(takePendingHookContext(), 'branch: main\n\ndocker: 2 containers');
-	t.is(takePendingHookContext(), '', 'draining is destructive');
+	t.is(
+		await takePendingHookContext(),
+		'branch: main\n\ndocker: 2 containers',
+	);
+	t.is(await takePendingHookContext(), '', 'draining is destructive');
 
 	addPendingHookContext('dropped');
 	clearPendingHookContext();
-	t.is(takePendingHookContext(), '');
+	t.is(await takePendingHookContext(), '');
+	t.is(drainPendingHookContext(), '', 'the sync drain agrees');
 });
 
 test.serial('invalid hook entries are dropped, valid ones survive', t => {
@@ -323,10 +341,13 @@ test.serial('a hook command keeps its $VAR references unexpanded', t => {
 // The engine above is only useful if the tool path actually consults it, so
 // pin both directions through the real `processToolUse`.
 
-const writeFileCall: ToolCall = {
+// A fresh object per test on purpose: runPreToolUseGate suppresses repeat runs
+// per tool-call object, so a shared fixture would carry "already gated" from
+// one test into the next.
+const writeFileCall = (path = '.env'): ToolCall => ({
 	id: 'call-1',
-	function: {name: 'write_file', arguments: {path: '.env', content: 'x'}},
-};
+	function: {name: 'write_file', arguments: {path, content: 'x'}},
+});
 
 test.serial('a pre-tool-use veto stops the handler from running', async t => {
 	let handlerRan = false;
@@ -346,7 +367,7 @@ test.serial('a pre-tool-use veto stops the handler from running', async t => {
 		],
 	});
 
-	const result = await processToolUse(writeFileCall);
+	const result = await processToolUse(writeFileCall());
 
 	t.false(handlerRan, 'the tool must not execute after a veto');
 	t.true(result.isError);
@@ -363,7 +384,7 @@ test.serial('post-tool-use stdout is folded into the tool result', async t => {
 		],
 	});
 
-	const result = await processToolUse(writeFileCall);
+	const result = await processToolUse(writeFileCall());
 
 	t.is(
 		result.content,
@@ -381,8 +402,281 @@ test.serial('a tool with no matching hooks is untouched', async t => {
 		],
 	});
 
-	const result = await processToolUse(writeFileCall);
+	const result = await processToolUse(writeFileCall());
 
 	t.is(result.content, 'wrote 1 file');
 	t.falsy(result.isError);
 });
+
+// ---------------------------------------------------------------------------
+// Review follow-ups: the gate's once-per-call contract, post-tool-use on
+// failure, the session-end budget, hook cwd, and the truncation cap.
+// ---------------------------------------------------------------------------
+
+test.serial(
+	'post-tool-use fires when the tool throws, not just when it returns',
+	async t => {
+		setToolRegistryGetter(() => ({
+			write_file: async () => {
+				throw new Error('disk full');
+			},
+		}));
+		withHooks({
+			'post-tool-use': [{command: node("console.log('audited')")}],
+		});
+
+		const result = await processToolUse(writeFileCall());
+
+		t.true(result.isError, 'the failure is still reported as an error');
+		t.true(
+			String(result.content).includes('disk full'),
+			'the original error survives',
+		);
+		t.true(
+			String(result.content).includes('<hook-output event="post-tool-use">'),
+			'an audit-log hook must see the failed call too',
+		);
+		t.true(String(result.content).includes('audited'));
+	},
+);
+
+test.serial('post-tool-use sees a malformed-arguments failure', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'never runs',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"console.log(process.env.NANOCODER_TOOL_NAME + ':failed')",
+				),
+			},
+		],
+	});
+
+	// Strict parsing rejects this before the handler is ever reached.
+	const result = await processToolUse({
+		id: 'call-bad',
+		function: {name: 'write_file', arguments: '{not json'},
+	});
+
+	t.true(result.isError);
+	t.true(String(result.content).includes('write_file:failed'));
+});
+
+test.serial('a pre-tool-use veto suppresses post-tool-use', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote .env',
+	}));
+	withHooks({
+		'pre-tool-use': [
+			{name: 'no-env', command: node("console.log('denied');process.exit(1)")},
+		],
+		'post-tool-use': [{command: node("console.log('should-not-run')")}],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.true(result.isError);
+	t.false(
+		String(result.content).includes('should-not-run'),
+		'the tool never ran, so there is nothing to observe afterwards',
+	);
+});
+
+test.serial('the pre-tool-use gate runs once per tool call', async t => {
+	const counterFile = join(testDir, 'gate-count.txt');
+	if (existsSync(counterFile)) rmSync(counterFile);
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'pre-tool-use': [
+			{
+				command: node(
+					`require('fs').appendFileSync(${JSON.stringify(
+						JSON.stringify(counterFile),
+					)},'x')`,
+				),
+			},
+		],
+	});
+
+	// The same object every layer sees: the conversation loop gates it before
+	// the approval prompt, then processToolUse gates it again at the execution
+	// boundary. The hook itself must fire exactly once.
+	const toolCall = writeFileCall('src/app.ts');
+	const first = await runPreToolUseGate(toolCall, {path: 'src/app.ts'});
+	const second = await runPreToolUseGate(toolCall, {path: 'src/app.ts'});
+	await processToolUse(toolCall);
+
+	t.false(first.blocked);
+	t.false(second.blocked);
+	t.is(
+		readFileSync(counterFile, 'utf-8'),
+		'x',
+		'a hook with side effects must not run once per layer',
+	);
+});
+
+test.serial('a distinct tool call is gated on its own', async t => {
+	withHooks({
+		'pre-tool-use': [
+			{name: 'deny', command: node("console.log('no');process.exit(1)")},
+		],
+	});
+
+	const first = await runPreToolUseGate(
+		{id: 'a', function: {name: 'read_file', arguments: {}}},
+		{},
+	);
+	const other = await runPreToolUseGate(
+		{id: 'b', function: {name: 'read_file', arguments: {}}},
+		{},
+	);
+
+	t.true(first.blocked, 'the first call is refused');
+	t.true(other.blocked, 'and so is a different call — no leaked pass');
+});
+
+test.serial(
+	'session-end defaults to a timeout inside the shutdown budget',
+	async t => {
+		// The shutdown manager races every handler against one 5s budget and
+		// then exits, so a session-end hook leaning on the general 30s default
+		// would never finish. 2s leaves the rest of the shutdown room to run.
+		withHooks({
+			'session-end': [{command: node('setTimeout(()=>{},10000)')}],
+		});
+
+		const started = Date.now();
+		const outcome = await runLifecycleHooks('session-end');
+		const elapsed = Date.now() - started;
+
+		t.false(outcome.blocked, 'a timeout is never a veto');
+		t.true(
+			elapsed < 5000,
+			`session-end must give up inside the shutdown budget (took ${elapsed}ms)`,
+		);
+	},
+);
+
+test.serial(
+	'an explicit timeout still overrides the session-end default',
+	async t => {
+		withHooks({
+			'session-end': [
+				{command: node('setTimeout(()=>{},10000)'), timeout: 300},
+			],
+		});
+
+		const started = Date.now();
+		await runLifecycleHooks('session-end');
+
+		t.true(Date.now() - started < 2000);
+	},
+);
+
+test.serial('hooks run from the project root, not the session cwd', async t => {
+	const deeper = join(testDir, 'nested');
+	mkdirSync(deeper, {recursive: true});
+	setProjectRoot(testDir);
+	// What a bash `cd` into a subdirectory does. A hook defined in project
+	// config must keep resolving its relative paths regardless.
+	setSessionCwd(deeper);
+
+	withHooks({
+		'session-start': [{command: node('console.log(process.cwd())')}],
+	});
+
+	const outcome = await runLifecycleHooks('session-start');
+
+	t.is(
+		realpathSync(outcome.output),
+		realpathSync(testDir),
+		'a relative hook command must not follow the model around',
+	);
+	setSessionCwd(testDir);
+});
+
+test.serial('NANOCODER_SESSION_CWD still reports where the shell is', async t => {
+	const deeper = join(testDir, 'nested');
+	mkdirSync(deeper, {recursive: true});
+	setProjectRoot(testDir);
+	setSessionCwd(deeper);
+
+	withHooks({
+		'session-start': [
+			{command: node('console.log(process.env.NANOCODER_SESSION_CWD)')},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('session-start');
+
+	t.is(realpathSync(outcome.output), realpathSync(deeper));
+	setSessionCwd(testDir);
+});
+
+test.serial(
+	'a chatty post-tool-use hook cannot breach the result cap',
+	async t => {
+		setToolRegistryGetter(() => ({
+			write_file: async () => 'wrote 1 file',
+		}));
+		withHooks({
+			'post-tool-use': [
+				// Well past MAX_HOOK_OUTPUT_CHARS so both the capture cap and the
+				// result cap are exercised.
+				{command: node("console.log('z'.repeat(40000))")},
+			],
+		});
+
+		const result = await processToolUse(writeFileCall());
+		const cap = truncateToolResult('y'.repeat(500_000)).length;
+
+		t.true(
+			String(result.content).length <= cap,
+			'the joined result is re-truncated, not appended past the limit',
+		);
+	},
+);
+
+test.serial('session-start context waits for a slow hook', async t => {
+	withHooks({
+		'session-start': [
+			{command: node("setTimeout(()=>console.log('late context'),150)")},
+		],
+	});
+
+	// Exactly the race a fast typist creates: init kicks the hook off without
+	// awaiting it, and the first prompt drains the buffer immediately.
+	void beginSessionStartHooks();
+	const context = await takePendingHookContext();
+
+	t.is(
+		context,
+		'late context',
+		'the context lands on prompt one, not prompt two',
+	);
+});
+
+test.serial(
+	'/clear drops context from a session-start still in flight',
+	async t => {
+		withHooks({
+			'session-start': [
+				{command: node("setTimeout(()=>console.log('stale'),150)")},
+			],
+		});
+
+		const run = beginSessionStartHooks();
+		clearPendingHookContext();
+		await run;
+
+		t.is(
+			drainPendingHookContext(),
+			'',
+			'output belonging to the cleared conversation must not carry over',
+		);
+	},
+);
