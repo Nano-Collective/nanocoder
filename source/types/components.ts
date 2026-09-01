@@ -34,6 +34,13 @@ export interface ChatQueueProps {
 	 * to print into. Only a bounded tail of components is rendered.
 	 */
 	disableStatic?: boolean;
+	/**
+	 * Left indent applied to every rendered item, so callers can line the
+	 * transcript up with some other left edge (e.g. the main chat's input
+	 * box). Defaults to 0 — callers with no such reference (e.g. the subagent
+	 * detail view) get the original flush-left layout.
+	 */
+	leftMargin?: number;
 }
 
 export type Completion = {name: string; isCustom: boolean};
