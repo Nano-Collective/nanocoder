@@ -336,6 +336,49 @@ test('findEntries accepts exact keys, blocks, and the bare suffix', t => {
 	});
 });
 
+test('config keys named after Object.prototype members are not resolved', t => {
+	// Every key here comes from user-written JSON, so reads must stay on own
+	// properties. The sharpest case is a provider named `constructor`: reading
+	// it off a plain accumulator object returns Object's own constructor for
+	// *any* layer, which used to invent a shadowing layer that does not exist.
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					autoCompact: {threshold: 80, toString: 'hijacked'},
+					providers: [
+						{name: 'constructor', models: ['m']},
+						{name: '__proto__', models: ['m']},
+					],
+				},
+			},
+			globalAgents: {nanocoder: {providers: [{name: 'real', models: ['m']}]}},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+
+			for (const name of ['constructor', '__proto__']) {
+				const provider = entry(config, `nanocoder.providers.${name}`);
+				t.is(provider?.layer, 'project', `${name} resolves from the file`);
+				t.deepEqual(
+					provider?.shadowed,
+					[],
+					`${name} must not report a layer that never declared it`,
+				);
+			}
+
+			// An inherited member is never mistaken for a real setting or for a
+			// built-in default.
+			t.is(findEntries(config, 'nanocoder.autoCompact.toString').length, 0);
+			t.is(findEntries(config, 'nanocoder.autoCompact.valueOf').length, 0);
+
+			// Real fields alongside the hostile ones still resolve normally.
+			t.is(entry(config, 'nanocoder.autoCompact.threshold')?.value, 80);
+			t.is(entry(config, 'nanocoder.autoCompact.enabled')?.value, true);
+		},
+	);
+});
+
 test('runConfigCli renders list, show, and diff', t => {
 	withFixture({projectAgents: {nanocoder: {autoCompact: {threshold: 80}}}}, () => {
 		const list = runConfigCli('list');
