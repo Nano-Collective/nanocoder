@@ -10,13 +10,9 @@
  *                                `args[name]` is falsy/empty (the complement
  *                                of `{{# name }}`).
  *
- * All scalar values are passed through `shellQuote()` which wraps the value
- * in single quotes and escapes embedded single quotes. Arrays are joined into
- * a single space-separated string with each element individually quoted.
- *
- * Substitution happens *before* the body is handed to the shell. Under
- * bash/sh that yields a POSIX-quoted command line. Under cmd.exe the
- * same quotes are not quoting, so this is not an injection barrier.
+ * Scalar values are passed through the quote function for the selected shell.
+ * Arrays are joined into a single space-separated string with each element
+ * individually quoted.
  */
 
 import {expandSections} from '@/utils/template-sections';
@@ -34,15 +30,23 @@ export function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Wrap a string in cmd.exe-safe double quotes. */
+export function cmdQuote(value: string): string {
+	return `"${value.replaceAll('%', '%%').replace(/["^&|<>]/g, '^$&')}"`;
+}
+
 /**
  * Render an argument value as a shell-safe token (or token list, for arrays).
  */
-export function renderValue(value: unknown): string {
+export function renderValue(
+	value: unknown,
+	quote: (value: string) => string = shellQuote,
+): string {
 	if (value === null || value === undefined) return '';
 	if (Array.isArray(value)) {
-		return value.map(v => shellQuote(stringify(v))).join(' ');
+		return value.map(v => quote(stringify(v))).join(' ');
 	}
-	return shellQuote(stringify(value));
+	return quote(stringify(value));
 }
 
 function stringify(value: unknown): string {
@@ -75,20 +79,22 @@ function isTruthyArg(value: unknown): boolean {
 export function renderBody(
 	body: string,
 	args: Record<string, unknown>,
+	quote: (value: string) => string = shellQuote,
 ): string {
 	const afterSections = expandSections(body, name => isTruthyArg(args[name]));
-	return expandSubstitutions(afterSections, args);
+	return expandSubstitutions(afterSections, args, quote);
 }
 
 function expandSubstitutions(
 	body: string,
 	args: Record<string, unknown>,
+	quote: (value: string) => string,
 ): string {
 	return body.replace(
 		/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g,
 		(_match, name: string) => {
 			if (!(name in args)) return '';
-			return renderValue(args[name]);
+			return renderValue(args[name], quote);
 		},
 	);
 }
