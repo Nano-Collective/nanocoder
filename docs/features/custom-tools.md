@@ -122,13 +122,13 @@ This is containment against misconfiguration, not a sandbox. The script body is 
 
 The body is a shell script with two placeholder forms:
 
-- **`{{ name }}`** — substitutes `args[name]`, POSIX-quoted. Arrays expand to space-separated quoted tokens. Not cmd-safe; see below.
+- **`{{ name }}`** — substitutes `args[name]`, quoted for the selected shell. Arrays expand to space-separated quoted tokens.
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. That is shell-safe under bash/sh. It is **not** shell-safe under cmd.exe: cmd does not treat `'` as a quote, so `type {{ file }}` becomes `type 'notes.txt'` (file not found) and `&`, `|`, `>`, `^`, `%VAR%` in a value can break out. Per-shell quoting in `renderValue` is a follow-up (#1084); until then the default Windows shell is cmd.
+Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes, command metacharacters are caret-escaped, and percent signs are doubled to prevent environment-variable expansion.
 
-This blocks shell injection through parameter values on POSIX:
+This blocks shell injection through parameter values:
 
 ```markdown
 echo {{ name }}
@@ -170,7 +170,7 @@ When the tool runs:
 
 ## Security Model
 
-A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are POSIX-quoted, which is not a cmd.exe injection barrier. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
+A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are quoted for the selected shell. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
 
 Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in `~/.config/nanocoder/tools/` and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
 
