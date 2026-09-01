@@ -172,6 +172,12 @@ function loadHierarchicalConfig<T>(
  * Built-in auto-compact defaults. Exported so the effective-config resolver
  * (`config/effective-config.ts`) can label a value as coming from the
  * `default` layer without re-declaring the numbers.
+ *
+ * Loaders must return a **copy** of this and of the sibling DEFAULT_* objects,
+ * never the object itself: callers mutate the result of `getAppConfig()` (see
+ * `subagents/subagent-executor.spec.ts`), and handing out the shared constant
+ * lets one such write redefine the built-in default for the whole process —
+ * it even survives `reloadAppConfig()`.
  * @public
  */
 export const DEFAULT_AUTO_COMPACT_CONFIG: AutoCompactConfig = {
@@ -207,7 +213,7 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 				};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
 }
 
@@ -308,7 +314,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 				};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
 }
 
@@ -343,10 +349,10 @@ function loadHeadlessConfig(): AppConfig['headless'] {
 				if (typeof value === 'number' && Number.isFinite(value)) {
 					return {maxTurns: Math.max(1, Math.round(value))};
 				}
-				return defaults;
+				return {...defaults};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
 }
 
@@ -405,7 +411,7 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 				};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
 }
 

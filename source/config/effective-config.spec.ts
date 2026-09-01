@@ -1,4 +1,4 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -10,7 +10,12 @@ import {
 	resolveEffectiveConfig,
 	selectOverrides,
 } from './effective-config';
-import {clearAppConfig} from './index';
+import {
+	clearAppConfig,
+	DEFAULT_SESSION_CONFIG,
+	getAppConfig,
+	reloadAppConfig,
+} from './index';
 import {resetPreferencesCache} from './preferences';
 
 console.log(`\neffective-config.spec.ts`);
@@ -377,6 +382,41 @@ test('config keys named after Object.prototype members are not resolved', t => {
 			t.is(entry(config, 'nanocoder.autoCompact.enabled')?.value, true);
 		},
 	);
+});
+
+test('the layer report matches disk after the loaders create a default file', t => {
+	withFixture({}, paths => {
+		const preferencesPath = join(paths.configDir, 'nanocoder-preferences.json');
+		const config = resolveEffectiveConfig();
+		const row = config.layers.find(layer => layer.origin === preferencesPath);
+
+		t.is(
+			row?.exists,
+			existsSync(preferencesPath),
+			'reported status must match what is actually on disk',
+		);
+	});
+});
+
+test('mutating the resolved config does not rewrite the built-in defaults', t => {
+	withFixture({}, () => {
+		const before = DEFAULT_SESSION_CONFIG.maxMessages;
+
+		const sessions = getAppConfig().sessions;
+		t.not(sessions, DEFAULT_SESSION_CONFIG, 'must not hand out the constant');
+		if (sessions) sessions.maxMessages = 3;
+
+		t.is(DEFAULT_SESSION_CONFIG.maxMessages, before, 'constant is unchanged');
+
+		reloadAppConfig();
+		t.is(getAppConfig().sessions?.maxMessages, before, 'reload is unpoisoned');
+		t.is(
+			entry(resolveEffectiveConfig(), 'nanocoder.sessions.maxMessages')
+				?.defaultValue,
+			before,
+			'the reported default still matches the real built-in',
+		);
+	});
 });
 
 test('runConfigCli renders list, show, and diff', t => {
