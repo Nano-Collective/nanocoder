@@ -80,7 +80,7 @@ Entries without a usable `command` string are dropped with an error in the log r
 | `session-start` | Once, as the session initializes | no |
 | `session-end` | During graceful shutdown, before the UI tears down | no |
 | `user-prompt-submit` | Before a chat prompt is sent to the model | **yes** |
-| `pre-tool-use` | Before a tool executes | **yes** |
+| `pre-tool-use` | Before a tool executes, ahead of any approval prompt | **yes** |
 | `post-tool-use` | After a tool returns, **including when it fails** | no |
 | `pre-compact` | Before context compaction, automatic or `/compact` | no |
 
