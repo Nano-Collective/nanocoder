@@ -295,7 +295,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			text-align: left;
 		}
 		.thread-delete-btn {
-			display: none;
+			display: flex;
+			align-items: center;
+			justify-content: center;
 			background: transparent;
 			color: var(--muted-foreground);
 			cursor: pointer;
@@ -303,11 +305,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border-radius: 4px;
 			flex-shrink: 0;
 			margin-left: 8px;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.2s;
+			border: 0;
 		}
 		.thread-item:hover .thread-delete-btn {
-			display: flex;
-			align-items: center;
-			justify-content: center;
+			opacity: 1;
+			pointer-events: auto;
 		}
 		.thread-delete-btn:hover {
 			color: #ef4444;
