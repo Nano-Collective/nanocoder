@@ -258,3 +258,69 @@ test('summariseWithLLM never starts the recent tail with an orphaned tool result
 		'every kept tool result is preceded by its owning assistant(tool_calls)',
 	);
 });
+
+test('summariseWithLLM never summarises a display-only notice', async t => {
+	const tokenizer = makeTokenizer();
+	let lastUserPrompt = '';
+	const client = makeClient(messages => {
+		const userMsg = messages.find(m => m.role === 'user');
+		lastUserPrompt = userMsg?.content || '';
+		return '## Context\nok';
+	});
+
+	const messages: Message[] = [
+		{role: 'user', content: `please run tests ${'a'.repeat(2000)}`},
+		{role: 'assistant', content: 'running'.repeat(300)},
+		{
+			role: 'assistant',
+			content: '**Error:** stream closed',
+			displayOnly: true,
+		},
+		{role: 'user', content: 'again'},
+		{role: 'assistant', content: 'rerunning'},
+	];
+
+	const result = await summariseWithLLM({
+		messages,
+		systemMessage,
+		client,
+		tokenizer,
+		keepRecentMessages: 2,
+	});
+
+	// The notice was never in the provider payload, so folding it into the
+	// summary would smuggle harness chrome back in as a real `user` message.
+	t.notRegex(lastUserPrompt, /stream closed/);
+	t.regex(lastUserPrompt, /please run tests/);
+	t.truthy(result);
+	t.false(result!.some(m => m.content.includes('stream closed')));
+});
+
+test('summariseWithLLM keeps a display-only notice that falls in the recent tail', async t => {
+	const tokenizer = makeTokenizer();
+	const client = makeClient(() => '## Context\nok');
+
+	const messages: Message[] = [
+		{role: 'user', content: 'a'.repeat(2000)},
+		{role: 'assistant', content: 'b'.repeat(2000)},
+		{role: 'user', content: 'cancel that'},
+		{
+			role: 'assistant',
+			content: '_Cancelled by user._',
+			displayOnly: true,
+		},
+	];
+
+	const result = await summariseWithLLM({
+		messages,
+		systemMessage,
+		client,
+		tokenizer,
+		keepRecentMessages: 2,
+	});
+
+	t.truthy(result);
+	const notice = result!.find(m => m.content.includes('Cancelled by user'));
+	t.truthy(notice, 'recent notices stay in history for rendering');
+	t.true(notice!.displayOnly, 'and stay filtered from the payload');
+});

@@ -14,6 +14,16 @@
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
+			<div id="timeline-strip" class="hidden shrink-0 border-b border-vscode-border px-3 py-2" aria-label="Action timeline">
+				<div class="flex items-center gap-2">
+					<span class="text-[0.65em] uppercase tracking-[0.06em] opacity-50 shrink-0">Timeline</span>
+					<div id="timeline-track" class="flex-1 overflow-x-auto overflow-y-hidden">
+						<div id="timeline-nodes" class="flex items-center min-h-[28px] px-1"></div>
+					</div>
+				</div>
+				<div id="timeline-hint" class="mt-1 h-[1.2em] text-[0.7em] opacity-60 truncate" aria-live="polite"></div>
+				<div id="timeline-confirm" class="hidden mt-2 p-2 rounded-md border border-vscode-widget-border bg-vscode-widget-bg text-[0.8em] font-vscode"></div>
+			</div>
 			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
 			</div>
@@ -218,6 +228,10 @@
 
 		
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
+			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg items-center gap-2">
+				<span class="font-vscode text-[0.78em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
+				<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+			</div>
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
@@ -231,22 +245,17 @@
 						</button>
 						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
 
-						<!-- Custom Provider Dropdown Trigger -->
-						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
-							<span id="provider-trigger-label" class="truncate">Provider...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
-						</button>
-
-						<!-- Custom Model Dropdown Trigger -->
-						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[40%] shrink min-w-0" disabled>
+						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover flex-1 min-w-0" disabled>
 							<span id="model-trigger-label" class="truncate">Loading models...</span>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 
-						<!-- Custom Mode Dropdown Trigger -->
-						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
-							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						<button id="composer-settings-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink-0 min-w-0" title="Provider and approval mode" aria-label="Composer settings" aria-haspopup="menu" aria-expanded="false" aria-controls="composer-settings">
+							<span id="composer-mode-badge" class="truncate max-w-[40%]"></span>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+								<circle cx="12" cy="12" r="3"></circle>
+								<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+							</svg>
 						</button>
 					</div>
 
@@ -275,9 +284,26 @@
 						Attach File / Folder
 					</button>
 				</div>
-				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+				<div id="composer-settings" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+					<div class="px-3 py-2 text-[0.85em] opacity-70">Configuration</div>
+					<div class="flex items-center justify-between gap-2 px-3 py-1">
+						<span class="text-[0.85em] opacity-70 shrink-0">Provider</span>
+						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover min-w-0 max-w-[40%]" disabled>
+							<span id="provider-trigger-label" class="truncate">Provider...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+					</div>
+					<div class="flex items-center justify-between gap-2 px-3 py-1 pb-2">
+						<span class="text-[0.85em] opacity-70 shrink-0">Approval mode</span>
+						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover min-w-0 max-w-[40%]" disabled>
+							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+					</div>
+					<div id="provider-dropdown" class="hidden absolute left-0 w-full bottom-[calc(100%+8px)] max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+					<div id="mode-dropdown" class="hidden absolute left-0 w-full bottom-[calc(100%+8px)] max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+				</div>
 				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
-				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 
 				<!-- @ mention autocomplete. Anchored to the composer rather than the
 				     caret: a textarea exposes no caret coordinates without a mirror

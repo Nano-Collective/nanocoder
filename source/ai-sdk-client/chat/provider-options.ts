@@ -15,6 +15,22 @@ import {isOpenRouterProvider} from '../providers/openrouter.js';
 export type ProviderOptions = Record<string, Record<string, unknown>>;
 
 /**
+ * Whether to mark this provider's requests with Anthropic cache breakpoints.
+ *
+ * Anthropic-only and on by default there. `promptCaching: true` on any other
+ * SDK provider is deliberately inert rather than an error: OpenAI and
+ * OpenRouter prefix-cache on their own, and local models have no cache.
+ */
+export function isPromptCachingEnabled(
+	providerConfig: AIProviderConfig,
+): boolean {
+	return (
+		providerConfig.sdkProvider === 'anthropic' &&
+		providerConfig.promptCaching !== false
+	);
+}
+
+/**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
  * Currently handles two providers:
