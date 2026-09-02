@@ -212,6 +212,11 @@ function validateFormatterEntry(
 	if (!entry || typeof entry !== 'object') return null;
 	const {extensions, command} = entry as Record<string, unknown>;
 	if (typeof command !== 'string' || command.trim().length === 0) return null;
+	// A command without the placeholder never receives the edited path. Most
+	// formatters then either error out or — `gofmt`, `black -` and friends —
+	// wait on stdin until the timeout expires, once per edited file. Dropping
+	// the entry fails faster and keeps the documented contract honest.
+	if (!command.includes('{file}')) return null;
 	if (!Array.isArray(extensions) || extensions.length === 0) return null;
 
 	const normalizedExtensions = extensions.filter(

@@ -7,7 +7,7 @@ import {setToolRegistryGetter} from '@/message-handler.js';
 import type {AutoFormatConfig} from '@/types/config';
 import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
-import {runAutoFormat} from './auto-format.js';
+import {quoteForShell, runAutoFormat} from './auto-format.js';
 import {processAssistantResponse} from './conversation-loop.js';
 
 test.before(() => {
@@ -43,6 +43,49 @@ function baseConfig(
 	return {enabled: true, formatters: [], timeoutMs: 10_000, ...overrides};
 }
 
+test('quotes the path for the shell that will run the command', t => {
+	// POSIX shells: single quotes, with embedded quotes escaped.
+	t.is(quoteForShell('/tmp/a b.ts', '/bin/bash'), "'/tmp/a b.ts'");
+	t.is(quoteForShell("/tmp/a'b.ts", '/bin/sh'), "'/tmp/a'\\''b.ts'");
+
+	// cmd.exe does not treat single quotes as quoting at all, so a
+	// single-quoted path with spaces would reach the formatter as several
+	// arguments with literal quotes attached.
+	t.is(
+		quoteForShell('C:\\Users\\Jane Doe\\a.ts', 'C:\\Windows\\system32\\cmd.exe'),
+		'"C:\\Users\\Jane Doe\\a.ts"',
+	);
+	t.is(quoteForShell('C:\\tmp\\a.ts', 'cmd'), '"C:\\tmp\\a.ts"');
+});
+
+test('reports termination by signal rather than a null exit code', async t => {
+	const dir = makeTempDir();
+	try {
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'const a=1;');
+		const outcomes = await runAutoFormat(
+			[toolCall('call_1', 'write_file', {path: file})],
+			[toolResult('call_1', 'write_file')],
+			baseConfig({
+				formatters: [
+					{
+						extensions: ['ts'],
+						command: 'node -e "process.kill(process.pid, \'SIGKILL\')" {file}',
+					},
+				],
+			}),
+			dir,
+		);
+
+		t.is(outcomes.length, 1);
+		t.false(outcomes[0]?.success);
+		t.true(outcomes[0]?.error?.includes('SIGKILL'));
+		t.false(outcomes[0]?.error?.includes('null'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
 test('returns no outcomes when auto-format is disabled', async t => {
 	const dir = makeTempDir();
 	try {
@@ -53,7 +96,7 @@ test('returns no outcomes when auto-format is disabled', async t => {
 			[toolResult('call_1', 'write_file')],
 			baseConfig({
 				enabled: false,
-				formatters: [{extensions: ['ts'], command: 'true'}],
+				formatters: [{extensions: ['ts'], command: 'true {file}'}],
 			}),
 			dir,
 		);
@@ -88,7 +131,7 @@ test('skips files with no matching formatter extension', async t => {
 		const outcomes = await runAutoFormat(
 			[toolCall('call_1', 'write_file', {path: file})],
 			[toolResult('call_1', 'write_file')],
-			baseConfig({formatters: [{extensions: ['ts'], command: 'true'}]}),
+			baseConfig({formatters: [{extensions: ['ts'], command: 'true {file}'}]}),
 			dir,
 		);
 		t.deepEqual(outcomes, []);
@@ -105,7 +148,7 @@ test('ignores edits that failed or were cancelled', async t => {
 		const outcomes = await runAutoFormat(
 			[toolCall('call_1', 'write_file', {path: file})],
 			[toolResult('call_1', 'write_file', 'Error: no permissions')],
-			baseConfig({formatters: [{extensions: ['ts'], command: 'true'}]}),
+			baseConfig({formatters: [{extensions: ['ts'], command: 'true {file}'}]}),
 			dir,
 		);
 		t.deepEqual(outcomes, []);
@@ -169,7 +212,7 @@ test('reports a non-zero exit as a failed outcome without throwing', async t => 
 			[toolResult('call_1', 'write_file')],
 			baseConfig({
 				formatters: [
-					{extensions: ['ts'], command: 'node -e "process.exit(1)"'},
+					{extensions: ['ts'], command: 'node -e "process.exit(1)" {file}'},
 				],
 			}),
 			dir,
@@ -217,7 +260,7 @@ test('reports a timeout as a failed outcome and kills the process', async t => {
 			baseConfig({
 				timeoutMs: 100,
 				formatters: [
-					{extensions: ['ts'], command: 'node -e "setTimeout(()=>{}, 5000)"'},
+					{extensions: ['ts'], command: 'node -e "setTimeout(()=>{}, 5000)" {file}'},
 				],
 			}),
 			dir,
@@ -442,7 +485,7 @@ test.serial('processAssistantResponse surfaces a failed auto-format as a chat me
 			enabled: true,
 			timeoutMs: 10_000,
 			formatters: [
-				{extensions: ['ts'], command: 'node -e "process.exit(1)"'},
+				{extensions: ['ts'], command: 'node -e "process.exit(1)" {file}'},
 			],
 		};
 

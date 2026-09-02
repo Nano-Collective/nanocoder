@@ -127,7 +127,9 @@ You can also override these per-session with `/compact --auto-on`, `/compact --a
 
 Run a configured formatter automatically against any file touched by an edit tool (`write_file`, `string_replace`) after each turn. Disabled by default — running arbitrary shell commands against edited files is opt-in.
 
-Each formatter binds a set of file extensions to a shell command. `{file}` in `command` is replaced with the shell-quoted absolute path of the edited file. A file's extension is matched against every configured formatter's `extensions` in order; the first match runs. Failures (non-zero exit, missing binary, timeout) are reported as a chat message but never block the conversation or get reported back to the model.
+Each formatter binds a set of file extensions to a shell command. `{file}` in `command` is replaced with the absolute path of the edited file, quoted for the shell it runs under — single quotes on POSIX, double quotes under Windows `cmd.exe`. A file's extension is matched against every configured formatter's `extensions` in order; the first match runs. Failures (non-zero exit, missing binary, timeout) are reported as a chat message but never block the conversation or get reported back to the model.
+
+`{file}` is required. An entry whose `command` omits it is ignored when the config loads, because the formatter would never be told which file to format — and several formatters (`gofmt`, `black -`) would sit waiting on stdin until the timeout expired, once per edited file.
 
 ```json
 {
@@ -148,7 +150,7 @@ Each formatter binds a set of file extensions to a shell command. `{file}` in `c
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable/disable auto-format |
-| `formatters` | array | `[]` | Formatter bindings, each with `extensions` (string array, without the leading dot) and `command` (shell command containing `{file}`) |
+| `formatters` | array | `[]` | Formatter bindings, each with `extensions` (string array, without the leading dot) and `command` (shell command; must contain `{file}`) |
 | `timeoutMs` | number | `10000` | Per-formatter run timeout in milliseconds |
 
 ### Sessions

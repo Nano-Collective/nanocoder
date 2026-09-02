@@ -822,6 +822,9 @@ test.serial('auto-format drops malformed formatter entries', async t => {
 						{extensions: ['py'], command: ''},
 						{extensions: ['rb']},
 						'not-an-object',
+						// No {file} placeholder: the formatter would never be told
+						// which file to format, and several wait on stdin instead.
+						{extensions: ['go'], command: 'gofmt -w'},
 					],
 				},
 			},

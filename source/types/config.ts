@@ -104,8 +104,11 @@ export interface PasteConfig {
 }
 
 // A single formatter binding: which file extensions it handles and the shell
-// command to run. "{file}" in `command` is replaced with the shell-quoted
-// absolute path of the edited file (e.g. "prettier --write {file}").
+// command to run. "{file}" in `command` is replaced with the absolute path of
+// the edited file, quoted for the shell it runs under — single quotes on
+// POSIX, double quotes under cmd.exe (e.g. "prettier --write {file}"). The
+// placeholder is required; entries without it are dropped when the config
+// loads, since the formatter would never receive the path.
 export interface AutoFormatFormatterConfig {
 	extensions: string[];
 	command: string;
