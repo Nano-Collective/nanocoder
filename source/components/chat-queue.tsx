@@ -32,7 +32,7 @@ export default memo(function ChatQueue({
 	disableStatic = false,
 }: ChatQueueProps) {
 	const {staticQueuedComponents, liveQueuedComponents} = useMemo(() => {
-		if (!renderLastQueuedComponentLive) {
+		if (!renderLastQueuedComponentLive || !disableStatic) {
 			return {
 				staticQueuedComponents: queuedComponents,
 				liveQueuedComponents: [],
@@ -43,7 +43,7 @@ export default memo(function ChatQueue({
 			staticQueuedComponents: queuedComponents.slice(0, -1),
 			liveQueuedComponents: queuedComponents.slice(-1),
 		};
-	}, [queuedComponents, renderLastQueuedComponentLive]);
+	}, [queuedComponents, renderLastQueuedComponentLive, disableStatic]);
 
 	// Combine static and queued components for Static rendering
 	const allStaticComponents = useMemo(

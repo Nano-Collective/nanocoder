@@ -54,6 +54,7 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
+
 	// Held in a ref, not state: a cache write must not re-render the app or
 	// change the identity of getMessageTokens. Returned from this hook only so
 	// useAppState.spec.tsx can assert on it; there is no production consumer.

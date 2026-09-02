@@ -355,10 +355,14 @@ export function useChatHandler({
 		// placeholders) alongside the fully assembled message. Use it directly
 		// for the bubble; fall back to the raw message for callers that have no
 		// placeholder view (custom commands, VS Code prompts).
+
 		const displayMessage = displayValue ?? message;
 
 		// Add user message to chat using display version (with placeholders)
 		// Pass the full assembled message for accurate token counting
+
+		console.log('displayMessage', displayMessage, message);
+
 		addToChatQueue(
 			<UserMessage
 				key={generateKey('user')}
