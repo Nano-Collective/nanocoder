@@ -7,6 +7,7 @@ import {
 	setSessionContextLimit,
 } from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
+import type {MemoryFinder} from '@/memory/project-context';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	LLMClient,
@@ -33,7 +34,7 @@ function createMockToolManager(
 			handler: (
 				args: unknown,
 				options?: ToolExecutionContext,
-			) => Promise<string>;
+			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
 		}
@@ -183,6 +184,42 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('stringifies structured tool output without llmContent', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({someField: 'value'}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-structured',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The tool returned structured data.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Read structured data',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'The tool returned structured data.');
+	t.is(toolResults[0]?.content, '{"someField":"value"}');
 });
 
 test.serial('forwards the parent execution context to subagent tools', async t => {
@@ -1137,6 +1174,82 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.regex(toolResult, /not available to this subagent/);
 });
 
+test.serial('injects relevant project memories into the subagent system prompt', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => [
+			{
+				id: 'mem-1',
+				content: 'Auth flow uses Clerk and avoids middleware.',
+				category: 'architecture',
+				timestamp: '2026-01-01T00:00:00.000Z',
+			},
+		],
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: true},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.true(systemPrompt.includes('## Project Context'));
+	t.true(systemPrompt.includes('Auth flow uses Clerk and avoids middleware.'));
+});
+
+test.serial('skips subagent memory recall when semantic memory is disabled', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	let finderCalls = 0;
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => {
+			finderCalls++;
+			return [
+				{
+					id: 'mem-1',
+					content: 'Auth flow uses Clerk and avoids middleware.',
+					category: 'architecture',
+					timestamp: '2026-01-01T00:00:00.000Z',
+				},
+			];
+		},
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: false},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.is(finderCalls, 0);
+	t.false(systemPrompt.includes('## Project Context'));
+});
+
 test.serial(
 	'caps subagent history before client.chat without starting on a tool row',
 	async t => {
@@ -1283,4 +1396,3 @@ test.serial('compacts subagent history after a tool turn', async t => {
 		resetSessionContextLimit();
 	}
 });
-

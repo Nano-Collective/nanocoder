@@ -6,6 +6,7 @@ import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -2183,3 +2184,158 @@ test.serial(
 	},
 );
 
+
+// ============================================================================
+// Sub-agent tool approval (#1019)
+// ============================================================================
+
+/**
+ * Drives signalToolApproval from inside the turn, which is the only way the
+ * sub-agent executor ever reaches it. Firing it after runAcpConversation
+ * returned would only pass while the handler leaked past the turn.
+ */
+const approveFromInsideTurn = async (
+	requestPermission: (p: any) => Promise<any>,
+	subagentName = 'docs',
+) => {
+	const updates: any[] = [];
+	const permissionRequests: any[] = [];
+	let approved: boolean | undefined;
+	let signalled = false;
+
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u.update);
+		},
+		requestPermission: async (p: any) => {
+			permissionRequests.push(p);
+			return requestPermission(p);
+		},
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	// chat() is awaited by the turn, so this is a point where the handler is
+	// installed and the turn has not returned - the state the sub-agent
+	// executor signals from.
+	const client = {
+		chat: async () => {
+			if (!signalled) {
+				signalled = true;
+				approved = await signalToolApproval({
+					toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
+					subagentName,
+				});
+			}
+			return {
+				choices: [{message: {content: 'done', tool_calls: []}}],
+				toolsDisabled: false,
+			};
+		},
+	} as unknown as LLMClient;
+	const toolManager = {
+		getAvailableToolNames: () => [],
+		getFilteredTools: () => ({}),
+		hasTool: () => false,
+		getToolEntry: () => undefined,
+		isReadOnly: () => true,
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	return {approved, updates, permissionRequests, session};
+};
+
+test('runAcpConversation - a sub-agent tool call reaches the client for permission', async t => {
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
+	);
+
+	t.true(approved);
+	t.is(permissionRequests.length, 1);
+
+	// Prefixed: sub-agent ids come from the sub-agent's own model and share an
+	// id space with top-level calls, so an unprefixed id could merge two cards.
+	const announcedId = permissionRequests[0].toolCall.toolCallId;
+	t.is(announcedId, 'subagent:call-1');
+	t.true(String(permissionRequests[0].toolCall.title).includes('docs'));
+
+	// Announced before the request, or the client rejects the id.
+	const announced = updates.filter(
+		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === announcedId,
+	);
+	t.is(announced.length, 1);
+
+	// Settled rather than left spinning: the sub-agent layer reports no result.
+	const terminal = updates.filter(
+		(u: any) => u.toolCallId === announcedId && u.status === 'completed',
+	);
+	t.is(terminal.length, 1);
+});
+
+test('runAcpConversation - a denied sub-agent tool call is reported as failed', async t => {
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'selected', optionId: 'deny'}}),
+	);
+
+	t.false(approved);
+	t.is(permissionRequests.length, 1);
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+	t.is(failed[0].rawOutput, 'Denied by user');
+});
+
+test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
+	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
+		async () => ({outcome: {outcome: 'cancelled'}}),
+	);
+
+	// t.false(approved) alone would pass with no handler installed at all,
+	// since the slot's fallback already denies. The request reaching the
+	// connection and the call being settled are the parts that need one.
+	t.false(approved);
+	t.is(permissionRequests.length, 1);
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+	// Distinct from the deny path, so a client can tell a user's refusal from
+	// a turn that was torn down under it.
+	t.is(failed[0].rawOutput, 'Cancelled by user');
+});
+
+test('runAcpConversation - a transport failure denies the tool rather than aborting the sub-agent', async t => {
+	const {approved, permissionRequests} = await approveFromInsideTurn(async () => {
+		throw new Error('connection closed');
+	});
+
+	// signalToolApproval is awaited outside the sub-agent executor's own try, so
+	// a throw here would abort the whole run instead of denying one tool.
+	t.false(approved);
+	t.is(permissionRequests.length, 1);
+});
+
+test('runAcpConversation - the approval handler does not outlive the turn', async t => {
+	const {permissionRequests} = await approveFromInsideTurn(async () => ({
+		outcome: {outcome: 'selected', optionId: 'allow'},
+	}));
+	t.is(permissionRequests.length, 1);
+
+	// The slot is a module singleton shared across sessions, so a handler left
+	// installed would answer a later session's approvals with this turn's
+	// session id and abort controller.
+	const afterTurn = await signalToolApproval({
+		toolCall: createMockToolCall('write_file', {path: 'b.txt'}, 'call-2'),
+		subagentName: 'docs',
+	});
+
+	t.false(afterTurn);
+	t.is(permissionRequests.length, 1);
+});

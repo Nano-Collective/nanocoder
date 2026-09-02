@@ -592,7 +592,7 @@ export default function App({
 	});
 
 	// Setup session autosave
-	useSessionAutosave({
+	const {isSaving} = useSessionAutosave({
 		messages: appState.messages,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
@@ -784,6 +784,7 @@ export default function App({
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}
 							handleIdeSelect={handleIdeSelect}
+							isSaving={isSaving}
 						/>
 					)}
 				</PrivacyContext.Provider>

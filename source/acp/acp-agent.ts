@@ -46,8 +46,13 @@ import {artifactManager} from '@/artifacts/artifact-manager';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {
+	getProjectContextPreferences,
+	loadPreferences,
+	updateLastUsed,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {TimelineManager} from '@/services/timeline-manager';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
@@ -333,6 +338,25 @@ export class AcpAgent implements Agent {
 				...(images.length > 0 ? {images} : {}),
 			},
 		];
+
+		if (session.baseSystemMessage) {
+			const projectContext = await appendRelevantProjectContextWithCount(
+				session.baseSystemMessage.content,
+				userText,
+				session.getMemoryFinder(),
+				getProjectContextPreferences(),
+			);
+			session.systemMessage = {
+				role: 'system',
+				content: projectContext.systemPrompt,
+			};
+			setLastBuiltPrompt(projectContext.systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				logger.info(
+					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+				);
+			}
+		}
 
 		const config = getAppConfig();
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
@@ -840,7 +864,8 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
-		session.systemMessage = {role: 'system', content: systemContent};
+		session.baseSystemMessage = {role: 'system', content: systemContent};
+		session.systemMessage = session.baseSystemMessage;
 	}
 
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {

@@ -6,12 +6,18 @@ import {
 	artifactManager,
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, savePreferences} from '@/config/preferences';
+import {
+	loadPreferences,
+	resolveProjectContextPreferences,
+	savePreferences,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -51,6 +57,7 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
+	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
 	artifacts: Pick<
 		ArtifactManager,
 		| 'cleanupStaleEphemeralSessions'
@@ -65,6 +72,7 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
+	appendRelevantProjectContextWithCount,
 	artifacts: artifactManager,
 };
 
@@ -168,12 +176,25 @@ export async function runPlainShell(
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
 		: {};
-	const systemContent = appendToolDefinitionsToPrompt(
+	const toolPrompt = appendToolDefinitionsToPrompt(
 		basePrompt,
 		toolsDisabled,
 		fallbackToolFormat,
 		toolsForPrompt,
 	);
+
+	const projectContext = await deps.appendRelevantProjectContextWithCount(
+		toolPrompt,
+		prompt,
+		new SemanticMemoryManager(),
+		resolveProjectContextPreferences(deps.loadPreferences()),
+	);
+	const systemContent = projectContext.systemPrompt;
+	if (projectContext.memoryCount > 0) {
+		writeStatus(
+			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+		);
+	}
 	setLastBuiltPrompt(systemContent);
 
 	const systemMessage: Message = {role: 'system', content: systemContent};

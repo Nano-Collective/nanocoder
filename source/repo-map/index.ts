@@ -312,40 +312,42 @@ async function scanFiles(
 	const files: ScannedFile[] = [];
 	let truncated = false;
 
-	await walkProjectEntries(cwd, undefined, async entry => {
-		if (entry.isDirectory) {
-			return false;
-		}
-		const language = languageFor(entry.relativePath);
-		if (!language) {
-			return false;
-		}
-		// Checked before the push so a repo holding exactly `maxFiles` indexable
-		// files is not reported as truncated.
-		if (files.length >= maxFiles) {
-			truncated = true;
-			return true;
-		}
+	const walkResult = await walkProjectEntries(
+		cwd,
+		undefined,
+		async entry => {
+			const language = languageFor(entry.relativePath);
+			if (!language) {
+				return false;
+			}
+			// Checked before the push so exactly `maxFiles` files isn't reported as truncated.
+			if (files.length >= maxFiles) {
+				truncated = true;
+				return true;
+			}
 
-		let source: string;
-		try {
-			source = await readFile(entry.absolutePath, 'utf-8');
-		} catch {
-			return false;
-		}
-		if (source.length > maxFileBytes) {
-			return false;
-		}
+			let source: string;
+			try {
+				source = await readFile(entry.absolutePath, 'utf-8');
+			} catch {
+				return false;
+			}
+			if (source.length > maxFileBytes) {
+				return false;
+			}
 
-		const stripped = stripNoise(source, language);
-		files.push({
-			path: entry.relativePath.replace(/\\/g, '/'),
-			definitions: extractDefinitions(stripped, language),
-			references: countReferences(stripped, language),
-		});
+			const stripped = stripNoise(source, language);
+			files.push({
+				path: entry.relativePath.replace(/\\/g, '/'),
+				definitions: extractDefinitions(stripped, language),
+				references: countReferences(stripped, language),
+			});
 
-		return false;
-	});
+			return false;
+		},
+		{includeDirectories: false},
+	);
+	truncated = truncated || walkResult.truncated;
 
 	return {files, truncated};
 }

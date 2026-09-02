@@ -44,6 +44,10 @@ import type {
 import {buildResponseUsage} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	type PendingToolApproval,
+	setGlobalToolApprovalHandler,
+} from '@/utils/tool-approval-queue';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
@@ -74,7 +78,106 @@ export interface RunAcpConversationOptions {
 	nonInteractiveAlwaysAllow: string[];
 }
 
+/**
+ * Sub-agent tool calls reach the approval slot in tool-approval-queue, which
+ * only the Ink UI installs a handler for. Under ACP the slot fell back to
+ * denying, so a dispatched sub-agent was refused without the client seeing a
+ * request. Route those to the same session/request_permission channel the
+ * top-level calls use.
+ */
+function createSubagentApprovalHandler(
+	session: AcpSession,
+	conn: AgentSideConnection,
+): (approval: PendingToolApproval) => Promise<boolean> {
+	return async ({toolCall, subagentName}) => {
+		// The sub-agent's own model names its tool calls and shares an id space
+		// with the top-level ones, so prefix to keep the two cards distinct.
+		const announced: ToolCall = {
+			...toolCall,
+			id: `${SUBAGENT_TOOL_CALL_PREFIX}${toolCall.id}`,
+		};
+
+		try {
+			const meta = await buildToolCallMeta(announced);
+			const subagentMeta: AcpToolCallMeta = {
+				...meta,
+				title: `${meta.title} (${subagentName})`,
+			};
+
+			// Announced first: a permission request naming a tool call the
+			// client has not seen is rejected as invalid params.
+			await emitToolCall(session, conn, announced, 'pending', subagentMeta);
+
+			const permission = await requestToolPermission(
+				session,
+				announced,
+				conn,
+				subagentMeta,
+				session.abortController.signal,
+			);
+
+			if (permission === 'approved') {
+				// The sub-agent layer does not report its results back here, so
+				// settle the card on approval rather than leave it spinning
+				// forever. This does claim success before the tool has run: a
+				// call that then fails still shows completed. Reporting the
+				// real outcome means threading results out of the executor.
+				await emitToolCall(
+					session,
+					conn,
+					announced,
+					'completed',
+					subagentMeta,
+					'tool_call_update',
+				);
+				return true;
+			}
+
+			await emitToolCallUpdate(
+				session,
+				conn,
+				announced,
+				'failed',
+				permission === 'cancelled' ? 'Cancelled by user' : 'Denied by user',
+			);
+			return false;
+		} catch {
+			// signalToolApproval is awaited outside the sub-agent executor's own
+			// try, so a transport failure here would abort the whole sub-agent
+			// run. Deny the one tool instead and keep the safe-fallback posture.
+			return false;
+		}
+	};
+}
+
 export async function runAcpConversation(
+	options: RunAcpConversationOptions,
+): Promise<PromptResponse> {
+	// The slot is a module singleton with last-writer-wins semantics, so the
+	// handler is scoped to this turn: without the teardown a finished turn's
+	// session, connection and aborted controller stay reachable, and the last
+	// turn to run would keep answering approvals for every later one.
+	//
+	// This does not make overlapping turns safe. turnActive is per session
+	// (acp-session.ts), so two sessions can be mid-turn at once, and for that
+	// window the later installer answers the earlier session's approvals
+	// against the wrong session id and abort controller. The restore is
+	// LIFO-correct, so routing rights hand back once the later turn ends.
+	// Closing the window itself needs the slot keyed by session id, or an
+	// approval channel threaded through SubagentExecutor.
+	const restoreApprovalHandler = setGlobalToolApprovalHandler(
+		createSubagentApprovalHandler(options.session, options.conn),
+	);
+	try {
+		return await runTurn(options);
+	} finally {
+		restoreApprovalHandler();
+	}
+}
+
+const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
+
+async function runTurn(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
 	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow} =

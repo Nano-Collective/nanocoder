@@ -1,6 +1,15 @@
 import {readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
+import {
+	DEFAULT_MEMORY_LIMIT,
+	DEFAULT_TOKEN_BUDGET,
+	MAX_MEMORY_LIMIT,
+	MAX_TOKEN_BUDGET,
+	MIN_MEMORY_LIMIT,
+	MIN_TOKEN_BUDGET,
+	type ProjectContextOptions,
+} from '@/memory/project-context';
 import type {TuneConfig} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
@@ -246,6 +255,89 @@ export function getPrivacyPreference(): boolean {
 export function updatePrivacyPreference(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.enablePromptScrubbing = value;
+	savePreferences(preferences);
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * Resolve the project-context knobs from an already-loaded preferences object.
+ *
+ * The single place the semantic-memory defaults live. Callers that inject
+ * `loadPreferences` (the plain shell) pass their own object in; everything else
+ * goes through {@link getProjectContextPreferences}.
+ */
+export function resolveProjectContextPreferences(
+	preferences: UserPreferences,
+): Required<
+	Pick<
+		ProjectContextOptions,
+		'semanticMemoryEnabled' | 'memoryLimit' | 'tokenBudget'
+	>
+> {
+	return {
+		semanticMemoryEnabled: preferences.semanticMemoryEnabled ?? true,
+		memoryLimit: clamp(
+			preferences.semanticMemoryLimit ?? DEFAULT_MEMORY_LIMIT,
+			MIN_MEMORY_LIMIT,
+			MAX_MEMORY_LIMIT,
+		),
+		tokenBudget: clamp(
+			preferences.semanticMemoryTokenBudget ?? DEFAULT_TOKEN_BUDGET,
+			MIN_TOKEN_BUDGET,
+			MAX_TOKEN_BUDGET,
+		),
+	};
+}
+
+/** Project-context knobs for the current user. */
+export function getProjectContextPreferences(): ReturnType<
+	typeof resolveProjectContextPreferences
+> {
+	return resolveProjectContextPreferences(loadPreferences());
+}
+
+/**
+ * Get the semantic memory preference from preferences
+ */
+export function getSemanticMemoryEnabled(): boolean {
+	return getProjectContextPreferences().semanticMemoryEnabled;
+}
+
+/**
+ * Save the semantic memory preference
+ */
+export function updateSemanticMemoryEnabled(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryEnabled = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Save how many memories may be recalled into a single prompt.
+ */
+export function updateSemanticMemoryLimit(value: number): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryLimit = clamp(
+		value,
+		MIN_MEMORY_LIMIT,
+		MAX_MEMORY_LIMIT,
+	);
+	savePreferences(preferences);
+}
+
+/**
+ * Save the token budget project context may consume in the system prompt.
+ */
+export function updateSemanticMemoryTokenBudget(value: number): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryTokenBudget = clamp(
+		value,
+		MIN_TOKEN_BUDGET,
+		MAX_TOKEN_BUDGET,
+	);
 	savePreferences(preferences);
 }
 

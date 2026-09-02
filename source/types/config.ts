@@ -521,6 +521,12 @@ export interface UserPreferences {
 	};
 	lastUpdateCheck?: number;
 	selectedTheme?: ThemePreset;
+	/**
+	 * Theme whose palette colours syntax highlighting in code blocks, diffs, and
+	 * file previews. Defaults to `selectedTheme`; set it only to give code a
+	 * palette of its own. An unknown name falls back to `selectedTheme`.
+	 */
+	syntaxTheme?: ThemePreset;
 	trustedDirectories?: string[];
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
@@ -551,6 +557,12 @@ export interface UserPreferences {
 	 */
 	showUsageFooter?: boolean;
 	enablePromptScrubbing?: boolean;
+	/** Whether semantic memory is active. Default true to preserve existing behavior. */
+	semanticMemoryEnabled?: boolean;
+	/** Max memories recalled into one prompt. Defaults and bounds live in project-context.ts. */
+	semanticMemoryLimit?: number;
+	/** Approximate token ceiling for the injected Project Context block. */
+	semanticMemoryTokenBudget?: number;
 	/**
 	 * Interactive TUI screen mode. true (default): fullscreen on the
 	 * alternate screen buffer with in-app scrolling (wheel / PgUp / PgDn).
