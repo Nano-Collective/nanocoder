@@ -6,6 +6,7 @@ export const TaskSchema = z.object({
 		z.object({
 			id: z
 				.string()
+				.regex(/^[a-z0-9-]+$/)
 				.describe('A unique identifier for the worker (e.g. worker-1)'),
 			description: z.string().describe('The prompt for this worker'),
 			fileScope: z

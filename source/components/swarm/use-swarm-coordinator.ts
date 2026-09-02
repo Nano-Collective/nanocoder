@@ -1,4 +1,4 @@
-import {execFile, execSync, spawn} from 'node:child_process';
+import {execFile, execFileSync, spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {promisify} from 'node:util';
@@ -37,6 +37,7 @@ export interface SwarmWorkerState {
 }
 
 export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
+	const abortController = useRef(new AbortController());
 	const [status, setStatus] = useState<SwarmStatus>('starting');
 	const [workers, setWorkers] = useState<SwarmWorkerState[]>(() =>
 		Array.from({length: config.workers}, (_, i) => ({
@@ -56,6 +57,10 @@ export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 		hasStarted.current = true;
 
 		void runSwarm();
+
+		return () => {
+			abortController.current.abort(new Error('Swarm unmounted'));
+		};
 	}, [client]);
 
 	async function runSwarm() {
@@ -156,16 +161,19 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 				try {
 					const resolvedTarget = path.resolve(process.cwd(), targetPath);
 					if (fs.existsSync(resolvedTarget)) {
-						execSync(`rm -rf "${resolvedTarget}"`);
+						fs.rmSync(resolvedTarget, {recursive: true, force: true});
 					}
-					execSync(`git worktree remove "${resolvedTarget}" --force`, {
-						stdio: 'ignore',
-					});
+					execFileSync('git', [
+						'worktree',
+						'remove',
+						resolvedTarget,
+						'--force',
+					]);
 				} catch (_e) {
 					// Ignore
 				}
 				try {
-					execSync(`git branch -D ${branchName}`, {stdio: 'ignore'});
+					execFileSync('git', ['branch', '-D', branchName]);
 				} catch (_e) {
 					// Ignore
 				}
@@ -210,6 +218,7 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 						{
 							cwd: worktreeAbsPath,
 							env: {...process.env}, // Pass environment variables
+							signal: abortController.current.signal,
 						},
 					);
 
@@ -338,7 +347,12 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 			if (!localPreSwarmCommit) {
 				throw new Error('Pre-swarm commit not found during merge');
 			}
-			await executeSwarmMerge(tasks, localPreSwarmCommit, process.cwd());
+			await executeSwarmMerge(
+				tasks,
+				localPreSwarmCommit,
+				process.cwd(),
+				config.swarmMode,
+			);
 
 			setStatus('complete');
 		} catch (err) {
@@ -362,5 +376,9 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 		}
 	}
 
-	return {status, workers, error, preSwarmCommit};
+	const cancelSwarm = () => {
+		abortController.current.abort(new Error('Swarm cancelled by user'));
+	};
+
+	return {status, workers, error, preSwarmCommit, cancelSwarm};
 }

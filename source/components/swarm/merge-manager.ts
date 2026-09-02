@@ -20,6 +20,7 @@ export async function executeSwarmMerge(
 	tasks: TaskDefinition[],
 	preSwarmCommit: string,
 	cwd: string,
+	swarmMode: 'review' | 'apply' | 'yolo' = 'review',
 ): Promise<void> {
 	for (const task of tasks) {
 		const branchName = `nanocoder-swarm-${task.id}`;
@@ -67,13 +68,19 @@ export async function executeSwarmMerge(
 
 			if (patchData.trim()) {
 				// Save patch to .nanocoder directory so work isn't lost on later failures
-				const patchPath = path.join(cwd, '.nanocoder', `${task.id}.patch`);
+				const nanoDir = path.join(cwd, '.nanocoder');
+				if (!fs.existsSync(nanoDir)) {
+					fs.mkdirSync(nanoDir, {recursive: true});
+				}
+				const patchPath = path.join(nanoDir, `${task.id}.patch`);
 				await fs.promises.writeFile(patchPath, patchData);
 
 				// 3. Patch Application
-				await execFileAsync('git', ['apply', '--3way', patchPath], {
-					cwd,
-				});
+				if (swarmMode === 'apply' || swarmMode === 'yolo') {
+					await execFileAsync('git', ['apply', '--3way', patchPath], {
+						cwd,
+					});
+				}
 			}
 		} finally {
 			// Always remove the worktree when merging is done (or failed)

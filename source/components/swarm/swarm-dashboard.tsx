@@ -14,19 +14,21 @@ export function SwarmDashboard({
 }) {
 	const {exit} = useApp();
 
-	// Handle graceful exit via Ctrl+C
-	useInput((input, key) => {
-		if (key.ctrl && input === 'c') {
-			exit();
-			process.exit(0);
-		}
-	});
-
 	const {
 		status: swarmStatus,
 		workers,
 		error,
+		cancelSwarm,
 	} = useSwarmCoordinator(config, client ?? undefined);
+
+	// Handle graceful exit via Ctrl+C
+	useInput((input, key) => {
+		if (key.ctrl && input === 'c') {
+			cancelSwarm();
+			exit();
+			process.exit(1);
+		}
+	});
 
 	const allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
 
