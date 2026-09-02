@@ -188,12 +188,13 @@ export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
 
 /**
  * Per-mode provider/model overrides keyed by mode name (e.g. use a fast
- * model for plan mode).
+ * model for plan mode). Keys are constrained to the user-selectable modes so
+ * the schema rejects typos and unsupported modes at edit time.
  * @internal
  */
-export interface DiskModeProviders {
-	[mode: string]: ModeProviderConfig;
-}
+export type DiskModeProviders = Partial<
+	Record<DiskDefaultMode, ModeProviderConfig>
+>;
 
 /**
  * On-disk representation of the `nanocoder` namespace in agents.config.json.

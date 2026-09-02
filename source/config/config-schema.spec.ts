@@ -289,6 +289,28 @@ test('modeProviders value rejects extra keys', t => {
 	});
 });
 
+test('modeProviders rejects unknown mode keys', t => {
+	assertInvalid(t, 'modeProviders headless mode key', {
+		nanocoder: {modeProviders: {headless: {provider: 'x', model: 'y'}}},
+	});
+	assertInvalid(t, 'modeProviders typo mode key', {
+		nanocoder: {modeProviders: {plann: {provider: 'x', model: 'y'}}},
+	});
+});
+
+test('modeProviders accepts all valid mode keys together', t => {
+	assertValid(t, 'modeProviders all modes', {
+		nanocoder: {
+			modeProviders: {
+				normal: {provider: 'a', model: 'b'},
+				'auto-accept': {provider: 'a', model: 'b'},
+				yolo: {provider: 'a', model: 'b'},
+				plan: {provider: 'a', model: 'b'},
+			},
+		},
+	});
+});
+
 // ---------------------------------------------------------------------------
 // retries (RetryLimitsConfig)
 // ---------------------------------------------------------------------------

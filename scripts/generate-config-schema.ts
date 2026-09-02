@@ -80,6 +80,7 @@ const definitionRenames: Record<string, string> = {
 	'Partial<AutoCompactConfig>': 'AutoCompactConfig',
 	'Partial<TuneConfig>': 'TuneConfig',
 	'Partial<RetryLimitsConfig>': 'RetryLimitsConfig',
+	'Partial<Record<DiskDefaultMode,ModeProviderConfig>>': 'DiskModeProviders',
 	'Record<string,number>': 'RecordStringNumber',
 	'Record<string,string>': 'RecordStringString',
 	'Record<string,unknown>': 'RecordStringUnknown',

@@ -20,13 +20,6 @@
 		}
 	},
 	"definitions": {
-		"DiskModeProviders": {
-			"additionalProperties": {
-				"$ref": "#/definitions/ModeProviderConfig"
-			},
-			"description": "Per-mode provider/model overrides keyed by mode name (e.g. use a fast\nmodel for plan mode).",
-			"type": "object"
-		},
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
@@ -467,6 +460,24 @@
 				},
 				"threshold": {
 					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"DiskModeProviders": {
+			"properties": {
+				"auto-accept": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"normal": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"plan": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"yolo": {
+					"$ref": "#/definitions/ModeProviderConfig"
 				}
 			},
 			"type": "object",
