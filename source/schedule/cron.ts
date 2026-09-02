@@ -46,6 +46,21 @@ export function formatCronHuman(expression: string): string {
 		return 'every minute';
 	}
 
+	// Every N minutes: minute is "*/N", all other fields wildcard. Rendered
+	// explicitly so the cron syntax does not leak into the human label (#1132).
+	if (
+		minute?.startsWith('*/') &&
+		hour === '*' &&
+		dayOfMonth === '*' &&
+		month === '*' &&
+		dayOfWeek === '*'
+	) {
+		const step = minute.slice(2);
+		if (/^[1-9]\d*$/.test(step)) {
+			return `every ${step} minutes`;
+		}
+	}
+
 	if (
 		minute !== '*' &&
 		hour === '*' &&
