@@ -27,6 +27,10 @@ interface Fixture {
 	globalAgents?: unknown;
 	projectPreferences?: unknown;
 	globalPreferences?: unknown;
+	/** JSON written to `<project>/.mcp.json`. */
+	projectMcp?: unknown;
+	/** JSON written to `<configDir>/.mcp.json`. */
+	globalMcp?: unknown;
 	/** Environment variables set for the duration of the callback. */
 	env?: Record<string, string | undefined>;
 }
@@ -56,6 +60,8 @@ function withFixture<T>(
 	write(join(configDir, 'agents.config.json'), fixture.globalAgents);
 	write(join(project, 'nanocoder-preferences.json'), fixture.projectPreferences);
 	write(join(configDir, 'nanocoder-preferences.json'), fixture.globalPreferences);
+	write(join(project, '.mcp.json'), fixture.projectMcp);
+	write(join(configDir, '.mcp.json'), fixture.globalMcp);
 
 	const originalCwd = process.cwd();
 	const originalEnv = {...process.env};
@@ -417,6 +423,128 @@ test('mutating the resolved config does not rewrite the built-in defaults', t =>
 			'the reported default still matches the real built-in',
 		);
 	});
+});
+
+test('an MCP server set in two files reports the one that lost', t => {
+	withFixture(
+		{
+			projectMcp: {mcpServers: {docs: {command: 'project-server'}}},
+			globalMcp: {mcpServers: {docs: {command: 'global-server'}}},
+		},
+		paths => {
+			const config = resolveEffectiveConfig();
+			const docs = entry(config, 'mcpServers.docs');
+
+			t.is(docs?.layer, 'project');
+			t.is(docs?.origin, join(paths.project, '.mcp.json'));
+			t.is(docs?.shadowed.length, 1, 'the global definition is reported');
+			t.is(docs?.shadowed[0]?.layer, 'global');
+			t.is(docs?.shadowed[0]?.origin, join(paths.configDir, '.mcp.json'));
+			t.like(docs?.shadowed[0]?.value, {command: 'global-server'});
+		},
+	);
+});
+
+test('MCP servers from NANOCODER_MCPSERVERS_FILE name that variable as the origin', t => {
+	const serverFile = join(tmpdir(), `nanocoder-mcp-${Date.now()}.json`);
+	writeFileSync(
+		serverFile,
+		JSON.stringify({mcpServers: {docs: {command: 'from-file'}}}),
+		'utf-8',
+	);
+
+	try {
+		withFixture(
+			{
+				projectMcp: {mcpServers: {docs: {command: 'from-project'}}},
+				env: {
+					NANOCODER_MCPSERVERS: undefined,
+					NANOCODER_MCPSERVERS_FILE: serverFile,
+				},
+			},
+			paths => {
+				const docs = entry(resolveEffectiveConfig(), 'mcpServers.docs');
+
+				t.is(docs?.layer, 'env');
+				t.is(
+					docs?.origin,
+					'NANOCODER_MCPSERVERS_FILE',
+					'the variable actually in use, not the inline one',
+				);
+				t.is(docs?.shadowed[0]?.origin, join(paths.project, '.mcp.json'));
+			},
+		);
+	} finally {
+		rmSync(serverFile, {force: true});
+	}
+});
+
+test('MCP server credentials are redacted', t => {
+	withFixture(
+		{
+			projectMcp: {
+				mcpServers: {
+					github: {
+						command: 'gh-mcp',
+						// `\btoken\b` never matched GITHUB_TOKEN — no word boundary
+						// after the underscore — so this used to print in full.
+						env: {GITHUB_TOKEN: 'ghp_realsecret', LOG_LEVEL: 'debug'},
+						headers: {Authorization: 'Bearer realsecret'},
+					},
+				},
+			},
+		},
+		() => {
+			const github = entry(resolveEffectiveConfig(), 'mcpServers.github');
+			const value = github?.value as {
+				env: Record<string, string>;
+				headers: Record<string, string>;
+				command: string;
+			};
+
+			t.true(github?.redacted);
+			t.is(value.env.GITHUB_TOKEN, '<redacted>');
+			t.is(value.headers.Authorization, '<redacted>');
+			t.is(value.env.LOG_LEVEL, 'debug', 'non-secrets stay readable');
+			t.is(value.command, 'gh-mcp');
+		},
+	);
+});
+
+test('runConfigCli --json covers list and show as well as diff', t => {
+	withFixture(
+		{
+			projectAgents: {nanocoder: {autoCompact: {threshold: 80}}},
+			projectMcp: {mcpServers: {docs: {command: 'x'}}},
+		},
+		() => {
+			const list = runConfigCli('list', ['--json']);
+			t.is(list.exitCode, 0);
+			const listed = JSON.parse(list.output) as EffectiveConfig;
+			t.true(listed.entries.length > 1);
+			t.truthy(listed.layers.length, 'layer metadata travels with the JSON');
+			t.truthy(
+				listed.entries.find(e => e.key === 'nanocoder.autoCompact.enabled'),
+				'list --json includes untouched defaults, unlike diff',
+			);
+
+			const show = runConfigCli('show', [
+				'nanocoder.autoCompact.threshold',
+				'--json',
+			]);
+			t.is(show.exitCode, 0);
+			const shown = JSON.parse(show.output) as EffectiveConfig;
+			t.is(shown.entries.length, 1, 'show --json is scoped to the match');
+			t.is(shown.entries[0]?.value, 80);
+			t.is(shown.entries[0]?.layer, 'project');
+
+			// A miss must be a non-zero exit even in JSON mode, so scripts can
+            // branch on it rather than parsing for an empty array.
+			const missing = runConfigCli('show', ['nope.nope', '--json']);
+			t.is(missing.exitCode, 1);
+			t.deepEqual((JSON.parse(missing.output) as EffectiveConfig).entries, []);
+		},
+	);
 });
 
 test('runConfigCli renders list, show, and diff', t => {
