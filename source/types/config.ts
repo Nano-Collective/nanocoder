@@ -234,6 +234,11 @@ export interface DiskNanocoderConfig {
 	};
 	/** Per-development-mode provider/model overrides (e.g. use a fast model for plan mode). */
 	modeProviders?: Record<string, ModeProviderConfig>;
+	/**
+	 * Agent-loop retry limits. Each field has its own sensible default — you
+	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
+	 */
+	retries?: Partial<RetryLimitsConfig>;
 }
 
 /**
@@ -241,12 +246,17 @@ export interface DiskNanocoderConfig {
  *
  * The schema wraps DiskNanocoderConfig under the `nanocoder` key to match
  * the actual on-disk layout. The optional `$schema` property enables
- * editor autocompletion without being read by the loader.
+ * editor autocompletion without being read by the loader. A legacy top-level
+ * `providers` form (without the `nanocoder` wrapper) is still accepted by the
+ * project provider loader (loadProjectProviderConfigs), so it is advertised
+ * here too.
  * @internal
  */
 export interface DiskConfig {
 	/** JSON Schema URI for editor autocompletion. Ignored by the loader. */
 	$schema?: string;
+	/** Top-level provider list — alternative to `nanocoder.providers`. Accepts the same format. */
+	providers?: ProviderConfig[];
 	nanocoder?: DiskNanocoderConfig;
 }
 

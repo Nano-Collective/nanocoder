@@ -79,6 +79,7 @@ try {
 const definitionRenames: Record<string, string> = {
 	'Partial<AutoCompactConfig>': 'AutoCompactConfig',
 	'Partial<TuneConfig>': 'TuneConfig',
+	'Partial<RetryLimitsConfig>': 'RetryLimitsConfig',
 	'Record<string,ModeProviderConfig>': 'ModeProviders',
 	'Record<string,number>': 'RecordStringNumber',
 	'Record<string,string>': 'RecordStringString',

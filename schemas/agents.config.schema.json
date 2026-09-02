@@ -10,6 +10,13 @@
 		"nanocoder": {
 			"$ref": "#/definitions/DiskNanocoderConfig",
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores."
+		},
+		"providers": {
+			"description": "Top-level provider list — alternative to `nanocoder.providers`. Accepts the same format.",
+			"items": {
+				"$ref": "#/definitions/ProviderConfig"
+			},
+			"type": "array"
 		}
 	},
 	"definitions": {
@@ -116,6 +123,10 @@
 						"$ref": "#/definitions/ProviderConfig"
 					},
 					"type": "array"
+				},
+				"retries": {
+					"$ref": "#/definitions/RetryLimitsConfig",
+					"description": "Agent-loop retry limits. Each field has its own sensible default — you\ncan set any combination (e.g. just `maxRepeatedToolCalls`)."
 				},
 				"systemPrompt": {
 					"$ref": "#/definitions/SystemPromptConfig",
@@ -435,6 +446,21 @@
 					"type": "string"
 				},
 				"threshold": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"RetryLimitsConfig": {
+			"properties": {
+				"maxEmptyTurns": {
+					"type": "number"
+				},
+				"maxMalformedRetries": {
+					"type": "number"
+				},
+				"maxRepeatedToolCalls": {
 					"type": "number"
 				}
 			},

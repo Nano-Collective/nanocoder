@@ -282,12 +282,81 @@ test('modeProviders value requires provider and model', t => {
 });
 
 // ---------------------------------------------------------------------------
+// retries (RetryLimitsConfig)
+// ---------------------------------------------------------------------------
+
+test('retries partial object is valid (per-field defaults)', t => {
+	assertValid(t, 'retries maxRepeatedToolCalls only', {
+		nanocoder: {retries: {maxRepeatedToolCalls: 5}},
+	});
+	assertValid(t, 'retries full', {
+		nanocoder: {
+			retries: {
+				maxRepeatedToolCalls: 3,
+				maxEmptyTurns: 2,
+				maxMalformedRetries: 2,
+			},
+		},
+	});
+});
+
+test('empty retries object is valid (all loader defaults)', t => {
+	assertValid(t, 'retries empty', {nanocoder: {retries: {}}});
+});
+
+test('retries rejects unknown key', t => {
+	assertInvalid(t, 'retries bogus', {
+		nanocoder: {retries: {bogus: 1}},
+	});
+});
+
+test('RetryLimitsConfig requires no fields and exposes all three retry caps', t => {
+	const def = schema.definitions.RetryLimitsConfig;
+	t.deepEqual(def.required, undefined);
+	t.false(Object.values(def.properties).some((p: {required?: string[]}) => p.required));
+	t.deepEqual(Object.keys(def.properties).sort(), [
+		'maxEmptyTurns',
+		'maxMalformedRetries',
+		'maxRepeatedToolCalls',
+	]);
+});
+
+// ---------------------------------------------------------------------------
+// root-level providers (legacy form read by loadProjectProviderConfigs)
+// ---------------------------------------------------------------------------
+
+test('legacy root-level providers form is valid', t => {
+	assertValid(t, 'root providers', {
+		providers: [{name: 'OpenRouter', models: ['anthropic/claude-4.5-sonnet']}],
+	});
+});
+
+test('legacy root-level provider requires name and models', t => {
+	assertInvalid(t, 'root provider missing models', {
+		providers: [{name: 'OpenRouter'}],
+	});
+	assertInvalid(t, 'root provider missing name', {
+		providers: [{models: ['a']}],
+	});
+});
+
+test('root-level and nanocoder providers may be combined', t => {
+	assertValid(t, 'both provider forms', {
+		providers: [{name: 'Root', models: ['a']}],
+		nanocoder: {providers: [{name: 'Nested', models: ['b']}]},
+	});
+});
+
+// ---------------------------------------------------------------------------
 // structural integrity against the type
 // ---------------------------------------------------------------------------
 
 test('root wraps under nanocoder and declares $schema', t => {
 	t.is(schema.type, 'object');
-	t.deepEqual(Object.keys(schema.properties), ['$schema', 'nanocoder']);
+	t.deepEqual(
+		Object.keys(schema.properties).sort(),
+		['$schema', 'nanocoder', 'providers'].sort(),
+	);
 	t.is(schema.properties.nanocoder.$ref, '#/definitions/DiskNanocoderConfig');
 	t.is(schema.additionalProperties, false);
 });
@@ -307,6 +376,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'systemPrompt',
 		'nanocoderTools',
 		'modeProviders',
+		'retries',
 	];
 	for (const key of expected) {
 		t.true(
