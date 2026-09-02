@@ -69,6 +69,14 @@ test('formatCronHuman formats hourly pattern', t => {
 	t.is(formatCronHuman('0 * * * *'), 'every hour at minute 0');
 });
 
+test('formatCronHuman formats every-N-minutes without leaking cron syntax', t => {
+	// Regression for #1132: "*/N" in the minute field used to render verbatim
+	// as "every hour at minute */5".
+	t.is(formatCronHuman('*/5 * * * *'), 'every 5 minutes');
+	t.is(formatCronHuman('*/15 * * * *'), 'every 15 minutes');
+	t.is(formatCronHuman('*/1 * * * *'), 'every 1 minutes');
+});
+
 test('formatCronHuman formats daily pattern', t => {
 	t.is(formatCronHuman('0 9 * * *'), 'daily at 9:00');
 	t.is(formatCronHuman('30 14 * * *'), 'daily at 14:30');
