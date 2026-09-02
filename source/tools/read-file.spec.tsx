@@ -151,6 +151,105 @@ test('ReadFileFormatter displays line range for partial reads', async t => {
 	}
 });
 
+test('ReadFileFormatter shows the metadata layout for a metadata_only read', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2\nline3');
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{path: join(testDir, 'test.ts'), metadata_only: true},
+			'File Information for "test.ts"\n==================================================\n\nType: file\nSize: 18 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nReadable: yes\nLines: 3\nEstimated Tokens: ~5\nFile Type: TypeScript\nEncoding: UTF-8\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
+		t.regex(output, /Total lines:\s+3/);
+		t.notRegex(output, /Tokens:/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test('ReadFileFormatter shows the metadata layout for a directory', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-dir-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		// executeReadFile's metadata branch never calls getCachedFileContent
+		// for a directory (only for `type === 'file'`), and the formatter's
+		// own getCachedFileContent(testDir) call throws (EISDIR) the same
+		// way. isMetadataOnly has to come from args up front, not from that
+		// call succeeding, or this falls back to the content layout.
+		const element = await formatter(
+			{path: testDir, metadata_only: true},
+			'File Information for "test-metadata-only-dir-temp"\n==================================================\n\nType: directory\nSize: 64 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nNote: Use list_directory tool to see directory contents\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
+		t.notRegex(output, /Tokens:/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test('ReadFileFormatter treats a truthy metadata_only string as metadata-only', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-string-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2');
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		// The XML tool-call fallback (xml-parser.ts) can hand metadata_only
+		// through as the string 'true' rather than a boolean: truthy, but not
+		// `=== true`. isMetadataOnly keys off Boolean() precisely so this
+		// still renders the metadata layout instead of silently reverting to
+		// the content one.
+		const element = await formatter(
+			{
+				path: join(testDir, 'test.ts'),
+				metadata_only: 'true' as unknown as boolean,
+			},
+			'File Information for "test.ts"\n==================================================\n\nType: file\nSize: 12 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nReadable: yes\nLines: 2\nEstimated Tokens: ~4\nFile Type: TypeScript\nEncoding: UTF-8\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 // ============================================================================
 // Tests for read_file Handler - Progressive Disclosure
 // ============================================================================

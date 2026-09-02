@@ -306,14 +306,26 @@ const readFileFormatter = async (
 		return <></>;
 	}
 
-	// Load file info to calculate actual read information
+	// `metadata_only` is the flag that selects the metadata response shape in
+	// executeReadFile, so it's the only correct signal here too. Boolean()
+	// matches executeReadFile's truthy `if (args.metadata_only)` rather than
+	// `=== true`: the XML tool-call fallback can hand this through as the
+	// string 'true', which is truthy but not strictly equal to true.
+	const isMetadataOnly = Boolean(args.metadata_only);
+
+	// Set isMetadataOnly from the args flag up front, not derived from what
+	// follows: for a directory or symlink, executeReadFile's metadata branch
+	// never calls getCachedFileContent, so the same call below throws
+	// (EISDIR) and lands in the catch. Seeding the default fileInfo with the
+	// real flag means that still renders the metadata layout, just with
+	// totalLines left at 0, instead of falling back to the content layout.
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
 		readEndLine: 0,
 		tokens: 0,
 		isPartialRead: false,
-		isMetadataOnly: false,
+		isMetadataOnly,
 		isTruncated: false,
 	};
 
@@ -322,18 +334,9 @@ const readFileFormatter = async (
 		if (path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
-			const content = cached.content;
 			const lines = cached.lines;
 			const totalLines = lines.length;
 
-			// Detect if this was a metadata-only response.
-			// The metadata branch returns `File Information for "..."`, never
-			// `File:`, so the old prefix test could not match. It also returns
-			// before any line range or size is considered, so gating on
-			// start_line/end_line/totalLines described the truncated-preview
-			// case below rather than this one. The request flag is what
-			// actually selects this response shape.
-			const isMetadataOnly = args.metadata_only === true;
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
@@ -344,15 +347,10 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			// Calculate tokens
-			let tokens: number;
-			if (isMetadataOnly) {
-				// For metadata, show estimated tokens of the FULL FILE
-				tokens = calculateTokens(content);
-			} else {
-				// For content reads, show tokens of what was actually returned
-				tokens = result ? calculateTokens(result) : 0;
-			}
+			// Tokens are only rendered for content reads (see
+			// ReadFileFormatter below), so skip calculating them for a
+			// metadata-only read - the value would never be shown.
+			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,
@@ -365,7 +363,9 @@ const readFileFormatter = async (
 			};
 		}
 	} catch {
-		// File doesn't exist or can't be read - keep default fileInfo
+		// File doesn't exist, or is a directory/symlink that the metadata
+		// branch handles without reading content - keep the default
+		// fileInfo, which already carries the correct isMetadataOnly.
 	}
 
 	return <ReadFileFormatter args={args} fileInfo={fileInfo} />;
