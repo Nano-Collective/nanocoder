@@ -72,6 +72,19 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder config <sub>` — fast path. Resolving the effective
+// config only needs the config module graph, not Ink or the tool registry.
+if (args[0] === 'config') {
+	const {runConfigCli} = await import('@/config/config-cli');
+	const result = runConfigCli(args[1], args.slice(2));
+	if (result.exitCode === 0) {
+		console.log(result.output);
+	} else {
+		console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder init` without booting the interactive app. The shared
 // initializer is also used by /init, so both entry points keep identical file
 // generation and overwrite behavior.
@@ -136,6 +149,8 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+  config <subcommand>             Inspect the resolved configuration and where each value came from.
+                                  Subcommands: list, show [key], diff. Add --json for machine output.
 
 Options:
   -v, --version       Show version number

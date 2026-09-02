@@ -26,6 +26,45 @@ Nanocoder looks for configuration in the following order (first found wins):
 
 > **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
 
+## Inspecting the Effective Configuration
+
+When a setting is not behaving the way you expect, the hard question is not
+what the value is but which file set it. `nanocoder config` answers both
+without booting the interactive app.
+
+```bash
+nanocoder config list                                   # every resolved key and its layer
+nanocoder config show nanocoder.autoCompact.threshold   # one key, in detail
+nanocoder config show autoCompact                       # a whole block
+nanocoder config diff                                   # only what your files change
+nanocoder config diff --json                            # machine-readable output
+```
+
+`config list` prints the layers in play — built-in defaults, the global config
+directory, the project directory, and `NANOCODER_*` environment variables —
+along with whether each file is present, missing, or unreadable. A `*` beside a
+key means a lower-precedence layer also sets it.
+
+`config show <key>` adds the built-in default, the values that lost, and a line
+explaining the rule that decided the winner. The key can be given in full
+(`nanocoder.autoCompact.threshold`), without the `nanocoder.` prefix
+(`autoCompact.threshold`), or as a block name to print every field under it.
+
+`config diff` is the debugging view: everything your config files change
+relative to the defaults, followed by every value that is set somewhere but is
+not in effect, with the reason it lost.
+
+> **Note:** Most settings are resolved **block by block**, not key by key. The
+> highest-precedence file that defines a block — say `nanocoder.autoCompact` —
+> supplies the whole block, and the fields it omits fall back to built-in
+> defaults rather than to a lower-precedence file. A project file setting one
+> field therefore discards the global file's other fields for that block.
+> `config diff` lists exactly those discarded values.
+
+API keys and other credentials are replaced with `<redacted>` in every output
+format. An unsubstituted `${VAR}` reference is shown verbatim, since naming the
+variable is the point of the output and the reference is not itself a secret.
+
 ## Environment Variables
 
 Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
@@ -383,3 +422,5 @@ Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings i
 - [MCP Configuration](mcp-configuration.md) - Model Context Protocol server integration
 - [Preferences](preferences.md) - User preferences and application data
 - [Logging](logging.md) - Structured logging with Pino
+
+See also [Inspecting the Effective Configuration](#inspecting-the-effective-configuration) for debugging which layer supplied a value.
