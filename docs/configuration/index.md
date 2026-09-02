@@ -123,6 +123,34 @@ Automatically compress context when it reaches a percentage of the model's conte
 
 You can also override these per-session with `/compact --auto-on`, `/compact --auto-off`, `/compact --threshold <n>`, and `/compact --strategy llm|mechanical`.
 
+### Auto-Format
+
+Run a configured formatter automatically against any file touched by an edit tool (`write_file`, `string_replace`) after each turn. Disabled by default — running arbitrary shell commands against edited files is opt-in.
+
+Each formatter binds a set of file extensions to a shell command. `{file}` in `command` is replaced with the shell-quoted absolute path of the edited file. A file's extension is matched against every configured formatter's `extensions` in order; the first match runs. Failures (non-zero exit, missing binary, timeout) are reported as a chat message but never block the conversation or get reported back to the model.
+
+```json
+{
+  "nanocoder": {
+    "autoFormat": {
+      "enabled": true,
+      "formatters": [
+        {"extensions": ["ts", "tsx", "js", "jsx"], "command": "npx prettier --write {file}"},
+        {"extensions": ["go"], "command": "gofmt -w {file}"},
+        {"extensions": ["py"], "command": "black {file}"}
+      ],
+      "timeoutMs": 10000
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Enable/disable auto-format |
+| `formatters` | array | `[]` | Formatter bindings, each with `extensions` (string array, without the leading dot) and `command` (shell command containing `{file}`) |
+| `timeoutMs` | number | `10000` | Per-formatter run timeout in milliseconds |
+
 ### Sessions
 
 Configure automatic session saving and retention. See [Session Management](../features/session-management.md) for usage details.

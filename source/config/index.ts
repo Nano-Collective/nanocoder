@@ -21,6 +21,8 @@ import {
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	AutoFormatConfig,
+	AutoFormatFormatterConfig,
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
@@ -192,6 +194,72 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 						autoCompact.notifyUser !== undefined
 							? Boolean(autoCompact.notifyUser)
 							: defaults.notifyUser,
+				};
+			}
+			return null;
+		}) ?? defaults
+	);
+}
+
+const DEFAULT_AUTO_FORMAT_TIMEOUT_MS = 10_000;
+
+// Validate a single raw formatter entry from `nanocoder.autoFormat.formatters`.
+// Malformed entries (missing/empty extensions or command) are dropped rather
+// than throwing, so one bad entry doesn't take down the whole config.
+function validateFormatterEntry(
+	entry: unknown,
+): AutoFormatFormatterConfig | null {
+	if (!entry || typeof entry !== 'object') return null;
+	const {extensions, command} = entry as Record<string, unknown>;
+	if (typeof command !== 'string' || command.trim().length === 0) return null;
+	if (!Array.isArray(extensions) || extensions.length === 0) return null;
+
+	const normalizedExtensions = extensions.filter(
+		(ext): ext is string => typeof ext === 'string' && ext.trim().length > 0,
+	);
+	if (normalizedExtensions.length === 0) return null;
+
+	return {extensions: normalizedExtensions, command};
+}
+
+// Load auto-format configuration and return defaults if not specified.
+// Disabled and formatter-less by default: running arbitrary shell commands
+// against edited files is opt-in, not something a fresh install should do.
+function loadAutoFormatConfig(): AutoFormatConfig {
+	const defaults: AutoFormatConfig = {
+		enabled: false,
+		formatters: [],
+		timeoutMs: DEFAULT_AUTO_FORMAT_TIMEOUT_MS,
+	};
+
+	return (
+		loadHierarchicalConfig('agents.config.json', 'auto-format', config => {
+			const autoFormat = config.nanocoder?.autoFormat;
+			if (autoFormat && typeof autoFormat === 'object') {
+				const formatters = Array.isArray(autoFormat.formatters)
+					? autoFormat.formatters
+							.map(validateFormatterEntry)
+							.filter(
+								(
+									f: AutoFormatFormatterConfig | null,
+								): f is AutoFormatFormatterConfig => f !== null,
+							)
+					: defaults.formatters;
+
+				const timeoutMs =
+					typeof autoFormat.timeoutMs === 'number' &&
+					Number.isFinite(autoFormat.timeoutMs) &&
+					autoFormat.timeoutMs > 0
+						? Math.round(autoFormat.timeoutMs)
+						: defaults.timeoutMs;
+
+				return {
+					enabled:
+						autoFormat.enabled !== undefined
+							? Boolean(autoFormat.enabled)
+							: defaults.enabled,
+					formatters,
+					timeoutMs,
 				};
 			}
 			return null;
@@ -581,6 +649,9 @@ function loadAppConfig(): AppConfig {
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
 
+	// Load auto-format configuration
+	const autoFormat = loadAutoFormatConfig();
+
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
@@ -617,6 +688,7 @@ function loadAppConfig(): AppConfig {
 		providers,
 		mcpServers,
 		autoCompact,
+		autoFormat,
 		sessions,
 		headless,
 		retries,

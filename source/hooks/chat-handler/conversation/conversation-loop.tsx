@@ -16,6 +16,7 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -60,6 +61,7 @@ import {
 } from '../utils/tool-filters';
 import {computeToolCallSignature} from '../utils/tool-signature';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
+import {runAutoFormat} from './auto-format';
 import {
 	displayExecutedTool,
 	executeApprovedTool,
@@ -1030,6 +1032,24 @@ export const processAssistantResponse = async (
 					processToolUse,
 				);
 			}
+
+			const autoFormatOutcomes = await runAutoFormat(
+				validToolCalls,
+				turnResults,
+				getAppConfig().autoFormat,
+				getSafeSessionCwd(),
+			);
+			for (const outcome of autoFormatOutcomes) {
+				if (outcome.success) continue;
+				addToChatQueue(
+					<InfoMessage
+						key={generateKey('auto-format-failed')}
+						message={`Auto-format failed for ${outcome.path} ("${outcome.command}"): ${outcome.error}`}
+						hideBox={true}
+					/>,
+				);
+			}
+
 			const builder = new MessageBuilder(updatedMessages);
 			builder.addToolResults(turnResults);
 			if (autoDiagnosticsMessage) {
