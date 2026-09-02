@@ -281,6 +281,14 @@ test('modeProviders value requires provider and model', t => {
 	});
 });
 
+test('modeProviders value rejects extra keys', t => {
+	assertInvalid(t, 'modeProviders value has extra key', {
+		nanocoder: {
+			modeProviders: {plan: {provider: 'x', model: 'y', temperature: 0.7}},
+		},
+	});
+});
+
 // ---------------------------------------------------------------------------
 // retries (RetryLimitsConfig)
 // ---------------------------------------------------------------------------

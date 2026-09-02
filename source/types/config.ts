@@ -187,6 +187,15 @@ export interface ModeProviderConfig {
 export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
 
 /**
+ * Per-mode provider/model overrides keyed by mode name (e.g. use a fast
+ * model for plan mode).
+ * @internal
+ */
+export interface DiskModeProviders {
+	[mode: string]: ModeProviderConfig;
+}
+
+/**
  * On-disk representation of the `nanocoder` namespace in agents.config.json.
  *
  * Every field is optional — the loader applies sensible defaults for each one.
@@ -232,8 +241,8 @@ export interface DiskNanocoderConfig {
 			apiKey?: string;
 		};
 	};
-	/** Per-development-mode provider/model overrides (e.g. use a fast model for plan mode). */
-	modeProviders?: Record<string, ModeProviderConfig>;
+	/** Per-mode provider/model overrides (e.g. use a fast model for plan mode). */
+	modeProviders?: DiskModeProviders;
 	/**
 	 * Agent-loop retry limits. Each field has its own sensible default — you
 	 * can set any combination (e.g. just `maxRepeatedToolCalls`).

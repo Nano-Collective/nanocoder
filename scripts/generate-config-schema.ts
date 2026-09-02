@@ -24,7 +24,7 @@
  *     escape-hatch fields like OpenRouterParameters.extraBody keep working.
  *   - Passing `tsconfig.json` as the first argument makes typescript-json-schema
  *     resolve the `@/*` path aliases and bundler module settings exactly like
- *     tsc does, so nested types (ModeProviders, AutoCompactConfig, TuneConfig)
+ *     tsc does, so nested types (DiskModeProviders, AutoCompactConfig, TuneConfig)
  *     keep their real structure and get real editor autocomplete.
  *
  * The committed schema is the artefact. Regenerating must be byte-identical —
@@ -80,7 +80,6 @@ const definitionRenames: Record<string, string> = {
 	'Partial<AutoCompactConfig>': 'AutoCompactConfig',
 	'Partial<TuneConfig>': 'TuneConfig',
 	'Partial<RetryLimitsConfig>': 'RetryLimitsConfig',
-	'Record<string,ModeProviderConfig>': 'ModeProviders',
 	'Record<string,number>': 'RecordStringNumber',
 	'Record<string,string>': 'RecordStringString',
 	'Record<string,unknown>': 'RecordStringUnknown',
@@ -150,24 +149,9 @@ function expandRecords(definitions: Record<string, unknown>): void {
 		RecordStringNumber: 'number',
 	};
 
-	// Record<string, ModeProviderConfig> — expand to an object whose values
-	// are the ModeProviderConfig schema. Inline the ref'd value schema so
-	// editors get autocomplete for the nested provider/model fields.
-	const modeProvidersDef = definitions['ModeProviders'] as JsonNode | undefined;
-	if (modeProvidersDef && modeProvidersDef.type === 'object') {
-		definitions['ModeProviders'] = {
-			type: 'object',
-			additionalProperties: {
-				type: 'object',
-				properties: {
-					model: {type: 'string'},
-					provider: {type: 'string'},
-				},
-				required: ['model', 'provider'],
-				additionalProperties: false,
-			},
-		};
-	}
+	// ModeProviderConfig is now emitted as a genuine definition via the
+	// DiskModeProviders index-signature interface (see source/types/config.ts).
+	// applyStrictness stamps additionalProperties:false onto it automatically.
 
 	for (const [name, valueType] of Object.entries(records)) {
 		if (!definitions[name]) continue;
@@ -229,6 +213,7 @@ function main(): void {
 	setRequired(definitions, 'ProviderConfig', ['name', 'models']);
 	setRequired(definitions, 'MCPServerConfig', ['name', 'transport']);
 	setRequired(definitions, 'OpenRouterPlugin', ['id']);
+	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.

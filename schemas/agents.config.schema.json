@@ -20,6 +20,13 @@
 		}
 	},
 	"definitions": {
+		"DiskModeProviders": {
+			"additionalProperties": {
+				"$ref": "#/definitions/ModeProviderConfig"
+			},
+			"description": "Per-mode provider/model overrides keyed by mode name (e.g. use a fast\nmodel for plan mode).",
+			"type": "object"
+		},
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
@@ -98,8 +105,8 @@
 					"type": "array"
 				},
 				"modeProviders": {
-					"$ref": "#/definitions/ModeProviders",
-					"description": "Per-development-mode provider/model overrides (e.g. use a fast model for plan mode)."
+					"$ref": "#/definitions/DiskModeProviders",
+					"description": "Per-mode provider/model overrides (e.g. use a fast model for plan mode)."
 				},
 				"nanocoderTools": {
 					"description": "Nanocoder-specific tool configurations.",
@@ -196,6 +203,19 @@
 			"type": "object",
 			"additionalProperties": false,
 			"required": ["name", "transport"]
+		},
+		"ModeProviderConfig": {
+			"properties": {
+				"model": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["provider", "model"]
 		},
 		"ModelParameters": {
 			"properties": {
@@ -578,22 +598,6 @@
 			},
 			"type": "object",
 			"required": ["name", "models"]
-		},
-		"ModeProviders": {
-			"type": "object",
-			"additionalProperties": {
-				"type": "object",
-				"properties": {
-					"model": {
-						"type": "string"
-					},
-					"provider": {
-						"type": "string"
-					}
-				},
-				"required": ["model", "provider"],
-				"additionalProperties": false
-			}
 		},
 		"RecordStringNumber": {
 			"type": "object",
