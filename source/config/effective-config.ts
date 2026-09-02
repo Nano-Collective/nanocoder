@@ -127,6 +127,30 @@ const REDACTED = '<redacted>';
 const SECRET_KEY_PATTERN =
 	/(api[-_]?key|access[-_]?token|refresh[-_]?token|\btoken\b|secret|password|passwd|authorization|credential)/i;
 
+const SECRET_KEY_SEGMENTS = new Set([
+	'token',
+	'secret',
+	'password',
+	'passwd',
+	'credential',
+	'credentials',
+	'authorization',
+	'auth',
+	'apikey',
+	'accesskey',
+	'privatekey',
+]);
+
+/** Whether a key names a credential. See SECRET_KEY_SEGMENTS. */
+function isSecretKey(key: string): boolean {
+	if (SECRET_KEY_PATTERN.test(key)) return true;
+	return key
+		.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.some(segment => SECRET_KEY_SEGMENTS.has(segment));
+}
+
 /**
  * An `$VAR` / `${VAR}` / `${VAR:-default}` reference is what the user wrote in
  * the file, not the credential itself, so showing it is both safe and the
@@ -148,7 +172,7 @@ export function redactValue(
 	value: unknown,
 	keyHint = '',
 ): {value: unknown; redacted: boolean} {
-	if (SECRET_KEY_PATTERN.test(keyHint) && !isEnvReference(value)) {
+	if (isSecretKey(keyHint) && !isEnvReference(value)) {
 		if (value === undefined || value === null || value === '') {
 			return {value, redacted: false};
 		}
@@ -186,6 +210,17 @@ interface RawLayer {
 	exists: boolean;
 	data: Record<string, unknown> | null;
 	error?: string;
+}
+
+/** Parse a JSON config file, or null when missing/unreadable/not an object. */
+function parseJsonFile(path: string): Record<string, unknown> | null {
+	if (!existsSync(path)) return null;
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		return isPlainObject(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
 }
 
 function readRawFile(
@@ -681,26 +716,118 @@ function readEnvProviderNames(): Set<string> {
 	return names;
 }
 
+/**
+ * Server definitions in one `.mcp.json`, keyed by name. Mirrors
+ * `parseMCPServers`, which only accepts the object form.
+ */
+function readMcpServers(
+	data: Record<string, unknown> | null,
+): Map<string, unknown> {
+	const byName = new Map<string, unknown>();
+	const servers = getAt(data, ['mcpServers']);
+	if (!isPlainObject(servers)) return byName;
+	for (const [name, server] of Object.entries(servers)) {
+		byName.set(name, isPlainObject(server) ? {name, ...server} : server);
+	}
+	return byName;
+}
+
+/**
+ * Servers supplied through the environment, plus which variable supplied
+ * them. `NANOCODER_MCPSERVERS` is consulted first and the file variable is the
+ * fallback, exactly as `loadEnvMCPConfigs` does — so reporting the file path
+ * variable only when it is the one actually in use.
+ */
+function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
+	const inline = process.env.NANOCODER_MCPSERVERS;
+	const file = process.env.NANOCODER_MCPSERVERS_FILE;
+	const origin = inline ? 'NANOCODER_MCPSERVERS' : 'NANOCODER_MCPSERVERS_FILE';
+
+	let rawData = inline;
+	if (!rawData && file && existsSync(file)) {
+		try {
+			rawData = readFileSync(file, 'utf-8');
+		} catch {
+			return {servers: new Map(), origin};
+		}
+	}
+	if (!rawData) return {servers: new Map(), origin};
+
+	try {
+		const parsed: unknown = JSON.parse(rawData);
+		if (Array.isArray(parsed)) {
+			const byName = new Map<string, unknown>();
+			for (const server of parsed) {
+				if (isPlainObject(server) && typeof server.name === 'string') {
+					byName.set(server.name, server);
+				}
+			}
+			return {servers: byName, origin};
+		}
+		return {
+			servers: readMcpServers(isPlainObject(parsed) ? parsed : null),
+			origin,
+		};
+	} catch {
+		return {servers: new Map(), origin};
+	}
+}
+
 function resolveMcpEntries(
 	cwd: string,
 	configDir: string,
 ): EffectiveConfigEntry[] {
-	const originFor = (source: string): string => {
-		if (source === 'project') return join(cwd, '.mcp.json');
-		if (source === 'global') return join(configDir, '.mcp.json');
-		return 'NANOCODER_MCPSERVERS';
-	};
+	const env = readEnvMcpServers();
+	// Ascending precedence, matching `mergeMCPConfigs`: env beats project
+	// beats global, and only a server of the same name is displaced.
+	const mcpLayers: Array<{
+		layer: ConfigLayerId;
+		origin: string;
+		servers: Map<string, unknown>;
+	}> = [
+		{
+			layer: 'global',
+			origin: join(configDir, '.mcp.json'),
+			servers: readMcpServers(parseJsonFile(join(configDir, '.mcp.json'))),
+		},
+		{
+			layer: 'project',
+			origin: join(cwd, '.mcp.json'),
+			servers: readMcpServers(parseJsonFile(join(cwd, '.mcp.json'))),
+		},
+		{layer: 'env', origin: env.origin, servers: env.servers},
+	];
 
 	return loadAllMCPConfigs().map(({server, source}) => {
-		const {value, redacted} = redactValue(server, server.name);
+		const name = server.name;
+		const winnerIndex = mcpLayers.findIndex(l => l.layer === source);
+		const winner = mcpLayers[winnerIndex];
+		const {value, redacted} = redactValue(server, name);
+
+		// Everything below the winning layer that names the same server is set
+		// but unused — the same reporting providers already get.
+		const shadowed: ConfigValueAt[] = mcpLayers
+			.slice(0, Math.max(winnerIndex, 0))
+			.filter(layer => layer.servers.has(name))
+			.reverse()
+			.map(layer => {
+				const raw = redactValue(layer.servers.get(name), name);
+				return {
+					layer: layer.layer,
+					origin: layer.origin,
+					value: raw.value,
+					redacted: raw.redacted,
+				};
+			});
+
 		return {
-			key: `mcpServers.${server.name}`,
+			key: `mcpServers.${name}`,
 			value,
 			redacted,
-			layer: (source === 'env' ? 'env' : source) as ConfigLayerId,
-			origin: originFor(source),
+			layer: source as ConfigLayerId,
+			origin: winner?.origin ?? 'built-in',
 			hasDefault: false,
-			shadowed: [],
+			shadowed,
 			rule: 'merge-by-name' as const,
 		};
 	});
