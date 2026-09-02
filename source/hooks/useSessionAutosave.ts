@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
@@ -74,8 +74,10 @@ export function useSessionAutosave({
 	currentSessionId,
 	setCurrentSessionId,
 }: UseSessionAutosaveProps) {
+	const [isSaving, setIsSaving] = useState<boolean>(false);
 	const initPromiseRef = useRef<Promise<boolean> | null>(null);
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSaveRef = useRef<number>(0);
 
 	// Serialises saves: each new save is chained onto the tail of this promise.
@@ -146,6 +148,9 @@ export function useSessionAutosave({
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
 			}
+			if (hideTimerRef.current) {
+				clearTimeout(hideTimerRef.current);
+			}
 		};
 	}, []);
 
@@ -156,6 +161,7 @@ export function useSessionAutosave({
 			capturedProvider: string,
 			capturedModel: string,
 		) => {
+			let startTime: number | null = null;
 			try {
 				// Wait for initialization to complete before saving
 				const initialized = await initPromiseRef.current;
@@ -169,6 +175,15 @@ export function useSessionAutosave({
 					message => !isInternalWalkthroughMessage(message),
 				);
 				if (persistedMessages.length === 0) return;
+
+				// Cancel any pending delayed-hide from an earlier save before showing
+				// the indicator for this save.
+				if (hideTimerRef.current) {
+					clearTimeout(hideTimerRef.current);
+					hideTimerRef.current = null;
+				}
+				startTime = Date.now();
+				setIsSaving(true);
 
 				// Read the live session ID AFTER the await above. Any prior save
 				// in this chain has already called setCurrentSessionId (and updated
@@ -238,6 +253,16 @@ export function useSessionAutosave({
 				lastSaveRef.current = Date.now();
 			} catch (error) {
 				console.warn('Failed to auto-save session:', error);
+			} finally {
+				if (startTime !== null) {
+					const elapsed = Date.now() - startTime;
+					const minDuration = 500;
+					const remaining = Math.max(0, minDuration - elapsed);
+					hideTimerRef.current = setTimeout(() => {
+						setIsSaving(false);
+						hideTimerRef.current = null;
+					}, remaining);
+				}
 			}
 		},
 		[setCurrentSessionId],
@@ -318,4 +343,6 @@ export function useSessionAutosave({
 		});
 		return () => manager.unregister(SHUTDOWN_HANDLER_NAME);
 	}, [flush]);
+
+	return {isSaving};
 }

@@ -1,5 +1,7 @@
 import test from 'ava';
-import {execSync, execFileSync} from 'child_process';
+import {execFileSync, spawnSync} from 'child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {tmpdir} from 'os';
 import {join} from 'path';
 import {fileURLToPath} from 'url';
 
@@ -96,4 +98,57 @@ test('CLI integration: help flag takes precedence over other arguments', t => {
 	// Should return help text, not start the app
 	t.true(output.includes('Usage:'));
 	t.true(output.includes('--version'));
+});
+
+test('CLI integration: init help exits successfully with preset guidance', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'init', '--help'], {
+		encoding: 'utf8',
+	});
+
+	t.is(result.status, 0);
+	t.true(result.stdout.includes('Usage: nanocoder init [options]'));
+	t.true(result.stdout.includes('--preset <type>'));
+	t.true(result.stdout.includes('react, nextjs, rust'));
+});
+
+test.serial('CLI integration: init preset succeeds and creates files', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
+	try {
+		writeFileSync(
+			join(projectPath, 'package.json'),
+			JSON.stringify({scripts: {build: 'vite build'}}),
+		);
+		const result = spawnSync(
+			process.execPath,
+			[cliPath, 'init', '--preset', 'React'],
+			{cwd: projectPath, encoding: 'utf8'},
+		);
+
+		t.is(result.status, 0);
+		t.true(result.stdout.includes('Preset: react'));
+		t.true(result.stdout.includes('Created: AGENTS.md'));
+		t.true(result.stdout.includes('Created: .nanocoderignore'));
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+	}
+});
+
+test.serial('CLI integration: init invalid preset exits with an error', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
+	try {
+		const result = spawnSync(
+			process.execPath,
+			[cliPath, 'init', '--preset', 'constructor'],
+			{cwd: projectPath, encoding: 'utf8'},
+		);
+
+		t.is(result.status, 1);
+		t.true(
+			result.stderr.includes(
+				'Unknown preset "constructor". Supported presets: react, nextjs, rust.',
+			),
+		);
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+	}
 });

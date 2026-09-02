@@ -365,3 +365,43 @@ test('diff_edit description tells models not to wrap diff in code fences', t => 
 		/do not wrap.*code fence|code fence.*do not wrap/i,
 	);
 });
+
+// `$$`, `$&`, "$`" and `$'` are substitution tokens to String.prototype.replace
+// but ordinary characters in the shell scripts and CI YAML models edit.
+test('diff_edit writes $ substitution tokens literally', async t => {
+	const filePath = await createTestFile(
+		'dollars.sh',
+		'#!/bin/sh\necho "old"\nexit 0\n',
+	);
+	const replacement = 'echo "pid=$$ match=$& pre=$` post=$\'"';
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('echo "old"', replacement),
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		`#!/bin/sh\n${replacement}\nexit 0\n`,
+	);
+});
+
+test('diff_edit keeps $ tokens literal across multiple blocks', async t => {
+	const filePath = await createTestFile(
+		'multi.yml',
+		'first: OLD_A\nsecond: OLD_B\n',
+	);
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: [
+			diffBlock('first: OLD_A', 'first: "$&"'),
+			diffBlock('second: OLD_B', "second: \"$`$'\""),
+		].join('\n\n'),
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'first: "$&"\nsecond: "$`$\'"\n',
+	);
+});
