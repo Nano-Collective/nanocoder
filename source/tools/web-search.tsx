@@ -95,9 +95,20 @@ export const executeWebSearch = async (
 
         let formattedResults = `# Web Search Results: "${safeQuery}"\n\n`;
 
+
         for (let i = 0; i < results.length; i++) {
             const result = results[i];
             if (!result) continue;
+
+		return formattedResults;
+	} catch (error: unknown) {
+		if (
+			error instanceof Error &&
+			(error.name === 'AbortError' || error.name === 'TimeoutError')
+		) {
+			throw new Error('Search request timeout');
+		}
+
 
             // Collapse internal newlines in the title to keep heading intact
             const normalizedTitle = (result.title || '').replace(/\r?\n+/g, ' ').trim();

@@ -203,6 +203,12 @@ mode (no foreground prompts, no `ask_user`, no `agent`). The
 `confirm: true` opt-in below switches a specific subscription to plan
 mode instead.
 
+Triggered runs are subagent runs, so the
+[`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap
+applies: a triggered skill whose model gets stuck repeating the same
+tool call stops with an error instead of burning tokens unattended (see
+[Loop Protection](./subagents.md#loop-protection)).
+
 ## Inspecting and creating skills
 
 ```
