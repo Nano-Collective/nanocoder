@@ -734,6 +734,123 @@ test.serial('getRetryLimits falls back per field, not per object', async t => {
 	}
 });
 
+// Tests for auto-format configuration (nanocoder.autoFormat)
+async function withAutoFormatConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (autoFormat: {
+		enabled: boolean;
+		formatters: {extensions: string[]; command: string}[];
+		timeoutMs: number;
+	}) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		const autoFormat = getAppConfig().autoFormat;
+		if (!autoFormat) {
+			throw new Error('Resolved config should always carry autoFormat');
+		}
+		assertion(autoFormat);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial('auto-format defaults to disabled with no formatters', async t => {
+	await withAutoFormatConfig('autoformat-default', {nanocoder: {}}, autoFormat => {
+		t.is(autoFormat.enabled, false);
+		t.deepEqual(autoFormat.formatters, []);
+		t.is(autoFormat.timeoutMs, 10_000);
+	});
+});
+
+test.serial('auto-format loads custom formatters from config', async t => {
+	await withAutoFormatConfig(
+		'autoformat-config',
+		{
+			nanocoder: {
+				autoFormat: {
+					enabled: true,
+					formatters: [
+						{extensions: ['ts', 'tsx'], command: 'prettier --write {file}'},
+						{extensions: ['go'], command: 'gofmt -w {file}'},
+					],
+					timeoutMs: 5000,
+				},
+			},
+		},
+		autoFormat => {
+			t.is(autoFormat.enabled, true);
+			t.deepEqual(autoFormat.formatters, [
+				{extensions: ['ts', 'tsx'], command: 'prettier --write {file}'},
+				{extensions: ['go'], command: 'gofmt -w {file}'},
+			]);
+			t.is(autoFormat.timeoutMs, 5000);
+		},
+	);
+});
+
+test.serial('auto-format drops malformed formatter entries', async t => {
+	await withAutoFormatConfig(
+		'autoformat-malformed',
+		{
+			nanocoder: {
+				autoFormat: {
+					enabled: true,
+					formatters: [
+						{extensions: ['ts'], command: 'prettier --write {file}'},
+						{extensions: [], command: 'missing-extensions {file}'},
+						{extensions: ['py'], command: ''},
+						{extensions: ['rb']},
+						'not-an-object',
+						// No {file} placeholder: the formatter would never be told
+						// which file to format, and several wait on stdin instead.
+						{extensions: ['go'], command: 'gofmt -w'},
+					],
+				},
+			},
+		},
+		autoFormat => {
+			t.deepEqual(autoFormat.formatters, [
+				{extensions: ['ts'], command: 'prettier --write {file}'},
+			]);
+		},
+	);
+});
+
+test.serial('auto-format ignores an invalid timeoutMs', async t => {
+	await withAutoFormatConfig(
+		'autoformat-bad-timeout',
+		{
+			nanocoder: {
+				autoFormat: {enabled: true, formatters: [], timeoutMs: -5},
+			},
+		},
+		autoFormat => {
+			t.is(autoFormat.timeoutMs, 10_000);
+		},
+	);
+});
+
 // Tests for modeProviders
 async function withModeProvidersConfig(
 	testName: string,

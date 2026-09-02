@@ -103,6 +103,28 @@ export interface PasteConfig {
 	singleLineThreshold: number;
 }
 
+// A single formatter binding: which file extensions it handles and the shell
+// command to run. "{file}" in `command` is replaced with the absolute path of
+// the edited file, quoted for the shell it runs under — single quotes on
+// POSIX, double quotes under cmd.exe (e.g. "prettier --write {file}"). The
+// placeholder is required; entries without it are dropped when the config
+// loads, since the formatter would never receive the path.
+export interface AutoFormatFormatterConfig {
+	extensions: string[];
+	command: string;
+}
+
+// Auto-format configuration: after a turn's edit tools (`write_file`,
+// `string_replace`) succeed, run the matching configured formatter against
+// each touched file. Failures are logged to the chat but never block the
+// conversation or get reported back to the model.
+export interface AutoFormatConfig {
+	enabled: boolean;
+	formatters: AutoFormatFormatterConfig[];
+	// Per-formatter run timeout in milliseconds.
+	timeoutMs: number;
+}
+
 // Agent-loop retry limits: caps on how many times the conversation loop
 // auto-retries a failing pattern without user intervention. Distinct from the
 // per-provider `maxRetries` setting, which governs network request retries.
@@ -230,6 +252,9 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
+
+	// Auto-format configuration
+	autoFormat?: AutoFormatConfig;
 
 	// Paste handling configuration
 	paste?: PasteConfig;
