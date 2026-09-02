@@ -16,6 +16,24 @@ import {getSafeSessionCwd, setSessionCwd} from './session-cwd.js';
 
 const isWindows = platform === 'win32';
 
+// Each returned collector has its own budget, so one stream's volume can't affect the other's.
+function makeStreamCollector(append: (text: string) => void, marker: string) {
+	let bytes = 0;
+	let truncated = false;
+	return (data: Buffer) => {
+		if (bytes < BASH_MAX_OUTPUT_BYTES) {
+			const remaining = BASH_MAX_OUTPUT_BYTES - bytes;
+			const limitedChunk = data.subarray(0, remaining);
+			append(limitedChunk.toString());
+			bytes += limitedChunk.length;
+		}
+		if (bytes >= BASH_MAX_OUTPUT_BYTES && !truncated) {
+			truncated = true;
+			append(marker);
+		}
+	};
+}
+
 export interface BashExecutionState {
 	executionId: string;
 	command: string;
@@ -105,23 +123,16 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		let outputBytes = 0;
-		let outputTruncated = false;
+		const collectStdout = makeStreamCollector(text => {
+			state.fullOutput += text;
+		}, '\n... [Output truncated to prevent memory exhaustion]');
+		const collectStderr = makeStreamCollector(text => {
+			state.stderr += text;
+		}, '\n... [Stderr truncated to prevent memory exhaustion]');
 
 		// Collect output
 		proc.stdout.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.fullOutput += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.fullOutput +=
-						'\n... [Output truncated to prevent memory exhaustion]';
-				}
-			}
+			collectStdout(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
@@ -129,18 +140,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.stderr += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.stderr +=
-						'\n... [Stderr truncated to prevent memory exhaustion]';
-				}
-			}
+			collectStderr(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});
