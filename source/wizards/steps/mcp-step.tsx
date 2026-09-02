@@ -26,6 +26,21 @@ interface McpStepProps {
 	onDelete?: () => void;
 	existingServers?: Record<string, McpServerConfig>;
 	configExists?: boolean;
+	/**
+	 * Open straight into the edit/delete choice for this server instead of the
+	 * initial menu. An unknown name falls back to the normal menu, since the
+	 * caller lists the resolved config while this step lists whichever config
+	 * file the wizard loaded.
+	 */
+	initialEditName?: string;
+}
+
+function findServerName(
+	servers: Record<string, McpServerConfig>,
+	name: string | undefined,
+): string | null {
+	if (!name) return null;
+	return Object.hasOwn(servers, name) ? name : null;
 }
 
 type Mode =
@@ -47,6 +62,7 @@ export function McpStep({
 	onDelete,
 	existingServers = {},
 	configExists = false,
+	initialEditName,
 }: McpStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
@@ -60,7 +76,11 @@ export function McpStep({
 		setServers(existingServers);
 	}, [existingServers]);
 
-	const [mode, setMode] = useState<Mode>('initial-menu');
+	const [mode, setMode] = useState<Mode>(() =>
+		findServerName(existingServers, initialEditName) === null
+			? 'initial-menu'
+			: 'edit-or-delete',
+	);
 	const {
 		selectedTemplate,
 		currentFieldIndex,
@@ -78,7 +98,7 @@ export function McpStep({
 	} = useWizardForm<McpTemplate>();
 	const [multilineBuffer, setMultilineBuffer] = useState('');
 	const [editingServerName, setEditingServerName] = useState<string | null>(
-		null,
+		() => findServerName(existingServers, initialEditName),
 	);
 	const [activeTab, setActiveTab] = useState<'local' | 'remote'>('local');
 

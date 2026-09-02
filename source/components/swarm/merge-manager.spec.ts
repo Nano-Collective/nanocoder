@@ -50,7 +50,7 @@ test.serial('executeSwarmMerge: applies 3-way merge from multiple workers', asyn
 	execSync('git commit -am "w2 change"', {cwd: join(dir, '.nanocoder/worktrees/w2')});
 
 	// Run merge
-	await t.notThrowsAsync(() => executeSwarmMerge(tasks, commit, dir));
+	await t.notThrowsAsync(() => executeSwarmMerge(tasks, commit, dir, 'apply'));
 
 	// Verify working tree has the merged changes
 	const authContent = readFileSync(join(dir, 'src/auth/login.ts'), 'utf-8');
@@ -83,7 +83,7 @@ test.serial('executeSwarmMerge: rejects out-of-scope bash edit via git diff --na
 	execSync('git commit -am "w1 hacked change"', {cwd: join(dir, '.nanocoder/worktrees/w1')});
 
 	// Run merge - should throw
-	await t.throwsAsync(() => executeSwarmMerge(tasks, commit, dir), {
+	await t.throwsAsync(() => executeSwarmMerge(tasks, commit, dir, 'apply'), {
 		message: /Scope violation: Worker w1 modified src\/api\/routes.ts which is outside its scope/
 	});
 
@@ -112,7 +112,7 @@ test.serial('executeSwarmMerge: patch recovery explicitly preserves successful w
 	execSync('git commit -am "w2 invalid change"', {cwd: join(dir, '.nanocoder/worktrees/w2')});
 
 	// Run merge - should throw on w2
-	await t.throwsAsync(() => executeSwarmMerge(tasks, commit, dir), {
+	await t.throwsAsync(() => executeSwarmMerge(tasks, commit, dir, 'apply'), {
 		message: /Scope violation/
 	});
 

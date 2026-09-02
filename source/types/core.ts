@@ -36,6 +36,17 @@ export interface Message {
 	reasoning?: string;
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
+	/**
+	 * Harness-authored chrome: rendered in chat and persisted with session
+	 * history, but filtered out of the provider payload (see
+	 * `convertToModelMessages`) so the model is never handed nanocoder's own
+	 * UI text as its past output.
+	 *
+	 * Contract: never set this on a message carrying `tool_calls`. The payload
+	 * filter runs before orphan detection, so dropping such a message silently
+	 * drops the tool results that answer it.
+	 */
+	displayOnly?: boolean;
 }
 
 export interface ToolCall {
@@ -81,10 +92,17 @@ export interface StructuredToolOutput {
 
 export type ToolExecuteResult = string | StructuredToolOutput;
 
+export interface ToolExecutionContext {
+	abortSignal?: AbortSignal;
+	sessionId?: string;
+	workingDirectory?: string;
+	context?: ToolContext;
+}
+
 export type ToolHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	input: any,
-	options?: {abortSignal?: AbortSignal},
+	options?: ToolExecutionContext,
 ) => Promise<ToolExecuteResult>;
 
 export type ToolFormatter = (
@@ -158,6 +176,8 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 }
 
 export interface ApiUsageSnapshot extends ApiUsage {
@@ -176,6 +196,8 @@ export interface ApiCallRecord {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 	timestamp: number;
 }
 
@@ -230,7 +252,8 @@ export interface LLMClient {
 	): Promise<LLMChatResponse>;
 	generateStructuredObject?<T>(
 		prompt: string,
-		schema: any, // zod schema
+		// biome-ignore lint/suspicious/noExplicitAny: zod schema
+		schema: any,
 		system?: string,
 		signal?: AbortSignal,
 	): Promise<T>;
@@ -273,4 +296,15 @@ export interface LSPConnectionStatus {
 	name: string;
 	status: ConnectionStatus;
 	errorMessage?: string;
+}
+
+/** Status-bar summary of the live task list, shown while it is collapsed. */
+export interface TaskIndicatorInfo {
+	totalCount: number;
+	completedCount: number;
+	/** When > 0 the badge prefix '~' is shown (work in flight). */
+	inProgressCount: number;
+	isHidden: boolean;
+	/** The list changed while collapsed - badge renders in the warning colour. */
+	hasUnread: boolean;
 }

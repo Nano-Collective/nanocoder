@@ -39,12 +39,21 @@ import {
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
+import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {
+	getProjectContextPreferences,
+	loadPreferences,
+	updateLastUsed,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {TimelineManager} from '@/services/timeline-manager';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
@@ -54,6 +63,20 @@ const logger = getLogger();
 
 // Stable id for the model selector config option (category `model`).
 const MODEL_CONFIG_ID = 'model';
+
+async function listSessionArtifacts(sessionId: string) {
+	try {
+		return await artifactManager.listArtifacts(sessionId);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith('Invalid session ID:')
+		) {
+			return [];
+		}
+		throw error;
+	}
+}
 
 export class AcpAgent implements Agent {
 	private sessions = new Map<string, AcpSession>();
@@ -145,6 +168,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -163,6 +189,8 @@ export class AcpAgent implements Agent {
 				`Prompt already in progress for session: ${params.sessionId}`,
 			);
 		}
+
+		session.beginTurn();
 
 		const {text: userText, images} = await acpContentToUserMessage(
 			params.prompt,
@@ -200,8 +228,12 @@ export class AcpAgent implements Agent {
 					const sendBuiltinReply = (msg: string) => {
 						session.messages = [
 							...session.messages,
-							{role: 'user', content: contextualUserText},
-							{role: 'assistant', content: msg},
+							{
+								role: 'user',
+								content: contextualUserText,
+								displayOnly: true,
+							},
+							{role: 'assistant', content: msg, displayOnly: true},
 						];
 						this.conn.sessionUpdate({
 							sessionId: params.sessionId,
@@ -214,8 +246,9 @@ export class AcpAgent implements Agent {
 					};
 
 					if (commandName === 'clear') {
-						// Clear the conversation history
+						// Clear the conversation history and action timeline
 						session.messages = [];
+						await session.timeline.clear();
 						const msg = 'Conversation cleared.';
 						this.conn.sessionUpdate({
 							sessionId: params.sessionId,
@@ -271,15 +304,16 @@ export class AcpAgent implements Agent {
 						return sendBuiltinReply(msg);
 					}
 
+					if (commandName === 'settings') {
+						const msg =
+							'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
+						return sendBuiltinReply(msg);
+					}
+
 					if (
-						[
-							'init',
-							'theme',
-							'compact',
-							'context-max',
-							'usage',
-							'settings',
-						].includes(commandName)
+						['init', 'theme', 'compact', 'context-max', 'usage'].includes(
+							commandName,
+						)
 					) {
 						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
 						return sendBuiltinReply(msg);
@@ -304,6 +338,25 @@ export class AcpAgent implements Agent {
 				...(images.length > 0 ? {images} : {}),
 			},
 		];
+
+		if (session.baseSystemMessage) {
+			const projectContext = await appendRelevantProjectContextWithCount(
+				session.baseSystemMessage.content,
+				userText,
+				session.getMemoryFinder(),
+				getProjectContextPreferences(),
+			);
+			session.systemMessage = {
+				role: 'system',
+				content: projectContext.systemPrompt,
+			};
+			setLastBuiltPrompt(projectContext.systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				logger.info(
+					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+				);
+			}
+		}
 
 		const config = getAppConfig();
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
@@ -333,7 +386,11 @@ export class AcpAgent implements Agent {
 						content: {type: 'text', text: cancelNotice},
 					},
 				});
-				session.messages.push({role: 'assistant', content: cancelNotice});
+				session.messages.push({
+					role: 'assistant',
+					content: cancelNotice,
+					displayOnly: true,
+				});
 				return {stopReason: 'cancelled'};
 			}
 
@@ -353,6 +410,7 @@ export class AcpAgent implements Agent {
 			session.messages.push({
 				role: 'assistant',
 				content: formattedError,
+				displayOnly: true,
 			});
 
 			throw error;
@@ -481,6 +539,18 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
+		const existing = this.sessions.get(params.sessionId);
+		if (existing) {
+			await existing.timeline.clear();
+		} else {
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			if (persisted) {
+				await new TimelineManager(
+					persisted.workingDirectory,
+					params.sessionId,
+				).clear();
+			}
+		}
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
@@ -512,6 +582,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -542,6 +615,54 @@ export class AcpAgent implements Agent {
 			}
 			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
 			return {title: updated.title};
+		}
+
+		if (method === 'timeline/list') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('timeline/list requires a string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			return {entries: await session.timeline.list()};
+		}
+
+		if (method === 'timeline/revert') {
+			const sessionId = params.sessionId;
+			const checkpointId = params.checkpointId;
+			if (typeof sessionId !== 'string' || typeof checkpointId !== 'string') {
+				throw new Error(
+					'timeline/revert requires string sessionId and checkpointId',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error(
+					'Cannot revert the timeline while a prompt is in progress',
+				);
+			}
+
+			const result = await session.timeline.revertTo(checkpointId);
+			session.messages = session.messages.slice(
+				0,
+				resolveTruncationPoint(session.messages, result.revertedTo),
+			);
+			// Harness chrome, not model output: it tells the user what the revert
+			// did. The model learns about the revert from the truncated history
+			// itself, so this must never come back as its own past turn.
+			session.messages.push({
+				role: 'assistant',
+				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+				displayOnly: true,
+			});
+			await this.saveAcpSessionToDisk(session);
+			await this.replaySessionHistory(session);
+			logger.info(
+				`ACP extMethod timeline/revert: session=${sessionId} checkpoint=${checkpointId}`,
+			);
+			return {
+				revertedTo: result.revertedTo,
+				filesRestored: result.filesRestored,
+			};
 		}
 
 		throw new Error(`Unknown extension method: ${method}`);
@@ -577,6 +698,14 @@ export class AcpAgent implements Agent {
 		return {};
 	}
 
+	private requireSession(sessionId: string): AcpSession {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		return session;
+	}
+
 	private registerSession(sessionId: string, cwd: string): AcpSession {
 		const session = new AcpSession({
 			sessionId,
@@ -599,6 +728,7 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
+			if (isInternalWalkthroughMessage(message)) continue;
 			if (message.role === 'user') {
 				if (typeof message.content === 'string' && message.content.length > 0) {
 					await this.conn.sessionUpdate({
@@ -610,7 +740,10 @@ export class AcpAgent implements Agent {
 					});
 				}
 			} else if (message.role === 'assistant') {
-				if (message.reasoning && message.reasoning.length > 0) {
+				// runAcpConversation no longer stores whitespace-only reasoning, so
+				// this guard is for sessions written before that — replaying one
+				// would otherwise open a thought section that renders to nothing.
+				if (message.reasoning && message.reasoning.trim().length > 0) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
@@ -731,7 +864,8 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
-		session.systemMessage = {role: 'system', content: systemContent};
+		session.baseSystemMessage = {role: 'system', content: systemContent};
+		session.systemMessage = session.baseSystemMessage;
 	}
 
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {

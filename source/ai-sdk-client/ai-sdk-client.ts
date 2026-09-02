@@ -243,7 +243,18 @@ export class AISDKClient implements LLMClient {
 			});
 
 			return result.object as T;
-		} catch (error) {
+		} catch (error: unknown) {
+			const isAbort =
+				(error as Error)?.name === 'AbortError' ||
+				(error as Error)?.message?.toLowerCase().includes('abort');
+			const isAuthOrNetwork =
+				(error as {statusCode?: number})?.statusCode === 401 ||
+				(error as {statusCode?: number})?.statusCode === 403 ||
+				((error as {statusCode?: number})?.statusCode ?? 0) >= 500;
+			if (isAbort || isAuthOrNetwork) {
+				throw error; // Bubble up abort and auth errors immediately
+			}
+
 			// Fallback: If the provider gateway strips JSON schema parameters and fails generateObject,
 			// try regular text generation and manually extract JSON from markdown blocks.
 			const {generateText} = await import('ai');

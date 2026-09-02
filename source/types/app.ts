@@ -1,4 +1,5 @@
 import React from 'react';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Session} from '@/session/session-manager';
@@ -24,9 +25,7 @@ export interface MessageSubmissionOptions {
 	commandArgs?: string[];
 	onEnterModelSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
-	onEnterConfigWizardMode: () => void;
-	onEnterSettingsMode: () => void;
-	onEnterMcpWizardMode: () => void;
+	onEnterSettingsMode: (tab?: SettingsTabId) => void;
 	onEnterExplorerMode: () => void;
 	onEnterIdeSelectionMode: () => void;
 	onEnterTune: () => void;
@@ -60,4 +59,5 @@ export interface MessageSubmissionOptions {
 	developmentMode?: DevelopmentMode;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	sessionId?: string;
 }

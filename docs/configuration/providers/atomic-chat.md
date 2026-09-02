@@ -50,4 +50,4 @@ Load your model with a context length as high as your system's memory can handle
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch your loaded models from Atomic Chat when configuring this provider.
+The `/settings providers` wizard can automatically fetch your loaded models from Atomic Chat when configuring this provider.

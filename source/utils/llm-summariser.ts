@@ -1,6 +1,7 @@
 import type {LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {COMPRESSION_CONSTANTS} from './message-compression';
+import {isModelFacing} from './message-visibility';
 
 export interface SummariseWithLLMParams {
 	messages: Message[];
@@ -82,9 +83,14 @@ export async function summariseWithLLM(
 		if (msg.role === 'system') continue;
 		if (i >= splitIndex) {
 			recent.push(msg);
-		} else {
+		} else if (isModelFacing(msg)) {
 			compressible.push(msg);
 		}
+		// Display-only notices inside the compressed segment are dropped, not
+		// summarised: they were never in the provider payload, and folding them
+		// into the summary would smuggle harness chrome back into context as a
+		// real `user` message. Notices in `recent` are kept verbatim and stay
+		// filtered at conversion time.
 	}
 
 	if (compressible.length === 0) {

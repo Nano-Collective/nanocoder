@@ -145,10 +145,7 @@ export function resolveFilePath(
 
 	// Lexical containment. The trailing separator stops a sibling directory
 	// with a shared prefix (e.g. `/proj-evil` for project `/proj`) from passing.
-	if (
-		absolutePath !== normalizedRoot &&
-		!absolutePath.startsWith(normalizedRoot + path.sep)
-	) {
+	if (!isPathInside(absolutePath, normalizedRoot)) {
 		throw new Error(
 			`File path escapes project directory: ${filePath} -> ${absolutePath}`,
 		);
@@ -161,13 +158,63 @@ export function resolveFilePath(
 	// /tmp -> /private/tmp on macOS) and re-check.
 	const realRoot = realResolvedPrefix(normalizedRoot);
 	const realTarget = realResolvedPrefix(absolutePath);
-	if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+	if (!isPathInside(realTarget, realRoot)) {
 		throw new Error(
 			`File path escapes project directory via symlink: ${filePath} -> ${realTarget}`,
 		);
 	}
 
 	return absolutePath;
+}
+
+/**
+ * Lexical containment: is `target` the root itself, or somewhere beneath it?
+ *
+ * Both arguments are resolved first, so callers may pass relative paths. The
+ * trailing separator is what stops a sibling directory with a shared prefix
+ * (e.g. `/proj-evil` for project `/proj`) from passing.
+ *
+ * This is purely lexical — it never touches the filesystem, so a symlink
+ * inside the root can still point outside it. Use `isRealPathInside` when the
+ * path may be attacker- or config-controlled.
+ */
+export function isPathInside(target: string, root: string): boolean {
+	const normalizedRoot = path.resolve(root);
+	const normalizedTarget = path.resolve(target);
+	return (
+		normalizedTarget === normalizedRoot ||
+		normalizedTarget.startsWith(normalizedRoot + path.sep)
+	);
+}
+
+/**
+ * Symlink-aware containment: is `target` really inside `root` once every
+ * symlink on both sides is resolved?
+ *
+ * Both sides are realpath'd, because the root itself may sit under a symlink
+ * (`/tmp` -> `/private/tmp` on macOS). That resolution is authoritative, so
+ * there is deliberately no lexical pre-check: an absolute path that is
+ * lexically outside the root but physically inside it (the same `/tmp` case,
+ * reached from the other direction) is legitimately contained and must pass.
+ *
+ * Fails closed: if either side cannot be realpath'd (missing, unreadable, or a
+ * symlink loop) this returns false. Callers using this as a security boundary
+ * want the deny. `resolveFilePath` does NOT use this, because it must also
+ * accept files that don't exist yet — see `realResolvedPrefix`.
+ *
+ * @example
+ * ```ts
+ * isRealPathInside('/proj/scripts', '/proj')   // true
+ * isRealPathInside('/proj-evil', '/proj')      // false - shared prefix
+ * isRealPathInside('/proj/link', '/proj')      // false - link -> /etc
+ * ```
+ */
+export function isRealPathInside(target: string, root: string): boolean {
+	try {
+		return isPathInside(realpathSync(target), realpathSync(root));
+	} catch {
+		return false;
+	}
 }
 
 /**

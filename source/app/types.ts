@@ -83,7 +83,7 @@ export type NonInteractiveExitReason =
 	| 'complete'
 	| 'timeout'
 	| 'error'
-	| 'tool-approval'
+	| 'tool-approval-required'
 	| null;
 
 /**

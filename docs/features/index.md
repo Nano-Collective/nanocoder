@@ -18,6 +18,14 @@ Here's what you need to know right away:
 
 Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** to add a new line — it's the official supported newline shortcut.
 
+Each response ends with a small grey footer showing what that turn cost:
+
+```
+Tokens: 4.2k | ~$0.01
+```
+
+The token count is whatever the provider reported for that response, and the cost is an estimate priced from [models.dev](https://models.dev). Providers that report no token telemetry (common with local models) get no footer at all, and the cost segment is omitted when no pricing is available — so a missing number means "unknown", never "zero". For a breakdown of your whole context window rather than a single response, use `/usage`.
+
 ### Giving the AI Context
 
 Use **`@`** followed by a filename to include file contents in your message. Nanocoder fuzzy-matches as you type and shows autocomplete suggestions — press **Tab** to select.
@@ -154,13 +162,13 @@ For multi-step tasks, the [task management](task-management.md) system keeps you
 /tasks add Update API documentation
 ```
 
-The AI also has access to task tools and will proactively create and update tasks when working on involved problems.
+The AI also has a task tool and will proactively create and update tasks when working on involved problems. Task state lives with the session rather than in your project directory, and is restored when you resume.
 
 ## Customizing Nanocoder
 
 ### Project Setup with `/init`
 
-Run `/init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `/init --force` to regenerate it.
+Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 
@@ -220,7 +228,7 @@ nanocoder --acp
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
 
 ```bash
-/setup-mcp      # interactive setup wizard
+/settings mcp   # interactive setup wizard
 /mcp            # see connected servers and tools
 ```
 
@@ -239,6 +247,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |

@@ -48,4 +48,4 @@ If your context limit is too low, you may notice:
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch your installed Ollama models when configuring this provider.
+The `/settings providers` wizard can automatically fetch your installed Ollama models when configuring this provider.

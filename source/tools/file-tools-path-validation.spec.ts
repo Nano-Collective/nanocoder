@@ -7,6 +7,7 @@ import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
 import {markFileSeen} from '../utils/read-tracker.js';
+import {setProjectRoot, resetSessionCwd} from '../services/session-cwd.js';
 
 // ============================================================================
 // Test Setup
@@ -619,6 +620,7 @@ test('writeFile validator: restricts writes to explicit scope via context', asyn
 
 	try {
 		process.chdir(testDir);
+		setProjectRoot(testDir);
 		const scopeDir = join(testDir, 'src');
 		await mkdir(scopeDir, {recursive: true});
 		
@@ -647,5 +649,6 @@ test('writeFile validator: restricts writes to explicit scope via context', asyn
 		}
 	} finally {
 		process.chdir(originalCwd);
+		resetSessionCwd();
 	}
 });

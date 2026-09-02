@@ -1,4 +1,5 @@
 import type {
+	ToolExecutionContext,
 	ToolHandler,
 	ToolValidator,
 	ValidationErrorDetail,
@@ -78,13 +79,7 @@ export function withValidation(
 	schema?: Parameters<typeof validateArgsAgainstSchema>[1],
 ): ToolHandler {
 	if (!validator && !schema) return handler;
-	return async (
-		args: unknown,
-		options?: {
-			abortSignal?: AbortSignal;
-			context?: import('@/types/core').ToolContext;
-		},
-	) => {
+	return async (args: unknown, options?: ToolExecutionContext) => {
 		if (schema) {
 			const typeErrors = validateArgsAgainstSchema(args, schema);
 			if (typeErrors.length > 0) {
@@ -100,6 +95,11 @@ export function withValidation(
 				throw new ToolValidationError(result.error, result.details);
 			}
 		}
+		// `options` carries the turn's abort signal, plus the session id and
+		// working directory the artifact tools need. Dropping it here would
+		// silently un-cancel every tool that has a schema or a validator (which
+		// is all of them): Stop/Escape would abort the model stream but a
+		// running `execute_bash` or `agent` would keep going to completion.
 		return handler(args, options);
 	};
 }

@@ -6,6 +6,7 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import type {ToolCall} from '@/types/core';
+import {replaceFirstLiteral} from '@/utils/literal-replace';
 
 export interface AcpToolCallMeta {
 	title: string;
@@ -33,6 +34,15 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	switch_mode: 'switch_mode',
 };
 
+export interface BuildToolCallMetaOptions {
+	/**
+	 * Build the before/after diff for edit tools. Diffing reads the whole file
+	 * off disk, so callers that discard content - the queued-batch announcement
+	 * - opt out instead of paying for a diff they never emit.
+	 */
+	withDiff?: boolean;
+}
+
 /**
  * Enrich a tool call with ACP metadata: a descriptive title, a kind, the file
  * locations it touches (for "follow-along"), and - for edits - a diff so the
@@ -41,7 +51,9 @@ const TOOL_KINDS: Record<string, ToolKind> = {
  */
 export async function buildToolCallMeta(
 	toolCall: ToolCall,
+	options: BuildToolCallMetaOptions = {},
 ): Promise<AcpToolCallMeta> {
+	const {withDiff = true} = options;
 	const name = toolCall.function.name;
 	const args = toolCall.function.arguments ?? {};
 	const kind = TOOL_KINDS[name] ?? 'other';
@@ -79,11 +91,13 @@ export async function buildToolCallMeta(
 
 	if (path) {
 		title = `${name}: ${path}`;
-		if (name === 'string_replace') {
-			const diff = await buildStringReplaceDiff(path, args);
-			if (diff) content.push(diff);
-		} else if (name === 'write_file') {
-			content.push(await buildWriteFileDiff(path, args));
+		if (withDiff) {
+			if (name === 'string_replace') {
+				const diff = await buildStringReplaceDiff(path, args);
+				if (diff) content.push(diff);
+			} else if (name === 'write_file') {
+				content.push(await buildWriteFileDiff(path, args));
+			}
 		}
 	}
 
@@ -156,7 +170,7 @@ async function buildStringReplaceDiff(
 		type: 'diff',
 		path: absPath,
 		oldText: current,
-		newText: current.replace(oldStr, newStr),
+		newText: replaceFirstLiteral(current, oldStr, newStr),
 	};
 }
 

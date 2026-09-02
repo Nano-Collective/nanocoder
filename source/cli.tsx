@@ -20,7 +20,21 @@ if (typeof nodeModule.enableCompileCache === 'function') {
 }
 
 const require = nodeModule.createRequire(import.meta.url);
-const {version} = require('../package.json');
+
+// Resolved inline rather than through `@/utils/package-version` to keep the
+// fast path import-free (see the note above). A missing or malformed
+// package.json must not throw here: this runs at module load, before any
+// error handling exists, so it would take the whole CLI down.
+const version = ((): string => {
+	try {
+		const packageJson = require('../package.json') as {version?: unknown};
+		return typeof packageJson.version === 'string' && packageJson.version
+			? packageJson.version
+			: 'unknown';
+	} catch {
+		return 'unknown';
+	}
+})();
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
@@ -58,12 +72,67 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder init` without booting the interactive app. The shared
+// initializer is also used by /init, so both entry points keep identical file
+// generation and overwrite behavior.
+if (args[0] === 'init') {
+	if (args.includes('--help') || args.includes('-h')) {
+		console.log(`
+Usage: nanocoder init [options]
+
+Options:
+  --preset <type>   Apply a bundled project preset (react, nextjs, rust)
+  -f, --force       Regenerate AGENTS.md if it already exists
+  --lean            Skip CLAUDE.md when merging existing project guidance
+  -h, --help        Show help for the init command
+
+Examples:
+  nanocoder init
+  nanocoder init --preset react
+  nanocoder init --preset nextjs
+  nanocoder init --preset rust
+  `);
+		process.exit(0);
+	}
+
+	const [{parseInitArguments}, initializer] = await Promise.all([
+		import('@/init/init-args'),
+		import('@/init/initializer'),
+	]);
+	try {
+		const options = parseInitArguments(args.slice(1));
+		const result = initializer.initializeProject({
+			projectPath: process.cwd(),
+			...options,
+		});
+
+		console.log('Nanocoder project initialized successfully.');
+		if (result.preset) console.log(`Preset: ${result.preset}`);
+		for (const file of result.created) console.log(`Created: ${file}`);
+		for (const file of result.preserved) {
+			console.log(`Preserved existing file: ${file}`);
+		}
+		process.exit(0);
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message : 'Unknown initialization error';
+		const suffix =
+			error instanceof initializer.ProjectAlreadyInitializedError
+				? ' Use nanocoder init --force to regenerate.'
+				: '';
+		console.error(`${message}${suffix}`);
+		process.exit(1);
+	}
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
 Commands:
+  init [options]                  Analyze the project and create AGENTS.md.
+                                  Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
@@ -104,6 +173,7 @@ Options:
                       --restricted-scope <path>
 
 Examples:
+  nanocoder init --preset nextjs
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
@@ -125,18 +195,9 @@ function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
 }
 
 async function main(): Promise<void> {
-	// Dynamic imports so the fast-path flag handlers above never pay for them.
-	const [
-		{render},
-		{default: App},
-		{parseContextLimit},
-		{setSessionContextLimit},
-	] = await Promise.all([
-		import('ink'),
-		import('@/app'),
-		import('@/app/utils/handlers/context-max-handler'),
-		import('@/models/index'),
-	]);
+	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
+	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
+	// on the lightweight path. Ink + App load only in the final TUI branch.
 
 	const vscodeMode = args.includes('--vscode');
 
@@ -154,13 +215,13 @@ async function main(): Promise<void> {
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(arg => arg === '--provider');
 	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
-		// Allow alphanumeric, hyphen, underscore, and space only to prevent injection
+		// Allow alphanumeric, hyphen, underscore only to prevent injection
 		const value = args[providerArgIndex + 1];
-		if (/^[a-zA-Z0-9_ -]+$/.test(value)) {
+		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
 			cliProvider = value;
 		} else {
 			console.error(
-				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, spaces, hyphens, and underscores.`,
+				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, hyphens, and underscores.`,
 			);
 			process.exit(1);
 		}
@@ -182,9 +243,13 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Extract --context-max if specified
+	// Extract --context-max if specified (framework-free parser — no React/Ink)
 	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
 	if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
+		const [{parseContextLimit}, {setSessionContextLimit}] = await Promise.all([
+			import('@/utils/parse-context-limit'),
+			import('@/models/index'),
+		]);
 		const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
 		if (limit !== null) {
 			setSessionContextLimit(limit);
@@ -197,6 +262,7 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --mode if specified. Accept `--mode value` and `--mode=value`.
+	// `@/app/types` is a tiny const module (no React/Ink) — safe before TUI.
 	const {VALID_MODES} = await import('@/app/types');
 	type CliMode = (typeof VALID_MODES)[number];
 	let cliMode: CliMode | undefined;
@@ -318,7 +384,7 @@ async function main(): Promise<void> {
 
 	// Check for swarm command
 	let swarmConfig: import('@/app/types').SwarmConfig | undefined;
-	const swarmCommandIndex = args.findIndex(arg => arg === 'swarm');
+	const swarmCommandIndex = args[0] === 'swarm' ? 0 : -1;
 	if (swarmCommandIndex !== -1) {
 		const afterSwarmArgs = args.slice(swarmCommandIndex + 1);
 		const promptArgs: string[] = [];
@@ -594,11 +660,16 @@ async function main(): Promise<void> {
 			telemetry: telemetryRequested,
 		});
 	} else {
+		// Interactive TUI — load Ink + App only now.
+		const [{render}, {default: App}] = await Promise.all([
+			import('ink'),
+			import('@/app'),
+		]);
+
 		// Prevent Node's global performance entry buffer from growing without
 		// bound during long Ink sessions. See issue #521.
 		const {installPerfBufferGuard} = await import('@/utils/perf-buffer');
 		installPerfBufferGuard();
-
 		// Resolve --continue/--resume <id> into a Session BEFORE rendering, so
 		// the app can apply it on first mount (see App's initialSession prop).
 		// A bare --resume (no id) instead opens the picker at startup — no
@@ -654,15 +725,15 @@ async function main(): Promise<void> {
 				loadPreferences().alternateScreen === true);
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		// The stdin proxy below is needed in BOTH screen modes, because
+		// bracketed paste applies to both — only mouse reporting is
+		// fullscreen-only.
+		const interactiveTty = process.stdout.isTTY && !nonInteractiveMode;
 		let inkStdin: NodeJS.ReadStream | undefined;
 		let stopInputForwarding: (() => void) | undefined;
+		let restoreInputModes: (() => void) | undefined;
 		if (useAltScreen) {
 			process.stdout.write('\x1B[?1049h'); // Enter alternate screen
-			// SGR mouse reporting so wheel scrolling reaches the app. The alt
-			// screen has no native scrollback, so the terminal's own wheel /
-			// scrollbar can't work — the app must receive wheel events itself.
-			// (Text selection needs Shift+drag while mouse reporting is on.)
-			process.stdout.write('\x1B[?1000h\x1B[?1006h');
 
 			// Wipe the screen on resize BEFORE Ink repaints (this listener is
 			// registered first, so it runs first). When the terminal GROWS,
@@ -672,20 +743,61 @@ async function main(): Promise<void> {
 			process.stdout.on('resize', () => {
 				process.stdout.write('\x1B[2J\x1B[H');
 			});
+		}
+		if (interactiveTty) {
+			const {
+				createUtf8InputDecoder,
+				markMouseReportingAvailable,
+				MOUSE_REPORTING_ON,
+				stripMouseSequences,
+				wheelEvents,
+			} = await import('@/utils/terminal-mouse');
+			const {
+				createPasteExtractor,
+				DISABLE_BRACKETED_PASTE,
+				ENABLE_BRACKETED_PASTE,
+				pasteEvents,
+			} = await import('@/utils/terminal-paste');
 
-			// Ink must never see the raw mouse sequences (its keypress parser
-			// would leak them into the chat input as text), so it reads from a
-			// filtered proxy stream: mouse reports are stripped, wheel ticks
-			// are re-emitted on the wheelEvents bus for the chat viewport.
+			// Bracketed paste in both screen modes. Without it the terminal
+			// sends a paste as bare bytes, so the CR at each line break
+			// reaches Ink as Enter and submits the prompt partway through.
+			process.stdout.write(ENABLE_BRACKETED_PASTE);
+			// Leaving it on would make the shell that inherits this terminal
+			// receive paste markers as literal text.
+			restoreInputModes = () => {
+				process.stdout.write(DISABLE_BRACKETED_PASTE);
+			};
+
+			if (useAltScreen) {
+				// SGR mouse reporting so wheel scrolling reaches the app. The
+				// alt screen has no native scrollback, so the terminal's own
+				// wheel / scrollbar can't work — the app must receive wheel
+				// events itself. This is also what takes click-drag selection
+				// away from the terminal, so UserInput offers a toggle that
+				// suspends it (see toggleSelectionMode).
+				process.stdout.write(MOUSE_REPORTING_ON);
+				markMouseReportingAvailable();
+			}
+
+			// Ink must never see the raw escape sequences (its keypress
+			// parser would leak them into the chat input as text, and a
+			// pasted newline would submit), so it reads from a filtered proxy
+			// stream. Paste payloads are lifted out first and republished on
+			// pasteEvents; mouse reports are then stripped from what's left,
+			// with wheel ticks re-emitted on wheelEvents for the viewport.
 			const {PassThrough} = await import('node:stream');
-			const {createUtf8InputDecoder, stripMouseSequences, wheelEvents} =
-				await import('@/utils/terminal-mouse');
 			const filtered = new PassThrough();
 			const decodeInput = createUtf8InputDecoder();
+			const extractPastes = createPasteExtractor();
 			let carry = '';
 			const forwardInput = (chunk: Buffer | string) => {
 				const text = decodeInput(chunk);
-				const result = stripMouseSequences(text, carry);
+				const split = extractPastes(text);
+				for (const payload of split.pastes) {
+					pasteEvents.emit('paste', payload);
+				}
+				const result = stripMouseSequences(split.clean, carry);
 				carry = result.carry;
 				for (const direction of result.wheel) {
 					wheelEvents.emit('wheel', direction);
@@ -742,6 +854,7 @@ async function main(): Promise<void> {
 			if (terminalRestored) return;
 			terminalRestored = true;
 			stopInputForwarding?.();
+			restoreInputModes?.();
 			if (useAltScreen) {
 				// Mouse reporting off, then back to the main screen buffer.
 				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');

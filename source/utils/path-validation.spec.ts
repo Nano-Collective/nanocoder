@@ -8,7 +8,13 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {checkRestrictedScope, isValidFilePath, resolveFilePath} from './path-validation';
+import {
+	isPathInside,
+	isRealPathInside,
+	isValidFilePath,
+	resolveFilePath,
+	checkRestrictedScope,
+} from './path-validation';
 
 // Test suite for isValidFilePath
 test('isValidFilePath: accepts simple relative paths', (t) => {
@@ -292,7 +298,71 @@ test.serial('resolveFilePath: containmentRoot lets a deep session cwd still reac
 		t.throws(() => resolveFilePath('../outside', root, root));
 	} finally {
 		rmSync(root, {recursive: true, force: true});
-	}
+	}// Test suite for isPathInside / isRealPathInside
+test('isPathInside: accepts the root itself and paths beneath it', t => {
+	t.true(isPathInside('/proj', '/proj'));
+	t.true(isPathInside('/proj/src/app.ts', '/proj'));
+	t.true(isPathInside('/proj/', '/proj'));
+});
+
+test('isPathInside: rejects siblings, ancestors, and shared prefixes', t => {
+	t.false(isPathInside('/proj-evil', '/proj'));
+	t.false(isPathInside('/projx/src', '/proj'));
+	t.false(isPathInside('/', '/proj'));
+	t.false(isPathInside('/etc/passwd', '/proj'));
+});
+
+test('isPathInside: resolves ../ traversal before comparing', t => {
+	t.false(isPathInside('/proj/../etc', '/proj'));
+	t.true(isPathInside('/proj/src/../lib', '/proj'));
+});
+
+test('isPathInside: is lexical, so an escaping symlink still passes', t => {
+	// The whole reason isRealPathInside exists — see the next test.
+	const root = mkdtempSync(join(tmpdir(), 'pathval-lex-'));
+	const outside = mkdtempSync(join(tmpdir(), 'pathval-lex-out-'));
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(outside, {recursive: true, force: true});
+	});
+	symlinkSync(outside, join(root, 'link'));
+	t.true(isPathInside(join(root, 'link'), root));
+});
+
+test('isRealPathInside: rejects the symlink that isPathInside accepts', t => {
+	const root = mkdtempSync(join(tmpdir(), 'pathval-real-'));
+	const outside = mkdtempSync(join(tmpdir(), 'pathval-real-out-'));
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(outside, {recursive: true, force: true});
+	});
+	symlinkSync(outside, join(root, 'link'));
+	mkdirSync(join(root, 'real'), {recursive: true});
+
+	t.false(isRealPathInside(join(root, 'link'), root));
+	t.true(isRealPathInside(join(root, 'real'), root));
+	t.true(isRealPathInside(root, root));
+});
+
+test('isRealPathInside: rejects a symlinked ancestor segment', t => {
+	const root = mkdtempSync(join(tmpdir(), 'pathval-anc-'));
+	const outside = mkdtempSync(join(tmpdir(), 'pathval-anc-out-'));
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(outside, {recursive: true, force: true});
+	});
+	mkdirSync(join(outside, 'child'), {recursive: true});
+	symlinkSync(outside, join(root, 'link'));
+	t.false(isRealPathInside(join(root, 'link', 'child'), root));
+});
+
+test('isRealPathInside: fails closed when a path cannot be resolved', t => {
+	const root = mkdtempSync(join(tmpdir(), 'pathval-missing-'));
+	t.teardown(() => rmSync(root, {recursive: true, force: true}));
+	// Unlike resolveFilePath, this predicate does not tolerate a not-yet-created
+	// path: callers use it as a boundary, so unresolvable means deny.
+	t.false(isRealPathInside(join(root, 'nope'), root));
+	t.false(isRealPathInside(root, join(root, 'nope')));
 });
 
 // Test suite for checkRestrictedScope
