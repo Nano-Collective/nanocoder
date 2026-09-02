@@ -14,6 +14,47 @@ interface FetchArgs {
 	url: string;
 }
 
+const MAX_REDIRECTS = 5;
+const URL_FETCH_TIMEOUT_MS = 15_000;
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+
+const resolveSafeRedirects = async (url: string): Promise<string> => {
+	let currentUrl = url;
+
+	for (let redirectCount = 0; ; redirectCount++) {
+		const validation = await fetchUrlValidator({url: currentUrl});
+		if (!validation.valid) {
+			throw new Error(validation.error);
+		}
+
+		const response = await fetch(currentUrl, {
+			redirect: 'manual',
+			signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+		});
+
+		try {
+			if (!REDIRECT_STATUS_CODES.has(response.status)) {
+				return currentUrl;
+			}
+
+			const location = response.headers.get('location');
+			if (!location) {
+				throw new Error(
+					`Redirect response from ${currentUrl} did not include a Location header`,
+				);
+			}
+
+			if (redirectCount >= MAX_REDIRECTS) {
+				throw new Error(`Too many redirects while fetching ${url}`);
+			}
+
+			currentUrl = new URL(location, currentUrl).toString();
+		} finally {
+			await response.body?.cancel();
+		}
+	}
+};
+
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	// Validate URL
 	try {
@@ -23,11 +64,16 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	}
 
 	try {
+		const safeUrl = await resolveSafeRedirects(args.url);
+
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
 		// so the ~100-module HTML-parsing graph only loads when the tool
 		// actually runs).
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
-		const result = await convertToMarkdown(args.url);
+		// The redirect chain was validated hop by hop above. Keep redirects off
+		// for the conversion fetch as well, so a changed response cannot escape
+		// validation between the probe and conversion requests.
+		const result = await convertToMarkdown(safeUrl, {followRedirects: false});
 
 		const content = result.markdown;
 
@@ -44,7 +90,11 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		return content;
 	} catch (error: unknown) {
 		const message = formatError(error);
-		throw new Error(`Failed to fetch URL: ${message}`);
+		throw new Error(
+			message.startsWith('Failed to fetch URL:')
+				? message
+				: `Failed to fetch URL: ${message}`,
+		);
 	}
 };
 
