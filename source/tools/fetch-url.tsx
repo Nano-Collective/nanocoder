@@ -5,6 +5,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
+import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -15,12 +16,7 @@ interface FetchArgs {
 }
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
-	// Validate URL
-	try {
-		new URL(args.url);
-	} catch {
-		throw new Error(`Invalid URL: ${args.url}`);
-	}
+	assertPublicHttpUrl(args.url);
 
 	try {
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
@@ -135,44 +131,13 @@ const fetchUrlFormatter = (
 const fetchUrlValidator = (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	// Validate URL format
 	try {
-		const parsedUrl = new URL(args.url);
-
-		// Check for valid protocol
-		if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-			return Promise.resolve({
-				valid: false,
-				error: `Invalid URL protocol "${parsedUrl.protocol}". Only http: and https: are supported.`,
-			});
-		}
-
-		// Check for localhost/internal IPs (security consideration)
-		const hostname = parsedUrl.hostname.toLowerCase();
-		if (
-			hostname === 'localhost' ||
-			hostname === '127.0.0.1' ||
-			hostname === '0.0.0.0' ||
-			// IPv6 loopback/unspecified. The URL parser normalizes every spelling
-			// (`[::1]`, expanded, IPv4-mapped `[::ffff:127.0.0.1]`) to these forms.
-			hostname === '[::1]' ||
-			hostname === '[::ffff:7f00:1]' ||
-			hostname === '[::]' ||
-			hostname.startsWith('192.168.') ||
-			hostname.startsWith('10.') ||
-			hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
-		) {
-			return Promise.resolve({
-				valid: false,
-				error: `Cannot fetch from internal/private network address: ${hostname}`,
-			});
-		}
-
+		assertPublicHttpUrl(args.url);
 		return Promise.resolve({valid: true});
-	} catch {
+	} catch (error: unknown) {
 		return Promise.resolve({
 			valid: false,
-			error: `Invalid URL format: ${args.url}`,
+			error: formatError(error),
 		});
 	}
 };
