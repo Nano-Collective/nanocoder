@@ -84,6 +84,11 @@ export function createErrorInfo(
 
 	// Determine error type and extract information
 	if (error instanceof Error) {
+		// Classification is strict by precedence: validation beats the looser
+		// network/timeout substring checks. Without this, a validation message
+		// that happens to contain "connection" or "fetch" is also flagged as a
+		// network error (#1136).
+		const validationError = isValidationError(error);
 		const errorInfo: ErrorInfo = {
 			message: error.message,
 			name: error.name,
@@ -91,9 +96,9 @@ export function createErrorInfo(
 			type: 'Error',
 			originalType: error.constructor.name,
 			hasStack: !!error.stack,
-			isNetworkError: isNetworkError(error),
-			isTimeoutError: isTimeoutError(error),
-			isValidationError: isValidationError(error),
+			isNetworkError: !validationError && isNetworkError(error),
+			isTimeoutError: !validationError && isTimeoutError(error),
+			isValidationError: validationError,
 			timestamp,
 			correlationId: effectiveCorrelationId,
 			context,
