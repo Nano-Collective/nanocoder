@@ -1905,8 +1905,8 @@
 
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
-	function appendUsageIndicator(usage, cost) {
-		if (!usage) return;
+	function appendUsageIndicator(usage, cost, showTokenUsage) {
+		if (!usage || !showTokenUsage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
 			: (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0) +
@@ -2280,7 +2280,7 @@
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			// Show token usage (and estimated cost) for the finished turn
-			appendUsageIndicator(update.usage, update.cost);
+			appendUsageIndicator(update.usage, update.cost, update.showTokenUsage);
 			// Turn is complete — restore the send button
 			setProcessing(false, update.outcome || 'completed');
 		}
