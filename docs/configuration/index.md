@@ -147,6 +147,8 @@ You can also override these per-session with `/compact --auto-on`, `/compact --a
 
 Configure automatic session saving and retention. See [Session Management](../features/session-management.md) for usage details.
 
+This setting is stored in `nanocoder-preferences.json` (see [Preferences](preferences.md) for file locations) — not in `agents.config.json`.
+
 ```json
 {
   "nanocoder": {

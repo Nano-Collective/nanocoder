@@ -526,7 +526,22 @@ export interface UserPreferences {
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
-	paste?: PasteConfig;
+	/**
+	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
+	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
+	 * `loadSessionConfig` / `loadPasteConfig` loaders read.
+	 */
+	nanocoder?: {
+		sessions?: {
+			autoSave?: boolean;
+			saveInterval?: number;
+			maxSessions?: number;
+			maxMessages?: number;
+			retentionDays?: number;
+			directory?: string;
+		};
+		paste?: PasteConfig;
+	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
 	/**
