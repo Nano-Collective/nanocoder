@@ -1120,3 +1120,33 @@ test.serial('read_file metadata_only shows converted binary encoding for DOCX', 
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test('ReadFileFormatter correctly identifies metadata_only results', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-formatter-temp');
+	try {
+		mkdirSync(testDir, { recursive: true });
+		const content = Array.from({ length: 100 }, (_, index) => `line-${index + 1}`).join('\n');
+		writeFileSync(join(testDir, 'small.ts'), content);
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{ path: join(testDir, 'small.ts'), metadata_only: true },
+			`File Information for "test-metadata-formatter-temp/small.ts"\n==================================================\n\nType: file\nSize: 1000 bytes\nLast Modified: 2023-01-01T00:00:00.000Z\nLines: 100`
+		);
+		const { lastFrame } = render(
+			<TestThemeProvider>{element}</TestThemeProvider>
+		);
+
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(stripAnsi(output!), /metadata only/);
+		t.regex(stripAnsi(output!), /Total lines:\s*100/);
+	} finally {
+		rmSync(testDir, { recursive: true, force: true });
+	}
+});
