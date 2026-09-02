@@ -27,10 +27,13 @@ export async function executeSwarmMerge(
 		const worktreeAbsPath = path.resolve(cwd, targetPath);
 
 		try {
+			// 0. Stage all changes to include untracked/new files
+			await execFileAsync('git', ['add', '-A'], {cwd: worktreeAbsPath});
+
 			// 1. Post-hoc Scope Validation: Check for scope violations inside the worker's branch before applying
 			const {stdout: changedFilesRaw} = await execFileAsync(
 				'git',
-				['diff', '--name-only', preSwarmCommit],
+				['diff', '--name-only', '--staged', preSwarmCommit],
 				{cwd: worktreeAbsPath},
 			);
 			const changedFiles = changedFilesRaw.split('\n').filter(Boolean);
@@ -58,7 +61,7 @@ export async function executeSwarmMerge(
 			// 2. Patch Extraction & Preservation
 			const {stdout: patchData} = await execFileAsync(
 				'git',
-				['diff', preSwarmCommit],
+				['diff', '--staged', preSwarmCommit],
 				{cwd: worktreeAbsPath},
 			);
 

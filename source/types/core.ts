@@ -252,7 +252,8 @@ export interface LLMClient {
 	): Promise<LLMChatResponse>;
 	generateStructuredObject?<T>(
 		prompt: string,
-		schema: any, // zod schema
+		// biome-ignore lint/suspicious/noExplicitAny: zod schema
+		schema: any,
 		system?: string,
 		signal?: AbortSignal,
 	): Promise<T>;

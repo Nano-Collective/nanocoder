@@ -899,7 +899,7 @@ export const processAssistantResponse = async (
 					executionContext: {
 						sessionId,
 						workingDirectory,
-						context: {restrictedScope: params.restrictedScope}
+						context: {restrictedScope: params.restrictedScope},
 					},
 				},
 			);
@@ -959,7 +959,7 @@ export const processAssistantResponse = async (
 					abortSignal: controller.signal,
 					sessionId,
 					workingDirectory,
-					context: {restrictedScope: params.restrictedScope}
+					context: {restrictedScope: params.restrictedScope},
 				});
 
 			for (let i = 0; i < confirmTools.length; i++) {

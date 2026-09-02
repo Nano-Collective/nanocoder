@@ -6,7 +6,7 @@ import {useEffect, useRef, useState} from 'react';
 import {z} from 'zod';
 import type {SwarmConfig} from '@/app/types';
 import type {LLMClient} from '@/types/core';
-import {createWorktree} from '@/utils/git-worktree';
+import {createWorktree, ensureCleanTree} from '@/utils/git-worktree';
 import {
 	type TaskDefinition,
 	TaskSchema,
@@ -64,6 +64,9 @@ export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 		try {
 			// 1. Capture preSwarmCommit
 			setStatus('starting');
+			// Ensure the working tree is clean before running the swarm
+			ensureCleanTree(process.cwd());
+
 			const {stdout} = await execFileAsync('git', ['rev-parse', 'HEAD']);
 			const commit = stdout.trim();
 			setPreSwarmCommit(commit);
@@ -195,7 +198,7 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 							cliPath,
 							'run',
 							'--mode',
-							'yolo',
+							config.swarmMode === 'yolo' ? 'yolo' : 'auto-accept',
 							'--json',
 							'--telemetry',
 							'--trust-directory',
