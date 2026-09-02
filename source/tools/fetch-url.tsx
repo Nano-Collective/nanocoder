@@ -1,6 +1,8 @@
 // `@nanocollective/get-md` (and its transitive chain: cheerio, turndown,
 // readability, domutils, entities) is loaded lazily inside the handler —
 // only users who actually invoke `fetch_url` pay the cost.
+
+import * as net from 'node:net';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
@@ -14,12 +16,88 @@ interface FetchArgs {
 	url: string;
 }
 
+function validateUrlInternal(urlStr: string): string | undefined {
+	let parsedUrl: URL;
+	try {
+		parsedUrl = new URL(urlStr);
+	} catch {
+		return `Invalid URL format: ${urlStr}`;
+	}
+
+	if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+		return `Invalid URL protocol "${parsedUrl.protocol}". Only http: and https: are supported.`;
+	}
+
+	let hostname = parsedUrl.hostname.toLowerCase();
+	if (hostname.endsWith('.')) {
+		hostname = hostname.slice(0, -1);
+	}
+
+	if (hostname === 'localhost' || hostname === 'metadata.google.internal') {
+		return `Cannot fetch from internal/private network address: ${hostname}`;
+	}
+
+	if (net.isIPv4(hostname)) {
+		const parts = hostname.split('.').map(Number);
+		const p1 = parts[1] ?? 0;
+		if (
+			parts[0] === 127 ||
+			parts[0] === 10 ||
+			parts[0] === 0 ||
+			(parts[0] === 172 && p1 >= 16 && p1 <= 31) ||
+			(parts[0] === 192 && p1 === 168) ||
+			(parts[0] === 169 && p1 === 254) ||
+			(parts[0] === 100 && p1 >= 64 && p1 <= 127)
+		) {
+			return `Cannot fetch from internal/private network address: ${hostname}`;
+		}
+	}
+
+	if (hostname.startsWith('[') && hostname.endsWith(']')) {
+		const ip6 = hostname.slice(1, -1);
+		if (net.isIPv6(ip6)) {
+			if (ip6 === '::1' || ip6 === '::') {
+				return `Cannot fetch from internal/private network address: ${hostname}`;
+			}
+			if (/^f[cd][0-9a-f]{2}:/i.test(ip6)) {
+				return `Cannot fetch from internal/private network address: ${hostname}`;
+			}
+			if (/^fe[89ab][0-9a-f]:/i.test(ip6)) {
+				return `Cannot fetch from internal/private network address: ${hostname}`;
+			}
+
+			if (ip6.startsWith('::ffff:')) {
+				const match = ip6.match(/^::ffff:([0-9a-f]+):([0-9a-f]+)$/i);
+				if (match && match[1] && match[2]) {
+					const high = Number.parseInt(match[1], 16);
+					const low = Number.parseInt(match[2], 16);
+					const parts = [high >> 8, high & 0xff, low >> 8, low & 0xff];
+					const p1 = parts[1] ?? 0;
+
+					if (
+						parts[0] === 127 ||
+						parts[0] === 10 ||
+						parts[0] === 0 ||
+						(parts[0] === 172 && p1 >= 16 && p1 <= 31) ||
+						(parts[0] === 192 && p1 === 168) ||
+						(parts[0] === 169 && p1 === 254) ||
+						(parts[0] === 100 && p1 >= 64 && p1 <= 127)
+					) {
+						return `Cannot fetch from internal/private network address: ${hostname}`;
+					}
+				}
+			}
+		}
+	}
+
+	return undefined;
+}
+
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	// Validate URL
-	try {
-		new URL(args.url);
-	} catch {
-		throw new Error(`Invalid URL: ${args.url}`);
+	const validationError = validateUrlInternal(args.url);
+	if (validationError) {
+		throw new Error(validationError);
 	}
 
 	try {
@@ -135,46 +213,11 @@ const fetchUrlFormatter = (
 const fetchUrlValidator = (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	// Validate URL format
-	try {
-		const parsedUrl = new URL(args.url);
-
-		// Check for valid protocol
-		if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-			return Promise.resolve({
-				valid: false,
-				error: `Invalid URL protocol "${parsedUrl.protocol}". Only http: and https: are supported.`,
-			});
-		}
-
-		// Check for localhost/internal IPs (security consideration)
-		const hostname = parsedUrl.hostname.toLowerCase();
-		if (
-			hostname === 'localhost' ||
-			hostname === '127.0.0.1' ||
-			hostname === '0.0.0.0' ||
-			// IPv6 loopback/unspecified. The URL parser normalizes every spelling
-			// (`[::1]`, expanded, IPv4-mapped `[::ffff:127.0.0.1]`) to these forms.
-			hostname === '[::1]' ||
-			hostname === '[::ffff:7f00:1]' ||
-			hostname === '[::]' ||
-			hostname.startsWith('192.168.') ||
-			hostname.startsWith('10.') ||
-			hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
-		) {
-			return Promise.resolve({
-				valid: false,
-				error: `Cannot fetch from internal/private network address: ${hostname}`,
-			});
-		}
-
-		return Promise.resolve({valid: true});
-	} catch {
-		return Promise.resolve({
-			valid: false,
-			error: `Invalid URL format: ${args.url}`,
-		});
+	const error = validateUrlInternal(args.url);
+	if (error) {
+		return Promise.resolve({valid: false, error});
 	}
+	return Promise.resolve({valid: true});
 };
 
 export const fetchUrlTool: NanocoderToolExport = {

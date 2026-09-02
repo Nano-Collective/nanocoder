@@ -126,18 +126,22 @@ test('validator rejects localhost URLs', async t => {
 	}
 });
 
-test('validator rejects 127.0.0.1 URLs', async t => {
+test('validator rejects 127.0.0.1 and 127.0.0.x loopback URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
 		return;
 	}
-	const result = await fetchUrlTool.validator!({
-		url: 'http://127.0.0.1:8080',
-	});
 
-	t.false(result.valid);
-	if (!result.valid) {
-		t.true(result.error.includes('internal/private network'));
+	for (const url of [
+		'http://127.0.0.1:8080',
+		'http://127.0.0.2',
+		'http://127.123.45.67'
+	]) {
+		const result = await fetchUrlTool.validator!({ url });
+		t.false(result.valid, `Expected ${url} to be rejected`);
+		if (!result.valid) {
+			t.true(result.error.includes('internal/private network'), `Expected error to mention internal/private network for ${url}`);
+		}
 	}
 });
 
@@ -164,10 +168,14 @@ test('validator rejects expanded and IPv4-mapped IPv6 loopback URLs', async t =>
 	for (const url of [
 		'http://[0:0:0:0:0:0:0:1]',
 		'http://[::ffff:127.0.0.1]',
+		'http://[::ffff:127.0.0.2]',
 		'http://[::]',
 	]) {
 		const result = await fetchUrlTool.validator!({url});
 		t.false(result.valid, `expected ${url} to be rejected`);
+		if (!result.valid) {
+			t.true(result.error.includes('internal/private network'));
+		}
 	}
 });
 
@@ -218,6 +226,63 @@ test('validator accepts external IP addresses', async t => {
 		return;
 	}
 	const result = await fetchUrlTool.validator!({url: 'http://8.8.8.8'});
+
+	t.true(result.valid);
+});
+
+test('validator rejects link-local and cloud metadata IPs', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://169.254.169.254/latest/meta-data/',
+		'http://[::ffff:169.254.169.254]'
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `Expected ${url} to be rejected`);
+		if (!result.valid) {
+			t.true(result.error.includes('internal/private network'));
+		}
+	}
+});
+
+test('validator rejects cloud metadata hostnames', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://metadata.google.internal',
+		'http://metadata.google.internal.'
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `Expected ${url} to be rejected`);
+		if (!result.valid) {
+			t.true(result.error.includes('internal/private network'));
+		}
+	}
+});
+
+test('validator rejects localhost with trailing dot', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const result = await fetchUrlTool.validator!({url: 'http://localhost.'});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.true(result.error.includes('internal/private network'));
+	}
+});
+
+test('validator accepts public domains starting with 10.', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const result = await fetchUrlTool.validator!({url: 'http://10.example.com'});
 
 	t.true(result.valid);
 });
