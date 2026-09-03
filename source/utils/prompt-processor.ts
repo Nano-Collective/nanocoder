@@ -92,6 +92,17 @@ export function assemblePrompt(inputState: InputState): string {
 				}
 				break;
 			}
+			case PlaceholderType.RESOURCE: {
+				// Format MCP resource content with header for LLM context
+				const resourceName = placeholderContent.resourceName;
+				const header = `=== MCP Resource: ${resourceName} (from ${placeholderContent.serverName}) ===`;
+				const footer = '='.repeat(header.length);
+				const contentWithType = placeholderContent.mimeType
+					? `Content-Type: ${placeholderContent.mimeType}\n\n${placeholderContent.content}`
+					: placeholderContent.content;
+				replacementContent = `${header}\n${contentWithType}\n${footer}`;
+				break;
+			}
 			default: {
 				placeholderContent satisfies never;
 				replacementContent = '';

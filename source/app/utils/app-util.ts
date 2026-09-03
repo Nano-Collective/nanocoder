@@ -31,6 +31,7 @@ import {
 	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
+import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
@@ -674,6 +675,16 @@ async function handleSlashCommand(
 	const commandName = message.slice(1).split(/\s+/)[0];
 
 	if (await handleCustomCommand(message, commandName, options)) {
+		return;
+	}
+
+	if (
+		await handleMCPPromptCommand(
+			commandName,
+			parseCustomCommandArgs(message.slice(commandName.length + 2)),
+			options,
+		)
+	) {
 		return;
 	}
 
