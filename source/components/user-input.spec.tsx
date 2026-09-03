@@ -864,6 +864,71 @@ test('UserInput does not insert a literal character when ctrl+t is pressed', asy
 });
 
 // ============================================================================
+// Undo / Redo (Ctrl+Z / Ctrl+Y) Tests
+// ============================================================================
+
+test('UserInput undoes the last edit with ctrl+z', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Ctrl+Z (0x1A) should revert the last edit. Watch for a frame WITHOUT the
+	// full value: the value must shrink (how far depends on paste detection,
+	// which may collapse a rapid keystroke run into one edit).
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /abcde/);
+	unmount();
+});
+
+test('UserInput redoes an undone edit with ctrl+y', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Undo with Ctrl+Z, settle so the redo stack commits, then redo with Ctrl+Y.
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await wait(100);
+	await waitForCondition(() => /abcde/.test(lastFrame() ?? ''));
+
+	t.regex(lastFrame()!, /abcde/);
+	unmount();
+});
+
+test('UserInput ctrl+z does not insert a literal character', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('ab');
+	await waitForFrame(lastFrame, /ab/);
+	stdin.write('\u001a');
+	await wait(50);
+
+	// Undo should remove "b", not append a control character.
+	t.notRegex(lastFrame()!, /ab/);
+	unmount();
+});
+
+// ============================================================================
 // Command Completion Navigation Tests
 // ============================================================================
 

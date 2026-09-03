@@ -155,6 +155,8 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		undo,
+		redo,
 	} = inputState;
 
 	const {
@@ -749,6 +751,20 @@ export default function UserInput({
 		// Ctrl+X: drop the most recently added image attachment.
 		if (key.ctrl && inputChar === 'x') {
 			setAttachments(prev => prev.slice(0, -1));
+			return;
+		}
+
+		// Ctrl+Z / Ctrl+Y: undo / redo the last input edit. State lives in
+		// useInputState's undo/redo stacks, which are unused by any key binding,
+		// so we surface them here. Both are no-ops on an empty stack.
+		if (key.ctrl && inputChar === 'z') {
+			undo();
+			setTextInputKey(prev => prev + 1);
+			return;
+		}
+		if (key.ctrl && inputChar === 'y') {
+			redo();
+			setTextInputKey(prev => prev + 1);
 			return;
 		}
 
