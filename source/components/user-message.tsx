@@ -75,8 +75,7 @@ export default memo(function UserMessage({
 		return null;
 	}
 
-	// Inner text width: outer width minus left border (1) and padding (1 each side)
-	const textWidth = boxWidth - 3;
+	const textWidth = boxWidth;
 	const strippedMessage = stripVSCodeContext(message);
 	const wordCount = [...strippedMessage.matchAll(/\S+/g)].length;
 	const isLongMessage =
@@ -98,20 +97,7 @@ export default memo(function UserMessage({
 					You:
 				</Text>
 			</Box>
-
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={colors.primary}
-			>
+			<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 				<Box flexDirection="column">
 					{lines.map((line, lineIndex) => {
 						// Skip empty lines — they create paragraph spacing via marginBottom.

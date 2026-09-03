@@ -6,7 +6,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
-import {AssistantMessageBox} from './assistant-message';
+import {AssistantMessageBody} from './assistant-message';
 
 /**
  * Pure helper: slices a bounded tail from a potentially huge streaming
@@ -57,7 +57,7 @@ export default memo(function StreamingMessage({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
-	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
+	const textWidth = boxWidth;
 
 	// Only show the tail of the content to keep the render small
 	// and avoid off-screen reflow that causes iTerm2 flickering.
@@ -70,16 +70,11 @@ export default memo(function StreamingMessage({
 		lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines;
 	const displayText = visibleLines.join('\n');
 
-	// Non-interactive (`run`) mode: just the streamed tail, no header/box.
+	// Non-interactive (`run`) mode: just the streamed tail, no header.
 	// Token calculation is skipped here — it's not displayed and computing it
 	// on the full message on every flush would add unnecessary per-render cost.
 	if (nonInteractive) {
-		return (
-			<Box flexDirection="column" marginBottom={1}>
-				{truncated && <Text>…</Text>}
-				<Text>{displayText}</Text>
-			</Box>
-		);
+		return <AssistantMessageBody truncated={truncated} text={displayText} />;
 	}
 
 	const tokens = calculateTokens(message);
@@ -96,7 +91,7 @@ export default memo(function StreamingMessage({
 					{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 				</Text>
 			</Box>
-			<AssistantMessageBox truncated={truncated} text={displayText} />
+			<AssistantMessageBody truncated={truncated} text={displayText} />
 		</>
 	);
 });
