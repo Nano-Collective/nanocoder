@@ -10,6 +10,7 @@ import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
@@ -312,7 +313,7 @@ async function handleSpecialCommand(
 		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			// Increment clear counter to force re-render of static components
+			sharedProposalStore.clear();
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -562,6 +563,7 @@ async function handleBuiltInCommand(
 			developmentMode: options.developmentMode,
 			lastApiUsage,
 			apiCallHistory,
+			sessionId: options.sessionId,
 		});
 	} finally {
 		if (progressLabel) {

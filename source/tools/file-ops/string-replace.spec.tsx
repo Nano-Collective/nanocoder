@@ -1029,3 +1029,77 @@ test('string_replace formatter: normalizes tabs to 2 spaces', async t => {
 	t.regex(output!, /string_replace/);
 	t.regex(output!, /Path:/);
 });
+
+// ============================================================================
+// Literal Replacement Tests
+// ============================================================================
+
+// `$$`, `$&`, "$`" and `$'` are ordinary characters in shell scripts,
+// Makefiles and CI YAML, but they are substitution tokens to
+// String.prototype.replace. The replacement must land byte for byte.
+const DOLLAR_TOKENS = 'echo "pid=$$ match=$& pre=$` post=$\'"';
+
+test('string_replace: writes $ substitution tokens literally', async t => {
+	const filePath = await createTestFile(
+		'dollars.sh',
+		'#!/bin/sh\necho "old"\nexit 0\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'echo "old"',
+		new_str: DOLLAR_TOKENS,
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		`#!/bin/sh\n${DOLLAR_TOKENS}\nexit 0\n`,
+	);
+});
+
+test('string_replace: $` and $\' do not splice the rest of the file in', async t => {
+	const filePath = await createTestFile(
+		'halves.txt',
+		'BEFORE\nTARGET\nAFTER\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'TARGET',
+		new_str: "$`$'",
+	});
+
+	const newContent = await readFile(filePath, 'utf-8');
+	t.is(newContent, "BEFORE\n$`$'\nAFTER\n");
+	t.false(newContent.includes('BEFORE\nBEFORE'));
+});
+
+test('string_replace: $ tokens in old_str still match and are removable', async t => {
+	const filePath = await createTestFile(
+		'makefile',
+		'all:\n\t@echo $$HOME $(shell pwd)\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: '@echo $$HOME $(shell pwd)',
+		new_str: '@echo $$PWD',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'all:\n\t@echo $$PWD\n');
+});
+
+test('string_replace: numbered group tokens stay literal', async t => {
+	const filePath = await createTestFile('groups.sh', 'run "old"\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'run "old"',
+		new_str: 'printf "%s\n" "$1" "$2" "$<" "$@"',
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'printf "%s\n" "$1" "$2" "$<" "$@"\n',
+	);
+});

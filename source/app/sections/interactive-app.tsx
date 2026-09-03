@@ -50,6 +50,7 @@ interface InteractiveAppProps {
 	 * the inline Static-based flow with native scrollback.
 	 */
 	altScreenActive?: boolean;
+	isSaving?: boolean;
 }
 
 /**
@@ -76,6 +77,7 @@ export function InteractiveApp({
 	handleIdeSelect,
 	clearKey,
 	altScreenActive = false,
+	isSaving,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
 	// Tune / IDE are launched by closing settings first, so their exit has no way
@@ -445,6 +447,7 @@ export function InteractiveApp({
 								tune={appState.tune}
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
+								isSaving={isSaving}
 							/>
 						</UIStateProvider>
 					)}

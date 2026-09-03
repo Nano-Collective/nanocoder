@@ -1,7 +1,17 @@
 import test from "ava";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
+import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from "@/models/models-dev-client.js";
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from "@/utils/auto-compact.js";
 import type { ToolManager } from "@/tools/tool-manager";
 import type {
 	AISDKCoreTool,
@@ -244,8 +254,8 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 		abortSignal: new AbortController().signal,
 	});
 
-	t.is(outcome.kind, "tool-approval-required");
-	if (outcome.kind === "tool-approval-required") {
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
 	}
 });
@@ -1870,3 +1880,96 @@ test("plain runs do not force a walkthrough by default", async t => {
 	t.is(outcome.kind, "success");
 	t.is(callCount, 1, "the ephemeral plain run must not spend a nudge turn");
 });
+
+test.serial(
+	"compacts history before the next model turn when over the token threshold",
+	async (t) => {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+		setSessionContextLimit(100);
+		setAutoCompactStrategy("mechanical");
+		setAutoCompactThreshold(50);
+
+		const filler = "old context sentence. ".repeat(60);
+		const toolCall: ToolCall = {
+			id: "call-compact",
+			function: { name: "safe_tool", arguments: {} },
+		};
+		const payloads: Message[][] = [];
+		let callIndex = 0;
+		const client = {
+			getCurrentModel: () => "gpt-4",
+			setModel: () => undefined,
+			getContextSize: () => 100_000,
+			getAvailableModels: async () => ["gpt-4"],
+			getProviderConfig: () => ({ name: "openai" }),
+			clearContext: async () => undefined,
+			getTimeout: () => undefined,
+			chat: async (messages: Message[]) => {
+				payloads.push(messages);
+				callIndex++;
+				if (callIndex === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									role: "assistant",
+									content: "",
+									tool_calls: [toolCall],
+								},
+							},
+						],
+					} as LLMChatResponse;
+				}
+				return {
+					choices: [{ message: { role: "assistant", content: "done" } }],
+				} as LLMChatResponse;
+			},
+		} as unknown as LLMClient;
+
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "ok") as ToolHandler,
+		}));
+
+		try {
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [
+					{ role: "user", content: filler },
+					{ role: "assistant", content: "ack" },
+					{ role: "user", content: "call the tool" },
+				],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(payloads.length, 2);
+			const secondHistory = payloads[1]
+				.slice(1)
+				.map((m) => (typeof m.content === "string" ? m.content : ""))
+				.join("");
+			t.true(secondHistory.length < filler.length);
+			t.false(
+				payloads[1].some(
+					(m) => typeof m.content === "string" && m.content.includes(filler),
+				),
+				"the verbose turn must be compressed out of the next model turn",
+			);
+			t.true(
+				secondHistory.includes("call the tool"),
+				"compaction must keep the recent turn, not empty the history",
+			);
+		} finally {
+			resetAutoCompactSession();
+			resetSessionContextLimit();
+		}
+	},
+);

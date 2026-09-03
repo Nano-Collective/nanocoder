@@ -31,6 +31,9 @@ const SHELL_IDS = [
 	'chat-view',
 	'close-modal-btn',
 	'composer-box',
+	'composer-mode-badge',
+	'composer-settings',
+	'composer-settings-trigger',
 	'context-chips',
 	'history-list',
 	'history-view',
@@ -157,7 +160,8 @@ export function createElement(tagName: string): StubElement {
 			);
 		},
 		focus: () => {},
-		click: (event: StubElement = {}) => {
+		click: (event: StubElement = {stopPropagation() {}}) => {
+			if (element.disabled) return;
 			for (const fn of listeners.get('click') ?? []) fn(event);
 		},
 		/** Drive any registered listener, not just click. */
@@ -236,12 +240,26 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const root = createElement('html');
 	const body = createElement('body');
 	root.appendChild(body);
+	const hiddenOnLoad = new Set([
+		'add-menu-dropdown',
+		'composer-settings',
+		'mention-dropdown',
+		'mode-dropdown',
+		'model-dropdown',
+		'provider-dropdown',
+		'slash-dropdown',
+	]);
 	for (const id of SHELL_IDS) {
 		const element = createElement('div');
 		element.id = id;
+		if (hiddenOnLoad.has(id)) element.classList.add('hidden');
 		body.appendChild(element);
 	}
 
+	const documentListeners = new Map<
+		string,
+		Array<(event: StubElement) => void>
+	>();
 	const messageListeners: ((event: {data: unknown}) => void)[] = [];
 	// Everything the panel posts back to the extension host.
 	const sent: unknown[] = [];
@@ -256,7 +274,11 @@ export function createPanel(options: {marked?: boolean} = {}) {
 			getElementById: (id: string) => findById(root, id),
 			querySelector: (selector: string) => queryAll(root, selector)[0] ?? null,
 			querySelectorAll: (selector: string) => queryAll(root, selector),
-			addEventListener: () => {},
+			addEventListener: (type: string, fn: (event: StubElement) => void) => {
+				const registered = documentListeners.get(type);
+				if (registered) registered.push(fn);
+				else documentListeners.set(type, [fn]);
+			},
 		},
 		window: {
 			addEventListener: (
@@ -308,6 +330,14 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		/** Any shell element by id, for panels rendered outside the transcript. */
 		byId(id: string): StubElement | null {
 			return findById(root, id);
+		},
+		dispatchDocument(type: string, event: StubElement = {}) {
+			const payload = {
+				preventDefault() {},
+				stopPropagation() {},
+				...event,
+			};
+			for (const fn of documentListeners.get(type) ?? []) fn(payload);
 		},
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});

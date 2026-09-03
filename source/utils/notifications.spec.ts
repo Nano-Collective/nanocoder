@@ -107,6 +107,86 @@ test.serial('sendNotification handles undefined events gracefully', (t) => {
 	t.notThrows(() => sendNotification('toolConfirmation'));
 });
 
+// ============================================================================
+// Terminal Bell Tests
+// ============================================================================
+
+const BELL = '\x07';
+
+function capturingStdout(isTTY: boolean): {get: () => string; restore: () => void} {
+	const originalWrite = process.stdout.write.bind(process.stdout);
+	const originalIsTTY = process.stdout.isTTY;
+	let buffer = '';
+	process.stdout.isTTY = isTTY;
+	// biome-ignore lint/suspicious/noExplicitAny: matching Node's overloaded write signature
+	(process.stdout.write as any) = (chunk: any) => {
+		buffer += typeof chunk === 'string' ? chunk : chunk.toString();
+		return true;
+	};
+	return {
+		get: () => buffer,
+		restore: () => {
+			process.stdout.write = originalWrite;
+			process.stdout.isTTY = originalIsTTY;
+		},
+	};
+}
+
+function bellFor(config: NotificationsConfig, isTTY = true): string {
+	setNotificationsConfig(config);
+	const stdout = capturingStdout(isTTY);
+	try {
+		sendNotification('generationComplete');
+	} finally {
+		stdout.restore();
+	}
+	return stdout.get();
+}
+
+test.serial('sendNotification rings the terminal bell when bell is enabled', (t) => {
+	const written = bellFor({
+		enabled: true,
+		bell: true,
+		events: {generationComplete: true},
+	});
+	t.true(written.includes(BELL));
+});
+
+test.serial('sendNotification does not ring the bell when bell is off', (t) => {
+	const written = bellFor({
+		enabled: true,
+		events: {generationComplete: true},
+	});
+	t.false(written.includes(BELL));
+});
+
+test.serial('sendNotification does not ring the bell for a disabled event', (t) => {
+	const written = bellFor({
+		enabled: true,
+		bell: true,
+		events: {generationComplete: false},
+	});
+	t.false(written.includes(BELL));
+});
+
+test.serial('sendNotification does not ring the bell when notifications are disabled', (t) => {
+	const written = bellFor({
+		enabled: false,
+		bell: true,
+		events: {generationComplete: true},
+	});
+	t.false(written.includes(BELL));
+});
+
+test.serial('sendNotification does not ring the bell when stdout is not a TTY', (t) => {
+	// Piped output (CI, redirected logs) must not collect stray control chars
+	const written = bellFor(
+		{enabled: true, bell: true, events: {generationComplete: true}},
+		false,
+	);
+	t.false(written.includes(BELL));
+});
+
 // Reset config after all tests
 test.after.always(() => {
 	setNotificationsConfig({enabled: false});

@@ -222,3 +222,24 @@ test('buildToolCallMeta - withDiff true is the default', async t => {
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+test('buildToolCallMeta - string_replace diff shows $ tokens literally', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
+	const file = join(dir, 'run.sh');
+	writeFileSync(file, '#!/bin/sh\necho "old"\nexit 0\n');
+	const replacement = 'echo "pid=$$ match=$& pre=$` post=$\'"';
+	try {
+		const meta = await buildToolCallMeta(
+			makeCall('string_replace', {
+				path: file,
+				old_str: 'echo "old"',
+				new_str: replacement,
+			}),
+		);
+		// The previewed diff has to be the diff that lands on disk.
+		const diff = meta.content[0] as any;
+		t.is(diff.newText, `#!/bin/sh\n${replacement}\nexit 0\n`);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});

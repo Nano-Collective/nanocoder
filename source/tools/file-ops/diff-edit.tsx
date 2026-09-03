@@ -10,6 +10,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validatePath} from '@/utils/path-validators';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
@@ -162,7 +163,7 @@ function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 			);
 		}
 
-		newContent = newContent.replace(block.search, block.replace);
+		newContent = replaceFirstLiteral(newContent, block.search, block.replace);
 	});
 
 	return newContent;

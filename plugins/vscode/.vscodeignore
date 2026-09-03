@@ -5,5 +5,5 @@ test-stubs/**
 node_modules/**
 .gitignore
 tsconfig.json
-tailwind.config.js
+scripts/**
 **/*.map

@@ -1,7 +1,4 @@
-import {readFile} from 'node:fs/promises';
 import net from 'node:net';
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
@@ -19,10 +16,9 @@ import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {getPackageVersion} from '@/utils/package-version';
 import {isLocalURL} from '@/utils/url-utils';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 
 type Section<T> = {status: 'ok'; data: T} | {status: 'error'; error: string};
@@ -83,19 +79,6 @@ export interface DoctorDependencies {
 	) => Promise<'reachable' | 'unreachable' | 'skipped'>;
 }
 
-async function getPackageVersion(): Promise<string> {
-	try {
-		const content = await readFile(
-			path.join(__dirname, '../../package.json'),
-			'utf8',
-		);
-		const packageJson = JSON.parse(content) as {version?: string};
-		return packageJson.version ?? '0.0.0';
-	} catch {
-		return '0.0.0';
-	}
-}
-
 async function probeLocalProvider(
 	baseURL: string,
 ): Promise<'reachable' | 'unreachable' | 'skipped'> {
@@ -150,7 +133,7 @@ async function getDaemonLock(): Promise<DaemonLock | null> {
 function defaultDependencies(): DoctorDependencies {
 	return {
 		now: () => Date.now(),
-		getVersion: getPackageVersion,
+		getVersion: async () => getPackageVersion(),
 		getProviders: loadProviderConfigs,
 		getLspStatus: async () => {
 			const manager = await getLSPManager();

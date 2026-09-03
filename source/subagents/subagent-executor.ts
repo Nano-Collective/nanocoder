@@ -7,7 +7,14 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig, getRetryLimits} from '@/config/index';
+import {getProjectContextPreferences} from '@/config/preferences';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
+import {
+	appendRelevantProjectContextWithCount,
+	type MemoryFinder,
+	type ProjectContextOptions,
+} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	appendSubagentTool,
 	getSubagentProgress,
@@ -31,7 +38,9 @@ import type {
 	ToolCall,
 	ToolExecutionContext,
 } from '@/types/core';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
+import {capMessagesForModel} from '@/utils/message-capping';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -83,17 +92,27 @@ export class SubagentExecutor {
 	 * that don't supply a resolver (plain shell, tests).
 	 */
 	private modeResolver?: () => DevelopmentMode;
+	private memoryFinder: MemoryFinder;
+	private projectContextOptions?: ProjectContextOptions;
 
 	constructor(
 		toolManager: ToolManager,
 		parentClient: LLMClient,
 		projectRoot: string = process.cwd(),
 		parentMode: DevelopmentMode = 'normal',
+		options: {
+			memoryFinder?: MemoryFinder;
+			projectContextOptions?: ProjectContextOptions;
+		} = {},
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
 		this.parentMode = parentMode;
+		this.memoryFinder =
+			options.memoryFinder ??
+			new SemanticMemoryManager({cwd: this.projectRoot});
+		this.projectContextOptions = options.projectContextOptions;
 	}
 
 	/**
@@ -162,9 +181,18 @@ export class SubagentExecutor {
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
+			const recalled = await appendRelevantProjectContextWithCount(
+				context.systemMessage,
+				this.buildTaskPrompt(task),
+				this.memoryFinder,
+				{
+					...getProjectContextPreferences(),
+					...this.projectContextOptions,
+				},
+			);
 
 			const messages: Message[] = [
-				{role: 'system', content: context.systemMessage},
+				{role: 'system', content: recalled.systemPrompt},
 				...context.initialMessages,
 			];
 
@@ -483,8 +511,17 @@ export class SubagentExecutor {
 			emitProgress('running');
 			await new Promise(resolve => setTimeout(resolve, 50));
 
+			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+			const systemMessage =
+				messages[0]?.role === 'system' ? messages[0] : undefined;
+			const history = systemMessage ? messages.slice(1) : messages;
+			const cappedHistory = capMessagesForModel(history, maxMessages);
+			const modelMessages = systemMessage
+				? [systemMessage, ...cappedHistory]
+				: cappedHistory;
+
 			const response = await client.chat(
-				messages,
+				modelMessages,
 				tools,
 				{
 					onToken: token => {
@@ -572,6 +609,25 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
+			if (systemMessage) {
+				// Gate on the same view the model receives, so the threshold is not
+				// measured against rows the cap already dropped from the request.
+				const gateInput = capMessagesForModel(messages.slice(1), maxMessages);
+				const compacted = await maybeAutoCompact(
+					gateInput,
+					systemMessage,
+					client,
+					tools,
+					{signal},
+				);
+				// Only adopt the result when compaction actually ran. Otherwise
+				// maybeAutoCompact hands back the capped view it was given, and
+				// writing that in would permanently discard history the cap only
+				// ever meant to hide from a single request.
+				if (compacted !== gateInput) {
+					messages.splice(0, messages.length, systemMessage, ...compacted);
+				}
+			}
 			if (agentId) {
 				streamingText = '';
 				streamingReasoning = '';
@@ -709,7 +765,10 @@ export class SubagentExecutor {
 			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
-			const content = typeof result === 'string' ? result : result.llmContent;
+			const content =
+				typeof result === 'string'
+					? result
+					: (result.llmContent ?? JSON.stringify(result));
 			return truncateToolResult(content);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
