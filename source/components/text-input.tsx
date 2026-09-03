@@ -167,7 +167,15 @@ function TextInput({
 			let nextValue = originalValueRef.current;
 			let nextCursorWidth = 0;
 
-			if (key.ctrl) {
+			if (key.home) {
+				if (showCursor) {
+					nextCursorOffset = 0;
+				}
+			} else if (key.end) {
+				if (showCursor) {
+					nextCursorOffset = originalValueRef.current.length;
+				}
+			} else if (key.ctrl) {
 				if (key.leftArrow) {
 					// Ctrl+Left: jump to start of previous word
 					if (showCursor) {
@@ -189,13 +197,17 @@ function TextInput({
 					switch (input) {
 						case 'a': {
 							// Move cursor to start of line
-							nextCursorOffset = 0;
+							if (showCursor) {
+								nextCursorOffset = 0;
+							}
 							break;
 						}
 
 						case 'e': {
 							// Move cursor to end of line
-							nextCursorOffset = originalValueRef.current.length;
+							if (showCursor) {
+								nextCursorOffset = originalValueRef.current.length;
+							}
 							break;
 						}
 
@@ -219,8 +231,8 @@ function TextInput({
 
 						case 'w': {
 							// Delete previous word (backward-kill-word, newline-aware)
-							if (cursorOffset > 0) {
-								let i = cursorOffset;
+							if (cursorOffsetRef.current > 0) {
+								let i = cursorOffsetRef.current;
 								while (
 									i > 0 &&
 									(originalValueRef.current[i - 1] === ' ' ||
@@ -235,7 +247,7 @@ function TextInput({
 									i--;
 								nextValue =
 									originalValueRef.current.slice(0, i) +
-									originalValueRef.current.slice(cursorOffset);
+									originalValueRef.current.slice(cursorOffsetRef.current);
 								nextCursorOffset = i;
 							}
 
@@ -244,14 +256,19 @@ function TextInput({
 
 						case 'u': {
 							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								cursorOffsetRef.current,
+							);
 							nextCursorOffset = 0;
 							break;
 						}
 
 						case 'k': {
 							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(0, cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								0,
+								cursorOffsetRef.current,
+							);
 							break;
 						}
 
@@ -268,22 +285,34 @@ function TextInput({
 				if (showCursor) {
 					nextCursorOffset++;
 				}
-			} else if (key.backspace || key.delete) {
-				if (cursorOffset > 0) {
+			} else if (key.backspace) {
+				// Backspace deletes the character before the cursor.
+				if (cursorOffsetRef.current > 0) {
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
 						originalValueRef.current.slice(
-							cursorOffset,
+							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
 					nextCursorOffset--;
 				}
+			} else if (key.delete) {
+				// Delete removes the character after the cursor (forward delete).
+				if (cursorOffsetRef.current < originalValueRef.current.length) {
+					nextValue =
+						originalValueRef.current.slice(0, cursorOffsetRef.current) +
+						originalValueRef.current.slice(
+							cursorOffsetRef.current + 1,
+							originalValueRef.current.length,
+						);
+					// Cursor stays in place — forward delete doesn't move it.
+				}
 			} else {
 				nextValue =
-					originalValueRef.current.slice(0, cursorOffset) +
+					originalValueRef.current.slice(0, cursorOffsetRef.current) +
 					input +
 					originalValueRef.current.slice(
-						cursorOffset,
+						cursorOffsetRef.current,
 						originalValueRef.current.length,
 					);
 				nextCursorOffset += input.length;

@@ -4,7 +4,7 @@ import {PlaceholderType} from '../types/hooks';
 import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
-import {useInputState} from './useInputState';
+import {MAX_UNDO_STACK, useInputState} from './useInputState';
 
 console.log('\nuseInputState.spec.ts');
 
@@ -182,6 +182,96 @@ test('redo does nothing with empty stack', t => {
 
 	t.is(currentHook!.input, 'text');
 	t.is(currentHook!.redoStack.length, 0);
+});
+
+// Test rapid consecutive undo without re-render (stale-closure guard).
+// Two undo() calls in the same tick must each step back one state.
+test('rapid consecutive undo steps back two states without re-render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+
+	// Two undo calls with no re-render — both read latest refs.
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'a');
+	// After undoing 'abc' -> 'ab' -> 'a', one entry (the empty start state)
+	// remains on the undo stack, and the two undone states sit on the redo stack.
+	t.is(currentHook!.undoStack.length, 1);
+	t.is(currentHook!.redoStack.length, 2);
+});
+
+// Test rapid consecutive redo without re-render
+test('rapid consecutive redo steps forward two states without re-render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	// Undo twice to populate the redo stack
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'a');
+	t.is(currentHook!.redoStack.length, 2);
+
+	// Two redo calls with no re-render — both step forward
+	currentHook!.redo();
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+	t.is(currentHook!.redoStack.length, 0);
+	// Redoing pushes each state back: ['', 'a', 'ab'] after stepping back to 'abc'.
+	t.is(currentHook!.undoStack.length, 3);
+});
+
+// Test that a burst of updateInput calls in the SAME tick records one correct
+// undo entry per call (stale-closure guard #4). A single stdin batch can deliver
+// several keystrokes before React re-renders; each must push its own predecessor
+// so rapid consecutive undos unwind every keystroke.
+test('rapid same-tick updateInput calls each record a distinct undo entry', t => {
+	const {hook, instance} = setupTest();
+
+	// No rerender between these — they arrive in the same batch/tick.
+	hook.updateInput('a');
+	hook.updateInput('ab');
+	hook.updateInput('abc');
+
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+	// Each call pushed its own predecessor, so there is one entry per step:
+	// [init, 'a', 'ab'].
+	t.is(currentHook!.undoStack.length, 3);
+
+	// Three undos, also in the same tick, must unwind all the way back.
+	currentHook!.undo();
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, '');
+	t.is(currentHook!.undoStack.length, 0);
+	t.is(currentHook!.redoStack.length, 3);
 });
 
 // Test that new action clears redo stack
@@ -558,6 +648,106 @@ test('multiple redos work correctly', t => {
 	t.is(currentHook!.redoStack.length, 0);
 });
 
+// --- Strengthened undo/redo invariant tests (issue #4) ---
+// Beyond asserting the visible input, these pin the exact entries that move
+// between the undo and redo stacks, protecting against off-by-one or
+// wrong-entry bugs that a length-only check would miss.
+
+test('undo pops the exact current state onto the redo stack', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	// undoStack entry (top) == the immediately-previous state 'ab'
+	const undoBefore = currentHook!.undoStack.map(s => s.displayValue);
+	t.deepEqual(undoBefore, ['', 'a', 'ab']);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'ab');
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a']);
+	// The undone state 'abc' lands unchanged on top of the redo stack.
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc']);
+});
+
+test('redo pops the exact state back onto the undo stack', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	// After two undos: input 'a', redo holds ['abc', 'ab'] in undo order.
+	t.is(currentHook!.input, 'a');
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc', 'ab']);
+
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	// Redo restores 'ab', removes it from the redo stack, and pushes the
+	// previous current state 'a' back onto the undo stack.
+	t.is(currentHook!.input, 'ab');
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc']);
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a']);
+});
+
+test('undo then redo round-trips the full stack contents losslessly', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	// Fully unwound back to the initial empty state. Every undo pushes the
+	// then-current state onto the redo stack, ending with the last-abandoned
+	// state 'a'.
+	t.is(currentHook!.input, '');
+	t.is(currentHook!.undoStack.length, 0);
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), [
+		'abc',
+		'ab',
+		'a',
+	]);
+
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	// Re-applying all three redos reproduces the original input and drains the
+	// redo stack; each redo pushes the then-current state back onto the undo
+	// stack, rebuilding ['', 'a', 'ab'] exactly.
+	t.is(currentHook!.input, 'abc');
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a', 'ab']);
+	t.is(currentHook!.redoStack.length, 0);
+});
+
 // Test setInputState preserves all placeholder data
 test('setInputState preserves placeholder metadata', t => {
 	const {hook, instance} = setupTest();
@@ -870,4 +1060,58 @@ test('cleanup function is defined', t => {
 
 	// Cleanup will be called when the test ends via test.afterEach
 	instance.unmount();
+});
+
+// Test undo stack is capped to prevent unbounded memory growth
+test('undo stack is capped at MAX_UNDO_STACK', t => {
+	const {hook, instance} = setupTest();
+
+	// Push well beyond the cap (2x) to force rollover from the front. Use
+	// distinct small inputs (all < 10 chars) to avoid paste detection; each
+	// update creates exactly one undo entry.
+	const overBy = MAX_UNDO_STACK * 2;
+	for (let i = 0; i < overBy; i++) {
+		hook.updateInput(`x${i}`);
+		instance.rerender(<TestComponent />);
+	}
+
+	// The stack must be clamped to exactly the cap, never a hair more.
+	t.is(currentHook!.undoStack.length, MAX_UNDO_STACK);
+
+	// The most recent input still wins (current isn't itself an undo entry).
+	t.is(currentHook!.input, `x${overBy - 1}`);
+
+	// Undo still walks back from the capped stack without growing it back up.
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.true(currentHook!.undoStack.length < MAX_UNDO_STACK);
+});
+
+// Test redo stack is capped to prevent unbounded memory growth (#5).
+// Every undo moves one InputState onto the redo stack, so it must obey the
+// same ceiling as the undo stack rather than relying on the undo cap alone.
+test('redo stack is capped at MAX_UNDO_STACK', t => {
+	const {hook, instance} = setupTest();
+
+	// Fill the undo stack right up to the cap.
+	for (let i = 0; i < MAX_UNDO_STACK; i++) {
+		hook.updateInput(`y${i}`);
+		instance.rerender(<TestComponent />);
+	}
+
+	// Undo the whole stack: each call pushes current onto the redo stack.
+	for (let i = 0; i < MAX_UNDO_STACK; i++) {
+		currentHook!.undo();
+		instance.rerender(<TestComponent />);
+	}
+
+	// The redo stack must never exceed the cap.
+	t.true(currentHook!.redoStack.length <= MAX_UNDO_STACK);
+
+	// Redo still restores from the (possibly clamped) redo stack.
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	t.true(currentHook!.redoStack.length < MAX_UNDO_STACK);
 });
