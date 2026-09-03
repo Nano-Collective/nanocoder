@@ -233,6 +233,90 @@ Each of those drops a stub file in the right flat dir and chains into an
 AI-assisted design conversation so the model can help fill in the
 frontmatter and body.
 
+## Installing a skill from a repository
+
+A bundle is one shareable artifact, so it can be installed straight from a
+git repository:
+
+```
+nanocoder skills add pr-reviewer                       resolve the name through the index
+nanocoder skills add Nano-Collective/nanocoder-skills  owner/repo shorthand
+nanocoder skills add https://example.com/skills.git    any git URL
+nanocoder skills add ./local-checkout                  a path on disk
+```
+
+Flags:
+
+```
+--ref <ref>       branch, tag, or commit to clone
+--subdir <path>   where the bundle sits inside the repo
+--global          install into the config dir instead of this project
+--force           replace an existing skill of the same name
+--yes             skip the trust prompt (for scripts and CI)
+--index <url>     use a different skills.json for name resolution
+```
+
+Without `--subdir`, the manifest is looked for at the repo root, then at
+`skills/<name>/`, then across a one-directory-per-bundle layout. A repo with
+several bundles and no `--subdir` lists the candidates rather than guessing.
+
+### The trust prompt
+
+Installing a skill means running its code: a bundle tool is a shell script,
+`approval: never` skips confirmation entirely, and a `subscribe:` block makes
+the daemon fire it unattended. Nothing is written into the project until you
+have seen what that means, so the prompt names every tool with its approval
+policy and every subscription with its trigger:
+
+```
+Skill "pr-reviewer" v0.1.0 by nano-collective
+  Reviews pull requests and posts findings.
+
+  from: https://github.com/Nano-Collective/nanocoder-skills
+  into: /repo/.nanocoder/skills/pr-reviewer
+
+  Commands: /pr-reviewer:review
+  Agent:    reviewer
+  Tools (visible only to this skill's agent):
+    - gh_pr_diff · shell script · approval: never (runs WITHOUT asking) · read-only
+  Event subscriptions (the daemon fires these unattended):
+    - file.changed → agent:reviewer · paths src/**
+
+Installing a skill means running its code. Only install skills you trust.
+Install this skill? [y/N]
+```
+
+Before you ever see that prompt the bundle has been shallow-cloned into a
+temp dir, had its `.git` stripped, been rejected if it contains a symlink (a
+bundle is markdown and YAML; a symlink is only ever an escape attempt), and
+been validated by the same linter `/skills check` runs. Declining leaves the
+project untouched. Accepting lands the bundle through the same copy the
+`promote` / `demote` commands use, so it refuses to overwrite an existing
+skill unless you pass `--force`.
+
+### The index
+
+Bare names resolve through a plain `skills.json` file - a list, hosted in a
+git repo, not a registry service:
+
+```json
+{
+  "skills": [
+    {
+      "name": "pr-reviewer",
+      "description": "Reviews pull requests and posts findings.",
+      "repo": "https://github.com/Nano-Collective/nanocoder-skills",
+      "subdir": "skills/pr-reviewer"
+    }
+  ]
+}
+```
+
+Point `NANOCODER_SKILLS_INDEX` (or `--index`) at another URL, or at a local
+file, to use a different list - a team can check one into its own repo. If
+the index promises one name and the cloned manifest declares another, the
+install is refused.
+
 ## Sharing skills across repos
 
 Skills load from three levels, highest priority first:

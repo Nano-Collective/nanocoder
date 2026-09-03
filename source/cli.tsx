@@ -72,6 +72,25 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder skills <sub>` — fast path, only loads the skill
+// installer (no Ink, no providers, no tool registry).
+if (args[0] === 'skills') {
+	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
+	if (args[1] !== 'add') {
+		console.error(SKILLS_CLI_USAGE);
+		process.exit(args[1] ? 1 : 0);
+	}
+	const result = await runSkillsCli({
+		projectRoot: process.cwd(),
+		args: args.slice(2),
+	});
+	if (result.output) {
+		if (result.exitCode === 0) console.log(result.output);
+		else console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder init` without booting the interactive app. The shared
 // initializer is also used by /init, so both entry points keep identical file
 // generation and overwrite behavior.
@@ -136,6 +155,9 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+  skills add <target>             Install a skill bundle from a git repository.
+                                  <target> is an index name, owner/repo, a git URL, or a local path.
+                                  Flags: --ref, --subdir, --global, --force, --yes, --index.
 
 Options:
   -v, --version       Show version number
@@ -171,6 +193,8 @@ Options:
 
 Examples:
   nanocoder init --preset nextjs
+  nanocoder skills add pr-reviewer
+  nanocoder skills add Nano-Collective/nanocoder-skills --subdir skills/pr-reviewer
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
