@@ -113,7 +113,7 @@ export default function UserInput({
 	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
-	const inputWrapWidth = boxWidth - 3;
+	const inputWrapWidth = boxWidth;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
@@ -1029,19 +1029,7 @@ export default function UserInput({
 				</Text>
 			)}
 
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={isBashMode ? colors.tool : colors.primary}
-			>
+			<Box flexDirection="column" marginTop={1} width={boxWidth}>
 				{/* Input row */}
 				<Box>
 					{input.length === 0 && (
