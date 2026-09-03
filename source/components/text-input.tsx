@@ -219,8 +219,8 @@ function TextInput({
 
 						case 'w': {
 							// Delete previous word (backward-kill-word, newline-aware)
-							if (cursorOffset > 0) {
-								let i = cursorOffset;
+							if (cursorOffsetRef.current > 0) {
+								let i = cursorOffsetRef.current;
 								while (
 									i > 0 &&
 									(originalValueRef.current[i - 1] === ' ' ||
@@ -235,7 +235,7 @@ function TextInput({
 									i--;
 								nextValue =
 									originalValueRef.current.slice(0, i) +
-									originalValueRef.current.slice(cursorOffset);
+									originalValueRef.current.slice(cursorOffsetRef.current);
 								nextCursorOffset = i;
 							}
 
@@ -244,14 +244,19 @@ function TextInput({
 
 						case 'u': {
 							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								cursorOffsetRef.current,
+							);
 							nextCursorOffset = 0;
 							break;
 						}
 
 						case 'k': {
 							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(0, cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								0,
+								cursorOffsetRef.current,
+							);
 							break;
 						}
 
@@ -269,21 +274,21 @@ function TextInput({
 					nextCursorOffset++;
 				}
 			} else if (key.backspace || key.delete) {
-				if (cursorOffset > 0) {
+				if (cursorOffsetRef.current > 0) {
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
 						originalValueRef.current.slice(
-							cursorOffset,
+							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
 					nextCursorOffset--;
 				}
 			} else {
 				nextValue =
-					originalValueRef.current.slice(0, cursorOffset) +
+					originalValueRef.current.slice(0, cursorOffsetRef.current) +
 					input +
 					originalValueRef.current.slice(
-						cursorOffset,
+						cursorOffsetRef.current,
 						originalValueRef.current.length,
 					);
 				nextCursorOffset += input.length;
