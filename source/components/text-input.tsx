@@ -167,7 +167,11 @@ function TextInput({
 			let nextValue = originalValueRef.current;
 			let nextCursorWidth = 0;
 
-			if (key.ctrl) {
+			if (key.home) {
+				nextCursorOffset = 0;
+			} else if (key.end) {
+				nextCursorOffset = originalValueRef.current.length;
+			} else if (key.ctrl) {
 				if (key.leftArrow) {
 					// Ctrl+Left: jump to start of previous word
 					if (showCursor) {
