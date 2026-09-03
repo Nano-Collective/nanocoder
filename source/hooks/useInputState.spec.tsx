@@ -184,6 +184,66 @@ test('redo does nothing with empty stack', t => {
 	t.is(currentHook!.redoStack.length, 0);
 });
 
+// Test rapid consecutive undo without re-render (stale-closure guard).
+// Two undo() calls in the same tick must each step back one state.
+test('rapid consecutive undo steps back two states without re-render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+
+	// Two undo calls with no re-render — both read latest refs.
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'a');
+	// After undoing 'abc' -> 'ab' -> 'a', one entry (the empty start state)
+	// remains on the undo stack, and the two undone states sit on the redo stack.
+	t.is(currentHook!.undoStack.length, 1);
+	t.is(currentHook!.redoStack.length, 2);
+});
+
+// Test rapid consecutive redo without re-render
+test('rapid consecutive redo steps forward two states without re-render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	// Undo twice to populate the redo stack
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'a');
+	t.is(currentHook!.redoStack.length, 2);
+
+	// Two redo calls with no re-render — both step forward
+	currentHook!.redo();
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+	t.is(currentHook!.redoStack.length, 0);
+	// Redoing pushes each state back: ['', 'a', 'ab'] after stepping back to 'abc'.
+	t.is(currentHook!.undoStack.length, 3);
+});
+
 // Test that new action clears redo stack
 test('new action after undo clears redo stack', t => {
 	const {hook, instance} = setupTest();
