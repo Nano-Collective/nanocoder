@@ -277,7 +277,8 @@ function TextInput({
 				if (showCursor) {
 					nextCursorOffset++;
 				}
-			} else if (key.backspace || key.delete) {
+			} else if (key.backspace) {
+				// Backspace deletes the character before the cursor.
 				if (cursorOffsetRef.current > 0) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
@@ -286,6 +287,17 @@ function TextInput({
 							originalValueRef.current.length,
 						);
 					nextCursorOffset--;
+				}
+			} else if (key.delete) {
+				// Delete removes the character after the cursor (forward delete).
+				if (cursorOffsetRef.current < originalValueRef.current.length) {
+					nextValue =
+						originalValueRef.current.slice(0, cursorOffsetRef.current) +
+						originalValueRef.current.slice(
+							cursorOffsetRef.current + 1,
+							originalValueRef.current.length,
+						);
+					// Cursor stays in place — forward delete doesn't move it.
 				}
 			} else {
 				nextValue =
