@@ -55,10 +55,22 @@ export function useInputState() {
 	// Cached line count for performance
 	const [cachedLineCount, setCachedLineCount] = useState(1);
 
+	// Cap the undo stack so a long composition can't grow it unbounded.
+	// Every keystroke/paste pushes one entry, and each entry holds a full
+	// InputState — without a ceiling the array (and its copies) grows
+	// linearly with input length. 100 steps is far beyond any realistic
+	// undo depth while keeping memory bounded.
+	const MAX_UNDO_STACK = 100;
+
 	// Helper to push current state to undo stack
 	const pushToUndoStack = useCallback(
 		(newState: InputState) => {
-			setUndoStack(prev => [...prev, currentState]);
+			setUndoStack(prev => {
+				if (prev.length >= MAX_UNDO_STACK) {
+					return [...prev.slice(-(MAX_UNDO_STACK - 1)), currentState];
+				}
+				return [...prev, currentState];
+			});
 			setRedoStack([]); // Clear redo stack on new action
 			setCurrentState(newState);
 		},

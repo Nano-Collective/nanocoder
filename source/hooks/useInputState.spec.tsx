@@ -871,3 +871,24 @@ test('cleanup function is defined', t => {
 	// Cleanup will be called when the test ends via test.afterEach
 	instance.unmount();
 });
+
+// Test undo stack is capped to prevent unbounded memory growth
+test('undo stack is capped at MAX_UNDO_STACK', t => {
+	const {hook, instance} = setupTest();
+
+	// Push well beyond the 100-entry cap. Use distinct single-char inputs
+	// (all < 10 chars) to avoid paste detection, each creating one undo entry.
+	for (let i = 0; i < 150; i++) {
+		hook.updateInput(`x${i}`);
+		instance.rerender(<TestComponent />);
+	}
+
+	// The stack must never exceed the cap.
+	t.true(currentHook!.undoStack.length <= 100);
+
+	// Undo should still work normally from the capped stack.
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.true(currentHook!.undoStack.length <= 100);
+});
