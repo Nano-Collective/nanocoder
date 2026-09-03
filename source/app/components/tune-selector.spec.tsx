@@ -21,6 +21,7 @@ const mockTheme = {
 const mockTitleShape = {
 	currentTitleShape: 'pill' as const,
 	setCurrentTitleShape: () => {},
+	commitTitleShape: () => {},
 };
 
 function Wrapper({children}: {children: React.ReactNode}) {

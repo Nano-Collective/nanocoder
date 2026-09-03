@@ -33,6 +33,7 @@ const testThemeContext = {
 const testTitleShapeContext = {
 	currentTitleShape: 'pill' as const,
 	setCurrentTitleShape: () => {},
+	commitTitleShape: () => {},
 };
 
 /**

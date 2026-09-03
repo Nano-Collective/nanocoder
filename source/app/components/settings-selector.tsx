@@ -309,14 +309,21 @@ export function SettingsTitleShapePanel({
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
-	const {currentTitleShape, setCurrentTitleShape} = useTitleShape();
+	const {currentTitleShape, setCurrentTitleShape, commitTitleShape} =
+		useTitleShape();
 	const [originalShape] = useState<TitleShape>(currentTitleShape);
 
 	useInput((_, key) => {
 		if (key.escape) {
+			// Esc/Shift+Tab = cancel. Navigation only previews via
+			// setCurrentTitleShape (in-memory, never persisted), so revert the
+			// in-memory preview back to the shape the panel was opened with
+			// before navigating away. Nothing is written to disk on cancel.
+			setCurrentTitleShape(originalShape);
 			onCancel();
 		}
 		if (key.shift && key.tab) {
+			setCurrentTitleShape(originalShape);
 			onBack();
 		}
 	});
@@ -411,11 +418,14 @@ export function SettingsTitleShapePanel({
 	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: TitleShape}) => {
-		setCurrentTitleShape(item.value);
+		// Only commit (persist to disk) on an explicit Enter.
+		commitTitleShape(item.value);
 		onBack();
 	};
 
 	const handleHighlight = (item: {label: string; value: TitleShape}) => {
+		// Preview only — updates the in-memory app title live but does NOT
+		// persist. Canceling (Esc/Shift+Tab) reverts this with no disk write.
 		setCurrentTitleShape(item.value);
 	};
 
