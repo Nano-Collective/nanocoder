@@ -28,13 +28,22 @@ interface ValueRef {
 function ControlledTextInput({
 	valueRef,
 	initialValue = '',
+	showCursor = true,
 }: {
 	valueRef: ValueRef;
 	initialValue?: string;
+	showCursor?: boolean;
 }) {
 	const [value, setValue] = useState(initialValue);
 	valueRef.current = value;
-	return <TextInput value={value} onChange={setValue} focus={true} />;
+	return (
+		<TextInput
+			value={value}
+			onChange={setValue}
+			focus={true}
+			showCursor={showCursor}
+		/>
+	);
 }
 
 // Write a key then wait a tick for Ink to process it.
@@ -150,5 +159,43 @@ test('component Home on empty value leaves cursor at 0 (typing not affected)', a
 
 	await waitForValue(valueRef, v => v === 'x');
 	t.is(valueRef.current, 'x');
+	unmount();
+});
+
+// --- Home / End with showCursor={false} (issue #8) ---
+// When the cursor is hidden, cursor-movement keys must be no-ops to match the
+// other navigation bindings (arrows, Ctrl+Left/Right, Ctrl+B/F) that all guard
+// on showCursor. A Home/End that still moves an invisible cursor would desync
+// the next insert.
+
+test('component Home does not move cursor when showCursor is false', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" showCursor={false} />,
+	);
+
+	// Home is ignored, so typing still appends at the end (cursor stayed put).
+	await press(stdin, '\u001b[H');
+	await press(stdin, 'x');
+
+	await waitForValue(valueRef, v => v === 'abcx');
+	t.is(valueRef.current, 'abcx');
+	unmount();
+});
+
+test('component End does not move cursor when showCursor is false', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" showCursor={false} />,
+	);
+
+	// Navigate to the start is also guarded; with showCursor=false even that
+	// must not move, so a subsequent insertion lands at the end.
+	await press(stdin, '\u001b[H');
+	await press(stdin, '\u001b[F');
+	await press(stdin, 'x');
+
+	await waitForValue(valueRef, v => v === 'abcx');
+	t.is(valueRef.current, 'abcx');
 	unmount();
 });
