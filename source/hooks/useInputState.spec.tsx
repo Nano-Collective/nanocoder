@@ -244,6 +244,36 @@ test('rapid consecutive redo steps forward two states without re-render', t => {
 	t.is(currentHook!.undoStack.length, 3);
 });
 
+// Test that a burst of updateInput calls in the SAME tick records one correct
+// undo entry per call (stale-closure guard #4). A single stdin batch can deliver
+// several keystrokes before React re-renders; each must push its own predecessor
+// so rapid consecutive undos unwind every keystroke.
+test('rapid same-tick updateInput calls each record a distinct undo entry', t => {
+	const {hook, instance} = setupTest();
+
+	// No rerender between these — they arrive in the same batch/tick.
+	hook.updateInput('a');
+	hook.updateInput('ab');
+	hook.updateInput('abc');
+
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'abc');
+	// Each call pushed its own predecessor, so there is one entry per step:
+	// [init, 'a', 'ab'].
+	t.is(currentHook!.undoStack.length, 3);
+
+	// Three undos, also in the same tick, must unwind all the way back.
+	currentHook!.undo();
+	currentHook!.undo();
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, '');
+	t.is(currentHook!.undoStack.length, 0);
+	t.is(currentHook!.redoStack.length, 3);
+});
+
 // Test that new action clears redo stack
 test('new action after undo clears redo stack', t => {
 	const {hook, instance} = setupTest();

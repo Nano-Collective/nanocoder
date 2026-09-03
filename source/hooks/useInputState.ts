@@ -85,26 +85,37 @@ export function useInputState() {
 	const [cachedLineCount, setCachedLineCount] = useState(1);
 
 	// Helper to push current state to undo stack.
-	const pushToUndoStack = useCallback(
-		(newState: InputState) => {
-			setUndoStack(prev => {
-				if (prev.length >= MAX_UNDO_STACK) {
-					return [...prev.slice(-(MAX_UNDO_STACK - 1)), currentState];
-				}
-				return [...prev, currentState];
-			});
-			setRedoStack([]); // Clear redo stack on new action
-			setCurrentState(newState);
-			// Keep the ref in lockstep so undo/redo called in the same tick
-			// capture the latest value.
-			currentStateRef.current = newState;
-		},
-		[currentState],
-	);
+	//
+	// Captures the previous state from currentStateRef EAGERLY (before any state
+	// is scheduled) so that multiple updateInput calls in the same stdin batch
+	// each record the right predecessor. Reading the ref lazily inside the
+	// functional updater would capture the already-advanced value at flush time.
+	// The ref is kept in lockstep by the assignment at the bottom of this
+	// function, so subsequent same-tick updateInput calls see the latest value.
+	const pushToUndoStack = useCallback((newState: InputState) => {
+		const previous = currentStateRef.current;
+		setUndoStack(prev => {
+			if (prev.length >= MAX_UNDO_STACK) {
+				return [...prev.slice(-(MAX_UNDO_STACK - 1)), previous];
+			}
+			return [...prev, previous];
+		});
+		setRedoStack([]); // Clear redo stack on new action
+		setCurrentState(newState);
+		// Keep the ref in lockstep so undo/redo and subsequent same-tick
+		// updateInput calls capture the latest value.
+		currentStateRef.current = newState;
+	}, []);
 
 	// Update input with paste detection and atomic deletion
+	//
+	// Reads state from currentStateRef (the synchronous source of truth) rather
+	// than the closure value so that a burst of updateInput calls within one
+	// stdin batch each see the newest committed state (undo/redo fix #4).
 	const updateInput = useCallback(
 		(newInput: string) => {
+			const currentState = currentStateRef.current;
+
 			// First, check for atomic deletion (placeholder removal)
 			const atomicDeletionResult = handleAtomicDeletion(currentState, newInput);
 			if (atomicDeletionResult) {
@@ -299,7 +310,7 @@ export function useInputState() {
 				);
 			}, 50);
 		},
-		[currentState, pushToUndoStack],
+		[pushToUndoStack],
 	);
 
 	// Insert a paste the terminal told us about (bracketed paste, DECSET
