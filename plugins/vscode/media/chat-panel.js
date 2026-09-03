@@ -2265,6 +2265,10 @@
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
+			const replayedUsage = update._meta && update._meta['nanocoder/response-usage'];
+			if (replayedUsage) {
+				appendUsageIndicator(replayedUsage, replayedUsage.cost);
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
 			// Whitespace-only reasoning is not worth a section of its own: it
