@@ -314,11 +314,9 @@ export function SettingsTitleShapePanel({
 
 	useInput((_, key) => {
 		if (key.escape) {
-			setCurrentTitleShape(originalShape);
 			onCancel();
 		}
 		if (key.shift && key.tab) {
-			setCurrentTitleShape(originalShape);
 			onBack();
 		}
 	});
