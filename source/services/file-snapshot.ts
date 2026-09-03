@@ -3,9 +3,25 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
+import type {CaptureResult, SkippedFile} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
+
+/**
+ * `git diff --name-only HEAD` lists files deleted in the working tree, so a
+ * deleted path reaches captureFiles and fails with ENOENT. That is ordinary
+ * work - delete a file, take a checkpoint - and recording it as a gap would
+ * make every later restore of that checkpoint warn about something that is
+ * not missing at all.
+ */
+function isMissingFile(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOENT'
+	);
+}
 
 /**
  * Service for capturing and restoring file snapshots for checkpoints
@@ -18,35 +34,56 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Capture the contents of specified files
+	 * Capture the contents of specified files.
+	 *
+	 * Read as bytes, never as text. Snapshots cover whatever git reports as
+	 * modified, which includes images, .vsix bundles and any other binary a
+	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
+	 * with U+FFFD, and since the checkpoint copy is written from this map the
+	 * original bytes would be gone at save time with nothing left to recover.
+	 *
+	 * Files that cannot be read are reported alongside the ones that could, not
+	 * just logged: the caller records them so a later restore can say what it
+	 * did not put back. A file that is simply gone is not one of them - see
+	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, string>> {
-		const snapshots = new Map<string, string>();
+	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
+		const snapshots = new Map<string, Buffer>();
+		const skipped: SkippedFile[] = [];
 
 		for (const filePath of filePaths) {
+			// Normalized up front so a skipped file is keyed the same way a
+			// captured one is; filesChanged and skippedFiles are read side by side.
+			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
+			const relativePath = path.relative(this.workspaceRoot, absolutePath);
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
-				const content = await fs.readFile(absolutePath, 'utf-8');
-				const relativePath = path.relative(this.workspaceRoot, absolutePath);
-				const normalizedPath = relativePath.split(path.sep).join('/');
+				const content = await fs.readFile(absolutePath);
 				snapshots.set(normalizedPath, content);
 			} catch (error) {
+				const reason = formatError(error);
+				if (!isMissingFile(error)) {
+					skipped.push({path: normalizedPath, reason});
+				}
+				// Logged either way: a deleted file is not a gap, but it is still
+				// worth seeing in the log when a capture comes out short.
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
-						error: formatError(error),
+						error: reason,
 					},
 				});
 			}
 		}
 
-		return snapshots;
+		return {snapshots, skipped};
 	}
 
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, string>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
 		const errors: string[] = [];
 
 		for (const [relativePath, content] of snapshots) {
@@ -64,7 +101,7 @@ export class FileSnapshotService {
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content, 'utf-8');
+				await fs.writeFile(absolutePath, content);
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -90,11 +127,14 @@ export class FileSnapshotService {
 	 * fell outside the cap looks untouched, and its before-image would be taken
 	 * from HEAD, discarding the user's uncommitted work on restore.
 	 *
-	 * `available` is false when git could not answer at all.
+	 * `truncatedCount` reports how many the cap dropped rather than only that it
+	 * fired, so the number reaches the checkpoint's metadata and, from there, a
+	 * later restore. `available` is false when git could not answer at all.
 	 */
 	getModifiedFilesResult(): {
 		files: string[];
 		truncated: boolean;
+		truncatedCount: number;
 		available: boolean;
 	} {
 		try {
@@ -142,18 +182,29 @@ export class FileSnapshotService {
 				return {
 					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
 					truncated: true,
+					truncatedCount: filtered.length - MAX_CHECKPOINT_FILES,
 					available: true,
 				};
 			}
 
-			return {files: filtered, truncated: false, available: true};
+			return {
+				files: filtered,
+				truncated: false,
+				truncatedCount: 0,
+				available: true,
+			};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return {files: [], truncated: false, available: false};
+			return {
+				files: [],
+				truncated: false,
+				truncatedCount: 0,
+				available: false,
+			};
 		}
 	}
 
@@ -192,10 +243,10 @@ export class FileSnapshotService {
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, string>): number {
+	getSnapshotSize(snapshots: Map<string, Buffer>): number {
 		let totalSize = 0;
 		for (const content of snapshots.values()) {
-			totalSize += Buffer.byteLength(content, 'utf-8');
+			totalSize += content.byteLength;
 		}
 		return totalSize;
 	}
@@ -204,7 +255,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, string>,
+		snapshots: Map<string, Buffer>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 
