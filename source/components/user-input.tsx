@@ -37,6 +37,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -155,6 +156,7 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		insertPaste,
 	} = inputState;
 
 	const {
@@ -181,6 +183,22 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Real pastes, as reported by the terminal via bracketed paste.
+	useEffect(() => {
+		if (disabled || !effectiveFocus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			insertPaste(payload);
+			// Remount TextInput so its cursor follows the appended text.
+			setTextInputKey(prev => prev + 1);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (
@@ -723,6 +741,12 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+t to collapse/expand the live task list (always available)
+		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+			onToggleTaskList();
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -970,6 +994,8 @@ export default function UserInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
 				/>
 			</Box>
 		);
@@ -1011,7 +1037,6 @@ export default function UserInput({
 							handleEnter={false}
 						/>
 					</Box>
-
 					{showClearMessage && (
 						<Text color={colors.secondary}>Press escape again to clear</Text>
 					)}
@@ -1085,20 +1110,6 @@ export default function UserInput({
 							})}
 						</Box>
 					)}
-					{isBusy && (
-						<Box marginTop={1}>
-							<Text color={colors.secondary}>
-								<Spinner type="dots" /> Press Esc to cancel
-								{onToggleCompactDisplay && (
-									<Text>
-										{' '}
-										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-										{isNarrow ? '' : 'tool results'}
-									</Text>
-								)}
-							</Text>
-						</Box>
-					)}
 				</Box>
 			</Box>
 
@@ -1122,6 +1133,8 @@ export default function UserInput({
 				tune={tune}
 				currentModel={currentModel}
 				activeEditor={activeEditor}
+				taskInfo={taskInfo}
+				isSaving={isSaving}
 			/>
 		</>
 	);
