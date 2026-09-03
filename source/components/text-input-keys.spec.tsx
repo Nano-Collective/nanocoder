@@ -183,7 +183,7 @@ test('component Home does not move cursor when showCursor is false', async t => 
 	unmount();
 });
 
-test('component End does not move cursor when showCursor is false', async t => {
+	test('component End does not move cursor when showCursor is false', async t => {
 	const valueRef: ValueRef = {current: ''};
 	const {stdin, unmount} = render(
 		<ControlledTextInput valueRef={valueRef} initialValue="abc" showCursor={false} />,
@@ -197,5 +197,58 @@ test('component End does not move cursor when showCursor is false', async t => {
 
 	await waitForValue(valueRef, v => v === 'abcx');
 	t.is(valueRef.current, 'abcx');
+	unmount();
+});
+
+// --- Ctrl+A / Ctrl+E with showCursor={false} (issue #2) ---
+// The readline "go to start/end of line" binds must honour showCursor exactly
+// like arrows, Home/End and Ctrl+B/F — otherwise an invisible cursor desyncs
+// the next insert.
+
+test('component Ctrl+A does not move cursor when showCursor is false', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" showCursor={false} />,
+	);
+
+	// Ctrl+A (^A) would jump to the start when the cursor is visible; with
+	// showCursor=false it must be ignored, so typing still appends at the end.
+	await press(stdin, '\u0001');
+	await press(stdin, 'x');
+
+	await waitForValue(valueRef, v => v === 'abcx');
+	t.is(valueRef.current, 'abcx');
+	unmount();
+});
+
+test('component Ctrl+E does not move cursor when showCursor is false', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" showCursor={false} />,
+	);
+
+	// Ctrl+E (^E) would jump to the end; with showCursor=false it must be
+	// ignored, so typing appends at the (unchanged) end.
+	await press(stdin, '\u0005');
+	await press(stdin, 'x');
+
+	await waitForValue(valueRef, v => v === 'abcx');
+	t.is(valueRef.current, 'abcx');
+	unmount();
+});
+
+test('component Ctrl+A moves to start when showCursor is true (positive control)', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" />,
+	);
+
+	// With showCursor=true (default), Ctrl+A genuinely jumps to the start, so
+	// the next typed char inserts at 0 — proving the guard is the differentiator.
+	await press(stdin, '\u0001');
+	await press(stdin, 'x');
+
+	await waitForValue(valueRef, v => v === 'xabc');
+	t.is(valueRef.current, 'xabc');
 	unmount();
 });

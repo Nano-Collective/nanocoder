@@ -197,13 +197,17 @@ function TextInput({
 					switch (input) {
 						case 'a': {
 							// Move cursor to start of line
-							nextCursorOffset = 0;
+							if (showCursor) {
+								nextCursorOffset = 0;
+							}
 							break;
 						}
 
 						case 'e': {
 							// Move cursor to end of line
-							nextCursorOffset = originalValueRef.current.length;
+							if (showCursor) {
+								nextCursorOffset = originalValueRef.current.length;
+							}
 							break;
 						}
 
