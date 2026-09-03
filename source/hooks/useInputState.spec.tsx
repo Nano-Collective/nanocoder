@@ -4,7 +4,7 @@ import {PlaceholderType} from '../types/hooks';
 import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
-import {useInputState} from './useInputState';
+import {MAX_UNDO_STACK, useInputState} from './useInputState';
 
 console.log('\nuseInputState.spec.ts');
 
@@ -1036,19 +1036,52 @@ test('cleanup function is defined', t => {
 test('undo stack is capped at MAX_UNDO_STACK', t => {
 	const {hook, instance} = setupTest();
 
-	// Push well beyond the 100-entry cap. Use distinct single-char inputs
-	// (all < 10 chars) to avoid paste detection, each creating one undo entry.
-	for (let i = 0; i < 150; i++) {
+	// Push well beyond the cap (2x) to force rollover from the front. Use
+	// distinct small inputs (all < 10 chars) to avoid paste detection; each
+	// update creates exactly one undo entry.
+	const overBy = MAX_UNDO_STACK * 2;
+	for (let i = 0; i < overBy; i++) {
 		hook.updateInput(`x${i}`);
 		instance.rerender(<TestComponent />);
 	}
 
-	// The stack must never exceed the cap.
-	t.true(currentHook!.undoStack.length <= 100);
+	// The stack must be clamped to exactly the cap, never a hair more.
+	t.is(currentHook!.undoStack.length, MAX_UNDO_STACK);
 
-	// Undo should still work normally from the capped stack.
+	// The most recent input still wins (current isn't itself an undo entry).
+	t.is(currentHook!.input, `x${overBy - 1}`);
+
+	// Undo still walks back from the capped stack without growing it back up.
 	currentHook!.undo();
 	instance.rerender(<TestComponent />);
 
-	t.true(currentHook!.undoStack.length <= 100);
+	t.true(currentHook!.undoStack.length < MAX_UNDO_STACK);
+});
+
+// Test redo stack is capped to prevent unbounded memory growth (#5).
+// Every undo moves one InputState onto the redo stack, so it must obey the
+// same ceiling as the undo stack rather than relying on the undo cap alone.
+test('redo stack is capped at MAX_UNDO_STACK', t => {
+	const {hook, instance} = setupTest();
+
+	// Fill the undo stack right up to the cap.
+	for (let i = 0; i < MAX_UNDO_STACK; i++) {
+		hook.updateInput(`y${i}`);
+		instance.rerender(<TestComponent />);
+	}
+
+	// Undo the whole stack: each call pushes current onto the redo stack.
+	for (let i = 0; i < MAX_UNDO_STACK; i++) {
+		currentHook!.undo();
+		instance.rerender(<TestComponent />);
+	}
+
+	// The redo stack must never exceed the cap.
+	t.true(currentHook!.redoStack.length <= MAX_UNDO_STACK);
+
+	// Redo still restores from the (possibly clamped) redo stack.
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	t.true(currentHook!.redoStack.length < MAX_UNDO_STACK);
 });
