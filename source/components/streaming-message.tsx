@@ -57,7 +57,7 @@ export default memo(function StreamingMessage({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
-	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
+	const textWidth = boxWidth;
 
 	// Only show the tail of the content to keep the render small
 	// and avoid off-screen reflow that causes iTerm2 flickering.

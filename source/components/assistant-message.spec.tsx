@@ -660,11 +660,12 @@ test('parseMarkdownParts inline code stays in text parts', t => {
 });
 
 // ============================================================================
-// Component rendering: code blocks should appear without ┃ border
+// Component rendering: messages should appear without ┃ border
 // ============================================================================
 
-test('AssistantMessage renders code blocks without ┃ border', t => {
-	const message = 'Here is some code:\n```javascript\nconst answer = 42;\n```\nDone.';
+test('AssistantMessage renders code blocks and text without ┃ border', t => {
+	const message =
+		'Here is some code:\n```javascript\nconst answer = 42;\n```\nDone.';
 	const {lastFrame} = render(
 		<MockThemeProvider>
 			<AssistantMessage message={message} model="test-model" />
@@ -672,17 +673,17 @@ test('AssistantMessage renders code blocks without ┃ border', t => {
 	);
 
 	const output = stripAnsi(lastFrame() ?? '');
-	// Code content must appear in the output
+	// Code and text content must appear in the output
 	t.true(output.includes('answer'), 'code content should be present');
-	// Every line containing the code identifier must NOT have ┃ in the same line
-	const codeLines = output.split('\n').filter(l => l.includes('answer'));
-	t.true(codeLines.length > 0, 'code lines should exist');
-	for (const line of codeLines) {
-		t.false(line.includes('┃'), `code line should not have ┃ border: ${line}`);
-	}
-	// Text around the code block should still have the border
-	const textLines = output.split('\n').filter(l => l.includes('┃'));
-	t.true(textLines.length > 0, 'text parts should still have ┃ border');
+	t.true(
+		output.includes('Here is some code:'),
+		'text content should be present',
+	);
+	// Neither code nor text should have the ┃ border character
+	t.false(
+		output.includes('┃'),
+		'AssistantMessage should not have ┃ border on any line',
+	);
 });
 
 test('parseMarkdown does not create bullet list from hyphen in middle of line', t => {
@@ -1055,15 +1056,9 @@ test('AssistantMessage strips leading newlines', t => {
 	const output = stripAnsi(raw);
 	// The message "Hello world" should appear in the output
 	t.true(output.includes('Hello world'));
-	// The content inside the box should not start with newlines
-	// Check the box content line
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(
-			contentMatch[1].startsWith('\n'),
-			'Box content should not start with newline',
-		);
-	}
+	const contentLines = output.split('\n').filter(l => l.includes('Hello world'));
+	t.true(contentLines.length > 0);
+	t.false(contentLines[0].startsWith('\n'), 'Content line should not start with newline');
 });
 
 test('AssistantMessage strips trailing newlines', t => {
@@ -1076,7 +1071,6 @@ test('AssistantMessage strips trailing newlines', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	// The message should appear
 	t.true(output.includes('Hello world'));
-	// The box should not have trailing newlines
 });
 
 test('AssistantMessage strips leading and trailing newlines', t => {
@@ -1092,14 +1086,9 @@ test('AssistantMessage strips leading and trailing newlines', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	// Should have the trimmed content
 	t.true(output.includes('Content'));
-	// Content should not start with newlines
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(
-			contentMatch[1].startsWith('\n'),
-			'Box content should not start with newline',
-		);
-	}
+	const contentLines = output.split('\n').filter(l => l.includes('Content'));
+	t.true(contentLines.length > 0);
+	t.false(contentLines[0].startsWith('\n'), 'Content line should not start with newline');
 });
 
 test('AssistantMessage strips carriage return characters', t => {
@@ -1112,18 +1101,7 @@ test('AssistantMessage strips carriage return characters', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	// Should have the message without CR/LF issues
 	t.true(output.includes('Hello'));
-	// Content should not start with \r or \n
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(
-			contentMatch[1].startsWith('\r'),
-			'Box content should not start with \\r',
-		);
-		t.false(
-			contentMatch[1].startsWith('\n'),
-			'Box content should not start with \\n',
-		);
-	}
+	t.false(output.includes('\r'), 'Output should not contain \\r');
 });
 
 test('AssistantMessage strips whitespace-only content to empty', t => {
@@ -1134,20 +1112,15 @@ test('AssistantMessage strips whitespace-only content to empty', t => {
 	);
 
 	const output = stripAnsi(lastFrame() ?? '');
-	// JSX attribute treats "\n" as literal backslash-n, so input is
-	// `   \n\n   ` (3 spaces + literal `\n\n` + 3 spaces). After trim, only
-	// the literal `\n\n` should remain — the input's surrounding 3-space
-	// runs must be gone. The box adds 1-char padding plus may pad lines to
-	// terminal width with trailing spaces; strip only `┃` and trim trailing
-	// width-padding before asserting the leading 3-space prefix is gone.
 	t.true(output.includes('test-model:'));
-	const boxContent = output
+	const contentLines = output
 		.split('\n')
-		.filter(l => l.includes('┃'))
-		.map(l => l.replace(/^.*?┃/, '').trimEnd());
-	t.true(
-		boxContent.every(l => !l.startsWith('   ') && !l.endsWith('   ')),
-		`Trim should strip surrounding spaces, got: ${JSON.stringify(boxContent)}`,
+		.map(l => l.trim())
+		.filter(Boolean);
+	// No content lines should have leading spaces after trimming
+	t.false(
+		contentLines.slice(1).some(l => l.startsWith('   ')),
+		'No lines should have leading 3 spaces',
 	);
 });
 
@@ -1165,4 +1138,23 @@ test('AssistantMessage preserves internal newlines', t => {
 	t.true(output.includes('Line 1'));
 	t.true(output.includes('Line 2'));
 	t.true(output.includes('Line 3'));
+});
+
+test('Issue 1113: AssistantMessage multi-line text has zero ┃ border characters for clean terminal copy', t => {
+	const message =
+		'First line of response.\nSecond line of response.\nThird line of response.';
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message={message} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.false(
+		output.includes('┃'),
+		'output should not contain ┃ border characters',
+	);
+	t.true(output.includes('First line of response.'));
+	t.true(output.includes('Second line of response.'));
+	t.true(output.includes('Third line of response.'));
 });
