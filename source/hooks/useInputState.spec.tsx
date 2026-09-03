@@ -618,6 +618,106 @@ test('multiple redos work correctly', t => {
 	t.is(currentHook!.redoStack.length, 0);
 });
 
+// --- Strengthened undo/redo invariant tests (issue #4) ---
+// Beyond asserting the visible input, these pin the exact entries that move
+// between the undo and redo stacks, protecting against off-by-one or
+// wrong-entry bugs that a length-only check would miss.
+
+test('undo pops the exact current state onto the redo stack', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	// undoStack entry (top) == the immediately-previous state 'ab'
+	const undoBefore = currentHook!.undoStack.map(s => s.displayValue);
+	t.deepEqual(undoBefore, ['', 'a', 'ab']);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, 'ab');
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a']);
+	// The undone state 'abc' lands unchanged on top of the redo stack.
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc']);
+});
+
+test('redo pops the exact state back onto the undo stack', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	// After two undos: input 'a', redo holds ['abc', 'ab'] in undo order.
+	t.is(currentHook!.input, 'a');
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc', 'ab']);
+
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	// Redo restores 'ab', removes it from the redo stack, and pushes the
+	// previous current state 'a' back onto the undo stack.
+	t.is(currentHook!.input, 'ab');
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['abc']);
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a']);
+});
+
+test('undo then redo round-trips the full stack contents losslessly', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('abc');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+
+	// Fully unwound back to the initial empty state. Every undo pushes the
+	// then-current state onto the redo stack, ending with the last-abandoned
+	// state 'a'.
+	t.is(currentHook!.input, '');
+	t.is(currentHook!.undoStack.length, 0);
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), [
+		'abc',
+		'ab',
+		'a',
+	]);
+
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+	currentHook!.redo();
+	instance.rerender(<TestComponent />);
+
+	// Re-applying all three redos reproduces the original input and drains the
+	// redo stack; each redo pushes the then-current state back onto the undo
+	// stack, rebuilding ['', 'a', 'ab'] exactly.
+	t.is(currentHook!.input, 'abc');
+	t.deepEqual(currentHook!.undoStack.map(s => s.displayValue), ['', 'a', 'ab']);
+	t.is(currentHook!.redoStack.length, 0);
+});
+
 // Test setInputState preserves all placeholder data
 test('setInputState preserves placeholder metadata', t => {
 	const {hook, instance} = setupTest();
