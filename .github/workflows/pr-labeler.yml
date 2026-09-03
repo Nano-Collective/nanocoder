@@ -32,7 +32,7 @@ jobs:
               owner,
               repo,
               path: '.github/labeler.yml',
-              ref: context.payload.pull_request.base.sha,
+              ref: context.payload.pull_request.head.sha,
             });
             if (data.type !== 'file' || typeof data.content !== 'string') {
               throw new Error('labeler.yml is not a file');
