@@ -163,6 +163,21 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 
 	try {
 		await toolManager.initializeMCP(config.mcpServers, onProgress);
+
+		// Register MCP prompts as slash commands
+		const mcpClient = toolManager.getMCPClient();
+		if (mcpClient) {
+			const {generateMCPPromptCommands} = await import(
+				'@/mcp/mcp-prompt-commands'
+			);
+			const promptCommands = generateMCPPromptCommands(mcpClient);
+			if (promptCommands.length > 0) {
+				commandRegistry.registerLazy(promptCommands);
+				writeStatus(
+					`Registered ${promptCommands.length} MCP prompt command(s)`,
+				);
+			}
+		}
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}

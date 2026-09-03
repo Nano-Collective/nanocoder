@@ -14,6 +14,12 @@ import {dynamicTool} from 'ai';
 import type {
 	AISDKCoreTool,
 	MCPInitResult,
+	MCPPrompt,
+	MCPPromptResult,
+	MCPResource,
+	MCPResourceContent,
+	MCPSamplingRequest,
+	MCPSamplingResult,
 	MCPServer,
 	MCPTool,
 	MCPToolInputSchema,
@@ -40,9 +46,14 @@ export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
 	private serverTools: Map<string, MCPTool[]> = new Map();
+	private serverResources: Map<string, MCPResource[]> = new Map();
+	private serverPrompts: Map<string, MCPPrompt[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
 	private logger = getLogger();
+	private samplingHandler?: (
+		request: MCPSamplingRequest,
+	) => Promise<MCPSamplingResult>;
 
 	private isToolAutoApproved(toolName: string, serverName: string): boolean {
 		const serverConfig = this.serverConfigs.get(serverName);
@@ -55,6 +66,17 @@ export class MCPClient {
 
 	constructor() {
 		this.logger.debug('MCP client initialized');
+	}
+
+	/**
+	 * Set a handler for sampling requests from MCP servers
+	 * The handler should accept a sampling request and return a completion result
+	 */
+	setSamplingHandler(
+		handler: (request: MCPSamplingRequest) => Promise<MCPSamplingResult>,
+	): void {
+		this.samplingHandler = handler;
+		this.logger.debug('MCP sampling handler registered');
 	}
 
 	/**
@@ -75,10 +97,17 @@ export class MCPClient {
 	// Overridable seam so tests can supply a client with a failing listTools()
 	// without standing up a real transport.
 	protected createClient(): Client {
-		return new Client({
-			name: 'nanocoder-mcp-client',
-			version: '1.0.0',
-		});
+		return new Client(
+			{
+				name: 'nanocoder-mcp-client',
+				version: '1.0.0',
+			},
+			{
+				capabilities: {
+					sampling: {},
+				},
+			},
+		);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -128,6 +157,85 @@ export class MCPClient {
 				// Create and connect client
 				client = this.createClient();
 
+				// Set up sampling request handler if a handler is configured
+				if (this.samplingHandler) {
+					const {CreateMessageRequestSchema} = await import(
+						'@modelcontextprotocol/sdk/types.js'
+					);
+					client.setRequestHandler(
+						CreateMessageRequestSchema,
+						async (request: {
+							params: {
+								messages: Array<{
+									role: string;
+									content: {type: string; text?: string};
+								}>;
+								modelPreferences?: {
+									hints?: Array<{name?: string}>;
+									costPriority?: number;
+									speedPriority?: number;
+									intelligencePriority?: number;
+								};
+								systemPrompt?: string;
+								includeContext?: 'none' | 'thisServer' | 'allServers';
+								temperature?: number;
+								maxTokens: number;
+								stopSequences?: string[];
+								metadata?: Record<string, unknown>;
+							};
+						}) => {
+							this.logger.info('MCP sampling request received', {
+								serverName: normalizedServer.name,
+								messageCount: request.params.messages.length,
+								maxTokens: request.params.maxTokens,
+							});
+
+							try {
+								const samplingRequest: MCPSamplingRequest = {
+									messages: request.params.messages.map(msg => ({
+										role: msg.role as 'user' | 'assistant',
+										content: {
+											type: msg.content.type,
+											text: msg.content.text,
+										},
+									})),
+									modelPreferences: request.params.modelPreferences,
+									systemPrompt: request.params.systemPrompt,
+									includeContext: request.params.includeContext,
+									temperature: request.params.temperature,
+									maxTokens: request.params.maxTokens,
+									stopSequences: request.params.stopSequences,
+									metadata: request.params.metadata,
+								};
+
+								const result = await this.samplingHandler?.(samplingRequest);
+								if (!result) {
+									throw new Error('Sampling handler not configured');
+								}
+
+								this.logger.info('MCP sampling request completed', {
+									serverName: normalizedServer.name,
+									model: result.model,
+									stopReason: result.stopReason,
+								});
+
+								return {
+									role: result.role,
+									content: result.content,
+									model: result.model,
+									stopReason: result.stopReason,
+								};
+							} catch (error) {
+								this.logger.error('MCP sampling request failed', {
+									serverName: normalizedServer.name,
+									error: formatError(error),
+								});
+								throw error;
+							}
+						},
+					);
+				}
+
 				this.logger.debug('MCP client created, attempting connection', {
 					serverName: normalizedServer.name,
 				});
@@ -171,18 +279,71 @@ export class MCPClient {
 					serverName: normalizedServer.name,
 				}));
 
-				// Store client, transport, config, and tools together only after
-				// connection and tool discovery have both succeeded.
+				// List available resources from this server
+				let resources: MCPResource[] = [];
+				try {
+					const resourcesResult = await client.listResources();
+					resources = resourcesResult.resources.map(resource => ({
+						uri: resource.uri,
+						name: resource.name,
+						description: resource.description || undefined,
+						mimeType: resource.mimeType || undefined,
+						serverName: normalizedServer.name,
+					}));
+					this.logger.debug('MCP resources discovered', {
+						serverName: normalizedServer.name,
+						resourceCount: resources.length,
+					});
+				} catch (error) {
+					// Resources are optional, log but don't fail
+					this.logger.debug('MCP server does not support resources', {
+						serverName: normalizedServer.name,
+						error: formatError(error),
+					});
+				}
+
+				// List available prompts from this server
+				let prompts: MCPPrompt[] = [];
+				try {
+					const promptsResult = await client.listPrompts();
+					prompts = promptsResult.prompts.map(prompt => ({
+						name: prompt.name,
+						description: prompt.description || undefined,
+						arguments: prompt.arguments?.map(arg => ({
+							name: arg.name,
+							description: arg.description || undefined,
+							required: arg.required || false,
+						})),
+						serverName: normalizedServer.name,
+					}));
+					this.logger.debug('MCP prompts discovered', {
+						serverName: normalizedServer.name,
+						promptCount: prompts.length,
+					});
+				} catch (error) {
+					// Prompts are optional, log but don't fail
+					this.logger.debug('MCP server does not support prompts', {
+						serverName: normalizedServer.name,
+						error: formatError(error),
+					});
+				}
+
+				// Store client, transport, config, tools, resources, and prompts together only after
+				// connection and discovery have both succeeded.
 				this.clients.set(normalizedServer.name, client);
 				this.transports.set(normalizedServer.name, transport);
 				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
+				this.serverResources.set(normalizedServer.name, resources);
+				this.serverPrompts.set(normalizedServer.name, prompts);
 
 				const finalMetrics = endMetrics(metrics);
 
 				this.logger.info('MCP server connection completed', {
 					serverName: normalizedServer.name,
 					toolCount: tools.length,
+					resourceCount: resources.length,
+					promptCount: prompts.length,
 					duration: `${finalMetrics.duration.toFixed(2)}ms`,
 					memoryDelta: formatMemoryUsage(
 						finalMetrics.memoryUsage || getSafeMemory(),
@@ -245,16 +406,23 @@ export class MCPClient {
 
 					await this.connectToServer(normalizedServer);
 					const tools = this.serverTools.get(normalizedServer.name) || [];
+					const resources =
+						this.serverResources.get(normalizedServer.name) || [];
+					const prompts = this.serverPrompts.get(normalizedServer.name) || [];
 					const result: MCPInitResult = {
 						serverName: normalizedServer.name,
 						success: true,
 						toolCount: tools.length,
+						resourceCount: resources.length,
+						promptCount: prompts.length,
 					};
 					results.push(result);
 
 					this.logger.debug('MCP server connection successful in batch', {
 						serverName: normalizedServer.name,
 						toolCount: tools.length,
+						resourceCount: resources.length,
+						promptCount: prompts.length,
 						correlationId,
 					});
 
@@ -607,6 +775,325 @@ export class MCPClient {
 		}, correlationId);
 	}
 
+	/**
+	 * Gets server information including transport type and URL for remote servers
+	 */
+	getServerInfo(serverName: string):
+		| {
+				name: string;
+				transport: string;
+				url?: string;
+				toolCount: number;
+				resourceCount: number;
+				promptCount: number;
+				connected: boolean;
+				description?: string;
+				tags?: string[];
+				autoApprovedCommands?: string[];
+		  }
+		| undefined {
+		const client = this.clients.get(serverName);
+		const serverConfig = this.serverConfigs.get(serverName);
+		const tools = this.serverTools.get(serverName) || [];
+		const resources = this.serverResources.get(serverName) || [];
+		const prompts = this.serverPrompts.get(serverName) || [];
+
+		if (!client || !serverConfig) {
+			return undefined;
+		}
+
+		return {
+			name: serverName,
+			transport: serverConfig.transport,
+			url: serverConfig.url,
+			toolCount: tools.length,
+			resourceCount: resources.length,
+			promptCount: prompts.length,
+			connected: true,
+			description: serverConfig.description,
+			tags: serverConfig.tags,
+			autoApprovedCommands: serverConfig.alwaysAllow,
+		};
+	}
+
+	/**
+	 * Get all MCP resources from all connected servers
+	 */
+	getAllResources(): MCPResource[] {
+		const resources: MCPResource[] = [];
+
+		this.logger.debug('Building all resources registry from MCP servers', {
+			serverCount: this.serverResources.size,
+			totalResourcesAvailable: Array.from(this.serverResources.values()).reduce(
+				(sum, resources) => sum + resources.length,
+				0,
+			),
+		});
+
+		for (const [
+			serverName,
+			serverResources,
+		] of this.serverResources.entries()) {
+			this.logger.debug('Processing resources from MCP server', {
+				serverName,
+				resourceCount: serverResources.length,
+			});
+
+			resources.push(...serverResources);
+		}
+
+		return resources;
+	}
+
+	/**
+	 * Get resources from a specific server
+	 */
+	getServerResources(serverName: string): MCPResource[] {
+		return this.serverResources.get(serverName) || [];
+	}
+
+	/**
+	 * Read content from an MCP resource
+	 */
+	async readResource(uri: string): Promise<MCPResourceContent> {
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
+
+		return await withNewCorrelationContext(async () => {
+			this.logger.info('Reading MCP resource', {
+				uri,
+				correlationId,
+			});
+
+			// Find which server has this resource
+			let serverName: string | undefined;
+			for (const [name, resources] of this.serverResources.entries()) {
+				if (resources.some(r => r.uri === uri)) {
+					serverName = name;
+					break;
+				}
+			}
+
+			if (!serverName) {
+				throw new Error(`MCP resource not found: ${uri}`);
+			}
+
+			const client = this.clients.get(serverName);
+			if (!client) {
+				throw new Error(`No MCP client connected for server: ${serverName}`);
+			}
+
+			try {
+				const result = await client.readResource({uri});
+
+				this.logger.debug('MCP resource read successfully', {
+					uri,
+					serverName,
+					hasContents: !!result.contents,
+					contentsLength: Array.isArray(result.contents)
+						? result.contents.length
+						: 0,
+					correlationId,
+				});
+
+				// Extract content from result
+				if (
+					result.contents &&
+					Array.isArray(result.contents) &&
+					result.contents.length > 0
+				) {
+					const content = result.contents[0] as
+						| {type: 'text'; uri: string; text?: string; mimeType?: string}
+						| {type: 'blob'; uri: string; blob?: string; mimeType?: string};
+
+					const finalMetrics = endMetrics(metrics);
+					this.logger.info('MCP resource read completed', {
+						uri,
+						serverName,
+						contentType: content.type,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+					});
+
+					if (content.type === 'text') {
+						return {
+							uri: content.uri,
+							mimeType: content.mimeType,
+							text: content.text || '',
+						};
+					}
+					return {
+						uri: content.uri,
+						mimeType: content.mimeType,
+						blob: content.blob,
+					};
+				}
+
+				const finalMetrics = endMetrics(metrics);
+				this.logger.info('MCP resource read completed (empty)', {
+					uri,
+					serverName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				return {uri, text: ''};
+			} catch (error) {
+				const errorMessage = formatError(error);
+				const errorName = error instanceof Error ? error.name : 'Unknown';
+
+				const finalMetrics = endMetrics(metrics);
+
+				this.logger.error('MCP resource read failed', {
+					uri,
+					serverName,
+					error: errorMessage,
+					errorName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				throw new Error(`MCP resource read failed: ${errorMessage}`);
+			}
+		}, correlationId);
+	}
+
+	/**
+	 * Get all MCP prompts from all connected servers
+	 */
+	getAllPrompts(): MCPPrompt[] {
+		const prompts: MCPPrompt[] = [];
+
+		this.logger.debug('Building all prompts registry from MCP servers', {
+			serverCount: this.serverPrompts.size,
+			totalPromptsAvailable: Array.from(this.serverPrompts.values()).reduce(
+				(sum, prompts) => sum + prompts.length,
+				0,
+			),
+		});
+
+		for (const [serverName, serverPrompts] of this.serverPrompts.entries()) {
+			this.logger.debug('Processing prompts from MCP server', {
+				serverName,
+				promptCount: serverPrompts.length,
+			});
+
+			prompts.push(...serverPrompts);
+		}
+
+		return prompts;
+	}
+
+	/**
+	 * Get prompts from a specific server
+	 */
+	getServerPrompts(serverName: string): MCPPrompt[] {
+		return this.serverPrompts.get(serverName) || [];
+	}
+
+	/**
+	 * Get a prompt from an MCP server
+	 */
+	async getPrompt(
+		name: string,
+		args?: Record<string, string>,
+	): Promise<MCPPromptResult> {
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
+
+		return await withNewCorrelationContext(async () => {
+			this.logger.info('Getting MCP prompt', {
+				name,
+				hasArgs: !!args,
+				argCount: args ? Object.keys(args).length : 0,
+				correlationId,
+			});
+
+			// Find which server has this prompt
+			let serverName: string | undefined;
+			for (const [sName, prompts] of this.serverPrompts.entries()) {
+				if (prompts.some(p => p.name === name)) {
+					serverName = sName;
+					break;
+				}
+			}
+
+			if (!serverName) {
+				throw new Error(`MCP prompt not found: ${name}`);
+			}
+
+			const client = this.clients.get(serverName);
+			if (!client) {
+				throw new Error(`No MCP client connected for server: ${serverName}`);
+			}
+
+			try {
+				const result = await client.getPrompt({name, arguments: args});
+
+				this.logger.debug('MCP prompt retrieved successfully', {
+					name,
+					serverName,
+					hasDescription: !!result.description,
+					messageCount: result.messages?.length || 0,
+					correlationId,
+				});
+
+				const finalMetrics = endMetrics(metrics);
+				this.logger.info('MCP prompt retrieval completed', {
+					name,
+					serverName,
+					messageCount: result.messages?.length || 0,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				return {
+					description: result.description,
+					messages: result.messages.map(
+						(msg: {
+							role: string;
+							content:
+								| {
+										type: string;
+										text?: string;
+										data?: string;
+										mimeType?: string;
+								  }
+								| string;
+						}) => ({
+							role: msg.role as 'user' | 'assistant',
+							content:
+								typeof msg.content === 'string'
+									? {type: 'text' as const, text: msg.content}
+									: {
+											type: msg.content.type as 'text' | 'image' | 'resource',
+											text: msg.content.text,
+											data: msg.content.data,
+											mimeType: msg.content.mimeType,
+										},
+						}),
+					),
+				};
+			} catch (error) {
+				const errorMessage = formatError(error);
+				const errorName = error instanceof Error ? error.name : 'Unknown';
+
+				const finalMetrics = endMetrics(metrics);
+
+				this.logger.error('MCP prompt retrieval failed', {
+					name,
+					serverName,
+					error: errorMessage,
+					errorName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				throw new Error(`MCP prompt retrieval failed: ${errorMessage}`);
+			}
+		}, correlationId);
+	}
+
 	async disconnect(): Promise<void> {
 		const correlationId = generateCorrelationId();
 		const serverNames = Array.from(this.clients.keys());
@@ -652,6 +1139,8 @@ export class MCPClient {
 			this.clients.clear();
 			this.transports.clear();
 			this.serverTools.clear();
+			this.serverResources.clear();
+			this.serverPrompts.clear();
 			this.serverConfigs.clear();
 			this.isConnected = false;
 
@@ -674,40 +1163,5 @@ export class MCPClient {
 
 	getServerTools(serverName: string): MCPTool[] {
 		return this.serverTools.get(serverName) || [];
-	}
-
-	/**
-	 * Gets server information including transport type and URL for remote servers
-	 */
-	getServerInfo(serverName: string):
-		| {
-				name: string;
-				transport: string;
-				url?: string;
-				toolCount: number;
-				connected: boolean;
-				description?: string;
-				tags?: string[];
-				autoApprovedCommands?: string[];
-		  }
-		| undefined {
-		const client = this.clients.get(serverName);
-		const serverConfig = this.serverConfigs.get(serverName);
-		const tools = this.serverTools.get(serverName) || [];
-
-		if (!client || !serverConfig) {
-			return undefined;
-		}
-
-		return {
-			name: serverName,
-			transport: serverConfig.transport,
-			url: serverConfig.url,
-			toolCount: tools.length,
-			connected: true,
-			description: serverConfig.description,
-			tags: serverConfig.tags,
-			autoApprovedCommands: serverConfig.alwaysAllow,
-		};
 	}
 }

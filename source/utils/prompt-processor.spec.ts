@@ -246,3 +246,83 @@ test('assemblePrompt - expands a legacy paste that has no displayText', t => {
 
 	t.is(assemblePrompt(inputState), 'look legacy body ok');
 });
+
+test('assemblePrompt - replaces placeholder with MCP resource content', t => {
+	const inputState: InputState = {
+		displayValue: 'Check this [@api-docs]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@api-docs]',
+				uri: 'mcp://server/docs/api',
+				content: 'API documentation content',
+				mimeType: 'text/markdown',
+				serverName: 'docs-server',
+				resourceName: 'api-docs',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== MCP Resource: api-docs (from docs-server) ==='));
+	t.true(result.includes('Content-Type: text/markdown'));
+	t.true(result.includes('API documentation content'));
+});
+
+test('assemblePrompt - handles MCP resource without mimeType', t => {
+	const inputState: InputState = {
+		displayValue: 'Review [@config]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@config]',
+				uri: 'mcp://server/config',
+				content: 'Configuration data',
+				serverName: 'config-server',
+				resourceName: 'config',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== MCP Resource: config (from config-server) ==='));
+	t.false(result.includes('Content-Type'));
+	t.true(result.includes('Configuration data'));
+});
+
+test('assemblePrompt - handles mixed file, paste, and resource placeholders', t => {
+	const inputState: InputState = {
+		displayValue: 'Compare [@file.ts] with [Paste #1: 5 chars] and [@resource]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content: 'file content',
+				filePath: 'file.ts',
+				displayText: '[@file.ts]',
+			},
+			paste_1: {
+				type: PlaceholderType.PASTE,
+				content: 'Hello',
+				displayText: '[Paste #1: 5 chars]',
+			},
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@resource]',
+				uri: 'mcp://server/resource',
+				content: 'resource content',
+				serverName: 'test-server',
+				resourceName: 'resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== File: file.ts ==='));
+	t.true(result.includes('file content'));
+	t.true(result.includes('Hello'));
+	t.true(result.includes('=== MCP Resource: resource (from test-server) ==='));
+	t.true(result.includes('resource content'));
+});
