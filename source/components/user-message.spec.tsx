@@ -368,3 +368,23 @@ code2
 	t.false(output!.includes('code1'));
 	t.false(output!.includes('code2'));
 });
+
+test('Issue 1113: UserMessage output contains no ┃ border characters for clean terminal copy', t => {
+	const message =
+		'First line of user prompt\nSecond line of user prompt\nThird line of user prompt';
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.false(
+		output!.includes('┃'),
+		'UserMessage output should not contain ┃ border characters',
+	);
+	t.true(output!.includes('First line of user prompt'));
+	t.true(output!.includes('Second line of user prompt'));
+	t.true(output!.includes('Third line of user prompt'));
+});

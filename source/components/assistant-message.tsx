@@ -16,23 +16,8 @@ export function AssistantMessageBox({
 	text: string;
 	truncated?: boolean;
 }) {
-	const {colors} = useTheme();
-	const boxWidth = useTerminalWidth();
-
 	return (
-		<Box
-			flexDirection="column"
-			marginBottom={1}
-			backgroundColor={colors.base}
-			width={boxWidth}
-			padding={1}
-			borderStyle="bold"
-			borderLeft={true}
-			borderRight={false}
-			borderTop={false}
-			borderBottom={false}
-			borderLeftColor={colors.secondary}
-		>
+		<Box flexDirection="column" marginBottom={1}>
 			{truncated && <Text>…</Text>}
 			<Text>{text}</Text>
 		</Box>
@@ -54,13 +39,13 @@ export default memo(function AssistantMessage({
 	// provider reported nothing.
 	const usageIndicator = usage ? formatUsageIndicator(usage) : null;
 
-	// Inner text width: outer width minus left border (1) and padding (1 each side)
-	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
+	const textWidth = boxWidth;
 
 	const displayMessage = message;
 
-	// Render markdown into segments: text parts (rendered inside the bordered box)
-	// and code parts (rendered without a border so they can be copied cleanly).
+	// Render markdown into segments: text parts and code parts.
+	// Both render without left border characters (┃) so terminal mouse
+	// selection and copy-paste remain clean without ASCII artifacts.
 	// For non-interactive mode we join all parts back into a flat string.
 	// Pre-wrap text parts to avoid Ink's trim:false leaving leading spaces on
 	// wrapped lines. trim() removes leading/trailing whitespace.
