@@ -420,14 +420,13 @@ test('UserInput navigates queued messages while busy with empty input', async t 
 	unmount();
 });
 
-test('UserInput loads selected queued message for editing', async t => {
+test('UserInput loads selected queued message for editing while idle', async t => {
 	let removedId = '';
 
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
 				forceFocus={true}
-				isBusy={true}
 				queuedMessages={[
 					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
 					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
@@ -1108,7 +1107,6 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
-
 // pasteEvents is a module singleton, so these run serially: a concurrently
 // mounted UserInput would also receive the payload and corrupt its frame.
 
@@ -1163,4 +1161,3 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
-
