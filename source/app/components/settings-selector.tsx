@@ -438,7 +438,9 @@ export function SettingsTitleShapePanel({
 					onHighlight={handleHighlight}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to apply · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -455,7 +457,7 @@ export function SettingsTitleShapePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to go back
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 
@@ -554,7 +556,9 @@ export function SettingsNanocoderShapePanel({
 						onHighlight={handleHighlight}
 					/>
 					<Box marginBottom={1}></Box>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</TitledBoxWithPreferences>
 			</>
 		);
@@ -579,7 +583,7 @@ export function SettingsNanocoderShapePanel({
 			>
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Enter to apply, Shift+Tab to go back, Esc to go back
+						Enter to apply · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 
@@ -683,9 +687,7 @@ export function SettingsPasteThresholdPanel({
 			/>
 			<Box marginTop={isNarrow ? 0 : 1}>
 				<Text color={colors.secondary}>
-					{isNarrow
-						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to go back'}
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
@@ -803,14 +805,16 @@ export function SettingsNotificationsPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -900,14 +904,16 @@ export function SettingsDisplayPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -966,7 +972,7 @@ export function SettingsPrivacyPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
@@ -982,7 +988,7 @@ export function SettingsPrivacyPanel({
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
@@ -1086,7 +1092,7 @@ export function SettingsSemanticMemoryPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
@@ -1103,7 +1109,7 @@ export function SettingsSemanticMemoryPanel({
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
