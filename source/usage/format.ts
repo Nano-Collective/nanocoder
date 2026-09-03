@@ -78,6 +78,10 @@ export function formatUsageIndicator(usage: ResponseUsage): string | null {
 		return null;
 	}
 	const parts = [`Tokens: ${formatCompactTokenCount(total)}`];
+	const cacheRead = usage.cacheReadTokens;
+	if (Number.isFinite(cacheRead) && (cacheRead as number) > 0) {
+		parts.push(`${formatCompactTokenCount(cacheRead as number)} cached`);
+	}
 	const cost = usage.cost != null ? formatCost(usage.cost) : null;
 	if (cost) {
 		parts.push(cost);

@@ -1,6 +1,15 @@
 import {readFileSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
+import {
+	DEFAULT_MEMORY_LIMIT,
+	DEFAULT_TOKEN_BUDGET,
+	MAX_MEMORY_LIMIT,
+	MAX_TOKEN_BUDGET,
+	MIN_MEMORY_LIMIT,
+	MIN_TOKEN_BUDGET,
+	type ProjectContextOptions,
+} from '@/memory/project-context';
 import type {TuneConfig} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
@@ -35,11 +44,43 @@ export function loadPreferences(): UserPreferences {
 	return {};
 }
 
+// Preferences are written straight to disk, so React has no natural signal that
+// a setting flipped. Consumers holding derived state (e.g. the memoized system
+// prompt in useChatHandler) subscribe here and re-read on the next render.
+let preferencesVersion = 0;
+const preferencesListeners = new Set<() => void>();
+
+/**
+ * Subscribe to preference writes. Returns an unsubscribe function, matching the
+ * shape React's useSyncExternalStore expects.
+ */
+export function subscribeToPreferences(listener: () => void): () => void {
+	preferencesListeners.add(listener);
+	return () => {
+		preferencesListeners.delete(listener);
+	};
+}
+
+/**
+ * Monotonic counter bumped on every successful preferences write. Reading it is
+ * free (no file I/O), which is what makes it safe as a snapshot for
+ * useSyncExternalStore - unlike the getters below, which hit the disk.
+ */
+export function getPreferencesVersion(): number {
+	return preferencesVersion;
+}
+
 export function savePreferences(preferences: UserPreferences): void {
 	try {
 		writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
+		return;
+	}
+
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
 	}
 }
 
@@ -210,6 +251,89 @@ export function updatePrivacyPreference(value: boolean): void {
 	savePreferences(preferences);
 }
 
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * Resolve the project-context knobs from an already-loaded preferences object.
+ *
+ * The single place the semantic-memory defaults live. Callers that inject
+ * `loadPreferences` (the plain shell) pass their own object in; everything else
+ * goes through {@link getProjectContextPreferences}.
+ */
+export function resolveProjectContextPreferences(
+	preferences: UserPreferences,
+): Required<
+	Pick<
+		ProjectContextOptions,
+		'semanticMemoryEnabled' | 'memoryLimit' | 'tokenBudget'
+	>
+> {
+	return {
+		semanticMemoryEnabled: preferences.semanticMemoryEnabled ?? true,
+		memoryLimit: clamp(
+			preferences.semanticMemoryLimit ?? DEFAULT_MEMORY_LIMIT,
+			MIN_MEMORY_LIMIT,
+			MAX_MEMORY_LIMIT,
+		),
+		tokenBudget: clamp(
+			preferences.semanticMemoryTokenBudget ?? DEFAULT_TOKEN_BUDGET,
+			MIN_TOKEN_BUDGET,
+			MAX_TOKEN_BUDGET,
+		),
+	};
+}
+
+/** Project-context knobs for the current user. */
+export function getProjectContextPreferences(): ReturnType<
+	typeof resolveProjectContextPreferences
+> {
+	return resolveProjectContextPreferences(loadPreferences());
+}
+
+/**
+ * Get the semantic memory preference from preferences
+ */
+export function getSemanticMemoryEnabled(): boolean {
+	return getProjectContextPreferences().semanticMemoryEnabled;
+}
+
+/**
+ * Save the semantic memory preference
+ */
+export function updateSemanticMemoryEnabled(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryEnabled = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Save how many memories may be recalled into a single prompt.
+ */
+export function updateSemanticMemoryLimit(value: number): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryLimit = clamp(
+		value,
+		MIN_MEMORY_LIMIT,
+		MAX_MEMORY_LIMIT,
+	);
+	savePreferences(preferences);
+}
+
+/**
+ * Save the token budget project context may consume in the system prompt.
+ */
+export function updateSemanticMemoryTokenBudget(value: number): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryTokenBudget = clamp(
+		value,
+		MIN_TOKEN_BUDGET,
+		MAX_TOKEN_BUDGET,
+	);
+	savePreferences(preferences);
+}
+
 /**
  * Get the alternate-screen (fullscreen) preference. Also settable via
  * --alt-screen/--no-alt-screen at launch; this is the persisted default.
@@ -225,5 +349,23 @@ export function getAlternateScreen(): boolean {
 export function updateAlternateScreen(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.alternateScreen = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the professional ("boring") tone preference. When on, progress text is
+ * strictly functional and the model is instructed to keep responses terse.
+ */
+export function getProfessionalTone(): boolean {
+	const preferences = loadPreferences();
+	return preferences.professionalTone ?? false;
+}
+
+/**
+ * Save the professional tone preference
+ */
+export function updateProfessionalTone(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.professionalTone = value;
 	savePreferences(preferences);
 }

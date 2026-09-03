@@ -412,3 +412,268 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 		);
 	});
 });
+
+// ============================================================================
+// Task indicator badge
+// ============================================================================
+
+const WIDE = 200;
+
+function renderWithWidth(
+	element: React.ReactElement,
+	columns: number = WIDE,
+): string {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = columns;
+	try {
+		const {lastFrame} = render(element);
+		return lastFrame()!;
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+}
+
+test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(~2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no in-progress tasks', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in-progress and unread updates', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(~2\/5\* Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide terminal', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.regex(output, /Tasks \(hide Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
+	const zero = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 0,
+				completedCount: 0,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+	);
+	t.notRegex(zero, /Tasks/);
+
+	const missing = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={null}
+		/>,
+	);
+	t.notRegex(missing, /Tasks/);
+});
+
+// ============================================================================
+// Task badge width budget
+// ============================================================================
+
+test('expanded task badge is dropped entirely when the row is under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
+		/>,
+		40,
+	);
+	// The expanded badge is pure help text - it goes before anything else does,
+	// and never squeezes the segments that carry information.
+	t.notRegex(output, /Tasks/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps its progress readout and drops only the key hint under width pressure', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+		40,
+	);
+	// Progress survives - it is the only trace of the collapsed list on screen.
+	t.regex(output, /Tasks \(~2\/5\*\)/);
+	t.notRegex(output, /Ctrl-t/);
+	t.regex(output, /ctx: 42%/);
+});
+
+test('collapsed task badge keeps the key hint when there is room for it', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			taskInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
+		/>,
+		60,
+	);
+	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+});
+
+// ============================================================================
+// Auto-save indicator tests (Issue #932)
+// ============================================================================
+
+test('DevelopmentModeIndicator renders saving indicator when isSaving is true', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			isSaving={true}
+		/>,
+	);
+	t.regex(output, /saving/);
+});
+
+test('DevelopmentModeIndicator omits saving indicator when isSaving is false or undefined', t => {
+	const falseOutput = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			isSaving={false}
+		/>,
+	);
+	t.notRegex(falseOutput, /saving/);
+
+	const undefOutput = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+		/>,
+	);
+	t.notRegex(undefOutput, /saving/);
+});
+
+test('saving indicator drops under narrow width pressure without shrinking session name', t => {
+	const fullSession = 'feature-authentication-token';
+	// Render at a tight width of 40 columns
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={40}
+			contextSource="api"
+			sessionName={fullSession}
+			isSaving={true}
+		/>,
+		42,
+	);
+
+	// saving indicator must drop when width is tight
+	t.notRegex(output, /saving/);
+	// Session name must still have room and not be shrunk away
+	t.regex(output, /feature/);
+});
+
+test('saving indicator renders when there is sufficient width', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={40}
+			contextSource="api"
+			sessionName="my-session"
+			isSaving={true}
+		/>,
+		100,
+	);
+
+	t.regex(output, /my-session/);
+	t.regex(output, /saving/);
+	t.regex(output, /ctx: 40%/);
+});

@@ -1,12 +1,15 @@
+import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
+import {getLogger} from '@/utils/logging';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {compressMessages} from './message-compression';
+import {filterModelFacing} from './message-visibility';
 import {createSessionOverride} from './session-override';
 
 export interface AutoCompactSessionOverrides {
@@ -74,7 +77,12 @@ export async function performAutoCompact(
 	onNotify?: (message: string) => void,
 	client?: LLMClient,
 	nativeTools?: Record<string, AISDKCoreTool>,
+	signal?: AbortSignal,
 ): Promise<Message[] | null> {
+	if (signal?.aborted) {
+		return null;
+	}
+
 	// Check if auto compact is enabled
 	const enabled =
 		autoCompactSessionOverrides.enabled !== null
@@ -122,6 +130,10 @@ export async function performAutoCompact(
 		return null;
 	}
 
+	if (signal?.aborted) {
+		return null;
+	}
+
 	// Create tokenizer
 	let tokenizer: Tokenizer | undefined;
 	try {
@@ -131,10 +143,13 @@ export async function performAutoCompact(
 	}
 
 	try {
-		// Calculate current token count
+		// Calculate current token count. Display-only notices are filtered out of
+		// the provider payload, so counting them would trip the threshold on
+		// tokens the model never receives — but they stay in `allMessages`, which
+		// is what compaction rewrites and the UI renders.
 		const allMessages = [systemMessage, ...messages];
 		let messageTokens = 0;
-		for (const msg of allMessages) {
+		for (const msg of filterModelFacing(allMessages)) {
 			messageTokens += tokenizer.countTokens(msg);
 		}
 
@@ -160,20 +175,31 @@ export async function performAutoCompact(
 		// (network error, malformed response, etc.) so a transient model issue
 		// never blocks compaction.
 		if (strategy === 'llm' && client) {
+			if (signal?.aborted) {
+				return null;
+			}
+			if (config.notifyUser && onNotify) {
+				onNotify('auto-compacting context...');
+			}
 			try {
 				const llmCompressed = await summariseWithLLM({
 					messages,
 					systemMessage,
 					client,
 					tokenizer,
+					signal,
 				});
+
+				if (signal?.aborted) {
+					return null;
+				}
 
 				if (llmCompressed) {
 					// Tool definitions are constant across compaction, so include them on
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
 					const compressedTokenCount =
-						[systemMessage, ...llmCompressed].reduce(
+						[systemMessage, ...filterModelFacing(llmCompressed)].reduce(
 							(sum, msg) => sum + tokenizer.countTokens(msg),
 							0,
 						) + toolDefTokens;
@@ -192,8 +218,15 @@ export async function performAutoCompact(
 					return llmCompressed;
 				}
 			} catch (_error) {
+				if (signal?.aborted) {
+					return null;
+				}
 				// fall through to mechanical
 			}
+		}
+
+		if (signal?.aborted) {
+			return null;
 		}
 
 		// Include system message in compression input so compressMessages()
@@ -222,6 +255,49 @@ export async function performAutoCompact(
 		if (tokenizer?.free) {
 			tokenizer.free();
 		}
+	}
+}
+
+export async function maybeAutoCompact(
+	messages: Message[],
+	systemMessage: Message,
+	client: LLMClient,
+	nativeTools?: Record<string, AISDKCoreTool>,
+	options?: {
+		signal?: AbortSignal;
+		onNotify?: (message: string) => void;
+		// Callers that already track the active provider/model (the TUI reads
+		// them from app state) pass them explicitly. Everything else derives
+		// them from the client.
+		provider?: string;
+		model?: string;
+	},
+): Promise<Message[]> {
+	if (options?.signal?.aborted) {
+		return messages;
+	}
+
+	const autoCompactConfig = getAppConfig().autoCompact;
+	if (!autoCompactConfig) {
+		return messages;
+	}
+
+	try {
+		const compressed = await performAutoCompact(
+			messages,
+			systemMessage,
+			options?.provider ?? client.getProviderConfig().name,
+			options?.model ?? client.getCurrentModel(),
+			autoCompactConfig,
+			options?.onNotify,
+			client,
+			nativeTools,
+			options?.signal,
+		);
+		return compressed ?? messages;
+	} catch (error) {
+		getLogger().debug('auto-compact failed; leaving history unchanged', error);
+		return messages;
 	}
 }
 
