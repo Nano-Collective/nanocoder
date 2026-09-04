@@ -17,6 +17,11 @@ import type {
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
+import {
+	acquireTimelineLock,
+	isTimelineLockLive,
+	releaseTimelineLock,
+} from './timeline-lock';
 
 /**
  * Paths the timeline must never treat as workspace content. Snapshotting its
@@ -46,6 +51,9 @@ export class TimelineManager {
 	private readonly timelineRoot: string;
 	private readonly timelineDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
+	private readonly sessionId: string;
+	private readonly sessionStartedAt: number;
+	private lockHeld = false;
 	private index: TimelineIndex | null = null;
 	private prunedStaleSessions = false;
 
@@ -55,6 +63,59 @@ export class TimelineManager {
 		this.timelineRoot = path.join(workspaceRoot, '.nanocoder', 'timeline'); // nosemgrep
 		this.timelineDir = path.join(this.timelineRoot, sessionId); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
+		this.sessionId = sessionId;
+		this.sessionStartedAt = Date.now();
+	}
+
+	/**
+	 * Best-effort: try to acquire the per-session lock so
+	 * pruneStaleSessions will skip this directory while we are still
+	 * writing into it. Failure is non-fatal - we log and continue so a
+	 * crashed sibling cannot block the chat.
+	 */
+	private async tryAcquireSessionLock(): Promise<void> {
+		// Idempotent: once the lock is held by this manager instance, the
+		// on-disk lockfile is ours and a second `ensureDir` call must not
+		// race against itself by observing the file as held and
+		// resetting `lockHeld` to false.
+		if (this.lockHeld) {
+			return;
+		}
+		try {
+			const acquired = await acquireTimelineLock(this.timelineDir, {
+				pid: process.pid,
+				startedAt: this.sessionStartedAt,
+			});
+			this.lockHeld = acquired;
+		} catch (error) {
+			logWarning('Could not acquire timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
+	}
+
+	/**
+	 * Release the per-session lock and prevent further writes from
+	 * touching the session directory. Idempotent.
+	 */
+	async dispose(): Promise<void> {
+		if (!this.lockHeld) {
+			return;
+		}
+		this.lockHeld = false;
+		try {
+			await releaseTimelineLock(this.timelineDir);
+		} catch (error) {
+			logWarning('Could not release timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
 	}
 
 	toRelativePath(filePath: string): string | null {
@@ -359,8 +420,29 @@ export class TimelineManager {
 
 	private async ensureDir(): Promise<void> {
 		await this.pruneStaleSessions();
+		// Try to acquire the session lock before any writes land. The
+		// session directory may not exist yet, so mkdir is the safe path.
 		if (!existsSync(this.timelineDir)) {
 			await fs.mkdir(this.timelineDir, {recursive: true});
+		}
+		await this.tryAcquireSessionLock();
+		await this.touchSessionDir();
+	}
+
+	/**
+	 * Refresh the session directory's mtime so it stays out of both the
+	 * age-based and the count-based prune windows. utimes is a single
+	 * syscall and never throws on a directory we just created.
+	 */
+	private async touchSessionDir(): Promise<void> {
+		try {
+			const now = new Date();
+			await fs.utimes(this.timelineDir, now, now);
+		} catch {
+			// Best-effort: a stale mtime may let pruning take this
+			// session out of rotation, but the live-lock check below
+			// still prevents the directory from being deleted out
+			// from under us.
 		}
 	}
 
@@ -399,6 +481,13 @@ export class TimelineManager {
 			);
 
 			for (const entry of stale) {
+				// An active session may have stale mtimeMs (mid-tool-call
+				// with no recent capture) but still be writing. Probe its
+				// lockfile before removing the directory.
+				const lockInfo = await isTimelineLockLive(entry.dir);
+				if (lockInfo.live) {
+					continue;
+				}
 				await fs.rm(entry.dir, {recursive: true, force: true});
 			}
 		} catch {
