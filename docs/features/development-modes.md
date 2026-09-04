@@ -80,7 +80,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 | **Web** | `web_search`, `fetch_url` |
 | **Interaction** | `ask_user`, `agent` |
 
-The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `delete_file`, etc.), `execute_bash`, all task management tools, and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
+The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`, `delete_file`, etc.), `execute_bash`, all task management tools, and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
 
 ### The Plan → Execute Workflow
 
