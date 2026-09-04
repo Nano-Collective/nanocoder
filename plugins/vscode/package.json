@@ -164,6 +164,11 @@
 					"default": false,
 					"description": "Automatically start Nanocoder CLI if not running"
 				},
+				"nanocoder.showTokenUsage": {
+					"type": "boolean",
+					"default": false,
+					"description": "Show token usage and estimated cost in the chat panel"
+				},
 				"nanocoder.showDiffPreview": {
 					"type": "boolean",
 					"default": true,
