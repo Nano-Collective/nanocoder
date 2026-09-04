@@ -12,10 +12,16 @@ import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
+import {parseInput} from '@/command-parser';
 import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -1187,3 +1193,36 @@ test('progress spinner - only slow commands opt in', t => {
 	const help = lazyCommands.find(c => c.name === 'help');
 	t.is(help?.progressLabel, undefined);
 });
+
+// --- Inline `?key=value` overrides (issue #1151) ---
+
+test('inline overrides - /compact ?threshold=80 is parsed into a session-override', t => {
+	// ?threshold is a session-override key (handled by applyOnceOverrides),
+	// not a legacy --flag, so expandOverrideArgs leaves it alone and the
+	// dispatcher applies it through the existing session-override stores.
+	const trimmed = '/compact ?threshold=80'.slice(1).trim().split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, []);
+	t.deepEqual(overrides, [{key: 'threshold', value: '80'}]);
+	t.deepEqual(expandOverrideArgs(overrides), []);
+});
+
+test('inline overrides - mixed positional args survive the split', t => {
+	const trimmed = '/compact --mechanical ?threshold=80 --preview'.slice(1).trim().split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, ['--mechanical', '--preview']);
+	t.deepEqual(overrides, [{key: 'threshold', value: '80'}]);
+});
+
+test('inline overrides - applyOnceOverrides restore function is idempotent and safe', async t => {
+	const restore = await applyOnceOverrides([]);
+	t.notThrows(() => restore());
+	t.notThrows(() => restore());
+});
+
+test('inline overrides - parseInput leaves the `?` token out of fullCommand for downstream args', t => {
+	const parsed = parseInput('/compact ?threshold=80');
+	t.is(parsed.command, 'compact');
+	t.deepEqual(parsed.args, ['?threshold=80']);
+});
+
