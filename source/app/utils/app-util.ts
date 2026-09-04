@@ -17,6 +17,11 @@ import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {handleCompactCommand} from './handlers/compact-handler';
@@ -612,33 +617,49 @@ async function handleSlashCommand(
 		return;
 	}
 
-	const commandParts = message.slice(1).trim().split(/\s+/);
+	// ?key=value tokens let a user test a per-session setting for one
+	// command without committing it to the session. They live in the args
+	// list alongside the existing positional / --flag arguments, so we
+	// extract them here and rebuild commandParts with the legacy flag form
+	// appended (handlers stay oblivious to the override feature).
+	const rawParts = message.slice(1).trim().split(/\s+/);
+	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
+	const restoreOnce = await applyOnceOverrides(overrides);
+	try {
+		const commandParts = [
+			commandName,
+			...positional,
+			...expandOverrideArgs(overrides),
+		];
 
-	if (await handleCompactCommand(commandParts, options)) return;
-	if (await handleContextMaxCommand(commandParts, options)) return;
-	if (await handleCommandCreate(commandParts, options)) return;
-	if (await handleAgentCreate(commandParts, options)) return;
-	if (await handleAgentCopy(commandParts, options)) return;
-	if (await handleToolCreate(commandParts, options)) return;
-	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleSpecialCommand(commandName, options)) return;
-	if (await handleCheckpointLoad(commandParts, options)) return;
-	// Stateful handlers that replay or resume chat flow live alongside each other.
-	if (await handleResumeCommand(commandParts, options)) return;
-	if (
-		await handleRetryCommand(
-			[
-				commandName,
-				...parseCustomCommandArgs(message.slice(commandName.length + 2)),
-			],
-			options,
+		if (await handleCompactCommand(commandParts, options)) return;
+		if (await handleContextMaxCommand(commandParts, options)) return;
+		if (await handleCommandCreate(commandParts, options)) return;
+		if (await handleAgentCreate(commandParts, options)) return;
+		if (await handleAgentCopy(commandParts, options)) return;
+		if (await handleToolCreate(commandParts, options)) return;
+		if (await handleSkillsCreate(commandParts, options)) return;
+		if (await handleSpecialCommand(commandName, options)) return;
+		if (await handleCheckpointLoad(commandParts, options)) return;
+		// Stateful handlers that replay or resume chat flow live alongside each other.
+		if (await handleResumeCommand(commandParts, options)) return;
+		if (
+			await handleRetryCommand(
+				[
+					commandName,
+					...parseCustomCommandArgs(message.slice(commandName.length + 2)),
+				],
+				options,
+			)
 		)
-	)
-		return;
-	if (handleCopilotLogin(commandParts, options)) return;
-	if (handleCodexLogin(commandParts, options)) return;
+			return;
+		if (handleCopilotLogin(commandParts, options)) return;
+		if (handleCodexLogin(commandParts, options)) return;
 
-	await handleBuiltInCommand(message, options);
+		await handleBuiltInCommand(message, options);
+	} finally {
+		restoreOnce();
+	}
 }
 
 /**
