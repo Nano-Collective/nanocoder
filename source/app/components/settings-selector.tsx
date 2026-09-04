@@ -11,6 +11,7 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
@@ -20,6 +21,9 @@ import {
 	updatePrivacyPreference,
 	updateReasoningExpanded,
 	updateSelectedTheme,
+	updateSemanticMemoryEnabled,
+	updateSemanticMemoryLimit,
+	updateSemanticMemoryTokenBudget,
 	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
@@ -46,6 +50,7 @@ export type ManagedSettingsPanel =
 	| 'notifications'
 	| 'display-settings'
 	| 'privacy'
+	| 'semantic-memory'
 	| 'json-config'
 	| 'web-search'
 	| 'providers-config'
@@ -705,10 +710,12 @@ export function SettingsNotificationsPanel({
 		saved ?? {
 			enabled: false,
 			sound: false,
+			bell: false,
 			events: {
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -725,9 +732,11 @@ export function SettingsNotificationsPanel({
 	type ToggleKey =
 		| 'enabled'
 		| 'sound'
+		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -741,6 +750,10 @@ export function SettingsNotificationsPanel({
 				value: 'sound' as ToggleKey,
 			},
 			{
+				label: `  Terminal Bell: ${isOn(config.bell)}`,
+				value: 'bell' as ToggleKey,
+			},
+			{
 				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
 				value: 'toolConfirmation' as ToggleKey,
 			},
@@ -752,6 +765,12 @@ export function SettingsNotificationsPanel({
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
 			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
+			},
 		];
 	}, [config]);
 
@@ -761,6 +780,8 @@ export function SettingsNotificationsPanel({
 			next.enabled = !next.enabled;
 		} else if (item.value === 'sound') {
 			next.sound = !next.sound;
+		} else if (item.value === 'bell') {
+			next.bell = !next.bell;
 		} else {
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
@@ -835,7 +856,9 @@ export function SettingsDisplayPanel({
 				value: 'reasoningExpanded' as ToggleKey,
 			},
 			{
-				label: `Expand Tool Results by default: ${isOn(currentCompactToolDisplay)}`,
+				// compactToolDisplay=true means results are COMPACT, so
+				// expansion is on exactly when the preference is false.
+				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
 				value: 'compactToolDisplay' as ToggleKey,
 			},
 			{
@@ -955,6 +978,127 @@ export function SettingsPrivacyPanel({
 					Prompt Scrubbing removes sensitive identifiers before sending prompts
 					to cloud providers. This improves privacy but does not guarantee
 					semantic anonymity.
+				</Text>
+			</Box>
+
+			<StyledSelectInput items={items} onSelect={handleSelect} />
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Enter/Esc</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+/** Presets cycled by the Advanced panel. Any value in range can still be set
+ * directly in nanocoder-preferences.json; these are just the common choices. */
+const TOKEN_BUDGET_PRESETS = [120, 240, 480, 960];
+const MEMORY_LIMIT_PRESETS = [3, 5, 8, 12];
+
+/** Next preset after `current`, wrapping. Falls to the first when `current`
+ * is a hand-edited value that isn't in the list. */
+function cyclePreset(presets: number[], current: number): number {
+	const index = presets.indexOf(current);
+	return presets[(index + 1) % presets.length] ?? presets[0] ?? current;
+}
+
+// Semantic memory settings panel
+export function SettingsSemanticMemoryPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const initialContextPreferences = getProjectContextPreferences();
+	const [semanticMemoryEnabled, setSemanticMemoryEnabled] = useState(
+		initialContextPreferences.semanticMemoryEnabled,
+	);
+	const [tokenBudget, setTokenBudget] = useState(
+		initialContextPreferences.tokenBudget,
+	);
+	const [memoryLimit, setMemoryLimit] = useState(
+		initialContextPreferences.memoryLimit,
+	);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const items = useMemo(() => {
+		return [
+			{
+				label: `Semantic Memory: ${semanticMemoryEnabled ? 'ON' : 'OFF'}`,
+				value: 'semantic-memory',
+			},
+			{
+				label: `Memory Token Budget: ${tokenBudget}`,
+				value: 'semantic-memory-token-budget',
+			},
+			{
+				label: `Memories Per Prompt: ${memoryLimit}`,
+				value: 'semantic-memory-limit',
+			},
+		];
+	}, [semanticMemoryEnabled, tokenBudget, memoryLimit]);
+
+	const handleSelect = (item: {value: string}) => {
+		switch (item.value) {
+			case 'semantic-memory': {
+				const next = !semanticMemoryEnabled;
+				setSemanticMemoryEnabled(next);
+				updateSemanticMemoryEnabled(next);
+				break;
+			}
+			case 'semantic-memory-token-budget': {
+				const next = cyclePreset(TOKEN_BUDGET_PRESETS, tokenBudget);
+				setTokenBudget(next);
+				updateSemanticMemoryTokenBudget(next);
+				break;
+			}
+			case 'semantic-memory-limit': {
+				const next = cyclePreset(MEMORY_LIMIT_PRESETS, memoryLimit);
+				setMemoryLimit(next);
+				updateSemanticMemoryLimit(next);
+				break;
+			}
+		}
+	};
+
+	const title = isNarrow ? 'Memory' : 'Semantic Memory';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+					</Text>
+				</Box>
+			)}
+
+			<Box marginBottom={1}>
+				<Text color={colors.warning}>
+					Semantic Memory recalls saved project context and injects it into
+					future prompts. Turn it off for stateless agent behavior. The budget
+					and per-prompt count bound how much of the context window it may
+					consume - lower them on small local models.
 				</Text>
 			</Box>
 

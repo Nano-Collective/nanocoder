@@ -31,12 +31,15 @@ async function getAllFiles(cwd: string): Promise<string[]> {
 
 	try {
 		const allFiles: string[] = [];
-		await walkProjectEntries(cwd, undefined, entry => {
-			if (!entry.isDirectory) {
+		await walkProjectEntries(
+			cwd,
+			undefined,
+			entry => {
 				allFiles.push(entry.relativePath.replace(/\\/g, '/'));
-			}
-			return false;
-		});
+				return false;
+			},
+			{includeDirectories: false},
+		);
 
 		fileListCache = {
 			files: allFiles,

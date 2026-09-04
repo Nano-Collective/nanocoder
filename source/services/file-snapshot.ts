@@ -1,4 +1,4 @@
-import {execSync} from 'child_process';
+import {execFileSync, execSync} from 'child_process';
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -51,7 +51,16 @@ export class FileSnapshotService {
 
 		for (const [relativePath, content] of snapshots) {
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, relativePath);
+				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+				// Snapshot keys are read back from user-writable metadata on disk
+				// (checkpoint / timeline index files), so a corrupted or tampered
+				// index must not be able to write outside the workspace.
+				const relative = path.relative(this.workspaceRoot, absolutePath);
+				if (relative.startsWith('..') || path.isAbsolute(relative)) {
+					throw new Error(
+						`Refusing to restore path outside workspace: ${relativePath}`,
+					);
+				}
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
@@ -71,6 +80,23 @@ export class FileSnapshotService {
 	 * Uses git to detect modified files if available, otherwise returns empty array
 	 */
 	getModifiedFiles(): string[] {
+		return this.getModifiedFilesResult().files;
+	}
+
+	/**
+	 * Same scan as {@link getModifiedFiles}, but reports whether the result was
+	 * cut short. Callers that infer a file's *previous* content from the scan
+	 * (the action timeline) must not trust a truncated list: a dirty file that
+	 * fell outside the cap looks untouched, and its before-image would be taken
+	 * from HEAD, discarding the user's uncommitted work on restore.
+	 *
+	 * `available` is false when git could not answer at all.
+	 */
+	getModifiedFilesResult(): {
+		files: string[];
+		truncated: boolean;
+		available: boolean;
+	} {
 		try {
 			const modifiedOutput = execSync('git diff --name-only HEAD', {
 				cwd: this.workspaceRoot,
@@ -96,7 +122,10 @@ export class FileSnapshotService {
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];
 
-			const ig = loadGitignore(this.workspaceRoot);
+			// .nanocoderignore only hides files from the model's view; a file the
+			// user hid from listings must still be snapshotted, or restoring a
+			// checkpoint would silently leave its changes in place.
+			const ig = loadGitignore(this.workspaceRoot, {nanocoderIgnore: false});
 			const filtered = allFiles.filter(file => !ig.ignores(file));
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
@@ -110,17 +139,53 @@ export class FileSnapshotService {
 						},
 					},
 				);
-				return filtered.slice(0, MAX_CHECKPOINT_FILES);
+				return {
+					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
+					truncated: true,
+					available: true,
+				};
 			}
 
-			return filtered;
+			return {files: filtered, truncated: false, available: true};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return [];
+			return {files: [], truncated: false, available: false};
+		}
+	}
+
+	/**
+	 * Return HEAD contents of a tracked file, or null if git is unavailable
+	 * or the path is not in HEAD (untracked / unknown).
+	 */
+	getHeadContent(relativePath: string): string | null {
+		try {
+			return execFileSync('git', ['show', `HEAD:${relativePath}`], {
+				cwd: this.workspaceRoot,
+				encoding: 'utf-8',
+				stdio: ['pipe', 'pipe', 'pipe'],
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Delete a file inside the workspace. Refuses paths that escape the root.
+	 */
+	async deleteFile(relativePath: string): Promise<void> {
+		const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+		const relative = path.relative(this.workspaceRoot, absolutePath);
+		if (relative.startsWith('..') || path.isAbsolute(relative)) {
+			throw new Error(
+				`Refusing to delete path outside workspace: ${relativePath}`,
+			);
+		}
+		if (existsSync(absolutePath)) {
+			await fs.unlink(absolutePath);
 		}
 	}
 

@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import {highlight} from 'cli-highlight';
+import {getSyntaxTheme} from '@/config/themes';
 import type {Colors} from '../types/markdown-parser.js';
 import {decodeHtmlEntities} from './html-entities.js';
 import {parseMarkdownTable} from './table-parser.js';
@@ -63,7 +64,7 @@ function _parseMarkdownCore(
 				// Apply syntax highlighting with detected language
 				const highlighted = highlight(codeStr, {
 					language: lang || 'plaintext',
-					theme: 'default',
+					theme: getSyntaxTheme(themeColors),
 				});
 				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
 				codeBlocks.push(highlighted);

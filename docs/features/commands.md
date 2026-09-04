@@ -13,7 +13,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists, or `/init --lean` to skip merging `CLAUDE.md` content into the generated AGENTS.md |
+| `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
 | `/model` | Switch between available models from any configured provider |
@@ -35,7 +35,9 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
+| `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
+| `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
@@ -44,6 +46,8 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
+| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber will remove from your prompts |
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |
@@ -103,6 +107,11 @@ nanocoder --mode yolo run "update README and push"
 ```
 
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.
+
+Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error names the limit that fired and the run exits with status code `1`.
+
+> **Warning - CI polling patterns:** the repeated-call hard stop triggers on *legitimate* repetition too. If your workflow's model is expected to run the identical command repeatedly - polling a deploy, waiting on a slow job by re-running the same check - the run aborts once `maxRepeatedToolCalls` consecutive identical calls are emitted (default 3). Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a pattern in CI.
+
 ### JSON Output
 
 For CI pipelines, scripting, and tool chaining, pass `--json` (alias `--output-format json`) alongside `run` to get a single structured JSON object on `stdout` instead of streamed markdown:
@@ -156,4 +165,4 @@ The emitted object looks like:
 
 Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
 
-On error (e.g. an untrusted workspace directory, or the turn limit being hit without a final answer), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
