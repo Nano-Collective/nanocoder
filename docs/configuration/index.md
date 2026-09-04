@@ -173,6 +173,36 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
+### Retry Limits
+
+Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
+
+```json
+{
+  "nanocoder": {
+    "retries": {
+      "maxRepeatedToolCalls": 3,
+      "maxEmptyTurns": 2,
+      "maxMalformedRetries": 2
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools count toward the streak too, so a model stuck on a nonexistent tool hits the same cap. |
+| `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
+| `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
+
+Choosing "Continue" at the repeated-tool-call prompt runs the paused call and re-checks after `maxRepeatedToolCalls` further identical calls, so a genuinely stuck model is re-prompted rather than left looping.
+
+Setting `maxEmptyTurns` or `maxMalformedRetries` to `0` disables the nudge entirely, so the first empty or malformed turn ends the run - the fail-fast behaviour `--plain` had before these limits existed, worth setting when a silent or malformed-output model should cost one model call rather than three. The interactive loop still runs its single compact-and-retry after an empty turn even at `0`.
+
+> **Warning - CI polling patterns:** in `--plain` runs (`nanocoder run "..."` in CI and non-TTY environments) there is no prompt to answer, so `maxRepeatedToolCalls` is a hard stop. A workflow whose model legitimately repeats the identical command - polling a deploy, re-running the same check while waiting on an external state change - aborts with exit code `1` once the cap is hit, by default on the third consecutive identical call. Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a polling pattern.
+
+Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone. Delegated [subagent](../features/subagents.md) runs apply `maxRepeatedToolCalls` - a stuck subagent stops with an error naming the setting, since there is nobody to ask inside a delegated run - but not the other two limits: a subagent's loop ends on its own after an empty turn, and it does not use text-parsed tool calls.
+
 ### Paste Handling
 
 Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.
@@ -317,6 +347,35 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 ```
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
+
+## Ignoring Files
+
+Nanocoder already respects your `.gitignore`, so `node_modules`, `dist` and friends stay out of the way. But some files are tracked in git and still not worth spending context on: lockfiles, generated fixtures, vendored bundles, big snapshot files.
+
+Create a `.nanocoderignore` at your project root to exclude those too. It uses the same pattern syntax as `.gitignore`:
+
+```
+# Tracked, but not worth the tokens
+package-lock.json
+pnpm-lock.yaml
+tests/__fixtures__/
+docs/generated/
+```
+
+**What it affects:** the `list_directory`, `find_files` and `search_file_contents` tools, the `@` file autocomplete, and the interactive file explorer. Matching files stop showing up in listings and search results, which is what keeps them out of the model's context.
+
+**What it does not affect:** `read_file` and `execute_bash`. If the model is given an exact path it can still read the file, and nothing stops a `cat` in a shell command.
+
+> **Important:** `.nanocoderignore` is a context-hygiene tool, not a secrets boundary. Listing `.env` in it makes the file harder for the model to stumble across, but it does not prevent the file being read. Keep real secrets out of the workspace, or out of files the agent has any reason to open.
+
+Patterns are applied after `.gitignore` and Nanocoder's built-in defaults, so a leading `!` can un-ignore something:
+
+```
+# Nanocoder ignores dist/ by default; opt back in for this project
+!dist
+```
+
+Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings is still snapshotted, so restoring a checkpoint reverts it like anything else. See [Checkpointing](../features/checkpointing.md).
 
 ## Sections
 

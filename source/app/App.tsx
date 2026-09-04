@@ -313,12 +313,20 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
-		onApiCallComplete: record =>
-			appState.setApiCallHistory(prev => [...prev, record]),
+		onApiCallComplete: record => {
+			appState.setApiCallHistory(prev => [...prev, record]);
+			// Lifetime /stats: tokens + estimated cost (never blocks UI).
+			void import('@/stats/record')
+				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
+				.catch(() => {
+					/* ignore */
+				});
+		},
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
 		privacyEnabled: getPrivacyPreference(),
+		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 	});
 
 	// Desktop notifications on state transitions. The unified tool flow drives
@@ -415,6 +423,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
+		setSettingsActiveTab: appState.setSettingsActiveTab,
 		addToChatQueue: appState.addToChatQueue,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 		setTune: appState.setTune,
@@ -490,6 +499,8 @@ export default function App({
 		customCommandCache: appState.customCommandCache,
 		customCommandLoader: appState.customCommandLoader,
 		customCommandExecutor: appState.customCommandExecutor,
+		currentSessionId: appState.currentSessionId,
+		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 		onClearCounterIncrement: () => {
 			// Inline mode: /clear must wipe the real terminal (screen +
 			// native scrollback + home) like Claude Code's classic renderer,
@@ -506,6 +517,7 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
 		setIsToolExecuting: appState.setIsToolExecuting,
+		setLiveComponentCapturesInput: appState.setLiveComponentCapturesInput,
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
@@ -523,9 +535,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
-		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 		enterSettingsMode: modeHandlers.enterSettingsMode,
-		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		enterExplorerMode: modeHandlers.enterExplorerMode,
 		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
 		enterTune: modeHandlers.enterTune,
@@ -590,7 +600,7 @@ export default function App({
 	});
 
 	// Setup session autosave
-	useSessionAutosave({
+	const {isSaving} = useSessionAutosave({
 		messages: appState.messages,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
@@ -782,6 +792,7 @@ export default function App({
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}
 							handleIdeSelect={handleIdeSelect}
+							isSaving={isSaving}
 						/>
 					)}
 				</PrivacyContext.Provider>

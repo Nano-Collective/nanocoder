@@ -25,6 +25,9 @@ coverage
 
 # Dependency directories
 node_modules/
+# Also match a bare `node_modules` entry: the trailing-slash form above only
+# matches directories, so a stray symlink of that name would slip through.
+node_modules
 jspm_packages/
 bower_components/
 web_modules/
@@ -109,6 +112,9 @@ agents
 # These contain conversation snapshots and should not be committed
 **/checkpoints/
 
+# Action timeline before-images (per-session user data)
+.nanocoder/timeline/
+
 # Heap snapshots
 .heap-snapshots
 
@@ -128,3 +134,4 @@ benchmarks/.module-*
 
 # Auto-generated CSS
 plugins/vscode/media/chat-panel.css
+assets/*.vsix

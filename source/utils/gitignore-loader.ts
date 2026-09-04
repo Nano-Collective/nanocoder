@@ -37,16 +37,63 @@ const DEFAULT_IGNORE_DIRS = [
 	'.hg', // Mercurial
 ];
 
+const NANOCODER_IGNORE_FILENAME = '.nanocoderignore';
+
 /**
- * Load and parse .gitignore file, returns an ignore instance.
+ * Absolute path to the workspace's .nanocoderignore, or undefined when there
+ * isn't one.
+ *
+ * Exists so callers that hand the file to an external tool - ripgrep's
+ * `--ignore-file`, say - resolve it the same way {@link loadGitignore} does
+ * rather than re-deriving the filename.
+ */
+export function findNanocoderIgnoreFile(
+	workspaceRoot: string,
+): string | undefined {
+	const candidate = join(workspaceRoot, NANOCODER_IGNORE_FILENAME);
+	return existsSync(candidate) ? candidate : undefined;
+}
+
+export interface LoadGitignoreOptions {
+	/**
+	 * Whether to layer .nanocoderignore on top of .gitignore. Defaults to true.
+	 *
+	 * Set this to false for consumers where "ignored" means something other than
+	 * "keep out of the model's view" - checkpoint snapshots, for example, still
+	 * need to cover a file the user hid from listings, or restoring a checkpoint
+	 * would silently leave that file's changes in place.
+	 */
+	nanocoderIgnore?: boolean;
+}
+
+/**
+ * Load and parse .gitignore and .nanocoderignore files, returns an ignore instance.
  * Always includes default ignore patterns for common directories.
  *
- * @param cwd - The current working directory to load .gitignore from
+ * .nanocoderignore is an additional, nanocoder-specific ignore file. It keeps
+ * files out of directory listings, searches and the file explorer (saving tokens
+ * and avoiding context bloat) even when those files are tracked in git and
+ * therefore not covered by .gitignore, e.g. package-lock.json or large fixtures.
+ *
+ * It is not a secrets boundary: read_file and execute_bash do not consult these
+ * patterns, so a listed file is still readable by path.
+ *
+ * Patterns are applied after .gitignore and the default ignores, so a
+ * .nanocoderignore entry can also un-ignore something with a leading `!` - the
+ * only way to opt back into a DEFAULT_IGNORE_DIRS entry such as `dist`.
+ *
+ * @param workspaceRoot - The workspace root to load .gitignore / .nanocoderignore from
+ * @param options - See {@link LoadGitignoreOptions}
  * @returns An ignore instance configured with patterns
  */
-export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
+export function loadGitignore(
+	workspaceRoot: string,
+	options: LoadGitignoreOptions = {},
+): ReturnType<typeof ignore> {
+	const {nanocoderIgnore = true} = options;
 	const ig = ignore();
-	const gitignorePath = join(cwd, '.gitignore');
+	const gitignorePath = join(workspaceRoot, '.gitignore');
+	const nanocoderignorePath = join(workspaceRoot, NANOCODER_IGNORE_FILENAME);
 
 	// Always ignore common directories
 	ig.add(DEFAULT_IGNORE_DIRS);
@@ -59,6 +106,18 @@ export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
 		} catch {
 			// Silently fail if we can't read .gitignore
 			// The hardcoded ignores above will still apply
+		}
+	}
+
+	// Load .nanocoderignore if it exists. Added last so its patterns layer on top
+	// of .gitignore and the defaults, including `!` negations of either.
+	if (nanocoderIgnore && existsSync(nanocoderignorePath)) {
+		try {
+			const nanocoderignoreContent = readFileSync(nanocoderignorePath, 'utf-8');
+			ig.add(nanocoderignoreContent);
+		} catch {
+			// Silently fail if we can't read .nanocoderignore
+			// The gitignore + hardcoded ignores above will still apply
 		}
 	}
 

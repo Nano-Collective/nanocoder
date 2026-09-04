@@ -16,6 +16,8 @@ import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {checkSkillTool} from '@/tools/skill-check';
 import {writeTasksTool} from '@/tools/tasks';
 import {webSearchTool} from '@/tools/web-search';
+import {writePlanTool} from '@/tools/write-plan';
+import {writeWalkthroughTool} from '@/tools/write-walkthrough';
 import type {NanocoderToolExport} from '@/types/index';
 
 // Static tools (always available)
@@ -39,6 +41,10 @@ const staticTools: NanocoderToolExport[] = [
 	...getFileOpTools(),
 	// Task management tool
 	writeTasksTool,
+	// Plan mode artifact tool
+	writePlanTool,
+	// Completion artifact tool
+	writeWalkthroughTool,
 	// Skill authoring linter
 	checkSkillTool,
 ];

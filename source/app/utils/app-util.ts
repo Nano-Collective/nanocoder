@@ -1,14 +1,21 @@
 import React from 'react';
+import {
+	SETTINGS_TAB_IDS,
+	type SettingsTabId,
+} from '@/app/components/settings-constants';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
+import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
+import {resetStatsLedger} from '@/stats/record';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
-import {clearAllTasks} from '@/tools/tasks/storage';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -26,9 +33,6 @@ import {
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
-// Re-export for consumers that import parseContextLimit from here
-export {parseContextLimit} from './handlers/context-max-handler';
-
 /**
  * "Special commands" need access to app-level state (setting modes, mutating
  * messages, swapping live components) that the standard `Command.handler`
@@ -43,8 +47,6 @@ const SPECIAL_COMMANDS = {
 	CLEAR: 'clear',
 	MODEL: 'model',
 	MODEL_DATABASE: 'model-database',
-	SETUP_PROVIDERS: 'setup-providers',
-	SETUP_MCP: 'setup-mcp',
 	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
@@ -53,6 +55,12 @@ const SPECIAL_COMMANDS = {
 	TUNE: 'tune',
 	RENAME: 'rename',
 } as const;
+
+/** Retired in favour of `/settings`; forwarded so they don't error out. */
+const RETIRED_SETUP_COMMANDS: Record<string, SettingsTabId> = {
+	'setup-providers': 'providers',
+	'setup-mcp': 'mcp',
+};
 
 /** Checkpoint subcommands */
 const CHECKPOINT_SUBCOMMANDS = {
@@ -228,6 +236,10 @@ async function handleCustomCommand(
 	return true;
 }
 
+function isSettingsTabId(value: string): value is SettingsTabId {
+	return (SETTINGS_TAB_IDS as readonly string[]).includes(value);
+}
+
 /**
  * Handles special commands that need app state access (/clear, /model, etc.)
  * Returns true if a special command was handled.
@@ -241,9 +253,7 @@ async function handleSpecialCommand(
 		onRenameSession,
 		onEnterModelSelectionMode,
 		onEnterModelDatabaseMode,
-		onEnterConfigWizardMode,
 		onEnterSettingsMode,
-		onEnterMcpWizardMode,
 		onEnterExplorerMode,
 		onShowStatus,
 		onCommandComplete,
@@ -256,9 +266,6 @@ async function handleSpecialCommand(
 	const enterModeCommands: Record<string, () => void> = {
 		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
 		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
-		[SPECIAL_COMMANDS.SETUP_PROVIDERS]: onEnterConfigWizardMode,
-		[SPECIAL_COMMANDS.SETUP_MCP]: onEnterMcpWizardMode,
-		[SPECIAL_COMMANDS.SETTINGS]: onEnterSettingsMode,
 		[SPECIAL_COMMANDS.EXPLORER]: onEnterExplorerMode,
 		[SPECIAL_COMMANDS.IDE]: options.onEnterIdeSelectionMode,
 		[SPECIAL_COMMANDS.TUNE]: options.onEnterTune,
@@ -271,11 +278,44 @@ async function handleSpecialCommand(
 		return true;
 	}
 
+	const retiredTab = RETIRED_SETUP_COMMANDS[commandName];
+	if (retiredTab) {
+		onAddToChatQueue(
+			infoMsg(
+				`/${commandName} has moved to /settings — opening the ${retiredTab} tab. Use /settings ${retiredTab} next time.`,
+				`${commandName}-retired`,
+			),
+		);
+		onEnterSettingsMode(retiredTab);
+		onCommandComplete?.();
+		return true;
+	}
+
 	switch (commandName) {
+		case SPECIAL_COMMANDS.SETTINGS: {
+			const rawTab = commandArgs?.[0];
+			const tabArg = rawTab?.toLowerCase();
+			let tab: SettingsTabId | undefined;
+			if (tabArg) {
+				if (!isSettingsTabId(tabArg)) {
+					onAddToChatQueue(
+						errorMsg(
+							`Unknown settings tab: "${rawTab}". Valid tabs: ${SETTINGS_TAB_IDS.join(', ')}`,
+							'settings-error',
+						),
+					);
+					setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+					return true;
+				}
+				tab = tabArg;
+			}
+			onEnterSettingsMode(tab);
+			onCommandComplete?.();
+			return true;
+		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			await clearAllTasks();
-			// Increment clear counter to force re-render of static components
+			sharedProposalStore.clear();
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -423,6 +463,68 @@ function handleCopilotLogin(
 }
 
 /**
+ * Handles /stats as a live component so ←/→ can switch ranges without the
+ * chat composer swallowing the keys.
+ * Returns true if handled.
+ */
+function handleStatsCommand(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'stats') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setLiveComponentCapturesInput,
+		onAddToChatQueue,
+		onCommandComplete,
+	} = options;
+
+	const args = commandParts.slice(1);
+	const resetArg = args[0]?.toLowerCase();
+	if (resetArg === 'reset' || resetArg === '--reset') {
+		if (args.length !== 1) {
+			onAddToChatQueue(
+				errorMsg('Usage: /stats [7d|3m|all-time|reset]', 'stats-error'),
+			);
+			onCommandComplete?.();
+			return true;
+		}
+		resetStatsLedger();
+		onAddToChatQueue(infoMsg('Lifetime stats reset.', 'stats-reset'));
+		onCommandComplete?.();
+		return true;
+	}
+
+	setLiveComponentCapturesInput(true);
+
+	const close = () => {
+		// Leave a static snapshot in the transcript, then release focus.
+		onAddToChatQueue(
+			createStatsDisplayElement({
+				args,
+				interactive: false,
+			}),
+		);
+		setLiveComponent(null);
+		setLiveComponentCapturesInput(false);
+		onCommandComplete?.();
+	};
+
+	setLiveComponent(
+		createStatsDisplayElement({
+			args,
+			interactive: true,
+			onClose: close,
+		}),
+	);
+
+	return true;
+}
+
+/**
  * Handles /codex-login as a live component.
  * Returns true if handled.
  */
@@ -484,27 +586,54 @@ async function handleBuiltInCommand(
 	const {
 		onAddToChatQueue,
 		onCommandComplete,
+		setLiveComponent,
 		messages,
 		lastApiUsage,
 		apiCallHistory,
 	} = options;
 
-	const totalTokens = messages.reduce(
-		(sum, msg) => sum + options.getMessageTokens(msg),
-		0,
-	);
+	// Commands that declare a progressLabel do slow work (LLM round-trip,
+	// network) before returning their result component. Hold a spinner in the
+	// live slot for the duration so the UI is not silent for seconds. Mount it
+	// before any other work here — tokenizing a long transcript is itself
+	// perceptible — and release it in `finally` so a throwing handler cannot
+	// strand a spinner that never resolves.
+	const commandName = message.slice(1).trim().split(/\s+/)[0];
+	const progressLabel = commandRegistry.get(commandName)?.progressLabel;
 
-	const result = await commandRegistry.execute(message.slice(1), messages, {
-		provider: options.provider,
-		model: options.model,
-		tokens: totalTokens,
-		getMessageTokens: options.getMessageTokens,
-		client: options.client,
-		tune: options.tune,
-		developmentMode: options.developmentMode,
-		lastApiUsage,
-		apiCallHistory,
-	});
+	if (progressLabel) {
+		setLiveComponent(
+			React.createElement(CommandProgress, {
+				key: generateKey(`${commandName}-progress`),
+				label: progressLabel,
+			}),
+		);
+	}
+
+	let result: Awaited<ReturnType<typeof commandRegistry.execute>>;
+	try {
+		const totalTokens = messages.reduce(
+			(sum, msg) => sum + options.getMessageTokens(msg),
+			0,
+		);
+
+		result = await commandRegistry.execute(message.slice(1), messages, {
+			provider: options.provider,
+			model: options.model,
+			tokens: totalTokens,
+			getMessageTokens: options.getMessageTokens,
+			client: options.client,
+			tune: options.tune,
+			developmentMode: options.developmentMode,
+			lastApiUsage,
+			apiCallHistory,
+			sessionId: options.sessionId,
+		});
+	} finally {
+		if (progressLabel) {
+			setLiveComponent(null);
+		}
+	}
 
 	if (!result) {
 		onCommandComplete?.();
@@ -572,6 +701,7 @@ async function handleSlashCommand(
 		return;
 	if (handleCopilotLogin(commandParts, options)) return;
 	if (handleCodexLogin(commandParts, options)) return;
+	if (handleStatsCommand(commandParts, options)) return;
 
 	await handleBuiltInCommand(message, options);
 }

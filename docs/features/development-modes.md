@@ -45,15 +45,16 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 
 Automatically accepts and executes **every** tool call without exception — including bash commands and destructive git operations.
 
-- No confirmation prompts at all — everything runs immediately
+- No tool confirmation prompts at all — everything runs immediately
 - Bash commands, hard resets, force deletes, stash drops — all auto-accepted
 - The status bar turns red to make it clear you're in yolo mode
+- One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
-**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators.
+**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators and the repeated-call pause above.
 
 ## Plan Mode
 
-A dedicated exploration and planning workflow. The AI investigates your codebase with the tools available in plan mode and produces a structured plan — it cannot edit files, run shell commands, or perform git/task mutations.
+A dedicated exploration and planning workflow. The AI investigates your codebase with the tools available in plan mode and produces a structured plan, which is saved so you can read and approve it before anything runs. It cannot edit files, run shell commands, or perform git/task mutations.
 
 ### What Happens in Plan Mode
 
@@ -79,17 +80,39 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 | **Diagnostics** | `lsp_get_diagnostics` |
 | **Web** | `web_search`, `fetch_url` |
 | **Interaction** | `ask_user`, `agent` |
+| **Plan artifact** | `write_plan` |
 
-The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`, `delete_file`, etc.), `execute_bash`, all task management tools, and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
+`write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
 
-### The Plan → Execute Workflow
+The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`, `delete_file`, etc.), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
+
+### The Plan → Review → Execute Workflow
 
 Plan mode is designed as the first step of a two-phase workflow:
 
-1. **Plan** — switch to plan mode with **Shift+Tab**, describe your task, and let the AI explore and produce a plan
-2. **Execute** — switch back to normal, auto-accept, or yolo mode with **Shift+Tab**, then tell the AI to execute the plan
+1. **Plan** — switch to plan mode with **Shift+Tab** and describe your task. The AI explores, produces a plan, and saves it with `write_plan`. If the model finishes without calling the tool, its written plan is saved for you.
+2. **Review** — a review prompt appears when the turn completes:
+   - **Yes, execute this plan** — leaves plan mode, switches to normal mode, and starts implementation with the saved plan attached to the request
+   - **No, tell Nanocoder what to change** — stays in plan mode so you can ask for revisions
+   - **Ask me clarifying questions** — stays in plan mode and has the AI ask follow-up questions first
+   - **Esc** — same as *No*. Plan mode is never exited implicitly
+3. **Execute** — implementation runs in normal mode
 
-Your conversation history (including the plan) is preserved when you switch modes, so the AI has full context when it starts executing.
+The saved plan is reachable at any time from the **Plan** shortcut above the prompt (Cmd/Ctrl+click to open it). Approving sends the plan text along with the request, so a model that has lost the plan from its context window still has it. Your conversation history is preserved across the mode switch either way.
+
+After implementing an approved plan, the AI is asked to record a **Walkthrough** with `write_walkthrough` — the files it changed, the tests it actually ran, and how to verify the result. It appears as a third shortcut above the prompt.
+
+### Session Artifacts
+
+Plan mode writes to the session's artifact directory under the app data path, never into your repository:
+
+| Shortcut | File | Written by |
+|----------|------|-----------|
+| **Plan** | `implementation_plan.md` | `write_plan` in plan mode |
+| **Tasks** | `task.md` | `write_tasks` while implementing |
+| **Walkthrough** | `walkthrough.md` | `write_walkthrough` after implementing |
+
+Artifacts are restored when you resume a session and are deleted along with it. See [Session Management](session-management.md).
 
 ### Plan Mode with Tune
 
@@ -98,9 +121,10 @@ When [Tune](tune.md) is active with the **minimal** profile, plan mode uses an e
 | Profile | Plan Mode Tools |
 |---------|----------------|
 | **full** | All plan-mode tools listed above |
-| **minimal** | `read_file`, `find_files`, `search_file_contents`, `list_directory` |
+| **minimal** | `read_file`, `find_files`, `search_file_contents`, `list_directory`, `write_plan` |
+| **nano** | `read_file`, `search_file_contents`, `write_plan` |
 
-Because the minimal tune profile already limits the available tools, `ask_user`, `agent`, diagnostics, web tools, and git tools are not available in that configuration.
+Because the minimal tune profile already limits the available tools, `ask_user`, `agent`, diagnostics, web tools, and git tools are not available in that configuration. `write_plan` is the exception: plan mode adds it back on every profile, so the review-and-approve flow works the same for small local models.
 
 ### Simplified Prompts
 
