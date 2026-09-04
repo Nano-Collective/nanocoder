@@ -12,6 +12,7 @@ import type {
 	QueuedUserMessage,
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
+import {getToolManager} from '@/message-handler';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -36,13 +37,67 @@ import {
 	getFileCompletions,
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
+import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {handleResourceMention} from '@/utils/resource-mention-handler';
 import {isSelectionMode, toggleSelectionMode} from '@/utils/terminal-mouse';
 import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
+
+// An MCP resource shares the file-mention `@` trigger and completion list,
+// distinguished from a filesystem path by this prefix so `handleFileSelection`
+// knows which resolver to call. `resource.uri` can itself contain colons
+// (e.g. `file:///…`), so the prefix only wraps the leading `serverName` and
+// is split off with a bounded split rather than a plain `:` join/parse.
+const MCP_RESOURCE_PATH_PREFIX = 'mcp-resource:';
+
+function encodeMCPResourcePath(serverName: string, uri: string): string {
+	return `${MCP_RESOURCE_PATH_PREFIX}${serverName}:${uri}`;
+}
+
+function decodeMCPResourcePath(
+	path: string,
+): {serverName: string; uri: string} | null {
+	if (!path.startsWith(MCP_RESOURCE_PATH_PREFIX)) return null;
+	const rest = path.slice(MCP_RESOURCE_PATH_PREFIX.length);
+	const separatorIndex = rest.indexOf(':');
+	if (separatorIndex === -1) return null;
+	return {
+		serverName: rest.slice(0, separatorIndex),
+		uri: rest.slice(separatorIndex + 1),
+	};
+}
+
+/**
+ * MCP resources from every connected server, scored against the partial
+ * `@mention` the same way local files are, and merged into the same
+ * completion list. Mirrors `getFileCompletions`'s shape and score-based
+ * filtering so the two sources sort together without special-casing.
+ */
+async function getMCPResourceCompletions(partialPath: string): Promise<
+	Array<{
+		path: string;
+		displayPath: string;
+		score: number;
+		isDirectory: boolean;
+	}>
+> {
+	const mcpClient = getToolManager()?.getMCPClient();
+	if (!mcpClient) return [];
+
+	return mcpClient
+		.getAllResources()
+		.map(resource => ({
+			path: encodeMCPResourcePath(resource.serverName, resource.uri),
+			displayPath: `${resource.name} (${resource.serverName})`,
+			score: fuzzyScoreFilePath(resource.name, partialPath),
+			isDirectory: false,
+		}))
+		.filter(c => c.score > 0);
+}
 
 interface ChatProps {
 	onSubmit?: (
@@ -132,7 +187,7 @@ export default function UserInput({
 	// File autocomplete state
 	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
 	const [fileCompletions, setFileCompletions] = useState<
-		Array<{path: string; score: number}>
+		Array<{path: string; displayPath: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
@@ -296,8 +351,15 @@ export default function UserInput({
 			if (mention) {
 				setIsFileAutocompleteMode(true);
 				const cwd = process.cwd();
-				const completions = await getFileCompletions(mention.mention, cwd);
-				setFileCompletions(completions);
+				const [completions, resourceCompletions] = await Promise.all([
+					getFileCompletions(mention.mention, cwd),
+					getMCPResourceCompletions(mention.mention),
+				]);
+				setFileCompletions(
+					[...completions, ...resourceCompletions]
+						.sort((a, b) => b.score - a.score)
+						.slice(0, 20),
+				);
 				setSelectedFileIndex(0); // Reset selection when completions change
 			} else {
 				setIsFileAutocompleteMode(false);
@@ -326,7 +388,10 @@ export default function UserInput({
 		const commandPrefix = input.slice(1).split(' ')[0];
 
 		const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
-		const customCompletions = customCommands
+		const mcpPromptNames = (
+			getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
+		).map(p => `mcp:${p.serverName}:${p.name}`);
+		const customCompletions = [...customCommands, ...mcpPromptNames]
 			.filter(cmd => {
 				// Include all when no prefix, otherwise filter by prefix
 				return (
@@ -402,13 +467,28 @@ export default function UserInput({
 		// Extract the original mention text (the @... part we're replacing)
 		const mentionText = input.substring(mention.startIndex, mention.endIndex);
 
-		// Handle the file mention to create placeholder
-		const result = await handleFileMention(
-			selectedPath,
-			currentState.displayValue,
-			currentState.placeholderContent,
-			mentionText,
-		);
+		// Handle the mention to create a placeholder. An MCP resource and a
+		// filesystem file share this completion list and are resolved by
+		// different readers, distinguished by the encoded path's prefix.
+		const decoded = decodeMCPResourcePath(selectedPath);
+		const mcpClient = decoded ? getToolManager()?.getMCPClient() : undefined;
+		const result =
+			decoded && mcpClient
+				? await handleResourceMention(
+						mcpClient,
+						decoded.serverName,
+						decoded.uri,
+						fileCompletions[selectedFileIndex]?.displayPath ?? decoded.uri,
+						currentState.displayValue,
+						currentState.placeholderContent,
+						mentionText,
+					)
+				: await handleFileMention(
+						selectedPath,
+						currentState.displayValue,
+						currentState.placeholderContent,
+						mentionText,
+					);
 
 		if (result) {
 			setInputState(result);
@@ -1118,7 +1198,9 @@ export default function UserInput({
 								bold={index === selectedFileIndex}
 							>
 								{index === selectedFileIndex ? '▸ ' : '  '}
-								{file.path}
+								{decodeMCPResourcePath(file.path)
+									? file.displayPath
+									: file.path}
 							</Text>
 						))}
 					</Box>
