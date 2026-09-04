@@ -1,4 +1,4 @@
-import {readFileSync, writeFileSync} from 'fs';
+import {readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {
@@ -13,6 +13,7 @@ import {
 import type {TuneConfig} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
@@ -72,7 +73,10 @@ export function getPreferencesVersion(): number {
 
 export function savePreferences(preferences: UserPreferences): void {
 	try {
-		writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
+		atomicWriteFileSync(
+			getPreferencesPath(),
+			JSON.stringify(preferences, null, 2),
+		);
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
 		return;
@@ -163,7 +167,7 @@ export function updateNotificationsPreference(
  */
 export function getPasteThreshold(): number | undefined {
 	const preferences = loadPreferences();
-	const threshold = preferences.paste?.singleLineThreshold;
+	const threshold = preferences.nanocoder?.paste?.singleLineThreshold;
 	if (typeof threshold === 'number' && threshold > 0) {
 		return Math.round(threshold);
 	}
@@ -175,10 +179,13 @@ export function getPasteThreshold(): number | undefined {
  */
 export function updatePasteThreshold(threshold: number): void {
 	const preferences = loadPreferences();
-	if (!preferences.paste) {
-		preferences.paste = {singleLineThreshold: Math.round(threshold)};
+	if (!preferences.nanocoder) {
+		preferences.nanocoder = {};
+	}
+	if (!preferences.nanocoder.paste) {
+		preferences.nanocoder.paste = {singleLineThreshold: Math.round(threshold)};
 	} else {
-		preferences.paste.singleLineThreshold = Math.round(threshold);
+		preferences.nanocoder.paste.singleLineThreshold = Math.round(threshold);
 	}
 	savePreferences(preferences);
 }

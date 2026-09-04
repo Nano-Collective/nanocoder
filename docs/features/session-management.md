@@ -77,7 +77,7 @@ See [Development Modes](development-modes.md) for how the artifacts are produced
 
 ## Configuration
 
-Customize session behaviour in your `agents.config.json`:
+Customize session behaviour in your `nanocoder-preferences.json` (not `agents.config.json`):
 
 ```json
 {

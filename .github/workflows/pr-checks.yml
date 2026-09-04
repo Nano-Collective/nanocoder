@@ -1,6 +1,7 @@
 name: Pull Request Automated Checks
 
-# Nanocoder-specific checks (VS Code extension) that sit outside the shared org workflow.
+# Nanocoder-specific checks (VS Code extension, config schema freshness) that
+# sit outside the shared org workflow.
 
 on:
   pull_request:
@@ -79,3 +80,34 @@ jobs:
 
       - name: Verify the theme tokens compiled into the CSS
         run: node plugins/vscode/scripts/verify-theme-css.js
+
+  # schemas/agents.config.schema.json is generated from the DiskConfig type.
+  # Regenerating it must be byte-identical to the committed file, otherwise the
+  # schema would silently drift from the on-disk shape it describes. typescript-
+  # json-schema is a devDependency, so no network access is needed here.
+  schema-drift:
+    name: Config Schema Freshness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate and check for drift
+        run: |
+          pnpm generate:schema
+          git diff --exit-code schemas/agents.config.schema.json

@@ -989,3 +989,318 @@ test.serial(
 		);
 	},
 );
+
+// Sessions and paste are read from nanocoder-preferences.json, not
+// agents.config.json. These tests pin that the loaders read the same file and
+// shape the /settings panels write.
+
+const prefTestDir = join(tmpdir(), `nanocoder-pref-test-${Date.now()}`);
+
+test.before(() => {
+	mkdirSync(prefTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(prefTestDir)) {
+		rmSync(prefTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withPreferencesConfig(
+	subdir: string,
+	preferencesBody: unknown,
+	assertion: (appConfig: AppConfig) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(prefTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'nanocoder-preferences.json'),
+			JSON.stringify(preferencesBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial(
+	'loadAppConfig reads sessions from nanocoder-preferences.json (namespaced)',
+	async t => {
+		await withPreferencesConfig(
+			'sessions-namespaced',
+			{
+				nanocoder: {
+					sessions: {autoSave: false, maxSessions: 5},
+				},
+			},
+			appConfig => {
+				t.is(appConfig.sessions?.autoSave, false);
+				t.is(appConfig.sessions?.maxSessions, 5);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig reads paste threshold from nanocoder-preferences.json (namespaced)',
+	async t => {
+		await withPreferencesConfig(
+			'paste-namespaced',
+			{
+				nanocoder: {
+					paste: {singleLineThreshold: 1500},
+				},
+			},
+			appConfig => {
+				t.is(appConfig.paste?.singleLineThreshold, 1500);
+			},
+		);
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue writes sessions into nanocoder-preferences.json',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(prefTestDir, 'writer-sessions');
+		mkdirSync(testSubdir, {recursive: true});
+
+		try {
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+			const {updatePreferencesNestedValue} = await import('./config-writer.js');
+			updatePreferencesNestedValue('sessions', 'maxMessages', 42);
+
+			const prefsPath = getClosestConfigFile('nanocoder-preferences.json');
+			const written = JSON.parse(readFileSync(prefsPath, 'utf-8'));
+			t.is(written.nanocoder?.sessions?.maxMessages, 42);
+		} finally {
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
+// --- User-level resolution test ---
+// Verifies loadHierarchicalConfig falls through to the user-level
+// (NANOCODER_CONFIG_DIR) file when no cwd project file exists.
+
+test.serial(
+	'loadAppConfig reads sessions from user-level nanocoder-preferences.json when no project file exists',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const userDir = join(prefTestDir, 'user-level');
+		mkdirSync(userDir, {recursive: true});
+
+		writeFileSync(
+			join(userDir, 'nanocoder-preferences.json'),
+			JSON.stringify({
+				nanocoder: {sessions: {autoSave: false, maxSessions: 200}},
+			}),
+			'utf-8',
+		);
+
+		// Use a separate empty dir as cwd so there's no project-level file
+		const emptyCwd = join(prefTestDir, 'empty-cwd');
+		mkdirSync(emptyCwd, {recursive: true});
+
+		try {
+			process.chdir(emptyCwd);
+			process.env.NANOCODER_CONFIG_DIR = userDir;
+
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+
+			t.is(getAppConfig().sessions?.autoSave, false);
+			t.is(getAppConfig().sessions?.maxSessions, 200);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
+// --- Cross-file fall-through regression guard ---
+// If a project nanocoder-preferences.json has sessions but no paste, and a
+// user-level file has paste, the loader should fall through per-key and still
+// read paste from the user file.
+
+test.serial(
+	'loadAppConfig falls through per-key: paste from user file when project file only has sessions',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+
+		const projectDir = join(prefTestDir, 'fallthrough-project');
+		const userDir = join(prefTestDir, 'fallthrough-user');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(userDir, {recursive: true});
+
+		// Project file: sessions only, no paste
+		writeFileSync(
+			join(projectDir, 'nanocoder-preferences.json'),
+			JSON.stringify({
+				nanocoder: {sessions: {maxSessions: 50}},
+			}),
+			'utf-8',
+		);
+
+		// User file: paste only, no sessions
+		writeFileSync(
+			join(userDir, 'nanocoder-preferences.json'),
+			JSON.stringify({
+				nanocoder: {paste: {singleLineThreshold: 3000}},
+			}),
+			'utf-8',
+		);
+
+		try {
+			process.chdir(projectDir);
+			process.env.NANOCODER_CONFIG_DIR = userDir;
+
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+
+			// Sessions from project file (cwd-first)
+			t.is(getAppConfig().sessions?.maxSessions, 50);
+			// Paste falls through to user file (project had no paste key)
+			t.is(getAppConfig().paste?.singleLineThreshold, 3000);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
+// --- Paste default fallback ---
+// When nanocoder-preferences.json has no paste key, the loader should return
+// the built-in default, and getPasteThreshold() should return undefined.
+
+test.serial(
+	'loadAppConfig returns paste default when no paste key is present',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(prefTestDir, 'paste-default');
+		mkdirSync(testSubdir, {recursive: true});
+
+		writeFileSync(
+			join(testSubdir, 'nanocoder-preferences.json'),
+			JSON.stringify({lastProvider: 'test'}),
+			'utf-8',
+		);
+
+		try {
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+
+			// The loader applies DEFAULT_SINGLE_LINE_PASTE_THRESHOLD (800)
+			t.is(getAppConfig().paste?.singleLineThreshold, 800);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
+// --- Settings -> Loader end-to-end ---
+// Simulates the core "false-error trap" scenario: write sessions via the
+// settings writer path, reload the config, and verify the loader picks it up.
+
+test.serial(
+	'sessions written by updatePreferencesNestedValue are readable after reloadAppConfig',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(prefTestDir, 'settings-e2e');
+		mkdirSync(testSubdir, {recursive: true});
+
+		// Start with an empty preferences file
+		writeFileSync(
+			join(testSubdir, 'nanocoder-preferences.json'),
+			'{}',
+			'utf-8',
+		);
+
+		try {
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+
+			// Before write: sessions use loader defaults
+			reload();
+			t.is(getAppConfig().sessions?.autoSave, true);
+			t.is(getAppConfig().sessions?.maxSessions, 100);
+
+			// Simulate SettingsSessionsPanel.persist
+			const {updatePreferencesNestedValue} = await import(
+				'@/config/config-writer'
+			);
+			updatePreferencesNestedValue('sessions', 'autoSave', false);
+			updatePreferencesNestedValue('sessions', 'maxSessions', 25);
+
+			// Reload: the corrected file is now read
+			reload();
+			t.is(getAppConfig().sessions?.autoSave, false);
+			t.is(getAppConfig().sessions?.maxSessions, 25);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);

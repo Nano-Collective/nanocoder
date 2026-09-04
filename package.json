@@ -59,11 +59,13 @@
 		"format:check": "biome check .",
 		"build:vscode": "cd plugins/vscode && pnpm run build && mkdir -p ../../assets && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
+		"generate:schema": "tsx scripts/generate-config-schema.ts",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
 		"prepare": "husky"
 	},
 	"files": [
 		"dist",
+		"schemas",
 		"source/app/prompts/sections",
 		"source/config/themes.json",
 		"assets/nanocoder-vscode.vsix"
@@ -116,6 +118,7 @@
 		"@types/node": "^26.1.2",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
+		"ajv": "^8.20.0",
 		"ava": "^8.0.1",
 		"c8": "^12.0.0",
 		"husky": "^9.1.7",
@@ -125,7 +128,8 @@
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
-		"typescript": "^7.0.2"
+		"typescript": "^7.0.2",
+		"typescript-json-schema": "^0.68.0"
 	},
 	"lint-staged": {
 		"*.{js,ts,jsx,tsx,json,md}": [
