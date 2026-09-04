@@ -570,6 +570,7 @@ test('isReadOnly - returns false for mutating tools', t => {
 		'write_file',
 		'string_replace',
 		'execute_bash',
+		'lsp_format_document',
 		'create_task',
 		'update_task',
 		'delete_task',

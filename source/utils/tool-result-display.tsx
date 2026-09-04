@@ -84,6 +84,8 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Ran ${count} git command${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
+		case 'lsp_format_document':
+			return `Formatted ${count} file${s}`;
 		case 'ask_user':
 			return `Asked ${count} question${s}`;
 		case 'agent':

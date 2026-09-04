@@ -45,6 +45,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'string_replace',
 		'diff_edit',
 		'file_op',
+		'lsp_format_document',
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',

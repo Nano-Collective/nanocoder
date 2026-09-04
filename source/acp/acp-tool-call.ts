@@ -23,6 +23,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	read_file: 'read',
 	list_directory: 'read',
 	lsp_get_diagnostics: 'read',
+	lsp_format_document: 'edit',
 	search_file_contents: 'search',
 	find_files: 'search',
 	string_replace: 'edit',
