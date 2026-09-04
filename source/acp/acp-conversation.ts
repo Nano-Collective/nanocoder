@@ -41,6 +41,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
@@ -621,13 +622,13 @@ async function runTurn(
 					}
 
 					if (best) {
-						const tokens = Math.floor(best.tokenCount / 1000);
+						const tokens = formatCompactTokenCount(best.tokenCount);
 						const lastTool =
 							best.toolHistory.length > 0
 								? best.toolHistory[best.toolHistory.length - 1]
 								: '';
 
-						let title = `${best.subagentName || 'agent'} • ${tokens}k tokens`;
+						let title = `${best.subagentName || 'agent'} • ${tokens} tokens`;
 						if (best.toolCallCount > 0) {
 							title += ` • ${best.toolCallCount} tools${lastTool ? ` (${lastTool})` : ''}`;
 						} else {
