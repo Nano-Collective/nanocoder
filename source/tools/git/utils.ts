@@ -462,6 +462,32 @@ export async function getPrChangedFiles(pr: number): Promise<string[]> {
 }
 
 /**
+ * Resolve the open PR number for a branch, if one exists. Used by the daemon
+ * to decide whether a CI-failure diagnosis should be posted as a PR comment
+ * (no PR yet — e.g. a branch pushed before opening one — just means there's
+ * nowhere to post it). Bounded by TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function getPrNumberForBranch(
+	branch: string,
+): Promise<number | undefined> {
+	const output = await execGh(
+		['pr', 'list', '--head', branch, '--json', 'number', '--limit', '1'],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	const results = JSON.parse(output) as Array<{number: number}>;
+	return results[0]?.number;
+}
+
+/**
+ * Post a comment-only review to a PR. Shared by `verify --pr`'s
+ * `--post-review` and the daemon's CI-investigation posting — both want the
+ * exact same `gh pr review --comment` call.
+ */
+export async function postPrComment(pr: number, body: string): Promise<void> {
+	await execGh(['pr', 'review', pr.toString(), '--comment', '--body', body]);
+}
+
+/**
  * Get the default branch (main or master)
  */
 export async function getDefaultBranch(): Promise<string> {

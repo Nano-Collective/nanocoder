@@ -22,7 +22,26 @@ import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
+import {getAllowedToolNames} from '@/verify/trust';
 import {startDaemon} from './daemon';
+
+// Built-in, daemon-triggered subagents that must be pinned to a trust-level
+// tool allowlist at execution time rather than trusting their frontmatter
+// `tools:` list alone — see `source/verify/trust.ts`. Mirrors the same
+// `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`: name-level
+// only, so it doesn't stop `git_pr`'s comment/review/create argument shapes
+// on its own. What actually blocks those calls today is that this
+// `buildExecutor` never registers a tool-approval-queue handler, so any
+// `git_pr` call requiring confirmation is auto-denied by
+// `signalToolApproval()`'s default — a property of headless mode, not of
+// this list. If a future change ever registers an approval handler here,
+// this override alone would no longer be sufficient.
+const TRUST_OVERRIDDEN_SUBAGENTS: Record<
+	string,
+	ReturnType<typeof getAllowedToolNames>
+> = {
+	'verify-ci-investigator': getAllowedToolNames('comment-only'),
+};
 
 async function main(): Promise<void> {
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
@@ -70,8 +89,16 @@ async function main(): Promise<void> {
 			mode,
 		);
 		return {
-			execute: (task: SubagentTask): Promise<SubagentResult> =>
-				executor.execute(task),
+			execute: (task: SubagentTask): Promise<SubagentResult> => {
+				const tools = TRUST_OVERRIDDEN_SUBAGENTS[task.subagent_type];
+				return executor.execute(
+					task,
+					undefined,
+					0,
+					undefined,
+					tools ? {tools} : undefined,
+				);
+			},
 		};
 	};
 
@@ -102,6 +129,7 @@ async function main(): Promise<void> {
 		projectRoot,
 		buildExecutor,
 		checkpointer,
+		ciWatch: getAppConfig().ciWatch,
 	});
 
 	// Wire shutdown through the existing ShutdownManager rather than

@@ -81,12 +81,21 @@ export interface ScheduleCronTrigger extends SkillTriggerBase {
 	cron: string;
 }
 
+export interface CiJobFailedTrigger extends SkillTriggerBase {
+	kind: 'ci.job.failed';
+	/** Glob patterns; omitted = every branch the source polls. */
+	branches?: string[];
+}
+
 /**
  * A subscription declaration as it appears in user-authored YAML (either a
  * bundle manifest's `subscribe:` block or a member file's frontmatter).
  * The registrar resolves these into runtime `Subscription` objects.
  */
-export type SkillTrigger = FileChangedTrigger | ScheduleCronTrigger;
+export type SkillTrigger =
+	| FileChangedTrigger
+	| ScheduleCronTrigger
+	| CiJobFailedTrigger;
 
 export interface SkillSource {
 	priority: SkillPriority;

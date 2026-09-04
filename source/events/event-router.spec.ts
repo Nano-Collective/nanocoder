@@ -54,6 +54,34 @@ function cronEvent(cron: string): Event {
 	return {kind: 'schedule.cron', payload: {cron}, at: Date.now()};
 }
 
+function ciJobFailedSub(
+	id: string,
+	overrides: Partial<Subscription> = {},
+): Subscription {
+	return {
+		id,
+		kind: 'ci.job.failed',
+		target: {kind: 'agent', name: 'verify-ci-investigator'},
+		source: 'manifest',
+		ownerSkill: 'builtin',
+		...overrides,
+	} as Subscription;
+}
+
+function ciJobFailedEvent(branch: string): Event {
+	return {
+		kind: 'ci.job.failed',
+		payload: {
+			runId: 1,
+			workflowName: 'CI',
+			branch,
+			headSha: 'abc123',
+			url: 'https://example.com/run/1',
+		},
+		at: Date.now(),
+	};
+}
+
 test('subscribe + emit dispatches matching subscription', async t => {
 	const d = makeDispatcher();
 	const router = new EventRouter(d);
@@ -145,6 +173,26 @@ test('listByKind returns the registered subscriptions for that kind only', t => 
 
 	t.is(router.listByKind('file.changed').length, 1);
 	t.is(router.listByKind('schedule.cron').length, 1);
+});
+
+test('ci.job.failed with no filter dispatches for any branch', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(ciJobFailedSub('s1'));
+
+	await router.emit(ciJobFailedEvent('main'));
+	t.is(d.calls.length, 1);
+});
+
+test('ci.job.failed branches filter glob-matches the payload branch', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(ciJobFailedSub('s1', {filter: {branches: ['release/**']}}));
+
+	await router.emit(ciJobFailedEvent('feature-x'));
+	t.is(d.calls.length, 0);
+	await router.emit(ciJobFailedEvent('release/1.0'));
+	t.is(d.calls.length, 1);
 });
 
 test('matchesFilter on kind mismatch returns false', t => {
