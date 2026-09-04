@@ -250,6 +250,27 @@ test('runScript: timeout kills long-running script', async t => {
 	);
 });
 
+// A script that traps SIGTERM must still be force-killed. Guarding the
+// escalation on `child.killed` never fired (Node sets that flag the moment
+// SIGTERM is delivered), so the shell survived and 'close' - and with it the
+// rejection - waited on the full `sleep`. `sleep`'s stdio is redirected so it
+// does not hold our pipes open past the shell's death.
+test('runScript: escalates to SIGKILL when the script ignores SIGTERM', async t => {
+	const started = Date.now();
+	await t.throwsAsync(
+		runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
+			cwd: testDir,
+			env: process.env,
+			shell: '/bin/sh',
+			timeoutMs: 100,
+		}),
+		{message: /timed out/},
+	);
+	// SIGTERM at 100ms + a 1s grace window. Without escalation this only
+	// settles once `sleep 5` finishes.
+	t.true(Date.now() - started < 3_000);
+});
+
 test('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);
 	const result = await handler({name: 'world'});
