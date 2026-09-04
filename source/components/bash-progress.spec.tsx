@@ -53,6 +53,25 @@ test('BashProgress displays the command', t => {
 	t.regex(output!, /npm run build/);
 });
 
+test('BashProgress splits compound commands onto separate lines', t => {
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command={command}
+			completedState={createCompletedState({command})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /dolt version/);
+	t.regex(output!, /echo "==="/);
+	t.regex(output!, /ls -la \/usr\/local\/bin\/dolt/);
+	// Each segment renders on its own line.
+	t.is((output!.match(/dolt version/g) || []).length, 1);
+});
+
 test('BashProgress displays execute_bash tool name', t => {
 	const {lastFrame} = renderWithTheme(
 		<BashProgress
