@@ -325,7 +325,7 @@ test('formatter shows truncation warning when content is truncated', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Content was truncated to 100KB/);
+	t.true(output!.includes('Content was truncated to 100,000 characters'));
 });
 
 test('formatter renders without result (before execution)', t => {

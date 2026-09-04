@@ -113,7 +113,8 @@ function FetchUrlFormatterComponent({
 					{wasTruncated && (
 						<Box>
 							<Text color={colors.warning}>
-								⚠ Content was truncated to 100KB
+								⚠ Content was truncated to{' '}
+								{MAX_URL_CONTENT_BYTES.toLocaleString()} characters
 							</Text>
 						</Box>
 					)}
