@@ -245,3 +245,19 @@ test('fullscreen mode hides welcome banner while liveComponent is active', t => 
 	unmount();
 });
 
+test('inline mode keeps queued components in static queue even if renderLastQueuedComponentLive is passed', t => {
+	const props = createDefaultProps({
+		fullscreen: false,
+		queuedComponents: [
+			<div key="msg1">Message 1</div>,
+			<div key="msg2">Message 2</div>,
+		],
+		renderLastQueuedComponentLive: true,
+	});
+	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	const output = lastFrame() ?? '';
+	t.regex(output, /Message 1/);
+	t.regex(output, /Message 2/);
+	unmount();
+});
+
