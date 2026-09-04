@@ -208,6 +208,14 @@ select option {
 	opacity: 1;
 }
 
+/* Files Nanocoder created or edited. Dashed so the row reads as two things at
+   once: solid chips are attached to your next message, dashed ones are there
+   to be opened and reviewed. */
+.context-chip.context-chip-edited {
+  border-style: dashed;
+  border-color: var(--vscode-focusBorder, rgba(150, 150, 150, 0.45));
+}
+
 /* ── Drop Overlay ───────────────────────────────────── */
 #composer-box.drag-over::after {
 	content: 'Drop files or folders';
