@@ -96,3 +96,9 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 | Toggle compact tool output | Ctrl+O |
 | Toggle expanded reasoning traces | Ctrl+R |
 | Toggle selection mode (fullscreen only) | Ctrl+P |
+
+## Voice Mode
+
+| Action | Shortcut | Notes |
+|--------|----------|-------|
+| Push-to-talk / Barge-in | Ctrl+T | Start/stop voice recording; interrupts AI response if speaking or processing |
