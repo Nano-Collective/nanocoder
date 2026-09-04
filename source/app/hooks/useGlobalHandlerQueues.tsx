@@ -11,6 +11,10 @@ import {
 	type PendingToolConfirmation,
 	setGlobalToolConfirmHandler,
 } from '@/utils/tool-confirm-queue';
+import {
+	type PendingVoiceInstall,
+	setGlobalVoiceInstallHandler,
+} from '@/utils/voice-install-queue';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
@@ -23,17 +27,10 @@ interface GlobalHandlerQueues {
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
+	pendingVoiceInstall: PendingVoiceInstall | null;
+	handleVoiceInstallConfirm: (confirmed: boolean) => void;
 }
 
-/**
- * Wires the two global "ask the user" queues into the React tree:
- *  - question-queue (ask_question tool) drives the question prompt UI
- *  - tool-approval-queue (subagent tool calls) drives a parallel approval flow
- *
- * The tool-approval queue uses a dedicated state slot so it doesn't conflict
- * with the main agent's tool confirmation flow — a subagent's tool can need
- * approval while the parent agent is mid-conversation.
- */
 export function useGlobalHandlerQueues({
 	setPendingQuestion,
 	setIsQuestionMode,
@@ -73,8 +70,6 @@ export function useGlobalHandlerQueues({
 			return new Promise<boolean>(resolve => {
 				toolApprovalResolverRef.current = resolve;
 				setPendingSubagentApproval(approval);
-				// Don't clear the live component — AgentProgress renders above the
-				// chat input, ToolConfirmation renders below. They coexist.
 			});
 		});
 	}, []);
@@ -87,8 +82,6 @@ export function useGlobalHandlerQueues({
 		setPendingSubagentApproval(null);
 	}, []);
 
-	// Main agent tool confirmation: the conversation loop suspends on
-	// signalToolConfirm() until the user approves/declines here.
 	const toolConfirmResolverRef = useRef<((approved: boolean) => void) | null>(
 		null,
 	);
@@ -112,11 +105,36 @@ export function useGlobalHandlerQueues({
 		setPendingToolConfirmation(null);
 	}, []);
 
+	const voiceInstallResolverRef = useRef<((confirmed: boolean) => void) | null>(
+		null,
+	);
+	const [pendingVoiceInstall, setPendingVoiceInstall] =
+		useState<PendingVoiceInstall | null>(null);
+
+	useEffect(() => {
+		setGlobalVoiceInstallHandler((install: PendingVoiceInstall) => {
+			return new Promise<boolean>(resolve => {
+				voiceInstallResolverRef.current = resolve;
+				setPendingVoiceInstall(install);
+			});
+		});
+	}, []);
+
+	const handleVoiceInstallConfirm = useCallback((confirmed: boolean) => {
+		if (voiceInstallResolverRef.current) {
+			voiceInstallResolverRef.current(confirmed);
+			voiceInstallResolverRef.current = null;
+		}
+		setPendingVoiceInstall(null);
+	}, []);
+
 	return {
 		handleQuestionAnswer,
 		pendingSubagentApproval,
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	};
 }
