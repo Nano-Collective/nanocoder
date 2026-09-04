@@ -9,6 +9,7 @@ import {
 } from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {
+	getCiWatchPreference,
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
@@ -16,6 +17,7 @@ import {defaultTheme, getThemeColors} from '@/config/themes';
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	CiWatchConfig,
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
@@ -491,6 +493,11 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
+// Load CI-watch configuration from preferences
+function loadCiWatchConfig(): CiWatchConfig | undefined {
+	return getCiWatchPreference();
+}
+
 export function loadDefaultMode(): CliMode | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'defaultMode', config => {
@@ -541,6 +548,8 @@ function loadAppConfig(): AppConfig {
 
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
+	// Load CI-watch configuration
+	const ciWatch = loadCiWatchConfig();
 
 	// Load mode providers configuration
 	const modeProviders = loadModeProvidersConfig(providers);
@@ -559,6 +568,7 @@ function loadAppConfig(): AppConfig {
 		disabledTools,
 		systemPrompt,
 		notifications,
+		ciWatch,
 		modeProviders,
 		tune,
 	};

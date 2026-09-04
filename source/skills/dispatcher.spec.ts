@@ -70,6 +70,35 @@ test('buildTriggeredTask: schedule.cron event produces matching trigger context'
 	});
 });
 
+test('buildTriggeredTask: ci.job.failed event produces matching trigger context (not mislabeled as schedule.cron)', t => {
+	const sub: Subscription = {
+		id: 'builtin:ci-investigator',
+		kind: 'ci.job.failed',
+		target: {kind: 'agent', name: 'verify-ci-investigator'},
+		source: 'manifest',
+		ownerSkill: 'builtin',
+	};
+	const event: Event = {
+		kind: 'ci.job.failed',
+		payload: {
+			runId: 42,
+			workflowName: 'CI',
+			branch: 'feature-x',
+			headSha: 'abc123',
+			url: 'https://example.com/run/42',
+		},
+		at: 1_700_000_000_000,
+	};
+	const task = buildTriggeredTask(sub, event);
+	t.deepEqual(task.context, {
+		trigger: {
+			type: 'event',
+			kind: 'ci.job.failed',
+			payload: event.payload,
+		},
+	});
+});
+
 test('dispatch: routes agent target through executor.execute', async t => {
 	const calls: SubagentTask[] = [];
 	const dispatcher = new SkillDispatcher({

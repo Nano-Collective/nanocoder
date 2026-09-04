@@ -18,12 +18,12 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import type {SubagentTask} from '@/subagents/types';
 import {
-	execGh,
 	getCurrentCommitSha,
 	getPrChangedFiles,
 	getPrRefs,
 	isGhAvailable,
 	type PrRefs,
+	postPrComment,
 } from '@/tools/git/utils';
 import {formatError} from '@/utils/error-formatter';
 import {formatReviewBody} from './format-review';
@@ -88,7 +88,7 @@ async function defaultRunSubagent(
 }
 
 async function defaultPostReview(pr: number, body: string): Promise<void> {
-	await execGh(['pr', 'review', pr.toString(), '--comment', '--body', body]);
+	await postPrComment(pr, body);
 }
 
 const USAGE =

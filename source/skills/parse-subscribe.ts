@@ -13,6 +13,7 @@
  */
 
 import type {
+	CiJobFailedTrigger,
 	FileChangedTrigger,
 	FileChangeEventKind,
 	ScheduleCronTrigger,
@@ -69,8 +70,11 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 	if (kind === 'schedule.cron') {
 		return {...base, ...parseScheduleCron(obj, index)};
 	}
+	if (kind === 'ci.job.failed') {
+		return {...base, ...parseCiJobFailed(obj, index)};
+	}
 	throw new SubscribeParseError(
-		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron)`,
+		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron, ci.job.failed)`,
 	);
 }
 
@@ -149,4 +153,25 @@ function parseScheduleCron(
 		);
 	}
 	return {kind: 'schedule.cron', cron};
+}
+
+function parseCiJobFailed(
+	obj: Record<string, unknown>,
+	index: number,
+): CiJobFailedTrigger {
+	const trigger: CiJobFailedTrigger = {kind: 'ci.job.failed'};
+
+	if (obj.branches !== undefined) {
+		if (
+			!Array.isArray(obj.branches) ||
+			!obj.branches.every((b): b is string => typeof b === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].branches must be an array of glob strings`,
+			);
+		}
+		trigger.branches = obj.branches;
+	}
+
+	return trigger;
 }

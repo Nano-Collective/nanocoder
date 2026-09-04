@@ -118,6 +118,18 @@ export function updateNotificationsPreference(
 }
 
 /**
+ * Get the CI-watch config from the preferences file. Set by hand-editing
+ * the preferences file for now — no `/settings` UI wizard yet (that's a
+ * natural follow-up once the feature has seen real-world use).
+ */
+export function getCiWatchPreference():
+	| import('@/types/config').CiWatchConfig
+	| undefined {
+	const preferences = loadPreferences();
+	return preferences.ciWatch;
+}
+
+/**
  * Get the paste threshold from the preferences file.
  */
 export function getPasteThreshold(): number | undefined {
