@@ -581,3 +581,83 @@ test.serial('CheckpointManager list includes size information', async t => {
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test.serial(
+	'CheckpointManager does not write a snapshot outside the checkpoint directory',
+	async t => {
+		const tempDir = await createTempDir();
+		// A sibling of the workspace. captureFiles keys a snapshot by
+		// path.relative(workspaceRoot, file), so this arrives as `../name`,
+		// which joined onto the files directory would land outside it.
+		const outsideFile = path.join(tempDir, '..', `escaped-${Date.now()}.txt`);
+		try {
+			await fs.writeFile(outsideFile, 'secret', 'utf-8');
+
+			const manager = new CheckpointManager(tempDir);
+			const metadata = await manager.saveCheckpoint(
+				'traversal-checkpoint',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				[outsideFile],
+			);
+
+			const checkpointDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'checkpoints',
+				'traversal-checkpoint',
+			);
+			const escapedCopy = path.join(checkpointDir, path.basename(outsideFile));
+
+			t.false(
+				existsSync(escapedCopy),
+				'snapshot escaped the files directory',
+			);
+			for (const relativePath of metadata.filesChanged) {
+				t.false(
+					relativePath.startsWith('..'),
+					`metadata recorded a traversal path: ${relativePath}`,
+				);
+			}
+		} finally {
+			await fs.rm(outsideFile, {force: true});
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'CheckpointManager still snapshots a normal workspace file',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const insideFile = path.join(tempDir, 'src', 'kept.txt');
+			await fs.mkdir(path.dirname(insideFile), {recursive: true});
+			await fs.writeFile(insideFile, 'kept', 'utf-8');
+
+			const manager = new CheckpointManager(tempDir);
+			const metadata = await manager.saveCheckpoint(
+				'normal-checkpoint',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				[insideFile],
+			);
+
+			t.deepEqual(metadata.filesChanged, ['src/kept.txt']);
+			const stored = path.join(
+				tempDir,
+				'.nanocoder',
+				'checkpoints',
+				'normal-checkpoint',
+				'files',
+				'src',
+				'kept.txt',
+			);
+			t.true(existsSync(stored), 'a normal file must still be snapshotted');
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
