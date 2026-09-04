@@ -173,6 +173,28 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
+### OS sandbox
+
+File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to `true` (boolean; a string like `"true"` is ignored and treated as off, with a warning) to wrap those two in an OS jail. Default is off.
+
+```json
+{
+  "nanocoder": {
+    "sandbox": true
+  }
+}
+```
+
+When on:
+
+- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), and the Darwin user temp dir (bare `mktemp` ignores `TMPDIR` on macOS). Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model.
+- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. Same read caveat as macOS. If `bwrap` is missing the tool returns an error and does **not** fall through to unsandboxed bash.
+- **Windows** — not supported in this version. The tool returns an error if the flag is on.
+
+This is not a secrets boundary. Network is blocked, writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation.
+
+Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).

@@ -33,7 +33,7 @@ import type {
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
 // Load .env file from working directory (shell environment takes precedence)
@@ -422,6 +422,22 @@ function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
 	);
 }
 
+function loadSandboxConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'sandbox', config => {
+			const value = config.nanocoder?.sandbox;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.sandbox must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -613,6 +629,8 @@ function loadAppConfig(): AppConfig {
 	// Load project-level tune defaults from agents.config.json
 	const tune = loadTuneConfig();
 
+	const sandbox = loadSandboxConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -628,6 +646,7 @@ function loadAppConfig(): AppConfig {
 		notifications,
 		modeProviders,
 		tune,
+		sandbox,
 	};
 }
 
