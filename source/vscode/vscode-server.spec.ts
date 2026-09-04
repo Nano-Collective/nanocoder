@@ -21,6 +21,22 @@ function getNextPort(): number {
 	return testPort++;
 }
 
+/**
+ * Stable token every test passes when constructing its server. Keeping it
+ * deterministic lets each test construct both ends with the same secret.
+ */
+const TEST_TOKEN = 'test-token-do-not-use-in-production';
+
+/**
+ * Build a client URL that includes the per-session token in the query string.
+ * Every test needs to do this now that the server enforces authentication;
+ * keeping it in one helper makes it obvious that the token check is being
+ * exercised rather than bypassed.
+ */
+function authenticatedUrl(port: number, token: string = TEST_TOKEN): string {
+	return `ws://127.0.0.1:${port}?token=${encodeURIComponent(token)}`;
+}
+
 // ============================================================================
 // Tests for VSCodeServer class
 // ============================================================================
@@ -37,7 +53,7 @@ test('VSCodeServer can be instantiated with custom port', t => {
 
 test('VSCodeServer starts and stops correctly', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	const started = await server.start();
 	t.true(started);
@@ -48,7 +64,7 @@ test('VSCodeServer starts and stops correctly', async t => {
 
 test('VSCodeServer reports no connections initially', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
 	t.false(server.hasConnections());
@@ -59,11 +75,11 @@ test('VSCodeServer reports no connections initially', async t => {
 
 test('VSCodeServer accepts client connections', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
 	// Connect a client
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
@@ -81,10 +97,10 @@ test('VSCodeServer accepts client connections', async t => {
 
 test('VSCodeServer sends connection acknowledgment on connect', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	const message = await new Promise<ServerMessage>(resolve => {
 		client.on('message', (data: {toString(): string}) => {
@@ -103,7 +119,7 @@ test('VSCodeServer sends connection acknowledgment on connect', async t => {
 
 test('VSCodeServer calls onConnect callback', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let connectCalled = false;
 	server.onCallbacks({
@@ -114,7 +130,7 @@ test('VSCodeServer calls onConnect callback', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -130,7 +146,7 @@ test('VSCodeServer calls onConnect callback', async t => {
 
 test('VSCodeServer calls onDisconnect callback', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let disconnectCalled = false;
 	server.onCallbacks({
@@ -141,7 +157,7 @@ test('VSCodeServer calls onDisconnect callback', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -158,10 +174,10 @@ test('VSCodeServer calls onDisconnect callback', async t => {
 
 test('VSCodeServer sendFileChange broadcasts to connected clients', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	// Wait for connection ack first
 	await new Promise<void>(resolve => {
@@ -203,10 +219,10 @@ test('VSCodeServer sendFileChange broadcasts to connected clients', async t => {
 
 test('VSCodeServer tracks pending changes', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -235,10 +251,10 @@ test('VSCodeServer tracks pending changes', async t => {
 
 test('VSCodeServer getAllPendingChanges returns all pending changes', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -257,10 +273,10 @@ test('VSCodeServer getAllPendingChanges returns all pending changes', async t =>
 
 test('VSCodeServer removePendingChange removes a change', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -280,10 +296,10 @@ test('VSCodeServer removePendingChange removes a change', async t => {
 
 test('VSCodeServer sendAssistantMessage broadcasts message', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	// Wait for connection ack
 	await new Promise<void>(resolve => {
@@ -312,10 +328,10 @@ test('VSCodeServer sendAssistantMessage broadcasts message', async t => {
 
 test('VSCodeServer sendAssistantMessage with streaming flag', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	await new Promise<void>(resolve => {
 		client.on('message', () => resolve());
@@ -341,10 +357,10 @@ test('VSCodeServer sendAssistantMessage with streaming flag', async t => {
 
 test('VSCodeServer sendStatus broadcasts status', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	await new Promise<void>(resolve => {
 		client.on('message', () => resolve());
@@ -374,10 +390,10 @@ test('VSCodeServer sendStatus broadcasts status', async t => {
 
 test('VSCodeServer requestDiagnostics broadcasts request', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 
 	await new Promise<void>(resolve => {
 		client.on('message', () => resolve());
@@ -404,7 +420,7 @@ test('VSCodeServer requestDiagnostics broadcasts request', async t => {
 
 test('VSCodeServer handles client messages - send_prompt', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let receivedPrompt = '';
 	server.onCallbacks({
@@ -415,7 +431,7 @@ test('VSCodeServer handles client messages - send_prompt', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -433,7 +449,7 @@ test('VSCodeServer handles client messages - send_prompt', async t => {
 
 test('VSCodeServer handles client messages - apply_change', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let appliedId = '';
 	server.onCallbacks({
@@ -444,7 +460,7 @@ test('VSCodeServer handles client messages - apply_change', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -468,7 +484,7 @@ test('VSCodeServer handles client messages - apply_change', async t => {
 
 test('VSCodeServer handles client messages - reject_change', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let rejectedId = '';
 	server.onCallbacks({
@@ -479,7 +495,7 @@ test('VSCodeServer handles client messages - reject_change', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -500,7 +516,7 @@ test('VSCodeServer handles client messages - reject_change', async t => {
 
 test('VSCodeServer handles client messages - context', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let receivedContext: {workspaceFolder?: string} = {};
 	server.onCallbacks({
@@ -511,7 +527,7 @@ test('VSCodeServer handles client messages - context', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -536,7 +552,7 @@ test('VSCodeServer handles client messages - context', async t => {
 
 test('VSCodeServer handles client messages - diagnostics_response', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	let receivedDiagnostics: unknown[] = [];
 	server.onCallbacks({
@@ -547,7 +563,7 @@ test('VSCodeServer handles client messages - diagnostics_response', async t => {
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -578,7 +594,7 @@ test('VSCodeServer handles client messages - diagnostics_response', async t => {
 
 test('VSCodeServer handles client messages - active_editor with selection', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	const received: Array<{
 		filePath?: string;
@@ -595,7 +611,7 @@ test('VSCodeServer handles client messages - active_editor with selection', asyn
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -627,7 +643,7 @@ test('VSCodeServer handles client messages - active_editor with selection', asyn
 
 test('VSCodeServer handles client messages - active_editor cleared state', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 
 	const received: Array<{filePath?: string}> = [];
 	server.onCallbacks({
@@ -638,7 +654,7 @@ test('VSCodeServer handles client messages - active_editor cleared state', async
 
 	await server.start();
 
-	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client = new WebSocket(authenticatedUrl(port));
 	await new Promise<void>(resolve => {
 		client.on('open', () => resolve());
 	});
@@ -659,11 +675,11 @@ test('VSCodeServer handles client messages - active_editor cleared state', async
 
 test('VSCodeServer handles multiple clients', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client1 = new WebSocket(`ws://127.0.0.1:${port}`);
-	const client2 = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client1 = new WebSocket(authenticatedUrl(port));
+	const client2 = new WebSocket(authenticatedUrl(port));
 
 	await Promise.all([
 		new Promise<void>(resolve => client1.on('open', () => resolve())),
@@ -681,11 +697,11 @@ test('VSCodeServer handles multiple clients', async t => {
 
 test('VSCodeServer broadcasts to all clients', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
-	const client1 = new WebSocket(`ws://127.0.0.1:${port}`);
-	const client2 = new WebSocket(`ws://127.0.0.1:${port}`);
+	const client1 = new WebSocket(authenticatedUrl(port));
+	const client2 = new WebSocket(authenticatedUrl(port));
 
 	// Wait for both connections and their ack messages
 	await Promise.all([
@@ -772,7 +788,7 @@ test('sendFileChangeToVSCode returns null when no connections', t => {
 
 test('VSCodeServer getPort returns the actual port', async t => {
 	const port = getNextPort();
-	const server = new VSCodeServer(port);
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
 	await server.start();
 
 	t.is(server.getPort(), port);
@@ -784,13 +800,13 @@ test('VSCodeServer falls back to next port when requested port is in use', async
 	const port = getNextPort();
 
 	// Start first server on the port
-	const server1 = new VSCodeServer(port);
+	const server1 = new VSCodeServer(port, {token: TEST_TOKEN});
 	const started1 = await server1.start();
 	t.true(started1);
 	t.is(server1.getPort(), port);
 
 	// Try to start second server on same port - should fall back
-	const server2 = new VSCodeServer(port);
+	const server2 = new VSCodeServer(port, {token: TEST_TOKEN});
 	const started2 = await server2.start();
 	t.true(started2);
 	t.not(server2.getPort(), port); // Should be different
@@ -808,13 +824,13 @@ test('VSCodeServer tries up to 10 alternative ports', async t => {
 
 	// Start first server on base port
 	for (let i = 0; i <= 10; i++) {
-		const server = new VSCodeServer(basePort + i);
+		const server = new VSCodeServer(basePort + i, {token: TEST_TOKEN});
 		await server.start();
 		servers.push(server);
 	}
 
 	// Try to start another server - should fail as all 11 ports (base + 10 alternatives) are taken
-	const failingServer = new VSCodeServer(basePort);
+	const failingServer = new VSCodeServer(basePort, {token: TEST_TOKEN});
 	const started = await failingServer.start();
 	t.false(started);
 

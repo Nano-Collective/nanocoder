@@ -10,6 +10,18 @@
  */
 
 export {
+	clearDiscoveryFile,
+	generateServerToken,
+	getDefaultConfigDir,
+	getDiscoveryFilePath,
+	readDiscoveryFile,
+	type ServerDiscovery,
+	safeEqualToken,
+	VSCODE_DISCOVERY_FILENAME,
+	VSCODE_DISCOVERY_VERSION,
+	writeDiscoveryFile,
+} from './discovery';
+export {
 	getExtensionStatus,
 	getVsixPath,
 	installExtension,
@@ -18,7 +30,6 @@ export {
 	SUPPORTED_CLIS,
 	type VSCodeStatus,
 } from './extension-installer';
-
 export {
 	type ActiveEditorMessage,
 	type ApplyChangeMessage,
@@ -51,4 +62,5 @@ export {
 	sendFileChangeToVSCode,
 	VSCodeServer,
 	type VSCodeServerCallbacks,
+	type VSCodeServerOptions,
 } from './vscode-server';
