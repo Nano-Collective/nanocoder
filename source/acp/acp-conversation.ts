@@ -206,6 +206,14 @@ async function runTurn(
 			turnUsage.outputTokens =
 				(turnUsage.outputTokens ?? 0) + (usage.outputTokens as number);
 		}
+		if (Number.isFinite(usage.cacheReadTokens)) {
+			turnUsage.cacheReadTokens =
+				(turnUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens as number);
+		}
+		if (Number.isFinite(usage.cacheWriteTokens)) {
+			turnUsage.cacheWriteTokens =
+				(turnUsage.cacheWriteTokens ?? 0) + (usage.cacheWriteTokens as number);
+		}
 		// Keep the running total consistent when a call reports only
 		// input/output: add their sum so mixed-report turns don't understate.
 		const total = Number.isFinite(usage.totalTokens)
@@ -228,7 +236,9 @@ async function runTurn(
 		const usageReported =
 			turnUsage.inputTokens !== undefined ||
 			turnUsage.outputTokens !== undefined ||
-			turnUsage.totalTokens !== undefined;
+			turnUsage.totalTokens !== undefined ||
+			turnUsage.cacheReadTokens !== undefined ||
+			turnUsage.cacheWriteTokens !== undefined;
 		if (!usageReported) return response;
 		// Cost is computed from the sparse accumulators so a total-only turn
 		// takes the lump-sum averaging branch instead of pricing 0+0 tokens.

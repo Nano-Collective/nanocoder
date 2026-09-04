@@ -170,7 +170,9 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	/** Cached input tokens read from the provider cache. */
 	cacheReadTokens?: number;
+	/** Input tokens written to the provider cache. */
 	cacheWriteTokens?: number;
 }
 

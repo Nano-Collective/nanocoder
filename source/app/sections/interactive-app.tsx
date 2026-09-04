@@ -180,7 +180,8 @@ export function InteractiveApp({
 		(appState.isCancelling ||
 			chatHandler.isGenerating ||
 			appState.isToolExecuting ||
-			appState.abortController !== null);
+			appState.abortController !== null) &&
+		!appState.liveComponentCapturesInput;
 
 	const recallableSubmittedDraft =
 		cancellable &&
@@ -404,7 +405,9 @@ export function InteractiveApp({
 				{appState.startChat &&
 					appState.activeMode === null &&
 					!appState.isSettingsMode &&
-					!appState.planReviewState?.show && (
+					!appState.planReviewState?.show &&
+					// Hide the composer only while a live component explicitly captures input.
+					!appState.liveComponentCapturesInput && (
 						<UIStateProvider>
 							<ChatInput
 								isCancelling={appState.isCancelling}

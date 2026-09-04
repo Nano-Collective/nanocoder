@@ -7,12 +7,14 @@ import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
+import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
+import {resetStatsLedger} from '@/stats/record';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
@@ -461,6 +463,68 @@ function handleCopilotLogin(
 }
 
 /**
+ * Handles /stats as a live component so ←/→ can switch ranges without the
+ * chat composer swallowing the keys.
+ * Returns true if handled.
+ */
+function handleStatsCommand(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'stats') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setLiveComponentCapturesInput,
+		onAddToChatQueue,
+		onCommandComplete,
+	} = options;
+
+	const args = commandParts.slice(1);
+	const resetArg = args[0]?.toLowerCase();
+	if (resetArg === 'reset' || resetArg === '--reset') {
+		if (args.length !== 1) {
+			onAddToChatQueue(
+				errorMsg('Usage: /stats [7d|3m|all-time|reset]', 'stats-error'),
+			);
+			onCommandComplete?.();
+			return true;
+		}
+		resetStatsLedger();
+		onAddToChatQueue(infoMsg('Lifetime stats reset.', 'stats-reset'));
+		onCommandComplete?.();
+		return true;
+	}
+
+	setLiveComponentCapturesInput(true);
+
+	const close = () => {
+		// Leave a static snapshot in the transcript, then release focus.
+		onAddToChatQueue(
+			createStatsDisplayElement({
+				args,
+				interactive: false,
+			}),
+		);
+		setLiveComponent(null);
+		setLiveComponentCapturesInput(false);
+		onCommandComplete?.();
+	};
+
+	setLiveComponent(
+		createStatsDisplayElement({
+			args,
+			interactive: true,
+			onClose: close,
+		}),
+	);
+
+	return true;
+}
+
+/**
  * Handles /codex-login as a live component.
  * Returns true if handled.
  */
@@ -637,6 +701,7 @@ async function handleSlashCommand(
 		return;
 	if (handleCopilotLogin(commandParts, options)) return;
 	if (handleCodexLogin(commandParts, options)) return;
+	if (handleStatsCommand(commandParts, options)) return;
 
 	await handleBuiltInCommand(message, options);
 }

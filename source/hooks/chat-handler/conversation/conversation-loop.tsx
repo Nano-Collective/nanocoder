@@ -644,7 +644,9 @@ export const processAssistantResponse = async (
 			!!usage &&
 			(Number.isFinite(usage.inputTokens) ||
 				Number.isFinite(usage.outputTokens) ||
-				Number.isFinite(usage.totalTokens));
+				Number.isFinite(usage.totalTokens) ||
+				Number.isFinite(usage.cacheReadTokens) ||
+				Number.isFinite(usage.cacheWriteTokens));
 		setLastApiUsage(
 			hasReportedUsage
 				? {...usage, atMessageCount: updatedMessages.length}

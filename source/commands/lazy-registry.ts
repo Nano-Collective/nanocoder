@@ -150,6 +150,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
 	},
 	{
+		name: 'stats',
+		description:
+			'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
+		load: () => import('@/commands/stats').then(m => m.statsCommand),
+	},
+	{
 		name: 'tip',
 		description: 'Show a random Nanocoder usage tip',
 		load: () => import('@/commands/tip').then(m => m.tipCommand),

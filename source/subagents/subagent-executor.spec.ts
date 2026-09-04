@@ -10,6 +10,7 @@ import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
+	ApiCallRecord,
 	LLMClient,
 	LLMChatResponse,
 	Message,
@@ -65,7 +66,14 @@ function createMockToolManager(
 
 // Helper to create a mock LLM client
 function createMockClient(
-	responses: Array<{content: string; tool_calls?: Array<{id: string; function: {name: string; arguments: string}}>}>,
+	responses: Array<{
+		content: string;
+		tool_calls?: Array<{
+			id: string;
+			function: {name: string; arguments: string};
+		}>;
+		usage?: LLMChatResponse['usage'];
+	}>,
 	onChat?: (messages: Message[]) => void,
 ): LLMClient {
 	let callIndex = 0;
@@ -79,6 +87,7 @@ function createMockClient(
 			return {
 				choices: [{message: response}],
 				toolsDisabled: false,
+				usage: response.usage,
 			} as unknown as LLMChatResponse;
 		},
 		getCurrentModel: () => currentModel,
@@ -121,6 +130,139 @@ test.serial('executes a simple task without tool calls', async t => {
 	t.is(result.output, 'Here are the results');
 	t.is(result.subagentName, 'explore');
 	t.true(result.executionTimeMs >= 0);
+});
+
+test.serial('reports provider usage for every subagent model call', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'file contents', readOnly: true},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-usage',
+					function: {
+						name: 'read_file',
+						arguments: '{"path":"file.txt"}',
+					},
+				},
+			],
+			usage: {
+				inputTokens: 100,
+				outputTokens: 20,
+				totalTokens: 120,
+				cacheReadTokens: 10,
+				cacheWriteTokens: 5,
+			},
+		},
+		{
+			content: 'Done',
+			usage: {inputTokens: 150, outputTokens: 30, totalTokens: 180},
+		},
+	]);
+	const records: ApiCallRecord[] = [];
+	let callbackFinished = false;
+	const executor = new SubagentExecutor(
+		toolManager,
+		client,
+		process.cwd(),
+		'normal',
+		async record => {
+			await new Promise(resolve => setTimeout(resolve, 1));
+			records.push(record);
+			callbackFinished = true;
+		},
+	);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Read file.txt',
+	});
+
+	t.true(result.success);
+	t.true(callbackFinished);
+	t.is(records.length, 2);
+	t.deepEqual(
+		records.map(({timestamp, ...record}) => record),
+		[
+			{
+				provider: 'TestProvider',
+				model: 'test-model-sonnet-v1',
+				inputTokens: 100,
+				outputTokens: 20,
+				totalTokens: 120,
+				cacheReadTokens: 10,
+				cacheWriteTokens: 5,
+			},
+			{
+				provider: 'TestProvider',
+				model: 'test-model-sonnet-v1',
+				inputTokens: 150,
+				outputTokens: 30,
+				totalTokens: 180,
+			},
+		],
+	);
+});
+
+test.serial('preserves partial provider usage without estimating missing fields', async t => {
+	const records: ApiCallRecord[] = [];
+	const executor = new SubagentExecutor(
+		createMockToolManager(),
+		createMockClient([{content: 'Done', usage: {inputTokens: 42}}]),
+		process.cwd(),
+		'normal',
+		record => records.push(record),
+	);
+
+	await executor.execute({
+		subagent_type: 'explore',
+		description: 'Test partial usage',
+	});
+
+	t.is(records.length, 1);
+	t.is(records[0]?.inputTokens, 42);
+	t.is(records[0]?.outputTokens, undefined);
+	t.is(records[0]?.totalTokens, undefined);
+});
+
+test.serial('does not report a subagent call when the provider omits usage', async t => {
+	const records: ApiCallRecord[] = [];
+	const executor = new SubagentExecutor(
+		createMockToolManager(),
+		createMockClient([{content: 'Done'}]),
+		process.cwd(),
+		'normal',
+		record => records.push(record),
+	);
+
+	await executor.execute({
+		subagent_type: 'explore',
+		description: 'Test missing usage',
+	});
+
+	t.deepEqual(records, []);
+});
+
+test.serial('ignores usage callback failures', async t => {
+	const executor = new SubagentExecutor(
+		createMockToolManager(),
+		createMockClient([{content: 'Done', usage: {totalTokens: 10}}]),
+		process.cwd(),
+		'normal',
+		async () => {
+			throw new Error('stats unavailable');
+		},
+	);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Test usage failure',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'Done');
 });
 
 test.serial('returns error for non-existent subagent', async t => {

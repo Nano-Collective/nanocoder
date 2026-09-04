@@ -158,4 +158,4 @@ Nanocoder stores internal application data (such as usage statistics) in a separ
 - **Linux/Unix**: `$XDG_DATA_HOME/nanocoder` or `~/.local/share/nanocoder`
 - **Windows**: `%APPDATA%\nanocoder`
 
-You can override this directory using `NANOCODER_DATA_DIR`.
+You can override this directory using `NANOCODER_DATA_DIR`. Lifetime `/stats` data is stored in `stats.json` in this directory. Older `.nanocoder-stats.json` files are migrated automatically on first read.

@@ -31,7 +31,10 @@ import {
 } from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
-import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {
+	recordSubagentApiCallForStats,
+	SubagentExecutor,
+} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
@@ -395,7 +398,13 @@ export function useAppInitialization({
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
-				const executor = new SubagentExecutor(toolManager, client);
+				const executor = new SubagentExecutor(
+					toolManager,
+					client,
+					process.cwd(),
+					'normal',
+					recordSubagentApiCallForStats,
+				);
 				// Read the live development mode per tool call so subagents honor
 				// the current mode (and mid-run switches), matching the main loop.
 				if (developmentModeRef) {

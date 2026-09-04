@@ -104,6 +104,7 @@ interface UseAppHandlersProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	setChatComponents: (components: React.ReactNode[]) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setLiveComponentCapturesInput: (value: boolean) => void;
 	client: LLMClient | null;
 	getMessageTokens: (message: Message) => number;
 
@@ -695,6 +696,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onSwitchModel: props.handleModelSelect,
 					onAddToChatQueue: props.addToChatQueue,
 					setLiveComponent: props.setLiveComponent,
+					setLiveComponentCapturesInput: props.setLiveComponentCapturesInput,
 					setIsToolExecuting: props.setIsToolExecuting,
 					onCommandComplete: () => props.setIsConversationComplete(true),
 					setMessages: props.updateMessages,

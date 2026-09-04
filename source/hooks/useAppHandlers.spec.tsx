@@ -69,6 +69,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const setChatComponents = spy<[React.ReactNode[]]>();
 	const setLiveComponent = spy<[React.ReactNode]>();
+	const setLiveComponentCapturesInput = spy<[boolean]>();
 	const enterModelSelectionMode = spy<[]>();
 	const enterModelDatabaseMode = spy<[]>();
 	const enterSettingsMode = spy<[]>();
@@ -115,6 +116,7 @@ function makeProps(overrides: ProbeOverrides) {
 		addToChatQueue,
 		setChatComponents,
 		setLiveComponent,
+		setLiveComponentCapturesInput,
 		client: overrides.client ?? null,
 		getMessageTokens: () => 0,
 		enterModelSelectionMode,
