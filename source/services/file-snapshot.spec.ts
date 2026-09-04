@@ -1,3 +1,4 @@
+import {execSync} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
 import test from 'ava';
@@ -525,6 +526,27 @@ test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test.serial(
+	'FileSnapshotService finds untracked files when git HEAD is unborn',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execSync('git init', {cwd: tempDir, stdio: 'ignore'});
+			await createTestFile(tempDir, 'file.txt', 'new file');
+			await createTestFile(tempDir, 'nested/other.txt', 'also new');
+			await createTestFile(tempDir, 'ignored.txt', 'ignored');
+			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
+
+			const service = new FileSnapshotService(tempDir);
+			const files = service.getModifiedFiles();
+
+			t.deepEqual(files.sort(), ['.gitignore', 'file.txt', 'nested/other.txt']);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
 
 test.serial('FileSnapshotService captures empty files', async t => {
 	const tempDir = await createTempDir();

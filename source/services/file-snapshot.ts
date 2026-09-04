@@ -98,11 +98,23 @@ export class FileSnapshotService {
 		available: boolean;
 	} {
 		try {
-			const modifiedOutput = execSync('git diff --name-only HEAD', {
-				cwd: this.workspaceRoot,
-				encoding: 'utf-8',
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
+			let hasHead = true;
+			try {
+				execSync('git rev-parse --verify HEAD', {
+					cwd: this.workspaceRoot,
+					stdio: ['pipe', 'pipe', 'pipe'],
+				});
+			} catch {
+				hasHead = false;
+			}
+
+			const modifiedOutput = hasHead
+				? execSync('git diff --name-only HEAD', {
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+					}).trim()
+				: '';
 
 			const untrackedOutput = execSync(
 				'git ls-files --others --exclude-standard',
