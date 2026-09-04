@@ -49,6 +49,12 @@ export interface SkillCheckReport {
 	issues: SkillCheckIssue[];
 	/** Human summary of members, e.g. "2 commands, 1 agent, 3 tools". */
 	memberSummary: string;
+	/**
+	 * The loaded bundle, or null when `skill.yaml` is missing or unparseable.
+	 * Callers that need the members themselves (the installer's trust prompt)
+	 * read it from here instead of re-walking the bundle.
+	 */
+	skill: Skill | null;
 }
 
 function toRelative(projectRoot: string, filePath: string): string {
@@ -70,12 +76,18 @@ function loadErrorToIssue(
 
 /**
  * Lint a bundle skill under `<projectRoot>/.nanocoder/skills/<name>/`.
+ *
+ * `bundlePathOverride` points the linter at a bundle that does not live in
+ * the project yet - `nanocoder skills add` validates a freshly cloned
+ * bundle in a temp dir before anything is copied in.
  */
 export async function checkSkillBundle(
 	projectRoot: string,
 	name: string,
+	bundlePathOverride?: string,
 ): Promise<SkillCheckReport> {
-	const bundlePath = join(projectRoot, '.nanocoder', 'skills', name);
+	const bundlePath =
+		bundlePathOverride ?? join(projectRoot, '.nanocoder', 'skills', name);
 	const relBundlePath = toRelative(projectRoot, bundlePath);
 
 	if (!existsSync(bundlePath)) {
@@ -85,6 +97,7 @@ export async function checkSkillBundle(
 			found: false,
 			ok: false,
 			memberSummary: 'no members',
+			skill: null,
 			issues: [
 				{
 					severity: 'error',
@@ -146,6 +159,7 @@ export async function checkSkillBundle(
 		ok,
 		memberSummary: formatMemberSummary(commandCount, hasAgent, toolCount),
 		issues,
+		skill,
 	};
 }
 

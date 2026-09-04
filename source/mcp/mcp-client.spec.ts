@@ -1141,3 +1141,293 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.is(client.getServerTools('seam-server').length, 1);
 	t.is(client.getServerInfo('seam-server')?.connected, true);
 });
+
+// ============================================================================
+// Tests for MCP Resources Support
+// ============================================================================
+
+test('MCPClient.getAllResources: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const resources = client.getAllResources();
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getAllResources: returns resources from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with resources
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///test/resource1.txt',
+			name: 'resource1',
+			description: 'Test resource 1',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///test/resource2.json',
+			name: 'resource2',
+			description: 'Test resource 2',
+			mimeType: 'application/json',
+			serverName: 'test-server',
+		},
+	]);
+
+	const resources = client.getAllResources();
+
+	t.is(resources.length, 2);
+	t.is(resources[0].name, 'resource1');
+	t.is(resources[0].uri, 'file:///test/resource1.txt');
+	t.is(resources[1].name, 'resource2');
+});
+
+test('MCPClient.getServerResources: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const resources = client.getServerResources('non-existent');
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getServerResources: returns resources for specific server', t => {
+	const client = new MCPClient();
+
+	const testResources = [
+		{
+			uri: 'file:///test/resource.txt',
+			name: 'resource',
+			description: 'Test resource',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverResources.set('test-server', testResources);
+
+	const resources = client.getServerResources('test-server');
+
+	t.is(resources.length, 1);
+	t.deepEqual(resources, testResources);
+});
+
+test('MCPClient.readResource: throws error for non-existent resource', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.readResource('file:///non-existent'),
+		{message: /MCP resource not found/},
+	);
+});
+
+test('MCPClient.getServerInfo: includes resource count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///resource1.txt',
+			name: 'resource1',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///resource2.txt',
+			name: 'resource2',
+			serverName: 'test-server',
+		},
+	]);
+	(client as any).serverPrompts.set('test-server', []);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.resourceCount, 2);
+});
+
+// ============================================================================
+// Tests for MCP Prompts Support
+// ============================================================================
+
+test('MCPClient.getAllPrompts: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const prompts = client.getAllPrompts();
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getAllPrompts: returns prompts from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with prompts
+	(client as any).serverPrompts.set('test-server', [
+		{
+			name: 'prompt1',
+			description: 'Test prompt 1',
+			arguments: [
+				{name: 'query', description: 'Query parameter', required: true},
+			],
+			serverName: 'test-server',
+		},
+		{
+			name: 'prompt2',
+			description: 'Test prompt 2',
+			serverName: 'test-server',
+		},
+	]);
+
+	const prompts = client.getAllPrompts();
+
+	t.is(prompts.length, 2);
+	t.is(prompts[0].name, 'prompt1');
+	t.is(prompts[0].description, 'Test prompt 1');
+	t.is(prompts[1].name, 'prompt2');
+});
+
+test('MCPClient.getServerPrompts: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const prompts = client.getServerPrompts('non-existent');
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getServerPrompts: returns prompts for specific server', t => {
+	const client = new MCPClient();
+
+	const testPrompts = [
+		{
+			name: 'test-prompt',
+			description: 'Test prompt',
+			arguments: [],
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverPrompts.set('test-server', testPrompts);
+
+	const prompts = client.getServerPrompts('test-server');
+
+	t.is(prompts.length, 1);
+	t.deepEqual(prompts, testPrompts);
+});
+
+test('MCPClient.getPrompt: throws error for non-existent prompt', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.getPrompt('non-existent-prompt'),
+		{message: /MCP prompt not found/},
+	);
+});
+
+test('MCPClient.getServerInfo: includes prompt count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', []);
+	(client as any).serverPrompts.set('test-server', [
+		{name: 'prompt1', serverName: 'test-server'},
+		{name: 'prompt2', serverName: 'test-server'},
+		{name: 'prompt3', serverName: 'test-server'},
+	]);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.promptCount, 3);
+});
+
+// ============================================================================
+// Tests for MCP Sampling Support
+// ============================================================================
+
+test('MCPClient.setSamplingHandler: registers sampling handler', t => {
+	const client = new MCPClient();
+
+	const mockHandler = async (request: any) => {
+		return {
+			role: 'assistant' as const,
+			content: {type: 'text' as const, text: 'Test response'},
+			model: 'test-model',
+		};
+	};
+
+	t.notThrows(() => client.setSamplingHandler(mockHandler));
+
+	// Verify handler was set
+	t.truthy((client as any).samplingHandler);
+});
+
+test('MCPClient.setSamplingHandler: allows setting handler multiple times', t => {
+	const client = new MCPClient();
+
+	const handler1 = async () => ({
+		role: 'assistant' as const,
+		content: {type: 'text' as const, text: 'Response 1'},
+		model: 'model1',
+	});
+
+	const handler2 = async () => ({
+		role: 'assistant' as const,
+		content: {type: 'text' as const, text: 'Response 2'},
+		model: 'model2',
+	});
+
+	client.setSamplingHandler(handler1);
+	t.truthy((client as any).samplingHandler);
+
+	client.setSamplingHandler(handler2);
+	t.truthy((client as any).samplingHandler);
+
+	// The second handler should have replaced the first
+	t.is((client as any).samplingHandler, handler2);
+});
+
+// ============================================================================
+// Tests for disconnect with resources and prompts
+// ============================================================================
+
+test('MCPClient.disconnect: clears resources and prompts', async t => {
+	const client = new MCPClient();
+
+	// Add some mock state including resources and prompts
+	(client as any).clients.set('mock', {});
+	(client as any).transports.set('mock', {});
+	(client as any).serverTools.set('mock', []);
+	(client as any).serverResources.set('mock', [{uri: 'test', name: 'test', serverName: 'mock'}]);
+	(client as any).serverPrompts.set('mock', [{name: 'test', serverName: 'mock'}]);
+	(client as any).serverConfigs.set('mock', {});
+	(client as any).isConnected = true;
+
+	await client.disconnect();
+
+	// State should be cleared
+	t.is(client.getServerResources('mock').length, 0);
+	t.is(client.getServerPrompts('mock').length, 0);
+	t.is(client.getAllResources().length, 0);
+	t.is(client.getAllPrompts().length, 0);
+});
