@@ -407,6 +407,152 @@ test.serial('TimelineManager refuses index paths that escape the workspace', asy
 	}
 });
 
+test.serial('TimelineManager saves the index atomically over a read-only live file', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-atomic');
+		const indexPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-atomic',
+			'timeline.json',
+		);
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step 1',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'v1']]),
+		});
+
+		// rename(2) only needs write permission on the directory, so an atomic
+		// save replaces the file; an in-place write would fail with EACCES.
+		await fs.chmod(indexPath, 0o444);
+
+		const second = await manager.capture({
+			toolCallId: 'c2',
+			toolName: 'write_file',
+			title: 'step 2',
+			truncateToMessageIndex: 2,
+			files: filesMap([['b.ts', 'v2']]),
+		});
+
+		t.truthy(second);
+		t.is((await manager.list()).length, 2);
+		const saved = JSON.parse(await fs.readFile(indexPath, 'utf-8'));
+		t.is(saved.entries.length, 2);
+		const dirListing = await fs.readdir(path.dirname(indexPath));
+		t.false(dirListing.some(name => name.endsWith('.tmp')));
+	} finally {
+		const indexPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-atomic',
+			'timeline.json',
+		);
+		await fs.chmod(indexPath, 0o644).catch(() => {});
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager keeps the previous index intact when a save fails', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const sessionDir = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-fail',
+		);
+		const manager = new TimelineManager(tempDir, 'session-fail');
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step 1',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'v1']]),
+		});
+		const previousIndex = await fs.readFile(
+			path.join(sessionDir, 'timeline.json'),
+			'utf-8',
+		);
+
+		// A crash or full disk mid-save must not leave a truncated index: the
+		// previous checkpoint list stays readable until a save succeeds. A
+		// read-only session directory blocks any new write, including the save.
+		await fs.chmod(path.join(sessionDir, 'timeline.json'), 0o444);
+		await fs.chmod(sessionDir, 0o555);
+		await t.throwsAsync(
+			manager.capture({
+				toolCallId: 'c2',
+				toolName: 'write_file',
+				title: 'step 2',
+				truncateToMessageIndex: 2,
+				files: filesMap([['b.ts', 'v2']]),
+			}),
+		);
+
+		const saved = await fs.readFile(
+			path.join(sessionDir, 'timeline.json'),
+			'utf-8',
+		);
+		t.is(saved, previousIndex);
+		t.is(JSON.parse(saved).entries.length, 1);
+		const dirListing = await fs.readdir(sessionDir);
+		t.false(dirListing.some(name => name.endsWith('.tmp')));
+	} finally {
+		const sessionDir = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-fail',
+		);
+		await fs.chmod(path.join(sessionDir, 'timeline.json'), 0o644).catch(() => {});
+		await fs.chmod(sessionDir, 0o755).catch(() => {});
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager starts empty when the index file is corrupted', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-corrupt');
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'v1']]),
+		});
+		const indexPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-corrupt',
+			'timeline.json',
+		);
+		// A torn write leaves truncated JSON behind.
+		await fs.writeFile(indexPath, '{"entries": [', 'utf-8');
+
+		const fresh = new TimelineManager(tempDir, 'session-corrupt');
+		t.deepEqual(await fresh.list(), []);
+
+		const entry = await fresh.capture({
+			toolCallId: 'c2',
+			toolName: 'write_file',
+			title: 'recover',
+			truncateToMessageIndex: 1,
+			files: filesMap([['b.ts', 'v2']]),
+		});
+		t.truthy(entry);
+		t.is(JSON.parse(await fs.readFile(indexPath, 'utf-8')).entries.length, 1);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager prunes timelines from abandoned sessions', async t => {
 	const tempDir = await createTempDir();
 	try {
