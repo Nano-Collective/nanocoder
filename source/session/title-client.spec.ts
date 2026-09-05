@@ -67,3 +67,52 @@ test('falls back to the session client when the override cannot be built', async
 	const session = fakeClient('session-model');
 	t.is(await resolveTitleClient(session), session);
 });
+
+// The tests below need a provider that actually constructs, so they write a
+// real agents.config.json into the pinned config dir (also the cwd).
+function writeProviders(providers: unknown[]): void {
+	writeFileSync(
+		join(testConfigDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {providers}}),
+	);
+	clearAppConfig();
+}
+
+const alpha = {
+	name: 'alpha',
+	type: 'openai-compatible',
+	baseUrl: 'http://127.0.0.1:9/v1',
+	apiKey: 'x',
+	models: ['alpha-model'],
+};
+
+test('the cached client is rebuilt when the configured title model changes', async t => {
+	writeProviders([alpha]);
+	writeSessionConfig({titleProvider: 'alpha', titleModel: 'alpha-model'});
+
+	const session = fakeClient('session-model');
+	const first = await resolveTitleClient(session);
+	t.not(first, session, 'a configured, constructible provider should be used');
+	t.is(await resolveTitleClient(session), first, 'same config reuses the client');
+
+	writeSessionConfig({titleProvider: 'alpha', titleModel: 'a-different-model'});
+	const rebuilt = await resolveTitleClient(session);
+	t.not(rebuilt, first, 'a config change must not serve the stale client');
+});
+
+test('the cached client is rebuilt when the provider it names is edited', async t => {
+	// The case a provider/model cache key cannot see: both names are untouched,
+	// so the key built from them is byte-identical, but "alpha" now points at a
+	// different endpoint. Without the config generation in the key this serves a
+	// client aimed at the old baseURL for the rest of the process.
+	writeProviders([alpha]);
+	writeSessionConfig({titleProvider: 'alpha', titleModel: 'alpha-model'});
+
+	const session = fakeClient('session-model');
+	const first = await resolveTitleClient(session);
+	t.not(first, session, 'a configured, constructible provider should be used');
+
+	writeProviders([{...alpha, baseUrl: 'http://127.0.0.1:10/v1'}]);
+	const rebuilt = await resolveTitleClient(session);
+	t.not(rebuilt, first, 'an edited provider must not serve the stale client');
+});

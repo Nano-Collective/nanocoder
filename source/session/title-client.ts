@@ -1,15 +1,23 @@
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getConfigGeneration} from '@/config/index';
 import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 
-/** Built at most once per process, and only when an override is configured. */
+/** Built at most once per config, and only when an override is configured. */
 let cachedClient: LLMClient | null = null;
+/**
+ * The config generation plus the provider/model the cached client was built
+ * from. The names alone are not enough: editing a provider's baseURL or apiKey
+ * leaves `titleProvider` reading the same string while it no longer points at
+ * the same endpoint, so the generation is what makes any config edit rebuild.
+ */
+let cachedKey: string | null = null;
 let warnedAboutFailure = false;
 
 /** Test seam. Production code never calls this. */
 export function resetTitleClientCache(): void {
 	cachedClient = null;
+	cachedKey = null;
 	warnedAboutFailure = false;
 }
 
@@ -26,11 +34,14 @@ export async function resolveTitleClient(
 	const provider = sessions?.titleProvider;
 
 	if (!model && !provider) return sessionClient;
-	if (cachedClient) return cachedClient;
+
+	const key = `${getConfigGeneration()}\u0000${provider ?? ''}\u0000${model ?? ''}`;
+	if (cachedClient && cachedKey === key) return cachedClient;
 
 	try {
 		const {client} = await createLLMClient(provider, model);
 		cachedClient = client;
+		cachedKey = key;
 		return client;
 	} catch (error) {
 		// Fall back rather than going quiet, so a typo in config does not look
