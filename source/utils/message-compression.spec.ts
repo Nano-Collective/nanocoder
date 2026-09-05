@@ -542,3 +542,44 @@ test('isThresholdInRange agrees with clampThreshold at the bounds', t => {
 	t.true(isThresholdInRange(MAX));
 	t.false(isThresholdInRange(MAX + 1));
 });
+
+test('compressMessages ignores display-only messages in compressible segment and token counts', t => {
+	const tokenizer = createMockTokenizer();
+	const displayOnlyContent = 'Display-only UI notification banner '.repeat(100);
+	const messages = [
+		createUserMessage('Old user message that is compressible'),
+		{
+			role: 'assistant' as const,
+			content: displayOnlyContent,
+			displayOnly: true,
+		},
+		createUserMessage('Recent 1'),
+		createAssistantMessage('Recent 2'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {mode: 'default'});
+
+	// Display-only message should not be in the compressed output segment
+	t.false(
+		result.compressedMessages.some(
+			msg => msg.content === displayOnlyContent,
+		),
+	);
+
+	// Original token count must exclude the large display-only banner
+	const modelFacingOriginal = [messages[0]!, messages[2]!, messages[3]!];
+	const expectedOriginalTokens = modelFacingOriginal.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.originalTokenCount, expectedOriginalTokens);
+	t.true(result.originalTokenCount < displayOnlyContent.length);
+
+	// Compressed token count must also only account for model-facing compressed messages
+	const expectedCompressedTokens = result.compressedMessages.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.compressedTokenCount, expectedCompressedTokens);
+	t.true(result.compressedTokenCount < displayOnlyContent.length);
+});

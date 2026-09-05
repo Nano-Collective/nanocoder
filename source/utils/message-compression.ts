@@ -1,6 +1,7 @@
 import type {CompressionMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
+import {filterModelFacing, isModelFacing} from './message-visibility';
 
 /**
  * Compression configuration constants
@@ -115,7 +116,7 @@ export function compressMessages(
 		} else if (i >= messages.length - keepRecent) {
 			recentMessages.push(msg);
 		} else {
-			compressibleMessages.push(msg);
+			if (isModelFacing(msg)) compressibleMessages.push(msg);
 		}
 	}
 
@@ -506,7 +507,7 @@ function summarizeText(text: string, targetLength: number): string {
 // Count total tokens in messages
 function countTotalTokens(messages: Message[], tokenizer: Tokenizer): number {
 	let total = 0;
-	for (const msg of messages) {
+	for (const msg of filterModelFacing(messages)) {
 		total += tokenizer.countTokens(msg);
 	}
 	return total;
