@@ -137,7 +137,12 @@ export const ChatHistory = React.memo(function ChatHistory({
 		() => ({
 			staticComponents: frozenComponents,
 			queuedComponents,
-			renderLastQueuedComponentLive,
+			// In inline mode, the transcript is backed by Ink's <Static>. Moving an
+			// in-flight draft from live rendering to Static when streaming begins
+			// causes Ink to reprint the component to stdout, duplicating the prompt.
+			// Only enable live queue rendering in fullscreen (alt-screen) mode.
+			renderLastQueuedComponentLive:
+				fullscreen && Boolean(renderLastQueuedComponentLive),
 			clearKey,
 			disableStatic: fullscreen,
 		}),
