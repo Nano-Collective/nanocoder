@@ -803,21 +803,6 @@ test.serial(
 // background session titling
 // ============================================================================
 
-/** Poll the persisted session, since titling is deliberately fire and forget. */
-async function waitForSession(
-	sessionId: string,
-	predicate: (s: any) => boolean,
-	timeoutMs = 3000,
-): Promise<any | null> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const s = await sessionManager.readSession(sessionId);
-		if (s && predicate(s)) return s;
-		await new Promise(r => setTimeout(r, 20));
-	}
-	return null;
-}
-
 test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
 	const {agent} = createAgent();
 
@@ -836,7 +821,7 @@ test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
 		prompt: [{type: 'text', text: 'fix this'}],
 	});
 
-	await new Promise(r => setTimeout(r, 200));
+	await agent['pendingTitleGeneration'];
 	const beforeContext = await sessionManager.readSession(session.sessionId);
 	t.not(beforeContext?.titleGenerated, true);
 	t.is(chatCalls, 1);
@@ -846,21 +831,19 @@ test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
 		prompt: [{type: 'text', text: 'summarize the README'}],
 	});
 
-	const titled = await waitForSession(
-		session.sessionId,
-		s => s.titleGenerated === true,
-	);
-	t.truthy(titled, 'expected a generated title to be persisted');
-	t.is(titled.title, 'Fix Login Redirect');
+	await agent['pendingTitleGeneration'];
+	const titled = await sessionManager.readSession(session.sessionId);
+	t.true(titled?.titleGenerated, 'expected a generated title to be persisted');
+	t.is(titled?.title, 'Fix Login Redirect');
 	// A generated title must never masquerade as a user rename.
-	t.not(titled.titleManuallySet, true);
+	t.not(titled?.titleManuallySet, true);
 
 	// A third turn must not re-title: titleGenerated short-circuits it.
 	await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'and now this'}],
 	});
-	await new Promise(r => setTimeout(r, 200));
+	await agent['pendingTitleGeneration'];
 
 	const after = await sessionManager.readSession(session.sessionId);
 	t.is(after!.title, 'Fix Login Redirect');
@@ -882,7 +865,7 @@ test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => 
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'fix this'}],
 	});
-	await new Promise(r => setTimeout(r, 200));
+	await agent['pendingTitleGeneration'];
 
 	// The cancel path early-returns from inside catch, which still runs the
 	// finally. Reaching the finally must not be mistaken for a clean turn.
@@ -907,7 +890,7 @@ test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
 			prompt: [{type: 'text', text: 'fix this'}],
 		}),
 	);
-	await new Promise(r => setTimeout(r, 200));
+	await agent['pendingTitleGeneration'];
 
 	t.is(chatCalls, 1);
 	const stored = await sessionManager.readSession(session.sessionId);

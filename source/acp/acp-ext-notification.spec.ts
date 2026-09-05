@@ -50,11 +50,26 @@ test('a title notification sent with notify() arrives as extNotification', async
 		title: 'Fix Login Redirect',
 	});
 
+	// Close both directions and drop the deadline timer however this ends. The
+	// test passes without it today, but a change that stopped the notification
+	// from arriving would leave the AVA worker holding open streams.
+	let deadline: ReturnType<typeof setTimeout> | undefined;
+	t.teardown(async () => {
+		if (deadline) clearTimeout(deadline);
+		await Promise.allSettled([
+			a2b.writable.close(),
+			b2a.writable.close(),
+		]);
+	});
+
 	await Promise.race([
 		gotOne,
-		new Promise((_r, reject) =>
-			setTimeout(() => reject(new Error('notification never arrived')), 3000),
-		),
+		new Promise((_r, reject) => {
+			deadline = setTimeout(
+				() => reject(new Error('notification never arrived')),
+				3000,
+			);
+		}),
 	]);
 
 	t.is(received.length, 1);

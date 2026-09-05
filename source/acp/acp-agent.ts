@@ -84,6 +84,13 @@ async function listSessionArtifacts(sessionId: string) {
 }
 
 export class AcpAgent implements Agent {
+	/**
+	 * The in-flight background titling run. Exposed only so tests can await
+	 * work that production deliberately fires and forgets - asserting on it
+	 * with a fixed sleep goes flaky the moment CI is loaded.
+	 */
+	private pendingTitleGeneration: Promise<void> = Promise.resolve();
+
 	private sessions = new Map<string, AcpSession>();
 	private initContext: AcpInitContext;
 	private conn: AgentSideConnection;
@@ -432,9 +439,11 @@ export class AcpAgent implements Agent {
 			});
 
 			// Fire and forget: the turn must return to idle immediately, and a
-			// cosmetic title landing a moment later is fine.
+			// cosmetic title landing a moment later is fine. The promise is kept
+			// only so tests can await it instead of sleeping; nothing in
+			// production reads it.
 			if (turnSucceeded) {
-				void maybeGenerateTitle({
+				this.pendingTitleGeneration = maybeGenerateTitle({
 					sessionId: session.sessionId,
 					messages: session.messages,
 					client: this.initContext.client,
@@ -450,7 +459,7 @@ export class AcpAgent implements Agent {
 							})
 							.catch(() => {});
 					},
-				});
+				}).catch(() => {});
 			}
 		}
 	}
