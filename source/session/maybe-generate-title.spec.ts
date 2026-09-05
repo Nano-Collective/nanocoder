@@ -337,7 +337,7 @@ test('a rename that lands mid-flight still wins', async t => {
 });
 
 test('never rejects, even when the session store throws', async t => {
-	// Both call sites invoke this as a bare `void` with no .catch(), so a
+	// The call site invokes this as a bare `void` with no .catch(), so a
 	// rejection here becomes an unhandled rejection and takes the process down.
 	// An uninitialised SessionManager does exactly this: readSession builds a
 	// path from an undefined directory and throws TypeError.

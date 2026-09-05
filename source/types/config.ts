@@ -248,11 +248,25 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
-		/** Generate a descriptive title once per session. Default true. */
+		/**
+		 * Generate a descriptive title once per session. Default true.
+		 *
+		 * Only the ACP agent titles sessions today, so this affects the VS Code
+		 * extension and any other ACP client. The CLI keeps its heuristic title
+		 * (the first user message) regardless of the three keys below.
+		 */
 		smartTitles?: boolean;
 		/** Optional model for title generation. Defaults to the session's model. */
 		titleModel?: string;
-		/** Optional provider for title generation. Defaults to the session's provider. */
+		/**
+		 * Optional provider for title generation. Defaults to the session's own
+		 * provider, so by default titling sends nothing anywhere the session was
+		 * not already going to send it.
+		 *
+		 * Naming a different provider here sends that provider the opening user
+		 * turns plus a summary of the tools that ran - which includes file paths
+		 * and bash command strings. Point this at a local model if that matters.
+		 */
 		titleProvider?: string;
 	};
 

@@ -21,7 +21,12 @@ const MAX_HEURISTIC_TITLE_CHARS = 50;
  */
 export const ACTIVE_FILE_PREFIX = /^\[Active file: [^\]]+\]\r?\n\r?\n/;
 
-/** Argument names that usually carry the thing a tool acted on, best first. */
+/**
+ * Argument names that usually carry the thing a tool acted on, best first.
+ * `command` means bash command strings reach the title model. That is the
+ * session's own model by default; with `sessions.titleProvider` set it is
+ * whichever provider the user named. See the note on that config key.
+ */
 const PATH_ARG_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'command'];
 
 export interface TitleContext {
