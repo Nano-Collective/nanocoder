@@ -47,6 +47,17 @@ test('a substantive CJK prompt is not treated as weak', t => {
 	t.true(isWeakTitle('ログイン処理のバグを直して'));
 });
 
+test('the active-file prefix is stripped with CRLF line endings too', t => {
+	t.is(
+		normalizeFirstMessage('[Active file: a.ts]\r\n\r\nfix the crash'),
+		'fix the crash',
+	);
+	t.is(
+		deriveTitleFromFirstMessage('[Active file: a.ts]\r\n\r\nfix the crash'),
+		'fix the crash',
+	);
+});
+
 test('isWeakTitle measures the normalized string, not the raw one', t => {
 	// Real content behind a prefix that would otherwise inflate the length.
 	const withPrefix =

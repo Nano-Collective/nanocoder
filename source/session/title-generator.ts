@@ -14,8 +14,12 @@ const MAX_ASSISTANT_REPLY_CHARS = 300;
 
 const MAX_HEURISTIC_TITLE_CHARS = 50;
 
-/** Prepended by the VS Code UI, so it is plumbing rather than the request. */
-const ACTIVE_FILE_PREFIX = /^\[Active file: [^\]]+\]\n\n/;
+/**
+ * Prepended by the VS Code UI, so it is plumbing rather than the request.
+ * Exported so the ACP save path strips it with the same pattern - two copies
+ * of this regex drifted apart once already.
+ */
+export const ACTIVE_FILE_PREFIX = /^\[Active file: [^\]]+\]\r?\n\r?\n/;
 
 /** Argument names that usually carry the thing a tool acted on, best first. */
 const PATH_ARG_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'command'];

@@ -56,7 +56,10 @@ import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
-import {deriveTitleFromFirstMessage} from '@/session/title-generator';
+import {
+	ACTIVE_FILE_PREFIX,
+	deriveTitleFromFirstMessage,
+} from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -946,7 +949,7 @@ export class AcpAgent implements Agent {
 					if (m.role === 'user' && typeof m.content === 'string') {
 						return {
 							...m,
-							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+							content: m.content.replace(ACTIVE_FILE_PREFIX, ''),
 						};
 					}
 					return m;
