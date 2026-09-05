@@ -28,6 +28,8 @@ export class NanocoderAcpClient {
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
+	/** Fires when a background title update is received. */
+	public onSessionTitleChanged?: () => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -88,6 +90,13 @@ export class NanocoderAcpClient {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._clearPendingPermissions();
+	}
+
+	/** Handle custom notifications from the agent. */
+	async handleExtNotification(method: string, _params: unknown): Promise<void> {
+		if (method === '_nanocoder/sessionTitleChanged') {
+			this.onSessionTitleChanged?.();
+		}
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {

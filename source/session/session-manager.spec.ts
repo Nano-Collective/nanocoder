@@ -1055,3 +1055,69 @@ test.serial(
 		t.is(loaded!.title, 'Kept title');
 	},
 );
+
+test('titleGenerated round-trips through save and read', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+
+	await manager.saveSession({
+		...session,
+		title: 'Fix Login Bug',
+		titleGenerated: true,
+	});
+
+	const reloaded = await manager.readSession(session.id);
+	t.is(reloaded?.title, 'Fix Login Bug');
+	t.true(reloaded?.titleGenerated);
+});
+
+test('titleGenerated survives an index rebuild', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	await manager.saveSession({
+		...session,
+		title: 'Fix Login Bug',
+		titleGenerated: true,
+	});
+
+	// Corrupt the index so listSessions is forced to rebuild it from the
+	// session files on disk. rebuildIndex hand-lists every metadata field,
+	// so a field missing there is dropped silently.
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+
+	const listed = await manager.listSessions();
+	const found = listed.find(s => s.id === session.id);
+	t.truthy(found);
+	t.true(found?.titleGenerated);
+});
+
+test('titleManuallySet also survives an index rebuild', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	await manager.renameSession(session.id, 'My Own Name');
+
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+
+	const listed = await manager.listSessions();
+	const found = listed.find(s => s.id === session.id);
+	t.is(found?.title, 'My Own Name');
+	t.true(found?.titleManuallySet);
+});

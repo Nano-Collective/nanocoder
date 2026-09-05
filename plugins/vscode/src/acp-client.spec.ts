@@ -30,6 +30,21 @@ test('NanocoderAcpClient - permission flow', async (t) => {
 	t.false(client.hasPendingPermissions(), 'Pending permissions should be cleared');
 });
 
+test('NanocoderAcpClient - forwards background title notifications', async (t) => {
+	const client = makeClient({});
+	let notified = false;
+	client.onSessionTitleChanged = () => {
+		notified = true;
+	};
+
+	await client.handleExtNotification('_nanocoder/sessionTitleChanged', {
+		sessionId: 'session-1',
+		title: 'Updated title',
+	});
+
+	t.true(notified);
+});
+
 function makeClient(connection: unknown) {
 	const outputChannel = { appendLine: () => {} } as any;
 	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());

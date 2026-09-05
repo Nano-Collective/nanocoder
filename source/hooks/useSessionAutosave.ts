@@ -3,6 +3,7 @@ import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
+import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
@@ -25,19 +26,27 @@ export function shouldResetSessionId(
 	return previousMessageCount > 0 && currentMessageCount === 0;
 }
 
+/**
+ * The plain title for a CLI-autosaved session. Scans forward: the FIRST real
+ * user turn names the session, because deriving from the latest one made the
+ * title a rolling mirror of whatever was typed most recently. Approved-plan
+ * injections and internal walkthrough protocol messages are plumbing, not
+ * requests, so they never name a session. Truncation and the active-file
+ * prefix strip are delegated to the same helper the ACP save path uses -
+ * both write to this store, so both must agree on the title.
+ */
 export function deriveSessionTitle(messages: Message[]): string {
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const message = messages[index];
+	for (const message of messages) {
 		if (
-			message?.role === 'user' &&
-			!isApprovedPlanMessage(message) &&
-			!isInternalWalkthroughMessage(message)
+			message?.role !== 'user' ||
+			isApprovedPlanMessage(message) ||
+			isInternalWalkthroughMessage(message)
 		) {
-			return (
-				message.content.substring(0, 50) +
-				(message.content.length > 50 ? '...' : '')
-			);
+			continue;
 		}
+
+		const title = deriveTitleFromFirstMessage(message.content);
+		if (title) return title;
 	}
 
 	return `Session ${new Date().toLocaleDateString()}`;
@@ -191,7 +200,9 @@ export function useSessionAutosave({
 				// the update path instead of calling createSession() again.
 				const liveSessionId = currentSessionIdRef.current;
 
-				// Derive a human-readable title from the most recent user message.
+				// Derive from the FIRST user message, through the same helper the
+				// ACP path uses. Deriving it from the latest one made the title a
+				// rolling mirror of whatever was typed most recently.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
 				const title = deriveSessionTitle(persistedMessages);
@@ -202,11 +213,10 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = persistedMessages;
 						session.messageCount = persistedMessages.length;
-						// A manually-renamed title sticks — don't let the auto-derived
-						// title clobber it. Currently only the VS Code extension's
-						// rename sets this flag; the CLI's /rename command only
-						// updates in-memory display state and never reaches disk.
-						if (!session.titleManuallySet) {
+						// A manually-renamed title, or one the ACP agent generated,
+						// sticks - don't let the auto-derived title clobber either.
+						// Both flags are written to the same store this hook saves to.
+						if (!session.titleManuallySet && !session.titleGenerated) {
 							session.title = title;
 						}
 						session.provider = capturedProvider;
