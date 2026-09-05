@@ -5,7 +5,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import {clearAppConfig} from '@/config/index';
 import type {LLMClient, Message} from '@/types/core';
-import {maybeGenerateTitle} from './maybe-generate-title.js';
+import {
+	maybeGenerateTitle,
+	resetTitleGenerationState,
+} from './maybe-generate-title.js';
 import {SessionManager} from './session-manager.js';
 
 console.log('\nmaybe-generate-title.spec.ts');
@@ -32,6 +35,8 @@ let manager: SessionManager;
 
 test.beforeEach(async () => {
 	writeSessionConfig({});
+	// inFlight is module state, not per-manager.
+	resetTitleGenerationState();
 	testDir = await mkdtemp(join(tmpdir(), 'title-orch-test-'));
 	manager = new SessionManager(join(testDir, 'sessions'));
 	await manager.initialize();
@@ -415,4 +420,36 @@ test('an assistant message without string content does not abort titling', async
 	const saved = await manager.readSession(session.id);
 	t.is(saved?.title, 'README Overview');
 	t.true(saved?.titleGenerated);
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency
+
+test('two turns finishing together make only one model call', async t => {
+	const session = await seed('fix this');
+	let calls = 0;
+	let release: (() => void) | undefined;
+	const gate = new Promise<void>(resolve => {
+		release = resolve;
+	});
+
+	const slow = {
+		...client('Fix Login Redirect'),
+		chat: async () => {
+			calls++;
+			await gate;
+			return {
+				choices: [{message: {role: 'assistant', content: 'Fix Login Redirect'}}],
+			};
+		},
+	} as unknown as LLMClient;
+
+	const both = Promise.all([
+		maybeGenerateTitle({sessionId: session.id, messages: turn, client: slow, manager}),
+		maybeGenerateTitle({sessionId: session.id, messages: turn, client: slow, manager}),
+	]);
+	release?.();
+	await both;
+
+	t.is(calls, 1, 'the inFlight guard must close before the first await');
 });

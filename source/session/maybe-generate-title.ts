@@ -16,6 +16,11 @@ const TITLE_TIMEOUT_MS = 20_000;
 /** Stops two turns finishing close together from both launching a call. */
 const inFlight = new Set<string>();
 
+/** Test seam. Production code never calls this. */
+export function resetTitleGenerationState(): void {
+	inFlight.clear();
+}
+
 export interface MaybeGenerateTitleOptions {
 	sessionId: string;
 	/** The conversation so far. Only the first turn is ever read. */
@@ -49,6 +54,9 @@ async function runTitleGeneration(
 	const {sessionId, messages, client, onTitle} = options;
 	const manager = options.manager ?? sessionManager;
 
+	// Every guard from here to inFlight.add() is synchronous. Nothing may await
+	// in between, or two turns finishing together both pass the check and both
+	// make a call - the exact case this set exists to prevent.
 	if (getAppConfig().sessions?.smartTitles === false) return;
 	if (inFlight.has(sessionId)) return;
 
@@ -61,10 +69,6 @@ async function runTitleGeneration(
 	const userMessages = extractUserMessages(messages);
 	if (userMessages.length < 2 && toolSummaries.length === 0) return;
 
-	const session = await manager.readSession(sessionId);
-	if (!session) return;
-	if (session.titleManuallySet || session.titleGenerated) return;
-
 	inFlight.add(sessionId);
 	// Not the session's own controller: AcpSession.cancel() swaps that one out,
 	// so borrowing it would leave this call attached to a stale controller.
@@ -72,6 +76,10 @@ async function runTitleGeneration(
 	const timer = setTimeout(() => timeout.abort(), TITLE_TIMEOUT_MS);
 
 	try {
+		const session = await manager.readSession(sessionId);
+		if (!session) return;
+		if (session.titleManuallySet || session.titleGenerated) return;
+
 		const assistantReply = messages.find(
 			m =>
 				m.role === 'assistant' &&
