@@ -206,6 +206,7 @@ test('clearKey prop is accepted and does not change output for equal transcripts
 	b.unmount();
 });
 
+<<<<<<< HEAD
 test('fullscreen mode shows welcome banner before first prompt', t => {
 	const props = createDefaultProps({
 		fullscreen: true,
@@ -260,4 +261,37 @@ test('inline mode keeps queued components in static queue even if renderLastQueu
 	t.regex(output, /Message 2/);
 	unmount();
 });
+
+test('inline mode does not duplicate queued components when transitioning from live to static', t => {
+	const queuedComponents = [
+		<div key="msg1">Message 1</div>,
+		<div key="msg2">Message 2</div>,
+	];
+	const {lastFrame, rerender, unmount} = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: true,
+			})}
+		/>,
+	);
+
+	// Simulate model starting to stream: recall window closes and live flag turns false
+	rerender(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: false,
+			})}
+		/>,
+	);
+
+	const output = lastFrame() ?? '';
+	const matches = output.match(/Message 2/g);
+	t.is(matches?.length, 1);
+	unmount();
+});
+
 
