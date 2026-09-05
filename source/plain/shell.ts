@@ -27,6 +27,12 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
+import {
+	beginSessionStartHooks,
+	runLifecycleHooks,
+	SESSION_END_HOOK_HANDLER,
+	takePendingHookContext,
+} from '@/services/lifecycle-hooks';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -198,7 +204,51 @@ export async function runPlainShell(
 	setLastBuiltPrompt(systemContent);
 
 	const systemMessage: Message = {role: 'system', content: systemContent};
-	const initialMessages: Message[] = [{role: 'user', content: prompt}];
+
+	// `run` / --plain is a session too, so it fires the same lifecycle points
+	// as the TUI. session-end goes through the shutdown manager (priority -5)
+	// so it runs on every exit path, including SIGINT.
+	deps.getShutdownManager().register({
+		name: SESSION_END_HOOK_HANDLER,
+		priority: -5,
+		handler: async () => {
+			await runLifecycleHooks('session-end');
+		},
+	});
+
+	await beginSessionStartHooks();
+
+	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
+	if (promptGate.blocked) {
+		const message = promptGate.reason ?? 'Prompt blocked by a hook.';
+		if (isJson) {
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				filesChanged: [],
+				message,
+			});
+		} else {
+			writeError(message);
+		}
+		await deps.getShutdownManager().gracefulShutdown(1);
+		return;
+	}
+
+	const hookContext = [await takePendingHookContext(), promptGate.output]
+		.filter(Boolean)
+		.join('\n\n');
+	const initialMessages: Message[] = [
+		{
+			role: 'user',
+			content: hookContext
+				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
+				: prompt,
+		},
+	];
 
 	const abortController = new AbortController();
 	const sigint = () => abortController.abort();

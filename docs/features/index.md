@@ -193,6 +193,20 @@ These are the kinds of members a skill can contain. Each page covers its primiti
 - **[Custom Tools](custom-tools.md)** — model-callable shell scripts with declared input schemas and approval policy.
 - **Event subscriptions** — cron and `file.changed` triggers that fire skill members through the per-project daemon. See [Skills → Event subscriptions](skills.md#event-subscriptions).
 
+### Lifecycle Hooks
+
+Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md)** run your own shell command at a fixed point in the agent loop — before or after a tool, on session start/end, on prompt submit, before compaction. No model, no tokens, and they fire every time:
+
+```json
+{"nanocoder": {"hooks": {
+  "post-tool-use": [
+    {"matchTools": ["write_file", "string_replace"], "command": "biome check --write \"$NANOCODER_FILE\""}
+  ]
+}}}
+```
+
+A `pre-tool-use` hook that exits non-zero denies the tool call and tells the model why, which makes rules like "never touch `.env`" enforceable rather than merely requested.
+
 ### File Explorer
 
 The [file explorer](file-explorer.md) gives you an interactive tree view of your project for browsing and selecting files as context:
@@ -240,6 +254,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files (a kind of skill member) |
 | [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
+| [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |

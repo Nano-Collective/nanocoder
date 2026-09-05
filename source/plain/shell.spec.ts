@@ -1,4 +1,15 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "ava";
+import { clearAppConfig, reloadAppConfig } from "@/config/index";
+import {
+	clearPendingHookContext,
+	resetSessionStartHooks,
+	SESSION_END_HOOK_HANDLER,
+} from "@/services/lifecycle-hooks";
+import { setProjectRoot } from "@/services/session-cwd";
+import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
@@ -24,6 +35,8 @@ interface CapturedShutdown {
 
 function makeFakeShutdownManager(captured: CapturedShutdown) {
 	return () => ({
+		// runPlainShell registers its session-end lifecycle hook here; the fake
+		// only has to accept the registration, never run it.
 		register: () => undefined,
 		unregister: () => undefined,
 		gracefulShutdown: async (code: number) => {
@@ -862,3 +875,191 @@ test.serial(
 		t.is(shutdown.code, 1);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Lifecycle hooks in the headless shell.
+//
+// `run` / --plain is a session too, so it fires session-start, session-end and
+// user-prompt-submit. None of that is exercised by the TUI's tests, and a veto
+// here has to stop the run before any model call rather than after one.
+// ---------------------------------------------------------------------------
+
+const HOOK_DIR = join(tmpdir(), `nanocoder-plain-hooks-${Date.now()}`);
+
+function withPlainHooks(hooks: HooksConfig): void {
+	writeFileSync(
+		join(HOOK_DIR, "agents.config.json"),
+		JSON.stringify({ nanocoder: { hooks } }),
+		"utf-8",
+	);
+	reloadAppConfig();
+}
+
+// Portable hook bodies: `sh -c` on POSIX, `cmd /c` on Windows.
+const hookNode = (script: string) => `node -e "${script}"`;
+
+test.serial(
+	"plain shell prepends session-start hook output to the prompt",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const stdout = capturingStdout();
+		let firstUserMessage = "";
+		try {
+			withPlainHooks({
+				"session-start": [{ command: hookNode("console.log('branch: main')") }],
+			});
+			await runPlainShell({
+				prompt: "what changed?",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async (options) => {
+						firstUserMessage = String(
+							options.initialMessages.find((m) => m.role === "user")?.content ?? "",
+						);
+						return {
+							kind: "success",
+							finalText: "done",
+							reasoning: null,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager({ code: null }),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		t.true(
+			firstUserMessage.startsWith(
+				"<hook-context>\nbranch: main\n</hook-context>\n\n",
+			),
+			`expected the hook context in front of the prompt, got: ${firstUserMessage}`,
+		);
+		t.true(firstUserMessage.endsWith("what changed?"));
+	},
+);
+
+test.serial(
+	"a user-prompt-submit veto stops the run before any model call",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		let conversationRan = false;
+		try {
+			withPlainHooks({
+				"user-prompt-submit": [
+					{
+						name: "guard",
+						command: hookNode("console.log('not on a Friday');process.exit(1)"),
+					},
+				],
+			});
+			await runPlainShell({
+				prompt: "ship it",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async () => {
+						conversationRan = true;
+						return {
+							kind: "success",
+							finalText: "done",
+							reasoning: null,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		t.false(conversationRan, "the model must never be reached");
+		t.is(shutdown.code, 1, "and the run exits non-zero");
+		t.true(
+			stdout.get().includes("not on a Friday"),
+			"the hook's reason is reported",
+		);
+	},
+);
+
+test.serial("plain shell registers a session-end hook handler", async (t) => {
+	const registered: string[] = [];
+	const stdout = capturingStdout();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					toolCalls: [],
+				}),
+				getShutdownManager: () =>
+					({
+						register: (handler: { name: string }) => {
+							registered.push(handler.name);
+						},
+						unregister: () => undefined,
+						gracefulShutdown: async () => undefined,
+					}) as never,
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.true(
+		registered.includes(SESSION_END_HOOK_HANDLER),
+		`session-end must be registered for every exit path, got: ${registered.join(", ")}`,
+	);
+});
