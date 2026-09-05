@@ -13,12 +13,24 @@ import {
 /** Local models can be slow, but a cosmetic title is never worth hanging on. */
 const TITLE_TIMEOUT_MS = 20_000;
 
+/**
+ * A model that never returns a usable title would otherwise re-run the whole
+ * path on every turn for the life of the session. Small local models are both
+ * the target audience here and the population most likely to ignore "reply
+ * with only the title", so that is the expected path, not an edge case.
+ */
+const MAX_TITLE_ATTEMPTS = 3;
+
 /** Stops two turns finishing close together from both launching a call. */
 const inFlight = new Set<string>();
+
+/** Attempts spent per session, so a session that never titles stops trying. */
+const attemptsBySession = new Map<string, number>();
 
 /** Test seam. Production code never calls this. */
 export function resetTitleGenerationState(): void {
 	inFlight.clear();
+	attemptsBySession.clear();
 }
 
 export interface MaybeGenerateTitleOptions {
@@ -62,6 +74,7 @@ async function runTitleGeneration(
 	// make a call - the exact case this set exists to prevent.
 	if (getAppConfig().sessions?.smartTitles === false) return;
 	if (inFlight.has(sessionId)) return;
+	if ((attemptsBySession.get(sessionId) ?? 0) >= MAX_TITLE_ATTEMPTS) return;
 
 	const firstUser = messages.find(m => m.role === 'user');
 	if (!firstUser || typeof firstUser.content !== 'string') return;
@@ -89,6 +102,14 @@ async function runTitleGeneration(
 				typeof m.content === 'string' &&
 				m.content.trim().length > 0,
 		)?.content;
+
+		// Spend the attempt before making it, so a null response, a throw, a
+		// timeout and a provider that never settles all cost the same. Cleared
+		// only on success, which is also when titleGenerated stops us anyway.
+		attemptsBySession.set(
+			sessionId,
+			(attemptsBySession.get(sessionId) ?? 0) + 1,
+		);
 
 		// The abort signal asks the provider to stop; the race is what makes the
 		// bound hold. A provider that ignores the signal would otherwise leave
@@ -122,6 +143,8 @@ async function runTitleGeneration(
 		// saveSession, never renameSession - the latter sets titleManuallySet,
 		// which would make an AI title indistinguishable from the user's own.
 		await manager.saveSession({...fresh, title, titleGenerated: true});
+
+		attemptsBySession.delete(sessionId);
 		onTitle?.(title);
 	} finally {
 		if (timer) clearTimeout(timer);

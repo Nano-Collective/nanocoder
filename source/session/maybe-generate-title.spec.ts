@@ -35,7 +35,7 @@ let manager: SessionManager;
 
 test.beforeEach(async () => {
 	writeSessionConfig({});
-	// inFlight is module state, not per-manager.
+	// inFlight and the attempt counter are module state, not per-manager.
 	resetTitleGenerationState();
 	testDir = await mkdtemp(join(tmpdir(), 'title-orch-test-'));
 	manager = new SessionManager(join(testDir, 'sessions'));
@@ -485,4 +485,67 @@ test('a chat that never settles does not wedge the session', async t => {
 	});
 
 	t.is((await manager.readSession(session.id))?.title, 'Fix Login Redirect');
+});
+
+// ---------------------------------------------------------------------------
+// Giving up: a model that never returns a usable title
+
+test('stops calling the model after three unusable responses', async t => {
+	const session = await seed('fix this');
+	let calls = 0;
+	// A paragraph never survives sanitizeTitle, so every attempt "succeeds" at
+	// the transport level and still yields no title - the common local-model
+	// failure, and the one that used to re-run on every turn forever.
+	const paragraph = client(
+		'Sure! Here is a title for your session: '.repeat(5),
+		() => {
+			calls++;
+		},
+	);
+
+	for (let i = 0; i < 6; i++) {
+		await maybeGenerateTitle({
+			sessionId: session.id,
+			messages: turn,
+			client: paragraph,
+			manager,
+		});
+	}
+
+	t.is(calls, 3, 'the attempt cap must hold across turns, not per turn');
+	const reloaded = await manager.readSession(session.id);
+	t.is(reloaded?.title, 'fix this');
+	t.not(reloaded?.titleGenerated, true);
+});
+
+test('a spent attempt budget does not leak to another session', async t => {
+	const exhausted = await seed('fix this');
+	const fresh = await seed('fix this');
+	let calls = 0;
+	const paragraph = client(
+		'not a title, an entire sentence of prose here',
+		() => {
+			calls++;
+		},
+	);
+
+	for (let i = 0; i < 4; i++) {
+		await maybeGenerateTitle({
+			sessionId: exhausted.id,
+			messages: turn,
+			client: paragraph,
+			manager,
+		});
+	}
+	const spent = calls;
+
+	await maybeGenerateTitle({
+		sessionId: fresh.id,
+		messages: turn,
+		client: client('Fix Login Redirect'),
+		manager,
+	});
+
+	t.is(calls, spent, 'the second session must not spend the first budget');
+	t.is((await manager.readSession(fresh.id))?.title, 'Fix Login Redirect');
 });
