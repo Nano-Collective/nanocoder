@@ -206,19 +206,36 @@ test('clearKey prop is accepted and does not change output for equal transcripts
 	b.unmount();
 });
 
-test('inline mode keeps queued components in static queue even if renderLastQueuedComponentLive is passed', t => {
-	const props = createDefaultProps({
-		fullscreen: false,
-		queuedComponents: [
-			<div key="msg1">Message 1</div>,
-			<div key="msg2">Message 2</div>,
-		],
-		renderLastQueuedComponentLive: true,
-	});
-	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+test('inline mode does not duplicate queued components when transitioning from live to static', t => {
+	const queuedComponents = [
+		<div key="msg1">Message 1</div>,
+		<div key="msg2">Message 2</div>,
+	];
+	const {lastFrame, rerender, unmount} = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: true,
+			})}
+		/>,
+	);
+
+	// Simulate model starting to stream: recall window closes and live flag turns false
+	rerender(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: false,
+			})}
+		/>,
+	);
+
 	const output = lastFrame() ?? '';
-	t.regex(output, /Message 1/);
-	t.regex(output, /Message 2/);
+	const matches = output.match(/Message 2/g);
+	t.is(matches?.length, 1);
 	unmount();
 });
+
 
