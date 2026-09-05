@@ -150,7 +150,7 @@ test('formatBootSummaryGitLabel marks the default branch', t => {
 			isDefault: true,
 			detached: false,
 		}),
-		'⎇ main (default)',
+		'⎇ main',
 	);
 });
 
