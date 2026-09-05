@@ -1,3 +1,4 @@
+import {execSync} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
 import test from 'ava';
@@ -525,6 +526,54 @@ test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test.serial(
+	'FileSnapshotService returns untracked files from a repository without commits',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			await createTestFile(tempDir, 'file.txt', 'new file');
+			await createTestFile(tempDir, 'nested/other.txt', 'nested file');
+			await createTestFile(tempDir, 'ignored.txt', 'ignored');
+			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
+
+			const service = new FileSnapshotService(tempDir);
+			const files = service.getModifiedFiles();
+
+			t.deepEqual(files.sort(), ['.gitignore', 'file.txt', 'nested/other.txt']);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'FileSnapshotService returns staged files from a repository without commits',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			await createTestFile(tempDir, 'staged.txt', 'staged file');
+			await createTestFile(tempDir, 'nested/also-staged.txt', 'nested staged');
+			await createTestFile(tempDir, 'ignored.txt', 'ignored');
+			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
+			execSync('git add .', {cwd: tempDir, stdio: 'pipe'});
+
+			const service = new FileSnapshotService(tempDir);
+			const result = service.getModifiedFilesResult();
+
+			t.true(result.available);
+			t.deepEqual(result.files.sort(), [
+				'.gitignore',
+				'nested/also-staged.txt',
+				'staged.txt',
+			]);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
 
 test.serial('FileSnapshotService captures empty files', async t => {
 	const tempDir = await createTempDir();
