@@ -63,15 +63,26 @@ export function runScript(
 		let stdout = '';
 		let stderr = '';
 		let timedOut = false;
+		let killTimer: NodeJS.Timeout | undefined;
 
 		const timer = setTimeout(() => {
 			timedOut = true;
 			child.kill('SIGTERM');
 			// Force-kill if the process refuses to exit within a grace window.
-			setTimeout(() => {
-				if (!child.killed) child.kill('SIGKILL');
-			}, 1_000).unref();
+			// No `child.killed` check here: Node sets that flag as soon as a
+			// signal is delivered, so the SIGTERM above already made it true.
+			// `clearTimers` cancels this on exit, so if it fires the child is
+			// still alive by construction.
+			killTimer = setTimeout(() => {
+				child.kill('SIGKILL');
+			}, 1_000);
+			killTimer.unref();
 		}, options.timeoutMs);
+
+		const clearTimers = () => {
+			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
+		};
 
 		child.stdout?.on('data', chunk => {
 			stdout += chunk.toString();
@@ -81,12 +92,12 @@ export function runScript(
 		});
 
 		child.on('error', err => {
-			clearTimeout(timer);
+			clearTimers();
 			rejectPromise(new Error(`Custom tool failed to start: ${err.message}`));
 		});
 
 		child.on('close', code => {
-			clearTimeout(timer);
+			clearTimers();
 			if (timedOut) {
 				rejectPromise(
 					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
