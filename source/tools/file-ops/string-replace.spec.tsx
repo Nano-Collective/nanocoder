@@ -1089,6 +1089,54 @@ test('string_replace: $ tokens in old_str still match and are removable', async 
 	t.is(await readFile(filePath, 'utf-8'), 'all:\n\t@echo $$PWD\n');
 });
 
+// ============================================================================
+// Derived-content Guard Tests (PDF/DOCX)
+// ============================================================================
+
+test('string_replace: refuses a .pdf and leaves the document untouched', async t => {
+	const pdfBytes = '%PDF-1.4 fake document bytes';
+	const filePath = await createTestFile('doc.pdf', pdfBytes);
+
+	await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'wordCount',
+			new_str: 'pageCount',
+		}),
+		{message: /markdown transcript/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), pdfBytes);
+});
+
+test('string_replace validator: refuses a .docx path', async t => {
+	await createTestFile('spec.docx', 'PK fake docx bytes');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('spec.docx');
+
+		const result = await stringReplaceTool.validator({
+			path: 'spec.docx',
+			old_str: 'fake',
+			new_str: 'real',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /markdown transcript/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
 test('string_replace: numbered group tokens stay literal', async t => {
 	const filePath = await createTestFile('groups.sh', 'run "old"\n');
 

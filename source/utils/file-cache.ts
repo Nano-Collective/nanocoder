@@ -12,11 +12,31 @@ import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 /** Maximum number of files to cache (exported for testing) */
 export const MAX_CACHE_SIZE = 50;
 
+/**
+ * Extensions whose content is obtained by converting the file to markdown.
+ * Reading one of these yields a transcript, never the file's own bytes.
+ */
+const DERIVED_CONTENT_EXTENSIONS = new Set(['.pdf', '.docx']);
+
+/**
+ * True when reading `path` yields a derived markdown transcript instead of the
+ * file's own content.
+ */
+export function isDerivedContentPath(path: string): boolean {
+	return DERIVED_CONTENT_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
 export interface CachedFile {
 	content: string;
 	lines: string[];
 	mtime: number;
 	cachedAt: number;
+	/**
+	 * True when `content` is a derived representation of the file (the markdown
+	 * transcript of a PDF/DOCX) rather than the bytes on disk. Callers that write
+	 * content back must refuse these paths: the transcript is not the document.
+	 */
+	derived: boolean;
 }
 
 interface CacheEntry {
@@ -145,9 +165,9 @@ async function readAndCacheFile(
 	}
 
 	let content: string;
-	const ext = extname(absPath).toLowerCase();
+	const derived = isDerivedContentPath(absPath);
 
-	if (ext === '.pdf' || ext === '.docx') {
+	if (derived) {
 		try {
 			const {convertToMarkdown} = await import('@nanocollective/get-md');
 			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
@@ -167,6 +187,7 @@ async function readAndCacheFile(
 		lines: content.split('\n'),
 		mtime: mtimeAfter,
 		cachedAt: now,
+		derived,
 	};
 
 	// Enforce max cache size with LRU eviction
