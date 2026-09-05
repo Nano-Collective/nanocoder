@@ -37,6 +37,23 @@ function isProbablyBinary(content: string): boolean {
 	return content.includes('\u0000');
 }
 
+/** Write data to a temp file then atomically rename into place. */
+async function atomicWriteFile(filePath: string, data: string): Promise<void> {
+	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+	try {
+		await fs.writeFile(tmpPath, data, 'utf-8');
+		await fs.rename(tmpPath, filePath);
+	} catch (error) {
+		// Clean up temp file on failure
+		try {
+			await fs.unlink(tmpPath);
+		} catch {
+			// Ignore cleanup errors
+		}
+		throw error;
+	}
+}
+
 /**
  * Per-session log of before-images captured ahead of mutating tool calls.
  * Stored under `.nanocoder/timeline/<sessionId>/`.
@@ -445,11 +462,9 @@ export class TimelineManager {
 	private async saveIndex(index: TimelineIndex): Promise<void> {
 		this.index = index;
 		await this.ensureDir();
-		await fs.writeFile(
-			this.indexPath(),
-			JSON.stringify(index, null, 2),
-			'utf-8',
-		);
+		// The index is the session's only record of its checkpoints, so a torn
+		// write must never replace a readable index with a truncated one.
+		await atomicWriteFile(this.indexPath(), JSON.stringify(index, null, 2));
 	}
 
 	private assertSafeId(id: string): void {
