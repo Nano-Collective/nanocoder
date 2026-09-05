@@ -36,6 +36,17 @@ test('isWeakTitle table', t => {
 	);
 });
 
+test('a substantive CJK prompt is not treated as weak', t => {
+	// 34 characters, but a flat 40-character threshold would still call it
+	// weak and spend a model call on it. CJK carries far more meaning per
+	// character, so those count double.
+	t.false(
+		isWeakTitle('セッションマネージャーを原子的書き込みに全面的にリファクタリングして'),
+	);
+	// Still weak, and should be: this really is a one-line request.
+	t.true(isWeakTitle('ログイン処理のバグを直して'));
+});
+
 test('isWeakTitle measures the normalized string, not the raw one', t => {
 	// Real content behind a prefix that would otherwise inflate the length.
 	const withPrefix =

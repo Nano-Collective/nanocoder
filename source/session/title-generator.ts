@@ -61,12 +61,28 @@ export function deriveTitleFromFirstMessage(content: string): string | null {
 }
 
 /**
+ * CJK scripts pack far more meaning into a character than Latin ones, so a
+ * flat 40-character threshold would mark almost every Chinese, Japanese or
+ * Korean prompt as weak and spend a call on it. Counting those characters
+ * double puts the two scripts on roughly the same footing.
+ */
+const CJK_CHARACTER =
+	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g;
+
+function informationLength(text: string): number {
+	return text.length + (text.match(CJK_CHARACTER)?.length ?? 0);
+}
+
+/**
  * Length only, deliberately. An English stopword list would silently never
  * fire for non-English users, and a false positive here costs one small call
  * and yields an equal-or-better title.
  */
 export function isWeakTitle(firstUserMessage: string): boolean {
-	return normalizeFirstMessage(firstUserMessage).length < WEAK_TITLE_THRESHOLD;
+	return (
+		informationLength(normalizeFirstMessage(firstUserMessage)) <
+		WEAK_TITLE_THRESHOLD
+	);
 }
 
 /**
