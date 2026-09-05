@@ -134,6 +134,7 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
 
@@ -178,6 +179,9 @@ Examples:
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
+  nanocoder review main
+  nanocoder review feature/auth
+  nanocoder review 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -314,11 +318,10 @@ async function main(): Promise<void> {
 
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const afterRunArgs =
-		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
+	const isRunCommand = args[0] === 'run';
+	const afterRunArgs = isRunCommand ? args.slice(1) : [];
+	if (isRunCommand && afterRunArgs.length > 0) {
+		// Filter out known flags when constructing the prompt
 		const promptArgs: string[] = [];
 		for (let i = 0; i < afterRunArgs.length; i++) {
 			const arg = afterRunArgs[i];
@@ -361,7 +364,63 @@ async function main(): Promise<void> {
 		nonInteractivePrompt = promptArgs.join(' ');
 	}
 
-	const nonInteractiveMode = runCommandIndex !== -1;
+	let nonInteractiveMode = isRunCommand;
+
+	// Check for `nanocoder review <target>` — syntactic sugar for
+	// `nanocoder run /review <target>`. The target is the branch or PR number
+	// to review. Flags between `review` and the target are filtered the same
+	// way as `run`.
+	const isReviewCommand = args[0] === 'review';
+	if (isReviewCommand) {
+		const afterReviewArgs = args.slice(1);
+		const reviewArgs: string[] = [];
+		for (let i = 0; i < afterReviewArgs.length; i++) {
+			const arg = afterReviewArgs[i];
+			if (
+				arg === '--vscode' ||
+				arg === '--json' ||
+				arg === '--trust-directory' ||
+				arg === '--plain' ||
+				arg === '--no-plain' ||
+				arg === '--no-alt-screen' ||
+				arg === '--alt-screen'
+			) {
+				continue;
+			} else if (
+				arg === '--vscode-port' ||
+				arg === '--provider' ||
+				arg === '--model' ||
+				arg === '--context-max' ||
+				arg === '--output-format'
+			) {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg === '--mode') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--mode=')) {
+				continue;
+			} else if (arg.startsWith('--output-format=')) {
+				continue;
+			} else {
+				reviewArgs.push(arg);
+			}
+		}
+		if (reviewArgs.length === 0) {
+			console.error(
+				'Usage: nanocoder review <branch-or-pr-number>\n\nExamples:\n  nanocoder review feature/auth\n  nanocoder review 42',
+			);
+			process.exit(1);
+		}
+		// Inject as a slash command prompt.
+		nonInteractivePrompt = `/review ${reviewArgs.join(' ')}`;
+		nonInteractiveMode = true;
+	}
+
+	if (isRunCommand && isReviewCommand) {
+		console.error('Cannot use both "run" and "review" commands.');
+		process.exit(1);
+	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
@@ -418,7 +477,7 @@ async function main(): Promise<void> {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
 	}
-	if (plainRequested && !nonInteractiveMode) {
+	if (plainRequested && !isRunCommand) {
 		console.error(
 			'--plain requires the `run` subcommand in this version. Try: nanocoder --plain run "..."',
 		);
@@ -445,11 +504,21 @@ async function main(): Promise<void> {
 				process.env.JENKINS_URL,
 		);
 	const plainAuto =
-		nonInteractiveMode &&
+		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
+
+	// Hard-error when `review` lands in a non-interactive context (piped
+	// stdout, CI). The plain shell has no slash-command dispatch, so
+	// `/review <target>` would be sent verbatim to the model as chat.
+	if (isReviewCommand && !process.stdout.isTTY) {
+		console.error(
+			'Error: `nanocoder review` requires an interactive terminal (TTY). Pipe the output to a file instead: nanocoder review <target> 2>&1 | tee out.md',
+		);
+		process.exit(1);
+	}
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
