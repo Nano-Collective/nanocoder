@@ -72,6 +72,25 @@ export class CheckpointManager {
 	}
 
 	/**
+	 * Is this snapshot key safe to join onto a checkpoint's files directory?
+	 *
+	 * A snapshot key is `path.relative(workspaceRoot, file)`, so a file
+	 * captured from outside the workspace arrives as `../../etc/passwd`, and
+	 * joining that onto filesDir reads or writes outside the checkpoint. Same
+	 * containment rule as getCheckpointDir, expressed on the relative path so
+	 * it can be applied before a base directory exists.
+	 */
+	private isSafeSnapshotPath(relativePath: string): boolean {
+		if (!relativePath || path.isAbsolute(relativePath)) {
+			return false;
+		}
+		// normalize collapses `a/../../b` down to `../b`, so this catches
+		// traversal buried mid-path as well as a leading `..`.
+		const normalized = path.normalize(relativePath);
+		return normalized !== '..' && !normalized.startsWith(`..${path.sep}`);
+	}
+
+	/**
 	 * Validate checkpoint name using shared utility
 	 */
 	private validateName(name: string): void {
@@ -125,8 +144,23 @@ export class CheckpointManager {
 			modifiedFiles || this.fileSnapshotService.getModifiedFiles();
 
 		// Capture file snapshots
-		const fileSnapshots =
+		const capturedSnapshots =
 			await this.fileSnapshotService.captureFiles(filesToSnapshot);
+
+		// Drop anything that would escape the checkpoint before metadata
+		// records it, so filesChanged and the files actually written can never
+		// disagree. A file outside the workspace is not part of this
+		// workspace's checkpoint.
+		const fileSnapshots = new Map<string, string>();
+		for (const [relativePath, content] of capturedSnapshots) {
+			if (this.isSafeSnapshotPath(relativePath)) {
+				fileSnapshots.set(relativePath, content);
+			} else {
+				logWarning('Refusing to snapshot a path outside the workspace', true, {
+					context: {relativePath},
+				});
+			}
+		}
 
 		// Create metadata
 		const metadata: CheckpointMetadata = {
@@ -223,6 +257,15 @@ export class CheckpointManager {
 
 		if (existsSync(filesDir)) {
 			for (const relativePath of metadata.filesChanged) {
+				// metadata.json is on-disk state: it may have been written by a
+				// version without the check above, or edited by hand, so the
+				// path is validated again on the way back in.
+				if (!this.isSafeSnapshotPath(relativePath)) {
+					logWarning('Skipping snapshot path outside the checkpoint', true, {
+						context: {relativePath},
+					});
+					continue;
+				}
 				try {
 					const filePath = path.join(filesDir, relativePath); // nosemgrep
 					const content = await fs.readFile(filePath, 'utf-8');
