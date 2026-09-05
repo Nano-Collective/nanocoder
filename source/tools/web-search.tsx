@@ -30,6 +30,22 @@ interface BraveSearchResponse {
 	};
 }
 
+/**
+ * Escapes standard CommonMark/GFM syntax characters to prevent formatting disruption
+ * and markdown injection vulnerabilities.
+ */
+export function escapeMarkdown(text: string): string {
+	return text.replace(/([\\`*_{}[\]()#+\-.!|~><])/g, '\\$1');
+}
+
+/**
+ * Normalizes and sanitizes a URL for safe embedding in Markdown.
+ * Strips whitespace and characters that break autolink/bracket enclosures.
+ */
+export function sanitizeUrl(url: string): string {
+	return url.replace(/\s+/g, '').replace(/[<>]/g, '');
+}
+
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
@@ -71,20 +87,33 @@ export const executeWebSearch = async (
 		const data = (await response.json()) as BraveSearchResponse;
 		const results = data.web?.results ?? [];
 
+		const safeQuery = escapeMarkdown(args.query.trim());
+
 		if (results.length === 0) {
-			return `No results found for query: "${args.query}"`;
+			return `No results found for query: "${safeQuery}"`;
 		}
 
-		let formattedResults = `# Web Search Results: "${args.query}"\n\n`;
+		let formattedResults = `# Web Search Results: "${safeQuery}"\n\n`;
 
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-			formattedResults += `**URL:** ${result.url}\n\n`;
+
+			// Collapse internal newlines in the title to keep heading intact
+			const normalizedTitle = (result.title || '')
+				.replace(/\r?\n+/g, ' ')
+				.trim();
+			const safeTitle = escapeMarkdown(normalizedTitle);
+			const safeUrl = sanitizeUrl(result.url || '');
+
+			formattedResults += `## ${i + 1}. ${safeTitle}\n\n`;
+			formattedResults += `**URL:** <${safeUrl}>\n\n`;
+
 			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+				const safeDescription = escapeMarkdown(result.description.trim());
+				formattedResults += `${safeDescription}\n\n`;
 			}
+
 			formattedResults += '---\n\n';
 		}
 
@@ -101,7 +130,7 @@ export const executeWebSearch = async (
 			throw error;
 		}
 
-		throw new Error(`Web search failed: Unknown error`);
+		throw new Error('Web search failed: Unknown error');
 	}
 };
 
@@ -140,7 +169,6 @@ function WebSearchFormatterComponent({
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
-	// Parse result to count actual results
 	let resultCount = 0;
 	let estimatedTokens = 0;
 	if (result) {
@@ -200,7 +228,6 @@ export const webSearchValidator = (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const query = args.query?.trim();
 
-	// Check if query is empty
 	if (!query) {
 		return Promise.resolve({
 			valid: false,
@@ -208,7 +235,6 @@ export const webSearchValidator = (
 		});
 	}
 
-	// Check query length (reasonable limit)
 	if (query.length > MAX_WEB_SEARCH_QUERY_LENGTH) {
 		return Promise.resolve({
 			valid: false,
