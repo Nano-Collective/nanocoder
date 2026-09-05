@@ -1,6 +1,6 @@
 import test from 'ava';
 import {createOpenAI} from '@ai-sdk/openai';
-import {streamText} from 'ai';
+import {jsonSchema, streamText, tool} from 'ai';
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
@@ -360,6 +360,216 @@ test('privacy: scrubs outgoing prompts and rehydrates the response at the histor
 	const content = result.choices[0]?.message.content ?? '';
 	t.is(content, 'Saved real@example.com');
 	t.false(content.includes('«'));
+});
+
+// Tool results are the largest and least-reviewed body of text leaving the
+// machine, so they go through the same detectors as everything else.
+async function scrubbedPayload(
+	messages: Message[],
+): Promise<{payload: string; sessionMap: Record<string, string>}> {
+	const captured: {prompt?: unknown} = {};
+	const sessionMap: Record<string, string> = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages,
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: sessionMap},
+	});
+	return {payload: JSON.stringify(captured.prompt), sessionMap};
+}
+
+test('privacy: scrubs tool result content', async t => {
+	const {payload, sessionMap} = await scrubbedPayload([
+		{role: 'user', content: 'who owns this?'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'read_file', arguments: {path: '.env'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'read_file',
+			content: 'OWNER=ops@example.com',
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	t.regex(payload, /«Email_\d+»/);
+	t.true(Object.values(sessionMap).includes('ops@example.com'));
+	// Paths stay in the clear — the agent has to be able to act on them.
+	t.true(payload.includes('.env'));
+});
+
+test('privacy: scrubs the string leaves of structured tool output', async t => {
+	const structuredContent = {
+		matches: [{line: 'contact ops@example.com', count: 3}],
+		truncated: false,
+	};
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'search'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'grep', arguments: {pattern: 'contact'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'grep',
+			content: 'contact ops@example.com',
+			structuredContent,
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	// Walking leaves rather than the serialised JSON leaves the shape intact.
+	t.regex(payload, /"count":3/);
+	t.regex(payload, /"truncated":false/);
+	// The caller's message is untouched, so committed history keeps the real value.
+	t.is(structuredContent.matches[0]?.line, 'contact ops@example.com');
+});
+
+test('privacy: scrubs assistant tool-call arguments replayed from history', async t => {
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'save it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {
+						name: 'write_file',
+						arguments: {path: 'notes.md', content: 'ping ops@example.com'},
+					},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'write_file',
+			content: 'written',
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	t.regex(payload, /«Email_\d+»/);
+	t.true(payload.includes('notes.md'));
+});
+
+test('privacy: truncates a tool result before scrubbing it', async t => {
+	// truncateToolResult keeps a head and a tail around an elision marker.
+	// Scrubbing the truncated text means the cut can never land mid-placeholder
+	// — and the elided middle is never fed to the detectors at all.
+	const filler = 'x'.repeat(30_000);
+	const {payload, sessionMap} = await scrubbedPayload([
+		{role: 'user', content: 'cat the log'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'bash', arguments: {command: 'cat log'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'bash',
+			content: `head head@example.com ${filler} middle middle@example.com ${filler} tail tail@example.com`,
+		},
+	]);
+
+	const captured = Object.values(sessionMap);
+	t.true(captured.includes('head@example.com'));
+	t.true(captured.includes('tail@example.com'));
+	t.false(captured.includes('middle@example.com'));
+	// Every placeholder that reaches the provider is whole: no opener in the
+	// payload is left without the rest of its placeholder behind it.
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: rehydrates tool-call arguments before the harness executes them', async t => {
+	const model = {
+		specificationVersion: 'v3',
+		provider: 'test-provider',
+		modelId: 'test-model',
+		doStream: async (options: {prompt: unknown}) => {
+			const sent = JSON.stringify(options.prompt);
+			const placeholder = (sent.match(/«[^»]+»/) ?? ['«Email_1»'])[0];
+			return {
+				stream: new ReadableStream({
+					start(controller) {
+						controller.enqueue({
+							type: 'tool-call',
+							toolCallId: 'call_1',
+							toolName: 'write_file',
+							input: JSON.stringify({
+								path: 'notes.md',
+								content: `ping ${placeholder}`,
+							}),
+						});
+						controller.enqueue({
+							type: 'finish',
+							finishReason: 'tool-calls',
+							usage: {inputTokens: 1, outputTokens: 1, totalTokens: 2},
+						});
+						controller.close();
+					},
+				}),
+			};
+		},
+	} as unknown as LanguageModel;
+
+	const result = await handleChat({
+		model,
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [{role: 'user', content: 'ping ops@example.com'}],
+		tools: {
+			write_file: tool({
+				description: 'write a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}, content: {type: 'string'}},
+				}),
+			}),
+		},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: {}},
+	});
+
+	// The tool the harness is about to run receives the real value, not the
+	// placeholder the model was shown.
+	t.deepEqual(result.choices[0]?.message.tool_calls?.[0]?.function.arguments, {
+		path: 'notes.md',
+		content: 'ping ops@example.com',
+	});
 });
 
 function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
