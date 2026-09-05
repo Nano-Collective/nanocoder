@@ -28,10 +28,16 @@ export interface UseChatHandlerProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
-	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	developmentMode?:
+		| 'normal'
+		| 'auto-accept'
+		| 'yolo'
+		| 'plan'
+		| 'headless'
+		| 'architect';
 	// Live mode ref so the conversation loop can read mode changes mid-turn.
 	developmentModeRef?: React.RefObject<
-		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless' | 'architect'
 	>;
 	nonInteractiveMode?: boolean;
 	onConversationComplete?: () => void;

@@ -223,11 +223,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// non-interactive mode entered by the daemon, not the user.
 		if (props.developmentMode === 'headless') return;
 
-		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
+		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect' > = [
 			'normal',
 			'auto-accept',
 			'yolo',
 			'plan',
+			'architect',
 		];
 		const currentIndex = modes.indexOf(
 			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
