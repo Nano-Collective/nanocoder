@@ -327,8 +327,64 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	});
 });
 
+test('you template: builds authenticated HTTP config with API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: 'ydc_test_key_123',
+	});
+
+	t.is(config.name, 'you');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+	t.deepEqual(config.tags, ['you', 'search', 'web', 'research', 'http']);
+});
+
+test('you template: builds keyless free-profile config without API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
+test('you template: trims whitespace from API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '  ydc_test_key_123  ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+});
+
+test('you template: empty-string API key falls back to free profile', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '   ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
 test('remote templates: have no required fields', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);
