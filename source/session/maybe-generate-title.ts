@@ -31,6 +31,8 @@ export interface MaybeGenerateTitleOptions {
 	manager?: SessionManager;
 	/** Called only when a title was actually persisted, for live UI updates. */
 	onTitle?: (title: string) => void;
+	/** Test seam, so the wedged-provider case need not wait the real 20s. */
+	timeoutMs?: number;
 }
 
 /**
@@ -52,6 +54,7 @@ async function runTitleGeneration(
 	options: MaybeGenerateTitleOptions,
 ): Promise<void> {
 	const {sessionId, messages, client, onTitle} = options;
+	const timeoutMs = options.timeoutMs ?? TITLE_TIMEOUT_MS;
 	const manager = options.manager ?? sessionManager;
 
 	// Every guard from here to inFlight.add() is synchronous. Nothing may await
@@ -73,7 +76,7 @@ async function runTitleGeneration(
 	// Not the session's own controller: AcpSession.cancel() swaps that one out,
 	// so borrowing it would leave this call attached to a stale controller.
 	const timeout = new AbortController();
-	const timer = setTimeout(() => timeout.abort(), TITLE_TIMEOUT_MS);
+	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	try {
 		const session = await manager.readSession(sessionId);
@@ -87,12 +90,28 @@ async function runTitleGeneration(
 				m.content.trim().length > 0,
 		)?.content;
 
-		const titleClient = await resolveTitleClient(client);
-		const title = await generateSessionTitle(
-			titleClient,
-			{userMessages, toolSummaries, assistantReply},
-			timeout.signal,
-		);
+		// The abort signal asks the provider to stop; the race is what makes the
+		// bound hold. A provider that ignores the signal would otherwise leave
+		// this promise unsettled, and with it the inFlight entry, so the session
+		// could never be titled again for the process lifetime.
+		const deadline = new Promise<null>(resolve => {
+			timer = setTimeout(() => {
+				timeout.abort();
+				resolve(null);
+			}, timeoutMs);
+		});
+
+		const title = await Promise.race([
+			(async () => {
+				const titleClient = await resolveTitleClient(client);
+				return generateSessionTitle(
+					titleClient,
+					{userMessages, toolSummaries, assistantReply},
+					timeout.signal,
+				);
+			})(),
+			deadline,
+		]);
 		if (!title) return;
 
 		// Re-read: the user may have renamed the session while we were waiting.
@@ -105,7 +124,7 @@ async function runTitleGeneration(
 		await manager.saveSession({...fresh, title, titleGenerated: true});
 		onTitle?.(title);
 	} finally {
-		clearTimeout(timer);
+		if (timer) clearTimeout(timer);
 		inFlight.delete(sessionId);
 	}
 }

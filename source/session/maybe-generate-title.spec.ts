@@ -453,3 +453,36 @@ test('two turns finishing together make only one model call', async t => {
 
 	t.is(calls, 1, 'the inFlight guard must close before the first await');
 });
+
+// ---------------------------------------------------------------------------
+// The timeout has to hold even against a provider that ignores the signal
+
+test('a chat that never settles does not wedge the session', async t => {
+	const session = await seed('fix this');
+	// Ignores the abort signal entirely, exactly like a provider that does not
+	// wire it through. Without the race this promise - and the inFlight entry
+	// with it - would never resolve.
+	const wedged = {
+		...client('unused'),
+		chat: () => new Promise(() => {}),
+	} as unknown as LLMClient;
+
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: turn,
+		client: wedged,
+		manager,
+		timeoutMs: 30,
+	});
+
+	// The real proof: the session is still titleable afterwards. A leaked
+	// inFlight entry would make every later attempt a silent no-op.
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: turn,
+		client: client('Fix Login Redirect'),
+		manager,
+	});
+
+	t.is((await manager.readSession(session.id))?.title, 'Fix Login Redirect');
+});
