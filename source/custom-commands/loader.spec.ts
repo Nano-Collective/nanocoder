@@ -672,3 +672,55 @@ test.serial(
 		t.is(commands[0]?.name, 'valid-cmd');
 	},
 );
+
+test.serial(
+	'CustomCommandLoader - loadResources continues loading remaining resources when statSync throws',
+	t => {
+		const testDir = createTestDir('resource-stat-error');
+		t.teardown(() => cleanupTestDir(testDir));
+
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const mySkillDir = join(commandsDir, 'my-skill');
+		const resourcesDir = join(mySkillDir, 'resources');
+		mkdirSync(resourcesDir, {recursive: true});
+
+		writeFileSync(
+			join(mySkillDir, 'my-skill.md'),
+			`---
+description: Skill with resources
+---
+Do stuff.`,
+			'utf-8',
+		);
+		writeFileSync(
+			join(resourcesDir, 'valid.sh'),
+			'#!/bin/bash\necho hi',
+			'utf-8',
+		);
+		writeFileSync(join(resourcesDir, 'inaccessible.sh'), 'bad', 'utf-8');
+
+		const originalStatSync = fs.statSync;
+		(fs as any).statSync = ((path: any, options: any) => {
+			if (String(path).includes('inaccessible')) {
+				const err: any = new Error('EACCES: permission denied, stat');
+				err.code = 'EACCES';
+				throw err;
+			}
+			return originalStatSync(path, options);
+		}) as typeof fs.statSync;
+
+		t.teardown(() => {
+			fs.statSync = originalStatSync;
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const command = loader.getCommand('my-skill');
+		t.truthy(command);
+		t.truthy(command?.loadedResources);
+		t.is(command?.loadedResources?.length, 1);
+		t.is(command?.loadedResources?.[0]?.name, 'valid.sh');
+	},
+);
+

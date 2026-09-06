@@ -186,7 +186,10 @@ export class CustomCommandLoader {
 			let st: {mode: number; isFile: () => boolean};
 			try {
 				st = fs.statSync(resourcePath);
-			} catch {
+			} catch (error) {
+				logWarning(
+					`Failed to inspect resource ${resourcePath}: ${String(error)}`,
+				);
 				continue;
 			}
 			if (!st.isFile()) continue;
