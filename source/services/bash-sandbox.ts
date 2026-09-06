@@ -1,4 +1,4 @@
-import {type ChildProcess, spawn} from 'node:child_process';
+import {type ChildProcess, spawn, spawnSync} from 'node:child_process';
 import {existsSync, realpathSync, statSync} from 'node:fs';
 import {delimiter, join} from 'node:path';
 
@@ -34,6 +34,21 @@ export function findBwrap(pathEnv = process.env.PATH): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+const bwrapJailCache = new Map<string, boolean>();
+
+function bwrapCanUnshareNet(bwrap: string): boolean {
+	const hit = bwrapJailCache.get(bwrap);
+	if (hit !== undefined) return hit;
+	const result = spawnSync(
+		bwrap,
+		['--unshare-net', '--die-with-parent', '--ro-bind', '/', '/', '/bin/true'],
+		{timeout: 3000, stdio: 'ignore'},
+	);
+	const ok = result.status === 0;
+	bwrapJailCache.set(bwrap, ok);
+	return ok;
 }
 
 function seatbeltString(value: string): string {
@@ -101,6 +116,7 @@ type PlanInput = {
 	tmpDir?: string;
 	hostTmp?: string;
 	bwrapPath?: string | null;
+	bwrapUsable?: boolean;
 };
 
 export function planBashSpawn(
@@ -136,7 +152,12 @@ export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 				'-p',
 				macSandboxProfile(
 					projectRoot,
-					[input.tmpDir ?? '', input.hostTmp ?? ''].filter(Boolean),
+					[
+						input.tmpDir ?? '',
+						input.hostTmp ?? '',
+						'/tmp',
+						'/private/tmp',
+					].filter(Boolean),
 				),
 				'sh',
 				'-c',
@@ -154,6 +175,16 @@ export function planBashSpawn(input: PlanInput): BashSpawnPlan {
 		return {
 			error:
 				'OS sandbox is on but bubblewrap (bwrap) was not found. Install bubblewrap or unset nanocoder.sandbox.',
+		};
+	}
+
+	const discovered = input.bwrapPath === undefined;
+	const usable =
+		input.bwrapUsable ?? (discovered ? bwrapCanUnshareNet(bwrap) : true);
+	if (!usable) {
+		return {
+			error:
+				'OS sandbox is on but bubblewrap cannot create a user namespace. Enable unprivileged user namespaces or unset nanocoder.sandbox.',
 		};
 	}
 

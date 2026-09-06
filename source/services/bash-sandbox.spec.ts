@@ -105,6 +105,24 @@ test('planBashSpawn on linux with bwrap uses --unshare-net, --tmpfs, --new-sessi
 	t.true(plan.args.includes('/tmp/jail'));
 });
 
+test('planBashSpawn on linux with unusable bwrap returns an error', t => {
+	const plan = planBashSpawn({
+		platform: 'linux',
+		sandbox: true,
+		command: 'echo hi',
+		spawnCommand: 'echo hi',
+		cwd: '/tmp/proj',
+		projectRoot: '/tmp/proj',
+		tmpDir: '/tmp/jail',
+		bwrapPath: '/run/wrappers/bin/bwrap',
+		bwrapUsable: false,
+	});
+	t.true('error' in plan);
+	if ('error' in plan) {
+		t.regex(plan.error, /user namespace/i);
+	}
+});
+
 test('macSandboxProfile denies network and allows project plus tmp writes', t => {
 	const profile = macSandboxProfile('/Users/me/proj', ['/tmp/jail', '/var/folders/xx/T']);
 	t.true(profile.includes('(deny network*)'));
@@ -133,6 +151,7 @@ test('planBashSpawn on darwin with sandbox uses sandbox-exec when present', t =>
 	t.true(plan.args[1].includes('deny network*'));
 	t.true(plan.args[1].includes('/tmp/jail'));
 	t.true(plan.args[1].includes('/var/folders/xx/T'));
+	t.true(plan.args[1].includes('/private/tmp'));
 	t.true(plan.args.includes('sh'));
 });
 

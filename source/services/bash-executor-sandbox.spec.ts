@@ -123,6 +123,15 @@ async function assertJail(t: ExecutionContext, label: string) {
 		const mk = await executor.execute('mktemp').promise;
 		t.is(mk.exitCode, 0, `${label} mktemp: ${mk.stderr || mk.error || ''}`);
 
+		const tmpHard = join('/tmp', `nc-sbx-${Date.now()}`);
+		try {
+			const hard = await executor.execute(`echo hard > '${tmpHard}'`).promise;
+			t.is(hard.exitCode, 0, `${label} /tmp: ${hard.stderr || hard.error || ''}`);
+			t.is(readFileSync(tmpHard, 'utf8').trim(), 'hard');
+		} finally {
+			if (existsSync(tmpHard)) rmSync(tmpHard);
+		}
+
 		const outside = await executor.execute(`echo no > '${probe}'`).promise;
 		t.false(existsSync(probe), 'sandbox must not write into $HOME');
 		t.true(
