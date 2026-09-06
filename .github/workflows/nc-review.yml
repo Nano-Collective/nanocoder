@@ -460,14 +460,31 @@ jobs:
           fi
 
           CLAIMED=$(jq -r '.verdict // "(none)"' "$V")
-          [ "$CLAIMED" != "$VERDICT" ] && \
+          if [ "$CLAIMED" != "$VERDICT" ]; then
             echo "::notice::model said '$CLAIMED', findings imply '$VERDICT' — using '$VERDICT'"
+          fi
 
           # Human-readable tally, e.g. "1 blocking, 2 important, 2 nits".
+          # Plain if-blocks, not `[ ... ] && VAR=...`. Under `set -e` an
+          # assignment takes the exit status of its command substitution, so
+          #
+          #   COUNTS="...${N_NIT} nit$([ "$N_NIT" -gt 1 ] && echo s)"
+          #
+          # killed the whole step whenever there was exactly ONE nit: the inner
+          # test returned 1, the substitution inherited it, and the assignment
+          # failed. Silently, because every echo below is redirected into
+          # comment.md. It survived earlier runs only because they had no nits.
           COUNTS=""
-          [ "$N_BLOCK" -gt 0 ] && COUNTS="${N_BLOCK} blocking"
-          [ "$N_IMP" -gt 0 ] && COUNTS="${COUNTS:+$COUNTS, }${N_IMP} important"
-          [ "$N_NIT" -gt 0 ] && COUNTS="${COUNTS:+$COUNTS, }${N_NIT} nit$([ "$N_NIT" -gt 1 ] && echo s)"
+          if [ "$N_BLOCK" -gt 0 ]; then
+            COUNTS="${N_BLOCK} blocking"
+          fi
+          if [ "$N_IMP" -gt 0 ]; then
+            COUNTS="${COUNTS:+$COUNTS, }${N_IMP} important"
+          fi
+          if [ "$N_NIT" -gt 0 ]; then
+            if [ "$N_NIT" -eq 1 ]; then NITW="nit"; else NITW="nits"; fi
+            COUNTS="${COUNTS:+$COUNTS, }${N_NIT} ${NITW}"
+          fi
 
           {
             case "$VERDICT" in
