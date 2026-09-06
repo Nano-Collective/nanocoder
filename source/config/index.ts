@@ -520,6 +520,14 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 		if (matchTools.length > 0) definition.matchTools = matchTools;
 	}
 
+	if (Array.isArray(entry.matchPaths)) {
+		const matchPaths = entry.matchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) definition.matchPaths = matchPaths;
+	}
+
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
 		definition.timeout = Math.max(1, Math.round(entry.timeout));
 	}
