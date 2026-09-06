@@ -176,6 +176,26 @@ jobs:
             | jq --argjson me "$PR" 'map(select(.number != $me))' \
             > /tmp/nc-review/open-prs.json
 
+          # Issues this PR claims to close, with their full bodies — the agent
+          # cannot judge whether the issue was actually addressed without them.
+          # Only GraphQL exposes closingIssuesReferences; `gh pr view --json`
+          # does not have the field.
+          OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
+          gh api graphql -f query="
+          {
+            repository(owner: \"$OWNER\", name: \"$NAME\") {
+              pullRequest(number: $PR) {
+                closingIssuesReferences(first: 10) {
+                  nodes { number title state body labels(first: 10) { nodes { name } } }
+                }
+              }
+            }
+          }" --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+            > /tmp/nc-review/issues.json 2>/dev/null || echo '[]' > /tmp/nc-review/issues.json
+          [ -s /tmp/nc-review/issues.json ] || echo '[]' > /tmp/nc-review/issues.json
+          N_ISSUES=$(jq 'length' /tmp/nc-review/issues.json 2>/dev/null || echo 0)
+          echo "linked issues: $N_ISSUES"
+
           {
             echo "# Pull request under review"
             echo
@@ -210,6 +230,22 @@ jobs:
             echo
             jq -r '.body // "(no description provided)"' /tmp/nc-review/pr.json
             echo
+            echo "## Linked issue(s) — what this PR claims to close"
+            echo
+            if [ "$N_ISSUES" -eq 0 ]; then
+              echo "**This pull request closes no issue.** It may still be warranted —"
+              echo "a typo fix or a small obvious improvement does not need one — but you"
+              echo "should judge whether the change is justified on its own terms, and"
+              echo "whether CONTRIBUTING's guidance to discuss first applies given its size."
+            else
+              echo "Judge whether the diff actually resolves what is described below."
+              echo "A PR that says it closes an issue and only partly does is a problem:"
+              echo "merging it closes the issue and the remainder is silently lost."
+              echo
+              jq -r '.[] | "### Issue #\(.number) — \(.title)\n\nState: \(.state)\nLabels: \([.labels.nodes[].name] | join(", "))\n\n\(.body // "(no body)")\n"' \
+                /tmp/nc-review/issues.json
+            fi
+            echo
             echo "## Other open pull requests (duplicate-detection corpus)"
             echo '```json'
             cat /tmp/nc-review/open-prs.json
@@ -230,8 +266,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh label create "agent:clean"      --color "0e8a16" --description "nc-review found no blocking issues" --force
-          gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking issues"    --force
+          gh label create "agent:clean"      --color "0e8a16" --description "nc-review had nothing to raise"          --force
+          gh label create "agent:comments"   --color "fbca04" --description "nc-review left non-blocking findings"    --force
+          gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking findings"       --force
 
       # Nanocoder resolves providers from `agents.config.json` in the working
       # directory first. This is written at run time rather than committed: a
@@ -357,16 +394,42 @@ jobs:
             exit 0
           fi
 
-          VERDICT=$(jq -r '.verdict // "needs-work"' "$V")
           SUMMARY=$(jq -r '.summary // "No summary provided."' "$V")
           DUP=$(jq -r '.duplicate_of // empty' "$V")
 
+          N_BLOCK=$(jq '[.findings[]? | select(.severity == "blocking")] | length' "$V")
+          N_IMP=$(jq   '[.findings[]? | select(.severity == "important")] | length' "$V")
+          N_NIT=$(jq   '[.findings[]? | select(.severity == "nit")] | length' "$V")
+          N_ALL=$(jq   '.findings | length' "$V")
+
+          # Derive the verdict from the findings rather than trusting the model's
+          # own label. Run 5 returned verdict "clean" alongside five findings,
+          # which put an agent:clean label on a PR that had five things to fix —
+          # and the label is what a maintainer skims.
+          if [ "$N_BLOCK" -gt 0 ]; then
+            VERDICT="needs-work"
+          elif [ "$N_ALL" -gt 0 ]; then
+            VERDICT="comments"
+          else
+            VERDICT="clean"
+          fi
+
+          CLAIMED=$(jq -r '.verdict // "(none)"' "$V")
+          [ "$CLAIMED" != "$VERDICT" ] && \
+            echo "::notice::model said '$CLAIMED', findings imply '$VERDICT' — using '$VERDICT'"
+
+          # Human-readable tally, e.g. "1 blocking, 2 important, 2 nits".
+          COUNTS=""
+          [ "$N_BLOCK" -gt 0 ] && COUNTS="${N_BLOCK} blocking"
+          [ "$N_IMP" -gt 0 ] && COUNTS="${COUNTS:+$COUNTS, }${N_IMP} important"
+          [ "$N_NIT" -gt 0 ] && COUNTS="${COUNTS:+$COUNTS, }${N_NIT} nit$([ "$N_NIT" -gt 1 ] && echo s)"
+
           {
-            if [ "$VERDICT" = "clean" ]; then
-              echo "### nc-review: no blocking issues"
-            else
-              echo "### nc-review: needs work"
-            fi
+            case "$VERDICT" in
+              needs-work) echo "### nc-review: needs work — ${COUNTS}" ;;
+              comments)   echo "### nc-review: comments — ${COUNTS}" ;;
+              clean)      echo "### nc-review: nothing to raise" ;;
+            esac
             echo
             echo "$SUMMARY"
             echo
@@ -378,7 +441,7 @@ jobs:
               echo "| | Area | Where | Finding |"
               echo "|---|---|---|---|"
               jq -r '.findings[] |
-                "| \(if .severity == "blocking" then "🔴" else "🟡" end)"
+                "| \(if .severity == "blocking" then "🔴" elif .severity == "important" then "🟠" else "⚪" end)"
                 + " | `\(.area)`"
                 + " | \(if .file then "`\(.file)\(if .line then ":\(.line)" else "" end)`" else "—" end)"
                 + " | \(.detail | gsub("\n"; " ")) |"' "$V"
@@ -386,13 +449,21 @@ jobs:
             fi
             echo "---"
             echo
-            echo "<sub>Automated code review — correctness, security, design, tests, plus duplicates and scope. Advisory: a human still decides. Not a substitute for review, and not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
+            echo "<sub>🔴 blocking · 🟠 a reviewer would ask for a change · ⚪ optional</sub>"
+            echo
+            echo "<sub>Automated code review — correctness, security, design, tests, plus duplicates and scope. A human still decides; this is not a substitute for review and is not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
           } > /tmp/nc-review/comment.md
 
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/nc-review/comment.md
 
-          if [ "$VERDICT" = "clean" ]; then
-            gh pr edit "$PR" --repo "$REPO" --add-label "agent:clean" --remove-label "agent:needs-work" || true
-          else
-            gh pr edit "$PR" --repo "$REPO" --add-label "agent:needs-work" --remove-label "agent:clean" || true
-          fi
+          # Exactly one agent:* label should ever be present. Remove the other
+          # two unconditionally so a re-review cannot leave a stale pair.
+          case "$VERDICT" in
+            clean)      KEEP="agent:clean";      DROP="agent:comments agent:needs-work" ;;
+            comments)   KEEP="agent:comments";   DROP="agent:clean agent:needs-work" ;;
+            needs-work) KEEP="agent:needs-work"; DROP="agent:clean agent:comments" ;;
+          esac
+          ARGS="--add-label $KEEP"
+          for d in $DROP; do ARGS="$ARGS --remove-label $d"; done
+          # shellcheck disable=SC2086
+          gh pr edit "$PR" --repo "$REPO" $ARGS || true
