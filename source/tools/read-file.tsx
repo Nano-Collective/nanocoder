@@ -328,10 +328,11 @@ const readFileFormatter = async (
 
 			// Detect if this was a metadata-only response
 			const isMetadataOnly =
-				(result?.startsWith('File:') ?? false) &&
+				(result?.startsWith('File Information for') ?? false) &&
 				!args.start_line &&
 				!args.end_line &&
-				totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
+				((args.metadata_only ?? false) ||
+					totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES);
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
