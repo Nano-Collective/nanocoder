@@ -1,6 +1,6 @@
 /**
- * Composer chrome: model stays on the input row; provider and approval mode
- * live behind the settings popover (#859).
+ * Composer chrome: model and mode stay on the input row; provider lives
+ * behind the settings popover.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -29,29 +29,29 @@ const syncComposer = (panel: ReturnType<typeof createPanel>) => {
 		availableProviders: ['claude', 'openai'],
 		provider: 'claude',
 		availableModes: ['normal', 'auto-accept', 'yolo', 'plan'],
-		mode: 'normal',
+		mode: 'auto-accept',
 		availableModels: ['sonnet'],
 		model: 'sonnet',
 	});
 };
 
-test('markup keeps model on the row and moves provider and mode into settings', t => {
+test('markup groups model and mode on the row while keeping provider in settings', t => {
 	const row = slice(PANEL_HTML, 'add-menu-btn', 'send-stop-btn');
 	t.true(row.includes('id="model-trigger"'));
+	t.true(row.includes('id="mode-trigger"'));
 	t.true(row.includes('id="composer-settings-trigger"'));
-	t.true(row.includes('id="composer-mode-badge"'));
 	t.false(row.includes('id="provider-trigger"'));
-	t.false(row.includes('id="mode-trigger"'));
+	t.false(row.includes('id="composer-mode-badge"'));
+	t.true(
+		row.indexOf('id="model-trigger"') <
+			row.indexOf('id="mode-trigger"'),
+	);
 
 	const settings = slice(PANEL_HTML, 'composer-settings', 'model-dropdown');
 	t.true(settings.includes('id="provider-trigger"'));
-	t.true(settings.includes('id="mode-trigger"'));
 	t.true(settings.includes('id="provider-dropdown"'));
-	t.true(settings.includes('id="mode-dropdown"'));
-	t.true(
-		settings.indexOf('id="mode-trigger"') <
-			settings.indexOf('id="provider-dropdown"'),
-	);
+	t.false(settings.includes('id="mode-trigger"'));
+	t.false(settings.includes('id="mode-dropdown"'));
 	t.false(settings.includes('id="model-trigger"'));
 });
 
@@ -68,15 +68,17 @@ test('settings trigger opens the composer settings popover', t => {
 	);
 });
 
-test('the gear shows the current approval mode', t => {
+test('the mode dropdown shows a readable label', t => {
 	const panel = createPanel();
 	syncComposer(panel);
-	t.is(panel.byId('composer-mode-badge')?.textContent, 'normal');
-	t.true(
-		panel
-			.byId('composer-settings-trigger')
-			?.title.includes('normal'),
-	);
+	t.is(panel.byId('mode-trigger-label')?.textContent, 'Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.title, 'Mode: Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-label'), 'Mode: Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-haspopup'), 'menu');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-controls'), 'mode-dropdown');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'false');
+	t.is(panel.byId('mode-dropdown')?.children[0].textContent, 'Normal');
+	t.is(panel.byId('mode-dropdown')?.children[1].textContent, 'Auto-Accept');
 });
 
 test('opening a nested provider list keeps composer settings open', t => {
@@ -89,14 +91,19 @@ test('opening a nested provider list keeps composer settings open', t => {
 	t.false(panel.byId('provider-dropdown')?.classList.contains('hidden'));
 });
 
-test('opening a nested mode list keeps composer settings open', t => {
+test('opening the mode list closes composer settings', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('mode-trigger')?.click();
 
-	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
 	t.false(panel.byId('mode-dropdown')?.classList.contains('hidden'));
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'true');
+	t.is(
+		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
+		'false',
+	);
 });
 
 test('opening the model list closes composer settings', t => {
@@ -147,13 +154,12 @@ test('provider and mode still post the existing extension messages', t => {
 		),
 	);
 
-	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('mode-trigger')?.click();
-	panel.byId('mode-dropdown')?.children[1].click();
+	panel.byId('mode-dropdown')?.children[2].click();
 	t.true(
 		panel.sent.some(
 			(message: {type?: string; mode?: string}) =>
-				message.type === 'setMode' && message.mode === 'auto-accept',
+				message.type === 'setMode' && message.mode === 'yolo',
 		),
 	);
 
@@ -166,5 +172,22 @@ test('provider and mode still post the existing extension messages', t => {
 		availableModels: ['sonnet'],
 		model: 'sonnet',
 	});
-	t.is(panel.byId('composer-mode-badge')?.textContent, 'yolo');
+	t.is(panel.byId('mode-trigger-label')?.textContent, 'YOLO');
+});
+
+test('model dropdown labels keep provider prefixes out of the trigger and items', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'syncState',
+		availableProviders: ['openrouter'],
+		provider: 'openrouter',
+		availableModes: ['normal'],
+		mode: 'normal',
+		availableModels: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5-codex'],
+		model: 'anthropic/claude-sonnet-4-5',
+	});
+
+	t.is(panel.byId('model-trigger-label')?.textContent, 'claude-sonnet-4-5');
+	t.is(panel.byId('model-dropdown')?.children[0].textContent, 'claude-sonnet-4-5');
+	t.is(panel.byId('model-dropdown')?.children[1].textContent, 'gpt-5-codex');
 });

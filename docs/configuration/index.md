@@ -46,6 +46,45 @@ Nanocoder looks for configuration in the following order (first found wins):
 
 > **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
 
+## Inspecting the Effective Configuration
+
+When a setting is not behaving the way you expect, the hard question is not
+what the value is but which file set it. `nanocoder config` answers both
+without booting the interactive app.
+
+```bash
+nanocoder config list                                   # every resolved key and its layer
+nanocoder config show nanocoder.autoCompact.threshold   # one key, in detail
+nanocoder config show autoCompact                       # a whole block
+nanocoder config diff                                   # only what your files change
+nanocoder config diff --json                            # machine-readable output
+```
+
+`config list` prints the layers in play — built-in defaults, the global config
+directory, the project directory, and `NANOCODER_*` environment variables —
+along with whether each file is present, missing, or unreadable. A `*` beside a
+key means a lower-precedence layer also sets it.
+
+`config show <key>` adds the built-in default, the values that lost, and a line
+explaining the rule that decided the winner. The key can be given in full
+(`nanocoder.autoCompact.threshold`), without the `nanocoder.` prefix
+(`autoCompact.threshold`), or as a block name to print every field under it.
+
+`config diff` is the debugging view: everything your config files change
+relative to the defaults, followed by every value that is set somewhere but is
+not in effect, with the reason it lost.
+
+> **Note:** Most settings are resolved **block by block**, not key by key. The
+> highest-precedence file that defines a block — say `nanocoder.autoCompact` —
+> supplies the whole block, and the fields it omits fall back to built-in
+> defaults rather than to a lower-precedence file. A project file setting one
+> field therefore discards the global file's other fields for that block.
+> `config diff` lists exactly those discarded values.
+
+API keys and other credentials are replaced with `<redacted>` in every output
+format. An unsubstituted `${VAR}` reference is shown verbatim, since naming the
+variable is the point of the output and the reference is not itself a secret.
+
 ## Environment Variables
 
 Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
@@ -194,6 +233,28 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 | `maxTurns` | number | `200` | Maximum LLM turns before the loop forces a final, tool-free answer (minimum 1). Raise it for long iterative jobs; the `NANOCODER_MAX_TURNS` env var takes precedence over this setting. |
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
+
+### OS sandbox
+
+File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to `true` (boolean; a string like `"true"` is ignored and treated as off, with a warning) to wrap those two in an OS jail. Default is off.
+
+```json
+{
+  "nanocoder": {
+    "sandbox": true
+  }
+}
+```
+
+When on:
+
+- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), the Darwin user temp dir (bare `mktemp` ignores `TMPDIR`), and `/tmp` / `/private/tmp`. Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model.
+- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. Same read caveat as macOS. If `bwrap` is missing, or present but cannot create a user namespace (`--unshare-net`), the tool returns an error and does **not** fall through to unsandboxed bash.
+- **Windows** — not supported in this version. The tool returns an error if the flag is on.
+
+This is not a secrets boundary. Network is blocked, writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation.
+
+Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 
 ### Retry Limits
 
@@ -433,3 +494,5 @@ Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings i
 - [Preferences](preferences.md) - User preferences and application data
 - [Logging](logging.md) - Structured logging with Pino
 - [Lifecycle Hooks](../features/hooks.md) - Shell commands run at fixed points in the agent loop
+
+See also [Inspecting the Effective Configuration](#inspecting-the-effective-configuration) for debugging which layer supplied a value.
