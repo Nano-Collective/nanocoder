@@ -14,6 +14,10 @@ const mediaUrl = (filename: string) =>
 		new URL(`../../plugins/vscode/media/${filename}`, import.meta.url),
 	);
 
+// The panel reads its siblings off `globalThis` at load - the slash command
+// table is destructured at the top level, so a missing one throws before a
+// single element is built. chat-panel.html loads them ahead of the panel; this
+// list mirrors that order.
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
 const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
 const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
@@ -35,6 +39,7 @@ const SHELL_IDS = [
 	'composer-settings',
 	'composer-settings-trigger',
 	'context-chips',
+	'context-chips-clear',
 	'history-list',
 	'history-view',
 	'icon-send',
@@ -148,6 +153,9 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
+		removeAttribute: (name: string) => {
+			attributes.delete(name);
+		},
 		addEventListener: (type: string, fn: (event: StubElement) => void) => {
 			const registered = listeners.get(type);
 			if (registered) registered.push(fn);
@@ -240,9 +248,13 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const root = createElement('html');
 	const body = createElement('body');
 	root.appendChild(body);
+	// Mirrors the `hidden` class these carry in chat-panel.html, so a panel that
+	// never renders a chip looks the same here as it does on load.
 	const hiddenOnLoad = new Set([
 		'add-menu-dropdown',
 		'composer-settings',
+		'context-chips',
+		'context-chips-clear',
 		'mention-dropdown',
 		'mode-dropdown',
 		'model-dropdown',
