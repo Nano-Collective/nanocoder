@@ -217,7 +217,7 @@ function synthesizeCommandSkills(loader: CustomCommandLoader): Skill[] {
 				? 'project'
 				: command.source === 'personal'
 					? 'personal'
-					: 'project';
+					: 'built-in';
 		out.push(
 			commandToSkill(command, {
 				filePath: command.path,
