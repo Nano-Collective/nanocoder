@@ -41,7 +41,7 @@ importers:
         version: 1.7.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.91(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(@napi-rs/canvas@0.1.80)(ai@6.0.193(zod@4.4.3))(pdfjs-dist@5.4.296)
       '@nanocollective/prompt-scrub':
         specifier: ^1.0.1
-        version: 1.0.1
+        version: 1.0.2
       '@vscode/ripgrep':
         specifier: ^1.18.0
         version: 1.18.0
@@ -981,8 +981,8 @@ packages:
       pdfjs-dist:
         optional: true
 
-  '@nanocollective/prompt-scrub@1.0.1':
-    resolution: {integrity: sha512-FxWrU5yFc25VNBUfr7g+y6xgjuCOWvOU2QFr0tOfaY24Qmqam1B0/IuC79DSnyVtdF+viCi4OQCAySG/W0l5OA==}
+  '@nanocollective/prompt-scrub@1.0.2':
+    resolution: {integrity: sha512-DtkkfBDpd8AWSYWiY3WHhA75/AqvZYlVYV9nRUMwS8SDF+LNgldi52I1t/tbhqerfko4Uc9nc0qG93UztJVQyQ==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -5233,7 +5233,7 @@ snapshots:
       ai: 6.0.193(zod@4.4.3)
       pdfjs-dist: 5.4.296
 
-  '@nanocollective/prompt-scrub@1.0.1':
+  '@nanocollective/prompt-scrub@1.0.2':
     dependencies:
       commander: 15.0.0
 
