@@ -298,6 +298,8 @@ export interface DiskNanocoderConfig {
 	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
 	 */
 	retries?: Partial<RetryLimitsConfig>;
+	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
+	sandbox?: boolean;
 }
 
 /**
