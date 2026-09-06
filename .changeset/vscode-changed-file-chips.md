@@ -1,0 +1,5 @@
+---
+"@nanocollective/nanocoder": minor
+---
+
+Added created and modified files to the VS Code extension's context panel: every file the agent writes during a turn now appears as a chip above the composer as soon as the edit lands, and clicking it opens the current version in the editor for review. The chips are dashed to set them apart from files you attached yourself, survive sending a message, and can be dismissed individually or, for a turn that touched many files, all at once with a "Clear N changed files" control; the row scrolls at a fixed height rather than growing the composer. They are deliberately not inlined into the next prompt, since the agent just wrote them. The row follows the rest of the file lifecycle too - a deleted file loses its chip, and a rename moves the chip to the new path. Two tools also report themselves more accurately over ACP as a result: `diff_edit` is now an edit, so edits from the nano tool profile get the same file card and chip that `write_file` and `string_replace` already did, and `file_op` reports the kind its operation actually performs (delete, move, or an edit for a copy) instead of a generic tool call. Closes #857.

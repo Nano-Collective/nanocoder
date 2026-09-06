@@ -160,6 +160,49 @@ export interface NotificationsConfig {
 	};
 }
 
+/**
+ * Points in the agent lifecycle a user-defined shell command can be attached
+ * to. `pre-tool-use` and `user-prompt-submit` are the vetoing points: a
+ * non-zero exit denies the tool call (or the prompt) and its stdout is handed
+ * back to the model as the reason. The rest are observe-only — a non-zero exit
+ * there is logged, and the remaining hooks still run.
+ */
+export const HOOK_EVENTS = [
+	'session-start',
+	'session-end',
+	'user-prompt-submit',
+	'pre-tool-use',
+	'post-tool-use',
+	'pre-compact',
+] as const;
+
+export type HookEvent = (typeof HOOK_EVENTS)[number];
+
+/**
+ * A single lifecycle hook: one shell command, optionally scoped to a set of
+ * tools (tool events only) and with its own timeout.
+ */
+export interface HookDefinition {
+	/** Shell command to run. Receives hook context via NANOCODER_* env vars. */
+	command: string;
+	/**
+	 * Tool names this hook applies to. Omitted means "every tool".
+	 * Ignored by non-tool events.
+	 */
+	matchTools?: string[];
+	/**
+	 * Milliseconds before the hook is killed. Defaults to 30s, except
+	 * `session-end`, which defaults to 2s so it fits inside the shutdown budget.
+	 * A timed-out hook never blocks — only a deliberate non-zero exit does.
+	 */
+	timeout?: number;
+	/** Optional label used in transcripts and /doctor instead of the command. */
+	name?: string;
+}
+
+/** Lifecycle hooks keyed by event. Every event is optional. */
+export type HooksConfig = Partial<Record<HookEvent, HookDefinition[]>>;
+
 // Note: temperature is intentionally excluded from this interface.
 // It cannot be applied during a mode switch without proper integration into
 // the tune/ModelParameters pipeline (tune.ts). Tracked as a follow-up.
@@ -168,33 +211,117 @@ export interface ModeProviderConfig {
 	model: string;
 }
 
+// ---------------------------------------------------------------------------
+// On-disk shape of agents.config.json
+//
+// This is the schema source of truth. It differs from the runtime AppConfig:
+//   • includes $schema (editor-only, ignored by the loader)
+//   • includes defaultMode (read by loadDefaultMode(), not on AppConfig)
+//   • uses ProviderConfig for providers (superset of the AppConfig inline type)
+//   • autoCompact is Partial (the loader defaults each field)
+//   • excludes notifications, sessions, paste (read from nanocoder-preferences.json)
+//
+// The JSON schema generator (`pnpm run generate:schema`) targets this type.
+// These types are consumed exclusively by that tooling and are not part of
+// the runtime surface, hence @internal.
+// ---------------------------------------------------------------------------
+
+/** Valid default mode values for agents.config.json. */
+export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
+
+/**
+ * Per-mode provider/model overrides keyed by mode name (e.g. use a fast
+ * model for plan mode). Keys are constrained to the user-selectable modes so
+ * the schema rejects typos and unsupported modes at edit time.
+ * @internal
+ */
+export type DiskModeProviders = Partial<
+	Record<DiskDefaultMode, ModeProviderConfig>
+>;
+
+/**
+ * On-disk representation of the `nanocoder` namespace in agents.config.json.
+ *
+ * Every field is optional — the loader applies sensible defaults for each one.
+ * Fields that live in nanocoder-preferences.json (notifications, sessions,
+ * paste) are intentionally absent: the schema should not advertise keys the
+ * loader silently ignores.
+ * @internal
+ */
+export interface DiskNanocoderConfig {
+	/** AI provider configurations (all OpenAI-compatible). */
+	providers?: ProviderConfig[];
+	/** Default conversation mode when none is specified. */
+	defaultMode?: DiskDefaultMode;
+	/** Automatic context compression when usage exceeds threshold. All fields have defaults. */
+	autoCompact?: Partial<AutoCompactConfig>;
+	/** Model mode defaults (tool profile, tool mode, model parameters). */
+	tune?: Partial<TuneConfig>;
+	/** Maximum LLM turns for headless runs (--plain and ACP loops). */
+	headless?: {
+		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
+		maxTurns?: number;
+	};
+	/** Model Context Protocol server configurations. */
+	mcpServers?: MCPServerConfig[];
+	/** LSP server configurations (optional — auto-discovery enabled by default). */
+	lspServers?: {
+		name: string;
+		command: string;
+		args?: string[];
+		/** File extensions this server handles. */
+		languages: string[];
+		env?: Record<string, string>;
+	}[];
+	/** Tools that run automatically without confirmation in non-interactive mode. */
+	alwaysAllow?: string[];
+	/** Tools unavailable to the model — filtered out of chat, subagents, and tune profiles. */
+	disabledTools?: string[];
+	/** Custom system prompt — replaces or extends the built-in prompt. */
+	systemPrompt?: SystemPromptConfig;
+	/**
+	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
+	 * event. Project-local, so this carries the same code-execution weight as
+	 * `mcpServers` above.
+	 */
+	hooks?: HooksConfig;
+	/** Nanocoder-specific tool configurations. */
+	nanocoderTools?: {
+		webSearch?: {
+			apiKey?: string;
+		};
+	};
+	/** Per-mode provider/model overrides (e.g. use a fast model for plan mode). */
+	modeProviders?: DiskModeProviders;
+	/**
+	 * Agent-loop retry limits. Each field has its own sensible default — you
+	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
+	 */
+	retries?: Partial<RetryLimitsConfig>;
+}
+
+/**
+ * Root structure of agents.config.json.
+ *
+ * The schema wraps DiskNanocoderConfig under the `nanocoder` key to match
+ * the actual on-disk layout. The optional `$schema` property enables
+ * editor autocompletion without being read by the loader. A legacy top-level
+ * `providers` form (without the `nanocoder` wrapper) is still accepted by the
+ * project provider loader (loadProjectProviderConfigs), so it is advertised
+ * here too.
+ * @internal
+ */
+export interface DiskConfig {
+	/** JSON Schema URI for editor autocompletion. Ignored by the loader. */
+	$schema?: string;
+	/** Top-level provider list — alternative to `nanocoder.providers`. Accepts the same format. */
+	providers?: ProviderConfig[];
+	nanocoder?: DiskNanocoderConfig;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
-	providers?: {
-		name: string;
-		baseUrl?: string;
-		apiKey?: string;
-		caCertPath?: string;
-		models: string[];
-		contextWindow?: number;
-		contextWindows?: Record<string, number>;
-		requestTimeout?: number;
-		socketTimeout?: number;
-		maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
-		connectionPool?: {
-			idleTimeout?: number;
-			cumulativeMaxIdleTimeout?: number;
-		};
-		// Tool configuration
-		disableTools?: boolean; // Disable tools for entire provider
-		disableToolModels?: string[]; // List of model names to disable tools for
-		// SDK provider package to use (default: 'openai-compatible')
-		sdkProvider?: SdkProvider;
-		// OpenRouter-specific request body fields. Only applied when the
-		// provider is OpenRouter (name match, case-insensitive).
-		openrouter?: OpenRouterParameters;
-		[key: string]: unknown; // Allow additional provider-specific config
-	}[];
+	providers?: ProviderConfig[];
 
 	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
@@ -220,6 +347,11 @@ export interface AppConfig {
 
 	// Custom system prompt — replaces or extends the built-in prompt
 	systemPrompt?: SystemPromptConfig;
+
+	// Lifecycle hooks — shell commands run at fixed points in the agent loop.
+	// Project-local config, so it carries the same code-execution weight as
+	// `mcpServers`, gated by the same directory-trust prompt.
+	hooks?: HooksConfig;
 
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
@@ -454,7 +586,22 @@ export interface UserPreferences {
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
-	paste?: PasteConfig;
+	/**
+	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
+	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
+	 * `loadSessionConfig` / `loadPasteConfig` loaders read.
+	 */
+	nanocoder?: {
+		sessions?: {
+			autoSave?: boolean;
+			saveInterval?: number;
+			maxSessions?: number;
+			maxMessages?: number;
+			retentionDays?: number;
+			directory?: string;
+		};
+		paste?: PasteConfig;
+	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
 	/**

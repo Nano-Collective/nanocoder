@@ -235,7 +235,12 @@
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
-				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
+				<!-- Capped and scrollable: a turn that edits thirty files would
+				     otherwise grow the composer until it crowds out the message
+				     list. The clear control sits outside the scroll box so it
+				     stays reachable no matter how far the row is scrolled. -->
+				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1 max-h-24 overflow-y-auto"></div>
+				<button id="context-chips-clear" type="button" class="hidden self-start mx-3 mb-1 px-2 py-0.5 rounded font-vscode text-[0.75em] opacity-60 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-input-fg"></button>
 				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mention-dropdown slash-dropdown"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">

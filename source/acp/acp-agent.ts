@@ -192,177 +192,176 @@ export class AcpAgent implements Agent {
 
 		session.beginTurn();
 
-		const {text: userText, images} = await acpContentToUserMessage(
-			params.prompt,
-			{
-				conn: this.conn,
-				sessionId: params.sessionId,
-				canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
-			},
-		);
-		logger.info(
-			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
-		);
+		try {
+			const {text: userText, images} = await acpContentToUserMessage(
+				params.prompt,
+				{
+					conn: this.conn,
+					sessionId: params.sessionId,
+					canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
+				},
+			);
+			logger.info(
+				`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
+			);
 
-		// Prepend active workspace context (e.g. the file focused in VS Code) so
-		// the model always knows what the user is looking at.
-		let contextualUserText = userText;
+			// Prepend active workspace context (e.g. the file focused in VS Code) so
+			// the model always knows what the user is looking at.
+			let contextualUserText = userText;
 
-		// Slash command interception
-		const trimmedUserText = userText.trim();
-		if (trimmedUserText.startsWith('/')) {
-			const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
+			// Slash command interception
+			const trimmedUserText = userText.trim();
+			if (trimmedUserText.startsWith('/')) {
+				const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
 
-			// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
-			// not a slash command. Skip command interception.
-			if (!commandName.includes('/')) {
-				const command =
-					this.initContext.customCommandLoader?.getCommand(commandName);
+				// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
+				// not a slash command. Skip command interception.
+				if (!commandName.includes('/')) {
+					const command =
+						this.initContext.customCommandLoader?.getCommand(commandName);
 
-				if (command) {
-					// Custom user-defined command — expand its instructions into the prompt
-					const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-					contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
-				} else {
-					// Check for built-in commands that have special ACP handling
-					const sendBuiltinReply = (msg: string) => {
-						session.messages = [
-							...session.messages,
-							{
-								role: 'user',
-								content: contextualUserText,
-								displayOnly: true,
-							},
-							{role: 'assistant', content: msg, displayOnly: true},
-						];
-						this.conn.sessionUpdate({
-							sessionId: params.sessionId,
-							update: {
-								sessionUpdate: 'agent_message_chunk',
-								content: {type: 'text', text: msg},
-							},
-						});
-						return {stopReason: 'end_turn' as const};
-					};
+					if (command) {
+						// Custom user-defined command — expand its instructions into the prompt
+						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
+						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+					} else {
+						// Check for built-in commands that have special ACP handling
+						const sendBuiltinReply = (msg: string) => {
+							session.messages = [
+								...session.messages,
+								{
+									role: 'user',
+									content: contextualUserText,
+									displayOnly: true,
+								},
+								{role: 'assistant', content: msg, displayOnly: true},
+							];
+							this.conn.sessionUpdate({
+								sessionId: params.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: msg},
+								},
+							});
+							return {stopReason: 'end_turn' as const};
+						};
 
-					if (commandName === 'clear') {
-						// Clear the conversation history and action timeline
-						session.messages = [];
-						await session.timeline.clear();
-						const msg = 'Conversation cleared.';
-						this.conn.sessionUpdate({
-							sessionId: params.sessionId,
-							update: {
-								sessionUpdate: 'agent_message_chunk',
-								content: {type: 'text', text: msg},
-							},
-						});
-						return {stopReason: 'end_turn'};
+						if (commandName === 'clear') {
+							// Clear the conversation history and action timeline
+							session.messages = [];
+							await session.timeline.clear();
+							const msg = 'Conversation cleared.';
+							this.conn.sessionUpdate({
+								sessionId: params.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: msg},
+								},
+							});
+							return {stopReason: 'end_turn'};
+						}
+
+						if (commandName === 'help') {
+							const customCmds =
+								this.initContext.customCommandLoader?.getAllCommands() ?? [];
+							const customList =
+								customCmds.length > 0
+									? customCmds
+											.map(
+												c =>
+													`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
+											)
+											.join('\n')
+									: '';
+							const msg = [
+								'**Available slash commands in VS Code GUI:**',
+								'',
+								'- `/clear` — Clear the current conversation',
+								'- `/copy` — Copy the last assistant response',
+								'- `/copy code` — Copy the last code block from the last response',
+								'- `/help` — Show this help message',
+								'',
+								'**Not available in VS Code GUI** (CLI-only):',
+								'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+								'',
+								customList ? `**Your custom commands:**\n${customList}` : '',
+							]
+								.filter(Boolean)
+								.join('\n');
+							return sendBuiltinReply(msg);
+						}
+
+						// `/copy` is normally intercepted by the webview before it
+						// reaches us, but `/help` advertises it, so a client without
+						// that interception must not get "unrecognized command".
+						if (commandName === 'copy') {
+							const msg =
+								'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
+							return sendBuiltinReply(msg);
+						}
+
+						if (['model', 'provider'].includes(commandName)) {
+							const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
+							return sendBuiltinReply(msg);
+						}
+
+						if (commandName === 'settings') {
+							const msg =
+								'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
+							return sendBuiltinReply(msg);
+						}
+
+						if (
+							['init', 'theme', 'compact', 'context-max', 'usage'].includes(
+								commandName,
+							)
+						) {
+							const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
+							return sendBuiltinReply(msg);
+						}
+
+						// Truly unrecognized command
+						const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
+						return sendBuiltinReply(errorMsg);
 					}
-
-					if (commandName === 'help') {
-						const customCmds =
-							this.initContext.customCommandLoader?.getAllCommands() ?? [];
-						const customList =
-							customCmds.length > 0
-								? customCmds
-										.map(
-											c =>
-												`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
-										)
-										.join('\n')
-								: '';
-						const msg = [
-							'**Available slash commands in VS Code GUI:**',
-							'',
-							'- `/clear` — Clear the current conversation',
-							'- `/copy` — Copy the last assistant response',
-							'- `/copy code` — Copy the last code block from the last response',
-							'- `/help` — Show this help message',
-							'',
-							'**Not available in VS Code GUI** (CLI-only):',
-							'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
-							'',
-							customList ? `**Your custom commands:**\n${customList}` : '',
-						]
-							.filter(Boolean)
-							.join('\n');
-						return sendBuiltinReply(msg);
-					}
-
-					// `/copy` is normally intercepted by the webview before it
-					// reaches us, but `/help` advertises it, so a client without
-					// that interception must not get "unrecognized command".
-					if (commandName === 'copy') {
-						const msg =
-							'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
-						return sendBuiltinReply(msg);
-					}
-
-					if (['model', 'provider'].includes(commandName)) {
-						const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
-						return sendBuiltinReply(msg);
-					}
-
-					if (commandName === 'settings') {
-						const msg =
-							'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
-						return sendBuiltinReply(msg);
-					}
-
-					if (
-						['init', 'theme', 'compact', 'context-max', 'usage'].includes(
-							commandName,
-						)
-					) {
-						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
-						return sendBuiltinReply(msg);
-					}
-
-					// Truly unrecognized command
-					const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
-					return sendBuiltinReply(errorMsg);
 				}
 			}
-		}
 
-		if (session.activeFile) {
-			contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
-		}
-
-		session.messages = [
-			...session.messages,
-			{
-				role: 'user',
-				content: contextualUserText,
-				...(images.length > 0 ? {images} : {}),
-			},
-		];
-
-		if (session.baseSystemMessage) {
-			const projectContext = await appendRelevantProjectContextWithCount(
-				session.baseSystemMessage.content,
-				userText,
-				session.getMemoryFinder(),
-				getProjectContextPreferences(),
-			);
-			session.systemMessage = {
-				role: 'system',
-				content: projectContext.systemPrompt,
-			};
-			setLastBuiltPrompt(projectContext.systemPrompt);
-			if (projectContext.memoryCount > 0) {
-				logger.info(
-					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
-				);
+			if (session.activeFile) {
+				contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
 			}
-		}
 
-		const config = getAppConfig();
-		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
+			session.messages = [
+				...session.messages,
+				{
+					role: 'user',
+					content: contextualUserText,
+					...(images.length > 0 ? {images} : {}),
+				},
+			];
 
-		session.turnActive = true;
-		try {
+			if (session.baseSystemMessage) {
+				const projectContext = await appendRelevantProjectContextWithCount(
+					session.baseSystemMessage.content,
+					userText,
+					session.getMemoryFinder(),
+					getProjectContextPreferences(),
+				);
+				session.systemMessage = {
+					role: 'system',
+					content: projectContext.systemPrompt,
+				};
+				setLastBuiltPrompt(projectContext.systemPrompt);
+				if (projectContext.memoryCount > 0) {
+					logger.info(
+						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+					);
+				}
+			}
+
+			const config = getAppConfig();
+			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
+
 			return await runAcpConversation({
 				session,
 				client: this.initContext.client,
@@ -882,7 +881,7 @@ export class AcpAgent implements Agent {
 
 			// We only want user/assistant messages for the title generation/saving
 			const saveableMessages = session.messages.filter(
-				m => m.role === 'user' || m.role === 'assistant',
+				m => (m.role === 'user' || m.role === 'assistant') && !m.displayOnly,
 			);
 
 			if (saveableMessages.length === 0) {
