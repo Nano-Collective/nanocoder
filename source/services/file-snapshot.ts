@@ -3,6 +3,7 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
+import type {FileSnapshot} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
@@ -20,16 +21,30 @@ export class FileSnapshotService {
 	/**
 	 * Capture the contents of specified files
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, string>> {
-		const snapshots = new Map<string, string>();
+	async captureFiles(filePaths: string[]): Promise<Map<string, FileSnapshot>> {
+		const snapshots = new Map<string, FileSnapshot>();
 
 		for (const filePath of filePaths) {
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
-				const content = await fs.readFile(absolutePath, 'utf-8');
 				const relativePath = path.relative(this.workspaceRoot, absolutePath);
 				const normalizedPath = relativePath.split(path.sep).join('/');
-				snapshots.set(normalizedPath, content);
+
+				try {
+					const content = await fs.readFile(absolutePath, 'utf-8');
+					snapshots.set(normalizedPath, {
+						existed: true,
+						content,
+					});
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+						snapshots.set(normalizedPath, {
+							existed: false,
+						});
+					} else {
+						throw error;
+					}
+				}
 			} catch (error) {
 				logWarning('Could not capture file', true, {
 					context: {
@@ -46,10 +61,10 @@ export class FileSnapshotService {
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, string>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, FileSnapshot>): Promise<void> {
 		const errors: string[] = [];
 
-		for (const [relativePath, content] of snapshots) {
+		for (const [relativePath, snapshot] of snapshots) {
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
 				// Snapshot keys are read back from user-writable metadata on disk
@@ -61,10 +76,21 @@ export class FileSnapshotService {
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
 				}
+
+				if (!snapshot.existed) {
+					try {
+						await fs.unlink(absolutePath);
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+							throw error;
+						}
+					}
+					continue;
+				}
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content, 'utf-8');
+				await fs.writeFile(absolutePath, snapshot.content ?? '', 'utf-8');
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -192,11 +218,15 @@ export class FileSnapshotService {
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, string>): number {
+	getSnapshotSize(snapshots: Map<string, FileSnapshot>): number {
 		let totalSize = 0;
-		for (const content of snapshots.values()) {
-			totalSize += Buffer.byteLength(content, 'utf-8');
+
+		for (const snapshot of snapshots.values()) {
+			if (snapshot.existed && snapshot.content !== undefined) {
+				totalSize += Buffer.byteLength(snapshot.content, 'utf-8');
+			}
 		}
+
 		return totalSize;
 	}
 
@@ -204,7 +234,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, string>,
+		snapshots: Map<string, FileSnapshot>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 
@@ -227,6 +257,7 @@ export class FileSnapshotService {
 						try {
 							const parentStats = await fs.stat(parentDir);
 							const parentMode = parentStats.mode;
+
 							// Check if any write permission bit is set - owner: 0o200, group: 0o020, others: 0o002
 							const parentHasWritePermission =
 								(parentMode & 0o200) !== 0 ||
@@ -248,6 +279,7 @@ export class FileSnapshotService {
 					if (parentWritable) {
 						try {
 							await fs.mkdir(directory, {recursive: true});
+
 							try {
 								const verifyStats = await fs.stat(directory);
 								directoryExists = verifyStats.isDirectory();
@@ -274,6 +306,7 @@ export class FileSnapshotService {
 					try {
 						const dirStats = await fs.stat(directory);
 						const mode = dirStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -302,6 +335,7 @@ export class FileSnapshotService {
 					try {
 						const fileStats = await fs.stat(absolutePath);
 						const mode = fileStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -324,6 +358,7 @@ export class FileSnapshotService {
 				);
 			}
 		}
+
 		return {valid: errors.length === 0, errors};
 	}
 }

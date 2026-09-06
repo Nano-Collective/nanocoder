@@ -24,6 +24,7 @@ test('returned function is mode-aware', t => {
 	t.true(approvalFn({}, 'normal'), 'normal mode requires approval');
 	t.false(approvalFn({}, 'auto-accept'), 'auto-accept skips approval');
 	t.false(approvalFn({}, 'headless'), 'headless skips approval');
+	t.false(approvalFn({}, 'architect'), 'architect skips per-tool approval');
 });
 
 test('different tool names produce independent functions', t => {

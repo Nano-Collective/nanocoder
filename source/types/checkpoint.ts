@@ -5,6 +5,7 @@ export interface CheckpointMetadata {
 	timestamp: string; // ISO 8601 format
 	messageCount: number;
 	filesChanged: string[]; // Relative file paths
+	filesMissing?: string[];
 	provider: {
 		name: string;
 		model: string;
@@ -23,10 +24,15 @@ export interface CheckpointConversation {
 	}>;
 }
 
+export interface FileSnapshot {
+	existed: boolean;
+	content?: string;
+}
+
 export interface CheckpointData {
 	metadata: CheckpointMetadata;
 	conversation: CheckpointConversation;
-	fileSnapshots: Map<string, string>;
+	fileSnapshots: Map<string, FileSnapshot>;
 }
 
 export interface CheckpointListItem {

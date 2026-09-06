@@ -88,6 +88,7 @@ export function useChatHandler({
 	nonInteractiveMode = false,
 	onConversationComplete,
 	onPlanTurnComplete,
+	onArchitectTurnComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
@@ -249,6 +250,10 @@ export function useChatHandler({
 			sessionId?: string,
 			onToolExecuted?: (toolName: string) => void,
 			onFinalAssistantText?: (content: string) => void,
+			architectCheckpointState?: {
+				created: boolean;
+				name?: string;
+			},
 		) => {
 			if (!client) return;
 
@@ -272,6 +277,7 @@ export function useChatHandler({
 					developmentModeRef,
 					nonInteractiveMode,
 					conversationStateManager,
+					architectCheckpointState,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
 					reasoningExpandedRef,
@@ -383,6 +389,14 @@ export function useChatHandler({
 		const controller = new AbortController();
 		setAbortController(controller);
 
+		// Keep Architect checkpoint state for the entire user turn.
+		const architectCheckpointState: {
+			created: boolean;
+			name?: string;
+		} = {
+			created: false,
+		};
+
 		try {
 			let systemPrompt = getBaseSystemPrompt(
 				developmentMode,
@@ -437,6 +451,7 @@ export function useChatHandler({
 				content => {
 					finalAssistantText = content;
 				},
+				architectCheckpointState,
 			);
 
 			if (
@@ -478,6 +493,15 @@ export function useChatHandler({
 				!controller.signal.aborted
 			) {
 				onPlanTurnComplete?.();
+			}
+
+			if (
+				developmentMode === 'architect' &&
+				architectCheckpointState.created &&
+				architectCheckpointState.name &&
+				!controller.signal.aborted
+			) {
+				onArchitectTurnComplete?.(architectCheckpointState.name);
 			}
 		} catch (error) {
 			displayError(error, 'chat-error');

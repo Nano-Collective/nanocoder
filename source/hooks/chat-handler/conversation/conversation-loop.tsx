@@ -16,6 +16,8 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -66,6 +68,50 @@ import {
 	executeToolsDirectly,
 } from './tool-executor';
 
+interface ArchitectCheckpointState {
+	created: boolean;
+	name?: string;
+}
+
+function getArchitectMutationPaths(toolCalls: ToolCall[]): string[] {
+	const paths = new Set<string>();
+
+	for (const toolCall of toolCalls) {
+		const args = toolCall.function.arguments as {
+			operation?: string;
+			path?: string;
+			destination?: string;
+		};
+
+		switch (toolCall.function.name) {
+			case 'write_file':
+			case 'string_replace':
+			case 'diff_edit':
+				if (args.path) {
+					paths.add(args.path);
+				}
+				break;
+
+			case 'file_op':
+				if (args.operation === 'delete' || args.operation === 'move') {
+					if (args.path) {
+						paths.add(args.path);
+					}
+				}
+
+				if (args.operation === 'move' || args.operation === 'copy') {
+					if (args.destination) {
+						paths.add(args.destination);
+					}
+				}
+
+				break;
+		}
+	}
+
+	return [...paths];
+}
+
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
 	messages: Message[];
@@ -97,6 +143,7 @@ interface ProcessAssistantResponseParams {
 	>;
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
+	architectCheckpointState?: ArchitectCheckpointState;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
 	reasoningExpandedRef?: React.RefObject<boolean>;
@@ -197,6 +244,7 @@ export const processAssistantResponse = async (
 		currentModel,
 		nonInteractiveMode,
 		conversationStateManager,
+		architectCheckpointState,
 		onConversationComplete,
 		conversationStartTime,
 		reasoningExpandedRef,
@@ -888,6 +936,41 @@ export const processAssistantResponse = async (
 		};
 
 		const turnResults: ToolResult[] = [];
+
+		const architectMutationTools =
+			developmentModeRef?.current === 'architect' ||
+			developmentMode === 'architect'
+				? autoTools.filter(toolCall =>
+						['write_file', 'string_replace', 'diff_edit', 'file_op'].includes(
+							toolCall.function.name,
+						),
+					)
+				: [];
+		if (architectMutationTools.length > 0 && architectCheckpointState) {
+			const mutationPaths = getArchitectMutationPaths(architectMutationTools);
+
+			if (mutationPaths.length > 0) {
+				const checkpointManager = new CheckpointManager(getProjectRoot());
+
+				if (!architectCheckpointState.created) {
+					const checkpointMetadata = await checkpointManager.saveCheckpoint(
+						`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+						messages,
+						currentProvider,
+						currentModel,
+						mutationPaths,
+					);
+
+					architectCheckpointState.created = true;
+					architectCheckpointState.name = checkpointMetadata.name;
+				} else if (architectCheckpointState.name) {
+					await checkpointManager.extendCheckpoint(
+						architectCheckpointState.name,
+						mutationPaths,
+					);
+				}
+			}
+		}
 
 		// 1) Auto-approved tools execute as a batch (parallelizes consecutive
 		//    read-only / agent runs).

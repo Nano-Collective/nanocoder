@@ -19,6 +19,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -100,6 +101,22 @@ interface UseAppHandlersProps {
 	) => void;
 	setPendingPlanProceed: (value: string | null) => void;
 
+	setArchitectReviewState: (
+		value: {
+			show: boolean;
+			checkpointName: string;
+			filesChanged: string[];
+			filesMissing: string[];
+		} | null,
+	) => void;
+
+	architectReviewState: {
+		show: boolean;
+		checkpointName: string;
+		filesChanged: string[];
+		filesMissing: string[];
+	} | null;
+
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
 	setChatComponents: (components: React.ReactNode[]) => void;
@@ -154,6 +171,8 @@ export interface AppHandlers {
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
+	handleArchitectRevert: () => Promise<void>;
+	handleArchitectRevertAndRevise: () => Promise<void>;
 	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
@@ -222,13 +241,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// non-interactive mode entered by the daemon, not the user.
 		if (props.developmentMode === 'headless') return;
 
-		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect' > = [
-			'normal',
-			'auto-accept',
-			'yolo',
-			'plan',
-			'architect',
-		];
+		const modes: Array<
+			'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'
+		> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 		const currentIndex = modes.indexOf(
 			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
 		);
@@ -645,6 +660,91 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		);
 	}, [props.setPlanReviewState, props.addToChatQueue, props]);
 
+	// Architect review action bar handlers
+	const handleArchitectRevert = React.useCallback(async () => {
+		const reviewState = props.architectReviewState;
+
+		if (!reviewState?.checkpointName) {
+			return;
+		}
+
+		try {
+			const manager = new CheckpointManager(getProjectRoot());
+
+			const checkpointData = await manager.loadCheckpoint(
+				reviewState.checkpointName,
+				{
+					validateIntegrity: true,
+				},
+			);
+
+			await manager.restoreFiles(checkpointData);
+
+			props.setArchitectReviewState(null);
+
+			props.addToChatQueue(
+				<SuccessMessage
+					key={generateKey('architect-revert-success')}
+					message={`✓ Architect changes reverted successfully`}
+					hideBox={true}
+				/>,
+			);
+		} catch (error) {
+			props.addToChatQueue(
+				<ErrorMessage
+					key={generateKey('architect-revert-error')}
+					message={`Failed to revert Architect changes: ${formatError(error)}`}
+					hideBox={true}
+				/>,
+			);
+		}
+	}, [
+		props.architectReviewState,
+		props.setArchitectReviewState,
+		props.addToChatQueue,
+		props,
+	]);
+
+	const handleArchitectRevertAndRevise = React.useCallback(async () => {
+		const reviewState = props.architectReviewState;
+
+		if (!reviewState?.checkpointName) {
+			return;
+		}
+
+		try {
+			const manager = new CheckpointManager(getProjectRoot());
+
+			const checkpointData = await manager.loadCheckpoint(
+				reviewState.checkpointName,
+				{
+					validateIntegrity: true,
+				},
+			);
+
+			await manager.restoreFiles(checkpointData);
+
+			props.setArchitectReviewState(null);
+
+			await props.handleChatMessage(
+				'Please review the changes you just made, revise them based on the previous result, and try again.',
+			);
+		} catch (error) {
+			props.addToChatQueue(
+				<ErrorMessage
+					key={generateKey('architect-revise-error')}
+					message={`Failed to revert Architect changes: ${formatError(error)}`}
+					hideBox={true}
+				/>,
+			);
+		}
+	}, [
+		props.architectReviewState,
+		props.setArchitectReviewState,
+		props.addToChatQueue,
+		props,
+	]);
+
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
 		async (
@@ -770,5 +870,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handlePlanProceed,
 		handlePlanAskMore,
 		handlePlanModify,
+		handleArchitectRevert,
+		handleArchitectRevertAndRevise,
 	};
 }

@@ -62,10 +62,6 @@ export async function resolveToolApproval(
 		return false;
 	}
 
-	if (ctx.mode === 'architect' && !target?.readOnly) {
-		return true;
-	}
-
 	const approval = target?.approval;
 
 	if (typeof approval === 'boolean') {

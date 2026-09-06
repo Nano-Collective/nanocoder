@@ -86,8 +86,8 @@ test('write_file requires approval in plan mode', async t => {
 	);
 });
 
-test('write_file requires approval in architect mode', async t => {
-	t.true(
+test('write_file does NOT require approval in architect mode', async t => {
+	t.false(
 		await evaluateNeedsApproval(writeFileTool, 'architect', {
 			path: 'test.txt',
 			content: 'test',
@@ -125,8 +125,8 @@ test('string_replace requires approval in plan mode', async t => {
 	);
 });
 
-test('string_replace requires approval in architect mode', async t => {
-	t.true(
+test('string_replace does NOT require approval in architect mode', async t => {
+	t.false(
 		await evaluateNeedsApproval(stringReplaceTool, 'architect', {
 			path: 'test.txt',
 			old_str: 'old',
@@ -162,8 +162,8 @@ test('diff_edit requires approval in plan mode', async t => {
 	);
 });
 
-test('diff_edit requires approval in architect mode', async t => {
-	t.true(
+test('diff_edit does NOT require approval in architect mode', async t => {
+	t.false(
 		await evaluateNeedsApproval(diffEditTool, 'architect', {
 			path: 'test.txt',
 			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
@@ -298,8 +298,8 @@ test('file_op requires approval in plan mode', async t => {
 	);
 });
 
-test('file_op requires approval in architect mode', async t => {
-	t.true(
+test('file_op does NOT require approval in architect mode', async t => {
+	t.false(
 		await evaluateNeedsApproval(fileOpTool, 'architect', {
 			operation: 'delete',
 			path: 'test.txt',

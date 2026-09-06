@@ -47,6 +47,7 @@ export interface UseChatHandlerProps {
 	// which is racy: the user can toggle modes mid-generation, so a completing
 	// normal-mode turn would otherwise look like a finished plan.
 	onPlanTurnComplete?: () => void;
+	onArchitectTurnComplete?: (checkpointName: string) => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
