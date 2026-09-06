@@ -58,7 +58,7 @@
 		const formatDropdownLabel = (value, triggerId) => {
 			if (triggerId === 'mode-trigger') {
 				const modeLabels = {
-					normal: 'Chat',
+					normal: 'Normal',
 					'auto-accept': 'Auto-Accept',
 					yolo: 'YOLO',
 					plan: 'Plan',
@@ -82,6 +82,9 @@
 				this.onChange = onChange;
 
 				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute('aria-haspopup', 'menu');
+				this.trigger.setAttribute('aria-expanded', 'false');
+				this.trigger.setAttribute('aria-controls', dropdownId);
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
@@ -91,14 +94,25 @@
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
+					this.syncTriggerExpanded();
 				});
 			}
 
-			syncModeBadge() {
+			syncModeTriggerLabel() {
 				if (this.label?.id !== 'mode-trigger-label') return;
 				if (this.trigger && this.label.textContent) {
-					this.trigger.title = this.label.textContent;
+					const accessibleLabel = `Mode: ${this.label.textContent}`;
+					this.trigger.title = accessibleLabel;
+					this.trigger.setAttribute('aria-label', accessibleLabel);
 				}
+			}
+
+			syncTriggerExpanded() {
+				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute(
+					'aria-expanded',
+					this.dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
 			}
 
 			setOptions(options, selectedValue) {
@@ -108,7 +122,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
-					this.syncModeBadge();
+					this.syncModeTriggerLabel();
 					return;
 				}
 
@@ -121,13 +135,12 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					item.textContent = formatDropdownLabel(opt, this.triggerId);
+					const displayValue = formatDropdownLabel(opt, this.triggerId);
+					item.textContent = displayValue;
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
-						
-						const displayValue = formatDropdownLabel(opt, this.triggerId);
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -138,6 +151,7 @@
 					item.addEventListener('click', () => {
 						this.onChange(opt);
 						this.dropdown.classList.add('hidden');
+						this.syncTriggerExpanded();
 					});
 
 					this.dropdown.appendChild(item);
@@ -147,7 +161,7 @@
 					const displayValue = formatDropdownLabel(options[0], this.triggerId);
 					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.syncModeBadge();
+				this.syncModeTriggerLabel();
 			}
 		}
 
@@ -194,6 +208,20 @@
 			}
 		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		[
+			['provider-trigger', 'provider-dropdown'],
+			['model-trigger', 'model-dropdown'],
+			['mode-trigger', 'mode-dropdown'],
+		].forEach(([triggerId, dropdownId]) => {
+			const trigger = document.getElementById(triggerId);
+			const dropdown = document.getElementById(dropdownId);
+			if (trigger && dropdown) {
+				trigger.setAttribute(
+					'aria-expanded',
+					dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
+			}
+		});
 		const composerSettings = document.getElementById('composer-settings');
 		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
 		if (composerSettingsTrigger) {
