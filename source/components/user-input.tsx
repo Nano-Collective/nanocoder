@@ -5,7 +5,7 @@ import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {usePromptWidth, useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -42,9 +42,6 @@ import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
-
-// Prompt box width floor: keeps narrow terminals legible.
-const PROMPT_WIDTH_MIN = 40;
 
 interface ChatProps {
 	onSubmit?: (
@@ -115,8 +112,9 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals.
-	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
+	// cols for legibility on tiny terminals. Shared with the chat transcript
+	// (usePromptWidth) so both track the same left edge as the terminal resizes.
+	const {promptWidth} = usePromptWidth();
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
@@ -1123,19 +1121,26 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible */}
-			<DevelopmentModeIndicator
-				developmentMode={developmentMode}
-				colors={colors}
-				contextPercentUsed={contextPercentUsed ?? null}
-				contextSource={contextSource ?? null}
-				sessionName={sessionName}
-				tune={tune}
-				currentModel={currentModel}
-				activeEditor={activeEditor}
-				taskInfo={taskInfo}
-				isSaving={isSaving}
-			/>
+			{/* Development mode indicator - always visible. marginLeft matches the
+			2-col margin promptWidth (actualWidth - 4, centered) leaves to the
+			left of the input box, so the indicator's text lines up with the
+			box's left border instead of sitting flush against the terminal
+			edge. Left-only (not paddingX) so it doesn't eat further into the
+			indicator's own actualWidth-based truncation budget. */}
+			<Box marginLeft={2}>
+				<DevelopmentModeIndicator
+					developmentMode={developmentMode}
+					colors={colors}
+					contextPercentUsed={contextPercentUsed ?? null}
+					contextSource={contextSource ?? null}
+					sessionName={sessionName}
+					tune={tune}
+					currentModel={currentModel}
+					activeEditor={activeEditor}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
+				/>
+			</Box>
 		</>
 	);
 }
