@@ -8,6 +8,26 @@ sidebar_order: 5
 
 Nanocoder is configured through JSON files that control AI providers, MCP servers, user preferences, and more.
 
+## JSON Schema (editors)
+
+A JSON Schema for `agents.config.json` is published as `schemas/agents.config.schema.json`. It is generated deterministically from the on-disk config shape (see `scripts/generate-config-schema.ts`) and validated in CI to prevent drift.
+
+To enable autocompletion and inline validation, add the `$schema` key at the top of your config:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/Nano-Collective/nanocoder/main/schemas/agents.config.schema.json"
+}
+```
+
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema.
+
+You can also wire it up without the `$schema` key:
+
+- **VS Code**: add a `jsonValidation` rule for `**/agents.config.json` pointing at the schema file.
+- **JetBrains IDEs**: under *Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings*, add a mapping for `agents.config.json` to the schema file.
+- **CLI validation** (any editor): `ajv validate -s schemas/agents.config.schema.json -d <your config>`.
+
 ## Configuration File Locations
 
 Nanocoder looks for configuration in the following order (first found wins):
@@ -126,6 +146,8 @@ You can also override these per-session with `/compact --auto-on`, `/compact --a
 ### Sessions
 
 Configure automatic session saving and retention. See [Session Management](../features/session-management.md) for usage details.
+
+This setting is stored in `nanocoder-preferences.json` (see [Preferences](preferences.md) for file locations) — not in `agents.config.json`.
 
 ```json
 {

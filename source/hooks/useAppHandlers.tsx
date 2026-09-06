@@ -46,6 +46,7 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -471,7 +472,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					validateIntegrity: true,
 				});
 
-				await manager.restoreFiles(checkpointData);
+				const gaps = await manager.restoreFiles(checkpointData);
 
 				props.addToChatQueue(
 					<SuccessMessage
@@ -480,6 +481,18 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						hideBox={true}
 					/>,
 				);
+
+				// A restore that reports only success, when the checkpoint never held
+				// every file, leaves the user believing the workspace is back.
+				if (gaps.length > 0) {
+					props.addToChatQueue(
+						<WarningMessage
+							key={generateKey('restore-gaps')}
+							message={describeGapsMessage(gaps)}
+							hideBox={true}
+						/>,
+					);
+				}
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
