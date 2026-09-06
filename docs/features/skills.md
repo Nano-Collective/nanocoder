@@ -128,11 +128,6 @@ A multi-verb bundle is natural:
 Subscriptions can declare on member frontmatter (target is implicit
 `self`) or on the bundle manifest (target is explicit `kind:name`):
 
-Accepted manifest target kinds are `command:`, `agent:`, and `tool:`.
-`skill:` is parsed for forward compatibility, but registering it today
-raises a clear "not supported yet" error instead of loading a dead
-subscription.
-
 ```yaml
 # bundle manifest, multiple targets in one place
 subscribe:
@@ -144,6 +139,11 @@ subscribe:
     target: command:weekly-report
     cron: "0 9 * * MON"
 ```
+
+Accepted manifest target kinds are `command:`, `agent:`, and `tool:`.
+`skill:` is parsed for forward compatibility, but registering it today
+raises a clear "not supported yet" error instead of loading a dead
+subscription.
 
 v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`) and
 `schedule.cron` (filter: `cron`).

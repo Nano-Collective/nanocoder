@@ -168,7 +168,10 @@ test('dispatch: skill target is reported as unsupported', async t => {
 		fileEvent(),
 	);
 	t.is(unsupported.length, 1);
-	t.regex(unsupported[0] ?? '', /skill targets/);
+	t.is(
+		unsupported[0],
+		'skill targets are rejected at registration and should never reach dispatch',
+	);
 });
 
 test('modeForSubscription: confirm=true → plan, otherwise headless', t => {

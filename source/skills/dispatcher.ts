@@ -97,7 +97,7 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 		if (target.kind === 'skill') {
 			this.options.onUnsupportedTarget?.(
 				subscription,
-				'skill targets are resolved earlier by the registrar',
+				'skill targets are rejected at registration and should never reach dispatch',
 			);
 			return;
 		}
@@ -112,13 +112,6 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 			this.options.onUnsupportedTarget?.(
 				subscription,
 				'tool targets are deferred until a real use case lands',
-			);
-			return;
-		}
-		if (target.kind === 'skill') {
-			this.options.onUnsupportedTarget?.(
-				subscription,
-				'skill targets are deferred until skill-level dispatch is implemented',
 			);
 			return;
 		}
