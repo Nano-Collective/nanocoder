@@ -684,6 +684,15 @@
 		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-2 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
+		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			return footer;
+		}
+
 		const btn = document.createElement('button');
 		btn.type = 'button';
 		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
@@ -714,19 +723,8 @@
 				}, 1500);
 			});
 		});
-
-		const timeEl = document.createElement('span');
-		timeEl.className = 'leading-none';
-		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-
-		if (role === 'user') {
-			footer.appendChild(timeEl);
-			
-		} else {
-			footer.appendChild(btn);
-			footer.appendChild(timeEl);
-		}
-
+		footer.appendChild(btn);
+		footer.appendChild(timeEl);
 		return footer;
 	}
 
