@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
+import {BASH_OUTPUT_PREFIX} from '@/constants';
 import {sessionManager} from '@/session/session-manager';
 import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import type {Message} from '@/types/core';
@@ -35,12 +36,25 @@ export function shouldResetSessionId(
  * prefix strip are delegated to the same helper the ACP save path uses -
  * both write to this store, so both must agree on the title.
  */
+/**
+ * `!bash` output arrives as a plain `role: 'user'` turn with no displayOnly
+ * flag, so a forward scan would name the whole session after it and, unlike
+ * the old backward scan, never recover once a real request arrives.
+ */
+function isBashOutputMessage(message: Message): boolean {
+	return (
+		typeof message.content === 'string' &&
+		message.content.startsWith(BASH_OUTPUT_PREFIX)
+	);
+}
+
 export function deriveSessionTitle(messages: Message[]): string {
 	for (const message of messages) {
 		if (
 			message?.role !== 'user' ||
 			isApprovedPlanMessage(message) ||
-			isInternalWalkthroughMessage(message)
+			isInternalWalkthroughMessage(message) ||
+			isBashOutputMessage(message)
 		) {
 			continue;
 		}

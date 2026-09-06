@@ -10,7 +10,11 @@ import {CopilotLogin} from '@/commands/copilot-login';
 import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
-import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {
+	BASH_OUTPUT_PREFIX,
+	DELAY_COMMAND_COMPLETE_MS,
+	MAX_SESSION_NAME_LENGTH,
+} from '@/constants';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
@@ -184,7 +188,7 @@ async function handleBashCommand(
 		if (llmContext) {
 			const userMessage: Message = {
 				role: 'user',
-				content: `Bash command output:\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
+				content: `${BASH_OUTPUT_PREFIX}\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
 			};
 			setMessages([...messages, userMessage]);
 		}

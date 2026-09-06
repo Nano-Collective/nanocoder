@@ -104,6 +104,22 @@ test('the first substantive user turn names the session, not the latest', t => {
 	t.is(title, 'Add rate limiting to the auth endpoints');
 });
 
+test('bash output never names the session', t => {
+	// !bash output is pushed as a plain role:'user' turn with no displayOnly
+	// flag. The forward scan would latch onto it and, unlike the old backward
+	// scan, never recover once the real request arrived.
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content: 'Bash command output:\n```\n$ git status\nOn branch main\n```',
+		},
+		{role: 'assistant', content: 'You are on main.'},
+		{role: 'user', content: 'add retry logic to the OpenRouter client'},
+	]);
+
+	t.is(title, 'add retry logic to the OpenRouter client');
+});
+
 test('the active-file prefix never becomes the title', t => {
 	// The VS Code UI prepends this; it is plumbing, not the request.
 	const title = deriveSessionTitle([
