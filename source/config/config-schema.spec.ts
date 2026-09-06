@@ -95,6 +95,7 @@ test('all documented nanocoder fields are accepted together', t => {
 			modeProviders: {plan: {provider: 'OpenRouter', model: 'gpt-4o'}},
 			nanocoderTools: {webSearch: {apiKey: 'sk-abc'}},
 			headless: {maxTurns: 20},
+			sandbox: true,
 		},
 	});
 });
@@ -486,6 +487,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'modeProviders',
 		'retries',
 		'hooks',
+		'sandbox',
 	];
 	for (const key of expected) {
 		t.true(

@@ -176,6 +176,18 @@ jobs:
             | jq --argjson me "$PR" 'map(select(.number != $me))' \
             > /tmp/nc-review/open-prs.json
 
+          # The most recent previous nc-review verdict on this pull request, if
+          # any. Without it a /re-review re-derives every finding from scratch
+          # and re-files ones the author has already fixed, which is worse than
+          # not re-reviewing at all — it tells someone their work did not land.
+          gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq '[.[] | select(.user.login == "github-actions[bot]")
+                       | select(.body | startswith("### nc-review"))] | last // empty' \
+            > /tmp/nc-review/prev.json 2>/dev/null || : > /tmp/nc-review/prev.json
+          HAS_PREV=0
+          [ -s /tmp/nc-review/prev.json ] && HAS_PREV=1
+          echo "previous review found: $HAS_PREV"
+
           # Issues this PR claims to close, with their full bodies — the agent
           # cannot judge whether the issue was actually addressed without them.
           # Only GraphQL exposes closingIssuesReferences; `gh pr view --json`
@@ -246,6 +258,29 @@ jobs:
                 /tmp/nc-review/issues.json
             fi
             echo
+            if [ "$HAS_PREV" = "1" ]; then
+              echo "## Your previous review of this pull request"
+              echo
+              echo "You have reviewed this pull request before. The diff below is the CURRENT"
+              echo "state, which may already include fixes made in response to what you said."
+              echo
+              echo "For each point you raised last time, work out whether it is now resolved:"
+              echo
+              echo "- **Resolved** — list it in the \`addressed\` array. Do NOT put it in"
+              echo "  \`findings\` again. Re-raising a fixed point tells the author their work"
+              echo "  did not land, and is the fastest way to make people stop reading you."
+              echo "- **Not resolved** — file it again in \`findings\`, and say briefly what is"
+              echo "  still outstanding rather than repeating the original wording verbatim."
+              echo "- **Cannot tell** — say so in the summary. Do not guess in either direction."
+              echo
+              echo "Judge the current diff on its own merits too: a fix can introduce a new"
+              echo "problem, and that is a new finding."
+              echo
+              echo "\`\`\`markdown"
+              jq -r '.body' /tmp/nc-review/prev.json
+              echo "\`\`\`"
+              echo
+            fi
             echo "## Other open pull requests (duplicate-detection corpus)"
             echo '```json'
             cat /tmp/nc-review/open-prs.json
@@ -440,6 +475,18 @@ jobs:
           fi
 
           SUMMARY=$(jq -r '.summary // "No summary provided."' "$V")
+
+          # Mention the author so the review reaches them rather than waiting to
+          # be noticed. Bots are skipped: dependabot and github-actions cannot
+          # read a review, and @-mentioning them is noise on every dependency
+          # bump. `is_bot` is authoritative here — matching on a "[bot]" suffix
+          # would miss accounts that do not use the convention.
+          AUTHOR=$(gh pr view "$PR" --repo "$REPO" --json author --jq '.author.login' 2>/dev/null || echo "")
+          IS_BOT=$(gh pr view "$PR" --repo "$REPO" --json author --jq '.author.is_bot' 2>/dev/null || echo "true")
+          MENTION=""
+          if [ -n "$AUTHOR" ] && [ "$IS_BOT" != "true" ]; then
+            MENTION="@${AUTHOR}"
+          fi
           DUP=$(jq -r '.duplicate_of // empty' "$V")
 
           N_BLOCK=$(jq '[.findings[]? | select(.severity == "blocking")] | length' "$V")
@@ -493,8 +540,26 @@ jobs:
               clean)      echo "### nc-review: nothing to raise" ;;
             esac
             echo
+            if [ -n "$MENTION" ]; then
+              case "$VERDICT" in
+                needs-work) echo "$MENTION — there is a blocking item below." ;;
+                comments)   echo "$MENTION — a few things worth a look, none blocking." ;;
+                clean)      echo "$MENTION — nothing to raise from the automated review." ;;
+              esac
+              echo
+            fi
             echo "$SUMMARY"
             echo
+            # Fixed points are stated explicitly rather than silently dropped.
+            # On a re-review, "what did I actually fix" is the first thing the
+            # author wants to know, and absence is ambiguous — it reads as the
+            # bot forgetting rather than the work landing.
+            if [ "$(jq '(.addressed // []) | length' "$V")" -gt 0 ]; then
+              echo "**Addressed since the last review**"
+              echo
+              jq -r '(.addressed // [])[] | "- ✅ \(.)"' "$V"
+              echo
+            fi
             if [ -n "$DUP" ]; then
               echo "> **Possible duplicate of #${DUP}** — worth checking before going further."
               echo

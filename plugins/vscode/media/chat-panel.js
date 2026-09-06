@@ -55,35 +55,64 @@
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
+		const formatDropdownLabel = (value, triggerId) => {
+			if (triggerId === 'mode-trigger') {
+				const modeLabels = {
+					normal: 'Normal',
+					'auto-accept': 'Auto-Accept',
+					yolo: 'YOLO',
+					plan: 'Plan',
+				};
+				return modeLabels[value] || value;
+			}
+
+			if (value.includes('/')) {
+				return value.split('/').pop();
+			}
+
+			return value;
+		};
+
 		class CustomDropdown {
 			constructor(triggerId, dropdownId, labelId, onChange) {
+				this.triggerId = triggerId;
 				this.trigger = document.getElementById(triggerId);
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
 
 				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute('aria-haspopup', 'menu');
+				this.trigger.setAttribute('aria-expanded', 'false');
+				this.trigger.setAttribute('aria-controls', dropdownId);
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
+					const nested = triggerId === 'provider-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
+					this.syncTriggerExpanded();
 				});
 			}
 
-			syncModeBadge() {
+			syncModeTriggerLabel() {
 				if (this.label?.id !== 'mode-trigger-label') return;
-				const badge = document.getElementById('composer-mode-badge');
-				if (badge) badge.textContent = this.label.textContent || '';
-				const settingsTrigger = document.getElementById('composer-settings-trigger');
-				if (settingsTrigger && this.label.textContent) {
-					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
-					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
+				if (this.trigger && this.label.textContent) {
+					const accessibleLabel = `Mode: ${this.label.textContent}`;
+					this.trigger.title = accessibleLabel;
+					this.trigger.setAttribute('aria-label', accessibleLabel);
 				}
+			}
+
+			syncTriggerExpanded() {
+				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute(
+					'aria-expanded',
+					this.dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
 			}
 
 			setOptions(options, selectedValue) {
@@ -93,7 +122,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
-					this.syncModeBadge();
+					this.syncModeTriggerLabel();
 					return;
 				}
 
@@ -106,16 +135,12 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					item.textContent = opt;
+					const displayValue = formatDropdownLabel(opt, this.triggerId);
+					item.textContent = displayValue;
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
-						
-						let displayValue = opt;
-						if (displayValue.includes('/')) {
-							displayValue = displayValue.split('/').pop();
-						}
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -126,19 +151,17 @@
 					item.addEventListener('click', () => {
 						this.onChange(opt);
 						this.dropdown.classList.add('hidden');
+						this.syncTriggerExpanded();
 					});
 
 					this.dropdown.appendChild(item);
 				});
 
 				if (!hasSelected && options.length > 0) {
-					let displayValue = options[0];
-					if (displayValue.includes('/')) {
-						displayValue = displayValue.split('/').pop();
-					}
+					const displayValue = formatDropdownLabel(options[0], this.triggerId);
 					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.syncModeBadge();
+				this.syncModeTriggerLabel();
 			}
 		}
 
@@ -185,6 +208,20 @@
 			}
 		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		[
+			['provider-trigger', 'provider-dropdown'],
+			['model-trigger', 'model-dropdown'],
+			['mode-trigger', 'mode-dropdown'],
+		].forEach(([triggerId, dropdownId]) => {
+			const trigger = document.getElementById(triggerId);
+			const dropdown = document.getElementById(dropdownId);
+			if (trigger && dropdown) {
+				trigger.setAttribute(
+					'aria-expanded',
+					dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
+			}
+		});
 		const composerSettings = document.getElementById('composer-settings');
 		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
 		if (composerSettingsTrigger) {
