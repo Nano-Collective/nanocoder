@@ -66,6 +66,30 @@ test('handler validates URL format', async t => {
 	);
 });
 
+test('handler rejects loopback aliases without fetching', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	for (const url of [
+		'http://127.0.0.2/',
+		'http://metadata.google.internal/',
+		'http://metadata.goog/',
+	]) {
+		await t.throwsAsync(
+			async () => {
+				await fetchUrlTool.tool.execute!(
+					{url},
+					{toolCallId: 'test', messages: []},
+				);
+			},
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+});
+
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
@@ -222,6 +246,24 @@ test('validator accepts external IP addresses', async t => {
 	t.true(result.valid);
 });
 
+test('validator rejects 127.0.0.2 and cloud metadata hosts', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://127.0.0.2',
+		'http://169.254.169.254/latest/meta-data/',
+		'http://metadata.google.internal',
+		'http://metadata.goog',
+		'http://metadata/',
+		'http://[::ffff:127.0.0.2]',
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `expected ${url} to be rejected`);
+	}
+});
+
 test('tool has correct name', t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
@@ -325,7 +367,7 @@ test('formatter shows truncation warning when content is truncated', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Content was truncated to 100KB/);
+	t.true(output!.includes('Content was truncated to 100,000 characters'));
 });
 
 test('formatter renders without result (before execution)', t => {

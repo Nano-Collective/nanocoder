@@ -8,6 +8,26 @@ sidebar_order: 5
 
 Nanocoder is configured through JSON files that control AI providers, MCP servers, user preferences, and more.
 
+## JSON Schema (editors)
+
+A JSON Schema for `agents.config.json` is published as `schemas/agents.config.schema.json`. It is generated deterministically from the on-disk config shape (see `scripts/generate-config-schema.ts`) and validated in CI to prevent drift.
+
+To enable autocompletion and inline validation, add the `$schema` key at the top of your config:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/Nano-Collective/nanocoder/main/schemas/agents.config.schema.json"
+}
+```
+
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema.
+
+You can also wire it up without the `$schema` key:
+
+- **VS Code**: add a `jsonValidation` rule for `**/agents.config.json` pointing at the schema file.
+- **JetBrains IDEs**: under *Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings*, add a mapping for `agents.config.json` to the schema file.
+- **CLI validation** (any editor): `ajv validate -s schemas/agents.config.schema.json -d <your config>`.
+
 ## Configuration File Locations
 
 Nanocoder looks for configuration in the following order (first found wins):
@@ -126,6 +146,8 @@ You can also override these per-session with `/compact --auto-on`, `/compact --a
 ### Sessions
 
 Configure automatic session saving and retention. See [Session Management](../features/session-management.md) for usage details.
+
+This setting is stored in `nanocoder-preferences.json` (see [Preferences](preferences.md) for file locations) — not in `agents.config.json`.
 
 ```json
 {
@@ -274,6 +296,33 @@ Names match the registered tool ids (`read_file`, `write_file`, `string_replace`
 
 Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 
+### Lifecycle Hooks
+
+Run your own shell commands at fixed points in the agent loop — before/after a tool, on session start/end, on prompt submit, before compaction. Hooks cost no tokens and fire every time, and a `pre-tool-use` hook that exits non-zero denies the tool call.
+
+```json
+{
+  "nanocoder": {
+    "hooks": {
+      "post-tool-use": [
+        {
+          "matchTools": ["write_file", "string_replace"],
+          "command": "biome check --write \"$NANOCODER_FILE\""
+        }
+      ],
+      "pre-tool-use": [
+        {"name": "no-env", "command": ".nanocoder/hooks/guard.sh", "timeout": 5000}
+      ],
+      "session-start": [{"command": "git log --oneline -5"}]
+    }
+  }
+}
+```
+
+Each entry takes `command` (required), plus optional `matchTools` (tool names the hook applies to; omitted means all), `timeout` (ms, default 30000, except `session-end` which defaults to 2000 to fit inside the shutdown budget), and `name` (label used in messages and `/doctor`). Context arrives as `NANOCODER_*` environment variables — `$VAR` references inside `command` are deliberately left unexpanded at load time so the shell sees them.
+
+Hooks are project-local shell commands, so they carry the same code-execution weight as `mcpServers` in the same file and are gated by the same directory-trust prompt. See [Lifecycle Hooks](../features/hooks.md) for the full event list, environment contract, and blocking semantics.
+
 ### Custom System Prompt
 
 Override or extend the built-in system prompt with your own. Useful when running small or context-constrained models where the default prompt consumes too many tokens, or when you want to specialize Nanocoder for a non-coding workflow.
@@ -383,3 +432,4 @@ Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings i
 - [MCP Configuration](mcp-configuration.md) - Model Context Protocol server integration
 - [Preferences](preferences.md) - User preferences and application data
 - [Logging](logging.md) - Structured logging with Pino
+- [Lifecycle Hooks](../features/hooks.md) - Shell commands run at fixed points in the agent loop

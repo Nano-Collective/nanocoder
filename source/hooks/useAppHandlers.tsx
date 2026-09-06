@@ -12,6 +12,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -19,6 +20,10 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+	runLifecycleHooks,
+	takePendingHookContext,
+} from '@/services/lifecycle-hooks';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -46,6 +51,7 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -104,6 +110,7 @@ interface UseAppHandlersProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	setChatComponents: (components: React.ReactNode[]) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setLiveComponentCapturesInput: (value: boolean) => void;
 	client: LLMClient | null;
 	getMessageTokens: (message: Message) => number;
 
@@ -470,7 +477,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					validateIntegrity: true,
 				});
 
-				await manager.restoreFiles(checkpointData);
+				const gaps = await manager.restoreFiles(checkpointData);
 
 				props.addToChatQueue(
 					<SuccessMessage
@@ -479,6 +486,18 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						hideBox={true}
 					/>,
 				);
+
+				// A restore that reports only success, when the checkpoint never held
+				// every file, leaves the user believing the workspace is back.
+				if (gaps.length > 0) {
+					props.addToChatQueue(
+						<WarningMessage
+							key={generateKey('restore-gaps')}
+							message={describeGapsMessage(gaps)}
+							hideBox={true}
+						/>,
+					);
+				}
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
@@ -659,8 +678,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// The VS Code editor pill is appended at the end of the message
 			// (\n\n[@…]<!--vscode-context-->…<!--/vscode-context-->); strip it
 			// so it doesn't leak into the parsed args.
-			const commandArgs = message.startsWith('/')
-				? message
+			// Trimmed to agree with parseInput, which is what actually routes the
+			// message downstream — `  /rename foo` is a slash command there.
+			const trimmedMessage = message.trim();
+			const isSlashCommand = trimmedMessage.startsWith('/');
+			const commandArgs = isSlashCommand
+				? trimmedMessage
 						.replace(
 							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
 							'',
@@ -671,8 +694,57 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
+			// user-prompt-submit hooks gate chat prompts only. A slash command and
+			// a `!` bash passthrough are local UI actions: they never reach the
+			// model, and prefixing either one breaks the routing that recognises it
+			// (handleMessageSubmission dispatches on parseInput, which keys bash off
+			// a leading `!`). Both must therefore leave the pending context buffer
+			// undrained, so it reaches the next prompt that actually goes to the model.
+			//
+			// Both checks are trimmed because parseInput trims before testing for
+			// either prefix — `  /help` and `  !ls` are still local actions there,
+			// so an untrimmed check here would prefix them and reroute them to the
+			// model.
+			const isLocalAction = isSlashCommand || trimmedMessage.startsWith('!');
+			let submittedMessage = message;
+			if (!isLocalAction) {
+				const gate = await runLifecycleHooks('user-prompt-submit', {
+					prompt: message,
+				});
+				if (gate.blocked) {
+					// Echo the prompt first, so the denial that follows has a visible
+					// cause in the scrollback instead of appearing on its own.
+					props.addToChatQueue(
+						<UserMessage
+							key={generateKey('user')}
+							message={displayValue ?? message}
+							tokenContent={message}
+							imageCount={images?.length ?? 0}
+						/>,
+					);
+					props.addToChatQueue(
+						<ErrorMessage
+							key={generateKey('hook-blocked-prompt')}
+							message={gate.reason ?? 'Prompt blocked by a hook.'}
+							hideBox={true}
+						/>,
+					);
+					props.setIsConversationComplete(true);
+					return;
+				}
+
+				// Fold in whatever session-start left buffered plus this hook's own
+				// stdout. displayValue keeps the user's original text on screen.
+				const injected = [await takePendingHookContext(), gate.output]
+					.filter(Boolean)
+					.join('\n\n');
+				if (injected) {
+					submittedMessage = `<hook-context>\n${injected}\n</hook-context>\n\n${message}`;
+				}
+			}
+
 			await handleMessageSubmission(
-				message,
+				submittedMessage,
 				{
 					customCommandCache: props.customCommandCache,
 					customCommandLoader: props.customCommandLoader,
@@ -695,6 +767,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onSwitchModel: props.handleModelSelect,
 					onAddToChatQueue: props.addToChatQueue,
 					setLiveComponent: props.setLiveComponent,
+					setLiveComponentCapturesInput: props.setLiveComponentCapturesInput,
 					setIsToolExecuting: props.setIsToolExecuting,
 					onCommandComplete: () => props.setIsConversationComplete(true),
 					setMessages: props.updateMessages,
@@ -712,7 +785,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					apiCallHistory: props.apiCallHistory,
 					sessionId: props.ensureCurrentSessionId(),
 				},
-				displayValue,
+				// Injected hook context must not reach the transcript — fall back to
+				// the raw message so the user still sees what they typed.
+				displayValue ?? message,
 				images,
 			);
 		},

@@ -18,6 +18,7 @@ import {
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
 } from '@/constants';
+import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -25,6 +26,9 @@ import type {
 	CompressionMode,
 	CompressionStrategy,
 	DevelopmentMode,
+	HookDefinition,
+	HookEvent,
+	HooksConfig,
 	ModeProviderConfig,
 	NotificationsConfig,
 	PasteConfig,
@@ -478,6 +482,76 @@ function loadSystemPromptConfig(): SystemPromptConfig | undefined {
 	);
 }
 
+/**
+ * Parse one hook entry, dropping anything that isn't a usable shell command.
+ * Invalid entries are skipped rather than failing the whole config — a typo in
+ * one hook must not take the session down.
+ */
+function parseHookDefinition(raw: unknown): HookDefinition | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+	const entry = raw as Record<string, unknown>;
+	const command = entry.command;
+	if (typeof command !== 'string' || command.trim() === '') return null;
+
+	const definition: HookDefinition = {command};
+
+	if (Array.isArray(entry.matchTools)) {
+		const matchTools = entry.matchTools.filter(
+			(item: unknown): item is string => typeof item === 'string',
+		);
+		if (matchTools.length > 0) definition.matchTools = matchTools;
+	}
+
+	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
+		definition.timeout = Math.max(1, Math.round(entry.timeout));
+	}
+
+	if (typeof entry.name === 'string' && entry.name.trim() !== '') {
+		definition.name = entry.name.trim();
+	}
+
+	return definition;
+}
+
+function loadHooksConfig(): HooksConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'hooks', config => {
+			const hooks = config.nanocoder?.hooks;
+			if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+				return null;
+			}
+
+			const result: HooksConfig = {};
+			for (const [event, entries] of Object.entries(hooks)) {
+				if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
+					logError(`Invalid hooks config: unknown lifecycle event '${event}'.`);
+					continue;
+				}
+				if (!Array.isArray(entries)) {
+					logError(`Invalid hooks config: '${event}' must be an array.`);
+					continue;
+				}
+
+				const parsed = entries
+					.map(parseHookDefinition)
+					.filter((hook): hook is HookDefinition => hook !== null);
+				if (parsed.length !== entries.length) {
+					logError(
+						`Invalid hooks config: '${event}' has entries without a 'command' string.`,
+					);
+				}
+				if (parsed.length > 0) result[event as HookEvent] = parsed;
+			}
+
+			// No env substitution here: hook commands are shell strings, so
+			// `$NANOCODER_FILE` and friends must survive to the shell that runs
+			// them rather than being expanded (to nothing) at config-load time.
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
 function loadModeProvidersConfig(
 	providers: ProviderConfig[],
 ): Partial<Record<DevelopmentMode, ModeProviderConfig>> | undefined {
@@ -605,6 +679,9 @@ function loadAppConfig(): AppConfig {
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig();
 
+	// Load lifecycle hooks (shell commands run at fixed points in the agent loop)
+	const hooks = loadHooksConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
@@ -625,6 +702,7 @@ function loadAppConfig(): AppConfig {
 		alwaysAllow,
 		disabledTools,
 		systemPrompt,
+		hooks,
 		notifications,
 		modeProviders,
 		tune,

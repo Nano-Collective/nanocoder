@@ -1,0 +1,720 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://raw.githubusercontent.com/Nano-Collective/nanocoder/main/schemas/agents.config.schema.json",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"description": "JSON Schema URI for editor autocompletion. Ignored by the loader.",
+			"type": "string"
+		},
+		"nanocoder": {
+			"$ref": "#/definitions/DiskNanocoderConfig",
+			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores."
+		},
+		"providers": {
+			"description": "Top-level provider list — alternative to `nanocoder.providers`. Accepts the same format.",
+			"items": {
+				"$ref": "#/definitions/ProviderConfig"
+			},
+			"type": "array"
+		}
+	},
+	"definitions": {
+		"DiskNanocoderConfig": {
+			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
+			"properties": {
+				"alwaysAllow": {
+					"description": "Tools that run automatically without confirmation in non-interactive mode.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"autoCompact": {
+					"$ref": "#/definitions/AutoCompactConfig",
+					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
+				},
+				"defaultMode": {
+					"description": "Default conversation mode when none is specified.",
+					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"type": "string"
+				},
+				"disabledTools": {
+					"description": "Tools unavailable to the model — filtered out of chat, subagents, and tune profiles.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"headless": {
+					"description": "Maximum LLM turns for headless runs (--plain and ACP loops).",
+					"properties": {
+						"maxTurns": {
+							"description": "Maximum LLM turns before the loop forces a final, tool-free answer.",
+							"type": "number"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"hooks": {
+					"$ref": "#/definitions/HooksConfig",
+					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. Project-local, so this carries the same code-execution weight as\n`mcpServers` above."
+				},
+				"lspServers": {
+					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
+					"items": {
+						"properties": {
+							"args": {
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							"command": {
+								"type": "string"
+							},
+							"env": {
+								"$ref": "#/definitions/RecordStringString"
+							},
+							"languages": {
+								"description": "File extensions this server handles.",
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							"name": {
+								"type": "string"
+							}
+						},
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["name", "command", "languages"]
+					},
+					"type": "array"
+				},
+				"mcpServers": {
+					"description": "Model Context Protocol server configurations.",
+					"items": {
+						"$ref": "#/definitions/MCPServerConfig"
+					},
+					"type": "array"
+				},
+				"modeProviders": {
+					"$ref": "#/definitions/DiskModeProviders",
+					"description": "Per-mode provider/model overrides (e.g. use a fast model for plan mode)."
+				},
+				"nanocoderTools": {
+					"description": "Nanocoder-specific tool configurations.",
+					"properties": {
+						"webSearch": {
+							"properties": {
+								"apiKey": {
+									"type": "string"
+								}
+							},
+							"type": "object",
+							"additionalProperties": false
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"providers": {
+					"description": "AI provider configurations (all OpenAI-compatible).",
+					"items": {
+						"$ref": "#/definitions/ProviderConfig"
+					},
+					"type": "array"
+				},
+				"retries": {
+					"$ref": "#/definitions/RetryLimitsConfig",
+					"description": "Agent-loop retry limits. Each field has its own sensible default — you\ncan set any combination (e.g. just `maxRepeatedToolCalls`)."
+				},
+				"systemPrompt": {
+					"$ref": "#/definitions/SystemPromptConfig",
+					"description": "Custom system prompt — replaces or extends the built-in prompt."
+				},
+				"tune": {
+					"$ref": "#/definitions/TuneConfig",
+					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"HookDefinition": {
+			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools (tool events only) and with its own timeout.",
+			"properties": {
+				"command": {
+					"description": "Shell command to run. Receives hook context via NANOCODER_* env vars.",
+					"type": "string"
+				},
+				"matchTools": {
+					"description": "Tool names this hook applies to. Omitted means \"every tool\".\nIgnored by non-tool events.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"name": {
+					"description": "Optional label used in transcripts and /doctor instead of the command.",
+					"type": "string"
+				},
+				"timeout": {
+					"description": "Milliseconds before the hook is killed. Defaults to 30s, except\n`session-end`, which defaults to 2s so it fits inside the shutdown budget.\nA timed-out hook never blocks — only a deliberate non-zero exit does.",
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["command"]
+		},
+		"MCPServerConfig": {
+			"properties": {
+				"alwaysAllow": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"args": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"command": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"env": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"headers": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"name": {
+					"type": "string"
+				},
+				"source": {
+					"enum": ["env", "global", "project"],
+					"type": "string"
+				},
+				"tags": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"timeout": {
+					"type": "number"
+				},
+				"transport": {
+					"enum": ["http", "stdio", "websocket"],
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["name", "transport"]
+		},
+		"ModeProviderConfig": {
+			"properties": {
+				"model": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["provider", "model"]
+		},
+		"ModelParameters": {
+			"properties": {
+				"frequencyPenalty": {
+					"type": "number"
+				},
+				"maxTokens": {
+					"type": "number"
+				},
+				"presencePenalty": {
+					"type": "number"
+				},
+				"reasoningEffort": {
+					"enum": ["high", "low", "medium", "minimal"],
+					"type": "string"
+				},
+				"reasoningSummary": {
+					"enum": ["auto", "concise", "detailed"],
+					"type": "string"
+				},
+				"stop": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"temperature": {
+					"type": "number"
+				},
+				"topK": {
+					"type": "number"
+				},
+				"topP": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"OpenRouterMaxPrice": {
+			"properties": {
+				"completion": {
+					"type": "number"
+				},
+				"image": {
+					"type": "number"
+				},
+				"prompt": {
+					"type": "number"
+				},
+				"request": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"OpenRouterParameters": {
+			"properties": {
+				"extraBody": {
+					"$ref": "#/definitions/RecordStringUnknown"
+				},
+				"models": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"plugins": {
+					"items": {
+						"$ref": "#/definitions/OpenRouterPlugin"
+					},
+					"type": "array"
+				},
+				"provider": {
+					"$ref": "#/definitions/OpenRouterProviderRouting"
+				},
+				"reasoning": {
+					"$ref": "#/definitions/OpenRouterReasoning"
+				},
+				"route": {
+					"const": "fallback",
+					"type": "string"
+				},
+				"service_tier": {
+					"enum": ["flex", "priority"],
+					"type": "string"
+				},
+				"user": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"OpenRouterPercentile": {
+			"properties": {
+				"p50": {
+					"type": "number"
+				},
+				"p75": {
+					"type": "number"
+				},
+				"p90": {
+					"type": "number"
+				},
+				"p99": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"OpenRouterPlugin": {
+			"additionalProperties": {},
+			"properties": {
+				"id": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"required": ["id"]
+		},
+		"OpenRouterProviderRouting": {
+			"properties": {
+				"allow_fallbacks": {
+					"type": "boolean"
+				},
+				"data_collection": {
+					"enum": ["allow", "deny"],
+					"type": "string"
+				},
+				"enforce_distillable_text": {
+					"type": "boolean"
+				},
+				"ignore": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"max_price": {
+					"$ref": "#/definitions/OpenRouterMaxPrice"
+				},
+				"only": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"order": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"preferred_max_latency": {
+					"anyOf": [
+						{
+							"$ref": "#/definitions/OpenRouterPercentile"
+						},
+						{
+							"type": "number"
+						}
+					]
+				},
+				"preferred_min_throughput": {
+					"anyOf": [
+						{
+							"$ref": "#/definitions/OpenRouterPercentile"
+						},
+						{
+							"type": "number"
+						}
+					]
+				},
+				"quantizations": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"require_parameters": {
+					"type": "boolean"
+				},
+				"sort": {
+					"anyOf": [
+						{
+							"properties": {
+								"by": {
+									"enum": ["latency", "price", "throughput"],
+									"type": "string"
+								},
+								"partition": {
+									"enum": ["model", "none"],
+									"type": "string"
+								}
+							},
+							"type": "object",
+							"additionalProperties": false
+						},
+						{
+							"enum": ["latency", "price", "throughput"],
+							"type": "string"
+						}
+					]
+				},
+				"zdr": {
+					"type": "boolean"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"OpenRouterReasoning": {
+			"properties": {
+				"effort": {
+					"enum": ["high", "low", "medium", "minimal", "none", "xhigh"],
+					"type": "string"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"exclude": {
+					"type": "boolean"
+				},
+				"max_tokens": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"AutoCompactConfig": {
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				},
+				"mode": {
+					"enum": ["aggressive", "conservative", "default"],
+					"type": "string"
+				},
+				"notifyUser": {
+					"type": "boolean"
+				},
+				"strategy": {
+					"enum": ["llm", "mechanical"],
+					"type": "string"
+				},
+				"threshold": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"HooksConfig": {
+			"properties": {
+				"post-tool-use": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"pre-compact": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"pre-tool-use": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"session-end": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"session-start": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"user-prompt-submit": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"DiskModeProviders": {
+			"properties": {
+				"auto-accept": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"normal": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"plan": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
+				"yolo": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"RetryLimitsConfig": {
+			"properties": {
+				"maxEmptyTurns": {
+					"type": "number"
+				},
+				"maxMalformedRetries": {
+					"type": "number"
+				},
+				"maxRepeatedToolCalls": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"TuneConfig": {
+			"properties": {
+				"aggressiveCompact": {
+					"type": "boolean"
+				},
+				"disableNativeTools": {
+					"type": "boolean"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"includeAgentsMd": {
+					"type": "boolean"
+				},
+				"modelParameters": {
+					"$ref": "#/definitions/ModelParameters"
+				},
+				"toolMode": {
+					"enum": ["json", "native", "xml"],
+					"type": "string"
+				},
+				"toolProfile": {
+					"enum": ["auto", "full", "minimal", "nano"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"ProviderConfig": {
+			"additionalProperties": {},
+			"properties": {
+				"apiKey": {
+					"type": "string"
+				},
+				"baseUrl": {
+					"type": "string"
+				},
+				"caCertPath": {
+					"type": "string"
+				},
+				"connectionPool": {
+					"properties": {
+						"cumulativeMaxIdleTimeout": {
+							"type": "number"
+						},
+						"idleTimeout": {
+							"type": "number"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"contextWindow": {
+					"type": "number"
+				},
+				"contextWindows": {
+					"$ref": "#/definitions/RecordStringNumber"
+				},
+				"disableToolModels": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"disableTools": {
+					"type": "boolean"
+				},
+				"headers": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"maxRetries": {
+					"type": "number"
+				},
+				"models": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"name": {
+					"type": "string"
+				},
+				"openrouter": {
+					"$ref": "#/definitions/OpenRouterParameters"
+				},
+				"organizationId": {
+					"type": "string"
+				},
+				"requestTimeout": {
+					"type": "number"
+				},
+				"sdkProvider": {
+					"enum": [
+						"anthropic",
+						"chatgpt-codex",
+						"github-copilot",
+						"google",
+						"openai-compatible"
+					],
+					"type": "string"
+				},
+				"socketTimeout": {
+					"type": "number"
+				},
+				"timeout": {
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"required": ["name", "models"]
+		},
+		"RecordStringNumber": {
+			"type": "object",
+			"additionalProperties": {
+				"type": "number"
+			}
+		},
+		"RecordStringString": {
+			"type": "object",
+			"additionalProperties": {
+				"type": "string"
+			}
+		},
+		"RecordStringUnknown": {
+			"type": "object",
+			"additionalProperties": true
+		},
+		"SystemPromptConfig": {
+			"properties": {
+				"content": {
+					"type": "string"
+				},
+				"file": {
+					"type": "string"
+				},
+				"mode": {
+					"enum": ["append", "replace"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		}
+	},
+	"additionalProperties": false
+}
