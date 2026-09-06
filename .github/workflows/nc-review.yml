@@ -1,0 +1,276 @@
+name: nc-review
+
+# Headless Nanocoder reviewing the *contribution* — duplicates, scope creep,
+# missing tests, missing changesets, CONTRIBUTING adherence. The six required
+# status checks judge the code; this judges everything they cannot see.
+#
+# It never merges, never closes, never pushes. It writes one comment and applies
+# one label.
+#
+# ---------------------------------------------------------------------------
+# SECURITY: why pull_request_target, and why that is safe here
+# ---------------------------------------------------------------------------
+# Reviewing a fork PR needs MINIMAX_API_KEY, and `pull_request` does not expose
+# secrets to fork PRs. `pull_request_target` does — because it runs in the base
+# repository's context, with the base repo's token and secrets.
+#
+# That combination is dangerous *if you check out the contributor's code*, which
+# is the well-known pull_request_target footgun: you would be executing an
+# untrusted branch with a privileged token.
+#
+# This workflow never does. Specifically:
+#
+#   1. `actions/checkout` takes NO `ref`, so it checks out the BASE branch.
+#      The contributor's branch is never on disk.
+#   2. The PR diff is fetched with `gh pr diff` — the API returns it as TEXT.
+#      It is data the model reads, never code that runs.
+#   3. Nanocoder itself is cloned and built from `main`, not from the PR.
+#   4. No `pnpm install` runs against PR-authored lockfiles or scripts.
+#
+# If you ever add a step that checks out `github.event.pull_request.head.sha`,
+# or installs dependencies from the PR, this workflow becomes a credential-theft
+# vector. Do not.
+
+on:
+  pull_request_target:
+    # On open only (decision Q8). Re-review is manual, via the comment trigger
+    # below — re-running on every push would burn tokens on work in progress.
+    types: [opened]
+    branches: [main]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
+
+concurrency:
+  # One review per PR. A /re-review while one is running queues behind it.
+  group: nc-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  review:
+    # Comment trigger is restricted to people who can already merge. author_association
+    # is a cheap pre-filter; the job re-verifies via the API before doing any work,
+    # because association is not a permission check.
+    if: |
+      (
+        github.event_name == 'pull_request_target'
+        && github.event.pull_request.draft == false
+        && github.event.pull_request.head.ref != 'changeset-release/main'
+      )
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request != null
+        && startsWith(github.event.comment.body, '/re-review')
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      )
+      || github.event_name == 'workflow_dispatch'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Resolve PR number
+        id: pr
+        env:
+          N: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+        run: echo "number=$N" >> "$GITHUB_OUTPUT"
+
+      # author_association says how GitHub labels the commenter, not what they
+      # can do. Verify the real permission before spending a model call.
+      - name: Verify commenter can merge
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+          PERM=$(gh api "repos/${{ github.repository }}/collaborators/${ACTOR}/permission" --jq '.permission')
+          echo "$ACTOR has: $PERM"
+          case "$PERM" in
+            admin|maintain|write) ;;
+            *) echo "::error::/re-review is restricted to maintainers"; exit 1 ;;
+          esac
+
+      # No `ref:` — this is the BASE branch. See the security note above.
+      - name: Checkout base repository
+        # pin: actions/checkout@v4.3.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      # pin: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+
+      # pin: actions/setup-node@v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Build and install Nanocoder from main
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/Nano-Collective/nanocoder.git /tmp/nanocoder
+          cd /tmp/nanocoder
+          npm install
+          npm run build
+          npm link
+          nanocoder --version || true
+
+      - name: Assemble review context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/nc-review
+          OUT=/tmp/nc-review/context.md
+
+          # Diffs can be enormous. Cap what we feed the model and say so
+          # explicitly, so it does not silently review a fraction of a PR and
+          # report confidently on the whole thing.
+          MAX_LINES=2500
+          gh pr diff "$PR" --repo "$REPO" > /tmp/nc-review/full.diff 2>/dev/null || : > /tmp/nc-review/full.diff
+          TOTAL=$(wc -l < /tmp/nc-review/full.diff | tr -d ' ')
+          head -n "$MAX_LINES" /tmp/nc-review/full.diff > /tmp/nc-review/capped.diff
+          if [ "$TOTAL" -gt "$MAX_LINES" ]; then
+            TRUNC="**Diff truncated: showing first ${MAX_LINES} of ${TOTAL} lines.** Judge only what is shown, and say so if the cap prevents a confident verdict."
+          else
+            TRUNC="Full diff shown (${TOTAL} lines)."
+          fi
+
+          gh pr view "$PR" --repo "$REPO" \
+            --json number,title,body,author,files,headRefName \
+            > /tmp/nc-review/pr.json
+
+          # Every other open PR — the duplicate-detection corpus.
+          gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,title,headRefName,author \
+            | jq --argjson me "$PR" 'map(select(.number != $me))' \
+            > /tmp/nc-review/open-prs.json
+
+          {
+            echo "# Pull request under review"
+            echo
+            echo "Repository: $REPO"
+            echo "PR number: #$PR"
+            echo
+            echo "## Metadata"
+            echo '```json'
+            jq '{number, title, author: .author.login, headRefName,
+                 changed_files: [.files[].path]}' /tmp/nc-review/pr.json
+            echo '```'
+            echo
+            echo "## Description as written by the author"
+            echo
+            jq -r '.body // "(no description provided)"' /tmp/nc-review/pr.json
+            echo
+            echo "## Other open pull requests (duplicate-detection corpus)"
+            echo '```json'
+            cat /tmp/nc-review/open-prs.json
+            echo '```'
+            echo
+            echo "## Diff"
+            echo
+            echo "$TRUNC"
+            echo
+            echo '```diff'
+            cat /tmp/nc-review/capped.diff
+            echo '```'
+          } > "$OUT"
+
+          echo "context bytes: $(wc -c < "$OUT")"
+
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "agent:clean"      --color "0e8a16" --description "nc-review found no blocking issues" --force
+          gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking issues"    --force
+
+      - name: Run nc-review
+        id: agent
+        env:
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          NANOCODER_CONTEXT_LIMIT: '128000'
+        run: |
+          set -euo pipefail
+          # The prompt is deliberately short and points at files on disk. Passing
+          # a multi-KB diff through argv round-trips it via sh -c and pnpm's
+          # escaping, which has corrupted backslash-heavy payloads in
+          # contentforest before it reached the model.
+          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, and /tmp/nc-review/context.md for the pull request under review. Then write your verdict as a single JSON object to /tmp/nc-review/verdict.json, following the schema in the rubric exactly. Write nothing to stdout except a brief note that you have finished.'
+
+          set +e
+          nanocoder run "$PROMPT" \
+            --mode yolo \
+            --model minimax-m3 \
+            --trust-directory
+          echo "agent_status=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Post review
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+          AGENT_STATUS: ${{ steps.agent.outputs.agent_status }}
+        run: |
+          set -euo pipefail
+          V=/tmp/nc-review/verdict.json
+
+          # A missing or malformed verdict is a failure of this workflow, not of
+          # the contributor. Say so plainly and label nothing — a stale
+          # agent:needs-work on a fine PR is worse than no label.
+          if [ ! -s "$V" ] || ! jq -e . "$V" >/dev/null 2>&1; then
+            echo "::warning::no parseable verdict (agent exit ${AGENT_STATUS:-unknown})"
+            gh pr comment "$PR" --repo "$REPO" --body \
+              "**nc-review** could not produce a verdict this run (agent exit \`${AGENT_STATUS:-unknown}\`). This is a problem with the review agent, not with your pull request. A maintainer can retry with \`/re-review\`."
+            exit 0
+          fi
+
+          VERDICT=$(jq -r '.verdict // "needs-work"' "$V")
+          SUMMARY=$(jq -r '.summary // "No summary provided."' "$V")
+          DUP=$(jq -r '.duplicate_of // empty' "$V")
+
+          {
+            if [ "$VERDICT" = "clean" ]; then
+              echo "### nc-review: no blocking issues"
+            else
+              echo "### nc-review: needs work"
+            fi
+            echo
+            echo "$SUMMARY"
+            echo
+            if [ -n "$DUP" ]; then
+              echo "> **Possible duplicate of #${DUP}** — worth checking before going further."
+              echo
+            fi
+            if [ "$(jq '.findings | length' "$V")" -gt 0 ]; then
+              echo "| | Area | Finding |"
+              echo "|---|---|---|"
+              jq -r '.findings[] | "| \(if .severity == "blocking" then "🔴" else "🟡" end) | `\(.area)` | \(.detail | gsub("\n"; " ")) |"' "$V"
+              echo
+            fi
+            echo "---"
+            echo
+            echo "<sub>Automated review of the *contribution* — duplicates, scope, tests, changesets, CONTRIBUTING. Code quality is covered by the required status checks. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
+          } > /tmp/nc-review/comment.md
+
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/nc-review/comment.md
+
+          if [ "$VERDICT" = "clean" ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "agent:clean" --remove-label "agent:needs-work" || true
+          else
+            gh pr edit "$PR" --repo "$REPO" --add-label "agent:needs-work" --remove-label "agent:clean" || true
+          fi
