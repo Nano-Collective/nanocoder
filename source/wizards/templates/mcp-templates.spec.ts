@@ -332,10 +332,11 @@ test('you template: builds authenticated HTTP config with API key', t => {
 	t.truthy(template);
 
 	const config = template!.buildConfig({
+		serverName: 'you-paid',
 		apiKey: 'ydc_test_key_123',
 	});
 
-	t.is(config.name, 'you');
+	t.is(config.name, 'you-paid');
 	t.is(config.transport, 'http');
 	t.is(config.url, 'https://api.you.com/mcp');
 	t.is(config.timeout, 30000);
@@ -343,6 +344,15 @@ test('you template: builds authenticated HTTP config with API key', t => {
 		Authorization: 'Bearer ydc_test_key_123',
 	});
 	t.deepEqual(config.tags, ['you', 'search', 'web', 'research', 'http']);
+});
+
+test('you template: defaults server name to you when unset', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
 });
 
 test('you template: builds keyless free-profile config without API key', t => {
@@ -384,7 +394,7 @@ test('you template: empty-string API key falls back to free profile', t => {
 });
 
 test('remote templates: have no required fields', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);
@@ -535,7 +545,7 @@ test('local templates: use stdio transport', t => {
 });
 
 test('remote templates: use http transport', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);

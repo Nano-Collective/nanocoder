@@ -258,13 +258,21 @@ export function McpStep({
 							answers.envVars = Object.entries(server.env)
 								.map(([key, value]) => `${key}=${value}`)
 								.join('\n');
-						} else if (field.name === 'apiKey' && server.env) {
-							// Try to find API key from env vars
-							const apiKeyEntry = Object.entries(server.env).find(
-								([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
-							);
+						} else if (field.name === 'apiKey') {
+							// Try to find the API key from env vars first, then fall
+							// back to a bearer Authorization header (remote templates
+							// like `you` and `github-remote` store the credential there).
+							const apiKeyEntry = server.env
+								? Object.entries(server.env).find(
+										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
+									)
+								: undefined;
 							if (apiKeyEntry) {
 								answers.apiKey = apiKeyEntry[1];
+							} else if (server.headers?.Authorization?.startsWith('Bearer ')) {
+								answers.apiKey = server.headers.Authorization.slice(
+									'Bearer '.length,
+								);
 							}
 						}
 					}

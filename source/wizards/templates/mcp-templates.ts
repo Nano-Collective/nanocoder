@@ -301,6 +301,47 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
+		id: 'you',
+		name: 'You.com',
+		description:
+			'You.com web search, URL reading, and research MCP server (leave the API key empty to use the keyless free profile)',
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: 'you',
+			},
+			{
+				name: 'apiKey',
+				prompt:
+					'You.com API key (optional — leave empty for the keyless free profile)',
+				required: false,
+				sensitive: true,
+			},
+		],
+		buildConfig: answers => {
+			const apiKey = answers.apiKey?.trim();
+			const config: McpServerConfig = {
+				name: answers.serverName || 'you',
+				transport: 'http' as McpTransportType,
+				url: apiKey
+					? 'https://api.you.com/mcp'
+					: 'https://api.you.com/mcp?profile=free',
+				description: 'You.com web search, URL reading, and research MCP server',
+				tags: ['you', 'search', 'web', 'research', 'http'],
+				timeout: TIMEOUT_MCP_DEFAULT_MS,
+			};
+			if (apiKey) {
+				config.headers = {Authorization: `Bearer ${apiKey}`};
+			}
+			return config;
+		},
+		category: 'remote',
+		transportType: 'http',
+	},
+	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',
@@ -378,41 +419,6 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		args: ['duckduckgo-mcp-server'],
 		tags: ['duckduckgo', 'search', 'stdio'],
 	}),
-	{
-		id: 'you',
-		name: 'You.com',
-		description:
-			'You.com web search, URL reading, and research MCP server (leave the API key empty to use the keyless free profile)',
-		command: '',
-		fields: [
-			{
-				name: 'apiKey',
-				prompt:
-					'You.com API key (optional — leave empty for the keyless free profile)',
-				required: false,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => {
-			const apiKey = answers.apiKey?.trim();
-			const config: McpServerConfig = {
-				name: 'you',
-				transport: 'http' as McpTransportType,
-				url: apiKey
-					? 'https://api.you.com/mcp'
-					: 'https://api.you.com/mcp?profile=free',
-				description: 'You.com web search, URL reading, and research MCP server',
-				tags: ['you', 'search', 'web', 'research', 'http'],
-				timeout: TIMEOUT_MCP_DEFAULT_MS,
-			};
-			if (apiKey) {
-				config.headers = {Authorization: `Bearer ${apiKey}`};
-			}
-			return config;
-		},
-		category: 'remote',
-		transportType: 'http',
-	},
 	{
 		id: 'git',
 		name: 'Git',
