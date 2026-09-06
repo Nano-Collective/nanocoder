@@ -1,11 +1,17 @@
 name: nc-review
 
-# Headless Nanocoder reviewing the *contribution* — duplicates, scope creep,
-# missing tests, missing changesets, CONTRIBUTING adherence. The six required
-# status checks judge the code; this judges everything they cannot see.
+# Headless Nanocoder doing a full code review: correctness, security, design and
+# test adequacy, plus contribution checks (duplicates, scope, changeset).
+#
+# The six required status checks are NOT a code review. They cover lint,
+# formatting, types, unused dependencies, whether the existing tests pass, and
+# whether it builds. None of that catches a logic error, a race condition, a
+# missing auth check or an unhandled error path — and "the tests pass" says
+# nothing about the tests that should exist but do not. That gap is this
+# workflow's job.
 #
 # It never merges, never closes, never pushes. It writes one comment and applies
-# one label.
+# one label. A human still decides.
 #
 # ---------------------------------------------------------------------------
 # SECURITY: why pull_request_target, and why that is safe here
@@ -76,7 +82,7 @@ jobs:
       || github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Resolve PR number
@@ -261,7 +267,7 @@ jobs:
           # tools refuse anything outside the project directory. An earlier
           # version pointed at /tmp and the agent correctly refused to invent a
           # verdict it could not substantiate.
-          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, and .nc-review/context.md for the pull request under review. Then write your verdict as a single JSON object to .nc-review/verdict.json, following the schema in the rubric exactly. All three paths are relative to the current project directory. Write nothing to stdout except a brief note that you have finished.'
+          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read. Then write your verdict as a single JSON object to .nc-review/verdict.json, following the schema in the rubric exactly. All paths are relative to the current project directory. Write nothing to stdout except a brief note that you have finished.'
 
           set +e
           nanocoder run "$PROMPT" \
@@ -310,14 +316,18 @@ jobs:
               echo
             fi
             if [ "$(jq '.findings | length' "$V")" -gt 0 ]; then
-              echo "| | Area | Finding |"
-              echo "|---|---|---|"
-              jq -r '.findings[] | "| \(if .severity == "blocking" then "🔴" else "🟡" end) | `\(.area)` | \(.detail | gsub("\n"; " ")) |"' "$V"
+              echo "| | Area | Where | Finding |"
+              echo "|---|---|---|---|"
+              jq -r '.findings[] |
+                "| \(if .severity == "blocking" then "🔴" else "🟡" end)"
+                + " | `\(.area)`"
+                + " | \(if .file then "`\(.file)\(if .line then ":\(.line)" else "" end)`" else "—" end)"
+                + " | \(.detail | gsub("\n"; " ")) |"' "$V"
               echo
             fi
             echo "---"
             echo
-            echo "<sub>Automated review of the *contribution* — duplicates, scope, tests, changesets, CONTRIBUTING. Code quality is covered by the required status checks. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
+            echo "<sub>Automated code review — correctness, security, design, tests, plus duplicates and scope. Advisory: a human still decides. Not a substitute for review, and not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
           } > /tmp/nc-review/comment.md
 
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/nc-review/comment.md
