@@ -106,6 +106,12 @@ async function runTitleGeneration(
 		// Spend the attempt before making it, so a null response, a throw, a
 		// timeout and a provider that never settles all cost the same. Cleared
 		// only on success, which is also when titleGenerated stops us anyway.
+		//
+		// Transient failures are capped alongside unusable responses on purpose:
+		// the two are indistinguishable from here without asking the provider why
+		// it failed, and the cost of getting it wrong is asymmetric. Over-capping
+		// leaves one session on its heuristic title; under-capping bills a model
+		// call every turn for the life of the session.
 		attemptsBySession.set(
 			sessionId,
 			(attemptsBySession.get(sessionId) ?? 0) + 1,
