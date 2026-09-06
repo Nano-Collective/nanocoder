@@ -72,7 +72,13 @@ test('the mode dropdown shows a readable label', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	t.is(panel.byId('mode-trigger-label')?.textContent, 'Auto-Accept');
-	t.is(panel.byId('mode-trigger')?.title, 'Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.title, 'Mode: Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-label'), 'Mode: Auto-Accept');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-haspopup'), 'menu');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-controls'), 'mode-dropdown');
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'false');
+	t.is(panel.byId('mode-dropdown')?.children[0].textContent, 'Normal');
+	t.is(panel.byId('mode-dropdown')?.children[1].textContent, 'Auto-Accept');
 });
 
 test('opening a nested provider list keeps composer settings open', t => {
@@ -93,6 +99,7 @@ test('opening the mode list closes composer settings', t => {
 
 	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
 	t.false(panel.byId('mode-dropdown')?.classList.contains('hidden'));
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'true');
 	t.is(
 		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
 		'false',
@@ -148,11 +155,11 @@ test('provider and mode still post the existing extension messages', t => {
 	);
 
 	panel.byId('mode-trigger')?.click();
-	panel.byId('mode-dropdown')?.children[1].click();
+	panel.byId('mode-dropdown')?.children[2].click();
 	t.true(
 		panel.sent.some(
 			(message: {type?: string; mode?: string}) =>
-				message.type === 'setMode' && message.mode === 'auto-accept',
+				message.type === 'setMode' && message.mode === 'yolo',
 		),
 	);
 
@@ -166,4 +173,21 @@ test('provider and mode still post the existing extension messages', t => {
 		model: 'sonnet',
 	});
 	t.is(panel.byId('mode-trigger-label')?.textContent, 'YOLO');
+});
+
+test('model dropdown labels keep provider prefixes out of the trigger and items', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'syncState',
+		availableProviders: ['openrouter'],
+		provider: 'openrouter',
+		availableModes: ['normal'],
+		mode: 'normal',
+		availableModels: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5-codex'],
+		model: 'anthropic/claude-sonnet-4-5',
+	});
+
+	t.is(panel.byId('model-trigger-label')?.textContent, 'claude-sonnet-4-5');
+	t.is(panel.byId('model-dropdown')?.children[0].textContent, 'claude-sonnet-4-5');
+	t.is(panel.byId('model-dropdown')?.children[1].textContent, 'gpt-5-codex');
 });
