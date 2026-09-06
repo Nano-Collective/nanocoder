@@ -132,6 +132,10 @@
 					"$ref": "#/definitions/RetryLimitsConfig",
 					"description": "Agent-loop retry limits. Each field has its own sensible default — you\ncan set any combination (e.g. just `maxRepeatedToolCalls`)."
 				},
+				"sandbox": {
+					"description": "Confine execute_bash / !cmd with an OS jail. Off by default.",
+					"type": "boolean"
+				},
 				"systemPrompt": {
 					"$ref": "#/definitions/SystemPromptConfig",
 					"description": "Custom system prompt — replaces or extends the built-in prompt."

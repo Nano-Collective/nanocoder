@@ -1,5 +1,5 @@
 import {type ChildProcess, spawn} from 'node:child_process';
-import {existsSync, realpathSync} from 'node:fs';
+import {existsSync, realpathSync, statSync} from 'node:fs';
 import {delimiter, join} from 'node:path';
 
 export type BashSpawnPlan =
@@ -27,7 +27,11 @@ export function findBwrap(pathEnv = process.env.PATH): string | undefined {
 	for (const dir of pathEnv.split(delimiter)) {
 		if (!dir) continue;
 		const candidate = join(dir, 'bwrap');
-		if (existsSync(candidate)) return candidate;
+		try {
+			if (statSync(candidate).isFile()) return candidate;
+		} catch {
+			continue;
+		}
 	}
 	return undefined;
 }
@@ -170,12 +174,8 @@ export function spawnPlanned(
 		env: options.env,
 		detached: true,
 	};
-	if (plan.bin === 'sandbox-exec') {
-		// codeql[js/shell-command-built-from-environment] seatbelt profile paths are bind roots, not a shell
-		// codeql[js/shell-command-constructed-from-input]
-		return spawn('/usr/bin/sandbox-exec', plan.args, spawnOpts);
-	}
-	// codeql[js/shell-command-built-from-environment] resolved bwrap path; argv is not a shell string
+	const bin = plan.bin === 'bwrap' ? plan.bwrap : '/usr/bin/sandbox-exec';
+	// codeql[js/shell-command-built-from-environment] resolved jail binary; argv is not a shell string
 	// codeql[js/shell-command-constructed-from-input]
-	return spawn(plan.bwrap, plan.args, spawnOpts);
+	return spawn(bin, plan.args, spawnOpts);
 }

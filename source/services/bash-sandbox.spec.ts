@@ -1,4 +1,4 @@
-import {chmodSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
@@ -144,6 +144,13 @@ test('findBwrap walks PATH', t => {
 		if (platform !== 'win32') chmodSync(bin, 0o755);
 		t.is(findBwrap(dir), bin);
 		t.is(findBwrap(''), undefined);
+		const decoy = mkdtempSync(join(tmpdir(), 'nc-bwrap-dir-'));
+		try {
+			mkdirSync(join(decoy, 'bwrap'));
+			t.is(findBwrap(decoy), undefined);
+		} finally {
+			rmSync(decoy, {recursive: true, force: true});
+		}
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
