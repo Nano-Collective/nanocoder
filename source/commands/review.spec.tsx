@@ -490,5 +490,5 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 
 	t.truthy(React.isValidElement(result));
 	t.true(userMessage.includes('diff truncated'));
-	t.true(userMessage.includes('of 1100 lines'));
+	t.true(userMessage.includes('first and last 500 of 1100 lines'));
 });

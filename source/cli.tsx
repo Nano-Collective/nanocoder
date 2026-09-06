@@ -333,8 +333,9 @@ async function main(): Promise<void> {
 
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
-	const isRunCommand = args[0] === 'run';
-	const afterRunArgs = isRunCommand ? args.slice(1) : [];
+	const runCommandIndex = args.findIndex(arg => arg === 'run');
+	const isRunCommand = runCommandIndex !== -1;
+	const afterRunArgs = isRunCommand ? args.slice(runCommandIndex + 1) : [];
 	if (isRunCommand && afterRunArgs.length > 0) {
 		// Filter out known flags when constructing the prompt
 		const promptArgs: string[] = [];
@@ -422,19 +423,15 @@ async function main(): Promise<void> {
 			}
 		}
 		if (reviewArgs.length === 0) {
-			console.error(
-				'Usage: nanocoder review <branch-or-pr-number>\n\nExamples:\n  nanocoder review feature/auth\n  nanocoder review 42',
-			);
-			process.exit(1);
+			// No target provided — review current branch against default.
+			// This matches the /review behavior in the interactive TUI.
+			nonInteractivePrompt = '/review';
+			nonInteractiveMode = true;
+		} else {
+			// Inject as a slash command prompt.
+			nonInteractivePrompt = `/review ${reviewArgs[0]}`;
+			nonInteractiveMode = true;
 		}
-		// Inject as a slash command prompt.
-		nonInteractivePrompt = `/review ${reviewArgs.join(' ')}`;
-		nonInteractiveMode = true;
-	}
-
-	if (isRunCommand && isReviewCommand) {
-		console.error('Cannot use both "run" and "review" commands.');
-		process.exit(1);
 	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
@@ -530,7 +527,7 @@ async function main(): Promise<void> {
 	// `/review <target>` would be sent verbatim to the model as chat.
 	if (isReviewCommand && !process.stdout.isTTY) {
 		console.error(
-			'Error: `nanocoder review` requires an interactive terminal (TTY). Pipe the output to a file instead: nanocoder review <target> 2>&1 | tee out.md',
+			'Error: `nanocoder review` requires an interactive terminal (TTY).',
 		);
 		process.exit(1);
 	}

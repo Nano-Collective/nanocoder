@@ -5,11 +5,11 @@ import test from 'ava';
 
 // Helper function to parse prompt from args (mimics the logic in cli.tsx)
 function parsePrompt(args: string[]): string | undefined {
-	const isRunCommand = args[0] === 'run';
-	if (!isRunCommand) {
+	const runCommandIndex = args.findIndex(arg => arg === 'run');
+	if (runCommandIndex === -1) {
 		return undefined;
 	}
-	const afterRunArgs = args.slice(1);
+	const afterRunArgs = args.slice(runCommandIndex + 1);
 	if (afterRunArgs.length === 0) {
 		return undefined;
 	}
@@ -92,7 +92,7 @@ test('CLI parsing: returns undefined when run command has no prompt', t => {
 });
 
 test('CLI parsing: handles mixed arguments with run command', t => {
-	const args = ['run', 'create', 'a', 'new', 'file'];
+	const args = ['--vscode', 'run', 'create', 'a', 'new', 'file'];
 	const prompt = parsePrompt(args);
 
 	t.is(prompt, 'create a new file');
@@ -255,7 +255,7 @@ function resolvePlainMode(opts: {
 	env: NodeJS.ProcessEnv;
 }): {plainMode: boolean; vscodeMode: boolean} {
 	const {args, stdoutIsTTY, env} = opts;
-	const nonInteractiveMode = args[0] === 'run';
+	const nonInteractiveMode = args.findIndex(arg => arg === 'run') !== -1;
 	const vscodeMode = args.includes('--vscode');
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
@@ -281,9 +281,9 @@ test('plain mode: filters --plain and --no-plain from prompt args', t => {
 	t.is(parsePrompt(['run', 'do', '--no-plain', 'a', 'thing']), 'do a thing');
 });
 
-test('plain mode: explicit --plain enables it on a TTY without CI when run is args[0]', t => {
+test('plain mode: explicit --plain enables it on a TTY without CI', t => {
 	const {plainMode} = resolvePlainMode({
-		args: ['run', 'hi', '--plain'],
+		args: ['--plain', 'run', 'hi'],
 		stdoutIsTTY: true,
 		env: {},
 	});
@@ -319,7 +319,7 @@ test('plain mode: auto-enables for run when GITHUB_ACTIONS is set', t => {
 
 test('plain mode: --no-plain wins over auto-detection', t => {
 	const {plainMode} = resolvePlainMode({
-		args: ['run', 'hi', '--no-plain'],
+		args: ['--no-plain', 'run', 'hi'],
 		stdoutIsTTY: false,
 		env: {CI: 'true'},
 	});
@@ -337,7 +337,7 @@ test('plain mode: stays off for interactive sessions even on a non-TTY', t => {
 
 test('plain mode: --vscode suppresses auto-detection', t => {
 	const {plainMode, vscodeMode} = resolvePlainMode({
-		args: ['run', 'hi', '--vscode'],
+		args: ['--vscode', 'run', 'hi'],
 		stdoutIsTTY: false,
 		env: {CI: 'true'},
 	});
@@ -454,7 +454,7 @@ function resolveResumeFlags(args: string[]): {
 	mutuallyExclusiveError: boolean;
 	nonInteractiveError: boolean;
 } {
-	const nonInteractiveMode = args[0] === 'run';
+	const nonInteractiveMode = args.findIndex(arg => arg === 'run') !== -1;
 
 	const continueRequested =
 		args.includes('--continue') || args.includes('-c');
@@ -560,14 +560,14 @@ test('resume flags: neither flag alone is not a mutual-exclusion error', t => {
 	t.false(resolveResumeFlags([]).mutuallyExclusiveError);
 });
 
-test('resume flags: --continue combined with `run` (not at args[0]) is not a non-interactive error', t => {
+test('resume flags: --continue combined with `run` is an error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue', 'run', 'hi']);
-	t.false(nonInteractiveError);
+	t.true(nonInteractiveError);
 });
 
-test('resume flags: --resume combined with `run` (not at args[0]) is not a non-interactive error', t => {
+test('resume flags: --resume combined with `run` is an error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--resume', 'run', 'hi']);
-	t.false(nonInteractiveError);
+	t.true(nonInteractiveError);
 });
 
 test('resume flags: --continue without `run` is not a non-interactive error', t => {
@@ -623,9 +623,9 @@ function parseReviewArgs(args: string[]): ReviewParseResult {
 		}
 	}
 	if (reviewArgs.length === 0) {
-		return {prompt: undefined, error: true};
+		return {prompt: '/review', error: false};
 	}
-	return {prompt: `/review ${reviewArgs.join(' ')}`, error: false};
+	return {prompt: `/review ${reviewArgs[0]}`, error: false};
 }
 
 test('review CLI: parses review with branch name', t => {
@@ -640,10 +640,10 @@ test('review CLI: parses review with PR number', t => {
 	t.false(result.error);
 });
 
-test('review CLI: errors when no target provided', t => {
+test('review CLI: no args produces /review', t => {
 	const result = parseReviewArgs(['review']);
-	t.is(result.prompt, undefined);
-	t.true(result.error);
+	t.is(result.prompt, '/review');
+	t.false(result.error);
 });
 
 test('review CLI: returns undefined when not a review command', t => {
@@ -744,5 +744,30 @@ test('review CLI: handles multiple mixed flags', t => {
 		'plan',
 		'--json',
 	]);
+	t.is(result.prompt, '/review feature');
+});
+
+// Run command with flags before 'run' (the blocker fix)
+test('CLI parsing: handles flags before run command', t => {
+	const args = ['--plain', 'run', 'say', 'hi'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'say hi');
+});
+
+test('CLI parsing: handles --provider before run command', t => {
+	const args = ['--provider', 'ollama', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: handles --mode before run command', t => {
+	const args = ['--mode', 'plan', 'run', 'audit', 'module'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'audit module');
+});
+
+// Review should only use first arg, not join all
+test('review CLI: only uses first positional arg', t => {
+	const result = parseReviewArgs(['review', 'feature', 'extra', 'args']);
 	t.is(result.prompt, '/review feature');
 });
