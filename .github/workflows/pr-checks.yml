@@ -18,28 +18,7 @@ jobs:
     uses: Nano-Collective/.github/.github/workflows/pr-checks.yml@main
     with:
       fail-on-coverage-drop: true
-
-  # Validates changeset package names to prevent main branch breakages.
-  # Uses a custom script instead of `changeset status` to keep the check non-blocking.
-  changeset-validation:
-    name: Changeset Validation
-    runs-on: ubuntu-latest
-    # Skip for the automated "Version Packages" PR.
-    if: github.head_ref != 'changeset-release/main'
-    steps:
-      # Dependency-free check, no pnpm install needed.
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-
-      - name: Validate every changeset resolves to a workspace package
-        run: node scripts/validate-changesets.js
+      validate-changesets: true
 
   # Tests and builds the VS Code extension.
   vscode-extension:
