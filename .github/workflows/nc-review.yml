@@ -176,6 +176,26 @@ jobs:
             | jq --argjson me "$PR" 'map(select(.number != $me))' \
             > /tmp/nc-review/open-prs.json
 
+          # Issues this PR claims to close, with their full bodies — the agent
+          # cannot judge whether the issue was actually addressed without them.
+          # Only GraphQL exposes closingIssuesReferences; `gh pr view --json`
+          # does not have the field.
+          OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
+          gh api graphql -f query="
+          {
+            repository(owner: \"$OWNER\", name: \"$NAME\") {
+              pullRequest(number: $PR) {
+                closingIssuesReferences(first: 10) {
+                  nodes { number title state body labels(first: 10) { nodes { name } } }
+                }
+              }
+            }
+          }" --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+            > /tmp/nc-review/issues.json 2>/dev/null || echo '[]' > /tmp/nc-review/issues.json
+          [ -s /tmp/nc-review/issues.json ] || echo '[]' > /tmp/nc-review/issues.json
+          N_ISSUES=$(jq 'length' /tmp/nc-review/issues.json 2>/dev/null || echo 0)
+          echo "linked issues: $N_ISSUES"
+
           {
             echo "# Pull request under review"
             echo
@@ -209,6 +229,22 @@ jobs:
             echo "## Description as written by the author"
             echo
             jq -r '.body // "(no description provided)"' /tmp/nc-review/pr.json
+            echo
+            echo "## Linked issue(s) — what this PR claims to close"
+            echo
+            if [ "$N_ISSUES" -eq 0 ]; then
+              echo "**This pull request closes no issue.** It may still be warranted —"
+              echo "a typo fix or a small obvious improvement does not need one — but you"
+              echo "should judge whether the change is justified on its own terms, and"
+              echo "whether CONTRIBUTING's guidance to discuss first applies given its size."
+            else
+              echo "Judge whether the diff actually resolves what is described below."
+              echo "A PR that says it closes an issue and only partly does is a problem:"
+              echo "merging it closes the issue and the remainder is silently lost."
+              echo
+              jq -r '.[] | "### Issue #\(.number) — \(.title)\n\nState: \(.state)\nLabels: \([.labels.nodes[].name] | join(", "))\n\n\(.body // "(no body)")\n"' \
+                /tmp/nc-review/issues.json
+            fi
             echo
             echo "## Other open pull requests (duplicate-detection corpus)"
             echo '```json'
