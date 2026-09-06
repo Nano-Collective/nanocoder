@@ -492,3 +492,56 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 	t.true(userMessage.includes('diff truncated'));
 	t.true(userMessage.includes('first and last 500 of 1100 lines'));
 });
+
+test('review falls back to default prompt when prompt file is missing', async t => {
+	const {renameSync} = await import('node:fs');
+	const {join} = await import('node:path');
+	const {fileURLToPath} = await import('node:url');
+	const {dirname} = await import('node:path');
+
+	const modulePath = fileURLToPath(import.meta.url);
+	const moduleDir = dirname(modulePath);
+	const promptPath = join(moduleDir, '../../source/app/prompts/sections/review.md');
+	const backupPath = promptPath + '.bak';
+
+	renameSync(promptPath, backupPath);
+
+	let systemPrompt = '';
+
+	const client = {
+		chat: async (messages: Message[]) => {
+			systemPrompt = (messages[0]?.content as string) || '';
+			return {
+				choices: [
+					{
+						message: {
+							content: 'Looks good.',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	try {
+		const command = createReviewCommand({
+			execGit: async args => {
+				if (args[0] === 'rev-parse') return '';
+				return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+			},
+			getCurrentBranch: async () => 'feature',
+			getDefaultBranch: async () => 'main',
+		});
+
+		const result = await command.handler(['feature'], baseMessages, {
+			...testMetadata,
+			client,
+		});
+
+		t.truthy(React.isValidElement(result));
+		t.true(systemPrompt.includes('senior software engineer'));
+		t.true(systemPrompt.includes('code review'));
+	} finally {
+		renameSync(backupPath, promptPath);
+	}
+});
