@@ -240,6 +240,12 @@ clean tells a maintainer to skim past findings you spent the run producing.
 
 ## Output
 
+**The file is the entire deliverable.** Anything you write in chat is discarded
+and never reaches a human — only the JSON file is read by the workflow that
+posts the review. A brilliant analysis narrated in chat and not written to the
+file is a failed run. Keep your reasoning brief; spend the effort on the file,
+and write it before you stop.
+
 Write **only** a JSON object to the file path given in the prompt. No prose
 before or after, no markdown fences. Schema:
 

@@ -363,15 +363,51 @@ jobs:
           # tools refuse anything outside the project directory. An earlier
           # version pointed at /tmp and the agent correctly refused to invent a
           # verdict it could not substantiate.
-          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read. Then write your verdict as a single JSON object to .nc-review/verdict.json, following the schema in the rubric exactly. All paths are relative to the current project directory. Write nothing to stdout except a brief note that you have finished.'
+          # The instruction to write the file is LAST and stated as the whole
+          # deliverable. An earlier version buried it mid-prompt and the model
+          # narrated a long, genuinely good analysis to stdout, then stopped
+          # without ever calling write_file — it treated the chat as the output.
+          PROMPT='You are reviewing a pull request. Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. All paths are relative to the current project directory.
+
+          This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read.
+
+          YOUR ONLY DELIVERABLE IS THE FILE .nc-review/verdict.json — write it with write_file, following the schema in the rubric exactly.
+
+          Anything you write in chat is discarded and never reaches a human. Only the JSON file is read. Do not narrate your analysis; put your conclusions in the JSON. Keep your reasoning brief and spend your effort on the file.
+
+          You are not finished until write_file has succeeded on .nc-review/verdict.json. If you have analysed the pull request but not yet written that file, write it now.'
 
           set +e
           nanocoder run "$PROMPT" \
             --mode yolo \
             --model minimax-m3 \
             --trust-directory
-          echo "agent_status=$?" >> "$GITHUB_OUTPUT"
+          STATUS=$?
           set -e
+
+          # One retry, and only for the specific failure of finishing without
+          # writing the file. The prompt above should prevent it, but "the
+          # analysis was good and went nowhere" is an expensive way to fail, and
+          # a second attempt is ~3 minutes. Not a general retry: a genuine agent
+          # error still falls through to the safe comment.
+          if [ ! -s .nc-review/verdict.json ]; then
+            echo "::warning::no verdict after first attempt — retrying once"
+            RETRY='Read .github/nc-review/rubric.md and .nc-review/context.md, then write your review verdict as a single JSON object to .nc-review/verdict.json using write_file, following the schema in the rubric exactly.
+
+            Write the file. Do not reply in chat — chat output is discarded and only the file is read. The file is the entire task.'
+            set +e
+            nanocoder run "$RETRY" \
+              --mode yolo \
+              --model minimax-m3 \
+              --trust-directory
+            STATUS=$?
+            set -e
+            [ -s .nc-review/verdict.json ] \
+              && echo "retry produced a verdict" \
+              || echo "::warning::retry also produced no verdict"
+          fi
+
+          echo "agent_status=$STATUS" >> "$GITHUB_OUTPUT"
 
       - name: Post review
         if: always()
@@ -391,6 +427,15 @@ jobs:
             echo "::warning::no parseable verdict (agent exit ${AGENT_STATUS:-unknown})"
             gh pr comment "$PR" --repo "$REPO" --body \
               "**nc-review** could not produce a verdict this run (agent exit \`${AGENT_STATUS:-unknown}\`). This is a problem with the review agent, not with your pull request. A maintainer can retry with \`/re-review\`."
+            # Clear any agent:* label from a previous run. Applying none was the
+            # right call, but leaving a stale one is not: a PR has carried
+            # agent:clean through two failed re-reviews, which reads as "an
+            # agent looked at this and was happy" when nothing of the kind
+            # happened.
+            gh pr edit "$PR" --repo "$REPO" \
+              --remove-label "agent:clean" \
+              --remove-label "agent:comments" \
+              --remove-label "agent:needs-work" 2>/dev/null || true
             exit 0
           fi
 
