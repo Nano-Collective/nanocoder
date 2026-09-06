@@ -457,6 +457,27 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 	);
 });
 
+test('AcpAgent.prompt - rejects an overlapping prompt before the first async boundary', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const controller = agent['sessions'].get(session.sessionId)!.abortController;
+
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'second'}],
+		}),
+		{message: `Prompt already in progress for session: ${session.sessionId}`},
+	);
+
+	t.is(agent['sessions'].get(session.sessionId)!.abortController, controller);
+	t.is((await first).stopReason, 'end_turn');
+});
 
 test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	const {agent} = createAgent();
@@ -600,6 +621,38 @@ test('AcpAgent.prompt - a built-in command exchange stays out of model context',
 	t.true(messages.every(m => m.displayOnly));
 	t.deepEqual(convertToModelMessages(messages), []);
 });
+
+test.serial(
+	'AcpAgent.prompt - built-in replies persist with sessions but do not create one alone',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const commandOnlySession = await agent.newSession({cwd: '/tmp'});
+
+		await agent.prompt({
+			sessionId: commandOnlySession.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+		t.falsy(await sessionManager.readSession(commandOnlySession.sessionId));
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'real prompt'}],
+		});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.truthy(persisted);
+		t.true(
+			persisted!.messages.some(m => m.displayOnly),
+			'display-only built-in replies must remain in session history',
+		);
+	},
+);
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/definitelynotacommand');

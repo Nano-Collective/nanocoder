@@ -1,6 +1,7 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
@@ -16,6 +17,7 @@ interface Overrides {
 	// Cancellation-related knobs
 	isGenerating?: boolean;
 	isToolExecuting?: boolean;
+	liveComponentCapturesInput?: boolean;
 	isToolConfirmationMode?: boolean;
 	isCancelling?: boolean;
 	abortController?: AbortController | null;
@@ -61,6 +63,7 @@ function makeProps(o: Overrides = {}) {
 		isSettingsMode: o.isSettingsMode ?? false,
 		isToolConfirmationMode: o.isToolConfirmationMode ?? false,
 		isToolExecuting: o.isToolExecuting ?? false,
+		liveComponentCapturesInput: o.liveComponentCapturesInput ?? false,
 		isQuestionMode: false,
 		isCancelling: o.isCancelling ?? false,
 		abortController: o.abortController ?? null,
@@ -271,6 +274,40 @@ test('Escape cancels while a regular tool runs behind ToolExecutionIndicator', a
 
 	await pressEscape(stdin);
 	t.is(cancelled, 1);
+});
+
+test('Escape does not cancel work while a live component captures input', async t => {
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				isToolExecuting: true,
+				liveComponentCapturesInput: true,
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 0);
+});
+
+test('bash-style live execution keeps the composer mounted', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				client: {},
+				isToolExecuting: true,
+				liveComponentCapturesInput: false,
+			})}
+		/>,
+	);
+
+	t.regex(stripAnsi(lastFrame() ?? ''), /\/ commands, ! bash/);
 });
 
 test('Escape cancels when only an abort controller is live (state flicker)', async t => {

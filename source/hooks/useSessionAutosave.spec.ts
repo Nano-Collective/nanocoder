@@ -214,7 +214,6 @@ test.serial(
 		t.is(sessions.length, 1);
 	},
 );
-
 test.serial(
 	'A: without serialisation, concurrent saves can create duplicate sessions (demonstrates the old bug)',
 	async t => {
@@ -543,4 +542,3 @@ test.serial(
 		}
 	},
 );
-

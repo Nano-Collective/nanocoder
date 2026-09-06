@@ -1,8 +1,13 @@
+import {execFile, execSync} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
+import {promisify} from 'util';
 import test from 'ava';
 import * as fs from 'fs/promises';
+import {MAX_CHECKPOINT_FILES} from '@/constants';
 import {FileSnapshotService} from './file-snapshot';
+
+const execFileAsync = promisify(execFile);
 
 // Helper to create a temporary directory for tests
 async function createTempDir(): Promise<string> {
@@ -42,10 +47,10 @@ test.serial('FileSnapshotService captures single file', async t => {
 		await createTestFile(tempDir, 'test.txt', 'Hello, World!');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['test.txt']);
+		const {snapshots} = await service.captureFiles(['test.txt']);
 
 		t.is(snapshots.size, 1);
-		t.is(snapshots.get('test.txt'), 'Hello, World!');
+		t.is(snapshots.get('test.txt')?.toString('utf-8'), 'Hello, World!');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -59,16 +64,16 @@ test.serial('FileSnapshotService captures multiple files', async t => {
 		await createTestFile(tempDir, 'file3.txt', 'Content 3');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles([
+		const {snapshots} = await service.captureFiles([
 			'file1.txt',
 			'file2.txt',
 			'file3.txt',
 		]);
 
 		t.is(snapshots.size, 3);
-		t.is(snapshots.get('file1.txt'), 'Content 1');
-		t.is(snapshots.get('file2.txt'), 'Content 2');
-		t.is(snapshots.get('file3.txt'), 'Content 3');
+		t.is(snapshots.get('file1.txt')?.toString('utf-8'), 'Content 1');
+		t.is(snapshots.get('file2.txt')?.toString('utf-8'), 'Content 2');
+		t.is(snapshots.get('file3.txt')?.toString('utf-8'), 'Content 3');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -85,14 +90,17 @@ test.serial('FileSnapshotService captures files in subdirectories', async t => {
 		);
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles([
+		const {snapshots} = await service.captureFiles([
 			'src/index.ts',
 			'src/utils/helper.ts',
 		]);
 
 		t.is(snapshots.size, 2);
-		t.is(snapshots.get('src/index.ts'), 'export {};');
-		t.is(snapshots.get('src/utils/helper.ts'), 'export function help() {}');
+		t.is(snapshots.get('src/index.ts')?.toString('utf-8'), 'export {};');
+		t.is(
+			snapshots.get('src/utils/helper.ts')?.toString('utf-8'),
+			'export function help() {}',
+		);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -106,14 +114,14 @@ test.serial(
 			await createTestFile(tempDir, 'exists.txt', 'I exist');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = await service.captureFiles([
+			const {snapshots} = await service.captureFiles([
 				'exists.txt',
 				'does-not-exist.txt',
 			]);
 
 			// Should only capture the existing file
 			t.is(snapshots.size, 1);
-			t.is(snapshots.get('exists.txt'), 'I exist');
+			t.is(snapshots.get('exists.txt')?.toString('utf-8'), 'I exist');
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -124,8 +132,8 @@ test.serial('FileSnapshotService restores files', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('restored.txt', 'Restored content');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('restored.txt', Buffer.from('Restored content'));
 
 		await service.restoreFiles(snapshots);
 
@@ -142,8 +150,8 @@ test.serial('FileSnapshotService restores files in subdirectories', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('deep/nested/file.txt', 'Nested content');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('deep/nested/file.txt', Buffer.from('Nested content'));
 
 		await service.restoreFiles(snapshots);
 
@@ -160,10 +168,10 @@ test.serial('FileSnapshotService restores multiple files', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('file1.txt', 'Content 1');
-		snapshots.set('file2.txt', 'Content 2');
-		snapshots.set('subdir/file3.txt', 'Content 3');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('file1.txt', Buffer.from('Content 1'));
+		snapshots.set('file2.txt', Buffer.from('Content 2'));
+		snapshots.set('subdir/file3.txt', Buffer.from('Content 3'));
 
 		await service.restoreFiles(snapshots);
 
@@ -183,8 +191,8 @@ test.serial(
 			await createTestFile(tempDir, 'existing.txt', 'Old content');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('existing.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('existing.txt', Buffer.from('New content'));
 
 			await service.restoreFiles(snapshots);
 
@@ -203,9 +211,9 @@ test.serial(
 	'FileSnapshotService getSnapshotSize calculates correct size',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
-		snapshots.set('file1.txt', 'Hello'); // 5 bytes
-		snapshots.set('file2.txt', 'World!'); // 6 bytes
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('file1.txt', Buffer.from('Hello')); // 5 bytes
+		snapshots.set('file2.txt', Buffer.from('World!')); // 6 bytes
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -217,7 +225,7 @@ test.serial(
 	'FileSnapshotService getSnapshotSize handles empty snapshots',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, Buffer>();
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -229,8 +237,8 @@ test.serial(
 	'FileSnapshotService getSnapshotSize handles unicode content',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
-		snapshots.set('unicode.txt', '日本語'); // 9 bytes in UTF-8
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('unicode.txt', Buffer.from('日本語')); // 9 bytes in UTF-8
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -244,8 +252,8 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('new-file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('new-file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -265,8 +273,8 @@ test.serial(
 			await createTestFile(tempDir, 'writable.txt', 'Original');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('writable.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('writable.txt', Buffer.from('New content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -284,9 +292,9 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			// Directory doesn't exist yet - should be created during validation
-			snapshots.set('nested/deep/path/file.txt', 'Content');
+			snapshots.set('nested/deep/path/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -312,8 +320,8 @@ test.serial(
 			chmodSync(readOnlyDir, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('readonly-dir/file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('readonly-dir/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -349,8 +357,8 @@ test.serial(
 			chmodSync(readOnlyFile, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('readonly.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('readonly.txt', Buffer.from('New content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -384,9 +392,9 @@ test.serial(
 			chmodSync(parentDir, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			// Try to create a file in a subdirectory of the read-only parent
-			snapshots.set('parent/child/file.txt', 'Content');
+			snapshots.set('parent/child/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -423,11 +431,11 @@ test.serial(
 			chmodSync(readOnlyFile, 0o444);
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('writable.txt', 'New content');
-			snapshots.set('readonly.txt', 'New content');
-			snapshots.set('new-file.txt', 'Content');
-			snapshots.set('nested/new-file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('writable.txt', Buffer.from('New content'));
+			snapshots.set('readonly.txt', Buffer.from('New content'));
+			snapshots.set('new-file.txt', Buffer.from('Content'));
+			snapshots.set('nested/new-file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -458,10 +466,10 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			snapshots.set(
 				'level1/level2/level3/level4/file.txt',
-				'Deeply nested content',
+				Buffer.from('Deeply nested content'),
 			);
 
 			const result = await service.validateRestorePath(snapshots);
@@ -504,6 +512,7 @@ test.serial('FileSnapshotService reports whether a scan was truncated', async t 
 
 		t.true(Array.isArray(result.files));
 		t.is(typeof result.truncated, 'boolean');
+		t.is(typeof result.truncatedCount, 'number');
 		t.is(typeof result.available, 'boolean');
 	} finally {
 		await cleanupTempDir(tempDir);
@@ -526,16 +535,64 @@ test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 	}
 });
 
+test.serial(
+	'FileSnapshotService returns untracked files from a repository without commits',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			await createTestFile(tempDir, 'file.txt', 'new file');
+			await createTestFile(tempDir, 'nested/other.txt', 'nested file');
+			await createTestFile(tempDir, 'ignored.txt', 'ignored');
+			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
+
+			const service = new FileSnapshotService(tempDir);
+			const files = service.getModifiedFiles();
+
+			t.deepEqual(files.sort(), ['.gitignore', 'file.txt', 'nested/other.txt']);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'FileSnapshotService returns staged files from a repository without commits',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			await createTestFile(tempDir, 'staged.txt', 'staged file');
+			await createTestFile(tempDir, 'nested/also-staged.txt', 'nested staged');
+			await createTestFile(tempDir, 'ignored.txt', 'ignored');
+			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
+			execSync('git add .', {cwd: tempDir, stdio: 'pipe'});
+
+			const service = new FileSnapshotService(tempDir);
+			const result = service.getModifiedFilesResult();
+
+			t.true(result.available);
+			t.deepEqual(result.files.sort(), [
+				'.gitignore',
+				'nested/also-staged.txt',
+				'staged.txt',
+			]);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
 test.serial('FileSnapshotService captures empty files', async t => {
 	const tempDir = await createTempDir();
 	try {
 		await createTestFile(tempDir, 'empty.txt', '');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['empty.txt']);
+		const {snapshots} = await service.captureFiles(['empty.txt']);
 
 		t.is(snapshots.size, 1);
-		t.is(snapshots.get('empty.txt'), '');
+		t.is(snapshots.get('empty.txt')?.toString('utf-8'), '');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -550,9 +607,9 @@ test.serial(
 			await createTestFile(tempDir, 'special.txt', specialContent);
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = await service.captureFiles(['special.txt']);
+			const {snapshots} = await service.captureFiles(['special.txt']);
 
-			t.is(snapshots.get('special.txt'), specialContent);
+			t.is(snapshots.get('special.txt')?.toString('utf-8'), specialContent);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -565,7 +622,7 @@ test.serial('FileSnapshotService uses relative paths in snapshots', async t => {
 		await createTestFile(tempDir, 'src/file.ts', 'content');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['src/file.ts']);
+		const {snapshots} = await service.captureFiles(['src/file.ts']);
 
 		// Should use relative path, not absolute
 		const keys = Array.from(snapshots.keys());
@@ -584,7 +641,7 @@ test.serial('FileSnapshotService handles large files', async t => {
 		await createTestFile(tempDir, 'large.txt', largeContent);
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['large.txt']);
+		const {snapshots} = await service.captureFiles(['large.txt']);
 
 		t.is(snapshots.get('large.txt')?.length, 100000);
 	} finally {
@@ -620,7 +677,7 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, Buffer>();
 
 		// Create a file in temp dir to simulate a file that exists
 		const testFile = path.join(tempDir, 'test.txt');
@@ -630,7 +687,7 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 		await fs.chmod(testFile, 0o444);
 
 		// Add the file to snapshots (relative path)
-		snapshots.set('test.txt', 'new content');
+		snapshots.set('test.txt', Buffer.from('new content'));
 
 		const result = await service.validateRestorePath(snapshots);
 
@@ -642,3 +699,185 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 		await cleanupTempDir(tempDir);
 	}
 });
+
+// Snapshots cover whatever git reports as modified, and that includes images,
+// .vsix bundles and every other binary a repository tracks. Reading or writing
+// those as UTF-8 replaces each invalid byte with U+FFFD, so this pins the
+// round-trip at the byte level rather than the string level.
+const BINARY_FIXTURE = Buffer.from([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+	0xff, 0xfe, 0xc0, 0x80, // lone/overlong bytes: never valid UTF-8
+]);
+
+test.serial(
+	'FileSnapshotService captures and restores binary files byte-for-byte',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const target = path.join(tempDir, 'assets/logo.png');
+			await fs.mkdir(path.dirname(target), {recursive: true});
+			await fs.writeFile(target, BINARY_FIXTURE);
+
+			const service = new FileSnapshotService(tempDir);
+			const {snapshots} = await service.captureFiles(['assets/logo.png']);
+
+			// Capture must not decode: the bytes are lost here first.
+			t.deepEqual(snapshots.get('assets/logo.png'), BINARY_FIXTURE);
+
+			await fs.writeFile(target, Buffer.from('clobbered'));
+			await service.restoreFiles(snapshots);
+
+			// Restore must not encode.
+			t.deepEqual(await fs.readFile(target), BINARY_FIXTURE);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Gap 1: a file git reported but that could not be read used to vanish with only
+// a log line, so a later restore silently put back less than the user thought.
+//
+// A directory standing where a file is expected fails with EISDIR on every
+// platform, which is a genuine read failure and not a missing file. chmod 0o000
+// would not do it: Windows cannot drop read permission that way.
+test.serial(
+	'FileSnapshotService reports files it could not capture',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'readable.txt', 'kept');
+			await fs.mkdir(path.join(tempDir, 'unreadable.txt'), {recursive: true});
+
+			const service = new FileSnapshotService(tempDir);
+			const {snapshots, skipped} = await service.captureFiles([
+				'readable.txt',
+				'unreadable.txt',
+			]);
+
+			t.is(snapshots.size, 1);
+			t.is(skipped.length, 1);
+			t.is(skipped[0]?.path, 'unreadable.txt');
+			// The reason travels with it, so a restore can say why.
+			t.true((skipped[0]?.reason.length ?? 0) > 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// `git diff --name-only HEAD` lists deleted files, so they reach captureFiles
+// and fail with ENOENT. Recording those would make deleting a file and taking a
+// checkpoint produce a permanent gap warning on every later restore - the
+// failure this feature exists to prevent, inverted.
+test.serial(
+	'FileSnapshotService does not record a deleted file as a gap',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'kept.txt', 'kept');
+
+			const service = new FileSnapshotService(tempDir);
+			const {snapshots, skipped} = await service.captureFiles([
+				'kept.txt',
+				'deleted.txt',
+			]);
+
+			t.is(snapshots.size, 1);
+			t.deepEqual(skipped, []);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// skippedFiles and filesChanged are read side by side at restore, so a skipped
+// path has to be keyed the same way a captured one is.
+test.serial(
+	'FileSnapshotService normalizes the path of a file it skipped',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.mkdir(path.join(tempDir, 'nested', 'dir.txt'), {
+				recursive: true,
+			});
+
+			const service = new FileSnapshotService(tempDir);
+			const {skipped} = await service.captureFiles([
+				path.join('nested', 'dir.txt'),
+			]);
+
+			t.is(skipped.length, 1);
+			t.is(skipped[0]?.path, 'nested/dir.txt');
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'FileSnapshotService reports nothing skipped when every file is readable',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'a.txt', 'a');
+
+			const service = new FileSnapshotService(tempDir);
+			const {skipped} = await service.captureFiles(['a.txt']);
+
+			t.deepEqual(skipped, []);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Gap 2: the cap warned at capture time and was invisible afterwards, so a
+// restore never mentioned the files it was never given.
+test.serial(
+	'FileSnapshotService reports how many files the cap dropped',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			// getModifiedFiles asks git for `diff --name-only HEAD`, so the repo
+			// needs a commit to diff against - a bare `git init` has no HEAD and
+			// the whole lookup falls into its empty-result branch.
+			await execFileAsync('git', ['init'], {cwd: tempDir});
+			await createTestFile(tempDir, 'committed.txt', 'base');
+			await execFileAsync('git', ['add', '-A'], {cwd: tempDir});
+			// A contributor with commit signing, a global core.hooksPath, or any
+			// commit-msg hook would otherwise fail this commit and take the test
+			// with it. None of them have anything to say about a temp fixture.
+			await execFileAsync(
+				'git',
+				[
+					'-c',
+					'user.email=test@example.com',
+					'-c',
+					'user.name=test',
+					'-c',
+					'core.hooksPath=',
+					'commit',
+					'-m',
+					'base',
+					'--no-gpg-sign',
+					'--no-verify',
+				],
+				{cwd: tempDir},
+			);
+
+			for (let i = 0; i < MAX_CHECKPOINT_FILES + 3; i++) {
+				await createTestFile(tempDir, `file-${i}.txt`, `content ${i}`);
+			}
+
+			const service = new FileSnapshotService(tempDir);
+			const {files, truncatedCount} = service.getModifiedFilesResult();
+
+			t.is(files.length, MAX_CHECKPOINT_FILES);
+			t.is(truncatedCount, 3);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
