@@ -92,6 +92,37 @@ echo {{ ns }}
 );
 
 test.serial(
+	'BundleLoader surfaces no errors when subscribe.target uses skill: prefix',
+	async t => {
+		await withTempEnv(async ({projectRoot}) => {
+			const bundleRoot = join(projectRoot, '.nanocoder', 'skills');
+			await makeBundle(bundleRoot, 'valid-target', {
+				'skill.yaml': `
+name: valid-target
+description: Test skill target prefix.
+subscribe:
+  - kind: file.changed
+    target: skill:some-other-skill
+`,
+				'agents/some-other-skill.md': `---
+name: some-other-skill
+description: x.
+---
+body
+`,
+			});
+
+			const loader = new BundleLoader(projectRoot);
+			const {skills, errors} = await loader.load();
+			t.is(errors.length, 0);
+			t.is(skills.length, 1);
+			t.is(skills[0]?.subscribe?.length, 1);
+			t.is(skills[0]?.subscribe?.[0]?.target, 'skill:some-other-skill');
+		});
+	},
+);
+
+test.serial(
 	'bundle without skill.yaml is silently skipped',
 	async t => {
 		await withTempEnv(async ({projectRoot}) => {

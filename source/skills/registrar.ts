@@ -59,7 +59,7 @@ export interface RegisterResult {
 	subscriptionIds: SubscriptionId[];
 }
 
-const TARGET_REGEX = /^(command|agent|tool):([a-z][a-z0-9_-]*)$/;
+const TARGET_REGEX = /^(command|agent|tool|skill):([a-z][a-z0-9_-]*)$/;
 
 export function registerSkills(
 	skills: Skill[],

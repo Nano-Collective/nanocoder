@@ -291,14 +291,3 @@ subscribe:
 `);
 	t.is(m.subscribe?.[0]?.target, 'agent:foo');
 });
-
-test('accepts skill prefix in subscribe.target', t => {
-	const m = parseSkillManifestContent(`
-name: k8s
-description: ok
-subscribe:
-  - kind: file.changed
-    target: skill:some-other-skill
-`);
-	t.is(m.subscribe?.[0]?.target, 'skill:some-other-skill');
-});
