@@ -1,4 +1,10 @@
-import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -35,6 +41,18 @@ interface Fixture {
 	env?: Record<string, string | undefined>;
 }
 
+/**
+ * The temp directory with symlinks resolved.
+ *
+ * On macOS `os.tmpdir()` reports `/var/folders/...`, but `/var` is a symlink to
+ * `/private/var`, so once a fixture calls `process.chdir()` the resolver sees
+ * `/private/var/folders/...` and every path assertion in this file compares two
+ * spellings of the same directory. Linux CI never sees it because `/tmp` is a
+ * real directory there. Resolving once, up front, keeps both sides identical on
+ * either platform.
+ */
+const TMP_ROOT = realpathSync(tmpdir());
+
 let fixtureCounter = 0;
 
 /**
@@ -47,7 +65,10 @@ function withFixture<T>(
 	fixture: Fixture,
 	body: (paths: {project: string; configDir: string}) => T,
 ): T {
-	const root = join(tmpdir(), `nanocoder-effective-${Date.now()}-${fixtureCounter++}`);
+	const root = join(
+		TMP_ROOT,
+		`nanocoder-effective-${Date.now()}-${fixtureCounter++}`,
+	);
 	const project = join(root, 'project');
 	const configDir = join(root, 'config');
 	mkdirSync(project, {recursive: true});
@@ -446,7 +467,7 @@ test('an MCP server set in two files reports the one that lost', t => {
 });
 
 test('MCP servers from NANOCODER_MCPSERVERS_FILE name that variable as the origin', t => {
-	const serverFile = join(tmpdir(), `nanocoder-mcp-${Date.now()}.json`);
+	const serverFile = join(TMP_ROOT, `nanocoder-mcp-${Date.now()}.json`);
 	writeFileSync(
 		serverFile,
 		JSON.stringify({mcpServers: {docs: {command: 'from-file'}}}),
