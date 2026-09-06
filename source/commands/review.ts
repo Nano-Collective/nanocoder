@@ -165,7 +165,7 @@ export function createReviewCommand(
 				];
 				if (truncated.truncated) {
 					parts.push(
-						`[Note: diff truncated — reviewed first and last ${Math.ceil(truncated.totalLines / 2)} of ${truncated.totalLines} lines]\n`,
+						`[Note: diff truncated — reviewed first and last 500 of ${truncated.totalLines} lines]\n`,
 					);
 				}
 				parts.push(truncated.content);
