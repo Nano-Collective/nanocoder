@@ -79,13 +79,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	}, [showAll]);
 
 	useInput((_input, key) => {
-		if (key.escape) {
-			if (!loading) {
-				onCancel();
-			}
-			return;
-		}
-		if (!loading && sessions.length === 0) {
+		if (key.escape && !loading) {
 			onCancel();
 		}
 	});
@@ -109,7 +103,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				) : (
 					<Text>No saved sessions found.</Text>
 				)}
-				<Text>Press any key to continue...</Text>
+				<Text>Press Escape to continue</Text>
 			</Box>
 		);
 	}

@@ -8,7 +8,7 @@ sidebar_order: 3
 
 Every message in your conversation takes up space in the model's context window. In long sessions, you'll eventually hit the limit — the AI loses access to earlier messages and starts losing track of what you've discussed. Context compression solves this by intelligently condensing older messages while keeping the important parts.
 
-This matters most when you're on extended coding sessions or using paid APIs where token usage affects cost.
+This matters most when you're on extended coding sessions or using paid APIs where token usage affects cost. Auto-compact uses the same `autoCompact` settings in the TUI, `--plain` / `nanocoder run`, ACP editor sessions, and subagent loops. `/compact` is still TUI-only.
 
 ## How It Works
 

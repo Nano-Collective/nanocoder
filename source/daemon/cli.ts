@@ -12,8 +12,13 @@
  */
 
 import {type ChildProcess, spawn} from 'node:child_process';
-import {existsSync, mkdirSync, openSync, statSync} from 'node:fs';
-import {readFile} from 'node:fs/promises';
+import {
+	createReadStream,
+	existsSync,
+	mkdirSync,
+	openSync,
+	statSync,
+} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {formatError} from '@/utils/error-formatter';
@@ -242,15 +247,62 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	};
 }
 
+const LOG_TAIL_BYTES = 64 * 1024;
+// How far into the window we look for a line break before giving up on
+// realigning. Past this point the partial first line is worth more than the
+// alignment, since realigning would discard most of the tail. Ordinary log
+// lines are far shorter than this.
+const LOG_TAIL_REALIGN_BYTES = 4 * 1024;
+
 async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const logPath = getLogPath(opts.projectRoot);
 	if (!existsSync(logPath)) {
 		return {exitCode: 0, output: 'No daemon log yet.'};
 	}
 	const size = statSync(logPath).size;
-	const start = Math.max(0, size - 64 * 1024);
-	const buf = await readFile(logPath, 'utf-8');
-	return {exitCode: 0, output: buf.slice(start)};
+	if (size === 0) {
+		return {exitCode: 0, output: ''};
+	}
+	const start = Math.max(0, size - LOG_TAIL_BYTES);
+	// Read the byte before the window as well. When it is a newline the window
+	// already opens on a whole line, and skipping past it keeps that line.
+	const readFrom = start === 0 ? 0 : start - 1;
+	const chunks: Buffer[] = [];
+	for await (const chunk of createReadStream(logPath, {
+		start: readFrom,
+		end: size - 1,
+	})) {
+		chunks.push(chunk as Buffer);
+	}
+	let tail = Buffer.concat(chunks);
+
+	if (start > 0) {
+		const newline = tail.indexOf(0x0a);
+		if (
+			newline !== -1 &&
+			newline < tail.length - 1 &&
+			newline <= LOG_TAIL_REALIGN_BYTES
+		) {
+			tail = tail.subarray(newline + 1);
+		} else {
+			// Either the window holds no usable line break, or the first one sits
+			// so far in that realigning to it would throw away most of the tail.
+			// Both cases keep the partial first line: drop the extra leading byte
+			// instead, plus the bytes of a character the window opened part way
+			// through.
+			let partial = 1;
+			while (
+				partial < tail.length &&
+				partial < 4 &&
+				(tail[partial] & 0xc0) === 0x80
+			) {
+				partial++;
+			}
+			tail = tail.subarray(partial);
+		}
+	}
+
+	return {exitCode: 0, output: tail.toString('utf-8')};
 }
 
 function launchSelfHosted(projectRoot: string): ChildProcess {

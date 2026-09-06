@@ -8,6 +8,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
@@ -27,6 +28,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
@@ -61,6 +63,8 @@ export interface PlainConversationUsage {
 	inputTokens: number;
 	outputTokens: number;
 	totalTokens: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 }
 
 export type PlainConversationOutcome =
@@ -114,16 +118,49 @@ const FINAL_TURN_INSTRUCTION =
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
 ): Promise<PlainConversationOutcome> {
+	const {client, initialMessages, model} = options;
+
+	// Lifetime /stats: count each initial user prompt in this headless run.
+	try {
+		const {recordUserPrompt} = await import('@/stats/record');
+		const provider = client.getProviderConfig().name;
+		const modelName = model ?? client.getCurrentModel();
+		for (const msg of initialMessages) {
+			if (msg.role === 'user') {
+				recordUserPrompt(provider, modelName);
+			}
+		}
+	} catch {
+		// Stats must never fail the plain loop.
+	}
+
+	try {
+		return await runPlainConversationBody(options, initialMessages, model);
+	} finally {
+		// Debounced stats writes use an unref'd timer — flush before exit so
+		// --plain / headless runs don't lose the ledger.
+		try {
+			const {finalizeStatsForExit} = await import('@/stats/record');
+			finalizeStatsForExit();
+		} catch {
+			// Stats must never fail the plain loop.
+		}
+	}
+}
+
+async function runPlainConversationBody(
+	options: RunPlainConversationOptions,
+	initialMessages: Message[],
+	model: string | undefined,
+): Promise<PlainConversationOutcome> {
 	const {
 		client,
 		toolManager,
 		systemMessage,
-		initialMessages,
 		developmentMode,
 		nonInteractiveAlwaysAllow,
 		abortSignal,
 		tune,
-		model,
 		outputFormat = 'text',
 		sessionId,
 		workingDirectory = process.cwd(),
@@ -143,6 +180,8 @@ export async function runPlainConversation(
 	let accumulatedInputTokens = 0;
 	let accumulatedOutputTokens = 0;
 	let accumulatedTotalTokens = 0;
+	let accumulatedCacheReadTokens = 0;
+	let accumulatedCacheWriteTokens = 0;
 
 	const getUsage = (): PlainConversationUsage | undefined => {
 		if (!hasReportedUsage) return undefined;
@@ -150,6 +189,12 @@ export async function runPlainConversation(
 			inputTokens: accumulatedInputTokens,
 			outputTokens: accumulatedOutputTokens,
 			totalTokens: accumulatedTotalTokens,
+			...(accumulatedCacheReadTokens > 0
+				? {cacheReadTokens: accumulatedCacheReadTokens}
+				: {}),
+			...(accumulatedCacheWriteTokens > 0
+				? {cacheWriteTokens: accumulatedCacheWriteTokens}
+				: {}),
 		};
 	};
 
@@ -298,14 +343,45 @@ export async function runPlainConversation(
 				: null;
 		const totalTokens =
 			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+		const cacheReadTokens =
+			typeof turnUsage?.cacheReadTokens === 'number'
+				? turnUsage.cacheReadTokens
+				: null;
+		const cacheWriteTokens =
+			typeof turnUsage?.cacheWriteTokens === 'number'
+				? turnUsage.cacheWriteTokens
+				: null;
 
-		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+		if (
+			inputTokens !== null ||
+			outputTokens !== null ||
+			totalTokens !== null ||
+			cacheReadTokens !== null ||
+			cacheWriteTokens !== null
+		) {
 			hasReportedUsage = true;
 			accumulatedInputTokens += inputTokens ?? 0;
 			accumulatedOutputTokens += outputTokens ?? 0;
+			accumulatedCacheReadTokens += cacheReadTokens ?? 0;
+			accumulatedCacheWriteTokens += cacheWriteTokens ?? 0;
 			// Fall back to input+output so a missing total never reads as zero spend.
-			accumulatedTotalTokens +=
-				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			const turnTotal = totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			accumulatedTotalTokens += turnTotal;
+			// Lifetime /stats (headless / --plain paths) with estimated cost.
+			try {
+				const {recordApiCallForStats} = await import('@/stats/record');
+				await recordApiCallForStats({
+					provider: client.getProviderConfig().name,
+					model: options.model ?? client.getCurrentModel(),
+					inputTokens: inputTokens ?? undefined,
+					outputTokens: outputTokens ?? undefined,
+					totalTokens: turnTotal,
+					cacheReadTokens: cacheReadTokens ?? undefined,
+					cacheWriteTokens: cacheWriteTokens ?? undefined,
+				});
+			} catch {
+				// Stats must never fail the plain loop.
+			}
 		}
 
 		if (!isJson && (reasoningPrinted || contentStarted)) {
@@ -411,6 +487,37 @@ export async function runPlainConversation(
 					reasoning: streamedReasoning || undefined,
 				},
 			];
+		}
+		// Gate on the same view the next turn will send, so the threshold is not
+		// measured against rows the cap already drops from the request.
+		const compactGateInput = capMessagesForModel(messages, maxMessages);
+		const compacted = await maybeAutoCompact(
+			compactGateInput,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{
+				signal: abortSignal,
+				onNotify: isJson
+					? undefined
+					: message => writeStatus(message.split('\n')[0] ?? message),
+			},
+		);
+		// Only adopt the result when compaction actually ran — otherwise
+		// maybeAutoCompact returns the capped view it was handed, and taking it
+		// would discard history the cap only meant to hide from one request.
+		if (compacted !== compactGateInput) {
+			messages = compacted;
+		}
+		if (abortSignal.aborted) {
+			return {
+				kind: 'error',
+				message: 'Aborted',
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				usage: getUsage(),
+			};
 		}
 
 		if (errorResults.length > 0) {
@@ -519,7 +626,7 @@ export async function runPlainConversation(
 
 		if (toolsNeedingApproval.length > 0) {
 			return {
-				kind: 'tool-approval-required',
+				kind: TOOL_APPROVAL_REQUIRED_KIND,
 				toolNames: toolsNeedingApproval,
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,

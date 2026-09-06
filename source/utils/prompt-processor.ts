@@ -5,6 +5,7 @@ import {
 } from '@/constants';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
+import {findPlaceholderOccurrences} from './placeholders';
 
 /**
  * Cached subagent descriptions for injection into the system prompt.
@@ -43,69 +44,66 @@ export function getSubagentDescriptions(): string {
 export function assemblePrompt(inputState: InputState): string {
 	let assembledPrompt = inputState.displayValue;
 
-	// Replace each placeholder with its full content
-	Object.entries(inputState.placeholderContent).forEach(
-		([placeholderId, placeholderContent]) => {
-			// Each placeholder type can have its own replacement logic
-			let replacementContent = placeholderContent.content || '';
-
-			// Type-specific content assembly (extensible for future types)
-			switch (placeholderContent.type) {
-				case PlaceholderType.PASTE: {
-					// For paste, use content directly
-					replacementContent = placeholderContent.content;
-					break;
-				}
-				case PlaceholderType.FILE: {
-					// Format file content with header for LLM context. Large files
-					// inline only a head preview plus a read_file hint so a single
-					// @-mention can't flood the conversation; small files inline whole.
-					const fileName =
-						placeholderContent.filePath.split('/').pop() ||
-						placeholderContent.filePath;
-					const lines = placeholderContent.content.split('\n');
-					const totalLines = lines.length;
-
-					if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
-						const previewBody = lines
-							.slice(0, FILE_MENTION_PREVIEW_LINES)
-							.join('\n');
-						const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
-						const relPath = isAbsolute(placeholderContent.filePath)
-							? relative(process.cwd(), placeholderContent.filePath)
-							: placeholderContent.filePath;
-						const header = `=== File: ${fileName} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
-						const footer = `=== ${remaining} more lines, use read_file('${relPath}') for the full file ===`;
-						replacementContent = `${header}\n${previewBody}\n${footer}`;
-					} else {
-						const header = `=== File: ${fileName} ===`;
-						const footer = '='.repeat(header.length);
-						replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
-					}
-					break;
-				}
-				default: {
-					placeholderContent satisfies never;
-					replacementContent = '';
-					break;
-				}
-			}
-
-			// Use the displayText to find and replace the placeholder
-			const displayText = placeholderContent.displayText;
-			if (displayText) {
-				assembledPrompt = assembledPrompt.replace(
-					displayText,
-					replacementContent,
-				);
-			} else {
-				// Fallback for legacy paste format
-				const placeholderPattern = `\\[Paste #${placeholderId}: \\d+ chars\\]`;
-				const regex = new RegExp(placeholderPattern, 'g');
-				assembledPrompt = assembledPrompt.replace(regex, replacementContent);
-			}
-		},
+	const occurrences = findPlaceholderOccurrences(
+		assembledPrompt,
+		inputState.placeholderContent,
 	);
+
+	// Walk backwards so each splice leaves the earlier offsets valid.
+	for (let i = occurrences.length - 1; i >= 0; i--) {
+		const {id, start, end} = occurrences[i];
+		const placeholderContent = inputState.placeholderContent[id];
+
+		// Each placeholder type can have its own replacement logic
+		let replacementContent = placeholderContent.content || '';
+
+		// Type-specific content assembly (extensible for future types)
+		switch (placeholderContent.type) {
+			case PlaceholderType.PASTE: {
+				// For paste, use content directly
+				replacementContent = placeholderContent.content;
+				break;
+			}
+			case PlaceholderType.FILE: {
+				// Format file content with header for LLM context. Large files
+				// inline only a head preview plus a read_file hint so a single
+				// @-mention can't flood the conversation; small files inline whole.
+				const fileName =
+					placeholderContent.filePath.split('/').pop() ||
+					placeholderContent.filePath;
+				const lines = placeholderContent.content.split('\n');
+				const totalLines = lines.length;
+
+				if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
+					const previewBody = lines
+						.slice(0, FILE_MENTION_PREVIEW_LINES)
+						.join('\n');
+					const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
+					const relPath = isAbsolute(placeholderContent.filePath)
+						? relative(process.cwd(), placeholderContent.filePath)
+						: placeholderContent.filePath;
+					const header = `=== File: ${fileName} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
+					const footer = `=== ${remaining} more lines, use read_file('${relPath}') for the full file ===`;
+					replacementContent = `${header}\n${previewBody}\n${footer}`;
+				} else {
+					const header = `=== File: ${fileName} ===`;
+					const footer = '='.repeat(header.length);
+					replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
+				}
+				break;
+			}
+			default: {
+				placeholderContent satisfies never;
+				replacementContent = '';
+				break;
+			}
+		}
+
+		assembledPrompt =
+			assembledPrompt.slice(0, start) +
+			replacementContent +
+			assembledPrompt.slice(end);
+	}
 
 	return assembledPrompt;
 }

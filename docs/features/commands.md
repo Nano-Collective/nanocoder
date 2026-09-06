@@ -13,7 +13,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists, or `/init --lean` to skip merging `CLAUDE.md` content into the generated AGENTS.md |
+| `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
 | `/model` | Switch between available models from any configured provider |
@@ -35,6 +35,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
+| `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`; `←`/`→` to switch, `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
 | `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
@@ -46,6 +47,8 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
+| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber will remove from your prompts |
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |

@@ -11,6 +11,7 @@ import {
 	getPasteThreshold,
 	getPrivacyPreference,
 	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
 	updateProfessionalTone,
@@ -38,6 +39,7 @@ import {
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
 	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
@@ -261,6 +263,15 @@ function buildRowsForTab(
 			const rows: SettingRow[] = [
 				{
 					kind: 'managed',
+					id: 'semantic-memory',
+					label: 'Semantic Memory',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
+					panel: 'semantic-memory',
+				},
+				{
+					kind: 'managed',
 					id: 'privacy',
 					label: 'Privacy',
 					value: getPrivacyPreference() ? 'on' : 'off',
@@ -408,6 +419,8 @@ function renderManagedPanel(
 			return <SettingsNotificationsPanel onBack={onBack} onCancel={onBack} />;
 		case 'display-settings':
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
+		case 'semantic-memory':
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':

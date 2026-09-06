@@ -29,9 +29,17 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {
+	beginSessionStartHooks,
+	runLifecycleHooks,
+	SESSION_END_HOOK_HANDLER,
+} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
-import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {
+	recordSubagentApiCallForStats,
+	SubagentExecutor,
+} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
@@ -395,7 +403,13 @@ export function useAppInitialization({
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
-				const executor = new SubagentExecutor(toolManager, client);
+				const executor = new SubagentExecutor(
+					toolManager,
+					client,
+					process.cwd(),
+					'normal',
+					recordSubagentApiCallForStats,
+				);
 				// Read the live development mode per tool call so subagents honor
 				// the current mode (and mid-run switches), matching the main loop.
 				if (developmentModeRef) {
@@ -594,6 +608,22 @@ export function useAppInitialization({
 			setCommandLoaderGetter(() => newCustomCommandLoader);
 
 			commandRegistry.registerLazy(lazyCommands);
+
+			// Lifecycle hooks: session-start output is buffered as context for the
+			// next prompt (so `git log -5` reaches the model without the user
+			// asking), and session-end runs through the shutdown manager at
+			// priority -5 — after the session autosave flush (-10), before the
+			// TUI teardown (0), while the process is still fully alive.
+			getShutdownManager().register({
+				name: SESSION_END_HOOK_HANDLER,
+				priority: -5,
+				handler: async () => {
+					await runLifecycleHooks('session-end');
+				},
+			});
+			// Not awaited: a slow session-start hook must not hold up the UI. The
+			// first prompt waits for it instead, when it drains the buffer.
+			void beginSessionStartHooks();
 
 			// === CRITICAL PATH ===
 			// LLM client + subagents are independent — run in parallel.
