@@ -306,19 +306,12 @@ const readFileFormatter = async (
 		return <></>;
 	}
 
-	// `metadata_only` is the flag that selects the metadata response shape in
-	// executeReadFile, so it's the only correct signal here too. Boolean()
-	// matches executeReadFile's truthy `if (args.metadata_only)` rather than
-	// `=== true`: the XML tool-call fallback can hand this through as the
-	// string 'true', which is truthy but not strictly equal to true.
+	// The flag that selects the metadata response shape in executeReadFile.
+	// Boolean() rather than === true so the XML fallback's string 'true'
+	// matches, and set before the read so a directory still renders the
+	// metadata layout.
 	const isMetadataOnly = Boolean(args.metadata_only);
 
-	// Set isMetadataOnly from the args flag up front, not derived from what
-	// follows: for a directory or symlink, executeReadFile's metadata branch
-	// never calls getCachedFileContent, so the same call below throws
-	// (EISDIR) and lands in the catch. Seeding the default fileInfo with the
-	// real flag means that still renders the metadata layout, just with
-	// totalLines left at 0, instead of falling back to the content layout.
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
@@ -347,9 +340,6 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			// Tokens are only rendered for content reads (see
-			// ReadFileFormatter below), so skip calculating them for a
-			// metadata-only read - the value would never be shown.
 			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
 
 			fileInfo = {
@@ -363,9 +353,7 @@ const readFileFormatter = async (
 			};
 		}
 	} catch {
-		// File doesn't exist, or is a directory/symlink that the metadata
-		// branch handles without reading content - keep the default
-		// fileInfo, which already carries the correct isMetadataOnly.
+		// File doesn't exist or can't be read - keep default fileInfo
 	}
 
 	return <ReadFileFormatter args={args} fileInfo={fileInfo} />;

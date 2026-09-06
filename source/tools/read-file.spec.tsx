@@ -193,11 +193,6 @@ test('ReadFileFormatter shows the metadata layout for a directory', async t => {
 			return;
 		}
 
-		// executeReadFile's metadata branch never calls getCachedFileContent
-		// for a directory (only for `type === 'file'`), and the formatter's
-		// own getCachedFileContent(testDir) call throws (EISDIR) the same
-		// way. isMetadataOnly has to come from args up front, not from that
-		// call succeeding, or this falls back to the content layout.
 		const element = await formatter(
 			{path: testDir, metadata_only: true},
 			'File Information for "test-metadata-only-dir-temp"\n==================================================\n\nType: directory\nSize: 64 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nNote: Use list_directory tool to see directory contents\n\n[Use read_file to view file contents]\n',
@@ -227,11 +222,6 @@ test('ReadFileFormatter treats a truthy metadata_only string as metadata-only', 
 			return;
 		}
 
-		// The XML tool-call fallback (xml-parser.ts) can hand metadata_only
-		// through as the string 'true' rather than a boolean: truthy, but not
-		// `=== true`. isMetadataOnly keys off Boolean() precisely so this
-		// still renders the metadata layout instead of silently reverting to
-		// the content one.
 		const element = await formatter(
 			{
 				path: join(testDir, 'test.ts'),
