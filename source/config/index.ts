@@ -436,6 +436,7 @@ function loadSandboxConfig(): boolean {
 				logWarning(
 					`nanocoder.sandbox must be true or false (got ${JSON.stringify(value)}); treating as off`,
 				);
+				return false;
 			}
 			return null;
 		}) ?? false
