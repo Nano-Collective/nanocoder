@@ -1,8 +1,8 @@
-import { writeFileSync, rmSync, existsSync, mkdirSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import fs, {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import test from 'ava';
-import { CustomCommandLoader } from './loader';
+import {CustomCommandLoader} from './loader';
 
 // Helper to create a valid custom command file
 function createCommandFile(path: string, content: string) {
@@ -598,3 +598,77 @@ test('CustomCommandLoader - commands have lastModified set', t => {
 	t.true(command!.lastModified instanceof Date);
 });
 
+test.serial(
+	'CustomCommandLoader - continues loading commands when a subdirectory throws permission error',
+	t => {
+		const testDir = createTestDir('permission-error');
+		t.teardown(() => cleanupTestDir(testDir));
+
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const unreadableSubDir = join(commandsDir, 'unreadable');
+		mkdirSync(unreadableSubDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'root-cmd.md'), 'Root command');
+		createCommandFile(join(unreadableSubDir, 'hidden.md'), 'Hidden command');
+
+		const originalReaddirSync = fs.readdirSync;
+		(fs as any).readdirSync = ((path: any, options: any) => {
+			if (String(path).includes('unreadable')) {
+				const err: any = new Error('EACCES: permission denied, scandir');
+				err.code = 'EACCES';
+				throw err;
+			}
+			return originalReaddirSync(path, options);
+		}) as typeof fs.readdirSync;
+
+		t.teardown(() => {
+			fs.readdirSync = originalReaddirSync;
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'root-cmd');
+	},
+);
+
+test.serial(
+	'CustomCommandLoader - continues scanning when statSync throws on an unreadable entry',
+	t => {
+		const testDir = createTestDir('stat-error');
+		t.teardown(() => cleanupTestDir(testDir));
+
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		mkdirSync(commandsDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'valid-cmd.md'), 'Valid command');
+		writeFileSync(
+			join(commandsDir, 'corrupted.md'),
+			'Corrupted file',
+			'utf-8',
+		);
+
+		const originalStatSync = fs.statSync;
+		(fs as any).statSync = ((path: any, options: any) => {
+			if (String(path).includes('corrupted')) {
+				const err: any = new Error('EACCES: permission denied, stat');
+				err.code = 'EACCES';
+				throw err;
+			}
+			return originalStatSync(path, options);
+		}) as typeof fs.statSync;
+
+		t.teardown(() => {
+			fs.statSync = originalStatSync;
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'valid-cmd');
+	},
+);

@@ -1,9 +1,9 @@
-import {existsSync, readdirSync, statSync} from 'fs';
+import fs, {existsSync} from 'fs';
 import {basename, join} from 'path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;
@@ -59,12 +59,24 @@ export class CustomCommandLoader {
 		namespace?: string,
 		source?: 'personal' | 'project',
 	): void {
-		const entries = readdirSync(dir);
+		let entries: string[];
+		try {
+			entries = fs.readdirSync(dir);
+		} catch (error) {
+			logWarning(`Failed to read command directory ${dir}: ${String(error)}`);
+			return;
+		}
 
 		for (const entry of entries) {
 			if (!isSafeEntry(entry)) continue;
 			const fullPath = join(dir, entry); // nosemgrep
-			const stat = statSync(fullPath);
+			let stat;
+			try {
+				stat = fs.statSync(fullPath);
+			} catch (error) {
+				logWarning(`Failed to inspect file ${fullPath}: ${String(error)}`);
+				continue;
+			}
 
 			if (stat.isDirectory()) {
 				// Check if this is a directory-as-command pattern:
@@ -108,7 +120,7 @@ export class CustomCommandLoader {
 			// Get file modification time
 			let lastModified: Date | undefined;
 			try {
-				const st = statSync(filePath);
+				const st = fs.statSync(filePath);
 				lastModified = st.mtime;
 			} catch {
 				// ignore
@@ -156,7 +168,16 @@ export class CustomCommandLoader {
 			return [];
 		}
 
-		const entries = readdirSync(resourcesDir);
+		let entries: string[];
+		try {
+			entries = fs.readdirSync(resourcesDir);
+		} catch (error) {
+			logWarning(
+				`Failed to read resources directory ${resourcesDir}: ${String(error)}`,
+			);
+			return [];
+		}
+
 		const resources: CommandResource[] = [];
 
 		for (const entry of entries) {
@@ -164,7 +185,7 @@ export class CustomCommandLoader {
 			const resourcePath = join(resourcesDir, entry); // nosemgrep
 			let st: {mode: number; isFile: () => boolean};
 			try {
-				st = statSync(resourcePath);
+				st = fs.statSync(resourcePath);
 			} catch {
 				continue;
 			}
