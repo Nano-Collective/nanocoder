@@ -123,14 +123,12 @@ async function assertJail(t: ExecutionContext, label: string) {
 		const mk = await executor.execute('mktemp').promise;
 		t.is(mk.exitCode, 0, `${label} mktemp: ${mk.stderr || mk.error || ''}`);
 
-		const tmpHard = join('/tmp', `nc-sbx-${Date.now()}`);
-		try {
-			const hard = await executor.execute(`echo hard > '${tmpHard}'`).promise;
-			t.is(hard.exitCode, 0, `${label} /tmp: ${hard.stderr || hard.error || ''}`);
-			t.is(readFileSync(tmpHard, 'utf8').trim(), 'hard');
-		} finally {
-			if (existsSync(tmpHard)) rmSync(tmpHard);
-		}
+		// Linux jails /tmp as tmpfs, so the host cannot see the file; cat it inside.
+		const hard = await executor.execute(
+			'echo hard > /tmp/nc-sbx-probe && cat /tmp/nc-sbx-probe',
+		).promise;
+		t.is(hard.exitCode, 0, `${label} /tmp: ${hard.stderr || hard.error || ''}`);
+		t.true(hard.fullOutput.includes('hard'));
 
 		const outside = await executor.execute(`echo no > '${probe}'`).promise;
 		t.false(existsSync(probe), 'sandbox must not write into $HOME');
