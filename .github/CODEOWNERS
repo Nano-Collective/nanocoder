@@ -1,6 +1,13 @@
-# Ownership is held by the team, not by individuals: adding a maintainer is a
-# team membership change rather than a pull request against seven files.
+# @Avtrkrb was removed here: the account was moved to `triage`, and a code owner
+# without write access cannot satisfy a code-owner review requirement. GitHub's
+# own CODEOWNERS validator was reporting it as an unknown owner.
 #
-# @Avtrkrb was removed here: the account was moved to `triage`, and a code
-# owner without write access cannot satisfy a code-owner review requirement.
-* @Nano-Collective/core-team
+# Individuals rather than @Nano-Collective/core-team, deliberately:
+# .github/workflows/stale-prs.yml parses this file for individual logins and
+# explicitly skips team entries (anything containing "/"). A team-only owner line
+# would leave it with zero owners, and it returns early in that case — silently
+# disabling stale-PR escalation.
+#
+# Move to the team once that workflow resolves team membership, or once it is
+# centralised into Nano-Collective/.github (step 9).
+* @will-lamerton @akramcodez
