@@ -214,6 +214,8 @@ async function main(): Promise<void> {
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
 
+	const {parseReviewCliArgs} = await import('./commands/review-cli');
+
 	const vscodeMode = args.includes('--vscode');
 
 	// Extract VS Code port if specified
@@ -386,52 +388,10 @@ async function main(): Promise<void> {
 	// `nanocoder run /review <target>`. The target is the branch or PR number
 	// to review. Flags between `review` and the target are filtered the same
 	// way as `run`.
-	const isReviewCommand = args[0] === 'review';
+	const {isReviewCommand, prompt: reviewPrompt} = parseReviewCliArgs(args);
 	if (isReviewCommand) {
-		const afterReviewArgs = args.slice(1);
-		const reviewArgs: string[] = [];
-		for (let i = 0; i < afterReviewArgs.length; i++) {
-			const arg = afterReviewArgs[i];
-			if (
-				arg === '--vscode' ||
-				arg === '--json' ||
-				arg === '--trust-directory' ||
-				arg === '--plain' ||
-				arg === '--no-plain' ||
-				arg === '--no-alt-screen' ||
-				arg === '--alt-screen'
-			) {
-				continue;
-			} else if (
-				arg === '--vscode-port' ||
-				arg === '--provider' ||
-				arg === '--model' ||
-				arg === '--context-max' ||
-				arg === '--output-format'
-			) {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--mode') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--mode=')) {
-				continue;
-			} else if (arg.startsWith('--output-format=')) {
-				continue;
-			} else {
-				reviewArgs.push(arg);
-			}
-		}
-		if (reviewArgs.length === 0) {
-			// No target provided — review current branch against default.
-			// This matches the /review behavior in the interactive TUI.
-			nonInteractivePrompt = '/review';
-			nonInteractiveMode = true;
-		} else {
-			// Inject as a slash command prompt.
-			nonInteractivePrompt = `/review ${reviewArgs[0]}`;
-			nonInteractiveMode = true;
-		}
+		nonInteractivePrompt = reviewPrompt;
+		nonInteractiveMode = true;
 	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
