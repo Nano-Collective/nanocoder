@@ -197,6 +197,52 @@ jobs:
           gh label create "agent:clean"      --color "0e8a16" --description "nc-review found no blocking issues" --force
           gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking issues"    --force
 
+      # Nanocoder resolves providers from `agents.config.json` in the working
+      # directory first. This is written at run time rather than committed: a
+      # checked-in config at the repo root would override every contributor's
+      # personal Nanocoder setup whenever they run it inside this repo.
+      #
+      # The API key is NOT interpolated here. Nanocoder substitutes `${VAR}`
+      # from the environment when it loads the config, so the secret stays out
+      # of the file and out of any log that echoes it.
+      #
+      # disabledTools is a security control, not tidiness. The PR diff is
+      # untrusted text written by the contributor, and it is fed to a model
+      # running in `yolo` mode with MINIMAX_API_KEY in the environment. A
+      # prompt injection in a diff that could reach `execute_bash` or
+      # `fetch_url` would be able to exfiltrate that key. The review task needs
+      # to read files and write one JSON verdict — nothing more.
+      - name: Configure Nanocoder provider
+        run: |
+          set -euo pipefail
+          cat > agents.config.json <<'JSON'
+          {
+            "nanocoder": {
+              "disabledTools": [
+                "execute_bash",
+                "fetch_url",
+                "agent",
+                "ask_user",
+                "string_replace",
+                "diff_edit"
+              ],
+              "providers": [
+                {
+                  "name": "MiniMax Coding",
+                  "sdkProvider": "anthropic",
+                  "baseUrl": "https://api.minimax.io/anthropic/v1",
+                  "apiKey": "${MINIMAX_API_KEY}",
+                  "models": ["minimax-m3"]
+                }
+              ]
+            }
+          }
+          JSON
+          # Assert the key was not baked into the file.
+          grep -q '\${MINIMAX_API_KEY}' agents.config.json \
+            || { echo "::error::config must reference the key by name, not value"; exit 1; }
+          echo "provider configured; tools restricted to read + write_file"
+
       - name: Run nc-review
         id: agent
         env:
