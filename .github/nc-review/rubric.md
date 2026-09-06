@@ -273,4 +273,14 @@ before or after, no markdown fences. Schema:
   `warranted`, `duplicate`, `scope`, `changeset`, `contributing`.
 - `file` / `line` — where the finding is. Omit both if it is not tied to a
   specific location. Never guess a line number; omit it instead.
+- `detail` — Markdown, rendered as its own block under a heading. Line breaks
+  and fenced code blocks are preserved, so quote the offending lines when that
+  makes the point faster than describing them:
+
+  ```
+  "detail": "The captured reference is never used:\n\n```ts\nconst realRename = rename;\nrealRename; // silences unused-locals\n```\n\nSo the failure path is never exercised."
+  ```
+
+  Lead with what is wrong, then why it matters, then what would fix it. Two or
+  three sentences is usually right; go longer only when quoting code earns it.
 - `duplicate_of` — PR number as an integer, or `null`. Only when confident.

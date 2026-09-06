@@ -483,14 +483,25 @@ jobs:
               echo
             fi
             if [ "$(jq '.findings | length' "$V")" -gt 0 ]; then
-              echo "| | Area | Where | Finding |"
-              echo "|---|---|---|---|"
-              jq -r '.findings[] |
-                "| \(if .severity == "blocking" then "🔴" elif .severity == "important" then "🟠" else "⚪" end)"
-                + " | `\(.area)`"
-                + " | \(if .file then "`\(.file)\(if .line then ":\(.line)" else "" end)`" else "—" end)"
-                + " | \(.detail | gsub("\n"; " ")) |"' "$V"
-              echo
+              # One block per finding rather than a table. Findings run to a
+              # paragraph or more, and a table cell forces all of that onto one
+              # line with newlines collapsed — unreadable at any width, and it
+              # squeezes the text into a narrow column. Blocks also let the
+              # detail keep its own line breaks and code formatting.
+              jq -r '
+                def icon: if . == "blocking" then "🔴"
+                          elif . == "important" then "🟠"
+                          else "⚪" end;
+                def rank: if . == "blocking" then 0
+                          elif . == "important" then 1
+                          else 2 end;
+                .findings
+                | sort_by(.severity | rank)
+                | .[]
+                | "**\(.severity | icon) \(.severity) · `\(.area)`"
+                  + (if .file then " · `\(.file)\(if .line then ":\(.line)" else "" end)`" else "" end)
+                  + "**\n\n\(.detail)\n"
+              ' "$V"
             fi
             echo "---"
             echo
