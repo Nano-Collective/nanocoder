@@ -13,6 +13,7 @@ import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {SuccessMessage} from '@/components/message-box';
+import ProcessingIndicator from '@/components/processing-indicator';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
@@ -703,29 +704,32 @@ export default function App({
 
 	const liveComponent =
 		appState.liveComponent ??
-		(chatHandler.isGenerating &&
-		(chatHandler.streamingContent || chatHandler.streamingReasoning) ? (
-			<>
-				{chatHandler.streamingReasoning && !chatHandler.streamingContent && (
-					<StreamingReasoning
-						reasoning={chatHandler.streamingReasoning}
-						expand={appState.reasoningExpanded}
-					/>
-				)}
-				{/* Reasoning stream is complete when text streaming begins */}
-				{chatHandler.streamingReasoning && chatHandler.streamingContent && (
-					<AssistantReasoning
-						reasoning={chatHandler.streamingReasoning}
-						expand={appState.reasoningExpanded}
-					/>
-				)}
-				{chatHandler.streamingContent && (
-					<StreamingMessage
-						message={chatHandler.streamingContent}
-						model={appState.currentModel}
-					/>
-				)}
-			</>
+		(chatHandler.isGenerating ? (
+			chatHandler.streamingContent || chatHandler.streamingReasoning ? (
+				<>
+					{chatHandler.streamingReasoning && !chatHandler.streamingContent && (
+						<StreamingReasoning
+							reasoning={chatHandler.streamingReasoning}
+							expand={appState.reasoningExpanded}
+						/>
+					)}
+					{/* Reasoning stream is complete when text streaming begins */}
+					{chatHandler.streamingReasoning && chatHandler.streamingContent && (
+						<AssistantReasoning
+							reasoning={chatHandler.streamingReasoning}
+							expand={appState.reasoningExpanded}
+						/>
+					)}
+					{chatHandler.streamingContent && (
+						<StreamingMessage
+							message={chatHandler.streamingContent}
+							model={appState.currentModel}
+						/>
+					)}
+				</>
+			) : (
+				<ProcessingIndicator model={appState.currentModel} />
+			)
 		) : null);
 
 	// Non-interactive render tree — minimal transcript + one status line,
