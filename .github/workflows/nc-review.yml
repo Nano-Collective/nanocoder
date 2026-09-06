@@ -132,8 +132,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/nc-review
-          OUT=/tmp/nc-review/context.md
+          # Nanocoder's file tools are sandboxed to the project directory, so
+          # anything the AGENT reads or writes must live inside the workspace.
+          # /tmp is fine for the intermediate files only this shell touches.
+          mkdir -p /tmp/nc-review .nc-review
+          OUT=.nc-review/context.md
 
           # Diffs can be enormous. Cap what we feed the model and say so
           # explicitly, so it does not silently review a fraction of a PR and
@@ -254,7 +257,11 @@ jobs:
           # a multi-KB diff through argv round-trips it via sh -c and pnpm's
           # escaping, which has corrupted backslash-heavy payloads in
           # contentforest before it reached the model.
-          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, and /tmp/nc-review/context.md for the pull request under review. Then write your verdict as a single JSON object to /tmp/nc-review/verdict.json, following the schema in the rubric exactly. Write nothing to stdout except a brief note that you have finished.'
+          # All paths are relative to the repo root, because Nanocoder's file
+          # tools refuse anything outside the project directory. An earlier
+          # version pointed at /tmp and the agent correctly refused to invent a
+          # verdict it could not substantiate.
+          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, and .nc-review/context.md for the pull request under review. Then write your verdict as a single JSON object to .nc-review/verdict.json, following the schema in the rubric exactly. All three paths are relative to the current project directory. Write nothing to stdout except a brief note that you have finished.'
 
           set +e
           nanocoder run "$PROMPT" \
@@ -273,7 +280,7 @@ jobs:
           AGENT_STATUS: ${{ steps.agent.outputs.agent_status }}
         run: |
           set -euo pipefail
-          V=/tmp/nc-review/verdict.json
+          V=.nc-review/verdict.json
 
           # A missing or malformed verdict is a failure of this workflow, not of
           # the contributor. Say so plainly and label nothing — a stale
