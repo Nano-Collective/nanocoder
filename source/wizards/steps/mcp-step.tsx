@@ -9,6 +9,7 @@ import {
 	MCP_TEMPLATES,
 	type McpServerConfig,
 	type McpTemplate,
+	resolveMcpTemplateId,
 } from '../templates/mcp-templates';
 import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
@@ -225,9 +226,16 @@ export function McpStep({
 		if (item.value === 'edit' && editingServerName !== null) {
 			const server = servers[editingServerName];
 			if (server) {
-				// Find matching template by server name or use custom
+				// Resolve the template that built this server. Prefer the stamped
+				// templateId / tags over the server name so a custom-named
+				// instance (e.g. `you-paid`) resolves back to its template
+				// instead of falling through to `custom`, whose buildConfig never
+				// writes headers and would silently drop a saved bearer token.
+				const templateId = resolveMcpTemplateId(server);
 				const template =
-					MCP_TEMPLATES.find(t => t.id === server.name) ||
+					(templateId
+						? MCP_TEMPLATES.find(t => t.id === templateId)
+						: undefined) ||
 					MCP_TEMPLATES.find(t => t.id === editingServerName) ||
 					MCP_TEMPLATES.find(t => t.id === 'custom');
 
@@ -259,9 +267,13 @@ export function McpStep({
 								.map(([key, value]) => `${key}=${value}`)
 								.join('\n');
 						} else if (field.name === 'apiKey') {
-							// Try to find the API key from env vars first, then fall
-							// back to a bearer Authorization header (remote templates
-							// like `you` and `github-remote` store the credential there).
+							// Try to find the API key from env vars first, then
+							// fall back to a bearer Authorization header. Only
+							// templates whose credential field is literally
+							// named `apiKey` and stored in headers take this
+							// path (today just `you`); `github-remote` uses a
+							// `githubToken` field, so it never hits this
+							// branch.
 							const apiKeyEntry = server.env
 								? Object.entries(server.env).find(
 										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),

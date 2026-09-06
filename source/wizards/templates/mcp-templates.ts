@@ -22,6 +22,11 @@ export interface McpServerConfig {
 	description?: string;
 	tags?: string[];
 	enabled?: boolean;
+	// Wizard bookkeeping: id of the template that built this server. Not
+	// consumed at runtime — it lets the edit flow resolve a server back to
+	// its template when the user renamed it via the serverName field, where
+	// name-based matching no longer works.
+	templateId?: string;
 }
 
 export interface McpTemplate {
@@ -332,6 +337,9 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				description: 'You.com web search, URL reading, and research MCP server',
 				tags: ['you', 'search', 'web', 'research', 'http'],
 				timeout: TIMEOUT_MCP_DEFAULT_MS,
+				// Stamp the origin template so the edit flow can resolve this
+				// server back to the `you` template even under a custom name.
+				templateId: 'you',
 			};
 			if (apiKey) {
 				config.headers = {Authorization: `Bearer ${apiKey}`};
@@ -536,3 +544,50 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'stdio', // Default to stdio, but can be http/websocket based on transport
 	},
 ];
+
+/**
+ * Resolve which wizard template a saved server came from, for the edit flow.
+ *
+ * Resolution order:
+ * 1. `templateId` — stamped by the wizard when the config is built. This is
+ *    the only signal that survives a custom `serverName` (e.g. `you-paid`),
+ *    since name-based matching misses and would fall through to `custom`,
+ *    whose buildConfig never writes headers — silently dropping the bearer
+ *    token.
+ * 2. `tags` — hand-edited files that kept them. A tag matches only if it
+ *    equals a real template id AND the template's transport agrees with the
+ *    saved server's; `github-remote` carries a `github` tag, but that id is
+ *    the stdio GitHub server, and resolving an http server to it would
+ *    rebuild the config with the wrong transport.
+ * 3. Server name equal to a template id — covers default names.
+ *
+ * Returns undefined when nothing matches, so callers can fall back to the
+ * `custom` template.
+ */
+export function resolveMcpTemplateId(
+	config: Pick<McpServerConfig, 'name' | 'tags' | 'transport'> & {
+		templateId?: string;
+	},
+): string | undefined {
+	const matches = (id: string) => {
+		const template = MCP_TEMPLATES.find(t => t.id === id);
+		return Boolean(template && template.id !== 'custom');
+	};
+	const transportCompatible = (id: string) => {
+		const template = MCP_TEMPLATES.find(t => t.id === id);
+		return Boolean(template && template.transportType === config.transport);
+	};
+	if (config.templateId && matches(config.templateId)) {
+		return config.templateId;
+	}
+	if (config.tags?.length) {
+		const tag = config.tags.find(
+			tag => matches(tag) && transportCompatible(tag),
+		);
+		if (tag) return tag;
+	}
+	if (matches(config.name) && transportCompatible(config.name)) {
+		return config.name;
+	}
+	return undefined;
+}
