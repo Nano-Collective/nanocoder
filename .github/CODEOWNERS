@@ -2,12 +2,9 @@
 # without write access cannot satisfy a code-owner review requirement. GitHub's
 # own CODEOWNERS validator was reporting it as an unknown owner.
 #
-# Individuals rather than @Nano-Collective/core-team, deliberately:
-# .github/workflows/stale-prs.yml parses this file for individual logins and
-# explicitly skips team entries (anything containing "/"). A team-only owner line
-# would leave it with zero owners, and it returns early in that case — silently
-# disabling stale-PR escalation.
-#
-# Move to the team once that workflow resolves team membership, or once it is
-# centralised into Nano-Collective/.github (step 9).
+# Moving to @Nano-Collective/core-team is no longer blocked by tooling:
+# .github/workflows/stale-prs.yml used to parse this file for individual logins
+# and skip team entries, so a team-only line silently disabled stale-PR
+# escalation. It now derives maintainer status from author_association instead
+# and does not read this file at all.
 * @will-lamerton @akramcodez
