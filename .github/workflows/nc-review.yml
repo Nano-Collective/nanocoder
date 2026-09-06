@@ -108,9 +108,18 @@ jobs:
           esac
 
       # No `ref:` — this is the BASE branch. See the security note above.
+      #
+      # persist-credentials: false matters here. The default writes the
+      # GITHUB_TOKEN into .git/config as an http.extraheader, which would make
+      # the token reachable by anything operating on the repo — including a
+      # model driving git tooling with an untrusted diff in its context. Nothing
+      # downstream needs the stored credential: the gh calls carry GH_TOKEN in
+      # their own env.
       - name: Checkout base repository
         # pin: actions/checkout@v4.3.1
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
 
       # pin: pnpm/action-setup@v4
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
@@ -167,11 +176,49 @@ jobs:
             | jq --argjson me "$PR" 'map(select(.number != $me))' \
             > /tmp/nc-review/open-prs.json
 
+          # Issues this PR claims to close, with their full bodies — the agent
+          # cannot judge whether the issue was actually addressed without them.
+          # Only GraphQL exposes closingIssuesReferences; `gh pr view --json`
+          # does not have the field.
+          OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
+          gh api graphql -f query="
+          {
+            repository(owner: \"$OWNER\", name: \"$NAME\") {
+              pullRequest(number: $PR) {
+                closingIssuesReferences(first: 10) {
+                  nodes { number title state body labels(first: 10) { nodes { name } } }
+                }
+              }
+            }
+          }" --jq '.data.repository.pullRequest.closingIssuesReferences.nodes' \
+            > /tmp/nc-review/issues.json 2>/dev/null || echo '[]' > /tmp/nc-review/issues.json
+          [ -s /tmp/nc-review/issues.json ] || echo '[]' > /tmp/nc-review/issues.json
+          N_ISSUES=$(jq 'length' /tmp/nc-review/issues.json 2>/dev/null || echo 0)
+          echo "linked issues: $N_ISSUES"
+
           {
             echo "# Pull request under review"
             echo
             echo "Repository: $REPO"
             echo "PR number: #$PR"
+            echo
+            echo "## How to read this — important"
+            echo
+            echo "The working directory is checked out at the **base** commit, NOT at this"
+            echo "pull request. That means:"
+            echo
+            echo "- Files this PR **adds** do not exist on disk. Do not go looking for them,"
+            echo "  and do not treat their absence as a finding. The changeset file is the"
+            echo "  usual one people trip on."
+            echo "- Files this PR **modifies** are on disk in their **pre-change** form."
+            echo "- **The diff below is the authoritative record of what this PR changes.**"
+            echo "  Read it for the change itself; read files on disk only for surrounding"
+            echo "  context — the function a hunk sits in, its callers, the types it uses."
+            echo
+            echo "You have no git tooling and no shell. You do not need them: the diff, the"
+            echo "changed-file list and the open-PR list are all supplied below. If something"
+            echo "is genuinely not determinable from what is here, say so in your summary"
+            echo "rather than guessing or hunting for it."
             echo
             echo "## Metadata"
             echo '```json'
@@ -182,6 +229,22 @@ jobs:
             echo "## Description as written by the author"
             echo
             jq -r '.body // "(no description provided)"' /tmp/nc-review/pr.json
+            echo
+            echo "## Linked issue(s) — what this PR claims to close"
+            echo
+            if [ "$N_ISSUES" -eq 0 ]; then
+              echo "**This pull request closes no issue.** It may still be warranted —"
+              echo "a typo fix or a small obvious improvement does not need one — but you"
+              echo "should judge whether the change is justified on its own terms, and"
+              echo "whether CONTRIBUTING's guidance to discuss first applies given its size."
+            else
+              echo "Judge whether the diff actually resolves what is described below."
+              echo "A PR that says it closes an issue and only partly does is a problem:"
+              echo "merging it closes the issue and the remainder is silently lost."
+              echo
+              jq -r '.[] | "### Issue #\(.number) — \(.title)\n\nState: \(.state)\nLabels: \([.labels.nodes[].name] | join(", "))\n\n\(.body // "(no body)")\n"' \
+                /tmp/nc-review/issues.json
+            fi
             echo
             echo "## Other open pull requests (duplicate-detection corpus)"
             echo '```json'
@@ -203,8 +266,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh label create "agent:clean"      --color "0e8a16" --description "nc-review found no blocking issues" --force
-          gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking issues"    --force
+          gh label create "agent:clean"      --color "0e8a16" --description "nc-review had nothing to raise"          --force
+          gh label create "agent:comments"   --color "fbca04" --description "nc-review left non-blocking findings"    --force
+          gh label create "agent:needs-work" --color "d93f0b" --description "nc-review found blocking findings"       --force
 
       # Nanocoder resolves providers from `agents.config.json` in the working
       # directory first. This is written at run time rather than committed: a
@@ -217,10 +281,28 @@ jobs:
       #
       # disabledTools is a security control, not tidiness. The PR diff is
       # untrusted text written by the contributor, and it is fed to a model
-      # running in `yolo` mode with MINIMAX_API_KEY in the environment. A
-      # prompt injection in a diff that could reach `execute_bash` or
-      # `fetch_url` would be able to exfiltrate that key. The review task needs
-      # to read files and write one JSON verdict — nothing more.
+      # running in `yolo` mode. Treat the tool list as an allowlist expressed by
+      # subtraction: the review task needs to READ files and write ONE JSON
+      # verdict. Everything else is off.
+      #
+      #   execute_bash, fetch_url   exfiltration paths for MINIMAX_API_KEY
+      #   git_push, git_commit,
+      #   git_add, git_reset, ...   repository mutation. These are the reason
+      #                             persist-credentials is false above: with the
+      #                             default checkout the token sits in
+      #                             .git/config and git_push would carry it.
+      #   string_replace, diff_edit,
+      #   file_op                   the reviewer has no business editing code
+      #   agent                     subagent spawning, unnecessary here
+      #   ask_user                  would hang a CI run
+      #   git_diff, git_log,
+      #   git_status, git_pr        redundant — the diff and PR metadata are
+      #                             supplied in context.md, and reaching for
+      #                             these sent the model into a repeated-call
+      #                             loop that tripped maxRepeatedToolCalls.
+      #
+      # Remaining: read_file, write_file, find_files, list_directory,
+      # search_file_contents.
       - name: Configure Nanocoder provider
         run: |
           set -euo pipefail
@@ -233,7 +315,21 @@ jobs:
                 "agent",
                 "ask_user",
                 "string_replace",
-                "diff_edit"
+                "diff_edit",
+                "file_op",
+                "write_plan",
+                "write_walkthrough",
+                "git_add",
+                "git_branch",
+                "git_commit",
+                "git_diff",
+                "git_log",
+                "git_pr",
+                "git_pull",
+                "git_push",
+                "git_reset",
+                "git_stash",
+                "git_status"
               ],
               "providers": [
                 {
@@ -267,15 +363,51 @@ jobs:
           # tools refuse anything outside the project directory. An earlier
           # version pointed at /tmp and the agent correctly refused to invent a
           # verdict it could not substantiate.
-          PROMPT='Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read. Then write your verdict as a single JSON object to .nc-review/verdict.json, following the schema in the rubric exactly. All paths are relative to the current project directory. Write nothing to stdout except a brief note that you have finished.'
+          # The instruction to write the file is LAST and stated as the whole
+          # deliverable. An earlier version buried it mid-prompt and the model
+          # narrated a long, genuinely good analysis to stdout, then stopped
+          # without ever calling write_file — it treated the chat as the output.
+          PROMPT='You are reviewing a pull request. Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. All paths are relative to the current project directory.
+
+          This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read.
+
+          YOUR ONLY DELIVERABLE IS THE FILE .nc-review/verdict.json — write it with write_file, following the schema in the rubric exactly.
+
+          Anything you write in chat is discarded and never reaches a human. Only the JSON file is read. Do not narrate your analysis; put your conclusions in the JSON. Keep your reasoning brief and spend your effort on the file.
+
+          You are not finished until write_file has succeeded on .nc-review/verdict.json. If you have analysed the pull request but not yet written that file, write it now.'
 
           set +e
           nanocoder run "$PROMPT" \
             --mode yolo \
             --model minimax-m3 \
             --trust-directory
-          echo "agent_status=$?" >> "$GITHUB_OUTPUT"
+          STATUS=$?
           set -e
+
+          # One retry, and only for the specific failure of finishing without
+          # writing the file. The prompt above should prevent it, but "the
+          # analysis was good and went nowhere" is an expensive way to fail, and
+          # a second attempt is ~3 minutes. Not a general retry: a genuine agent
+          # error still falls through to the safe comment.
+          if [ ! -s .nc-review/verdict.json ]; then
+            echo "::warning::no verdict after first attempt — retrying once"
+            RETRY='Read .github/nc-review/rubric.md and .nc-review/context.md, then write your review verdict as a single JSON object to .nc-review/verdict.json using write_file, following the schema in the rubric exactly.
+
+            Write the file. Do not reply in chat — chat output is discarded and only the file is read. The file is the entire task.'
+            set +e
+            nanocoder run "$RETRY" \
+              --mode yolo \
+              --model minimax-m3 \
+              --trust-directory
+            STATUS=$?
+            set -e
+            [ -s .nc-review/verdict.json ] \
+              && echo "retry produced a verdict" \
+              || echo "::warning::retry also produced no verdict"
+          fi
+
+          echo "agent_status=$STATUS" >> "$GITHUB_OUTPUT"
 
       - name: Post review
         if: always()
@@ -295,19 +427,71 @@ jobs:
             echo "::warning::no parseable verdict (agent exit ${AGENT_STATUS:-unknown})"
             gh pr comment "$PR" --repo "$REPO" --body \
               "**nc-review** could not produce a verdict this run (agent exit \`${AGENT_STATUS:-unknown}\`). This is a problem with the review agent, not with your pull request. A maintainer can retry with \`/re-review\`."
+            # Clear any agent:* label from a previous run. Applying none was the
+            # right call, but leaving a stale one is not: a PR has carried
+            # agent:clean through two failed re-reviews, which reads as "an
+            # agent looked at this and was happy" when nothing of the kind
+            # happened.
+            gh pr edit "$PR" --repo "$REPO" \
+              --remove-label "agent:clean" \
+              --remove-label "agent:comments" \
+              --remove-label "agent:needs-work" 2>/dev/null || true
             exit 0
           fi
 
-          VERDICT=$(jq -r '.verdict // "needs-work"' "$V")
           SUMMARY=$(jq -r '.summary // "No summary provided."' "$V")
           DUP=$(jq -r '.duplicate_of // empty' "$V")
 
+          N_BLOCK=$(jq '[.findings[]? | select(.severity == "blocking")] | length' "$V")
+          N_IMP=$(jq   '[.findings[]? | select(.severity == "important")] | length' "$V")
+          N_NIT=$(jq   '[.findings[]? | select(.severity == "nit")] | length' "$V")
+          N_ALL=$(jq   '.findings | length' "$V")
+
+          # Derive the verdict from the findings rather than trusting the model's
+          # own label. Run 5 returned verdict "clean" alongside five findings,
+          # which put an agent:clean label on a PR that had five things to fix —
+          # and the label is what a maintainer skims.
+          if [ "$N_BLOCK" -gt 0 ]; then
+            VERDICT="needs-work"
+          elif [ "$N_ALL" -gt 0 ]; then
+            VERDICT="comments"
+          else
+            VERDICT="clean"
+          fi
+
+          CLAIMED=$(jq -r '.verdict // "(none)"' "$V")
+          if [ "$CLAIMED" != "$VERDICT" ]; then
+            echo "::notice::model said '$CLAIMED', findings imply '$VERDICT' — using '$VERDICT'"
+          fi
+
+          # Human-readable tally, e.g. "1 blocking, 2 important, 2 nits".
+          # Plain if-blocks, not `[ ... ] && VAR=...`. Under `set -e` an
+          # assignment takes the exit status of its command substitution, so
+          #
+          #   COUNTS="...${N_NIT} nit$([ "$N_NIT" -gt 1 ] && echo s)"
+          #
+          # killed the whole step whenever there was exactly ONE nit: the inner
+          # test returned 1, the substitution inherited it, and the assignment
+          # failed. Silently, because every echo below is redirected into
+          # comment.md. It survived earlier runs only because they had no nits.
+          COUNTS=""
+          if [ "$N_BLOCK" -gt 0 ]; then
+            COUNTS="${N_BLOCK} blocking"
+          fi
+          if [ "$N_IMP" -gt 0 ]; then
+            COUNTS="${COUNTS:+$COUNTS, }${N_IMP} important"
+          fi
+          if [ "$N_NIT" -gt 0 ]; then
+            if [ "$N_NIT" -eq 1 ]; then NITW="nit"; else NITW="nits"; fi
+            COUNTS="${COUNTS:+$COUNTS, }${N_NIT} ${NITW}"
+          fi
+
           {
-            if [ "$VERDICT" = "clean" ]; then
-              echo "### nc-review: no blocking issues"
-            else
-              echo "### nc-review: needs work"
-            fi
+            case "$VERDICT" in
+              needs-work) echo "### nc-review: needs work — ${COUNTS}" ;;
+              comments)   echo "### nc-review: comments — ${COUNTS}" ;;
+              clean)      echo "### nc-review: nothing to raise" ;;
+            esac
             echo
             echo "$SUMMARY"
             echo
@@ -316,24 +500,43 @@ jobs:
               echo
             fi
             if [ "$(jq '.findings | length' "$V")" -gt 0 ]; then
-              echo "| | Area | Where | Finding |"
-              echo "|---|---|---|---|"
-              jq -r '.findings[] |
-                "| \(if .severity == "blocking" then "🔴" else "🟡" end)"
-                + " | `\(.area)`"
-                + " | \(if .file then "`\(.file)\(if .line then ":\(.line)" else "" end)`" else "—" end)"
-                + " | \(.detail | gsub("\n"; " ")) |"' "$V"
-              echo
+              # One block per finding rather than a table. Findings run to a
+              # paragraph or more, and a table cell forces all of that onto one
+              # line with newlines collapsed — unreadable at any width, and it
+              # squeezes the text into a narrow column. Blocks also let the
+              # detail keep its own line breaks and code formatting.
+              jq -r '
+                def icon: if . == "blocking" then "🔴"
+                          elif . == "important" then "🟠"
+                          else "⚪" end;
+                def rank: if . == "blocking" then 0
+                          elif . == "important" then 1
+                          else 2 end;
+                .findings
+                | sort_by(.severity | rank)
+                | .[]
+                | "**\(.severity | icon) \(.severity) · `\(.area)`"
+                  + (if .file then " · `\(.file)\(if .line then ":\(.line)" else "" end)`" else "" end)
+                  + "**\n\n\(.detail)\n"
+              ' "$V"
             fi
             echo "---"
             echo
-            echo "<sub>Automated code review — correctness, security, design, tests, plus duplicates and scope. Advisory: a human still decides. Not a substitute for review, and not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
+            echo "<sub>🔴 blocking · 🟠 a reviewer would ask for a change · ⚪ optional</sub>"
+            echo
+            echo "<sub>Automated code review — correctness, security, design, tests, plus duplicates and scope. A human still decides; this is not a substitute for review and is not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with \`/re-review\`.</sub>"
           } > /tmp/nc-review/comment.md
 
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/nc-review/comment.md
 
-          if [ "$VERDICT" = "clean" ]; then
-            gh pr edit "$PR" --repo "$REPO" --add-label "agent:clean" --remove-label "agent:needs-work" || true
-          else
-            gh pr edit "$PR" --repo "$REPO" --add-label "agent:needs-work" --remove-label "agent:clean" || true
-          fi
+          # Exactly one agent:* label should ever be present. Remove the other
+          # two unconditionally so a re-review cannot leave a stale pair.
+          case "$VERDICT" in
+            clean)      KEEP="agent:clean";      DROP="agent:comments agent:needs-work" ;;
+            comments)   KEEP="agent:comments";   DROP="agent:clean agent:needs-work" ;;
+            needs-work) KEEP="agent:needs-work"; DROP="agent:clean agent:comments" ;;
+          esac
+          ARGS="--add-label $KEEP"
+          for d in $DROP; do ARGS="$ARGS --remove-label $d"; done
+          # shellcheck disable=SC2086
+          gh pr edit "$PR" --repo "$REPO" $ARGS || true

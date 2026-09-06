@@ -348,6 +348,7 @@ export class AcpAgent implements Agent {
 				contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
 			}
 
+			const previousAssistant = findLastAssistantMessage(session);
 			session.messages = [
 				...session.messages,
 				{
@@ -379,15 +380,16 @@ export class AcpAgent implements Agent {
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
-			const result = await runAcpConversation({
+			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
 				toolManager: this.initContext.toolManager,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
+			this.attachResponseUsage(session, response, previousAssistant);
 			turnSucceeded = true;
-			return result;
+			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -818,8 +820,44 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
+				if (message.responseUsage) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: ''},
+							_meta: {
+								'nanocoder/response-usage': message.responseUsage,
+							},
+						},
+					});
+				}
 			}
 		}
+	}
+
+	private attachResponseUsage(
+		session: AcpSession,
+		response: PromptResponse,
+		previousAssistant?: (typeof session.messages)[number],
+	): void {
+		if (!response.usage) return;
+
+		const assistant = findLastAssistantMessage(session);
+		if (!assistant || assistant === previousAssistant) return;
+
+		const cost = (
+			response._meta as
+				| {'nanocoder/usage'?: {cost?: unknown}}
+				| null
+				| undefined
+		)?.['nanocoder/usage']?.cost;
+		assistant.responseUsage = {
+			inputTokens: response.usage.inputTokens,
+			outputTokens: response.usage.outputTokens,
+			totalTokens: response.usage.totalTokens,
+			...(typeof cost === 'number' && Number.isFinite(cost) ? {cost} : {}),
+		};
 	}
 
 	// 0.25.0 folded model selection into the generic session-config system: a
@@ -968,6 +1006,17 @@ export class AcpAgent implements Agent {
 			logger.error(`Failed to save session to disk: ${error}`);
 		}
 	}
+}
+
+function findLastAssistantMessage(
+	session: AcpSession,
+): (typeof session.messages)[number] | undefined {
+	for (let index = session.messages.length - 1; index >= 0; index--) {
+		if (session.messages[index].role === 'assistant') {
+			return session.messages[index];
+		}
+	}
+	return undefined;
 }
 
 function isToolCallingDisabled(provider: string, model: string): boolean {
