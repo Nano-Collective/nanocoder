@@ -238,6 +238,28 @@ Derived mechanically from the findings — do not set it by feel:
 fixing is **not** clean, even if none of them block the merge — labelling it
 clean tells a maintainer to skim past findings you spent the run producing.
 
+## If you have reviewed this pull request before
+
+The context may contain your previous verdict. When it does, the author has
+probably been working from it, and the diff you are looking at is the current
+state — fixes included.
+
+Go through what you said last time and place each point:
+
+- **Resolved** → list it in `addressed`, phrased so the author recognises it
+  ("the dead `realRename` capture is gone"). Do **not** re-file it in
+  `findings`.
+- **Not resolved** → file it in `findings` again, saying what is still
+  outstanding rather than repeating your original wording word for word.
+- **Cannot tell** → say so in the summary. Do not guess in either direction.
+
+Re-raising something the author has already fixed is the fastest way to make
+people stop reading you. Silently dropping it is nearly as bad — from the
+author's side that is indistinguishable from you forgetting. Say what landed.
+
+Judge the current diff on its own merits as well: a fix can introduce a new
+problem, and that is a new finding like any other.
+
 ## Output
 
 **The file is the entire deliverable.** Anything you write in chat is discarded
@@ -262,7 +284,8 @@ before or after, no markdown fences. Schema:
       "detail": "Specific and actionable. What is wrong, why it matters, and what would fix it."
     }
   ],
-  "duplicate_of": null
+  "duplicate_of": null,
+  "addressed": []
 }
 ```
 
@@ -284,3 +307,6 @@ before or after, no markdown fences. Schema:
   Lead with what is wrong, then why it matters, then what would fix it. Two or
   three sentences is usually right; go longer only when quoting code earns it.
 - `duplicate_of` — PR number as an integer, or `null`. Only when confident.
+- `addressed` — short strings, one per point from your previous review that is
+  now resolved. Omit or leave empty on a first review. Never list something here
+  and in `findings`.
