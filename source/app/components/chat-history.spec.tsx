@@ -1,3 +1,4 @@
+import {Text} from 'ink';
 import test from 'ava';
 import React from 'react';
 import {wheelEvents} from '@/utils/terminal-mouse';
@@ -17,6 +18,70 @@ function createDefaultProps(
 		...overrides,
 	};
 }
+
+// Serial: mutates the global process.stdout.columns.
+test.serial(
+	'ChatHistory indents the transcript to match the input box left margin (inline/Static path)',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 100,
+			configurable: true,
+		});
+
+		try {
+			const props = createDefaultProps({
+				// fullscreen defaults to false, so this exercises the classic
+				// Ink <Static> transcript path, not the fullscreen flow path.
+				queuedComponents: [<Text key="msg-1">Hello world</Text>],
+			});
+			const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+			const output = lastFrame() ?? '';
+			const line = output.split('\n').find(l => l.includes('Hello world'));
+			t.truthy(line, 'Should find the rendered message line');
+			// At width 100, promptWidth = 100 - 4 = 96, so the centering margin
+			// (same one the input box gets) is (100 - 96) / 2 = 2.
+			t.is(line!.search(/\S/), 2);
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+// Serial: mutates the global process.stdout.columns.
+test.serial(
+	'ChatHistory indents the transcript to match the input box left margin (fullscreen path)',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 100,
+			configurable: true,
+		});
+
+		try {
+			const props = createDefaultProps({
+				fullscreen: true,
+				staticComponents: [<Text key="welcome">banner</Text>],
+				queuedComponents: [<Text key="msg-1">Hello world</Text>],
+			});
+			const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+			const output = lastFrame() ?? '';
+			const line = output.split('\n').find(l => l.includes('Hello world'));
+			t.truthy(line, 'Should find the rendered message line');
+			t.is(line!.search(/\S/), 2);
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
 
 test('ChatHistory renders without error', t => {
 	const props = createDefaultProps();
