@@ -250,7 +250,6 @@ export async function handleChat(
 							e = new Error(String(error));
 						}
 					}
-					console.log('streaming response', e);
 					streamingErrors.push(e);
 					logger.warn('Streaming error received', {
 						error: e.message,

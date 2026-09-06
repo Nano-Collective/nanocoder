@@ -361,8 +361,6 @@ export function useChatHandler({
 		// Add user message to chat using display version (with placeholders)
 		// Pass the full assembled message for accurate token counting
 
-		console.log('displayMessage', displayMessage, message);
-
 		addToChatQueue(
 			<UserMessage
 				key={generateKey('user')}
