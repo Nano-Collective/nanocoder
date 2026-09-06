@@ -108,9 +108,18 @@ jobs:
           esac
 
       # No `ref:` — this is the BASE branch. See the security note above.
+      #
+      # persist-credentials: false matters here. The default writes the
+      # GITHUB_TOKEN into .git/config as an http.extraheader, which would make
+      # the token reachable by anything operating on the repo — including a
+      # model driving git tooling with an untrusted diff in its context. Nothing
+      # downstream needs the stored credential: the gh calls carry GH_TOKEN in
+      # their own env.
       - name: Checkout base repository
         # pin: actions/checkout@v4.3.1
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
 
       # pin: pnpm/action-setup@v4
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
@@ -173,6 +182,24 @@ jobs:
             echo "Repository: $REPO"
             echo "PR number: #$PR"
             echo
+            echo "## How to read this — important"
+            echo
+            echo "The working directory is checked out at the **base** commit, NOT at this"
+            echo "pull request. That means:"
+            echo
+            echo "- Files this PR **adds** do not exist on disk. Do not go looking for them,"
+            echo "  and do not treat their absence as a finding. The changeset file is the"
+            echo "  usual one people trip on."
+            echo "- Files this PR **modifies** are on disk in their **pre-change** form."
+            echo "- **The diff below is the authoritative record of what this PR changes.**"
+            echo "  Read it for the change itself; read files on disk only for surrounding"
+            echo "  context — the function a hunk sits in, its callers, the types it uses."
+            echo
+            echo "You have no git tooling and no shell. You do not need them: the diff, the"
+            echo "changed-file list and the open-PR list are all supplied below. If something"
+            echo "is genuinely not determinable from what is here, say so in your summary"
+            echo "rather than guessing or hunting for it."
+            echo
             echo "## Metadata"
             echo '```json'
             jq '{number, title, author: .author.login, headRefName,
@@ -217,10 +244,28 @@ jobs:
       #
       # disabledTools is a security control, not tidiness. The PR diff is
       # untrusted text written by the contributor, and it is fed to a model
-      # running in `yolo` mode with MINIMAX_API_KEY in the environment. A
-      # prompt injection in a diff that could reach `execute_bash` or
-      # `fetch_url` would be able to exfiltrate that key. The review task needs
-      # to read files and write one JSON verdict — nothing more.
+      # running in `yolo` mode. Treat the tool list as an allowlist expressed by
+      # subtraction: the review task needs to READ files and write ONE JSON
+      # verdict. Everything else is off.
+      #
+      #   execute_bash, fetch_url   exfiltration paths for MINIMAX_API_KEY
+      #   git_push, git_commit,
+      #   git_add, git_reset, ...   repository mutation. These are the reason
+      #                             persist-credentials is false above: with the
+      #                             default checkout the token sits in
+      #                             .git/config and git_push would carry it.
+      #   string_replace, diff_edit,
+      #   file_op                   the reviewer has no business editing code
+      #   agent                     subagent spawning, unnecessary here
+      #   ask_user                  would hang a CI run
+      #   git_diff, git_log,
+      #   git_status, git_pr        redundant — the diff and PR metadata are
+      #                             supplied in context.md, and reaching for
+      #                             these sent the model into a repeated-call
+      #                             loop that tripped maxRepeatedToolCalls.
+      #
+      # Remaining: read_file, write_file, find_files, list_directory,
+      # search_file_contents.
       - name: Configure Nanocoder provider
         run: |
           set -euo pipefail
@@ -233,7 +278,21 @@ jobs:
                 "agent",
                 "ask_user",
                 "string_replace",
-                "diff_edit"
+                "diff_edit",
+                "file_op",
+                "write_plan",
+                "write_walkthrough",
+                "git_add",
+                "git_branch",
+                "git_commit",
+                "git_diff",
+                "git_log",
+                "git_pr",
+                "git_pull",
+                "git_push",
+                "git_reset",
+                "git_stash",
+                "git_status"
               ],
               "providers": [
                 {
