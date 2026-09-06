@@ -1,2 +1,6 @@
-# All files - main maintainers
-* @will-lamerton @Avtrkrb @akramcodez
+# Ownership is held by the team, not by individuals: adding a maintainer is a
+# team membership change rather than a pull request against seven files.
+#
+# @Avtrkrb was removed here: the account was moved to `triage`, and a code
+# owner without write access cannot satisfy a code-owner review requirement.
+* @Nano-Collective/core-team
