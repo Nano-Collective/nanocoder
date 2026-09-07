@@ -264,7 +264,7 @@ export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
 	maxMessages: 1000,
 	retentionDays: 30,
 	directory: '',
-  smartTitles: true,
+	smartTitles: true,
 };
 
 // Load session configuration and Returns default config if not specified
