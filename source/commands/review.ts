@@ -1,5 +1,4 @@
-import {readFileSync} from 'node:fs';
-import {basename, dirname, join, normalize} from 'node:path';
+import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
 	execGh,
@@ -14,29 +13,15 @@ import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
+import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Match the prompt-builder.ts path resolution: sections live under
-// source/app/prompts/sections (shipped in the npm package). The basename
-// guard prevents directory-traversal via crafted names.
-const reviewSectionsDir = join(__dirname, '../../source/app/prompts/sections');
-
-function loadReviewPrompt(): string {
-	try {
-		const safeName = basename(normalize('review').replace(/^([/\\])+/, ''));
-		const promptPath = join(reviewSectionsDir, `${safeName}.md`);
-		return readFileSync(promptPath, 'utf-8').trim();
-	} catch {
-		const logger = getLogger();
-		logger.warn(
-			'Review prompt not found at %s — falling back to built-in default',
-			join(reviewSectionsDir, 'review.md'),
-		);
-		return 'You are a senior software engineer performing a code review. Review the diff for bugs, security issues, and style violations. Be concise and actionable.';
-	}
-}
+// Maximum number of diff lines to send to the model. truncateDiff keeps
+// the first and last half of this budget; keep in sync with the test
+// assertion that checks the truncation note.
+const REVIEW_MAX_DIFF_LINES = 1000;
 
 export type ReviewDependencies = {
 	execGit: (args: string[]) => Promise<string>;
@@ -44,6 +29,7 @@ export type ReviewDependencies = {
 	getDefaultBranch: () => Promise<string>;
 	isGhAvailable?: () => boolean;
 	execGh?: (args: string[]) => Promise<string>;
+	loadPrompt?: () => string;
 };
 
 const defaultDependencies: ReviewDependencies = {
@@ -53,6 +39,22 @@ const defaultDependencies: ReviewDependencies = {
 	isGhAvailable,
 	execGh,
 };
+
+function loadReviewPrompt(): string {
+	const content = loadSection('review');
+	if (content) return content;
+
+	const logger = getLogger();
+	const promptPath = join(
+		__dirname,
+		'../../source/app/prompts/sections/review.md',
+	);
+	logger.warn(
+		'Review prompt not found at %s — falling back to built-in default',
+		promptPath,
+	);
+	return 'You are a senior software engineer performing a code review. Review the diff for bugs, security issues, and style violations. Be concise and actionable.';
+}
 
 function validateTarget(target: string): string | null {
 	if (target.startsWith('-')) {
@@ -149,7 +151,7 @@ export function createReviewCommand(
 					}
 				}
 
-				const truncated = truncateDiff(diff, 1000);
+				const truncated = truncateDiff(diff, REVIEW_MAX_DIFF_LINES);
 
 				if (!truncated.content.trim()) {
 					return warningMsg(
@@ -158,14 +160,15 @@ export function createReviewCommand(
 					);
 				}
 
-				const reviewPrompt = loadReviewPrompt();
+				const reviewPrompt = dependencies.loadPrompt?.() ?? loadReviewPrompt();
 
 				const parts: string[] = [
 					`Reviewing changes from ${targetDescription}:\n`,
 				];
 				if (truncated.truncated) {
+					const halfLines = Math.ceil(REVIEW_MAX_DIFF_LINES / 2);
 					parts.push(
-						`[Note: diff truncated — reviewed first and last 500 of ${truncated.totalLines} lines]\n`,
+						`[Note: diff truncated — reviewed first and last ${halfLines} of ${truncated.totalLines} lines]\n`,
 					);
 				}
 				parts.push(truncated.content);

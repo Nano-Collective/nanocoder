@@ -56,6 +56,8 @@ nanocoder review main
 nanocoder review 42
 ```
 
+> **Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection.
+
 ### Screen Modes
 
 Nanocoder supports two rendering modes, mirroring what Claude Code and Codex ship:
