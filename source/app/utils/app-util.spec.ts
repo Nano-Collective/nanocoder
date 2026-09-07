@@ -18,6 +18,11 @@ import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
+import {
 	applyOnceOverrides,
 	expandOverrideArgs,
 	parseInlineOverrides,
@@ -1224,5 +1229,40 @@ test('inline overrides - parseInput leaves the `?` token out of fullCommand for 
 	const parsed = parseInput('/compact ?threshold=80');
 	t.is(parsed.command, 'compact');
 	t.deepEqual(parsed.args, ['?threshold=80']);
+});
+
+test.serial('inline overrides - dispatcher applies a ?threshold override and restores the prior value', async t => {
+	// Regression: a once-scoped override must write the new value into the
+	// auto-compact session-override store for the duration of the command,
+	// and restore the **prior** value (not null) afterwards so a pre-existing
+	// session setting survives the override. The compact handler is exercised
+	// end-to-end via handleMessageSubmission; the test reads the override
+	// through onAddToChatQueue (which fires synchronously during the handler)
+	// to prove the apply happened, and re-reads it after the await to prove
+	// the restore ran.
+	resetAutoCompactSession();
+	setAutoCompactThreshold(50);
+
+	let thresholdDuringCall: number | null | undefined = undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: () => {
+			thresholdDuringCall = autoCompactSessionOverrides.threshold;
+		},
+	});
+
+	await handleMessageSubmission('/compact ?threshold=80', options);
+
+	t.is(
+		thresholdDuringCall,
+		80,
+		'applyOnceOverrides should have written 80 before the compact handler ran',
+	);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		50,
+		'restoreOnce should have put the prior 50 back after the command',
+	);
+
+	resetAutoCompactSession();
 });
 

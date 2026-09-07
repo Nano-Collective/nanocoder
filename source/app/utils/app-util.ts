@@ -685,17 +685,21 @@ async function handleSlashCommand(
 	// ?key=value tokens let a user test a per-session setting for one
 	// command without committing it to the session. They live in the args
 	// list alongside the existing positional / --flag arguments, so we
-	// extract them here and rebuild commandParts with the legacy flag form
-	// appended (handlers stay oblivious to the override feature).
+	// extract them here, rebuild commandParts with the legacy flag form
+	// appended, AND rebuild the raw `message` without the `?` tokens so
+	// every downstream handler (including the lazy-registry built-ins and
+	// the retry branch, which re-split the message themselves) stays
+	// oblivious to the override feature.
 	const rawParts = message.slice(1).trim().split(/\s+/);
 	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
+	const expandedFlags = expandOverrideArgs(overrides);
+	const restTokens = [...positional, ...expandedFlags].join(' ');
+	const cleanedMessage = restTokens
+		? `/${commandName} ${restTokens}`
+		: `/${commandName}`;
 	const restoreOnce = await applyOnceOverrides(overrides);
 	try {
-		const commandParts = [
-			commandName,
-			...positional,
-			...expandOverrideArgs(overrides),
-		];
+		const commandParts = [commandName, ...positional, ...expandedFlags];
 
 		if (await handleCompactCommand(commandParts, options)) return;
 		if (await handleContextMaxCommand(commandParts, options)) return;
@@ -712,7 +716,9 @@ async function handleSlashCommand(
 			await handleRetryCommand(
 				[
 					commandName,
-					...parseCustomCommandArgs(message.slice(commandName.length + 2)),
+					...parseCustomCommandArgs(
+						cleanedMessage.slice(commandName.length + 2),
+					),
 				],
 				options,
 			)
@@ -720,8 +726,9 @@ async function handleSlashCommand(
 			return;
 		if (handleCopilotLogin(commandParts, options)) return;
 		if (handleCodexLogin(commandParts, options)) return;
+		if (handleStatsCommand(commandParts, options)) return;
 
-		await handleBuiltInCommand(message, options);
+		await handleBuiltInCommand(cleanedMessage, options);
 	} finally {
 		restoreOnce();
 	}

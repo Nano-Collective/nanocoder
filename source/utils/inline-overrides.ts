@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Parse inline `?key=value` tokens out of a slash command's args array, plus
  * the helpers used by the slash-command dispatcher to apply them.
  *
@@ -6,12 +6,21 @@
  * committing it to the global session state, e.g.
  *
  *   /compact ?threshold=80
- *   /context-max 128k ?once
+ *   /context-max 128k ?auto-compact=on
  *
  * Only arguments whose first character is `?` are considered; anything else
  * is preserved as-is in the returned `args`. A bare `?flag` (no `=`) becomes
  * `{ key: 'flag', value: true }` so handlers can opt into boolean toggles
  * like `/compact ?preview`.
+ *
+ * Unknown `?foo=bar` keys are silently dropped: the dispatcher never
+ * forwards them to the handler, so a user can't accidentally pass an
+ * unrecognised token to a command that doesn't know about it.
+ *
+ * Value validation in `applyOnceOverrides` is best-effort: unparseable or
+ * out-of-range values are ignored (no apply, no restore, no error). For
+ * strict validation with an explicit error message, use the regular
+ * `--flag value` form of the same argument.
  */
 
 export interface InlineOverride {
@@ -33,7 +42,7 @@ export function parseInlineOverrides(
 	const overrides: InlineOverride[] = [];
 
 	for (const arg of rawArgs) {
-		if (typeof arg !== 'string' || !arg.startsWith('?')) {
+		if (!arg.startsWith('?')) {
 			args.push(arg);
 			continue;
 		}
@@ -122,6 +131,11 @@ export function expandOverrideArgs(
  * `expandOverrideArgs` to forward them to the command handler as ordinary
  * flags, so `?preview` still works for any command that understands it.
  *
+ * The `restore` callback reverts each applied override to its **prior
+ * value** (not to `null`), so a pre-existing session override is preserved
+ * across the once-scoped change. Unparseable or out-of-range values are
+ * silently skipped (no apply, no restore).
+ *
  * The session-override setters are pulled in lazily. The dispatcher is
  * the only caller of this function and only runs once per slash command,
  * so paying the import cost on first use keeps the parser specs free
@@ -138,36 +152,45 @@ export async function applyOnceOverrides(
 
 	// Only import the setter modules when we actually have an override
 	// to apply. Keeps `parseInlineOverrides` testable in isolation.
-	const [{setAutoCompactEnabled, setAutoCompactThreshold}, models] =
-		await Promise.all([
-			import('./auto-compact.js'),
-			import('@/models/index.js'),
-		]);
+	const [
+		{
+			autoCompactSessionOverrides,
+			setAutoCompactEnabled,
+			setAutoCompactThreshold,
+		},
+		models,
+		{parseContextLimit},
+	] = await Promise.all([
+		import('./auto-compact.js'),
+		import('@/models/index.js'),
+		import('./parse-context-limit.js'),
+	]);
 
 	for (const {key, value} of overrides) {
 		switch (key) {
 			case 'threshold': {
 				const numeric = Number.parseFloat(String(value));
-				if (!Number.isNaN(numeric)) {
-					setAutoCompactThreshold(
-						Math.max(50, Math.min(95, Math.round(numeric))),
-					);
-					restorations.push(() => setAutoCompactThreshold(null));
-				}
+				// Out-of-range values are silently skipped (no apply, no
+				// restore) - matches the documented "best-effort" validation.
+				if (Number.isNaN(numeric) || numeric < 50 || numeric > 95) break;
+				const prior = autoCompactSessionOverrides.threshold;
+				setAutoCompactThreshold(Math.round(numeric));
+				restorations.push(() => setAutoCompactThreshold(prior));
 				break;
 			}
 			case 'auto-compact': {
 				const bool = toBoolean(value);
+				const prior = autoCompactSessionOverrides.enabled;
 				setAutoCompactEnabled(bool);
-				restorations.push(() => setAutoCompactEnabled(null));
+				restorations.push(() => setAutoCompactEnabled(prior));
 				break;
 			}
 			case 'context-max': {
-				const numeric = Number.parseInt(String(value), 10);
-				if (!Number.isNaN(numeric) && numeric > 0) {
-					models.setSessionContextLimit(numeric);
-					restorations.push(() => models.resetSessionContextLimit());
-				}
+				const numeric = parseContextLimit(String(value));
+				if (numeric === null) break;
+				const prior = models.getSessionContextLimit();
+				models.setSessionContextLimit(numeric);
+				restorations.push(() => models.setSessionContextLimit(prior));
 				break;
 			}
 			// No default: keys not listed here fall through to
