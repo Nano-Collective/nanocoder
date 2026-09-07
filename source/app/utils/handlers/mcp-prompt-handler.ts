@@ -1,7 +1,8 @@
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {getToolManager} from '@/message-handler';
+import type {Message} from '@/types/core';
 import type {MessageSubmissionOptions} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
+import {errorMsg, warningMsg} from '@/utils/message-factory';
 
 /**
  * Dispatches `/mcp:<server>:<prompt>` — an MCP prompt invoked as a slash
@@ -18,7 +19,13 @@ export async function handleMCPPromptCommand(
 	args: string[],
 	options: MessageSubmissionOptions,
 ): Promise<boolean> {
-	const {onAddToChatQueue, onCommandComplete, onHandleChatMessage} = options;
+	const {
+		onAddToChatQueue,
+		onCommandComplete,
+		onHandleChatMessage,
+		messages,
+		setMessages,
+	} = options;
 
 	const toolManager = getToolManager();
 	const mcpClient = toolManager?.getMCPClient();
@@ -29,9 +36,10 @@ export async function handleMCPPromptCommand(
 		.find(p => `mcp:${p.serverName}:${p.name}` === commandName);
 	if (!prompt) return false;
 
+	const declaredArgs = prompt.arguments ?? [];
 	const promptArgs: Record<string, string> = {};
 	const missing: string[] = [];
-	(prompt.arguments ?? []).forEach((arg, index) => {
+	declaredArgs.forEach((arg, index) => {
 		const value = args[index];
 		if (value !== undefined && value !== '') {
 			promptArgs[arg.name] = value;
@@ -51,20 +59,36 @@ export async function handleMCPPromptCommand(
 		return true;
 	}
 
+	// Args are filled in positionally, in the order the server declares them
+	// (see docs/configuration/mcp-configuration.md). Anything beyond that -
+	// including every arg typed when the prompt declares none at all - has
+	// nowhere to go and would otherwise vanish with no indication why.
+	if (args.length > declaredArgs.length) {
+		const extra = args.slice(declaredArgs.length);
+		onAddToChatQueue(
+			warningMsg(
+				declaredArgs.length === 0
+					? `/${commandName} takes no arguments; ignoring: ${extra.join(', ')}`
+					: `/${commandName} takes ${declaredArgs.length} argument${declaredArgs.length === 1 ? '' : 's'}; ignoring extra: ${extra.join(', ')}`,
+				'mcp-prompt-warning',
+			),
+		);
+	}
+
 	try {
 		const result = await mcpClient.getPrompt(
 			prompt.serverName,
 			prompt.name,
 			promptArgs,
 		);
-		const promptText = result.messages
-			.map(m => contentToText(m.content))
-			.filter(Boolean)
-			.join('\n\n');
+		// Keep each message's own role instead of joining every message's text
+		// into one blob - a few-shot prompt's assistant turns are structure the
+		// model relies on, not just extra text to prepend.
+		const textEntries = result.messages
+			.map(m => ({role: m.role, text: contentToText(m.content)}))
+			.filter(m => m.text.trim().length > 0);
 
-		if (promptText.trim()) {
-			await onHandleChatMessage(promptText);
-		} else {
+		if (textEntries.length === 0) {
 			onAddToChatQueue(
 				errorMsg(
 					`MCP prompt "/${commandName}" returned no text content.`,
@@ -72,6 +96,34 @@ export async function handleMCPPromptCommand(
 				),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
+		}
+
+		const last = textEntries[textEntries.length - 1];
+		const priorMessages: Message[] = textEntries
+			.slice(0, -1)
+			.map(m => ({role: m.role, content: m.text}));
+
+		if (last.role === 'user') {
+			// The common shape: any earlier turns (e.g. few-shot examples) are
+			// spliced into history as-is, and only the final user turn triggers
+			// the actual chat round-trip.
+			await onHandleChatMessage(
+				last.text,
+				undefined,
+				undefined,
+				priorMessages.length > 0 ? priorMessages : undefined,
+			);
+		} else {
+			// The prompt doesn't end on a user turn - e.g. it seeds a scripted
+			// assistant reply with nothing left to respond to. There is no
+			// "next chat message" to submit, so append every turn as inert
+			// history instead of fabricating a user message out of it.
+			setMessages([
+				...messages,
+				...textEntries.map(m => ({role: m.role, content: m.text}) as Message),
+			]);
+			onCommandComplete?.();
 		}
 	} catch (error) {
 		onAddToChatQueue(

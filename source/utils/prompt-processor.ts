@@ -93,14 +93,35 @@ export function assemblePrompt(inputState: InputState): string {
 				break;
 			}
 			case PlaceholderType.RESOURCE: {
-				// Format MCP resource content with header for LLM context
+				// Format MCP resource content with header for LLM context. Same
+				// guard as the FILE case above: a resource can be arbitrarily
+				// large and, unlike a file, there is no read_file()-style tool
+				// the model can call to page through the rest of it, so a large
+				// resource is truncated to a head preview rather than inlined
+				// whole - a single @-mention still can't flood the conversation.
 				const resourceName = placeholderContent.resourceName;
-				const header = `=== MCP Resource: ${resourceName} (from ${placeholderContent.serverName}) ===`;
-				const footer = '='.repeat(header.length);
-				const contentWithType = placeholderContent.mimeType
-					? `Content-Type: ${placeholderContent.mimeType}\n\n${placeholderContent.content}`
-					: placeholderContent.content;
-				replacementContent = `${header}\n${contentWithType}\n${footer}`;
+				const lines = placeholderContent.content.split('\n');
+				const totalLines = lines.length;
+
+				if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
+					const previewBody = lines
+						.slice(0, FILE_MENTION_PREVIEW_LINES)
+						.join('\n');
+					const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
+					const header = `=== MCP Resource: ${resourceName} (from ${placeholderContent.serverName}, ${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
+					const footer = `=== ${remaining} more lines truncated - ${placeholderContent.uri} is too large to inline in full ===`;
+					const previewWithType = placeholderContent.mimeType
+						? `Content-Type: ${placeholderContent.mimeType}\n\n${previewBody}`
+						: previewBody;
+					replacementContent = `${header}\n${previewWithType}\n${footer}`;
+				} else {
+					const header = `=== MCP Resource: ${resourceName} (from ${placeholderContent.serverName}) ===`;
+					const footer = '='.repeat(header.length);
+					const contentWithType = placeholderContent.mimeType
+						? `Content-Type: ${placeholderContent.mimeType}\n\n${placeholderContent.content}`
+						: placeholderContent.content;
+					replacementContent = `${header}\n${contentWithType}\n${footer}`;
+				}
 				break;
 			}
 			default: {

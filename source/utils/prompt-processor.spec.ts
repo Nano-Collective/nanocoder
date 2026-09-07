@@ -292,6 +292,73 @@ test('assemblePrompt - handles MCP resource without mimeType', t => {
 	t.true(result.includes('Configuration data'));
 });
 
+test('assemblePrompt - inlines an MCP resource at the line threshold in full', t => {
+	const content = Array.from(
+		{length: FILE_MENTION_INLINE_MAX_LINES},
+		(_, i) => `line ${i + 1}`,
+	).join('\n');
+	const inputState: InputState = {
+		displayValue: '[@small-resource]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@small-resource]',
+				uri: 'mcp://server/small-resource',
+				content,
+				serverName: 'docs-server',
+				resourceName: 'small-resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(
+		result.includes('=== MCP Resource: small-resource (from docs-server) ==='),
+	);
+	t.true(result.includes(content), 'full content is inlined');
+	t.false(result.includes('truncated'), 'no truncation for small resources');
+});
+
+test('assemblePrompt - previews a large MCP resource instead of flooding the conversation', t => {
+	const totalLines = FILE_MENTION_INLINE_MAX_LINES + 100;
+	const lines = Array.from({length: totalLines}, (_, i) => `line ${i + 1}`);
+	const content = lines.join('\n');
+	const inputState: InputState = {
+		displayValue: '[@big-resource]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@big-resource]',
+				uri: 'mcp://server/big-resource',
+				content,
+				serverName: 'docs-server',
+				resourceName: 'big-resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	// Header advertises the truncation and total line count, same as the FILE case.
+	t.true(
+		result.includes(
+			`=== MCP Resource: big-resource (from docs-server, ${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`,
+		),
+	);
+	// Only the preview lines are present; lines past the preview are dropped
+	t.true(result.includes(`line ${FILE_MENTION_PREVIEW_LINES}`));
+	t.false(
+		result.includes(`line ${FILE_MENTION_PREVIEW_LINES + 1}\n`),
+		'lines beyond the preview window are not inlined',
+	);
+	t.true(
+		result.includes(
+			`${totalLines - FILE_MENTION_PREVIEW_LINES} more lines truncated - mcp://server/big-resource is too large to inline in full`,
+		),
+	);
+});
+
 test('assemblePrompt - handles mixed file, paste, and resource placeholders', t => {
 	const inputState: InputState = {
 		displayValue: 'Compare [@file.ts] with [Paste #1: 5 chars] and [@resource]',

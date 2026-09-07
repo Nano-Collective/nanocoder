@@ -1,6 +1,7 @@
 import test from 'ava';
 import type {MCPClient} from '../mcp/mcp-client.js';
 import {PlaceholderType} from '../types/hooks.js';
+import {setGlobalMessageQueue} from './message-queue.js';
 import {handleResourceMention} from './resource-mention-handler.js';
 
 console.log('\nresource-mention-handler.spec.ts');
@@ -89,6 +90,36 @@ test('handleResourceMention: handles resource read errors gracefully', async t =
 	);
 
 	t.is(result, null);
+});
+
+// Regression (reviewer feedback on #1172): a remote read failure (server
+// error, timeout, unknown URI) must be visible to the user, unlike a missing
+// local file, which the user can already see for themselves in their
+// filesystem.
+test('handleResourceMention: surfaces a read failure to the chat queue instead of failing silently', async t => {
+	const queued: unknown[] = [];
+	setGlobalMessageQueue(component => queued.push(component));
+	t.teardown(() => setGlobalMessageQueue(() => {}));
+
+	const mockClient = new MockMCPClient(async () => {
+		throw new Error('Connection timed out');
+	}) as unknown as MCPClient;
+
+	const result = await handleResourceMention(
+		mockClient,
+		'test-server',
+		'file:///test/resource.txt',
+		'resource.txt',
+		'Check this @resource.txt',
+		{},
+		'@resource.txt',
+	);
+
+	t.is(result, null);
+	t.is(queued.length, 1, 'the failure must reach the chat queue');
+	const rendered = JSON.stringify(queued[0]);
+	t.true(rendered.includes('resource.txt'));
+	t.true(rendered.includes('Connection timed out'));
 });
 
 test('handleResourceMention: preserves existing placeholders', async t => {

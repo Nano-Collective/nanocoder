@@ -4,6 +4,7 @@ import {
 	PlaceholderContent,
 	PlaceholderType,
 } from '../types/hooks.js';
+import {logError} from './message-queue.js';
 import {allocatePlaceholderId} from './placeholders.js';
 
 /**
@@ -15,8 +16,11 @@ import {allocatePlaceholderId} from './placeholders.js';
  * that triggers this already knows which server it came from, so that
  * identity must not get lost here.
  *
- * Returns null if the resource can't be read (silent failure, matching
- * `handleFileMention`'s behavior for a missing file).
+ * Returns null if the resource can't be read. An empty result is silent,
+ * matching `handleFileMention`'s behavior for a missing file, but a thrown
+ * read error is surfaced via `logError` first — a remote failure (server
+ * error, timeout, unknown URI) isn't something the user can independently
+ * notice the way a missing local file is.
  */
 export async function handleResourceMention(
 	mcpClient: MCPClient,
@@ -79,8 +83,17 @@ export async function handleResourceMention(
 			displayValue: newDisplayValue,
 			placeholderContent: newPlaceholderContent,
 		};
-	} catch (_error) {
-		// If resource read fails, return null (silently skip per spec)
+	} catch (error) {
+		// Unlike a missing local file, a failed remote read (server error,
+		// timeout, unknown URI) is not something the user can see for
+		// themselves, so it must not disappear silently the way
+		// handleFileMention's missing-file case does - surface it and still
+		// decline to create a placeholder.
+		logError(
+			`Failed to read MCP resource "${resourceName}" from "${serverName}": ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
 		return null;
 	}
 }

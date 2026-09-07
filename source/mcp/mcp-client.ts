@@ -214,15 +214,21 @@ export class MCPClient {
 					} catch (error) {
 						// Server declared the capability but the call still failed -
 						// this is a genuine error, not an unsupported-feature guess.
-						this.logger.warn('MCP resources/list failed despite declared capability', {
-							serverName: normalizedServer.name,
-							error: formatError(error),
-						});
+						this.logger.warn(
+							'MCP resources/list failed despite declared capability',
+							{
+								serverName: normalizedServer.name,
+								error: formatError(error),
+							},
+						);
 					}
 				} else {
-					this.logger.debug('MCP server does not declare resources capability', {
-						serverName: normalizedServer.name,
-					});
+					this.logger.debug(
+						'MCP server does not declare resources capability',
+						{
+							serverName: normalizedServer.name,
+						},
+					);
 				}
 
 				// List available prompts from this server
@@ -247,10 +253,13 @@ export class MCPClient {
 					} catch (error) {
 						// Server declared the capability but the call still failed -
 						// this is a genuine error, not an unsupported-feature guess.
-						this.logger.warn('MCP prompts/list failed despite declared capability', {
-							serverName: normalizedServer.name,
-							error: formatError(error),
-						});
+						this.logger.warn(
+							'MCP prompts/list failed despite declared capability',
+							{
+								serverName: normalizedServer.name,
+								error: formatError(error),
+							},
+						);
 					}
 				} else {
 					this.logger.debug('MCP server does not declare prompts capability', {

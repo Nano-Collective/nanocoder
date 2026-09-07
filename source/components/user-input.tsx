@@ -81,6 +81,7 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 	Array<{
 		path: string;
 		displayPath: string;
+		resourceName: string;
 		score: number;
 		isDirectory: boolean;
 	}>
@@ -92,7 +93,12 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 		.getAllResources()
 		.map(resource => ({
 			path: encodeMCPResourcePath(resource.serverName, resource.uri),
+			// displayPath is for the completion list UI only — it must never be
+			// used as the resourceName passed to handleResourceMention, or the
+			// "(serverName)" suffix it carries gets stamped a second time by the
+			// assembled prompt header (see prompt-processor.ts's RESOURCE case).
 			displayPath: `${resource.name} (${resource.serverName})`,
+			resourceName: resource.name,
 			score: fuzzyScoreFilePath(resource.name, partialPath),
 			isDirectory: false,
 		}))
@@ -187,7 +193,12 @@ export default function UserInput({
 	// File autocomplete state
 	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
 	const [fileCompletions, setFileCompletions] = useState<
-		Array<{path: string; displayPath: string; score: number}>
+		Array<{
+			path: string;
+			displayPath: string;
+			resourceName?: string;
+			score: number;
+		}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
@@ -478,7 +489,7 @@ export default function UserInput({
 						mcpClient,
 						decoded.serverName,
 						decoded.uri,
-						fileCompletions[selectedFileIndex]?.displayPath ?? decoded.uri,
+						fileCompletions[selectedFileIndex]?.resourceName ?? decoded.uri,
 						currentState.displayValue,
 						currentState.placeholderContent,
 						mentionText,

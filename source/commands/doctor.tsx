@@ -43,6 +43,8 @@ export interface DoctorMcpServer {
 	name: string;
 	transport: string;
 	toolCount: number;
+	resourceCount: number;
+	promptCount: number;
 	url?: string;
 }
 
@@ -199,6 +201,8 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			name: serverName,
 			transport: String(serverInfo?.transport ?? 'stdio'),
 			toolCount: serverTools.length,
+			resourceCount: serverInfo?.resourceCount ?? 0,
+			promptCount: serverInfo?.promptCount ?? 0,
 			url: serverInfo?.url,
 		};
 	});
@@ -381,6 +385,12 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={server.name} color={colors.text}>
 						• {server.name}: {server.transport} • {server.toolCount} tool
 						{server.toolCount === 1 ? '' : 's'}
+						{server.resourceCount > 0
+							? ` • ${server.resourceCount} resource${server.resourceCount === 1 ? '' : 's'}`
+							: ''}
+						{server.promptCount > 0
+							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
+							: ''}
 						{server.url ? ` • ${server.url}` : ''}
 					</Text>
 				))
