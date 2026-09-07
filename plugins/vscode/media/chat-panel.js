@@ -2079,7 +2079,7 @@
 
 		endCurrentTextBlock();
 		const el = document.createElement('div');
-		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
 		scrollToBottom();
@@ -2192,6 +2192,9 @@
 				break;
 			case 'settingsData':
 				renderSettingsData(message.settings);
+				break;
+			case 'tokenUsageVisibility':
+				renderTokenUsageVisibility(message.showTokenUsage);
 				break;
 			case 'settingsUpdated':
 				if (!message.success) {
@@ -2656,9 +2659,20 @@
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
 
-		showTokenUsage = settings.showTokenUsage === true;
+		renderTokenUsageVisibility(settings.showTokenUsage === true);
+	}
+
+	function renderTokenUsageVisibility(enabled) {
+		showTokenUsage = enabled === true;
+		updateTokenUsageIndicators();
 		const tuToggle = document.getElementById('setting-showTokenUsage');
 		if (tuToggle) tuToggle.checked = showTokenUsage;
+	}
+
+	function updateTokenUsageIndicators() {
+		document.querySelectorAll('.token-usage-indicator').forEach(el => {
+			el.style.display = showTokenUsage ? '' : 'none';
+		});
 	}
 
 	function escapeHtml(str) {

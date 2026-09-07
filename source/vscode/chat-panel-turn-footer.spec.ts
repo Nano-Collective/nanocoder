@@ -82,6 +82,20 @@ test('each response gets its own footer', t => {
 
 test('replayed response usage metadata restores the token and cost line', t => {
 	const panel = createPanel();
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: true,
+		},
+	});
 	panel.userMessage('first');
 	panel.update({
 		sessionUpdate: 'agent_message_chunk',
@@ -147,6 +161,55 @@ test('usage footer is hidden until the setting is enabled', t => {
 			child.textContent.includes('Tokens: 1.2k | ~$0.01'),
 		),
 	);
+});
+
+test('disabling usage hides already-rendered indicators', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: true,
+		},
+	});
+	panel.userMessage('first');
+	panel.text('Response A');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 1200},
+		cost: 0.012,
+	});
+
+	const indicator = panel.container.children.find((child: StubElement) =>
+		child.classList.contains('token-usage-indicator'),
+	);
+	t.truthy(indicator);
+	t.is(indicator.style.display, undefined);
+
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: false,
+		},
+	});
+
+	t.is(indicator.style.display, 'none');
 });
 
 // ============================================================================

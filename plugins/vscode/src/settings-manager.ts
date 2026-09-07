@@ -16,7 +16,6 @@ export interface SettingsData {
 	reasoningTraces: boolean;
 	sessions: { autoSave: boolean };
 	webSearch: { configured: boolean };
-	showTokenUsage: boolean;
 }
 
 /**
@@ -113,7 +112,6 @@ export class SettingsManager {
 			reasoningTraces,
 			sessions,
 			webSearch,
-			showTokenUsage: false,
 		};
 	}
 

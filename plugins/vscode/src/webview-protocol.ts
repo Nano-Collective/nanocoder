@@ -2,6 +2,7 @@
  * Type-safe protocol for postMessage communication between the extension host
  * and the Sidebar Webview UI.
  */
+import type {SettingsData} from './settings-manager';
 
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
@@ -122,17 +123,7 @@ export interface ExtensionMessageUpdateSessions {
 
 export interface ExtensionMessageSettingsData {
 	type: 'settingsData';
-	settings: {
-		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
-		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
-		alwaysAllow: string[];
-		defaultMode: string | null;
-		autoCompact: { enabled: boolean; threshold: number; mode: string };
-		reasoningTraces: boolean;
-		sessions: { autoSave: boolean };
-		webSearch: { configured: boolean };
-		showTokenUsage: boolean;
-	};
+	settings: SettingsData & {showTokenUsage: boolean};
 }
 
 export interface ExtensionMessageSettingsUpdated {
@@ -140,6 +131,11 @@ export interface ExtensionMessageSettingsUpdated {
 	key: string;
 	success: boolean;
 	error?: string;
+}
+
+export interface ExtensionMessageTokenUsageVisibility {
+	type: 'tokenUsageVisibility';
+	showTokenUsage: boolean;
 }
 
 export interface ExtensionMessageToggleSettings {
@@ -214,6 +210,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageTokenUsageVisibility
 	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessagePlanReviewRequested
