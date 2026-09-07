@@ -1,3 +1,6 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {SubagentExecutor} from './subagent-executor.js';
 import {getAppConfig, reloadAppConfig} from '@/config/index';
@@ -8,7 +11,9 @@ import {
 } from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
+import {setProjectRoot} from '@/services/session-cwd';
 import type {ToolManager} from '@/tools/tool-manager';
+import type {HooksConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
 	LLMClient,
@@ -1537,4 +1542,258 @@ test.serial('compacts subagent history after a tool turn', async t => {
 		resetAutoCompactSession();
 		resetSessionContextLimit();
 	}
+});
+
+// ============================================================================
+// Lifecycle hooks in delegated work.
+//
+// Subagents run their own loop instead of going through processToolUse, so a
+// policy hook would silently not apply to them unless the gate is repeated
+// here — and, as in the main loop, it has to sit in front of the approval
+// prompt rather than behind it.
+// ============================================================================
+
+const SUBAGENT_HOOK_DIR = join(
+	tmpdir(),
+	`nanocoder-subagent-hooks-${Date.now()}`,
+);
+
+function enterSubagentHookFixture(hooks: HooksConfig): () => void {
+	const previousCwd = process.cwd();
+	const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	mkdirSync(SUBAGENT_HOOK_DIR, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = join(
+		SUBAGENT_HOOK_DIR,
+		'no-global-config',
+	);
+	process.chdir(SUBAGENT_HOOK_DIR);
+	setProjectRoot(SUBAGENT_HOOK_DIR);
+	writeFileSync(
+		join(SUBAGENT_HOOK_DIR, 'agents.config.json'),
+		JSON.stringify({nanocoder: {hooks}}),
+		'utf-8',
+	);
+	reloadAppConfig();
+	return () => {
+		process.chdir(previousCwd);
+		if (previousConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+		}
+		setProjectRoot(previousCwd);
+		reloadAppConfig();
+	};
+}
+
+// Portable hook body: `sh -c` on POSIX, `cmd /c` on Windows.
+const subagentHookNode = (script: string) => `node -e "${script}"`;
+
+test.serial('a pre-tool-use veto stops a subagent tool call', async t => {
+	let handlerRan = false;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				handlerRan = true;
+				return 'secrets';
+			},
+			readOnly: true,
+		},
+	});
+
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-veto',
+						function: {name: 'read_file', arguments: '{"path": ".env"}'},
+					},
+				],
+			},
+			{content: 'Understood, leaving .env alone.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const leave = enterSubagentHookFixture({
+		'pre-tool-use': [
+			{
+				name: 'no-env',
+				command: subagentHookNode(
+					"console.log('.env is off limits');process.exit(1)",
+				),
+			},
+		],
+	});
+	let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+	try {
+		const executor = new SubagentExecutor(toolManager, client);
+		result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read .env',
+		});
+	} finally {
+		leave();
+	}
+
+	t.true(result.success);
+	t.false(handlerRan, 'a policy hook must hold for delegated work too');
+	t.is(
+		toolResults[0]?.content,
+		'Error: Blocked by hook "no-env": .env is off limits',
+	);
+});
+
+test.serial(
+	'a subagent veto happens before the approval prompt',
+	async t => {
+		let approvalPrompts = 0;
+		setGlobalToolApprovalHandler(async () => {
+			approvalPrompts++;
+			return true;
+		});
+
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async () => 'wrote it',
+				readOnly: false,
+				needsApproval: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-approve',
+						function: {name: 'write_file', arguments: '{"path": ".env"}'},
+					},
+				],
+			},
+			{content: 'Understood.'},
+		]);
+
+		const leave = enterSubagentHookFixture({
+			'pre-tool-use': [
+				{name: 'no-env', command: subagentHookNode('process.exit(1)')},
+			],
+		});
+		try {
+			const executor = new SubagentExecutor(toolManager, client);
+			await executor.execute({
+				subagent_type: 'general-purpose',
+				description: 'Write .env',
+			});
+		} finally {
+			leave();
+			setGlobalToolApprovalHandler(async () => true);
+		}
+
+		t.is(
+			approvalPrompts,
+			0,
+			'a vetoed tool must not ask the user to approve it first',
+		);
+	},
+);
+
+test.serial('post-tool-use output reaches a subagent tool result', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'file contents', readOnly: true},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-post',
+						function: {name: 'read_file', arguments: '{"path": "a.ts"}'},
+					},
+				],
+			},
+			{content: 'Read it.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const leave = enterSubagentHookFixture({
+		'post-tool-use': [
+			{command: subagentHookNode("console.log('observed')")},
+		],
+	});
+	try {
+		const executor = new SubagentExecutor(toolManager, client);
+		await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read a.ts',
+		});
+	} finally {
+		leave();
+	}
+
+	t.is(
+		toolResults[0]?.content,
+		'file contents\n\n<hook-output event="post-tool-use">\nobserved\n</hook-output>',
+	);
+});
+
+test.serial('post-tool-use fires when a subagent tool throws', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				throw new Error('no such file');
+			},
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-throw',
+						function: {name: 'read_file', arguments: '{"path": "gone.ts"}'},
+					},
+				],
+			},
+			{content: 'It is missing.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const leave = enterSubagentHookFixture({
+		'post-tool-use': [{command: subagentHookNode("console.log('audited')")}],
+	});
+	try {
+		const executor = new SubagentExecutor(toolManager, client);
+		await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read gone.ts',
+		});
+	} finally {
+		leave();
+	}
+
+	const content = String(toolResults[0]?.content ?? '');
+	t.true(content.includes('no such file'), 'the error still reaches the model');
+	t.true(
+		content.includes('audited'),
+		'an audit-log hook must see the failed delegated call too',
+	);
 });

@@ -20,7 +20,7 @@ import type {
 import {parseYamlObject} from '@/utils/frontmatter';
 
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
-const TARGET_REGEX = /^(command|agent|tool):[a-z][a-z0-9_-]*$/;
+const TARGET_REGEX = /^(command|agent|tool|skill):[a-z][a-z0-9_-]*$/;
 const VALID_VISIBILITIES: ReadonlySet<SkillToolVisibility> = new Set([
 	'global',
 	'scoped',
@@ -148,7 +148,7 @@ function parseManifestSubscribe(value: unknown): SkillTrigger[] | undefined {
 		}
 		if (!TARGET_REGEX.test(trig.target)) {
 			throw new SkillManifestParseError(
-				`subscribe[${i}].target "${trig.target}" must match ${TARGET_REGEX} (e.g. "agent:foo", "command:bar", "tool:baz")`,
+				`subscribe[${i}].target "${trig.target}" must match ${TARGET_REGEX} (e.g. "agent:foo", "command:bar", "tool:baz", "skill:qux")`,
 			);
 		}
 		if (trig.kind === 'file.changed' && trig.paths) {
