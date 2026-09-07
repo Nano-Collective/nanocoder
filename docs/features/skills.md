@@ -244,10 +244,10 @@ A bundle is one shareable artifact, so it can be installed straight from a
 git repository:
 
 ```
-nanocoder skills add pr-reviewer                       resolve the name through the index
-nanocoder skills add Nano-Collective/nanocoder-skills  owner/repo shorthand
+nanocoder skills add owner/repo                        owner/repo shorthand
 nanocoder skills add https://example.com/skills.git    any git URL
-nanocoder skills add ./local-checkout                  a path on disk
+nanocoder skills add ./local-checkout                  a local directory, git repo or not
+nanocoder skills add pr-reviewer                       resolve the name through the index
 ```
 
 Flags:
@@ -321,6 +321,10 @@ Point `NANOCODER_SKILLS_INDEX` (or `--index`) at another URL, or at a local
 file, to use a different list - a team can check one into its own repo. If
 the index promises one name and the cloned manifest declares another, the
 install is refused.
+
+The default index above isn't published yet, so a bare name won't resolve
+until it is; install by `owner/repo`, a git URL, or a local path in the
+meantime, or point `NANOCODER_SKILLS_INDEX` at your own list.
 
 ## Sharing skills across repos
 

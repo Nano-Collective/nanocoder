@@ -27,7 +27,16 @@
 
 import {execFile} from 'node:child_process';
 import type {Dirent} from 'node:fs';
-import {access, mkdtemp, readdir, readFile, rm} from 'node:fs/promises';
+import {
+	access,
+	cp,
+	mkdtemp,
+	readdir,
+	readFile,
+	realpath,
+	rm,
+	stat,
+} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {isAbsolute, join, relative, resolve} from 'node:path';
 import {createInterface} from 'node:readline';
@@ -241,6 +250,109 @@ async function resolveFromIndex(
 	return {spec};
 }
 
+type CloneResult = {ok: true} | {ok: false; error: string};
+
+const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
+
+function gitCloneErrorMessage(
+	err: unknown,
+	repo: string,
+	ref?: string,
+): string {
+	const stderr =
+		typeof (err as {stderr?: unknown})?.stderr === 'string'
+			? (err as {stderr: string}).stderr.trim()
+			: '';
+	return `git clone failed for ${repo}${ref ? ` (ref ${ref})` : ''}: ${stderr || formatError(err)}`;
+}
+
+/** Plain shallow clone of the default branch. */
+async function simpleClone(
+	repo: string,
+	destDir: string,
+): Promise<CloneResult> {
+	try {
+		// `--` keeps a repo argument that starts with a dash from being read as
+		// a flag.
+		await execFileAsync(
+			'git',
+			['clone', '--depth', '1', '--single-branch', '--', repo, destDir],
+			{timeout: CLONE_TIMEOUT_MS, env: GIT_ENV},
+		);
+		return {ok: true};
+	} catch (err) {
+		return {ok: false, error: gitCloneErrorMessage(err, repo)};
+	}
+}
+
+/**
+ * Clone at a specific ref. `git clone --branch` only accepts a branch or tag
+ * name and rejects a commit SHA outright, but pinning to a commit is the
+ * safe way to install code you don't fully trust - so this tries the cheap
+ * shallow-clone-by-name path first, then falls back to init + fetch +
+ * checkout, which accepts any revision git understands.
+ */
+async function cloneAtRef(
+	repo: string,
+	ref: string,
+	destDir: string,
+): Promise<CloneResult> {
+	try {
+		await execFileAsync(
+			'git',
+			[
+				'clone',
+				'--depth',
+				'1',
+				'--single-branch',
+				'--branch',
+				ref,
+				'--',
+				repo,
+				destDir,
+			],
+			{timeout: CLONE_TIMEOUT_MS, env: GIT_ENV},
+		);
+		return {ok: true};
+	} catch {
+		// Not a branch or tag - fall through to fetch+checkout, which also
+		// accepts a commit SHA.
+	}
+
+	await rm(destDir, {recursive: true, force: true});
+	try {
+		await execFileAsync('git', ['init', '--quiet', '--', destDir], {
+			timeout: CLONE_TIMEOUT_MS,
+		});
+		await execFileAsync('git', ['remote', 'add', 'origin', '--', repo], {
+			cwd: destDir,
+			timeout: CLONE_TIMEOUT_MS,
+		});
+		try {
+			await execFileAsync('git', ['fetch', '--depth', '1', 'origin', ref], {
+				cwd: destDir,
+				timeout: CLONE_TIMEOUT_MS,
+				env: GIT_ENV,
+			});
+		} catch {
+			// Some servers refuse a shallow fetch of an arbitrary commit; a full
+			// fetch is the last resort.
+			await execFileAsync('git', ['fetch', 'origin', ref], {
+				cwd: destDir,
+				timeout: CLONE_TIMEOUT_MS,
+				env: GIT_ENV,
+			});
+		}
+		await execFileAsync('git', ['checkout', '--quiet', 'FETCH_HEAD'], {
+			cwd: destDir,
+			timeout: CLONE_TIMEOUT_MS,
+		});
+		return {ok: true};
+	} catch (err) {
+		return {ok: false, error: gitCloneErrorMessage(err, repo, ref)};
+	}
+}
+
 /**
  * Shallow-clone into `destDir`. Terminal prompts are disabled so a private
  * or mistyped repo fails fast instead of hanging on a credential prompt.
@@ -248,27 +360,42 @@ async function resolveFromIndex(
 async function cloneRepo(
 	spec: InstallSpec,
 	destDir: string,
-): Promise<{ok: true} | {ok: false; error: string}> {
-	const args = ['clone', '--depth', '1', '--single-branch'];
-	if (spec.ref) args.push('--branch', spec.ref);
-	// `--` keeps a repo argument that starts with a dash from being read as
-	// a flag.
-	args.push('--', spec.repo, destDir);
+): Promise<CloneResult> {
+	return spec.ref
+		? cloneAtRef(spec.repo, spec.ref, destDir)
+		: simpleClone(spec.repo, destDir);
+}
 
+/**
+ * A local filesystem path that is not itself a git working tree - the "path
+ * on disk" the docs promise, for a bundle someone is authoring before it's
+ * ever committed. Anything that IS a local git repo still goes through
+ * `cloneRepo`, so a local install gets the exact same `--ref` / shallow-clone
+ * semantics as a remote one, and uncommitted/untracked files never leak in.
+ */
+async function resolvePlainLocalDir(repo: string): Promise<string | null> {
+	let info: Awaited<ReturnType<typeof stat>>;
 	try {
-		await execFileAsync('git', args, {
-			timeout: CLONE_TIMEOUT_MS,
-			env: {...process.env, GIT_TERMINAL_PROMPT: '0'},
-		});
+		info = await stat(repo);
+	} catch {
+		return null;
+	}
+	if (!info.isDirectory()) return null;
+	if (await pathExists(join(repo, '.git'))) return null;
+	return resolve(repo);
+}
+
+async function copyLocalDir(
+	source: string,
+	destDir: string,
+): Promise<CloneResult> {
+	try {
+		await cp(source, destDir, {recursive: true});
 		return {ok: true};
 	} catch (err) {
-		const stderr =
-			typeof (err as {stderr?: unknown})?.stderr === 'string'
-				? (err as {stderr: string}).stderr.trim()
-				: '';
 		return {
 			ok: false,
-			error: `git clone failed for ${spec.repo}${spec.ref ? ` (ref ${spec.ref})` : ''}: ${stderr || formatError(err)}`,
+			error: `Could not copy "${source}": ${formatError(err)}`,
 		};
 	}
 }
@@ -277,6 +404,48 @@ async function cloneRepo(
 function isContained(parent: string, child: string): boolean {
 	const rel = relative(resolve(parent), resolve(child));
 	return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * `isContained` is lexical: it compares announced path strings, not where
+ * they actually resolve on disk. A git mode-120000 entry (a symlink) checks
+ * out as a bundle directory that lexically sits under the clone but whose
+ * real location is wherever the link points - `--subdir`, an index entry's
+ * `subdir`, or the auto-discovered root can all name one. `pathExists`
+ * (`fs.access`) follows the link when probing for `skill.yaml`, so it never
+ * notices. This resolves both sides with the real filesystem location before
+ * anything reads from or copies the bundle.
+ */
+async function assertBundleRootContained(
+	cloneDir: string,
+	bundleRoot: string,
+): Promise<{ok: true} | {ok: false; error: string}> {
+	let realClone: string;
+	let realRoot: string;
+	try {
+		realClone = await realpath(cloneDir);
+	} catch (err) {
+		return {
+			ok: false,
+			error: `Could not resolve the clone directory: ${formatError(err)}`,
+		};
+	}
+	try {
+		realRoot = await realpath(bundleRoot);
+	} catch (err) {
+		return {
+			ok: false,
+			error: `Could not resolve the bundle path: ${formatError(err)}`,
+		};
+	}
+	if (!isContained(realClone, realRoot)) {
+		return {
+			ok: false,
+			error:
+				'Refusing to install: the bundle path resolves outside the cloned repository (a symlink in the repo points elsewhere on disk).',
+		};
+	}
+	return {ok: true};
 }
 
 /**
@@ -417,10 +586,13 @@ export function buildTrustSummary(skill: Skill): SkillTrustSummary {
 			});
 		} catch {
 			// Unreachable for a bundle that passed the linter; fall back to the
-			// registry entry rather than dropping the tool from the prompt.
+			// registry entry rather than dropping the tool from the prompt. The
+			// fallback approval is worst-case ('never' - runs without asking),
+			// not the registry's own default: a trust prompt that under-reports
+			// risk is worse than one that over-reports it.
 			tools.push({
 				name: member.tool.name,
-				approval: 'always',
+				approval: 'never',
 				readOnly: member.tool.readOnly === true,
 			});
 		}
@@ -524,8 +696,16 @@ export async function stageSkillInstall(
 	};
 
 	const cloneDir = join(tempRoot, 'clone');
-	const cloned = await cloneRepo(spec, cloneDir);
-	if (!cloned.ok) return fail(cloned.error);
+	const plainLocalDir = await resolvePlainLocalDir(spec.repo);
+	if (plainLocalDir && spec.ref) {
+		return fail(
+			`"${spec.repo}" is a local directory, not a git repository; --ref cannot be used with it.`,
+		);
+	}
+	const fetched = plainLocalDir
+		? await copyLocalDir(plainLocalDir, cloneDir)
+		: await cloneRepo(spec, cloneDir);
+	if (!fetched.ok) return fail(fetched.error);
 
 	// Drop git metadata before anything walks or copies the tree: it is
 	// never part of the bundle, and it is the one place a repo can hide
@@ -534,6 +714,14 @@ export async function stageSkillInstall(
 
 	const root = await findBundleRoot(cloneDir, spec);
 	if ('error' in root) return fail(root.error);
+
+	// `findBundleRoot` and the checks above only ever compare announced path
+	// strings. A symlinked bundle directory (or an intermediate symlinked path
+	// segment) lexically sits under the clone while actually resolving
+	// elsewhere on disk - this is the one point before anything reads from or
+	// copies the bundle where that gets caught.
+	const contained = await assertBundleRootContained(cloneDir, root.path);
+	if (!contained.ok) return fail(contained.error);
 
 	const scanned = await scanBundleTree(root.path);
 	if (!scanned.ok) return fail(scanned.error);
@@ -555,11 +743,14 @@ export async function stageSkillInstall(
 		);
 	}
 
-	const report = await checkSkillBundle(
-		opts.projectRoot,
-		manifestName,
-		root.path,
-	);
+	let report: SkillCheckReport;
+	try {
+		report = await checkSkillBundle(opts.projectRoot, manifestName, root.path);
+	} catch (err) {
+		// An unexpected throw here must not leak the temp clone or surface as an
+		// unhandled rejection out of cli.tsx.
+		return fail(`Could not validate "${manifestName}": ${formatError(err)}`);
+	}
 	if (!report.ok || !report.skill) {
 		return fail(
 			`Skill "${manifestName}" failed validation:\n${formatSkillCheckReport(report)}`,
@@ -605,12 +796,19 @@ async function commitSkillInstall(
 		source: staged.bundlePath,
 		dest: staged.dest,
 	};
-	const result = await applyPromotion(plan, {force: opts.force});
-	await staged.cleanup();
-	const commit: CommitResult = {ok: result.ok};
-	if (result.destExists) commit.destExists = true;
-	if (result.error) commit.error = result.error;
-	return commit;
+	try {
+		const result = await applyPromotion(plan, {force: opts.force});
+		const commit: CommitResult = {ok: result.ok};
+		if (result.destExists) commit.destExists = true;
+		if (result.error) commit.error = result.error;
+		return commit;
+	} catch (err) {
+		// An unexpected throw must still clean up the temp clone rather than
+		// leak it and surface as an unhandled rejection out of cli.tsx.
+		return {ok: false, error: formatError(err)};
+	} finally {
+		await staged.cleanup();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -634,16 +832,10 @@ export interface SkillsCliOptions {
 }
 
 export const SKILLS_CLI_USAGE =
-	'Usage: nanocoder skills add <name|owner/repo|git-url> [--ref <ref>] [--subdir <path>] [--global] [--force] [--yes]';
+	'Usage: nanocoder skills add <name|owner/repo|git-url> [--ref <ref>] [--subdir <path>] [--global] [--force] [--yes] [--index <url>]';
 
 function defaultConfirm(prompt: string): Promise<boolean> {
 	process.stdout.write(`${prompt}\n\n`);
-	if (!process.stdin.isTTY) {
-		process.stdout.write(
-			'Not a terminal — re-run with --yes to accept this skill.\n',
-		);
-		return Promise.resolve(false);
-	}
 	const rl = createInterface({input: process.stdin, output: process.stdout});
 	return new Promise(resolvePrompt => {
 		rl.question('Install this skill? [y/N] ', answer => {
@@ -660,7 +852,9 @@ function defaultConfirm(prompt: string): Promise<boolean> {
 export async function runSkillsCli(
 	opts: SkillsCliOptions,
 ): Promise<SkillsCliResult> {
-	const {target, values, switches} = parseAddArgs(opts.args);
+	const parsed = parseAddArgs(opts.args);
+	if ('error' in parsed) return {exitCode: 1, output: parsed.error};
+	const {target, values, switches} = parsed;
 	if (!target) return {exitCode: 1, output: SKILLS_CLI_USAGE};
 
 	const stageOptions: StageOptions = {projectRoot: opts.projectRoot};
@@ -683,6 +877,17 @@ export async function runSkillsCli(
 	// leaves no record of the tools and subscriptions it agreed to is exactly
 	// the thing the prompt exists to prevent.
 	const autoAccepted = switches.has('--yes');
+	// A script that forgets --yes in a non-interactive environment must not
+	// look like a successful no-op: there is no default-confirm question to
+	// fall back to (a custom `confirm` from a caller owns its own semantics),
+	// so this is a failure, not a decline.
+	if (!autoAccepted && !opts.confirm && !process.stdin.isTTY) {
+		await staged.staged.cleanup();
+		return {
+			exitCode: 1,
+			output: `${prompt}\n\nNot a terminal — re-run with --yes to accept this skill. Aborted; nothing was written.`,
+		};
+	}
 	const accepted = autoAccepted
 		? true
 		: await (opts.confirm ?? defaultConfirm)(prompt);
@@ -715,24 +920,45 @@ export async function runSkillsCli(
 }
 
 const VALUE_FLAGS = new Set(['--ref', '--subdir', '--index']);
+const KNOWN_SWITCHES = new Set(['--global', '--force', '--yes']);
 
-/** Split `skills add` arguments into the target, value flags, and switches. */
-function parseAddArgs(args: string[]): {
+interface ParsedAddArgs {
 	target?: string;
 	values: Record<string, string | undefined>;
 	switches: Set<string>;
-} {
+}
+
+/**
+ * Split `skills add` arguments into the target, value flags, and switches.
+ * This is a security-sensitive command (it decides whether code runs
+ * unattended), so a malformed invocation is an error rather than a silent
+ * best-effort guess: an unrecognised `--forse` must not be accepted as a
+ * no-op, and `--ref --global` must not swallow `--global` as the ref's
+ * value - a flag-shaped next token means the value was omitted, not that the
+ * next flag is the value.
+ */
+function parseAddArgs(args: string[]): ParsedAddArgs | {error: string} {
 	const values: Record<string, string | undefined> = {};
 	const switches = new Set<string>();
 	let target: string | undefined;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (VALUE_FLAGS.has(arg)) {
-			values[arg] = args[++i];
+			const value = args[i + 1];
+			if (value === undefined || value.startsWith('--')) {
+				return {error: `${arg} requires a value.`};
+			}
+			values[arg] = value;
+			i++;
 		} else if (arg.startsWith('--')) {
+			if (!KNOWN_SWITCHES.has(arg)) {
+				return {error: `Unknown flag: ${arg}\n${SKILLS_CLI_USAGE}`};
+			}
 			switches.add(arg);
 		} else if (target === undefined) {
 			target = arg;
+		} else {
+			return {error: `Unexpected extra argument: ${arg}\n${SKILLS_CLI_USAGE}`};
 		}
 	}
 	return target === undefined ? {values, switches} : {target, values, switches};

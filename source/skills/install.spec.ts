@@ -1,15 +1,25 @@
 import {execFile} from 'node:child_process';
-import {access, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {
+	access,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
 import test from 'ava';
+import type {Skill} from '@/types/skills';
 import {
 	buildTrustSummary,
 	fetchSkillIndex,
 	formatTrustSummary,
 	parseInstallTarget,
 	runSkillsCli,
+	SKILLS_CLI_USAGE,
 	stageSkillInstall,
 } from './install.js';
 
@@ -32,6 +42,14 @@ const savedIndex = process.env.NANOCODER_SKILLS_INDEX;
 let mono: string;
 /** Fixture repository whose bundle lives at `skills/nested-skill/`. */
 let nested: string;
+/**
+ * Repository with two commits, each declaring a different version - proves
+ * `--ref` actually checks out the named revision rather than always landing
+ * on HEAD.
+ */
+let refRepo: string;
+/** The first commit's SHA in `refRepo`; the second is HEAD. */
+let refRepoFirstSha: string;
 /** Memoized fixture build, so the repos are created at most once. */
 let fixtureBuild: Promise<void> | undefined;
 
@@ -163,6 +181,27 @@ async function makeNestedRepo(): Promise<string> {
 }
 
 /**
+ * A repo with two commits, so `--ref <sha>` can be told apart from "whatever
+ * HEAD is": the first commit's manifest declares `version: 1.0.0`, the
+ * second (HEAD) declares `2.0.0`.
+ */
+async function makeRefRepo(): Promise<{repo: string; firstSha: string}> {
+	const repo = join(fixtures, 'ref-repo');
+	await mkdir(repo, {recursive: true});
+	await writeFile(join(repo, 'skill.yaml'), manifest('ref-demo', 'version: 1.0.0\n'));
+	await git(repo, ['init', '-q', '-b', 'main']);
+	await git(repo, ['add', '-A']);
+	await git(repo, ['commit', '-q', '-m', 'v1', '--no-gpg-sign']);
+	const firstSha = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+	await writeFile(join(repo, 'skill.yaml'), manifest('ref-demo', 'version: 2.0.0\n'));
+	await git(repo, ['add', '-A']);
+	await git(repo, ['commit', '-q', '-m', 'v2', '--no-gpg-sign']);
+
+	return {repo, firstSha};
+}
+
+/**
  * Build the fixture repos on first use rather than in a `before` hook: the
  * pure-parsing tests then run and reset AVA's inactivity timer before the
  * git work starts, which keeps a cold run inside the default timeout.
@@ -172,6 +211,9 @@ function ensureFixtures(): Promise<void> {
 		fixtures = await mkdtemp(join(tmpdir(), 'skill-install-repos-'));
 		mono = await makeFixtureRepo();
 		nested = await makeNestedRepo();
+		const ref = await makeRefRepo();
+		refRepo = ref.repo;
+		refRepoFirstSha = ref.firstSha;
 	})();
 	return fixtureBuild;
 }
@@ -426,6 +468,67 @@ test.serial(
 );
 
 test.serial(
+	'stageSkillInstall - rejects a bundle root that is itself a symlink escaping the clone',
+	async t => {
+		// Reproduces the reported escape: a repo whose bundle directory is a
+		// symlink is resolved through an index entry's implicit name lookup
+		// (findBundleRoot's `skills/<expectName>` guess), not an explicit
+		// --subdir - `isContained` there is lexical and `pathExists` follows
+		// the link, so nothing before the new realpath check ever notices.
+		//
+		// Built on the local-directory install path (Node's own `cp`/`symlink`)
+		// rather than a git checkout: git only materializes a real OS symlink
+		// from a mode-120000 entry when the platform supports it unprivileged,
+		// which a plain `fs.symlink` on Windows does too via a junction, so
+		// this reproduces the escape without depending on git's checkout
+		// semantics at all.
+		const source = join(dir, 'source-repo');
+		await mkdir(join(source, 'skills'), {recursive: true});
+
+		const outside = join(dir, 'outside-the-source-dir');
+		await mkdir(outside, {recursive: true});
+		await writeFile(join(outside, 'skill.yaml'), manifest('escaped'));
+
+		try {
+			await symlink(
+				outside,
+				join(source, 'skills', 'probe-skill'),
+				process.platform === 'win32' ? 'junction' : 'dir',
+			);
+		} catch (err) {
+			// Unprivileged symlink creation is unavailable in this environment
+			// (e.g. Windows without Developer Mode and without junction
+			// support). The escape can't be materialized here, but the same
+			// scenario is exercised on any environment that does support it,
+			// notably Linux CI.
+			t.log(`Skipping: could not create a symlink/junction: ${String(err)}`);
+			t.pass();
+			return;
+		}
+
+		const result = await stageSkillInstall('probe-skill', {
+			projectRoot: projectRoot(),
+			indexUrl: await writeIndex([{name: 'probe-skill', repo: source}]),
+		});
+		t.false(result.ok);
+		if (!result.ok) {
+			// Refused either way: on a platform that can copy a directory
+			// junction/symlink as-is, the escape reaches the new realpath
+			// containment check. Copying it into the temp clone needs the same
+			// unprivileged-symlink support Windows gates behind Developer Mode,
+			// so there `cp` itself refuses first - still nothing gets installed,
+			// just for an earlier, platform-specific reason.
+			t.regex(
+				result.error,
+				process.platform === 'win32'
+					? /Could not copy/
+					: /resolves outside the cloned repository/,
+			);
+		}
+	},
+);
+
+test.serial(
 	'stageSkillInstall - rejects a manifest whose include globs traverse upward',
 	async t => {
 		await ensureFixtures();
@@ -472,6 +575,88 @@ test.serial(
 		t.regex(rendered, /schedule\.cron → agent:watcher · cron "0 9 \* \* MON"/);
 		t.regex(rendered, /daemon fires these unattended/);
 
+		await result.staged.cleanup();
+	},
+);
+
+test.serial(
+	"buildTrustSummary - falls back to the worst-case approval ('never') when a tool file can't be re-read",
+	t => {
+		// Unreachable through a full install (a bundle that failed to parse its
+		// own tool file would have already failed the linter), so this is a
+		// direct unit test: it fakes the one condition the try/catch exists
+		// for, a tool file that parsed once but can't be read again.
+		const skill = {
+			name: 'demo',
+			description: 'A test skill.',
+			toolsVisibility: 'scoped',
+			tools: [
+				{
+					filePath: join(dir, 'does-not-exist.md'),
+					tool: {name: 'ghost', readOnly: false},
+				},
+			],
+			source: {priority: 'project', shape: 'bundle', rootPath: dir},
+		} as unknown as Skill;
+
+		const trust = buildTrustSummary(skill);
+		// Worst-case, not the registry entry's own (possibly milder) default:
+		// under-reporting risk in a trust prompt is worse than over-reporting it.
+		t.is(trust.tools[0]?.approval, 'never');
+	},
+);
+
+// --- local directories and --ref -------------------------------------------
+
+test.serial(
+	'stageSkillInstall - installs from a local directory that is not a git repository',
+	async t => {
+		const source = join(dir, 'local-checkout');
+		await mkdir(join(source, 'agents'), {recursive: true});
+		await writeFile(join(source, 'skill.yaml'), manifest('local-bundle'));
+		await writeFile(join(source, 'agents', 'a.md'), agentFile('a'));
+
+		const result = await stageSkillInstall(source, {projectRoot: projectRoot()});
+		t.true(result.ok);
+		if (!result.ok) return;
+		t.is(result.staged.trust.name, 'local-bundle');
+		await result.staged.cleanup();
+	},
+);
+
+test.serial(
+	'stageSkillInstall - refuses --ref against a local directory that is not a git repository',
+	async t => {
+		const source = join(dir, 'local-checkout-ref');
+		await mkdir(source, {recursive: true});
+		await writeFile(join(source, 'skill.yaml'), manifest('local-bundle'));
+
+		const result = await stageSkillInstall(source, {
+			projectRoot: projectRoot(),
+			ref: 'main',
+		});
+		t.false(result.ok);
+		if (!result.ok) {
+			t.regex(result.error, /not a git repository; --ref cannot be used/);
+		}
+	},
+);
+
+test.serial(
+	'stageSkillInstall - --ref accepts a commit SHA, not just a branch or tag',
+	async t => {
+		await ensureFixtures();
+		// git clone --branch rejects a SHA outright; this only passes if the
+		// init+fetch+checkout fallback actually ran.
+		const result = await stageSkillInstall(refRepo, {
+			projectRoot: projectRoot(),
+			ref: refRepoFirstSha,
+		});
+		t.true(result.ok);
+		if (!result.ok) return;
+		// Proves it checked out the named commit, not just whatever HEAD is -
+		// the first commit declares 1.0.0, HEAD (the second) declares 2.0.0.
+		t.is(result.staged.trust.version, '1.0.0');
 		await result.staged.cleanup();
 	},
 );
@@ -599,3 +784,64 @@ test.serial('skills add - usage when no target is given', async t => {
 	t.is(result.exitCode, 1);
 	t.regex(result.output, /Usage: nanocoder skills add/);
 });
+
+test('SKILLS_CLI_USAGE documents --index', t => {
+	t.regex(SKILLS_CLI_USAGE, /--index/);
+});
+
+// --- CLI argument parsing ----------------------------------------------------
+// A typo'd flag on a security-sensitive command (does this run unattended?)
+// must fail loudly, not be silently ignored or misparsed.
+
+test.serial('skills add - rejects an unknown flag instead of ignoring it', async t => {
+	await ensureFixtures();
+	const result = await runSkillsCli({
+		projectRoot: projectRoot(),
+		args: [mono, '--subdir', 'bundle', '--forse'],
+	});
+	t.is(result.exitCode, 1);
+	t.regex(result.output, /Unknown flag: --forse/);
+	t.false(await pathExists(join(projectRoot(), '.nanocoder', 'skills', 'demo')));
+});
+
+test.serial('skills add - --ref with no following value is an error', async t => {
+	const result = await runSkillsCli({
+		projectRoot: projectRoot(),
+		args: ['owner/repo', '--ref'],
+	});
+	t.is(result.exitCode, 1);
+	t.regex(result.output, /--ref requires a value/);
+});
+
+test.serial(
+	'skills add - --ref does not swallow the next flag as its value',
+	async t => {
+		await ensureFixtures();
+		const result = await runSkillsCli({
+			projectRoot: projectRoot(),
+			args: [nested, '--ref', '--global'],
+		});
+		// `--ref --global` must report the missing ref value, not silently
+		// install with --global swallowed as the ref and never applied.
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /--ref requires a value/);
+	},
+);
+
+test.serial(
+	'skills add - a non-interactive run without --yes fails instead of silently no-opting',
+	async t => {
+		await ensureFixtures();
+		// No `confirm` override and no --yes: the CLI cannot ask (this test
+		// process has no TTY on stdin), so it must fail loudly rather than
+		// report success while writing nothing - a CI script that forgot --yes
+		// should not see exit code 0.
+		const result = await runSkillsCli({
+			projectRoot: projectRoot(),
+			args: [mono, '--subdir', 'bundle'],
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /Not a terminal.*--yes/s);
+		t.false(await pathExists(join(projectRoot(), '.nanocoder', 'skills', 'demo')));
+	},
+);
