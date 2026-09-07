@@ -285,8 +285,12 @@ function TextInput({
 				if (showCursor) {
 					nextCursorOffset++;
 				}
-			} else if (key.backspace) {
+			} else if (key.backspace || (key.delete && key.raw === '\x7f')) {
 				// Backspace deletes the character before the cursor.
+				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
+				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
+				// sequence: '\x7f' (from macOS/Linux terminals) is a backward
+				// delete, while '\x1b[3~' is the forward Delete key.
 				if (cursorOffsetRef.current > 0) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
@@ -298,6 +302,8 @@ function TextInput({
 				}
 			} else if (key.delete) {
 				// Delete removes the character after the cursor (forward delete).
+				// Only reached for the forward Delete key (\x1b[3~); the
+				// physical Backspace (\x7f) is handled in the branch above.
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +

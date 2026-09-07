@@ -117,6 +117,77 @@ test('component Delete with cursor at end does nothing', async t => {
 	unmount();
 });
 
+// --- Backspace (\x7f) ---
+// Ink parses the physical Backspace (\x7f — sent by macOS Terminal, iTerm2
+// and essentially all Linux terminals) as `key.delete`, NOT `key.backspace`
+// (which Ink reserves for \b/Ctrl+H). So Backspace must be routed to a
+// backward delete by matching the raw sequence, distinct from forward Delete
+// (\x1b[3~).
+
+test('component Backspace (\x7f) removes the character before the cursor', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abcde" />,
+	);
+
+	// Cursor is at the end; Backspace must remove 'e'.
+	await press(stdin, '\u007f');
+
+	await waitForValue(valueRef, v => v === 'abcd');
+	t.is(valueRef.current, 'abcd');
+	unmount();
+});
+
+test('component Backspace (\x7f) with cursor between chars removes the char before', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abcde" />,
+	);
+
+	// Move left once so the cursor sits between 'd' and 'e'; Backspace should
+	// remove 'd' (the char before the cursor), leaving "abce".
+	await press(stdin, '\u001b[D'); // left
+	await press(stdin, '\u007f'); // Backspace
+
+	await waitForValue(valueRef, v => v === 'abce');
+	t.is(valueRef.current, 'abce');
+	unmount();
+});
+
+test('component Backspace (\x7f) with cursor at start does nothing', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abc" />,
+	);
+
+	// Move to the start with Home, then Backspace should be a no-op.
+	await press(stdin, '\u001b[H');
+	await press(stdin, '\u007f');
+
+	await waitForValue(valueRef, v => v === 'abc');
+	t.is(valueRef.current, 'abc');
+	unmount();
+});
+
+// A forward Delete (\x1b[3~) must NOT be treated as a Backspace even when the
+// cursor is mid-line — this pins the raw-sequence disambiguation.
+test('component Delete (\x1b[3~) still forward-deletes, distinct from Backspace', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abcde" />,
+	);
+
+	// Move left once so the cursor sits between 'd' and 'e'; forward Delete
+	// should remove 'e' (after the cursor), giving "abcd" — the opposite of
+	// the Backspace case above.
+	await press(stdin, '\u001b[D'); // left
+	await press(stdin, '\u001b[3~'); // Delete
+
+	await waitForValue(valueRef, v => v === 'abcd');
+	t.is(valueRef.current, 'abcd');
+	unmount();
+});
+
 // --- Home / End ---
 
 test('component Home moves cursor to start (next typed char inserts at 0)', async t => {

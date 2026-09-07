@@ -274,6 +274,57 @@ test('rapid same-tick updateInput calls each record a distinct undo entry', t =>
 	t.is(currentHook!.redoStack.length, 3);
 });
 
+// --- Same-batch edit + undo/redo (no re-render between mutations) ---
+// undo()/redo() treat the refs as the synchronous source of truth, while
+// pushToUndoStack only used to keep currentStateRef in lockstep. That meant an
+// edit followed by an undo/redo in the same stdin batch read STALE
+// undoStackRef/redoStackRef (resynced only by useEffect after a render). These
+// tests reproduce the two failure modes the maintainer flagged.
+
+test('updateInput then undo in the same tick reverts correctly (ref-sync)', t => {
+	const {hook, instance} = setupTest();
+
+	// Single update, then undo with NO re-render in between. If pushToUndoStack
+	// didn't keep undoStackRef in lockstep, undo() would read a stale (empty)
+	// stack and leave the input at 'a' instead of reverting to ''.
+	hook.updateInput('a');
+	hook.undo();
+
+	instance.rerender(<TestComponent />);
+
+	t.is(currentHook!.input, '');
+	t.is(currentHook!.undoStack.length, 0);
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['a']);
+});
+
+test('same-tick redo after a fresh edit does not resurrect a stale redo entry', t => {
+	const {hook, instance} = setupTest();
+
+	// Build up state: '' -> 'a' -> 'ab'.
+	hook.updateInput('a');
+	instance.rerender(<TestComponent />);
+	currentHook!.updateInput('ab');
+	instance.rerender(<TestComponent />);
+
+	// Undo back to 'a'; the redo stack now holds ['ab'].
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	t.is(currentHook!.input, 'a');
+	t.deepEqual(currentHook!.redoStack.map(s => s.displayValue), ['ab']);
+
+	// Now type 'aZ' and redo in the SAME tick. If pushToUndoStack didn't clear
+	// redoStackRef synchronously, redo() would read the stale ['ab'] and
+	// resurrect 'ab', discarding the typed 'Z'.
+	currentHook!.updateInput('aZ');
+	currentHook!.redo();
+
+	instance.rerender(<TestComponent />);
+
+	// Redo must be a no-op because the fresh edit cleared the redo stack.
+	t.is(currentHook!.input, 'aZ');
+	t.is(currentHook!.redoStack.length, 0);
+});
+
 // Test that new action clears redo stack
 test('new action after undo clears redo stack', t => {
 	const {hook, instance} = setupTest();

@@ -92,19 +92,25 @@ export function useInputState() {
 	// functional updater would capture the already-advanced value at flush time.
 	// The ref is kept in lockstep by the assignment at the bottom of this
 	// function, so subsequent same-tick updateInput calls see the latest value.
+	//
+	// undoStackRef/redoStackRef are ALSO kept in lockstep here (not just in a
+	// useEffect after render), because undo()/redo() read them synchronously as
+	// their source of truth. Without this, an edit followed by an undo/redo in
+	// the same stdin batch would read the stale pre-render stacks.
 	const pushToUndoStack = useCallback((newState: InputState) => {
 		const previous = currentStateRef.current;
-		setUndoStack(prev => {
-			if (prev.length >= MAX_UNDO_STACK) {
-				return [...prev.slice(-(MAX_UNDO_STACK - 1)), previous];
-			}
-			return [...prev, previous];
-		});
+		const nextUndoStack =
+			undoStackRef.current.length >= MAX_UNDO_STACK
+				? [...undoStackRef.current.slice(-(MAX_UNDO_STACK - 1)), previous]
+				: [...undoStackRef.current, previous];
+
+		undoStackRef.current = nextUndoStack;
+		redoStackRef.current = []; // Clear redo stack on new action
+		currentStateRef.current = newState;
+
+		setUndoStack(nextUndoStack);
 		setRedoStack([]); // Clear redo stack on new action
 		setCurrentState(newState);
-		// Keep the ref in lockstep so undo/redo and subsequent same-tick
-		// updateInput calls capture the latest value.
-		currentStateRef.current = newState;
 	}, []);
 
 	// Update input with paste detection and atomic deletion
@@ -390,12 +396,21 @@ export function useInputState() {
 	}, []);
 
 	// Redo function (Ctrl+Y). Same ref-as-source-of-truth pattern as undo.
+	// Pushing back onto the undo stack obeys the same MAX_UNDO_STACK cap as
+	// undo() so that a long redo streak (after many undos) cannot grow the
+	// undo stack unbounded.
 	const redo = useCallback(() => {
 		const stack = redoStackRef.current;
 		if (stack.length > 0) {
 			const nextState = stack[stack.length - 1];
 			const nextRedoStack = stack.slice(0, -1);
-			const nextUndoStack = [...undoStackRef.current, currentStateRef.current];
+			const nextUndoStack =
+				undoStackRef.current.length >= MAX_UNDO_STACK
+					? [
+							...undoStackRef.current.slice(-(MAX_UNDO_STACK - 1)),
+							currentStateRef.current,
+						]
+					: [...undoStackRef.current, currentStateRef.current];
 
 			undoStackRef.current = nextUndoStack;
 			redoStackRef.current = nextRedoStack;
