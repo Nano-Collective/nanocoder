@@ -296,7 +296,7 @@ test('WelcomeMessage hides menu when rows < 15', t => {
 	process.stdout.rows = originalRows;
 });
 
-test('WelcomeMessage hides logo when rows < 16', t => {
+test('WelcomeMessage falls back to a compact text logo when rows < 16', t => {
 	const originalColumns = process.stdout.columns;
 	const originalRows = process.stdout.rows;
 	process.stdout.columns = 100;
@@ -307,8 +307,48 @@ test('WelcomeMessage hides logo when rows < 16', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /N A N O C O D E R/);
+	// Too short for the multi-row BigText art, but the wordmark should still
+	// render as a single plain-text line rather than disappearing entirely.
 	t.notRegex(output!, /█/);
+	t.regex(output!, /NANOCODER/);
+	t.regex(output!, /Welcome to Nanocoder/);
+
+	process.stdout.columns = originalColumns;
+	process.stdout.rows = originalRows;
+});
+
+test('WelcomeMessage shows a compact NC wordmark in narrow+short terminals (e.g. VS Code panel)', t => {
+	const originalColumns = process.stdout.columns;
+	const originalRows = process.stdout.rows;
+	process.stdout.columns = 60;
+	// @ts-ignore
+	process.stdout.rows = 12;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /█/);
+	t.regex(output!, /NC/);
+	t.regex(output!, /Welcome to Nanocoder/);
+
+	process.stdout.columns = originalColumns;
+	process.stdout.rows = originalRows;
+});
+
+test('WelcomeMessage hides logo entirely only when rows < 8', t => {
+	const originalColumns = process.stdout.columns;
+	const originalRows = process.stdout.rows;
+	process.stdout.columns = 100;
+	// @ts-ignore
+	process.stdout.rows = 7;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /█/);
+	t.notRegex(output!, /NANOCODER/);
 	t.regex(output!, /Welcome to Nanocoder/);
 
 	process.stdout.columns = originalColumns;

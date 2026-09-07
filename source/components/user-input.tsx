@@ -5,7 +5,7 @@ import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {usePromptWidth, useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -37,13 +37,11 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
-
-// Prompt box width floor: keeps narrow terminals legible.
-const PROMPT_WIDTH_MIN = 40;
 
 interface ChatProps {
 	onSubmit?: (
@@ -114,8 +112,9 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals.
-	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
+	// cols for legibility on tiny terminals. Shared with the chat transcript
+	// (usePromptWidth) so both track the same left edge as the terminal resizes.
+	const {promptWidth} = usePromptWidth();
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
@@ -157,6 +156,7 @@ export default function UserInput({
 		setInputState,
 		undo,
 		redo,
+		insertPaste,
 	} = inputState;
 
 	const {
@@ -183,6 +183,22 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Real pastes, as reported by the terminal via bracketed paste.
+	useEffect(() => {
+		if (disabled || !effectiveFocus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			insertPaste(payload);
+			// Remount TextInput so its cursor follows the appended text.
+			setTextInputKey(prev => prev + 1);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (
@@ -725,6 +741,12 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+t to collapse/expand the live task list (always available)
+		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+			onToggleTaskList();
+			return;
+		}
+
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -990,6 +1012,8 @@ export default function UserInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
 				/>
 			</Box>
 		);
@@ -1031,7 +1055,6 @@ export default function UserInput({
 							handleEnter={false}
 						/>
 					</Box>
-
 					{showClearMessage && (
 						<Text color={colors.secondary}>Press escape again to clear</Text>
 					)}
@@ -1105,20 +1128,6 @@ export default function UserInput({
 							})}
 						</Box>
 					)}
-					{isBusy && (
-						<Box marginTop={1}>
-							<Text color={colors.secondary}>
-								<Spinner type="dots" /> Press Esc to cancel
-								{onToggleCompactDisplay && (
-									<Text>
-										{' '}
-										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-										{isNarrow ? '' : 'tool results'}
-									</Text>
-								)}
-							</Text>
-						</Box>
-					)}
 				</Box>
 			</Box>
 
@@ -1132,17 +1141,26 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible */}
-			<DevelopmentModeIndicator
-				developmentMode={developmentMode}
-				colors={colors}
-				contextPercentUsed={contextPercentUsed ?? null}
-				contextSource={contextSource ?? null}
-				sessionName={sessionName}
-				tune={tune}
-				currentModel={currentModel}
-				activeEditor={activeEditor}
-			/>
+			{/* Development mode indicator - always visible. marginLeft matches the
+			2-col margin promptWidth (actualWidth - 4, centered) leaves to the
+			left of the input box, so the indicator's text lines up with the
+			box's left border instead of sitting flush against the terminal
+			edge. Left-only (not paddingX) so it doesn't eat further into the
+			indicator's own actualWidth-based truncation budget. */}
+			<Box marginLeft={2}>
+				<DevelopmentModeIndicator
+					developmentMode={developmentMode}
+					colors={colors}
+					contextPercentUsed={contextPercentUsed ?? null}
+					contextSource={contextSource ?? null}
+					sessionName={sessionName}
+					tune={tune}
+					currentModel={currentModel}
+					activeEditor={activeEditor}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
+				/>
+			</Box>
 		</>
 	);
 }
