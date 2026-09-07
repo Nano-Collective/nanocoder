@@ -269,7 +269,16 @@ file is a failed run. Keep your reasoning brief; spend the effort on the file,
 and write it before you stop.
 
 Write **only** a JSON object to the file path given in the prompt. No prose
-before or after, no markdown fences. Schema:
+before or after, no markdown fences.
+
+**The key names below are matched literally.** They are not a description of
+what to include — a finding filed as `title` + `description` instead of `area` +
+`detail` is discarded by the workflow and the whole review is thrown away and
+re-run. `severity` and `detail` are required on every finding. If your context
+has been compacted and you are working from a summary, the schema is restated in
+your original instructions; use it exactly.
+
+Schema:
 
 ```json
 {

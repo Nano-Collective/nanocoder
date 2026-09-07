@@ -338,12 +338,30 @@ jobs:
       #
       # Remaining: read_file, write_file, find_files, list_directory,
       # search_file_contents.
+      #
+      # autoCompact.threshold is raised from its default of 60 because
+      # compaction is what broke the review on #978. A real review reads sixty
+      # or more files on top of a ~100KB context.md, so it crosses 60% of the
+      # context window every time on a large PR. Compaction then summarises the
+      # earlier turns — including the turn where the agent read the rubric — and
+      # the summariser preserves file paths and identifiers but not the required
+      # OUTPUT SCHEMA. The agent came out the other side still knowing it had to
+      # write a verdict, no longer knowing the exact key names, and invented its
+      # own. 90 is the practical ceiling (the loader clamps to 50-95) and buys
+      # roughly 50% more headroom before the schema is at risk.
+      #
+      # This reduces the odds; it does not remove them. The verdict is validated
+      # against the schema below before anything is posted, which is what
+      # actually guarantees a malformed verdict never reaches a contributor.
       - name: Configure Nanocoder provider
         run: |
           set -euo pipefail
           cat > agents.config.json <<'JSON'
           {
             "nanocoder": {
+              "autoCompact": {
+                "threshold": 90
+              },
               "disabledTools": [
                 "execute_bash",
                 "fetch_url",
@@ -402,15 +420,126 @@ jobs:
           # deliverable. An earlier version buried it mid-prompt and the model
           # narrated a long, genuinely good analysis to stdout, then stopped
           # without ever calling write_file — it treated the chat as the output.
+          # The schema is restated here as well as in the rubric, deliberately.
+          # The rubric is read in the agent's first turn, and on a long review
+          # that turn is the first thing auto-compaction summarises away. The
+          # summariser keeps file paths and identifiers; it does not know the
+          # exact JSON keys were load-bearing. Repeating them in the task
+          # statement gives the schema a second place to survive from, and it is
+          # ~15 lines, far short of the multi-KB payloads that argv has mangled.
+          SCHEMA='{
+            "verdict": "clean | comments | needs-work",
+            "summary": "Two or three sentences: what the change does, whether it is correct, whether it is ready.",
+            "findings": [
+              {
+                "area": "correctness | security | design | tests | completeness | warranted | duplicate | scope | changeset | contributing",
+                "severity": "blocking | important | nit",
+                "file": "source/path/to/file.ts",
+                "line": 42,
+                "detail": "Markdown. What is wrong, why it matters, what would fix it."
+              }
+            ],
+            "duplicate_of": null,
+            "addressed": []
+          }'
+
           PROMPT='You are reviewing a pull request. Read .github/nc-review/rubric.md for your instructions, CONTRIBUTING.md for the project rules, CLAUDE.md for the architecture, and .nc-review/context.md for the pull request under review. All paths are relative to the current project directory.
 
           This is a real code review: use read_file and search_file_contents to read the source around every changed area before judging it, and do not assert a bug in code you have not read.
 
-          YOUR ONLY DELIVERABLE IS THE FILE .nc-review/verdict.json — write it with write_file, following the schema in the rubric exactly.
+          YOUR ONLY DELIVERABLE IS THE FILE .nc-review/verdict.json — write it with write_file. Use exactly these keys, spelled exactly this way. Every finding MUST carry area, severity and detail; file and line may be omitted, nothing else may be:
+
+          '"$SCHEMA"'
 
           Anything you write in chat is discarded and never reaches a human. Only the JSON file is read. Do not narrate your analysis; put your conclusions in the JSON. Keep your reasoning brief and spend your effort on the file.
 
           You are not finished until write_file has succeeded on .nc-review/verdict.json. If you have analysed the pull request but not yet written that file, write it now.'
+
+          # A verdict that parses as JSON is not necessarily a verdict.
+          #
+          # On #978 the agent wrote well-formed JSON using key names it had
+          # reconstructed from memory after compaction: `severity` and `file`
+          # happened to match the schema, `area` and `detail` did not. Nothing
+          # downstream checked, so jq interpolated the two missing keys straight
+          # into a public comment as the literal string "null", six times, under
+          # a genuinely good summary. The contributor saw a bot post nulls at
+          # them.
+          #
+          # So: normalise, then validate, and treat anything that fails as no
+          # verdict at all.
+          #
+          #   normalise  accepts the handful of near-miss key and severity names
+          #              a model reaches for when working from memory, so a real
+          #              review is not binned over a synonym
+          #   validate   after normalising, every finding must still carry a
+          #              severity, an area and a detail
+          #
+          # Everything downstream reads the normalised file, so the renderer can
+          # only ever be handed fields that exist.
+          usable_verdict() {
+            [ -s .nc-review/verdict.json ] || return 1
+            jq -e . .nc-review/verdict.json >/dev/null 2>&1 || return 1
+
+            jq '
+              def nz: if type == "string" and (gsub("^\\s+|\\s+$"; "") | length) > 0
+                      then . else null end;
+              def sev:
+                (if type == "string" then ascii_downcase | gsub("[^a-z]"; "") else "" end) as $s
+                | if   ["blocking","blocker","critical","high","mustfix"] | index($s) then "blocking"
+                  elif ["important","major","medium","shouldfix"] | index($s) then "important"
+                  elif ["nit","nitpick","minor","low","suggestion","optional","advisory","info"] | index($s) then "nit"
+                  else null end;
+              {
+                verdict: (.verdict | nz),
+                summary: ((.summary | nz) // (.overview | nz) // (.conclusion | nz)),
+                duplicate_of: (if (.duplicate_of // .duplicateOf | type) == "number"
+                               then (.duplicate_of // .duplicateOf) else null end),
+                addressed: [ ((.addressed // .resolved // [])[]? | nz) | select(. != null) ],
+                findings: [
+                  ((.findings // .issues // .comments // [])[]? | select(type == "object"))
+                  | {
+                      area:     ((.area | nz) // (.category | nz) // (.type | nz) // (.kind | nz) // (.topic | nz)),
+                      severity: ((.severity | sev) // (.level | sev) // (.priority | sev)),
+                      file:     ((.file | nz) // (.path | nz) // (.location | nz) // (.filename | nz)),
+                      line:     (if (.line | type) == "number" then .line else null end),
+                      detail:   ((.detail | nz) // (.details | nz) // (.description | nz) // (.body | nz) // (.message | nz) // (.explanation | nz) // (.comment | nz))
+                    }
+                ]
+              }
+            ' .nc-review/verdict.json > .nc-review/verdict.normalised.json 2>/dev/null || {
+              rm -f .nc-review/verdict.normalised.json; return 1;
+            }
+
+            # severity and detail only. `area` is a category chip; the render
+            # drops it when it is missing, and binning seven minutes of correct
+            # analysis over a cosmetic label would be the same mistake in the
+            # other direction. `detail` IS the finding — without it there is
+            # nothing to post.
+            jq -e '
+              (.summary != null)
+              and (.findings | type == "array")
+              and all(.findings[]?; .severity != null and .detail != null)
+            ' .nc-review/verdict.normalised.json >/dev/null 2>&1 || {
+              rm -f .nc-review/verdict.normalised.json; return 1;
+            }
+          }
+
+          # Keep the rejected verdict where the next person can see it. Deriving
+          # "the model used its own key names" from run logs alone took longer
+          # than the fix did. Step summary, not a PR comment — this is our
+          # debugging surface, not the contributor'"'"'s problem.
+          dump_rejected() {
+            [ -s .nc-review/verdict.json ] || return 0
+            {
+              echo "### nc-review: verdict rejected as malformed"
+              echo
+              echo 'Raw `.nc-review/verdict.json`, first 100 lines:'
+              echo
+              echo '```json'
+              head -n 100 .nc-review/verdict.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
 
           set +e
           nanocoder run "$PROMPT" \
@@ -420,14 +549,29 @@ jobs:
           STATUS=$?
           set -e
 
-          # One retry, and only for the specific failure of finishing without
-          # writing the file. The prompt above should prevent it, but "the
-          # analysis was good and went nowhere" is an expensive way to fail, and
-          # a second attempt is ~3 minutes. Not a general retry: a genuine agent
-          # error still falls through to the safe comment.
-          if [ ! -s .nc-review/verdict.json ]; then
-            echo "::warning::no verdict after first attempt — retrying once"
-            RETRY='Read .github/nc-review/rubric.md and .nc-review/context.md, then write your review verdict as a single JSON object to .nc-review/verdict.json using write_file, following the schema in the rubric exactly.
+          # One retry, for finishing without a usable verdict — no file at all,
+          # or a file that does not match the schema. The prompt above should
+          # prevent both, but "the analysis was good and went nowhere" is an
+          # expensive way to fail, and a second attempt is ~3 minutes. Not a
+          # general retry: a genuine agent error still falls through to the safe
+          # comment.
+          if ! usable_verdict; then
+            echo "::warning::no usable verdict after first attempt — retrying once"
+            dump_rejected
+            # Back off before retrying. The commonest reason attempt 1 ends
+            # without a verdict is the provider cutting it off — #978 died
+            # 100 seconds in on "Rate limit exceeded: Too many requests", and
+            # the immediate retry then ran the whole review again against the
+            # same exhausted quota. Concurrency here is per-PR by design, so a
+            # burst of PRs opening together (five dependabot bumps inside 80
+            # seconds, on the day this was found) puts that many reviews on one
+            # MiniMax key at once. Making the group repo-wide is NOT the fix:
+            # Actions keeps only one queued run per group and cancels the rest,
+            # which would silently drop reviews instead of delaying them.
+            sleep 60
+            RETRY='Read .github/nc-review/rubric.md and .nc-review/context.md, then write your review verdict as a single JSON object to .nc-review/verdict.json using write_file. Use exactly these keys, spelled exactly this way. Every finding MUST carry area, severity and detail; file and line may be omitted, nothing else may be:
+
+            '"$SCHEMA"'
 
             Write the file. Do not reply in chat — chat output is discarded and only the file is read. The file is the entire task.'
             set +e
@@ -437,9 +581,12 @@ jobs:
               --trust-directory
             STATUS=$?
             set -e
-            [ -s .nc-review/verdict.json ] \
-              && echo "retry produced a verdict" \
-              || echo "::warning::retry also produced no verdict"
+            if usable_verdict; then
+              echo "retry produced a usable verdict"
+            else
+              echo "::warning::retry also produced no usable verdict"
+              dump_rejected
+            fi
           fi
 
           echo "agent_status=$STATUS" >> "$GITHUB_OUTPUT"
@@ -453,13 +600,18 @@ jobs:
           AGENT_STATUS: ${{ steps.agent.outputs.agent_status }}
         run: |
           set -euo pipefail
-          V=.nc-review/verdict.json
+          # The NORMALISED verdict, not the raw one. It only exists if the
+          # previous step validated the agent's output against the schema, so
+          # every field read below is guaranteed to be present and of the right
+          # type. Reading the raw file here is what put six `null`s into a
+          # public comment on #978.
+          V=.nc-review/verdict.normalised.json
 
           # A missing or malformed verdict is a failure of this workflow, not of
           # the contributor. Say so plainly and label nothing — a stale
           # agent:needs-work on a fine PR is worse than no label.
           if [ ! -s "$V" ] || ! jq -e . "$V" >/dev/null 2>&1; then
-            echo "::warning::no parseable verdict (agent exit ${AGENT_STATUS:-unknown})"
+            echo "::warning::no usable verdict (agent exit ${AGENT_STATUS:-unknown})"
             gh pr comment "$PR" --repo "$REPO" --body \
               "**nc-review** could not produce a verdict this run (agent exit \`${AGENT_STATUS:-unknown}\`). This is a problem with the review agent, not with your pull request. A maintainer can retry with \`/re-review\`."
             # Clear any agent:* label from a previous run. Applying none was the
@@ -580,7 +732,8 @@ jobs:
                 .findings
                 | sort_by(.severity | rank)
                 | .[]
-                | "**\(.severity | icon) \(.severity) · `\(.area)`"
+                | "**\(.severity | icon) \(.severity)"
+                  + (if .area then " · `\(.area)`" else "" end)
                   + (if .file then " · `\(.file)\(if .line then ":\(.line)" else "" end)`" else "" end)
                   + "**\n\n\(.detail)\n"
               ' "$V"
