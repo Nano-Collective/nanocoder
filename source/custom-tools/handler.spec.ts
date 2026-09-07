@@ -252,9 +252,8 @@ test('runScript: timeout kills long-running script', async t => {
 
 // A script that traps SIGTERM must still be force-killed. Guarding the
 // escalation on `child.killed` never fired (Node sets that flag the moment
-// SIGTERM is delivered), so the shell survived and 'close' - and with it the
-// rejection - waited on the full `sleep`. `sleep`'s stdio is redirected so it
-// does not hold our pipes open past the shell's death.
+// SIGTERM is delivered), so the force-kill never ran. The redirect keeps
+// this case about escalation alone - pipe drain is pinned separately below.
 test('runScript: escalates to SIGKILL when the script ignores SIGTERM', async t => {
 	const started = Date.now();
 	await t.throwsAsync(
@@ -268,6 +267,27 @@ test('runScript: escalates to SIGKILL when the script ignores SIGTERM', async t 
 	);
 	// SIGTERM at 100ms + a 1s grace window. Without escalation this only
 	// settles once `sleep 5` finishes.
+	t.true(Date.now() - started < 3_000);
+});
+
+// The timeout must settle even when a grandchild outlives the shell. SIGKILL
+// only reaches the shell; the backgrounded `sleep` inherits stdout/stderr and
+// holds those pipes open, so 'close' does not fire until it finishes. Settling
+// on 'exit' is what keeps this bounded. `& wait` rather than a bare `sleep`
+// because shells exec-optimise a trailing command, which would leave no
+// grandchild to hold the pipes at all.
+test('runScript: timeout settles without waiting on an orphaned grandchild', async t => {
+	const started = Date.now();
+	await t.throwsAsync(
+		runScript(`trap '' TERM; sleep 5 & wait`, {
+			cwd: testDir,
+			env: process.env,
+			shell: '/bin/sh',
+			timeoutMs: 100,
+		}),
+		{message: /timed out/},
+	);
+	// Without this the promise waits out the full `sleep 5`.
 	t.true(Date.now() - started < 3_000);
 });
 
