@@ -88,7 +88,7 @@ export interface CustomCommand {
 	metadata: CustomCommandMetadata;
 	content: string; // The markdown content without frontmatter
 	// Skill-like fields (populated for commands with auto-injection capabilities)
-	source?: 'personal' | 'project';
+	source: 'personal' | 'project' | 'built-in';
 	lastModified?: Date;
 	loadedResources?: CommandResource[];
 	/**

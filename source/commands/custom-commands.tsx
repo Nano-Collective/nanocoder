@@ -183,8 +183,8 @@ function CommandDetail({command}: {command: CustomCommand}) {
 	const {colors} = useTheme();
 
 	const sourceLabel = command.path
-		? `${command.source ?? 'project'} (${command.path})`
-		: (command.source ?? 'project');
+		? `${command.source ?? 'built-in'} (${command.path})`
+		: (command.source ?? 'built-in');
 
 	const fields: Array<{label: string; value: string}> = [
 		{label: 'Source', value: sourceLabel},

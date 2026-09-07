@@ -54,6 +54,8 @@ export interface SkillBootOptions {
 	builtInBundleRoot?: string;
 }
 
+export type {SkillCollision};
+
 export async function bootSkillPipeline(
 	opts: SkillBootOptions,
 ): Promise<SkillBootResult> {
@@ -212,12 +214,8 @@ function kindOf(skill: Skill): 'command' | 'agent' | 'tool' {
 function synthesizeCommandSkills(loader: CustomCommandLoader): Skill[] {
 	const out: Skill[] = [];
 	for (const command of loader.getAllCommands()) {
-		const priority: SkillPriority =
-			command.source === 'project'
-				? 'project'
-				: command.source === 'personal'
-					? 'personal'
-					: 'built-in';
+		const priority: SkillPriority = command.source ?? 'built-in';
+
 		out.push(
 			commandToSkill(command, {
 				filePath: command.path,
@@ -281,5 +279,3 @@ function detectDeprecations(projectRoot: string): string[] {
 	}
 	return warnings;
 }
-
-export type {SkillCollision};
