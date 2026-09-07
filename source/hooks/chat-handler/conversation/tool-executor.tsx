@@ -35,17 +35,13 @@ import {
  */
 const executeOne = async (
 	toolCall: ToolCall,
-	processToolUse: (
-		toolCall: ToolCall,
-		options?: {signal?: AbortSignal},
-	) => Promise<ToolResult>,
-	signal?: AbortSignal,
+	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 ): Promise<{
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
 	try {
-		const result = await processToolUse(toolCall, {signal});
+		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
 		return {
@@ -99,10 +95,7 @@ export interface ToolDisplayOptions {
 export const executeApprovedTool = (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
-	processToolUse: (
-		toolCall: ToolCall,
-		options?: {signal?: AbortSignal},
-	) => Promise<ToolResult>,
+	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
@@ -114,7 +107,7 @@ export const executeApprovedTool = (
 			signal,
 		);
 	}
-	return executeOne(toolCall, processToolUse, signal);
+	return executeOne(toolCall, processToolUse);
 };
 
 /**

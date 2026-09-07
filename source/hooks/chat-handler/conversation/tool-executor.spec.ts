@@ -1043,16 +1043,16 @@ test.serial(
 		const receivedSignals: (AbortSignal | undefined)[] = [];
 
 		setToolRegistryGetter(() => ({
-			read_tool_1: (async (_args: any, options?: {signal?: AbortSignal}) => {
-				receivedSignals.push(options?.signal);
-				if (options?.signal?.aborted) {
+			read_tool_1: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
+				receivedSignals.push(options?.abortSignal);
+				if (options?.abortSignal?.aborted) {
 					throw new Error('Aborted mid-flight');
 				}
 				return 'content 1';
 			}) as any,
-			read_tool_2: (async (_args: any, options?: {signal?: AbortSignal}) => {
-				receivedSignals.push(options?.signal);
-				if (options?.signal?.aborted) {
+			read_tool_2: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
+				receivedSignals.push(options?.abortSignal);
+				if (options?.abortSignal?.aborted) {
 					throw new Error('Aborted mid-flight');
 				}
 				return 'content 2';
@@ -1103,10 +1103,10 @@ test.serial(
 		let toolAborted = false;
 
 		setToolRegistryGetter(() => ({
-			slow_read_tool: (async (_args: any, options?: {signal?: AbortSignal}) => {
+			slow_read_tool: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
 				toolStarted = true;
 				return new Promise((resolve, reject) => {
-					if (options?.signal?.aborted) {
+					if (options?.abortSignal?.aborted) {
 						toolAborted = true;
 						return reject(new Error('Aborted mid-flight'));
 					}
@@ -1114,7 +1114,7 @@ test.serial(
 						toolAborted = true;
 						reject(new Error('Aborted mid-flight'));
 					};
-					options?.signal?.addEventListener('abort', onAbort);
+					options?.abortSignal?.addEventListener('abort', onAbort);
 					setTimeout(() => {
 						resolve('slow read content');
 					}, 200);
@@ -1141,8 +1141,10 @@ test.serial(
 			{compactDisplay: true, signal: controller.signal},
 		);
 
-		// Wait briefly to ensure tool has started executing
-		await new Promise(r => setTimeout(r, 40));
+		// Poll until the handler has started (dynamic import overhead varies)
+		for (let tick = 0; tick < 20 && !toolStarted; tick++) {
+			await new Promise(r => setTimeout(r, 20));
+		}
 		t.true(toolStarted, 'Tool should have already started executing');
 		t.false(toolAborted, 'Tool should not be aborted before signal fires');
 
