@@ -9,6 +9,21 @@ import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
 
 /**
+ * `git diff --name-only HEAD` lists files deleted in the working tree, so a
+ * deleted path reaches captureFiles and fails with ENOENT. That is ordinary
+ * work - delete a file, take a checkpoint - and recording it as a gap would
+ * make every later restore of that checkpoint warn about something that is
+ * not missing at all.
+ */
+function isMissingFile(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOENT'
+	);
+}
+
+/**
  * Service for capturing and restoring file snapshots for checkpoints
  */
 export class FileSnapshotService {
@@ -19,12 +34,29 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Capture the contents of specified files
+	 * Capture the contents of specified files.
+	 *
+	 * Read as bytes, never as text. Snapshots cover whatever git reports as
+	 * modified, which includes images, .vsix bundles and any other binary a
+	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
+	 * with U+FFFD, and since the checkpoint copy is written from this map the
+	 * original bytes would be gone at save time with nothing left to recover.
+	 *
+	 * Files that cannot be read are reported alongside the ones that could, not
+	 * just logged: the caller records them so a later restore can say what it
+	 * did not put back. A file that is simply gone is not one of them - see
+	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
 	 */
 	async captureFiles(filePaths: string[]): Promise<Map<string, FileSnapshot>> {
 		const snapshots = new Map<string, FileSnapshot>();
 
 		for (const filePath of filePaths) {
+			// Normalized up front so a skipped file is keyed the same way a
+			// captured one is; filesChanged and skippedFiles are read side by side.
+			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
+			const relativePath = path.relative(this.workspaceRoot, absolutePath);
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 				const relativePath = path.relative(this.workspaceRoot, absolutePath);
@@ -46,16 +78,22 @@ export class FileSnapshotService {
 					}
 				}
 			} catch (error) {
+				const reason = formatError(error);
+				if (!isMissingFile(error)) {
+					skipped.push({path: normalizedPath, reason});
+				}
+				// Logged either way: a deleted file is not a gap, but it is still
+				// worth seeing in the log when a capture comes out short.
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
-						error: formatError(error),
+						error: reason,
 					},
 				});
 			}
 		}
 
-		return snapshots;
+		return {snapshots, skipped};
 	}
 
 	/**
@@ -116,19 +154,37 @@ export class FileSnapshotService {
 	 * fell outside the cap looks untouched, and its before-image would be taken
 	 * from HEAD, discarding the user's uncommitted work on restore.
 	 *
-	 * `available` is false when git could not answer at all.
+	 * `truncatedCount` reports how many the cap dropped rather than only that it
+	 * fired, so the number reaches the checkpoint's metadata and, from there, a
+	 * later restore. `available` is false when git could not answer at all.
 	 */
 	getModifiedFilesResult(): {
 		files: string[];
 		truncated: boolean;
+		truncatedCount: number;
 		available: boolean;
 	} {
 		try {
-			const modifiedOutput = execSync('git diff --name-only HEAD', {
-				cwd: this.workspaceRoot,
-				encoding: 'utf-8',
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
+			let hasHead = true;
+			try {
+				execSync('git rev-parse --verify HEAD', {
+					cwd: this.workspaceRoot,
+					stdio: ['pipe', 'pipe', 'pipe'],
+				});
+			} catch {
+				hasHead = false;
+			}
+
+			// An unborn branch has no HEAD to diff against, but its index can still be
+			// full (`git init && git add .`), so diff the index instead of skipping.
+			const modifiedOutput = execSync(
+				hasHead ? 'git diff --name-only HEAD' : 'git diff --name-only --cached',
+				{
+					cwd: this.workspaceRoot,
+					encoding: 'utf-8',
+					stdio: ['pipe', 'pipe', 'pipe'],
+				},
+			).trim();
 
 			const untrackedOutput = execSync(
 				'git ls-files --others --exclude-standard',
@@ -168,18 +224,29 @@ export class FileSnapshotService {
 				return {
 					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
 					truncated: true,
+					truncatedCount: filtered.length - MAX_CHECKPOINT_FILES,
 					available: true,
 				};
 			}
 
-			return {files: filtered, truncated: false, available: true};
+			return {
+				files: filtered,
+				truncated: false,
+				truncatedCount: 0,
+				available: true,
+			};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return {files: [], truncated: false, available: false};
+			return {
+				files: [],
+				truncated: false,
+				truncatedCount: 0,
+				available: false,
+			};
 		}
 	}
 

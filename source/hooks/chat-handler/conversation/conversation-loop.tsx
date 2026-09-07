@@ -18,6 +18,7 @@ import {
 } from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {getProjectRoot} from '@/services/session-cwd';
+import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -49,6 +50,7 @@ import {infoMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {calculateTokens} from '@/utils/token-calculator';
+import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	createApprovalUnavailableResults,
 	createCancellationResults,
@@ -698,7 +700,9 @@ export const processAssistantResponse = async (
 			!!usage &&
 			(Number.isFinite(usage.inputTokens) ||
 				Number.isFinite(usage.outputTokens) ||
-				Number.isFinite(usage.totalTokens));
+				Number.isFinite(usage.totalTokens) ||
+				Number.isFinite(usage.cacheReadTokens) ||
+				Number.isFinite(usage.cacheWriteTokens));
 		setLastApiUsage(
 			hasReportedUsage
 				? {...usage, atMessageCount: updatedMessages.length}
@@ -880,6 +884,9 @@ export const processAssistantResponse = async (
 		// suspend on a confirmation prompt before executing. No second code path.
 		const autoTools: ToolCall[] = [];
 		const confirmTools: ToolCall[] = [];
+		// Results for tools a pre-tool-use hook refused. They skip execution
+		// entirely but still need a result to pair with their tool call.
+		const blockedResults: ToolResult[] = [];
 
 		for (const toolCall of validToolCalls) {
 			// The XML-fallback synthetic error isn't a real tool, so treat it as
@@ -887,6 +894,42 @@ export const processAssistantResponse = async (
 			// lives in the tool handler (single source of truth).
 			const validationFailed =
 				toolCall.function.name === '__xml_validation_error__';
+
+			// Lifecycle gate, ahead of the approval decision. Every execution path
+			// gates again at its own boundary, but only here is it in front of the
+			// confirmation prompt — so a "never touch .env" hook refuses the call
+			// instead of rendering a diff preview, collecting an approval, and
+			// vetoing afterwards. runPreToolUseGate fires the hook once per tool
+			// call, so the downstream gates cost nothing after this one.
+			if (!validationFailed) {
+				const gate = await runPreToolUseGate(
+					toolCall,
+					// Lenient: malformed arguments are the handler's error to report,
+					// and the hook should still see what the model actually sent.
+					parseToolArguments<Record<string, unknown>>(
+						toolCall.function.arguments,
+					),
+				);
+				if (gate.blocked) {
+					const reason = gate.reason ?? 'Blocked by a pre-tool-use hook.';
+					blockedResults.push({
+						tool_call_id: toolCall.id,
+						role: 'tool',
+						name: toolCall.function.name,
+						content: `Error: ${reason}`,
+						isError: true,
+					});
+					addToChatQueue(
+						<ErrorMessage
+							key={generateKey('hook-blocked-tool')}
+							message={reason}
+							hideBox={true}
+						/>,
+					);
+					continue;
+				}
+			}
+
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
 			const needsApproval =
 				!validationFailed &&
@@ -935,7 +978,7 @@ export const processAssistantResponse = async (
 			nonInteractiveMode,
 		};
 
-		const turnResults: ToolResult[] = [];
+		const turnResults: ToolResult[] = [...blockedResults];
 
 		const architectMutationTools =
 			developmentModeRef?.current === 'architect' ||

@@ -33,9 +33,14 @@ const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
 /**
  * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
  * byte is the same heuristic git uses to call a blob binary.
+ *
+ * Capture hands over raw bytes, so the check runs before any decode. The
+ * HEAD path is already decoded by `git show` and arrives as text.
  */
-function isProbablyBinary(content: string): boolean {
-	return content.includes('\u0000');
+function isProbablyBinary(content: string | Buffer): boolean {
+	return typeof content === 'string'
+		? content.includes('\u0000')
+		: content.includes(0);
 }
 
 /**
