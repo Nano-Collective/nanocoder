@@ -512,45 +512,63 @@ test('COMPRESSION_CONSTANTS exports expected values', t => {
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT, 500);
 });
 
-test('compressMessages ignores display-only messages in compressible segment and token counts', t => {
+test('compressMessages preserves display-only messages in output but excludes them from token counts and recent window', t => {
 	const tokenizer = createMockTokenizer();
-	const displayOnlyContent = 'Display-only UI notification banner '.repeat(100);
-	const messages = [
+	const oldBanner = 'Notice: Old cancellation banner';
+	const recentBanner = 'Error: Recent notification banner '.repeat(20);
+
+	const messages: Message[] = [
 		createUserMessage('Old user message that is compressible'),
+		createAssistantMessage('Old assistant response'),
 		{
 			role: 'assistant' as const,
-			content: displayOnlyContent,
+			content: oldBanner,
 			displayOnly: true,
 		},
-		createUserMessage('Recent 1'),
-		createAssistantMessage('Recent 2'),
+		createUserMessage('Recent user turn'),
+		createAssistantMessage('Recent assistant turn'),
+		{
+			role: 'assistant' as const,
+			content: recentBanner,
+			displayOnly: true,
+		},
 	];
 
-	const result = compressMessages(messages, tokenizer, {mode: 'default'});
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
 
-	// Display-only message should not be in the compressed output segment
-	t.false(
-		result.compressedMessages.some(
-			msg => msg.content === displayOnlyContent,
-		),
-	);
+	// Both display-only messages must be preserved verbatim in output to maintain scrollback
+	t.true(result.compressedMessages.some(msg => msg.content === oldBanner));
+	t.true(result.compressedMessages.some(msg => msg.content === recentBanner));
+	t.is(result.compressedMessages.length, messages.length);
 
-	// Original token count must exclude the large display-only banner
-	const modelFacingOriginal = [messages[0]!, messages[2]!, messages[3]!];
+	// The recent window must not be consumed by the trailing display-only banner:
+	// exactly 2 model-facing messages ('Recent user turn' and 'Recent assistant turn') are preserved
+	t.is(result.preservedInfo.recentMessages, 2);
+
+	// Both recent turns must be uncompressed (verbatim) in the recent tail
+	const recentTail = result.compressedMessages.slice(-3);
+	t.is(recentTail[0]?.content, 'Recent user turn');
+	t.is(recentTail[1]?.content, 'Recent assistant turn');
+	t.is(recentTail[2]?.content, recentBanner);
+
+	// Original token count must strictly match only the model-facing messages
+	const modelFacingOriginal = messages.filter(m => !m.displayOnly);
 	const expectedOriginalTokens = modelFacingOriginal.reduce(
 		(sum, m) => sum + tokenizer.countTokens(m),
 		0,
 	);
 	t.is(result.originalTokenCount, expectedOriginalTokens);
-	t.true(result.originalTokenCount < displayOnlyContent.length);
 
-	// Compressed token count must also only account for model-facing compressed messages
-	const expectedCompressedTokens = result.compressedMessages.reduce(
+	// Compressed token count must also strictly exclude the display-only banners
+	const modelFacingCompressed = result.compressedMessages.filter(
+		m => !m.displayOnly,
+	);
+	const expectedCompressedTokens = modelFacingCompressed.reduce(
 		(sum, m) => sum + tokenizer.countTokens(m),
 		0,
 	);
 	t.is(result.compressedTokenCount, expectedCompressedTokens);
-	t.true(result.compressedTokenCount < displayOnlyContent.length);
 });
-
-
