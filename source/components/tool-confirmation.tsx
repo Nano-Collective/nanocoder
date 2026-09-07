@@ -137,16 +137,15 @@ export default function ToolConfirmation({
 		}
 	});
 
-	// Auto-handle errors without user interaction
+	// Auto-handle formatter crashes without user interaction. Schema-validation
+	// errors are deliberately NOT auto-resolved: auto-approving would execute the
+	// tool without the user ever seeing the consent prompt. Instead the prompt
+	// renders below together with the validation error, and approving re-runs
+	// the validator so the error is fed back to the model for self-correction.
 	React.useEffect(() => {
 		if (hasFormatterError && !hasValidationError) {
 			// Automatically cancel the tool execution only for formatter crashes
 			onConfirm(false);
-		}
-		if (hasValidationError) {
-			// Automatically proceed to execution phase where the validator
-			// will fail again and pass the error back to the model to correct
-			onConfirm(true);
 		}
 	}, [hasFormatterError, hasValidationError, onConfirm]);
 
@@ -183,8 +182,10 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 
-				{/* Only show approval prompt if there's no error */}
-				{!hasFormatterError && !hasValidationError && (
+				{/* Show the approval prompt unless a formatter crash already
+					auto-cancelled the call. Validation errors render above the
+					prompt so the user sees what is wrong before deciding. */}
+				{!hasFormatterError && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>

@@ -1,7 +1,7 @@
-import {spawn} from 'node:child_process';
+import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {BASH_MAX_OUTPUT_BYTES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
@@ -54,53 +54,133 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
+		// On Unix the child leads its own process group (detached) so the whole
+		// subtree can be signalled together; a tool that backgrounds a long-lived
+		// child must not be able to outlive the shell's timeout.
 		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			detached: process.platform !== 'win32',
 		});
 
 		let stdout = '';
 		let stderr = '';
-		let timedOut = false;
+		let outputBytes = 0;
+		let outputCapped = false;
+		let settled = false;
+
+		// Combine stdout + stderr into a single byte budget, mirroring the built-in
+		// bash executor. Without a cap, a long-running tool printing large output
+		// is fully materialised in memory before the final truncation runs.
 
 		const timer = setTimeout(() => {
-			timedOut = true;
-			child.kill('SIGTERM');
-			// Force-kill if the process refuses to exit within a grace window.
+			// Destroy the pipes so nothing keeps the event loop (or a detached
+			// grandchild's inherited fds) engaged, then kill the process group.
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			killProcessTree(child);
+			// Force-kill the group if it refuses to exit within a grace window.
 			setTimeout(() => {
-				if (!child.killed) child.kill('SIGKILL');
+				if (!child.killed) killProcessTree(child, 'SIGKILL');
 			}, 1_000).unref();
+
+			// Settle now rather than waiting for `close`, which may never fire if a
+			// descendant holds a pipe inherited from the shell.
+			settle(() =>
+				rejectPromise(
+					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
+				),
+			);
 		}, options.timeoutMs);
 
-		child.stdout?.on('data', chunk => {
-			stdout += chunk.toString();
+		// Guard every completion path: `error`/`close` arriving after the timeout
+		// (which already settled) must not double-resolve the promise.
+		const settle = (finish: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			finish();
+		};
+
+		child.stdout?.on('data', (data: Buffer) => {
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limited = data.subarray(0, remaining);
+				stdout += limited.toString();
+				outputBytes += limited.length;
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) outputCapped = true;
+			}
 		});
-		child.stderr?.on('data', chunk => {
-			stderr += chunk.toString();
+		child.stderr?.on('data', (data: Buffer) => {
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limited = data.subarray(0, remaining);
+				stderr += limited.toString();
+				outputBytes += limited.length;
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) outputCapped = true;
+			}
 		});
 
 		child.on('error', err => {
-			clearTimeout(timer);
-			rejectPromise(new Error(`Custom tool failed to start: ${err.message}`));
+			settle(() =>
+				rejectPromise(new Error(`Custom tool failed to start: ${err.message}`)),
+			);
 		});
 
 		child.on('close', code => {
-			clearTimeout(timer);
-			if (timedOut) {
-				rejectPromise(
-					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
+			settle(() => {
+				// Put the cap notice at the head of the output so it survives the
+				// final truncation (which keeps the head and tail of the result) and
+				// the model learns the tool emitted more than was captured.
+				const capNotice = outputCapped
+					? '... [Output truncated to prevent memory exhaustion]\n'
+					: '';
+				resolvePromise(
+					truncateToolResult(
+						capNotice + formatScriptOutput(code, stdout, stderr),
+						TRUNCATION_OUTPUT_LIMIT,
+					),
 				);
-				return;
-			}
-			resolvePromise(
-				truncateToolResult(
-					formatScriptOutput(code, stdout, stderr),
-					TRUNCATION_OUTPUT_LIMIT,
-				),
-			);
+			});
 		});
 	});
+}
+
+/**
+ * Terminate the spawned shell and its descendants.
+ *
+ * The child is spawned `detached` on Unix, making it the leader of its own
+ * process group; signalling the negative PID kills the whole tree, so work the
+ * tool backgrounded cannot survive the shell's timeout. Windows has no process
+ * groups here, so we fall back to the single process.
+ */
+function killProcessTree(
+	child: ChildProcess,
+	signal: NodeJS.Signals = 'SIGTERM',
+): void {
+	const pid = child.pid;
+	if (pid === undefined) return;
+
+	if (process.platform === 'win32') {
+		try {
+			child.kill(signal);
+		} catch {
+			// Process already exited; nothing to terminate.
+		}
+		return;
+	}
+
+	try {
+		process.kill(-pid, signal);
+	} catch {
+		// Group already gone (or never formed) — fall back to the lone process.
+		try {
+			child.kill(signal);
+		} catch {
+			// Process already exited; nothing to terminate.
+		}
+	}
 }
 
 /**

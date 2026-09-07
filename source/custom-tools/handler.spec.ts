@@ -22,11 +22,20 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
 
-// POSIX shell for the runScript cases. `/bin/sh` doesn't exist as a literal
-// path on Windows, but `bash` resolves via PATH to a Git Bash install, so the
-// two new robustness cases can exercise real shells on contributor machines
-// too. (The rest of the suite keeps `/bin/sh` and runs on the Linux CI.)
-const posixShell = process.platform === 'win32' ? 'bash' : '/bin/sh';
+// A real POSIX shell for the two new robustness cases. We can't just use
+// `bash` by name on Windows: it can resolve to the WSL launcher
+// (`System32\bash.exe`), which prints an error and exits instead of running
+// anything. Prefer a Git Bash binary; if none is installed the cases are
+// skipped, matching how this suite already gates the symlink cases.
+const WINDOWS_BASH_CANDIDATES = [
+	'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+	'C:\\Program Files\\Git\\bin\\bash.exe',
+];
+const testShell =
+	process.platform === 'win32'
+		? (WINDOWS_BASH_CANDIDATES.find(path => existsSync(path)) ?? null)
+		: '/bin/sh';
+const shellCase = testShell === null ? test.skip : test;
 
 let testDir: string;
 let prevLcAll: string | undefined;
@@ -264,20 +273,22 @@ test('runScript: timeout kills long-running script', async t => {
 	);
 });
 
-test('runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker', async t => {
-	// Dynamically import the limit so we test against the actual cap.
-	const {BASH_MAX_OUTPUT_BYTES} = await import('../constants.js');
+shellCase(
+	'runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker',
+	async t => {
+		// Dynamically import the limit so we test against the actual cap.
+		const {BASH_MAX_OUTPUT_BYTES} = await import('../constants.js');
 
-	// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB).
-	const result = await runScript(
-		`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
-		{
-			cwd: testDir,
-			env: process.env,
-			shell: posixShell,
-			timeoutMs: 30_000,
-		},
-	);
+		// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB).
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
 
 	t.true(
 		result.length < BASH_MAX_OUTPUT_BYTES,
@@ -289,7 +300,9 @@ test('runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker
 	t.is(matches, 1, 'truncation marker must appear exactly once');
 });
 
-test('runScript: timeout settles promptly and, on Unix, reaps descendant processes', async t => {
+shellCase(
+	'runScript: timeout settles promptly and, on Unix, reaps descendant processes',
+	async t => {
 	const pidFile = join(testDir, `orphan-${Date.now()}.pid`).replaceAll('\\', '/');
 	// Shell backgrounds a long-lived child that inherits the stdout pipe, then
 	// blocks. On the old behavior, killing only the shell leaves the child
@@ -302,7 +315,7 @@ test('runScript: timeout settles promptly and, on Unix, reaps descendant process
 		runScript(script, {
 			cwd: testDir,
 			env: process.env,
-			shell: posixShell,
+			shell: testShell!,
 			timeoutMs: 500,
 		}).then(value => ({value}), (error: Error) => ({error})),
 		(async () => {
@@ -328,6 +341,9 @@ test('runScript: timeout settles promptly and, on Unix, reaps descendant process
 	// Windows has no process-group signal here, so descendant-reaping can only
 	// be asserted on Unix (CI is Linux; the settle assertion above runs everywhere).
 	if (process.platform === 'win32') return;
+
+	// Give the OS a moment to reap the group (mirrors bash-executor.spec.ts).
+	await new Promise(resolve => setTimeout(resolve, 300));
 
 	if (grandchildPid !== undefined) {
 		t.throws(
