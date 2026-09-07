@@ -80,6 +80,28 @@ test('each response gets its own footer', t => {
 	t.is(agentFooters(panel).length, 2);
 });
 
+test('replayed response usage metadata restores the token and cost line', t => {
+	const panel = createPanel();
+	panel.userMessage('first');
+	panel.update({
+		sessionUpdate: 'agent_message_chunk',
+		content: {type: 'text', text: 'Response A'},
+		_meta: {
+			'nanocoder/response-usage': {
+				inputTokens: 6500,
+				outputTokens: 500,
+				totalTokens: 7000,
+				cost: 0.004,
+			},
+		},
+	});
+
+	const usageLine = panel.container.children.find(
+		(child: StubElement) => child.textContent === 'Tokens: 7k | <$0.01',
+	);
+	t.truthy(usageLine);
+});
+
 // ============================================================================
 // A footer copies its own response
 //

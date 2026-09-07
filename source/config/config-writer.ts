@@ -1,14 +1,7 @@
-import {randomUUID} from 'node:crypto';
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	renameSync,
-	unlinkSync,
-	writeFileSync,
-} from 'node:fs';
-import {dirname} from 'node:path';
+import {existsSync, readFileSync} from 'node:fs';
 import {getClosestConfigFile} from '@/config/index';
+import type {UserPreferences} from '@/types/config';
+import {atomicWriteJson} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
 
 /**
@@ -32,14 +25,16 @@ export function updateConfigValue<K extends string, V>(
 }
 
 /**
- * Updates a nested value: updateConfigNestedValue('autoCompact', 'threshold', 75).
+ * Shared read-modify-write for a nested `nanocoder.<parent>.<child>` value.
+ * Reads the whole config file, merges the change, and writes it back atomically
+ * so a crash can never leave a truncated file.
  */
-export function updateConfigNestedValue<K extends string, V>(
-	parentKey: K,
+function updateNestedValue(
+	configPath: string,
+	parentKey: string,
 	childKey: string,
-	value: V,
+	value: unknown,
 ): void {
-	const configPath = getActiveConfigPath();
 	const config = readConfigObject(configPath);
 	if (!config) return;
 
@@ -55,15 +50,48 @@ export function updateConfigNestedValue<K extends string, V>(
 }
 
 /**
+ * Updates a nested value in agents.config.json:
+ * updateConfigNestedValue('autoCompact', 'threshold', 75).
+ */
+export function updateConfigNestedValue<K extends string, V>(
+	parentKey: K,
+	childKey: string,
+	value: V,
+): void {
+	updateNestedValue(getActiveConfigPath(), parentKey, childKey, value);
+}
+
+type PreferencesNanocoder = NonNullable<UserPreferences['nanocoder']>;
+
+/**
+ * Resolve the active nanocoder-preferences.json, merge the given nested value
+ * into the `nanocoder.<parentKey>.<childKey>` path, and write it back
+ * atomically. Creates the file if missing. The write counterpart to the
+ * `loadSessionConfig` / `loadPasteConfig` loaders, which read the same
+ * namespaced shape from nanocoder-preferences.json.
+ */
+export function updatePreferencesNestedValue<
+	K extends keyof PreferencesNanocoder,
+	N extends keyof NonNullable<PreferencesNanocoder[K]>,
+>(
+	parentKey: K,
+	childKey: N,
+	value: NonNullable<PreferencesNanocoder[K]>[N],
+): void {
+	updateNestedValue(
+		getClosestConfigFile('nanocoder-preferences.json'),
+		parentKey as string,
+		childKey as string,
+		value,
+	);
+}
+
+/**
  * Atomically write an arbitrary config file with pretty-printed JSON. Used by the
  * in-TUI JSON editor so a crash mid-write can never leave a truncated config.
  */
 export function writeConfigFileAtomic(filePath: string, data: unknown): void {
-	const dir = dirname(filePath);
-	if (!existsSync(dir)) {
-		mkdirSync(dir, {recursive: true});
-	}
-	atomicWriteFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+	atomicWriteJson(filePath, data);
 }
 
 function readConfigObject(
@@ -89,19 +117,6 @@ function writeConfigObject(
 		writeConfigFileAtomic(configPath, config);
 	} catch (error) {
 		logError(`Failed to write config ${label}: ${String(error)}`);
-	}
-}
-
-function atomicWriteFileSync(filePath: string, data: string): void {
-	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(tmpPath, data, 'utf-8');
-		renameSync(tmpPath, filePath);
-	} catch (error) {
-		try {
-			unlinkSync(tmpPath);
-		} catch {}
-		throw error;
 	}
 }
 

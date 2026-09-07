@@ -14,6 +14,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Provider, Model & Mode Switching**: Change your LLM provider, model, or operating mode on the fly from the dropdowns in the chat header. Switching provider refreshes the model list automatically.
 - **Settings Tab**: Configure providers and assistant behaviour from the sidebar instead of editing `agents.config.json` by hand.
 - **Context Attachments**: Attach files and folders with `@` mention autocomplete, drag-and-drop, or the `+` menu. Images can be uploaded or pasted for multimodal messages.
+- **Changed Files in Context**: Files the agent creates or edits appear as chips above the composer as soon as each edit lands - click one to open the current version in the editor. A file it deletes drops off the row, and a rename follows the file to its new path.
 - **Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class.
 - **Sessions**: Start a new chat, browse previous sessions, and resume, rename or delete them - conversations persist to disk across restarts.
 - **Slash Commands**: `/help`, `/clear`, `/copy`, and your custom commands from `.nanocoder/commands` work directly in the chat.
@@ -64,6 +65,12 @@ nanocoder --vscode
 2. **Chat**: Responses stream in as they generate. Thinking appears in a collapsible "Thinking..." section that folds away when the answer starts.
 
 3. **Tool activity**: Read-only tools group into an activity card; file edits get their own card - click it to open the change in VS Code's diff viewer.
+
+   Each file the agent finishes writing is also added to the context row above the composer, so the work of a turn is one click away from review. Those chips are dashed to set them apart from the files you attached yourself: clicking one opens the file as it stands now, the x dismisses it, and - unlike your own attachments - they are not sent along with your next message and are not cleared when you send it. Starting or resuming a conversation clears them.
+
+   The row follows the rest of the file lifecycle too: deleting a file takes its chip away (including one you attached yourself, which would otherwise expand to nothing on your next message), and renaming one moves its chip to the new path. Only calls that actually completed count - a delete you denied leaves the row exactly as it was.
+
+   A turn that touches many files fills the row rather than growing the composer: it scrolls once it is a few lines deep, and a **Clear N changed files** control below it dismisses the whole run at once. That control only clears what the agent changed - files you attached stay until you remove them yourself.
 
 4. **Approvals**: In modes that require confirmation, tool cards show Approve / Deny buttons inline. When the AI asks you a question (the `ask_user` tool), the full question is shown with one button per answer.
 
