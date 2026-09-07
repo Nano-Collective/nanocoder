@@ -1,5 +1,12 @@
 name: Release to NPM and GitHub
 
+# Thin caller for the shared org workflow. The publish itself lives in
+# Nano-Collective/.github; what stays here are the two downstream jobs that are
+# genuinely specific to this package — the Nix flake and the Homebrew formula.
+#
+# Publishes only when package.json's version is ahead of npm, so merging the
+# Version Packages PR is what triggers a release. Nothing else does.
+
 on:
   push:
     branches: [main]
@@ -7,250 +14,43 @@ on:
 permissions:
   contents: write
   packages: write
+  # Required for npm publish --provenance (OIDC build attestation).
   id-token: write
 
 jobs:
-  check-version:
-    runs-on: ubuntu-latest
-    outputs:
-      should-publish: ${{ steps.version-check.outputs.should-publish }}
-      package-version: ${{ steps.version-check.outputs.package-version }}
-      npm-version: ${{ steps.version-check.outputs.npm-version }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+  release:
+    uses: Nano-Collective/.github/.github/workflows/release.yml@main
+    with:
+      release-name: 'Nanocoder'
+      # The CLI the bin maps to. An npm publish of an empty package succeeds
+      # silently, so this is the check that the build produced something.
+      verify-files: 'dist/cli.js'
+      install-command: 'npm install -g {pkg}'
+      # This repo runs a narrower gate here than the org default: `test:all`
+      # includes the audit and semgrep passes, which are advisory on a PR and
+      # should not be able to block a release that has already been reviewed.
+      test-command: 'test'
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-
-      - name: Check version difference
-        id: version-check
-        run: |
-          # Get current package.json version
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          echo "package-version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-
-          # Get latest NPM version (handle case where package doesn't exist yet)
-          NPM_VERSION=$(npm view @nanocollective/nanocoder version 2>/dev/null || echo "0.0.0")
-          echo "npm-version=$NPM_VERSION" >> $GITHUB_OUTPUT
-
-          # Compare versions
-          if [ "$PACKAGE_VERSION" != "$NPM_VERSION" ]; then
-            echo "✅ New version detected: $PACKAGE_VERSION (current NPM: $NPM_VERSION)"
-            echo "should-publish=true" >> $GITHUB_OUTPUT
-          else
-            echo "ℹ️ No version change detected: $PACKAGE_VERSION"
-            echo "should-publish=false" >> $GITHUB_OUTPUT
-          fi
-
-  publish:
-    needs: check-version
-    if: needs.check-version.outputs.should-publish == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          # Full history so scripts/generate-credits.sh sees every contributor
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Install dependencies (including VS Code extension)
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate credits
-        run: pnpm run build:credits
-
-      - name: Build project
-        run: pnpm run build
-
-      - name: Build VS Code extension
-        run: pnpm run build:vscode
-
-      - name: Check formatting
-        run: pnpm test:format
-
-      - name: Typecheck
-        run: pnpm test:types
-
-      - name: Lint
-        run: pnpm test:lint
-
-      - name: Run AVA tests
-        run: pnpm test:ava
-
-      - name: Check for unused code
-        run: pnpm test:knip
-
-      - name: Security audit
-        run: pnpm test:audit
-
-      - name: Verify build output
-        run: |
-          if [ ! -f "dist/cli.js" ]; then
-            echo "❌ Build failed: dist/cli.js not found"
-            exit 1
-          fi
-          echo "✅ Build successful: dist/cli.js exists"
-          if [ ! -f "assets/nanocoder-vscode.vsix" ]; then
-            echo "❌ Build failed: VS Code extension not found"
-            exit 1
-          fi
-          echo "✅ VS Code extension built: assets/nanocoder-vscode.vsix exists"
-
-      - name: Extract Changelog
-        id: changelog
-        run: |
-          # Extract changelog for current version
-          CHANGELOG=$(node scripts/extract-changelog.js 2>&1)
-          if [ $? -eq 0 ]; then
-            echo "✅ Changelog extracted successfully"
-            # Use EOF to handle multi-line output
-            echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-            echo "$CHANGELOG" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ No changelog entry found, using default message"
-            echo "CHANGELOG=No changelog available for this version." >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build Contributors Section
-        id: contributors
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          # Credits every PR author in the range, not just the ones a changeset
-          # happened to thank by hand. Never fails the release: the script exits 0
-          # and prints nothing if the list can't be built.
-          CONTRIBUTORS=$(node scripts/generate-contributors.js \
-            --tag "v${{ needs.check-version.outputs.package-version }}" \
-            --previous-tag "v${{ needs.check-version.outputs.npm-version }}" \
-            --target "${{ github.sha }}")
-          if [ -n "$CONTRIBUTORS" ]; then
-            echo "✅ Contributors section built"
-          else
-            echo "ℹ️ No contributors section for this release"
-          fi
-          echo "CONTRIBUTORS<<EOF" >> $GITHUB_OUTPUT
-          echo "$CONTRIBUTORS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Publish to NPM
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Create GitHub Release
-        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ needs.check-version.outputs.package-version }}
-          release_name: nanocoder v${{ needs.check-version.outputs.package-version }}
-          body: |
-            ## What's Changed
-
-            ${{ steps.changelog.outputs.CHANGELOG }}
-
-            ${{ steps.contributors.outputs.CONTRIBUTORS }}
-
-            ### Installation
-            ```bash
-            npm install -g @nanocollective/nanocoder
-            ```
-
-            ### Usage
-            ```bash
-            nanocoder
-            ```
-
-            **Full Changelog**: https://github.com/Nano-Collective/nanocoder/compare/v${{ needs.check-version.outputs.npm-version }}...v${{ needs.check-version.outputs.package-version }}
-          draft: false
-          prerelease: false
-
-      - name: Send Discord Notification
-        if: success()
-        run: |
-          curl -H "Content-Type: application/json" \
-            -d '{
-              "embeds": [{
-                "title": "🎉 New Release: Nanocoder v${{ needs.check-version.outputs.package-version }}",
-                "description": "A new version of Nanocoder has been released!\n\n[View the full changelog on GitHub](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.check-version.outputs.package-version }})",
-                "color": 5763719,
-                "fields": [
-                  {
-                    "name": "Version",
-                    "value": "v${{ needs.check-version.outputs.package-version }}",
-                    "inline": true
-                  },
-                  {
-                    "name": "Installation",
-                    "value": "`npm install -g @nanocollective/nanocoder`",
-                    "inline": false
-                  }
-                ],
-                "footer": {
-                  "text": "GitHub Actions"
-                },
-                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%S.000Z)'",
-                "url": "https://github.com/${{ github.repository }}/releases/tag/v${{ needs.check-version.outputs.package-version }}"
-              }]
-            }' \
-            ${{ secrets.DISCORD_WEBHOOK_URL }}
-
+  # Downstream package managers. Both are local reusable workflows and both
+  # need to know the version that just shipped, which the shared workflow
+  # exposes as an output.
   update-nix:
-    needs: [check-version, publish]
-    if: needs.check-version.outputs.should-publish == 'true'
+    needs: release
+    if: needs.release.outputs.should-publish == 'true'
     uses: ./.github/workflows/update-nix.yml
     with:
-      version: ${{ needs.check-version.outputs.package-version }}
+      version: ${{ needs.release.outputs.package-version }}
     secrets:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
   update-homebrew:
-    needs: [check-version, publish, update-nix]
-    if: needs.check-version.outputs.should-publish == 'true'
+    needs: [release, update-nix]
+    if: needs.release.outputs.should-publish == 'true'
     uses: ./.github/workflows/update-homebrew.yml
     with:
-      version: ${{ needs.check-version.outputs.package-version }}
+      version: ${{ needs.release.outputs.package-version }}
     secrets:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-
-  notify:
-    needs: [check-version, publish, update-nix, update-homebrew]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify result
-        run: |
-          if [ "${{ needs.check-version.outputs.should-publish }}" == "true" ]; then
-            if [ "${{ needs.publish.result }}" == "success" ]; then
-              echo "🎉 Successfully published @nanocollective/nanocoder v${{ needs.check-version.outputs.package-version }} to NPM and created GitHub release!"
-              if [ "${{ needs.update-nix.result }}" == "success" ]; then
-                echo "✅ Nix package updated successfully!"
-              else
-                echo "⚠️ Warning: Nix package update failed"
-              fi
-              if [ "${{ needs.update-homebrew.result }}" == "success" ]; then
-                echo "✅ Homebrew formula updated successfully!"
-              else
-                echo "⚠️ Warning: Homebrew formula update failed"
-              fi
-            else
-              echo "❌ Failed to publish @nanocollective/nanocoder v${{ needs.check-version.outputs.package-version }}"
-              exit 1
-            fi
-          else
-            echo "ℹ️ No new version to publish (current: ${{ needs.check-version.outputs.package-version }})"
-          fi
