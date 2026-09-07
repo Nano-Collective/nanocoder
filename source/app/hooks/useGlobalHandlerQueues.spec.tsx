@@ -159,6 +159,12 @@ function question(text: string): PendingQuestion {
 	return {question: text, options: [], allowFreeform: true};
 }
 
+// Real useState updates need a tick to flush through the Probe's re-render
+// before `captured` reflects them — the other tests above only ever check
+// spy props (set synchronously inside the promise executor), so they don't
+// need this.
+const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
 test('concurrent subagent approvals each settle with their own answer', async t => {
 	setup();
 
@@ -209,4 +215,72 @@ test('concurrent main-agent tool confirmations settle in arrival order', async t
 	captured!.handleToolConfirmation(true);
 
 	t.deepEqual(await Promise.all([first, second]), [false, true]);
+});
+
+test('pendingSubagentApproval (real state) advances from A to B when A is answered', async t => {
+	setup();
+
+	const a = signalToolApproval(approvalFrom('agent-A'));
+	const b = signalToolApproval(approvalFrom('agent-B'));
+	await tick();
+
+	// This is the real useState the UI renders from — chat-input.tsx keys
+	// ToolConfirmation off pendingSubagentApproval.toolCall.id, so B must
+	// actually replace A here, not just in an internal queue array.
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-A');
+
+	captured!.handleSubagentToolApproval(true);
+	await tick();
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-B');
+
+	captured!.handleSubagentToolApproval(false);
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+
+	t.deepEqual(await Promise.all([a, b]), [true, false]);
+});
+
+test('a request arriving after the queue has fully drained is presented (the length === 1 gate)', async t => {
+	setup();
+
+	const a = signalToolApproval(approvalFrom('agent-A'));
+	await tick();
+	captured!.handleSubagentToolApproval(true);
+	await a;
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+
+	// The queue is empty again here, so this arrival must retrigger the
+	// `queueRef.current.length === 1` present() call rather than assuming
+	// something is already on screen.
+	const b = signalToolApproval(approvalFrom('agent-B'));
+	await tick();
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-B');
+
+	captured!.handleSubagentToolApproval(false);
+	t.false(await b);
+});
+
+test('the subagent-approval and main-agent-confirmation slots stay independent when both are pending', async t => {
+	setup();
+
+	const approval = signalToolApproval(approvalFrom('agent-A'));
+	const confirmation = signalToolConfirm({
+		toolCall: {id: 'main-1', function: {name: 'write_file', arguments: {}}},
+	} as unknown as Parameters<typeof signalToolConfirm>[0]);
+	await tick();
+
+	// These are separate queues specifically so a subagent's tool can need
+	// approval while the parent agent is mid-turn — both must be visible.
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-A');
+	t.is(captured!.pendingToolConfirmation?.toolCall.id, 'main-1');
+
+	captured!.handleSubagentToolApproval(true);
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+	// Answering the subagent slot must not touch the confirmation slot.
+	t.is(captured!.pendingToolConfirmation?.toolCall.id, 'main-1');
+
+	captured!.handleToolConfirmation(false);
+	t.deepEqual(await Promise.all([approval, confirmation]), [true, false]);
 });
