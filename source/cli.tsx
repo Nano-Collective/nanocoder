@@ -214,8 +214,6 @@ async function main(): Promise<void> {
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
 
-	const {parseReviewCliArgs} = await import('./commands/review-cli');
-
 	const vscodeMode = args.includes('--vscode');
 
 	// Extract VS Code port if specified
@@ -339,47 +337,8 @@ async function main(): Promise<void> {
 	const isRunCommand = runCommandIndex !== -1;
 	const afterRunArgs = isRunCommand ? args.slice(runCommandIndex + 1) : [];
 	if (isRunCommand && afterRunArgs.length > 0) {
-		// Filter out known flags when constructing the prompt
-		const promptArgs: string[] = [];
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--mode') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--mode=')) {
-				continue; // skip fused form
-			} else if (arg === '--json') {
-				continue; // skip this flag
-			} else if (arg === '--output-format') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--output-format=')) {
-				continue; // skip fused form
-			} else if (arg === '--trust-directory') {
-				continue; // skip this flag
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		nonInteractivePrompt = promptArgs.join(' ');
+		const {filterCliFlags} = await import('@/utils/cli-flags');
+		nonInteractivePrompt = filterCliFlags(afterRunArgs).join(' ');
 	}
 
 	let nonInteractiveMode = isRunCommand;
@@ -387,8 +346,25 @@ async function main(): Promise<void> {
 	// Check for `nanocoder review <target>` — syntactic sugar for
 	// `nanocoder run /review <target>`. The target is the branch or PR number
 	// to review. Flags between `review` and the target are filtered the same
-	// way as `run`.
-	const {isReviewCommand, prompt: reviewPrompt} = parseReviewCliArgs(args);
+	// way as `run`. Lazy-loaded to keep it off the lightweight path.
+	let isReviewCommand = false;
+	let reviewPrompt: string | undefined;
+	if (args[0] === 'review') {
+		const {parseReviewCliArgs} = await import('./commands/review-cli');
+		const result = parseReviewCliArgs(args);
+		isReviewCommand = result.isReviewCommand;
+		reviewPrompt = result.prompt;
+		if (result.error) {
+			console.error(`Error: ${result.error}`);
+			process.exit(1);
+		}
+	}
+
+	if (isRunCommand && isReviewCommand) {
+		console.error('Cannot use both `run` and `review` in the same invocation.');
+		process.exit(1);
+	}
+
 	if (isReviewCommand) {
 		nonInteractivePrompt = reviewPrompt;
 		nonInteractiveMode = true;
@@ -463,6 +439,13 @@ async function main(): Promise<void> {
 	// Enforce exclusive stdout protocol constraints
 	if (outputFormat === 'json' && vscodeMode) {
 		console.error('Error: --json cannot be combined with --vscode.');
+		process.exit(1);
+	}
+
+	if (outputFormat === 'json' && isReviewCommand) {
+		console.error(
+			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
+		);
 		process.exit(1);
 	}
 

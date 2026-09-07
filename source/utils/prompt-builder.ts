@@ -23,7 +23,7 @@ function getSectionFilePath(name: string): string {
 	return join(sectionsDir, `${safeName}.md`);
 }
 
-function loadSection(name: string): string {
+export function loadSection(name: string): string {
 	const cached = sectionCache.get(name);
 	if (cached !== undefined) return cached;
 

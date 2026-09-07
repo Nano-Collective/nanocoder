@@ -493,18 +493,9 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 	t.true(userMessage.includes('first and last 500 of 1100 lines'));
 });
 
-test('review falls back to default prompt when prompt file is missing', async t => {
-	const {renameSync} = await import('node:fs');
-	const {join} = await import('node:path');
-	const {fileURLToPath} = await import('node:url');
-	const {dirname} = await import('node:path');
-
-	const modulePath = fileURLToPath(import.meta.url);
-	const moduleDir = dirname(modulePath);
-	const promptPath = join(moduleDir, '../../source/app/prompts/sections/review.md');
-	const backupPath = promptPath + '.bak';
-
-	renameSync(promptPath, backupPath);
+test('review uses fallback prompt when loadPrompt returns fallback', async t => {
+	const fallbackPrompt =
+		'You are a senior software engineer performing a code review. Review the diff for bugs, security issues, and style violations. Be concise and actionable.';
 
 	let systemPrompt = '';
 
@@ -523,25 +514,23 @@ test('review falls back to default prompt when prompt file is missing', async t 
 		},
 	};
 
-	try {
-		const command = createReviewCommand({
-			execGit: async args => {
-				if (args[0] === 'rev-parse') return '';
-				return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
-			},
-			getCurrentBranch: async () => 'feature',
-			getDefaultBranch: async () => 'main',
-		});
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => false,
+		execGh: undefined,
+		loadPrompt: () => fallbackPrompt,
+	});
 
-		const result = await command.handler(['feature'], baseMessages, {
-			...testMetadata,
-			client,
-		});
+	const result = await command.handler(['feature'], baseMessages, {
+		...testMetadata,
+		client,
+	});
 
-		t.truthy(React.isValidElement(result));
-		t.true(systemPrompt.includes('senior software engineer'));
-		t.true(systemPrompt.includes('code review'));
-	} finally {
-		renameSync(backupPath, promptPath);
-	}
+	t.truthy(React.isValidElement(result));
+	t.is(systemPrompt, fallbackPrompt);
 });

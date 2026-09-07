@@ -1,4 +1,5 @@
 import test from 'ava';
+import {filterCliFlags} from '@/utils/cli-flags';
 
 // Test CLI argument parsing for non-interactive mode
 // These tests verify that the CLI correctly parses the 'run' command
@@ -13,47 +14,8 @@ function parsePrompt(args: string[]): string | undefined {
 	if (afterRunArgs.length === 0) {
 		return undefined;
 	}
-	// Filter out known flags after 'run' when constructing the prompt
-	const promptArgs: string[] = [];
-	for (let i = 0; i < afterRunArgs.length; i++) {
-		const arg = afterRunArgs[i];
-		if (arg === '--vscode') {
-			continue; // skip this flag
-		} else if (arg === '--vscode-port') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg === '--provider') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg === '--model') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg === '--context-max') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg === '--mode') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg.startsWith('--mode=')) {
-			continue; // skip fused form
-		} else if (arg === '--json') {
-			continue; // skip this flag
-		} else if (arg === '--output-format') {
-			i++; // skip this flag and its value
-			continue;
-		} else if (arg.startsWith('--output-format=')) {
-			continue; // skip fused form
-		} else if (arg === '--trust-directory') {
-			continue; // skip this flag
-		} else if (arg === '--plain' || arg === '--no-plain') {
-			continue; // skip this flag
-		} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-			continue; // skip this flag
-		} else {
-			promptArgs.push(arg);
-		}
-	}
-	return promptArgs.length > 0 ? promptArgs.join(' ') : undefined;
+	const positionals = filterCliFlags(afterRunArgs);
+	return positionals.length > 0 ? positionals.join(' ') : undefined;
 }
 
 test('CLI parsing: detects run command with single word prompt', t => {
@@ -592,4 +554,121 @@ test('CLI parsing: handles --mode before run command', t => {
 	const args = ['--mode', 'plan', 'run', 'audit', 'module'];
 	const prompt = parsePrompt(args);
 	t.is(prompt, 'audit module');
+});
+
+// Review guard tests — mirrors the guards in cli.tsx
+function resolveReviewGuards(opts: {
+	args: string[];
+	stdoutIsTTY: boolean;
+	outputFormat: string;
+}): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
+	const {args, stdoutIsTTY, outputFormat} = opts;
+	const isRunCommand = args.findIndex(arg => arg === 'run') !== -1;
+	const isReviewCommand = args[0] === 'review';
+	const ttyError = isReviewCommand && !stdoutIsTTY;
+	const jsonError = isReviewCommand && outputFormat === 'json';
+	const collisionError = isRunCommand && isReviewCommand;
+	return {ttyError, jsonError, collisionError};
+}
+
+test('review guard: errors when stdout is not a TTY', t => {
+	const {ttyError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: false,
+		outputFormat: 'text',
+	});
+	t.true(ttyError);
+});
+
+test('review guard: passes on a TTY', t => {
+	const {ttyError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(ttyError);
+});
+
+test('review guard: --json is rejected with review', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'json',
+	});
+	t.true(jsonError);
+});
+
+test('review guard: --json is not rejected with run', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['run', 'hello'],
+		stdoutIsTTY: true,
+		outputFormat: 'json',
+	});
+	t.false(jsonError);
+});
+
+test('review guard: run and review collision is detected', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['review', 'run'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.true(collisionError);
+});
+
+test('review guard: review alone has no collision', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(collisionError);
+});
+
+test('review guard: run alone has no collision', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['run', 'hello'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(collisionError);
+});
+
+// filterCliFlags: shared flag filter produces single source of truth
+test('filterCliFlags: filters all known flags', t => {
+	const result = filterCliFlags([
+		'--vscode',
+		'--json',
+		'--trust-directory',
+		'--plain',
+		'--no-plain',
+		'--no-alt-screen',
+		'--alt-screen',
+		'--vscode-port',
+		'3000',
+		'--provider',
+		'ollama',
+		'--model',
+		'llama3',
+		'--context-max',
+		'128k',
+		'--output-format',
+		'json',
+		'--output-format=json',
+		'--mode',
+		'plan',
+		'--mode=plan',
+		'my-prompt',
+	]);
+	t.deepEqual(result, ['my-prompt']);
+});
+
+test('filterCliFlags: returns all args when no flags present', t => {
+	const result = filterCliFlags(['hello', 'world']);
+	t.deepEqual(result, ['hello', 'world']);
+});
+
+test('filterCliFlags: returns empty array for empty input', t => {
+	const result = filterCliFlags([]);
+	t.deepEqual(result, []);
 });
