@@ -1,7 +1,7 @@
 import {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
+import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
-import {isDerivedContentPath} from '@/utils/file-cache';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};

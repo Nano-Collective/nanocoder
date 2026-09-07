@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import {extname} from 'node:path';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
+import {isDerivedContentPath} from '@/utils/derived-content';
 
 /**
  * File content cache to reduce duplicate file reads during tool confirmation flow.
@@ -11,20 +11,6 @@ import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 
 /** Maximum number of files to cache (exported for testing) */
 export const MAX_CACHE_SIZE = 50;
-
-/**
- * Extensions whose content is obtained by converting the file to markdown.
- * Reading one of these yields a transcript, never the file's own bytes.
- */
-const DERIVED_CONTENT_EXTENSIONS = new Set(['.pdf', '.docx']);
-
-/**
- * True when reading `path` yields a derived markdown transcript instead of the
- * file's own content.
- */
-export function isDerivedContentPath(path: string): boolean {
-	return DERIVED_CONTENT_EXTENSIONS.has(extname(path).toLowerCase());
-}
 
 export interface CachedFile {
 	content: string;

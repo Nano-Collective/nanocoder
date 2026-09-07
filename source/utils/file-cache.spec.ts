@@ -6,11 +6,11 @@ import {join} from 'node:path';
 import {
 	getCachedFileContent,
 	invalidateCache,
-	isDerivedContentPath,
 	clearCache,
 	getCacheSize,
 	MAX_CACHE_SIZE,
 } from './file-cache';
+import {buildMinimalPdf} from '@/test-utils/minimal-pdf';
 
 // Helper to create a temp directory for tests
 async function createTempDir(): Promise<string> {
@@ -479,11 +479,38 @@ test('getCachedFileContent - reads extensionless file as utf-8 text', async t =>
 	}
 });
 
-test('isDerivedContentPath - true only for converted document formats', t => {
-	t.true(isDerivedContentPath('/tmp/spec.pdf'));
-	t.true(isDerivedContentPath('/tmp/spec.DOCX'));
-	t.false(isDerivedContentPath('/tmp/spec.md'));
-	t.false(isDerivedContentPath('/tmp/LICENSE'));
+test('getCachedFileContent - marks a converted document as derived', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'spec.pdf');
+		const bytes = buildMinimalPdf('Hello World');
+		await writeFile(filePath, bytes);
+
+		const result = await getCachedFileContent(filePath);
+
+		// The provenance flag and the content have to tell the same story: what
+		// came back is a transcript of the document, not the document.
+		t.true(result.derived);
+		t.regex(result.content, /Hello World/);
+		t.false(result.content.startsWith('%PDF-'));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - derived flag survives a cache hit', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'spec.pdf');
+		await writeFile(filePath, buildMinimalPdf('Hello World'));
+
+		await getCachedFileContent(filePath);
+		const cached = await getCachedFileContent(filePath);
+
+		t.true(cached.derived);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
 });
 
 test('getCachedFileContent - marks plain text content as not derived', async t => {
