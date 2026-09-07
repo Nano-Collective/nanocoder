@@ -1,4 +1,12 @@
-import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test, {type ExecutionContext} from 'ava';
@@ -13,6 +21,12 @@ import {
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
+
+// POSIX shell for the runScript cases. `/bin/sh` doesn't exist as a literal
+// path on Windows, but `bash` resolves via PATH to a Git Bash install, so the
+// two new robustness cases can exercise real shells on contributor machines
+// too. (The rest of the suite keeps `/bin/sh` and runs on the Linux CI.)
+const posixShell = process.platform === 'win32' ? 'bash' : '/bin/sh';
 
 let testDir: string;
 let prevLcAll: string | undefined;
@@ -248,6 +262,80 @@ test('runScript: timeout kills long-running script', async t => {
 		}),
 		{message: /timed out/},
 	);
+});
+
+test('runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker', async t => {
+	// Dynamically import the limit so we test against the actual cap.
+	const {BASH_MAX_OUTPUT_BYTES} = await import('../constants.js');
+
+	// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB).
+	const result = await runScript(
+		`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+		{
+			cwd: testDir,
+			env: process.env,
+			shell: posixShell,
+			timeoutMs: 30_000,
+		},
+	);
+
+	t.true(
+		result.length < BASH_MAX_OUTPUT_BYTES,
+		'resolved output must stay far below the raw emitted size',
+	);
+
+	const marker = 'Output truncated to prevent memory exhaustion';
+	const matches = result.split(marker).length - 1;
+	t.is(matches, 1, 'truncation marker must appear exactly once');
+});
+
+test('runScript: timeout settles promptly and, on Unix, reaps descendant processes', async t => {
+	const pidFile = join(testDir, `orphan-${Date.now()}.pid`).replaceAll('\\', '/');
+	// Shell backgrounds a long-lived child that inherits the stdout pipe, then
+	// blocks. On the old behavior, killing only the shell leaves the child
+	// holding the pipe open, so `close` never fires and the promise never
+	// settles — the call hangs well past the timeout.
+	const script = `sleep 60 & echo $! > '${pidFile}'; sleep 30`;
+	let grandchildPid: number | undefined;
+
+	const result = await Promise.race([
+		runScript(script, {
+			cwd: testDir,
+			env: process.env,
+			shell: posixShell,
+			timeoutMs: 500,
+		}).then(value => ({value}), (error: Error) => ({error})),
+		(async () => {
+			for (let i = 0; i < 20 && !existsSync(pidFile); i++) {
+				await new Promise(resolve => setTimeout(resolve, 25));
+			}
+			const raw = existsSync(pidFile) ? readFileSync(pidFile, 'utf8') : '';
+			const match = raw.match(/\d+/);
+			if (match) grandchildPid = Number(match[0]);
+			return new Promise<{hang: true}>(resolve =>
+				setTimeout(() => resolve({hang: true}), 3_000),
+			);
+		})(),
+	]);
+
+	if ('hang' in result) {
+		t.fail('tool call must settle after the timeout instead of hanging');
+		return;
+	}
+	t.true('error' in result, 'timed-out tool call must reject');
+	t.regex((result as {error: Error}).error.message, /timed out/);
+
+	// Windows has no process-group signal here, so descendant-reaping can only
+	// be asserted on Unix (CI is Linux; the settle assertion above runs everywhere).
+	if (process.platform === 'win32') return;
+
+	if (grandchildPid !== undefined) {
+		t.throws(
+			() => process.kill(grandchildPid, 0),
+			undefined,
+			'background child must be reaped by the process-group kill',
+		);
+	}
 });
 
 test('buildHandler renders body and executes', async t => {
