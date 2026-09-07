@@ -1,7 +1,11 @@
 import {readFileSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
-import type {TuneConfig} from '@/types/config';
+import type {
+	CiWatchConfig,
+	NotificationsConfig,
+	TuneConfig,
+} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {logError} from '@/utils/message-queue';
@@ -99,9 +103,7 @@ export function saveTune(config: TuneConfig): void {
 /**
  * Get the notifications config from the preferences file.
  */
-export function getNotificationsPreference():
-	| import('@/types/config').NotificationsConfig
-	| undefined {
+export function getNotificationsPreference(): NotificationsConfig | undefined {
 	const preferences = loadPreferences();
 	return preferences.notifications;
 }
@@ -110,7 +112,7 @@ export function getNotificationsPreference():
  * Save the notifications config to the preferences file.
  */
 export function updateNotificationsPreference(
-	config: import('@/types/config').NotificationsConfig,
+	config: NotificationsConfig,
 ): void {
 	const preferences = loadPreferences();
 	preferences.notifications = config;
@@ -122,9 +124,7 @@ export function updateNotificationsPreference(
  * the preferences file for now — no `/settings` UI wizard yet (that's a
  * natural follow-up once the feature has seen real-world use).
  */
-export function getCiWatchPreference():
-	| import('@/types/config').CiWatchConfig
-	| undefined {
+export function getCiWatchPreference(): CiWatchConfig | undefined {
 	const preferences = loadPreferences();
 	return preferences.ciWatch;
 }

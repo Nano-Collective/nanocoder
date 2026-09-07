@@ -84,6 +84,29 @@ Desktop notification preferences are stored under the `nanocoder.notifications` 
 
 You can change these via `/settings` → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 
+### CI Watch Configuration
+
+Background CI-watch preferences are stored under the `nanocoder.ciWatch` namespace. When enabled, the daemon (`nanocoder daemon start`) polls GitHub Actions for failures on the current branch and automatically investigates them:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nanocoder.ciWatch.enabled` | boolean | `false` | Enable background CI-watch polling. Requires the `gh` CLI to be installed and authenticated. |
+| `nanocoder.ciWatch.pollIntervalMs` | number | `30000` | Base interval between polls, in milliseconds. |
+| `nanocoder.ciWatch.maxPollIntervalMs` | number | `300000` | Backoff ceiling applied when consecutive `gh` calls fail. |
+
+There's no `/settings` wizard for this yet — set it by hand-editing the preferences file:
+
+```json
+{
+  "nanocoder": {
+    "ciWatch": {
+      "enabled": true,
+      "pollIntervalMs": 30000
+    }
+  }
+}
+```
+
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 
 ## Manual Management

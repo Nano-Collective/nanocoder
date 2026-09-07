@@ -1,22 +1,33 @@
 /**
  * CI check-run event source for the skill event router.
  *
- * Polls `gh run list` for the most recent *completed* GitHub Actions run on
- * a branch (defaulting to whatever branch is currently checked out, so it
- * tracks the developer switching branches on a long-running daemon). When
- * that run's conclusion is `failure` and it hasn't been seen before, it
- * emits a `ci.job.failed` event and calls the optional `onDetected` hook
- * first, so a caller can fire an OS notification before the (potentially
- * slow) investigation dispatch that follows from `router.emit()` resolving.
+ * Polls `gh run list` for the most recently *completed* GitHub Actions runs
+ * on a branch (defaulting to whatever branch is currently checked out, so it
+ * tracks the developer switching branches on a long-running daemon), then
+ * looks only at the single latest run *per workflow* within that window
+ * (fetching more than one run guards against a second workflow completing
+ * between polls and pushing an earlier failure out of "the latest run" —
+ * see `RUN_LIST_LIMIT`). A workflow whose latest run's conclusion counts as
+ * a failure (`failure`, `timed_out`, `startup_failure`) and hasn't been seen
+ * before emits a `ci.job.failed` event, calling the optional `onDetected`
+ * hook first so a caller can fire an OS notification before the
+ * (potentially slow) investigation dispatch that follows from
+ * `router.emit()` resolving. Grouping by workflow (rather than emitting for
+ * every failing run in the fetch window) matters most on a fresh
+ * activation: it reports "which workflows are currently red," not a
+ * backlog of every stale failure in that workflow's recent history.
+ * Filtering by a specific workflow name is not supported — there's no config
+ * surface naming which workflow(s) to watch; `nanocoder.ciWatch.workflows?:
+ * string[]` would be a natural follow-up.
  *
  * On a `gh` error or unparseable output (rate limit, network, a CLI banner
  * on stdout) the poll interval grows via `ExponentialBackoff` instead of
  * hammering the API; a poll that both succeeds and parses resets it. Dedup
- * (`lastSeenRunId`) is in-memory only and does not survive a daemon restart
- * — an accepted limitation, consistent with subscriptions themselves not
- * being persisted either. A single scalar is enough (rather than a set of
- * every run id ever seen) because `--limit 1` only ever returns the single
- * latest run, and GitHub run ids are unique across the whole repo.
+ * (`seenFailedRunIds`) is capped at `MAX_TRACKED_RUN_IDS` and, by default,
+ * in-memory only. A caller that wants dedup to survive a daemon restart can
+ * seed `initialSeenFailedRunIds` from its own persisted state and observe
+ * `onSeenFailedRunIdsChanged` to keep that state up to date — this class
+ * itself does no filesystem I/O.
  *
  * Modeled structurally on `ScheduleEventSource`: injectable dependencies for
  * testability, `start()`/`stop()` lifecycle, emits into the shared
@@ -24,6 +35,7 @@
  * notifications.
  */
 
+import {TIMEOUT_GH_METADATA_MS} from '@/constants';
 import type {EventRouter} from '@/events/event-router';
 import type {CiJobFailedPayload} from '@/events/types';
 import {execGh, getCurrentBranch} from '@/tools/git/utils';
@@ -31,6 +43,13 @@ import {ExponentialBackoff} from '@/utils/backoff';
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_MAX_POLL_INTERVAL_MS = 300_000;
+const RUN_LIST_LIMIT = 10;
+const MAX_TRACKED_RUN_IDS = 50;
+const FAILING_CONCLUSIONS = new Set([
+	'failure',
+	'timed_out',
+	'startup_failure',
+]);
 
 interface RunListEntry {
 	databaseId: number;
@@ -48,6 +67,10 @@ export interface CiEventSourceOptions {
 	maxPollIntervalMs?: number;
 	/** Fired right before `router.emit()`, so detection can notify before dispatch finishes. */
 	onDetected?: (payload: CiJobFailedPayload) => void;
+	/** Seeds dedup state, e.g. from a caller's persisted last-seen run ids. */
+	initialSeenFailedRunIds?: number[];
+	/** Fired synchronously after `seenFailedRunIds` changes, so a caller can persist it. */
+	onSeenFailedRunIdsChanged?: (ids: number[]) => void;
 	execGhFn?: typeof execGh;
 	getCurrentBranchFn?: typeof getCurrentBranch;
 	now?: () => number;
@@ -56,7 +79,7 @@ export interface CiEventSourceOptions {
 }
 
 export class CiEventSource {
-	private lastSeenRunId: number | null = null;
+	private seenFailedRunIds: number[];
 	private readonly backoff: ExponentialBackoff;
 	private readonly execGhFn: typeof execGh;
 	private readonly getCurrentBranchFn: typeof getCurrentBranch;
@@ -73,6 +96,7 @@ export class CiEventSource {
 		private readonly router: EventRouter,
 		private readonly options: CiEventSourceOptions = {},
 	) {
+		this.seenFailedRunIds = [...(options.initialSeenFailedRunIds ?? [])];
 		this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		this.backoff = new ExponentialBackoff({
 			baseMs: this.pollIntervalMs,
@@ -85,12 +109,16 @@ export class CiEventSource {
 		this.clearFn = options.clearFn ?? clearTimeout;
 	}
 
-	/** Idempotent. Polls immediately, then schedules subsequent polls. */
+	/**
+	 * Idempotent. Schedules the first poll for 0ms rather than awaiting it
+	 * inline, so a caller awaiting `start()` (e.g. daemon boot) never blocks
+	 * on a live `gh` call.
+	 */
 	async start(): Promise<void> {
 		if (this.started) return;
 		this.started = true;
 		this.stopped = false;
-		await this.pollOnce();
+		this.scheduleNext(0);
 	}
 
 	/** Idempotent. Cancels any pending poll. */
@@ -115,18 +143,21 @@ export class CiEventSource {
 
 		let raw: string;
 		try {
-			raw = await this.execGhFn([
-				'run',
-				'list',
-				'--branch',
-				branch,
-				'--status',
-				'completed',
-				'--limit',
-				'1',
-				'--json',
-				'databaseId,conclusion,headSha,workflowName,url,headBranch',
-			]);
+			raw = await this.execGhFn(
+				[
+					'run',
+					'list',
+					'--branch',
+					branch,
+					'--status',
+					'completed',
+					'--limit',
+					String(RUN_LIST_LIMIT),
+					'--json',
+					'databaseId,conclusion,headSha,workflowName,url,headBranch',
+				],
+				TIMEOUT_GH_METADATA_MS,
+			);
 		} catch {
 			this.scheduleNext(this.backoff.next());
 			return;
@@ -147,13 +178,29 @@ export class CiEventSource {
 
 		this.backoff.reset();
 
-		const run = runs[0];
-		if (
-			run &&
-			run.conclusion === 'failure' &&
-			run.databaseId !== this.lastSeenRunId
-		) {
-			this.lastSeenRunId = run.databaseId;
+		// Only ever consider the single most recent completed run *per
+		// workflow* (gh returns `runs` newest-first, so the first entry seen
+		// for a given workflow name is its latest). Without this grouping,
+		// widening the fetch to RUN_LIST_LIMIT would treat every failing run
+		// in that window as "newly detected" — flooding a fresh activation
+		// with a backlog of stale, already-known-broken history instead of
+		// just "which workflows are currently red."
+		const latestPerWorkflow = new Map<string, RunListEntry>();
+		for (const run of runs) {
+			if (!latestPerWorkflow.has(run.workflowName)) {
+				latestPerWorkflow.set(run.workflowName, run);
+			}
+		}
+
+		const newlyFailed = [...latestPerWorkflow.values()].filter(
+			run =>
+				run.conclusion &&
+				FAILING_CONCLUSIONS.has(run.conclusion) &&
+				!this.seenFailedRunIds.includes(run.databaseId),
+		);
+
+		for (const run of newlyFailed) {
+			this.seenFailedRunIds.push(run.databaseId);
 			const payload: CiJobFailedPayload = {
 				runId: run.databaseId,
 				workflowName: run.workflowName,
@@ -163,6 +210,15 @@ export class CiEventSource {
 			};
 			this.options.onDetected?.(payload);
 			await this.router.emit({kind: 'ci.job.failed', payload, at: this.now()});
+		}
+
+		if (newlyFailed.length > 0) {
+			if (this.seenFailedRunIds.length > MAX_TRACKED_RUN_IDS) {
+				this.seenFailedRunIds = this.seenFailedRunIds.slice(
+					-MAX_TRACKED_RUN_IDS,
+				);
+			}
+			this.options.onSeenFailedRunIdsChanged?.([...this.seenFailedRunIds]);
 		}
 
 		this.scheduleNext(this.pollIntervalMs);

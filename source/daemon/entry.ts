@@ -36,6 +36,10 @@ import {startDaemon} from './daemon';
 // `signalToolApproval()`'s default — a property of headless mode, not of
 // this list. If a future change ever registers an approval handler here,
 // this override alone would no longer be sufficient.
+// `resolveToolApproval`'s first check (`ctx.alwaysAllow`) would also bypass
+// approval, but is equally unreachable here: `SubagentExecutor`'s own
+// `needsApprovalForTool` builds that context as just `{mode:
+// this.currentMode()}`, never populating `alwaysAllow`.
 const TRUST_OVERRIDDEN_SUBAGENTS: Record<
 	string,
 	ReturnType<typeof getAllowedToolNames>
