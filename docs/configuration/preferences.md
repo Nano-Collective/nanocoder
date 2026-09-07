@@ -53,18 +53,20 @@ Preferences follow the same location hierarchy as configuration files:
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the top-level `paste` key:
+The paste threshold is also stored in the preferences file under the namespaced `nanocoder.paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "paste": {
-    "singleLineThreshold": 1500
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 1500
+    }
   }
 }
 ```
@@ -158,4 +160,4 @@ Nanocoder stores internal application data (such as usage statistics) in a separ
 - **Linux/Unix**: `$XDG_DATA_HOME/nanocoder` or `~/.local/share/nanocoder`
 - **Windows**: `%APPDATA%\nanocoder`
 
-You can override this directory using `NANOCODER_DATA_DIR`.
+You can override this directory using `NANOCODER_DATA_DIR`. Lifetime `/stats` data is stored in `stats.json` in this directory. Older `.nanocoder-stats.json` files are migrated automatically on first read.
