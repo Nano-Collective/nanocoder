@@ -15,6 +15,7 @@ import {
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from './auto-compact';
+import {COMPRESSION_CONSTANTS} from './message-compression';
 
 // Reset session overrides before each test
 test.beforeEach(() => {
@@ -51,24 +52,36 @@ test('setAutoCompactThreshold sets threshold value', t => {
 	t.is(autoCompactSessionOverrides.threshold, 75);
 });
 
-test('setAutoCompactThreshold clamps to minimum of 50', t => {
-	setAutoCompactThreshold(30);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold clamps to the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT - 20);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold clamps to maximum of 95', t => {
-	setAutoCompactThreshold(99);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold clamps to the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT + 4);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 50', t => {
-	setAutoCompactThreshold(50);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold handles the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 95', t => {
-	setAutoCompactThreshold(95);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold handles the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
 test('setAutoCompactThreshold sets threshold to null', t => {
