@@ -36,6 +36,46 @@ test('buildResponseUsage computes cost from input and output tokens', async t =>
 	t.is(result?.cost, 4.5);
 });
 
+test('buildResponseUsage prices cached input with cache-specific rates', async t => {
+	const result = await buildResponseUsage(
+		{
+			inputTokens: 1_000_000,
+			outputTokens: 100_000,
+			totalTokens: 1_100_000,
+			cacheReadTokens: 500_000,
+			cacheWriteTokens: 100_000,
+		},
+		'model',
+		async () => ({
+			input: 3,
+			output: 15,
+			cache_read: 0.3,
+			cache_write: 0.6,
+		}),
+	);
+
+	t.is(result?.cacheReadTokens, 500_000);
+	t.is(result?.cacheWriteTokens, 100_000);
+	t.is(result?.cost, 2.91);
+});
+
+test('buildResponseUsage falls back to input pricing when cache rates are absent', async t => {
+	const result = await buildResponseUsage(
+		{
+			inputTokens: 1_000_000,
+			outputTokens: 100_000,
+			totalTokens: 1_100_000,
+			cacheReadTokens: 500_000,
+		},
+		'model',
+		stubPricing,
+	);
+
+	// The 500k cached tokens use the normal $3 input rate when no cache rate
+	// is available, so no input tokens disappear from the estimate.
+	t.is(result?.cost, 4.5);
+});
+
 test('buildResponseUsage prices zero-filled input/output with a positive total as a lump sum', async t => {
 	// Regression: accumulators that zero-fill unreported input/output must
 	// not route a total-only report into the input/output branch (cost $0).

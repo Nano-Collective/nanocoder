@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {
@@ -256,6 +259,7 @@ function createResumeTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -271,6 +275,84 @@ function createResumeTestOptions(overrides: {
 }
 
 // --- Direct !command handling ---
+
+test.serial('stats command captures input and releases it on close', async t => {
+	let liveComponent: React.ReactNode = null;
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('/stats all-time', options);
+
+	t.deepEqual(captureStates, [true]);
+	t.true(React.isValidElement(liveComponent));
+	const onClose = (liveComponent as React.ReactElement<{onClose: () => void}>).props
+		.onClose;
+	t.truthy(onClose);
+	onClose();
+	t.deepEqual(captureStates, [true, false]);
+});
+
+test.serial('stats reset command clears the ledger and reports success', async t => {
+	const previousDataDir = process.env.NANOCODER_DATA_DIR;
+	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-stats-reset-'));
+	process.env.NANOCODER_DATA_DIR = dataDir;
+
+	try {
+		const {flushStatsLedgerSync, recordTokenUsage} = await import('@/stats/record');
+		recordTokenUsage({
+			provider: 'OpenRouter',
+			model: 'gpt-5',
+			tokens: 100,
+		});
+		flushStatsLedgerSync();
+
+		let queued: React.ReactNode = null;
+		let completed = 0;
+		const options = createResumeTestOptions({
+			onAddToChatQueue: component => {
+				queued = component;
+			},
+			onCommandComplete: () => {
+				completed++;
+			},
+		});
+
+		await handleMessageSubmission('/stats reset', options);
+
+		t.false(fs.existsSync(path.join(dataDir, 'stats.json')));
+		t.true(React.isValidElement(queued));
+		t.is(
+			(queued as React.ReactElement<{message: string}>).props.message,
+			'Lifetime stats reset.',
+		);
+		t.is(completed, 1);
+	} finally {
+		if (previousDataDir === undefined) {
+			delete process.env.NANOCODER_DATA_DIR;
+		} else {
+			process.env.NANOCODER_DATA_DIR = previousDataDir;
+		}
+		fs.rmSync(dataDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('bash command does not capture input', async t => {
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.deepEqual(captureStates, []);
+});
 
 test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
 	let queued: React.ReactNode = null;
@@ -315,6 +397,25 @@ test.serial('chat message - forwards displayValue to onHandleChatMessage so the 
 		'[@app.tsx]',
 		'bubble receives the placeholder, not the expanded contents',
 	);
+});
+
+test.serial('slash command - leading whitespace still dispatches as a command', async t => {
+	// parseInput trims before testing for `/`, so routing has to trim too —
+	// dispatching on the raw string sent `  /stats` to the model as chat.
+	let chatMessage: string | undefined;
+	let liveComponent: React.ReactNode = null;
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async message => {
+		chatMessage = message;
+	};
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+
+	await handleMessageSubmission('  /stats all-time', options);
+
+	t.is(chatMessage, undefined, 'a slash command must not reach the model');
+	t.true(React.isValidElement(liveComponent));
 });
 
 test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
@@ -725,6 +826,7 @@ function createRenameTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -884,6 +986,7 @@ function createSettingsTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],

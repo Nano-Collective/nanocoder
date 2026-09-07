@@ -348,6 +348,14 @@ export function useChatHandler({
 		let wrotePlan = false;
 		let finalAssistantText = '';
 
+		// Lifetime /stats: count each user turn (fire-and-forget).
+		try {
+			const {recordUserPrompt} = await import('@/stats/record');
+			recordUserPrompt(currentProvider, currentModel);
+		} catch {
+			// Stats must never block chat.
+		}
+
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
 
