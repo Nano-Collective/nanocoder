@@ -210,6 +210,11 @@ export function ChatInput({
 			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
 			{pendingSubagentApproval ? (
 				<ToolConfirmation
+					// Force a fresh instance per queued request: without a key, React
+					// reconciles the same component across queue advances and carries
+					// over state (formatterPreview, hasValidationError, ...) from the
+					// previous request onto the new one.
+					key={pendingSubagentApproval.toolCall.id}
 					toolCall={pendingSubagentApproval.toolCall}
 					onConfirm={onSubagentToolApproval}
 					onCancel={() => onSubagentToolApproval(false)}
@@ -217,6 +222,7 @@ export function ChatInput({
 			) : /* Main agent tool confirmation (unified inline approval gate) */
 			pendingToolConfirmation ? (
 				<ToolConfirmation
+					key={pendingToolConfirmation.toolCall.id}
 					toolCall={pendingToolConfirmation.toolCall}
 					onConfirm={onToolConfirmation}
 					onCancel={() => onToolConfirmation(false)}
