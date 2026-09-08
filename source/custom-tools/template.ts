@@ -30,9 +30,19 @@ export function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Wrap a string in cmd.exe-safe double quotes. */
+/**
+ * Wrap a string in cmd.exe-safe double quotes.
+ *
+ * cmd.exe has no command-line escape for percent expansion or command
+ * separators, so reject those values instead of silently changing them.
+ */
 export function cmdQuote(value: string): string {
-	return `"${value.replaceAll('%', '%%').replace(/["^&|<>]/g, '^$&')}"`;
+	if (/[\0%\r\n]/.test(value)) {
+		throw new Error(
+			'cmd.exe arguments cannot contain percent signs, null bytes, or newlines',
+		);
+	}
+	return `"${value.replaceAll('"', '""')}"`;
 }
 
 /**
