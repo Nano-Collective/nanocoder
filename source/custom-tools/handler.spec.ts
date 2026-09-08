@@ -303,56 +303,145 @@ shellCase(
 shellCase(
 	'runScript: timeout settles promptly and, on Unix, reaps descendant processes',
 	async t => {
-	const pidFile = join(testDir, `orphan-${Date.now()}.pid`).replaceAll('\\', '/');
-	// Shell backgrounds a long-lived child that inherits the stdout pipe, then
-	// blocks. On the old behavior, killing only the shell leaves the child
-	// holding the pipe open, so `close` never fires and the promise never
-	// settles — the call hangs well past the timeout.
-	const script = `sleep 60 & echo $! > '${pidFile}'; sleep 30`;
-	let grandchildPid: number | undefined;
-
-	const result = await Promise.race([
-		runScript(script, {
-			cwd: testDir,
-			env: process.env,
-			shell: testShell!,
-			timeoutMs: 500,
-		}).then(value => ({value}), (error: Error) => ({error})),
-		(async () => {
-			for (let i = 0; i < 20 && !existsSync(pidFile); i++) {
-				await new Promise(resolve => setTimeout(resolve, 25));
-			}
-			const raw = existsSync(pidFile) ? readFileSync(pidFile, 'utf8') : '';
-			const match = raw.match(/\d+/);
-			if (match) grandchildPid = Number(match[0]);
-			return new Promise<{hang: true}>(resolve =>
-				setTimeout(() => resolve({hang: true}), 3_000),
-			);
-		})(),
-	]);
-
-	if ('hang' in result) {
-		t.fail('tool call must settle after the timeout instead of hanging');
-		return;
-	}
-	t.true('error' in result, 'timed-out tool call must reject');
-	t.regex((result as {error: Error}).error.message, /timed out/);
-
-	// Windows has no process-group signal here, so descendant-reaping can only
-	// be asserted on Unix (CI is Linux; the settle assertion above runs everywhere).
-	if (process.platform === 'win32') return;
-
-	// Give the OS a moment to reap the group (mirrors bash-executor.spec.ts).
-	await new Promise(resolve => setTimeout(resolve, 300));
-
-	if (grandchildPid !== undefined) {
-		t.throws(
-			() => process.kill(grandchildPid, 0),
-			undefined,
-			'background child must be reaped by the process-group kill',
+		const pidFile = join(testDir, `orphan-${Date.now()}.pid`).replaceAll(
+			'\\',
+			'/',
 		);
-	}
-});
+		// Shell backgrounds a long-lived child that inherits the stdout pipe,
+		// then blocks. On the old behavior, killing only the shell leaves the
+		// child holding the pipe open, so `close` never fires and the promise
+		// never settles — the call hangs well past the timeout.
+		const script = `sleep 60 & echo $! > '${pidFile}'; sleep 30`;
+		let grandchildPid: number | undefined;
+
+		const result = await Promise.race([
+			runScript(script, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 500,
+			}).then(value => ({value}), (error: Error) => ({error})),
+			(async () => {
+				for (let i = 0; i < 20 && !existsSync(pidFile); i++) {
+					await new Promise(resolve => setTimeout(resolve, 25));
+				}
+				const raw = existsSync(pidFile) ? readFileSync(pidFile, 'utf8') : '';
+				const match = raw.match(/\d+/);
+				if (match) grandchildPid = Number(match[0]);
+				return new Promise<{hang: true}>(resolve =>
+					setTimeout(() => resolve({hang: true}), 3_000),
+				);
+			})(),
+		]);
+
+		if ('hang' in result) {
+			t.fail('tool call must settle after the timeout instead of hanging');
+			return;
+		}
+		t.true('error' in result, 'timed-out tool call must reject');
+		t.regex((result as {error: Error}).error.message, /timed out/);
+
+		// Windows has no process-group signal here, so descendant-reaping can
+		// only be asserted on Unix (CI is Linux; the settle assertion above runs
+		// everywhere).
+		if (process.platform === 'win32') return;
+
+		// Give the OS a moment to reap the group (mirrors bash-executor.spec.ts).
+		await new Promise(resolve => setTimeout(resolve, 300));
+
+		if (grandchildPid !== undefined) {
+			t.throws(
+				() => process.kill(grandchildPid, 0),
+				undefined,
+				'background child must be reaped by the process-group kill',
+			);
+		}
+	},
+);
+
+shellCase(
+	'runScript: caps stderr-only output and appends the per-stream stderr notice exactly once',
+	async t => {
+		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
+		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
+
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000 >&2`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.true(
+			result.includes(stderrMarker),
+			'the stderr notice must appear when only stderr hits the cap',
+		);
+		t.is(
+			result.split(stderrMarker).length - 1,
+			1,
+			'the stderr notice must appear exactly once',
+		);
+		t.false(
+			result.includes(stdoutMarker),
+			'the stdout notice must not appear when stdout was not capped',
+		);
+		t.regex(
+			result,
+			/^EXIT_CODE: 0\nSTDERR:/,
+			'the stderr section must be labelled',
+		);
+	},
+);
+
+shellCase(
+	'runScript: per-stream notices stay with their own stream when only stdout is capped',
+	async t => {
+		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
+		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
+
+		const result = await runScript(
+			`echo 'small stderr line' >&2; yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.true(
+			result.includes(stdoutMarker),
+			'the stdout notice must appear when stdout hits the cap',
+		);
+		t.false(
+			result.includes(stderrMarker),
+			'the stderr notice must not appear when stderr fits the budget',
+		);
+		t.regex(
+			result,
+			/small stderr line/,
+			'stderr sent before the flood must be preserved uncapped',
+		);
+	},
+);
+
+shellCase(
+	'runScript: partial output is discarded when the tool times out instead of resolving half a result',
+	async t => {
+		await t.throwsAsync(
+			runScript(`echo 'started before timeout' ; sleep 30`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 250,
+			}),
+			{message: /timed out/},
+		);
+	},
+);
 
 test('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);

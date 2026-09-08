@@ -82,6 +82,10 @@ export function runScript(
 			child.stderr?.destroy();
 			killProcessTree(child);
 			// Force-kill the group if it refuses to exit within a grace window.
+			// Deliberately stronger than BashExecutor.cancel()'s SIGTERM-only:
+			// a custom tool is user-authored and its timeout must hold even
+			// against a child that traps SIGTERM, so the escalation is the
+			// guarantee here rather than an inconsistency to converge away.
 			setTimeout(() => {
 				if (!child.killed) killProcessTree(child, 'SIGKILL');
 			}, 1_000).unref();
@@ -155,7 +159,10 @@ export function runScript(
  * The child is spawned `detached` on Unix, making it the leader of its own
  * process group; signalling the negative PID kills the whole tree, so work the
  * tool backgrounded cannot survive the shell's timeout. Windows has no process
- * groups here, so we fall back to the single process.
+ * groups here, so we fall back to the single process: a descendant the tool
+ * backgrounded keeps running to completion (the promise already settled, so
+ * this leaks a stray process rather than hanging the call — documented
+ * limitation; a Job Object / `taskkill /T` could close it).
  */
 function killProcessTree(
 	child: ChildProcess,

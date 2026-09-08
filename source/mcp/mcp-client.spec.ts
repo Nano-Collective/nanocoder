@@ -1,5 +1,6 @@
 import test from 'ava';
 import {resolveToolApproval} from '../tools/approval-policy';
+import {ToolValidationError} from '../utils/tool-validation';
 import {MCPClient} from './mcp-client';
 
 // ============================================================================
@@ -436,6 +437,46 @@ test('MCPClient.getToolEntries: includes handler that calls callTool', async t =
 	t.is(entries.length, 1);
 	t.is(entries[0].name, 'test_tool');
 	t.is(typeof entries[0].handler, 'function');
+});
+
+test('gets entry handler that passes valid args through but stops wrong-typed args at execution', async t => {
+	const client = new MCPClient();
+
+	(client as any).serverTools.set('typed-server', [
+		{
+			name: 'typed_tool',
+			description: 'Typed tool',
+			inputSchema: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+			serverName: 'typed-server',
+		},
+	]);
+
+	let callsToServer = 0;
+	// The handler closure resolves `this.callTool` at call time, so a shadowing
+	// own property is enough to prove whether the wrapper lets the call through.
+	client.callTool = (async () => {
+		callsToServer++;
+		return 'server result';
+	}) as never;
+
+	const entry = client.getToolEntries()[0];
+	t.truthy(entry);
+
+	// Same lenient schema check the approval prompt renders: an object where a
+	// string is expected is rejected before the server is ever asked.
+	await t.throwsAsync(
+		() => entry.handler({path: {nested: true}}),
+		{instanceOf: ToolValidationError, message: /wrong type/},
+	);
+	t.is(callsToServer, 0, 'wrong-typed args must not reach the server');
+
+	// Scalar-typed args pass through to the server unchanged.
+	const result = await entry.handler({path: 'ok'});
+	t.is(result, 'server result');
+	t.is(callsToServer, 1, 'well-typed args must reach the server');
 });
 
 // ============================================================================
