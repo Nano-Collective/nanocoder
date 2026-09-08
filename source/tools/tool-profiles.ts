@@ -37,7 +37,7 @@ export const TOOL_PROFILE_DESCRIPTIONS: Record<ToolProfile, string> = {
 };
 
 export const TOOL_PROFILE_TOOLTIPS: Record<ToolProfile, string> = {
-	auto: 'Resolves from the model size: tiny models get nano, small models get minimal, larger/cloud models get full. Switching models re-resolves automatically.',
+	auto: 'Resolves from the model size: tiny models get nano, small models get minimal, large models get full, and unknown model ids get minimal. Switching models re-resolves automatically.',
 	full: 'No filtering. All registered tools including MCP servers.',
 	minimal:
 		'8 core tools (edit, bash, search, agent) with slim prompt and single-tool enforcement. Recommended for small models.',
@@ -74,14 +74,14 @@ function modelParamsBillions(model: string): number | null {
 /**
  * Infer a concrete profile from the active model id.
  *
- * Small local models benefit from a slim tool set and prompt; large or
- * cloud-hosted models (no size hint in the id) get the full surface.
+ * Small models benefit from a slim tool set and prompt; large models get the
+ * full surface, while unknown model ids use the safer minimal profile.
  */
 export function inferToolProfile(model?: string): ConcreteProfile {
 	if (!model) return 'full';
 
 	const params = modelParamsBillions(model);
-	if (params === null) return 'full'; // cloud / unknown — assume capable
+	if (params === null) return 'minimal'; // unknown size — prefer the safer slim profile
 	if (params <= 4) return 'nano';
 	if (params <= 15) return 'minimal';
 	return 'full';
