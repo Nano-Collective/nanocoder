@@ -4,7 +4,7 @@ import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
 	setAutoCompactThreshold,
-} from './auto-compact.js';
+} from './auto-compact-session.js';
 import {getSessionContextLimit, resetSessionContextLimit, setSessionContextLimit} from '@/models/index';
 import {
 	applyOnceOverrides,
