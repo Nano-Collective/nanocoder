@@ -42,21 +42,41 @@ function mapStringLeaves<T>(value: T, transform: StringTransform): T {
 
 function scrubMessage(message: Message, scrubText: StringTransform): Message {
 	if (message.role === 'tool') {
+		if (message.structuredContent !== undefined) {
+			const serialized = JSON.stringify(message.structuredContent);
+			const bounded = truncateToolResult(serialized);
+			if (bounded !== serialized) {
+				// Already over the cap before scrubbing runs. The converter would
+				// truncate-and-downgrade this to text anyway (message-converter.ts),
+				// so downgrade here too: scrub the bounded text once instead of
+				// leaf-scrubbing a payload whose bulk is discarded regardless.
+				return {
+					...message,
+					content: scrubText(bounded),
+					structuredContent: undefined,
+				};
+			}
+			// The converter ignores `content` whenever structuredContent is set,
+			// so scrubbing it here would be wasted work.
+			return {
+				...message,
+				structuredContent: mapStringLeaves(
+					message.structuredContent,
+					scrubText,
+				),
+			};
+		}
+
 		// Truncate before scrubbing. The converter caps tool output at
 		// MAX_TOOL_RESULT_CHARS anyway; scrubbing first would let that cut land
 		// mid-placeholder, and would run every detector over text the provider
-		// never sees.
+		// never sees. truncateToolResult never splits a placeholder token, so
+		// the converter's own re-truncation of scrub-expanded text (a result
+		// already at the cap can grow once placeholders replace what they
+		// redact) stays safe too.
 		return {
 			...message,
 			content: scrubText(truncateToolResult(message.content)),
-			...(message.structuredContent === undefined
-				? {}
-				: {
-						structuredContent: mapStringLeaves(
-							message.structuredContent,
-							scrubText,
-						),
-					}),
 		};
 	}
 
@@ -141,14 +161,27 @@ export async function rehydrateResponse(
 		reasoning: response.reasoning
 			? restore(response.reasoning, 'reasoning')
 			: response.reasoning,
-		toolCalls: response.toolCalls.map(toolCall => ({
-			...toolCall,
-			function: {
-				...toolCall.function,
-				arguments: mapStringLeaves(toolCall.function.arguments, value =>
-					restore(value, `tool args (${toolCall.function.name})`),
-				),
-			},
-		})),
+		toolCalls: response.toolCalls.map(toolCall => {
+			// Isolate one tool call's rehydration failure from the rest: falling
+			// back to the (still-placeholder) original keeps the harness from
+			// mistaking this for an API error or triggering the skipTools retry.
+			try {
+				return {
+					...toolCall,
+					function: {
+						...toolCall.function,
+						arguments: mapStringLeaves(toolCall.function.arguments, value =>
+							restore(value, `tool args (${toolCall.function.name})`),
+						),
+					},
+				};
+			} catch (error) {
+				logger.error('Failed to rehydrate tool call', {
+					toolName: toolCall.function.name,
+					error,
+				});
+				return toolCall;
+			}
+		}),
 	};
 }

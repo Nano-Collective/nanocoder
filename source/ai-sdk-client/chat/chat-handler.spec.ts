@@ -10,6 +10,7 @@ import type {
 import type {LanguageModel} from 'ai';
 import {handleChat} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
+import {rehydrateResponse} from './privacy.js';
 
 // Note: This file contains basic structure tests
 // Full integration tests would require mocking the AI SDK's streamText function
@@ -505,6 +506,134 @@ test('privacy: truncates a tool result before scrubbing it', async t => {
 		(payload.match(/«/g) ?? []).length,
 		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
 	);
+});
+
+test('privacy: keeps placeholders whole when scrubbing expands a result past the cap', async t => {
+	// Short, dense, distinct emails: each «Email_N» placeholder (9+ chars) is
+	// longer than the "aN@b.co " it replaces (7-8 chars for most N in this
+	// range), so scrubbing grows the text past MAX_TOOL_RESULT_CHARS even
+	// though the raw content started under it — the cap is only breached
+	// AFTER scrubbing, exercising the boundary the converter's own
+	// re-truncation (message-converter.ts) has to respect.
+	let content = '';
+	let i = 0;
+	while (content.length < 19_500) {
+		content += `a${i}@b.co `;
+		i++;
+	}
+
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'cat the log'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'bash', arguments: {command: 'cat log'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'bash',
+			content,
+		},
+	]);
+
+	// Confirms the scrub-then-retruncate path actually fired, rather than the
+	// assertion below passing vacuously because nothing was cut.
+	t.regex(payload, /Output truncated/);
+	// Every placeholder that reaches the provider is whole: the converter's
+	// re-truncation of the scrub-expanded text never lands mid-token.
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: pre-truncates an over-cap structured tool result before scrubbing it', async t => {
+	// lsp_get_diagnostics on a large repo is a realistic producer of a
+	// structuredContent payload that's already over MAX_TOOL_RESULT_CHARS
+	// before scrubbing even runs — leaf-scrubbing the whole thing would be
+	// wasted work, since the converter would truncate-and-downgrade it to
+	// text regardless.
+	const diagnostics = Array.from({length: 2000}, (_, i) => ({
+		file: `file${i}.ts`,
+		message: `contact user${i}@example.com`,
+	}));
+
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'check the repo'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {name: 'lsp_get_diagnostics', arguments: {path: '.'}},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'lsp_get_diagnostics',
+			content: `${diagnostics.length} diagnostics found`,
+			structuredContent: {diagnostics},
+		},
+	]);
+
+	// The full ~130k-char diagnostics list never reaches the payload —
+	// it was downgraded to bounded text before scrubbing ran.
+	t.true(payload.length < 100_000);
+	t.regex(payload, /Output truncated/);
+	// The kept portion is still scrubbed, and every placeholder in it whole.
+	t.regex(payload, /«Email_\d+»/);
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: isolates one tool call rehydration failure from the rest', async t => {
+	// mapStringLeaves walks arguments with Object.entries, which invokes
+	// getters — a poisoned argument makes that throw, standing in for any
+	// unexpected rehydration failure the old try/catch used to contain.
+	const poisoned: Record<string, unknown> = {};
+	Object.defineProperty(poisoned, 'secret', {
+		enumerable: true,
+		get(): never {
+			throw new Error('boom');
+		},
+	});
+
+	const toolCalls = [
+		{
+			id: 'call_1',
+			function: {name: 'broken_tool', arguments: {nested: poisoned}},
+		},
+		{
+			id: 'call_2',
+			function: {
+				name: 'write_file',
+				arguments: {content: 'ping «Email_1»'},
+			},
+		},
+	];
+
+	const response = await rehydrateResponse(
+		{content: '', toolCalls},
+		{'«Email_1»': 'real@example.com'},
+	);
+
+	// The tool call whose arguments can't be walked falls back to its
+	// original, unmodified value instead of throwing out of
+	// rehydrateResponse — where chat-handler.ts's outer catch would
+	// misread it as an API error or trigger the skipTools retry.
+	t.is(response.toolCalls[0], toolCalls[0]);
+	// A second tool call in the same response still rehydrates normally.
+	t.deepEqual(response.toolCalls[1]?.function.arguments, {
+		content: 'ping real@example.com',
+	});
 });
 
 test('privacy: rehydrates tool-call arguments before the harness executes them', async t => {
