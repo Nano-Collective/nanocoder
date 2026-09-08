@@ -5,11 +5,8 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
-import {
-	type FormattingOptions,
-	getLSPManager,
-	type TextEdit,
-} from '@/lsp/index';
+import {getLSPManager} from '@/lsp/index';
+import type {FormattingOptions, TextEdit} from '@/lsp/protocol';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -125,11 +122,29 @@ function globMatches(pattern: string, fileName: string): boolean {
 			);
 	}
 
-	const escaped = pattern
-		.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-		.replace(/\*/g, '.*')
-		.replace(/\?/g, '.');
-	return new RegExp(`^${escaped}$`).test(fileName);
+	// Star-only matching — no RegExp built from config text (Semgrep-safe).
+	return starMatch(pattern, fileName);
+}
+
+/** Match `*` wildcards without constructing a RegExp from untrusted input. */
+function starMatch(pattern: string, text: string): boolean {
+	const parts = pattern.split('*');
+	if (parts.length === 1) return pattern === text;
+
+	if (!text.startsWith(parts[0])) return false;
+	let index = parts[0].length;
+
+	for (let i = 1; i < parts.length - 1; i++) {
+		const part = parts[i];
+		if (part.length === 0) continue;
+		const found = text.indexOf(part, index);
+		if (found === -1) return false;
+		index = found + part.length;
+	}
+
+	const last = parts[parts.length - 1];
+	if (last.length === 0) return true;
+	return text.endsWith(last) && text.length - last.length >= index;
 }
 
 /** Split EditorConfig section headers on commas that are not inside `{...}`. */
