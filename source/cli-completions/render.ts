@@ -162,7 +162,7 @@ ${childrenCases}
 	esac
 }
 
-if [ "$funcstack[1]" = "_nanocoder" ]; then
+if [ "\${funcstack[1]}" = "_nanocoder" ]; then
 	_nanocoder "$@"
 else
 	compdef _nanocoder nanocoder

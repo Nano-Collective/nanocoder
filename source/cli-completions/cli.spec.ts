@@ -61,20 +61,38 @@ test.serial('completion prints a fish script registering the completer', t => {
 	t.true(result.output.includes('complete -c nanocoder'));
 });
 
+// Boundary-aware matchers: `--mode` must not match a future `--mode-foo`,
+// `-c` must not match `--context-max`, `run` must not match `runner`.
+function longFlagPattern(
+	shell: (typeof COMPLETION_SHELLS)[number],
+	name: string,
+): RegExp {
+	return shell === 'fish'
+		? new RegExp(`-l ${name}(?!\\w)`)
+		: new RegExp(`--${name}(?![\\w-])`);
+}
+
+function shortFlagPattern(
+	shell: (typeof COMPLETION_SHELLS)[number],
+	short: string,
+): RegExp {
+	return shell === 'fish'
+		? new RegExp(`-s ${short}(?!\\w)`)
+		: new RegExp(`-${short}(?!\\w)`);
+}
+
 test.serial('every spec flag is offered by every shell script', t => {
 	for (const shell of COMPLETION_SHELLS) {
 		const script = scriptFor(shell);
-		const longToken = shell === 'fish' ? (name: string) => `-l ${name}` : (name: string) => `--${name}`;
 		for (const flag of COMPLETION_FLAGS) {
 			t.true(
-				script.includes(longToken(flag.name)),
+				longFlagPattern(shell, flag.name).test(script),
 				`${shell}: missing --${flag.name}`,
 			);
 			if (flag.short) {
-				const token = shell === 'fish' ? `-s ${flag.short}` : `-${flag.short}`;
 				t.true(
-					script.includes(token),
-					`${shell}: missing short flag ${token}`,
+					shortFlagPattern(shell, flag.short).test(script),
+					`${shell}: missing short flag -${flag.short}`,
 				);
 			}
 		}
@@ -84,17 +102,15 @@ test.serial('every spec flag is offered by every shell script', t => {
 test.serial('every spec subcommand and child token is offered by every shell', t => {
 	for (const shell of COMPLETION_SHELLS) {
 		const script = scriptFor(shell);
-		for (const subcommand of COMPLETION_SUBCOMMANDS) {
+		const tokens = COMPLETION_SUBCOMMANDS.flatMap(s => [
+			s.name,
+			...(s.children ?? []),
+		]);
+		for (const token of tokens) {
 			t.true(
-				script.includes(subcommand.name),
-				`${shell}: missing subcommand ${subcommand.name}`,
+				new RegExp(`\\b${token}\\b`).test(script),
+				`${shell}: missing ${token}`,
 			);
-			for (const child of subcommand.children ?? []) {
-				t.true(
-					script.includes(child),
-					`${shell}: missing ${subcommand.name} child ${child}`,
-				);
-			}
 		}
 	}
 });
@@ -105,7 +121,10 @@ test.serial('enum flag values are completed by every shell', t => {
 	for (const shell of COMPLETION_SHELLS) {
 		const script = scriptFor(shell);
 		for (const value of [...modeValues, ...formatValues]) {
-			t.true(script.includes(value), `${shell}: missing value ${value}`);
+			t.true(
+				new RegExp(`\\b${value}\\b`).test(script),
+				`${shell}: missing value ${value}`,
+			);
 		}
 	}
 });
