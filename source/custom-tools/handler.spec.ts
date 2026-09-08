@@ -62,10 +62,23 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 });
 
 test('shellArgs uses /d /s /c for cmd.exe and -c for posix shells', t => {
-	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
-	t.deepEqual(shellArgs('cmd', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
+	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
+		'/d',
+		'/v:off',
+		'/s',
+		'/c',
+		'echo hi',
+	]);
+	t.deepEqual(shellArgs('cmd', 'echo hi'), [
+		'/d',
+		'/v:off',
+		'/s',
+		'/c',
+		'echo hi',
+	]);
 	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
 		'/d',
+		'/v:off',
 		'/s',
 		'/c',
 		'echo hi',
@@ -87,7 +100,24 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 		shell: bin,
 		timeoutMs: 5_000,
 	});
-	t.is(result, 'EXIT_CODE: 0\n/d\n/s\n/c\necho hi');
+	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/s\n/c\necho hi');
+});
+
+const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
+cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
+	const probe = join(testDir, 'print-argv.mjs');
+	writeFileSync(
+		probe,
+		'console.log(JSON.stringify(process.argv.slice(2)));\n',
+	);
+	const handler = buildHandler(
+		meta(),
+		'node {{ probe }} {{ value }}',
+		testDir,
+	);
+	const value = 'a b&c|d<e>f^g"h!i';
+	const result = await handler({probe, value});
+	t.is(result, `EXIT_CODE: 0\n${JSON.stringify([value])}`);
 });
 
 test('mergeEnv overlays configured vars onto process.env', t => {

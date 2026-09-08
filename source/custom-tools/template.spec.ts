@@ -27,11 +27,17 @@ test('shellQuote handles newlines', t => {
 	t.is(shellQuote('a\nb'), `'a\nb'`);
 });
 
-test('cmdQuote neutralizes metacharacters and percent expansion', t => {
+test('cmdQuote preserves metacharacters and embedded quotes', t => {
 	t.is(
-		cmdQuote('a&b|c<d>e^f%PATH%"g'),
-		'"a^&b^|c^<d^>e^^f%%PATH%%^"g"',
+		cmdQuote('a&b|c<d>e^f"g'),
+		'"a&b|c<d>e^f""g"',
 	);
+});
+
+test('cmdQuote rejects values cmd.exe cannot quote safely', t => {
+	for (const value of ['%PATH%', 'a\nb', 'a\rb', 'a\0b']) {
+		t.throws(() => cmdQuote(value), {message: /cannot contain/});
+	}
 });
 
 test('renderValue handles arrays', t => {
@@ -49,8 +55,8 @@ test('renderBody substitutes parameters with shell-quoted values', t => {
 });
 
 test('renderBody supports cmd.exe quoting', t => {
-	const out = renderBody('echo {{ value }}', {value: 'a&%PATH%'}, cmdQuote);
-	t.is(out, 'echo "a^&%%PATH%%"');
+	const out = renderBody('echo {{ value }}', {value: 'a&"quoted"'}, cmdQuote);
+	t.is(out, 'echo "a&""quoted"""');
 });
 
 test('renderBody leaves unknown placeholders empty', t => {

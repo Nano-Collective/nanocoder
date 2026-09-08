@@ -126,7 +126,7 @@ The body is a shell script with two placeholder forms:
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes, command metacharacters are caret-escaped, and percent signs are doubled to prevent environment-variable expansion.
+Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes and embedded quotes are doubled; delayed expansion is disabled. Because cmd.exe has no reliable command-line escape for percent expansion or embedded command separators, values containing percent signs, newlines, null bytes, or carriage returns are rejected instead of being executed.
 
 This blocks shell injection through parameter values:
 
@@ -147,7 +147,7 @@ echo '; rm -rf /; #'
 When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
-2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /s /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
+2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /s /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
 3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
 5. On exit code 0, stdout (and any stderr) is returned to the model, truncated at the standard output limit.
@@ -170,7 +170,7 @@ When the tool runs:
 
 ## Security Model
 
-A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are quoted for the selected shell. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
+A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are quoted for the selected shell, subject to the cmd.exe restrictions above. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
 
 Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in `~/.config/nanocoder/tools/` and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
 

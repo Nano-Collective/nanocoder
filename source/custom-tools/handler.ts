@@ -194,9 +194,11 @@ export function expandVars(value: string): string {
 	});
 }
 
-/** cmd.exe: /d (skip AutoRun), /s (deterministic quotes), /c. POSIX: -c. */
+/** cmd.exe: disable AutoRun/delayed expansion, normalize quotes, then run. */
 export function shellArgs(shell: string, script: string): string[] {
-	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
+	return isWindowsCmd(shell)
+		? ['/d', '/v:off', '/s', '/c', script]
+		: ['-c', script];
 }
 
 function isWindowsCmd(shell: string): boolean {
