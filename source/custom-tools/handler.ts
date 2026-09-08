@@ -67,7 +67,8 @@ export function runScript(
 		let stdout = '';
 		let stderr = '';
 		let outputBytes = 0;
-		let outputCapped = false;
+		let stdoutCapped = false;
+		let stderrCapped = false;
 		let settled = false;
 
 		// Combine stdout + stderr into a single byte budget, mirroring the built-in
@@ -109,7 +110,7 @@ export function runScript(
 				const limited = data.subarray(0, remaining);
 				stdout += limited.toString();
 				outputBytes += limited.length;
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) outputCapped = true;
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) stdoutCapped = true;
 			}
 		});
 		child.stderr?.on('data', (data: Buffer) => {
@@ -118,7 +119,7 @@ export function runScript(
 				const limited = data.subarray(0, remaining);
 				stderr += limited.toString();
 				outputBytes += limited.length;
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) outputCapped = true;
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) stderrCapped = true;
 			}
 		});
 
@@ -130,15 +131,16 @@ export function runScript(
 
 		child.on('close', code => {
 			settle(() => {
-				// Put the cap notice at the head of the output so it survives the
-				// final truncation (which keeps the head and tail of the result) and
-				// the model learns the tool emitted more than was captured.
-				const capNotice = outputCapped
-					? '... [Output truncated to prevent memory exhaustion]\n'
-					: '';
+				// Per-stream notices let the model see which stream was cut. They
+				// ride at the end of the captured stdout/stderr section (mirroring
+				// the built-in bash executor) and, because truncateToolResult keeps
+				// the tail, they survive the 2000-character limit.
 				resolvePromise(
 					truncateToolResult(
-						capNotice + formatScriptOutput(code, stdout, stderr),
+						formatScriptOutput(code, stdout, stderr, {
+							stdoutCapped,
+							stderrCapped,
+						}),
 						TRUNCATION_OUTPUT_LIMIT,
 					),
 				);
@@ -193,10 +195,19 @@ function formatScriptOutput(
 	code: number | null,
 	stdout: string,
 	stderr: string,
+	options: {stdoutCapped: boolean; stderrCapped: boolean},
 ): string {
 	const exitCode = code ?? 0;
-	const out = stdout.trimEnd();
-	const err = stderr.trimEnd();
+	let out = stdout.trimEnd();
+	let err = stderr.trimEnd();
+	// Per-stream cap notices, mirroring the bash executor's "Output truncated"
+	// / "Stderr truncated" markers.
+	if (options.stdoutCapped) {
+		out += '\n... [Output truncated to prevent memory exhaustion]';
+	}
+	if (options.stderrCapped) {
+		err += '\n... [Stderr truncated to prevent memory exhaustion]';
+	}
 	const prefix = `EXIT_CODE: ${exitCode}\n`;
 	if (err) {
 		return `${prefix}STDERR:\n${err}\nSTDOUT:\n${out}`;

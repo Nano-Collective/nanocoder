@@ -8,8 +8,9 @@ Tool-execution safety fixes:
   validation. The approval prompt now renders together with the validation
   error, so a malformed call is never executed without explicit consent.
 - Custom tools: cap captured stdout/stderr at `BASH_MAX_OUTPUT_BYTES` while
-  streaming, with a truncation notice placed at the head of the result, so a
-  large-output tool can't exhaust memory before the final truncation runs.
+  streaming, with a per-stream truncation notice appended to the affected
+  stdout/stderr section (mirroring the bash executor), so a large-output tool
+  can't exhaust memory before the final truncation runs.
 - Custom tools: on timeout, the shell is spawned detached (Unix), the whole
   process group is signalled, and the tool call settles immediately instead of
   waiting for a `close` event that a surviving descendant may leave un-fired —

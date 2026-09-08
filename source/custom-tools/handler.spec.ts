@@ -276,10 +276,11 @@ test('runScript: timeout kills long-running script', async t => {
 shellCase(
 	'runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker',
 	async t => {
-		// Dynamically import the limit so we test against the actual cap.
-		const {BASH_MAX_OUTPUT_BYTES} = await import('../constants.js');
-
-		// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB).
+		// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB),
+		// so the streaming cap must trip. The notice is written at the end of the
+		// capped stdout section and survives the final truncation (which keeps the
+		// tail) — asserting it there proves the cap engaged rather than merely that
+		// the result was trimmed to the 2000-character limit.
 		const result = await runScript(
 			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
 			{
@@ -290,14 +291,13 @@ shellCase(
 			},
 		);
 
-	t.true(
-		result.length < BASH_MAX_OUTPUT_BYTES,
-		'resolved output must stay far below the raw emitted size',
-	);
-
-	const marker = 'Output truncated to prevent memory exhaustion';
-	const matches = result.split(marker).length - 1;
-	t.is(matches, 1, 'truncation marker must appear exactly once');
+		const marker = '... [Output truncated to prevent memory exhaustion]';
+		t.true(
+			result.endsWith(marker),
+			'cap marker must survive truncation at the tail of the result',
+		);
+		const matches = result.split(marker).length - 1;
+		t.is(matches, 1, 'truncation marker must appear exactly once');
 });
 
 shellCase(
