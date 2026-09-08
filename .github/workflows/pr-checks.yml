@@ -20,6 +20,31 @@ jobs:
       fail-on-coverage-drop: true
       validate-changesets: true
 
+  # The cmd.exe argument parser cannot be validated on the Linux-only shared job.
+  custom-tools-windows:
+    name: Custom Tools (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify cmd.exe quoting
+        run: pnpm run test:ava source/custom-tools/template.spec.ts source/custom-tools/handler.spec.ts
+
   # Tests and builds the VS Code extension.
   vscode-extension:
     name: VS Code Extension
