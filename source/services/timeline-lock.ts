@@ -16,13 +16,13 @@
  * session directory might contain.
  */
 
-import {randomBytes} from 'node:crypto';
 import {existsSync} from 'node:fs';
-import {mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {mkdir, open, readFile, unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 
 export const TIMELINE_LOCK_FILENAME = '.lock';
 export const TIMELINE_LOCK_PURPOSE = 'session-active';
+export const MAX_LOCK_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface TimelineLockPayload {
 	pid: number;
@@ -84,47 +84,35 @@ async function readLockPayload(
 }
 
 /**
- * Acquire the per-session timeline lock. The write goes to a sibling
- * `*.tmp` file and is renamed in place, so a partially-written lock is
- * never observable. The call is best-effort: a `false` return means
- * another process holds the lock (or the filesystem refused the
- * rename), and the caller should log and continue.
+ * Acquire the per-session timeline lock atomically using O_EXCL. If the lock
+ * file already exists the kernel throws EEXIST before any byte is written, so
+ * two concurrent callers cannot both succeed. The call is best-effort: a
+ * `false` return means another process holds the lock (or the filesystem
+ * refused the open), and the caller should log and continue.
  */
 export async function acquireTimelineLock(
 	sessionDir: string,
 	payload: Omit<TimelineLockPayload, 'purpose'>,
 ): Promise<boolean> {
-	const lockPath = getTimelineLockPath(sessionDir);
-	if (existsSync(lockPath)) {
-		return false;
-	}
 	await mkdir(sessionDir, {recursive: true});
-	const tmp = `${lockPath}.${randomBytes(8).toString('hex')}.tmp`;
+	const lockPath = getTimelineLockPath(sessionDir);
 	const body: TimelineLockPayload = {
 		...payload,
 		purpose: TIMELINE_LOCK_PURPOSE,
 	};
+	let fd;
 	try {
-		await writeFile(tmp, JSON.stringify(body, null, 2), 'utf-8');
-		await rename(tmp, lockPath);
+		fd = await open(lockPath, 'wx');
+		await fd.writeFile(JSON.stringify(body, null, 2), 'utf-8');
 		return true;
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException).code;
-		// EEXIST means a sibling process beat us to the rename; treat as
-		// a normal "lock held" outcome rather than a failure.
 		if (code === 'EEXIST') {
 			return false;
 		}
 		return false;
 	} finally {
-		// Best-effort cleanup if the rename never happened.
-		if (existsSync(tmp)) {
-			try {
-				await unlink(tmp);
-			} catch {
-				// ignore
-			}
-		}
+		await fd?.close();
 	}
 }
 
@@ -164,6 +152,14 @@ export async function isTimelineLockLive(
 		return {live: false, payload: null};
 	}
 	if (!isProcessAlive(payload.pid)) {
+		try {
+			await unlink(lockPath);
+		} catch {
+			// ignore
+		}
+		return {live: false, payload};
+	}
+	if (Date.now() - payload.startedAt > MAX_LOCK_AGE_MS) {
 		try {
 			await unlink(lockPath);
 		} catch {

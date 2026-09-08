@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	MAX_LOCK_AGE_MS,
 	TIMELINE_LOCK_PURPOSE,
 	acquireTimelineLock,
 	getTimelineLockPath,
@@ -171,6 +172,27 @@ test.serial('acquireTimelineLock survives a stale lock (reaps and acquires)', as
 			startedAt: Date.now(),
 		});
 		t.false(acquired);
+	} finally {
+		await rm(sessionDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('isTimelineLockLive reaps a lock that is older than MAX_LOCK_AGE_MS', async t => {
+	const sessionDir = await tempSessionDir();
+	try {
+		await writeFile(
+			getTimelineLockPath(sessionDir),
+			JSON.stringify({
+				pid: process.pid,
+				startedAt: Date.now() - MAX_LOCK_AGE_MS - 1,
+				purpose: TIMELINE_LOCK_PURPOSE,
+			}),
+			'utf-8',
+		);
+		const {live, payload} = await isTimelineLockLive(sessionDir);
+		t.false(live);
+		t.truthy(payload);
+		t.false(existsSync(getTimelineLockPath(sessionDir)));
 	} finally {
 		await rm(sessionDir, {recursive: true, force: true});
 	}
