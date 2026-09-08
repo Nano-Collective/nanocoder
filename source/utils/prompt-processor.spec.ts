@@ -246,3 +246,150 @@ test('assemblePrompt - expands a legacy paste that has no displayText', t => {
 
 	t.is(assemblePrompt(inputState), 'look legacy body ok');
 });
+
+test('assemblePrompt - replaces placeholder with MCP resource content', t => {
+	const inputState: InputState = {
+		displayValue: 'Check this [@api-docs]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@api-docs]',
+				uri: 'mcp://server/docs/api',
+				content: 'API documentation content',
+				mimeType: 'text/markdown',
+				serverName: 'docs-server',
+				resourceName: 'api-docs',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== MCP Resource: api-docs (from docs-server) ==='));
+	t.true(result.includes('Content-Type: text/markdown'));
+	t.true(result.includes('API documentation content'));
+});
+
+test('assemblePrompt - handles MCP resource without mimeType', t => {
+	const inputState: InputState = {
+		displayValue: 'Review [@config]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@config]',
+				uri: 'mcp://server/config',
+				content: 'Configuration data',
+				serverName: 'config-server',
+				resourceName: 'config',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== MCP Resource: config (from config-server) ==='));
+	t.false(result.includes('Content-Type'));
+	t.true(result.includes('Configuration data'));
+});
+
+test('assemblePrompt - inlines an MCP resource at the line threshold in full', t => {
+	const content = Array.from(
+		{length: FILE_MENTION_INLINE_MAX_LINES},
+		(_, i) => `line ${i + 1}`,
+	).join('\n');
+	const inputState: InputState = {
+		displayValue: '[@small-resource]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@small-resource]',
+				uri: 'mcp://server/small-resource',
+				content,
+				serverName: 'docs-server',
+				resourceName: 'small-resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(
+		result.includes('=== MCP Resource: small-resource (from docs-server) ==='),
+	);
+	t.true(result.includes(content), 'full content is inlined');
+	t.false(result.includes('truncated'), 'no truncation for small resources');
+});
+
+test('assemblePrompt - previews a large MCP resource instead of flooding the conversation', t => {
+	const totalLines = FILE_MENTION_INLINE_MAX_LINES + 100;
+	const lines = Array.from({length: totalLines}, (_, i) => `line ${i + 1}`);
+	const content = lines.join('\n');
+	const inputState: InputState = {
+		displayValue: '[@big-resource]',
+		placeholderContent: {
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@big-resource]',
+				uri: 'mcp://server/big-resource',
+				content,
+				serverName: 'docs-server',
+				resourceName: 'big-resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	// Header advertises the truncation and total line count, same as the FILE case.
+	t.true(
+		result.includes(
+			`=== MCP Resource: big-resource (from docs-server, ${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`,
+		),
+	);
+	// Only the preview lines are present; lines past the preview are dropped
+	t.true(result.includes(`line ${FILE_MENTION_PREVIEW_LINES}`));
+	t.false(
+		result.includes(`line ${FILE_MENTION_PREVIEW_LINES + 1}\n`),
+		'lines beyond the preview window are not inlined',
+	);
+	t.true(
+		result.includes(
+			`${totalLines - FILE_MENTION_PREVIEW_LINES} more lines truncated - mcp://server/big-resource is too large to inline in full`,
+		),
+	);
+});
+
+test('assemblePrompt - handles mixed file, paste, and resource placeholders', t => {
+	const inputState: InputState = {
+		displayValue: 'Compare [@file.ts] with [Paste #1: 5 chars] and [@resource]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content: 'file content',
+				filePath: 'file.ts',
+				displayText: '[@file.ts]',
+			},
+			paste_1: {
+				type: PlaceholderType.PASTE,
+				content: 'Hello',
+				displayText: '[Paste #1: 5 chars]',
+			},
+			resource_1: {
+				type: PlaceholderType.RESOURCE,
+				displayText: '[@resource]',
+				uri: 'mcp://server/resource',
+				content: 'resource content',
+				serverName: 'test-server',
+				resourceName: 'resource',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== File: file.ts ==='));
+	t.true(result.includes('file content'));
+	t.true(result.includes('Hello'));
+	t.true(result.includes('=== MCP Resource: resource (from test-server) ==='));
+	t.true(result.includes('resource content'));
+});

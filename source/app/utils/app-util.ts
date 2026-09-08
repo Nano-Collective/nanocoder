@@ -31,6 +31,7 @@ import {
 	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
+import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
@@ -674,6 +675,25 @@ async function handleSlashCommand(
 	const commandName = message.slice(1).split(/\s+/)[0];
 
 	if (await handleCustomCommand(message, commandName, options)) {
+		return;
+	}
+
+	// #1162 (phase 2) proposed routing MCP prompts through
+	// source/commands/lazy-registry.ts, the same way built-in commands are
+	// dispatched. That registry is a static array of compile-time-known
+	// commands, each with a dynamic-import() thunk - a shape that doesn't fit
+	// prompts, whose entire set only exists at runtime and changes as MCP
+	// servers connect/disconnect, and whose "load" is an RPC (getPrompt) to a
+	// live server, not a module import. Intercepting here instead mirrors how
+	// handleCustomCommand (checked just above) already dispatches the other
+	// runtime-discovered command source - project `.nanocoder/commands/` files.
+	if (
+		await handleMCPPromptCommand(
+			commandName,
+			parseCustomCommandArgs(message.slice(commandName.length + 2)),
+			options,
+		)
+	) {
 		return;
 	}
 

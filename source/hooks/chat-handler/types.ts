@@ -70,6 +70,7 @@ export interface ChatHandlerReturn {
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		historyMessages?: Message[],
 	) => Promise<void>;
 	processAssistantResponse: (
 		systemMessage: Message,

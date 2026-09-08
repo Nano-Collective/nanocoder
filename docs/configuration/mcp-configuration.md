@@ -255,6 +255,15 @@ Two consequences worth calling out:
   `"enabled": false`, or don't configure that server in a project whose skills
   run under the daemon.
 
+## Resources and Prompts
+
+A server can also declare MCP resources and prompts, alongside tools:
+
+- **Resources** join the local file list under the `@` mention trigger — type `@` and fuzzy-search filenames and connected servers' resources together. Selecting one reads it from the server and inlines its content the same way a file mention does — including the same size guard: a resource over the inline line limit is truncated to a head preview instead of being dumped in full, so a single `@`-mention can't flood the conversation.
+- **Prompts** are invoked as `/mcp:<server>:<prompt>`, shown alongside custom commands in the `/` completion menu. Unlike a custom command's static template, the prompt is fetched fresh from the server on every call — arguments are filled in positionally, in the order the server declares them, and the result is sent as the next chat turn.
+
+Both are gated on the server's declared capabilities: a server that doesn't declare `resources` or `prompts` in its `initialize` response is never sent a `resources/list` or `prompts/list` request, and just contributes none — same as a server with no tools.
+
 ## Environment Variables
 
 Use environment variable references to keep credentials out of config files:

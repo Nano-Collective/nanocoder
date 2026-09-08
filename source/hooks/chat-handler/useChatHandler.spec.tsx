@@ -638,6 +638,58 @@ test('useChatHandler - allocates a session before starting a turn', async t => {
 	t.is(ensureCalls, 1);
 });
 
+// Regression (reviewer feedback on #1172): a caller (the MCP prompt handler)
+// can supply prior-turn messages to splice into history ahead of the new user
+// message, preserving their roles instead of flattening a multi-message
+// prompt into one user turn.
+test('useChatHandler - handleChatMessage splices historyMessages ahead of the new user message', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	// The conversation loop calls setMessages again once the (mocked) assistant
+	// reply comes back, so only the FIRST call reflects what this fix actually
+	// changed: how the new user message and its preceding history get merged
+	// into the existing conversation before the round-trip starts.
+	let firstMessages: Message[] | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				setMessages: msgs => {
+					firstMessages ??= msgs;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage(
+		'real question',
+		undefined,
+		undefined,
+		[
+			{role: 'user', content: 'example input'},
+			{role: 'assistant', content: 'example output'},
+		],
+	);
+
+	t.deepEqual(
+		firstMessages?.map(m => ({role: m.role, content: m.content})),
+		[
+			{role: 'user', content: 'example input'},
+			{role: 'assistant', content: 'example output'},
+			{role: 'user', content: 'real question'},
+		],
+	);
+});
+
 // The signal must be scoped to plan mode — a normal-mode turn completing must
 // NOT surface the plan review bar (this is the fix for the mode-inference race).
 test('useChatHandler - does NOT fire onPlanTurnComplete for a normal-mode turn', async t => {

@@ -261,7 +261,7 @@ Everywhere else, Nanocoder is at parity or ahead.
 ## Where Nanocoder is at parity
 
 - **Multi-provider support.** Matched by Aider, OpenCode, Crush, Pi, OMP.
-- **MCP client support.** Matched by Claude Code, Codex, Gemini, OpenCode, Crush, OMP.
+- **MCP client support**, including resources surfaced as `@`-mentions and prompts surfaced as slash commands, not just tools. Matched by Claude Code, Codex, Gemini, OpenCode, Crush, OMP.
 - **OSS license.** Matched by Codex, Gemini, Aider, OpenCode, Crush, Pi, OMP.
 - **Plain / non-TTY mode for CI.** Matched by every tool in this survey.
 - **Native tool calling.** Matched by every tool except Aider.
