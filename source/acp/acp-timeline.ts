@@ -9,6 +9,7 @@ const FILE_ARG_TOOLS = new Set([
 	'write_file',
 	'string_replace',
 	'diff_edit',
+	'lsp_format_document',
 	'file_op',
 ]);
 

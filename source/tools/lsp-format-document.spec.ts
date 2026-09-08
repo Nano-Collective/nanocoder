@@ -13,6 +13,9 @@ import {
 	formatDocumentTool,
 	formatFileWithLsp,
 	type FormatLspManager,
+	parseEditorConfigIndent,
+	positionToOffset,
+	resolveFormatOptions,
 } from './lsp-format-document.js';
 
 function edit(
@@ -37,6 +40,7 @@ function mockManager(
 	return {
 		isInitialized: () => true,
 		hasLanguageSupport: () => true,
+		supportsDocumentFormatting: () => true,
 		openDocument: async () => true,
 		formatDocument: async () => [],
 		updateDocument: () => true,
@@ -45,8 +49,20 @@ function mockManager(
 }
 
 // ============================================================================
-// applyTextEdits
+// positionToOffset / applyTextEdits
 // ============================================================================
+
+test('positionToOffset: clamps oversized character to end of line', t => {
+	const content = 'ab\ncd\n';
+	t.is(positionToOffset(content, 0, 50), 2);
+	t.is(positionToOffset(content, 1, 99), 5);
+});
+
+test('applyTextEdits: clamps oversized end character to line end', t => {
+	const content = 'ab\ncd\n';
+	const result = applyTextEdits(content, [edit(0, 0, 0, 50, 'X')]);
+	t.is(result, 'X\ncd\n');
+});
 
 test('applyTextEdits: replaces a single range', t => {
 	const content = 'hello world\n';
@@ -88,15 +104,85 @@ test('applyTextEdits: empty edits returns original content', t => {
 
 test('applyTextEdits: full-document replace', t => {
 	const content = 'old\ncontent\n';
-	const result = applyTextEdits(content, [edit(0, 0, 1, 8, 'new\nbody')]);
+	const result = applyTextEdits(content, [edit(0, 0, 2, 0, 'new\nbody')]);
 	t.is(result, 'new\nbody');
 });
 
 test('applyTextEdits: works with CRLF line endings', t => {
 	const content = 'foo\r\nbar\r\n';
-	// After \n of first line, second line starts at "bar"
 	const result = applyTextEdits(content, [edit(1, 0, 1, 3, 'BAZ')]);
 	t.is(result, 'foo\r\nBAZ\r\n');
+});
+
+// ============================================================================
+// editorconfig / format options
+// ============================================================================
+
+test('parseEditorConfigIndent: [*] tab style', t => {
+	const parsed = parseEditorConfigIndent(
+		'root = true\n\n[*]\nindent_style = tab\n',
+		'foo.ts',
+	);
+	t.deepEqual(parsed, {insertSpaces: false, tabSize: 4});
+});
+
+test('parseEditorConfigIndent: later section overrides for matching file', t => {
+	const parsed = parseEditorConfigIndent(
+		'[*]\nindent_style = tab\n\n[*.yml]\nindent_style = space\nindent_size = 2\n',
+		'ci.yml',
+	);
+	t.deepEqual(parsed, {insertSpaces: true, tabSize: 2});
+});
+
+test('parseEditorConfigIndent: brace glob matches', t => {
+	const parsed = parseEditorConfigIndent(
+		'[*.{ts,tsx}]\nindent_style = space\nindent_size = 4\n',
+		'App.tsx',
+	);
+	t.deepEqual(parsed, {insertSpaces: true, tabSize: 4});
+});
+
+test('resolveFormatOptions: explicit overrides win over editorconfig', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-ec-'));
+	t.teardown(async () => {
+		resetSessionCwd();
+		await rm(dir, {recursive: true, force: true});
+	});
+	await writeFile(
+		join(dir, '.editorconfig'),
+		'root = true\n[*]\nindent_style = tab\n',
+		'utf-8',
+	);
+	const filePath = join(dir, 'a.ts');
+	await writeFile(filePath, 'x\n', 'utf-8');
+	setProjectRoot(dir);
+	setSessionCwd(dir);
+
+	const options = await resolveFormatOptions(filePath, {
+		tabSize: 8,
+		insertSpaces: true,
+	});
+	t.deepEqual(options, {tabSize: 8, insertSpaces: true});
+});
+
+test('resolveFormatOptions: reads nearest editorconfig tabs', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-ec-'));
+	t.teardown(async () => {
+		resetSessionCwd();
+		await rm(dir, {recursive: true, force: true});
+	});
+	await writeFile(
+		join(dir, '.editorconfig'),
+		'root = true\n[*]\nindent_style = tab\n',
+		'utf-8',
+	);
+	const filePath = join(dir, 'a.ts');
+	await writeFile(filePath, 'x\n', 'utf-8');
+	setProjectRoot(dir);
+	setSessionCwd(dir);
+
+	const options = await resolveFormatOptions(filePath);
+	t.deepEqual(options, {tabSize: 4, insertSpaces: false});
 });
 
 // ============================================================================
@@ -130,6 +216,18 @@ test('formatFileWithLsp: returns clear message when server not ready', async t =
 	t.is(message, 'Language server for src/unused.ts is not ready.');
 });
 
+test('formatFileWithLsp: distinguishes missing formatting support from no-op', async t => {
+	const message = await formatFileWithLsp(
+		'/tmp/unused.ts',
+		'src/unused.ts',
+		mockManager({supportsDocumentFormatting: () => false}),
+	);
+	t.is(
+		message,
+		'Language server for src/unused.ts does not support document formatting.',
+	);
+});
+
 test('formatFileWithLsp: reports no changes when edits are empty', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-'));
 	t.teardown(async () => {
@@ -144,6 +242,37 @@ test('formatFileWithLsp: reports no changes when edits are empty', async t => {
 		mockManager({formatDocument: async () => []}),
 	);
 	t.is(message, 'No formatting changes needed for a.ts.');
+});
+
+test('formatFileWithLsp: passes resolved format options to the manager', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-'));
+	t.teardown(async () => {
+		resetSessionCwd();
+		await rm(dir, {recursive: true, force: true});
+	});
+	await writeFile(
+		join(dir, '.editorconfig'),
+		'root = true\n[*]\nindent_style = tab\n',
+		'utf-8',
+	);
+	const filePath = join(dir, 'a.ts');
+	await writeFile(filePath, 'const x = 1;\n', 'utf-8');
+	setProjectRoot(dir);
+	setSessionCwd(dir);
+
+	let seenOptions: {tabSize?: number; insertSpaces?: boolean} | undefined;
+	await formatFileWithLsp(
+		filePath,
+		'a.ts',
+		mockManager({
+			formatDocument: async (_path, options) => {
+				seenOptions = options;
+				return [];
+			},
+		}),
+	);
+
+	t.deepEqual(seenOptions, {tabSize: 4, insertSpaces: false});
 });
 
 test('formatFileWithLsp: applies edits and writes the file', async t => {
@@ -207,7 +336,6 @@ test('formatFileWithLsp: no-op when applied edits leave content unchanged', asyn
 		filePath,
 		'a.ts',
 		mockManager({
-			// Replace "same" with "same" — edit count > 0 but content identical
 			formatDocument: async () => [edit(0, 0, 0, 4, 'same')],
 		}),
 	);
@@ -250,6 +378,17 @@ test('lsp_format_document validator: rejects missing path', async t => {
 	t.false(result?.valid);
 	if (result && !result.valid) {
 		t.regex(result.error, /path is required/i);
+	}
+});
+
+test('lsp_format_document validator: rejects invalid tabSize', async t => {
+	const result = await formatDocumentTool.validator?.({
+		path: 'a.ts',
+		tabSize: -1,
+	});
+	t.false(result?.valid);
+	if (result && !result.valid) {
+		t.regex(result.error, /tabSize/i);
 	}
 });
 

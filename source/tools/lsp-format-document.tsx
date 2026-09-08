@@ -1,12 +1,16 @@
 import {constants} from 'node:fs';
 import {access, readFile, writeFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {basename, dirname, join, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getLSPManager, type TextEdit} from '@/lsp/index';
-import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	type FormattingOptions,
+	getLSPManager,
+	type TextEdit,
+} from '@/lsp/index';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -17,22 +21,33 @@ import {createFileToolApproval} from '@/utils/tool-approval';
 
 interface FormatDocumentArgs {
 	path: string;
+	/** Override indent width. Defaults from nearest .editorconfig when present. */
+	tabSize?: number;
+	/** Override spaces vs tabs. Defaults from nearest .editorconfig when present. */
+	insertSpaces?: boolean;
 }
+
+export type FormatOptions = Pick<FormattingOptions, 'tabSize' | 'insertSpaces'>;
 
 /** Minimal LSP surface used by format orchestration — keeps execute testable. */
 export type FormatLspManager = {
 	isInitialized(): boolean;
 	hasLanguageSupport(filePath: string): boolean;
+	supportsDocumentFormatting(filePath: string): boolean;
 	openDocument(filePath: string): Promise<boolean>;
-	formatDocument(filePath: string): Promise<TextEdit[]>;
+	formatDocument(
+		filePath: string,
+		options?: Partial<FormattingOptions>,
+	): Promise<TextEdit[]>;
 	updateDocument(filePath: string, content: string): boolean;
 };
 
 /**
- * Convert an LSP Position to a UTF-16-agnostic byte offset in `text`.
- * Line endings (`\n` / `\r\n`) are walked as in the open document content.
+ * Convert an LSP Position to a UTF-16 code-unit offset in `text`.
+ * Character is clamped to the end of its line so sentinel "end of line"
+ * values from servers do not swallow following lines.
  */
-function positionToOffset(
+export function positionToOffset(
 	text: string,
 	line: number,
 	character: number,
@@ -45,7 +60,20 @@ function positionToOffset(
 		}
 		i++;
 	}
-	return Math.min(i + Math.max(0, character), text.length);
+
+	let lineEnd = i;
+	while (lineEnd < text.length && text[lineEnd] !== '\n') {
+		lineEnd++;
+	}
+
+	// Exclude CR from the line body when the ending is CRLF.
+	let contentEnd = lineEnd;
+	if (contentEnd > i && text[contentEnd - 1] === '\r') {
+		contentEnd--;
+	}
+
+	const clampedChar = Math.min(Math.max(0, character), contentEnd - i);
+	return i + clampedChar;
 }
 
 /**
@@ -84,6 +112,135 @@ export function applyTextEdits(content: string, edits: TextEdit[]): string {
 	return result;
 }
 
+function globMatches(pattern: string, fileName: string): boolean {
+	if (pattern === '*') return true;
+
+	// One-level brace expansion: *.{ts,tsx} → *.ts | *.tsx
+	const brace = pattern.match(/^(.*)\{([^}]+)\}(.*)$/);
+	if (brace) {
+		return brace[2]
+			.split(',')
+			.some(alt =>
+				globMatches(`${brace[1]}${alt.trim()}${brace[3]}`, fileName),
+			);
+	}
+
+	const escaped = pattern
+		.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+		.replace(/\*/g, '.*')
+		.replace(/\?/g, '.');
+	return new RegExp(`^${escaped}$`).test(fileName);
+}
+
+/** Split EditorConfig section headers on commas that are not inside `{...}`. */
+function splitSectionPatterns(header: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let depth = 0;
+	for (const ch of header) {
+		if (ch === '{') depth++;
+		if (ch === '}') depth = Math.max(0, depth - 1);
+		if (ch === ',' && depth === 0) {
+			if (current.trim()) parts.push(current.trim());
+			current = '';
+			continue;
+		}
+		current += ch;
+	}
+	if (current.trim()) parts.push(current.trim());
+	return parts;
+}
+
+/**
+ * Resolve indent options from the nearest `.editorconfig`, then apply any
+ * explicit tool-arg overrides. Falls back to spaces/2 only when nothing else
+ * is available (matching the previous LSP client default).
+ */
+export async function resolveFormatOptions(
+	filePath: string,
+	overrides?: Partial<FormatOptions>,
+): Promise<FormatOptions> {
+	const fromConfig = await readEditorConfigIndent(filePath);
+	return {
+		tabSize:
+			typeof overrides?.tabSize === 'number' && overrides.tabSize > 0
+				? Math.floor(overrides.tabSize)
+				: (fromConfig?.tabSize ?? 2),
+		insertSpaces:
+			typeof overrides?.insertSpaces === 'boolean'
+				? overrides.insertSpaces
+				: (fromConfig?.insertSpaces ?? true),
+	};
+}
+
+async function readEditorConfigIndent(
+	filePath: string,
+): Promise<FormatOptions | null> {
+	const projectRoot = getProjectRoot();
+	let dir = dirname(resolve(filePath));
+	const fileName = basename(filePath);
+
+	while (true) {
+		const configPath = join(dir, '.editorconfig');
+		try {
+			const content = await readFile(configPath, 'utf-8');
+			const parsed = parseEditorConfigIndent(content, fileName);
+			if (parsed) return parsed;
+			if (/^\s*root\s*=\s*true\s*$/im.test(content)) return null;
+		} catch {
+			// Missing / unreadable — keep walking up.
+		}
+
+		if (dir === projectRoot || dirname(dir) === dir) {
+			return null;
+		}
+		dir = dirname(dir);
+	}
+}
+
+/** Parse indent_style / indent_size for `fileName` from one .editorconfig body. */
+export function parseEditorConfigIndent(
+	content: string,
+	fileName: string,
+): FormatOptions | null {
+	let currentMatch = false;
+	let indentStyle: 'tab' | 'space' | undefined;
+	let indentSize: number | undefined;
+
+	for (const rawLine of content.split(/\r?\n/)) {
+		const line = rawLine.replace(/[#;].*$/, '').trim();
+		if (!line) continue;
+
+		const section = line.match(/^\[(.+)\]$/);
+		if (section) {
+			const patterns = splitSectionPatterns(section[1]);
+			currentMatch = patterns.some(pattern => globMatches(pattern, fileName));
+			continue;
+		}
+
+		if (!currentMatch) continue;
+
+		const kv = line.match(/^([^=]+)=(.*)$/);
+		if (!kv) continue;
+		const key = kv[1].trim().toLowerCase();
+		const value = kv[2].trim().toLowerCase();
+
+		if (key === 'indent_style') {
+			if (value === 'tab' || value === 'space') indentStyle = value;
+		} else if (key === 'indent_size' || key === 'tab_width') {
+			const size = Number.parseInt(value, 10);
+			if (Number.isFinite(size) && size > 0) indentSize = size;
+		}
+	}
+
+	if (!indentStyle && indentSize === undefined) return null;
+
+	return {
+		insertSpaces: indentStyle ? indentStyle === 'space' : true,
+		tabSize: indentSize ?? (indentStyle === 'tab' ? 4 : 2),
+	};
+}
+
 /**
  * Format `absPath` via the given LSP manager and write changes to disk.
  * `displayPath` is used in user-facing messages (usually the relative arg).
@@ -92,6 +249,7 @@ export async function formatFileWithLsp(
 	absPath: string,
 	displayPath: string,
 	manager: FormatLspManager,
+	options?: Partial<FormatOptions>,
 ): Promise<string> {
 	if (!manager.isInitialized()) {
 		return 'No language server available. Install a language server for this file type, or run with --vscode.';
@@ -106,7 +264,12 @@ export async function formatFileWithLsp(
 		return `Language server for ${displayPath} is not ready.`;
 	}
 
-	const edits = await manager.formatDocument(absPath);
+	if (!manager.supportsDocumentFormatting(absPath)) {
+		return `Language server for ${displayPath} does not support document formatting.`;
+	}
+
+	const formatOptions = await resolveFormatOptions(absPath, options);
+	const edits = await manager.formatDocument(absPath, formatOptions);
 	if (edits.length === 0) {
 		return `No formatting changes needed for ${displayPath}.`;
 	}
@@ -132,18 +295,31 @@ const executeFormatDocument = async (
 ): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const manager = await getLSPManager();
-	return formatFileWithLsp(absPath, args.path, manager);
+	return formatFileWithLsp(absPath, args.path, manager, {
+		tabSize: args.tabSize,
+		insertSpaces: args.insertSpaces,
+	});
 };
 
 const formatDocumentCoreTool = tool({
 	description:
-		'Format a source file using the language server for its file type. Applies project-style formatting (indentation, trailing whitespace, etc.) and writes the result to disk. Prefer this over guessing a formatter CLI via execute_bash.',
+		'Format a source file using the language server for its file type. Applies project-style formatting from .editorconfig when present (override with tabSize/insertSpaces) and writes the result to disk. Prefer this over guessing a formatter CLI via execute_bash.',
 	inputSchema: jsonSchema<FormatDocumentArgs>({
 		type: 'object',
 		properties: {
 			path: {
 				type: 'string',
 				description: 'Path to the file to format.',
+			},
+			tabSize: {
+				type: 'number',
+				description:
+					'Indent width passed to the language server. Defaults from nearest .editorconfig.',
+			},
+			insertSpaces: {
+				type: 'boolean',
+				description:
+					'true for spaces, false for tabs. Defaults from nearest .editorconfig.',
 			},
 		},
 		required: ['path'],
@@ -217,6 +393,18 @@ const formatDocumentValidator = async (
 		return {
 			valid: false,
 			error: 'path is required. Provide the file to format.',
+		};
+	}
+
+	if (
+		args.tabSize !== undefined &&
+		(typeof args.tabSize !== 'number' ||
+			!Number.isFinite(args.tabSize) ||
+			args.tabSize <= 0)
+	) {
+		return {
+			valid: false,
+			error: 'tabSize must be a positive number when provided.',
 		};
 	}
 
