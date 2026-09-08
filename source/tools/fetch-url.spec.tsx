@@ -66,6 +66,138 @@ test('handler validates URL format', async t => {
 	);
 });
 
+test('handler rejects loopback aliases without fetching', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	for (const url of [
+		'http://127.0.0.2/',
+		'http://metadata.google.internal/',
+		'http://metadata.goog/',
+	]) {
+		await t.throwsAsync(
+			async () => {
+				await fetchUrlTool.tool.execute!(
+					{url},
+					{toolCallId: 'test', messages: []},
+				);
+			},
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+});
+
+test.serial(
+	'handler validates each redirect before fetching its destination',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const originalFetch = globalThis.fetch;
+		const requests: Array<{url: string; init: RequestInit}> = [];
+		globalThis.fetch = async (input, init) => {
+			const request = {url: String(input), init: init ?? {}};
+			requests.push(request);
+			if (request.url === 'https://public.example.test/redirect') {
+				return new Response(null, {
+					status: 302,
+					statusText: 'Found',
+					headers: {location: 'http://127.0.0.1:8080/internal'},
+				});
+			}
+
+			throw new Error(`Unexpected request to ${request.url}`);
+		};
+
+		try {
+			await t.throwsAsync(
+				async () => {
+					await fetchUrlTool.tool.execute!(
+						{url: 'https://public.example.test/redirect'},
+						{toolCallId: 'test', messages: []},
+					);
+				},
+				{message: /internal\/private network/},
+			);
+			t.is(requests.length, 1);
+			t.is(requests[0]?.url, 'https://public.example.test/redirect');
+			t.is(requests[0]?.init.redirect, 'manual');
+			t.notRegex(
+				requests.map(request => request.url).join('\n'),
+				/127\.0\.0\.1/,
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial(
+	'handler follows safe redirects and converts the final URL',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const originalFetch = globalThis.fetch;
+		const requests: Array<{url: string; init: RequestInit}> = [];
+		globalThis.fetch = async (input, init) => {
+			const request = {url: String(input), init: init ?? {}};
+			requests.push(request);
+			if (request.url === 'https://public.example.test/redirect') {
+				return new Response(null, {
+					status: 302,
+					statusText: 'Found',
+					headers: {location: '/intermediate'},
+				});
+			}
+
+			if (request.url === 'https://public.example.test/intermediate') {
+				return new Response(null, {
+					status: 307,
+					statusText: 'Temporary Redirect',
+					headers: {location: 'https://public.example.test/docs'},
+				});
+			}
+
+			if (request.url === 'https://public.example.test/docs') {
+				return new Response('<html><body><h1>Safe page</h1></body></html>', {
+					status: 200,
+					headers: {'content-type': 'text/html'},
+				});
+			}
+
+			throw new Error(`Unexpected request to ${request.url}`);
+		};
+
+		try {
+			const result = await fetchUrlTool.tool.execute!(
+				{url: 'https://public.example.test/redirect'},
+				{toolCallId: 'test', messages: []},
+			);
+			t.regex(result, /Safe page/);
+			t.deepEqual(
+				requests.map(request => request.url),
+				[
+					'https://public.example.test/redirect',
+					'https://public.example.test/intermediate',
+					'https://public.example.test/docs',
+					'https://public.example.test/docs',
+				],
+			);
+			t.true(requests.every(request => request.init.redirect === 'manual'));
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
@@ -222,6 +354,24 @@ test('validator accepts external IP addresses', async t => {
 	t.true(result.valid);
 });
 
+test('validator rejects 127.0.0.2 and cloud metadata hosts', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://127.0.0.2',
+		'http://169.254.169.254/latest/meta-data/',
+		'http://metadata.google.internal',
+		'http://metadata.goog',
+		'http://metadata/',
+		'http://[::ffff:127.0.0.2]',
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `expected ${url} to be rejected`);
+	}
+});
+
 test('tool has correct name', t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
@@ -325,7 +475,7 @@ test('formatter shows truncation warning when content is truncated', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Content was truncated to 100KB/);
+	t.true(output!.includes('Content was truncated to 100,000 characters'));
 });
 
 test('formatter renders without result (before execution)', t => {

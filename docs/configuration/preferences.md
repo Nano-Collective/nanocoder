@@ -53,18 +53,20 @@ Preferences follow the same location hierarchy as configuration files:
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the top-level `paste` key:
+The paste threshold is also stored in the preferences file under the namespaced `nanocoder.paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "paste": {
-    "singleLineThreshold": 1500
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 1500
+    }
   }
 }
 ```

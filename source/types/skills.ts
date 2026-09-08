@@ -16,6 +16,7 @@ import type {CustomCommand} from '@/types/commands';
 import type {ToolEntry} from '@/types/core';
 
 export type SkillMemberKind = 'command' | 'agent' | 'tool';
+export type SkillTargetKind = SkillMemberKind | 'skill';
 
 /**
  * Resolved reference to a single skill member. The string form used in YAML
@@ -23,7 +24,7 @@ export type SkillMemberKind = 'command' | 'agent' | 'tool';
  * registrar before subscriptions are dispatched.
  */
 export interface SkillMemberRef {
-	kind: SkillMemberKind;
+	kind: SkillTargetKind;
 	name: string;
 }
 
