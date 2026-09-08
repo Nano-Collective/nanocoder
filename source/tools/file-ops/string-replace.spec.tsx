@@ -9,6 +9,8 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {readFileTool} from '../read-file.js';
+import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
 // ============================================================================
 // Test Helpers
@@ -1087,6 +1089,86 @@ test('string_replace: $ tokens in old_str still match and are removable', async 
 	});
 
 	t.is(await readFile(filePath, 'utf-8'), 'all:\n\t@echo $$PWD\n');
+});
+
+// ============================================================================
+// Derived-content Guard Tests (PDF/DOCX)
+// ============================================================================
+
+test('string_replace: refuses a .pdf and leaves the document untouched', async t => {
+	const pdfBytes = '%PDF-1.4 fake document bytes';
+	const filePath = await createTestFile('doc.pdf', pdfBytes);
+
+	await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'wordCount',
+			new_str: 'pageCount',
+		}),
+		{message: /markdown transcript/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), pdfBytes);
+});
+
+test('string_replace: the reported issue repro leaves the PDF intact', async t => {
+	// Verbatim reproduction from #1058: read the PDF, then replace a token that
+	// exists only in the transcript the read returned. Before the fix this
+	// reported success and left 50 bytes of markdown where the document was.
+	const filePath = join(testDir, 'doc.pdf');
+	const originalBytes = buildMinimalPdf('Hello World');
+	await writeFile(filePath, originalBytes);
+
+	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+	const transcript = (await (readFileTool.tool as any).execute(
+		{path: filePath},
+		{toolCallId: 'test', messages: []},
+	)) as string;
+
+	// The read really did hand back a transcript, so the premise holds.
+	t.regex(transcript, /wordCount/);
+	t.false(transcript.startsWith('%PDF-'));
+
+	await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'wordCount',
+			new_str: 'pageCount',
+		}),
+		{message: /markdown transcript/},
+	);
+
+	const afterBytes = await readFile(filePath);
+	t.deepEqual(afterBytes, originalBytes);
+	t.is(afterBytes.subarray(0, 5).toString('latin1'), '%PDF-');
+});
+
+test('string_replace validator: refuses a .docx path', async t => {
+	await createTestFile('spec.docx', 'PK fake docx bytes');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('spec.docx');
+
+		const result = await stringReplaceTool.validator({
+			path: 'spec.docx',
+			old_str: 'fake',
+			new_str: 'real',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /markdown transcript/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
 });
 
 test('string_replace: numbered group tokens stay literal', async t => {

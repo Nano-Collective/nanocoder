@@ -72,10 +72,9 @@ const executeReadFile = async (args: {
 					// Detect likely encoding (simple heuristic)
 					let encoding = 'UTF-8';
 					try {
-						if (
-							absPath.toLowerCase().endsWith('.pdf') ||
-							absPath.toLowerCase().endsWith('.docx')
-						) {
+						// `derived` records what the cache actually produced for this
+						// path, so the label cannot disagree with the content above.
+						if (cached.derived) {
 							encoding = 'Binary (Converted to Markdown)';
 						} else {
 							// Try to read as UTF-8

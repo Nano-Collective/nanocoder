@@ -15,7 +15,7 @@ import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {validatePath} from '@/utils/path-validators';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -31,6 +31,11 @@ const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
+	const formatResult = validateEditableFormat(args.path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
+	}
+
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
 
@@ -229,6 +234,9 @@ const writeFileValidator = async (args: {
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
+
+	const formatResult = validateEditableFormat(args.path);
+	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 

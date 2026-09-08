@@ -11,7 +11,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validatePath} from '@/utils/path-validators';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
@@ -250,6 +250,11 @@ function formatUpdatedFileContext(
 
 const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const {path, diff} = args;
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
+	}
+
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
@@ -392,6 +397,9 @@ const diffEditValidator = async (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
+
+	const formatResult = validateEditableFormat(args.path);
+	if (!formatResult.valid) return formatResult;
 
 	let blocks: DiffEditBlock[];
 	try {

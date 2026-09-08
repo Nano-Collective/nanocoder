@@ -9,7 +9,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validatePath} from '@/utils/path-validators';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
@@ -69,6 +69,11 @@ const executeStringReplace = async (
 		throw new Error(
 			'old_str cannot be empty. Provide the exact content to find and replace.',
 		);
+	}
+
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
 	}
 
 	const absPath = resolve(getSafeSessionCwd(), path);
@@ -197,6 +202,9 @@ const stringReplaceValidator = async (
 
 	const pathResult = validatePath(path);
 	if (!pathResult.valid) return pathResult;
+
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), path);
 	try {
