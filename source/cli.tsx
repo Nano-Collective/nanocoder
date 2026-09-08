@@ -138,6 +138,23 @@ Examples:
 	}
 }
 
+// Handle `nanocoder completion <shell>` — fast path, prints a static
+// completion script and exits without loading any app code. The shell
+// argument is required so a missing argument fails loudly with usage
+// instead of silently installing the wrong script.
+if (args[0] === 'completion') {
+	const {runCompletionCli} = await import('@/cli-completions/cli');
+	const result = runCompletionCli(args.slice(1));
+	if (result.output) {
+		if (result.stream === 'stderr') {
+			console.error(result.output);
+		} else {
+			console.log(result.output);
+		}
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -151,6 +168,8 @@ Commands:
                                   Subcommands: start, stop, status, logs, install, uninstall.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  completion <shell>              Generate a shell completion script (bash, zsh, or fish).
+                                  Example: eval "$(nanocoder completion zsh)"
 
 Options:
   -v, --version       Show version number
