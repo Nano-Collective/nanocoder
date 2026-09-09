@@ -12,7 +12,13 @@ import {getSubagentDescriptions} from '@/utils/prompt-processor';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const sectionsDir = join(__dirname, '../../source/app/prompts/sections');
+const sectionsCandidates = [
+	join(__dirname, '../../source/app/prompts/sections'),
+	join(__dirname, '../source/app/prompts/sections'),
+	join(process.cwd(), 'source/app/prompts/sections'),
+];
+const sectionsDir =
+	sectionsCandidates.find(p => existsSync(p)) ?? sectionsCandidates[0];
 
 // Cache loaded sections to avoid re-reading files
 const sectionCache = new Map<string, string>();

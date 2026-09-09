@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import chalk from 'chalk';
@@ -14,8 +14,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Load themes from JSON at startup — keeps 50 theme definitions out of source code.
-// Path resolves from dist/config/ back to source/config/themes.json (included in package.json files).
-const themesPath = join(__dirname, '../../source/config/themes.json');
+// Path resolves from dist/config/ or dist/ back to source/config/themes.json (included in package.json files).
+const themesCandidates = [
+	join(__dirname, '../../source/config/themes.json'),
+	join(__dirname, '../source/config/themes.json'),
+	join(process.cwd(), 'source/config/themes.json'),
+];
+const themesPath =
+	themesCandidates.find(p => existsSync(p)) ?? themesCandidates[0];
 export const themes: Record<ThemePreset, Theme> = JSON.parse(
 	readFileSync(themesPath, 'utf-8'),
 );
