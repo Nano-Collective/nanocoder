@@ -566,6 +566,25 @@ test('VSCodeServer constructor rejects empty-string token and falls back to a ge
 	t.is(server.getToken().length, 64);
 });
 
+test('VSCodeServer accepts a token sent without the Bearer prefix', async t => {
+	const port = getNextPort();
+	const token = 'no-prefix-token';
+	await withIsolatedConfigDir(async () => {
+		const server = new VSCodeServer(port, {token});
+		await server.start();
+
+		// The header parser still applies the constant-time comparison on
+		// the raw value when no Bearer prefix is present, so an integrator
+		// that opts out of the standard prefix still works.
+		const accepted = await attemptConnect(`ws://127.0.0.1:${port}`, {
+			headers: {Authorization: token},
+		});
+		t.true(accepted, 'raw-token Authorization must be accepted');
+
+		await server.stop();
+	});
+});
+
 // ============================================================================
 // Ephemeral-port + discovery-file integration
 // ============================================================================

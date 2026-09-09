@@ -812,6 +812,29 @@ test('VSCodeServer getPort returns the actual port', async t => {
 	await server.stop();
 });
 
+test('VSCodeServer getDiscoveryFilePath returns null before start', t => {
+	const server = new VSCodeServer(0, {token: TEST_TOKEN});
+	t.is(server.getDiscoveryFilePath(), null);
+});
+
+test('VSCodeServer getDiscoveryFilePath returns the published path after start', async t => {
+	const server = new VSCodeServer(0, {token: TEST_TOKEN});
+	await server.start();
+
+	const filePath = server.getDiscoveryFilePath();
+	t.truthy(filePath);
+	t.true(filePath?.endsWith('vscode-server.json') ?? false);
+
+	await server.stop();
+});
+
+test('VSCodeServer isEphemeral returns false when an explicit port was requested', async t => {
+	const port = getNextPort();
+	const server = new VSCodeServer(port, {token: TEST_TOKEN});
+	t.false(server.isEphemeral());
+	await server.stop();
+});
+
 test('VSCodeServer falls back to next port when requested port is in use', async t => {
 	const port = getNextPort();
 
