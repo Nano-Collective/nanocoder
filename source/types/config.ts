@@ -120,13 +120,33 @@ export interface NotificationsConfig {
 		questionPrompt?: boolean;
 		generationComplete?: boolean;
 		triggeredRunComplete?: boolean;
+		ciFailureDetected?: boolean;
+		ciInvestigationComplete?: boolean;
 	};
 	customMessages?: {
 		toolConfirmation?: {title: string; message: string};
 		questionPrompt?: {title: string; message: string};
 		generationComplete?: {title: string; message: string};
 		triggeredRunComplete?: {title: string; message: string};
+		ciFailureDetected?: {title: string; message: string};
+		ciInvestigationComplete?: {title: string; message: string};
 	};
+}
+
+/**
+ * Background CI-watch configuration. Governs whether the per-project daemon
+ * polls GitHub Actions for check-run failures on the currently checked-out
+ * branch and automatically runs the `verify-ci-investigator` subagent when
+ * one is found. Opt-in (`enabled` defaults to false) since this is a new
+ * always-on-network, GitHub-API-rate-limit-consuming background feature,
+ * unlike file-watching/cron which have no such external cost.
+ */
+export interface CiWatchConfig {
+	enabled: boolean;
+	/** Base poll interval in ms. Defaults to 30_000. */
+	pollIntervalMs?: number;
+	/** Backoff cap in ms for consecutive `gh` errors. Defaults to 300_000. */
+	maxPollIntervalMs?: number;
 }
 
 // Note: temperature is intentionally excluded from this interface.
@@ -205,6 +225,9 @@ export interface AppConfig {
 
 	// Desktop notification configuration
 	notifications?: NotificationsConfig;
+
+	// Background CI-watch configuration (daemon-side)
+	ciWatch?: CiWatchConfig;
 
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
@@ -414,6 +437,7 @@ export interface UserPreferences {
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
+	ciWatch?: CiWatchConfig;
 	paste?: PasteConfig;
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;

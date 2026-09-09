@@ -148,3 +148,22 @@ test.serial(
 		);
 	},
 );
+
+test.serial(
+	"verify-ci-investigator's frontmatter tools match trust.ts's comment-only allowlist",
+	async t => {
+		const loader = new SubagentLoader();
+		await loader.initialize();
+		const config = await loader.getSubagent('verify-ci-investigator');
+
+		t.truthy(config, 'verify-ci-investigator subagent should exist');
+		const frontmatterTools = new Set(config?.tools ?? []);
+		const trustTools = new Set(getAllowedToolNames('comment-only'));
+
+		t.deepEqual(
+			frontmatterTools,
+			trustTools,
+			'verify-ci-investigator.md tools: list has drifted from trust.ts comment-only allowlist',
+		);
+	},
+);

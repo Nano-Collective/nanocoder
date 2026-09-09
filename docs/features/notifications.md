@@ -56,7 +56,10 @@ Notification preferences are stored in `nanocoder-preferences.json` under the `n
       "events": {
         "toolConfirmation": true,
         "questionPrompt": true,
-        "generationComplete": false
+        "generationComplete": false,
+        "triggeredRunComplete": true,
+        "ciFailureDetected": true,
+        "ciInvestigationComplete": true
       },
       "customMessages": {
         "toolConfirmation": {
@@ -76,6 +79,11 @@ Notification preferences are stored in `nanocoder-preferences.json` under the `n
 | `events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
 | `events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
 | `events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run (file-watch, cron, CI watch) finishes |
+| `events.ciFailureDetected` | boolean | `true` | Notify as soon as CI watch detects a failing run, before investigation starts |
+| `events.ciInvestigationComplete` | boolean | `true` | Notify when the automated CI-failure investigation finishes |
 | `customMessages.<event>` | object | — | Override the default title and message for an event |
+
+The last three fire only from the per-project daemon (`nanocoder daemon start`) — see [Scheduler](./scheduler.md) and CI Watch configuration in [Preferences](../configuration/preferences.md#ci-watch-configuration).
 
 Notification titles include the current project directory name, e.g. "Tool Confirmation Required in my-project".

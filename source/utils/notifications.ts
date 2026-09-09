@@ -9,7 +9,9 @@ export type NotificationEvent =
 	| 'toolConfirmation'
 	| 'questionPrompt'
 	| 'generationComplete'
-	| 'triggeredRunComplete';
+	| 'triggeredRunComplete'
+	| 'ciFailureDetected'
+	| 'ciInvestigationComplete';
 
 const DEFAULT_CONFIG: NotificationsConfig = {
 	enabled: false,
@@ -18,6 +20,8 @@ const DEFAULT_CONFIG: NotificationsConfig = {
 		questionPrompt: true,
 		generationComplete: true,
 		triggeredRunComplete: true,
+		ciFailureDetected: true,
+		ciInvestigationComplete: true,
 	},
 };
 
@@ -50,6 +54,15 @@ const EVENT_MESSAGES: Record<
 	triggeredRunComplete: {
 		title: projectName => `Triggered Run Completed in ${projectName}`,
 		message: 'A skill subscription fired and its target finished running.',
+	},
+	ciFailureDetected: {
+		title: projectName => `CI Failure Detected in ${projectName}`,
+		message: 'A CI run failed. Investigating…',
+	},
+	ciInvestigationComplete: {
+		title: projectName => `CI Investigation Complete in ${projectName}`,
+		message:
+			'Nanocoder finished diagnosing a CI failure — see the daemon log or PR comment.',
 	},
 };
 

@@ -117,6 +117,7 @@ coverage
 .nanocoder/tasks.json
 .nanocoder/schedule-runs.json
 .nanocoder/schedules.json
+.nanocoder/ci-watch-state.json
 .generated-prompts/
 .nanocoder/skills
 

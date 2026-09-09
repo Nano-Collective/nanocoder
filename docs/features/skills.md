@@ -140,8 +140,11 @@ subscribe:
     cron: "0 9 * * MON"
 ```
 
-v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`) and
-`schedule.cron` (filter: `cron`).
+v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`),
+`schedule.cron` (filter: `cron`), and `ci.job.failed` (filter: `branches`,
+glob-matched against the failing run's branch; omitted matches every
+branch). `ci.job.failed` only ever fires when the daemon's CI watch is
+active — see [CI Watch Configuration](../configuration/preferences.md#ci-watch-configuration).
 
 ### `confirm: true`
 
