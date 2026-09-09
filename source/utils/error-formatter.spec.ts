@@ -195,3 +195,22 @@ test('createErrorInfo - recognizes ETIMEDOUT as a network and timeout error', t 
 	t.true(result.isTimeoutError);
 	t.is(result.code, 'ETIMEDOUT');
 });
+
+// Regression for #1136: a validation message containing "connection" must be
+// classified strictly as a validation error, not also as a network error.
+test('createErrorInfo - classifies validation-overlapping messages strictly as validation', t => {
+	const error = new Error('validation failed for connection');
+	const result = createErrorInfo(error);
+
+	t.true(result.isValidationError);
+	t.false(result.isNetworkError);
+	t.false(result.isTimeoutError);
+});
+
+test('createErrorInfo - still classifies a real network error with no validation cue', t => {
+	const error = new Error('failed to fetch: connection refused');
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+	t.false(result.isValidationError);
+});
