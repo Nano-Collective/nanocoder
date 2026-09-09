@@ -33,7 +33,7 @@ test('AppProps accepts all optional parameters', t => {
 	t.is(fullProps.cliMode, 'yolo');
 });
 
-test('CliMode covers the four user-facing development modes', t => {
-	const modes: CliMode[] = ['normal', 'auto-accept', 'yolo', 'plan'];
-	t.deepEqual(modes, ['normal', 'auto-accept', 'yolo', 'plan']);
+test('CliMode covers the five user-facing development modes', t => {
+	const modes: CliMode[] = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
+	t.deepEqual(modes, ['normal', 'auto-accept', 'yolo', 'plan','architect' ]);
 });

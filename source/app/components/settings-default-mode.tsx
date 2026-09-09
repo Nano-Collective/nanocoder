@@ -14,6 +14,7 @@ const MODE_DESCRIPTIONS: Record<string, string> = {
 		'Semi-auto — most tools auto-run; bash and destructive git prompt',
 	yolo: 'Fully automatic — no confirmations at all',
 	plan: 'Read-only exploration — only read/search/list tools',
+	architect: 'Preview changes and require approval before committing',
 };
 
 /**

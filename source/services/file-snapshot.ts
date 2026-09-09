@@ -3,7 +3,7 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
-import type {CaptureResult, SkippedFile} from '@/types/checkpoint';
+import type {FileSnapshot} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
@@ -47,9 +47,8 @@ export class FileSnapshotService {
 	 * did not put back. A file that is simply gone is not one of them - see
 	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
 	 */
-	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
-		const snapshots = new Map<string, Buffer>();
-		const skipped: SkippedFile[] = [];
+	async captureFiles(filePaths: string[]): Promise<Map<string, FileSnapshot>> {
+		const snapshots = new Map<string, FileSnapshot>();
 
 		for (const filePath of filePaths) {
 			// Normalized up front so a skipped file is keyed the same way a
@@ -59,8 +58,25 @@ export class FileSnapshotService {
 			const normalizedPath = relativePath.split(path.sep).join('/');
 
 			try {
-				const content = await fs.readFile(absolutePath);
-				snapshots.set(normalizedPath, content);
+				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
+				const relativePath = path.relative(this.workspaceRoot, absolutePath);
+				const normalizedPath = relativePath.split(path.sep).join('/');
+
+				try {
+					const content = await fs.readFile(absolutePath, 'utf-8');
+					snapshots.set(normalizedPath, {
+						existed: true,
+						content,
+					});
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+						snapshots.set(normalizedPath, {
+							existed: false,
+						});
+					} else {
+						throw error;
+					}
+				}
 			} catch (error) {
 				const reason = formatError(error);
 				if (!isMissingFile(error)) {
@@ -83,10 +99,10 @@ export class FileSnapshotService {
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, FileSnapshot>): Promise<void> {
 		const errors: string[] = [];
 
-		for (const [relativePath, content] of snapshots) {
+		for (const [relativePath, snapshot] of snapshots) {
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
 				// Snapshot keys are read back from user-writable metadata on disk
@@ -98,10 +114,21 @@ export class FileSnapshotService {
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
 				}
+
+				if (!snapshot.existed) {
+					try {
+						await fs.unlink(absolutePath);
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+							throw error;
+						}
+					}
+					continue;
+				}
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content);
+				await fs.writeFile(absolutePath, snapshot.content ?? '', 'utf-8');
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -258,11 +285,15 @@ export class FileSnapshotService {
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, Buffer>): number {
+	getSnapshotSize(snapshots: Map<string, FileSnapshot>): number {
 		let totalSize = 0;
-		for (const content of snapshots.values()) {
-			totalSize += content.byteLength;
+
+		for (const snapshot of snapshots.values()) {
+			if (snapshot.existed && snapshot.content !== undefined) {
+				totalSize += Buffer.byteLength(snapshot.content, 'utf-8');
+			}
 		}
+
 		return totalSize;
 	}
 
@@ -270,7 +301,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, Buffer>,
+		snapshots: Map<string, FileSnapshot>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 
@@ -293,6 +324,7 @@ export class FileSnapshotService {
 						try {
 							const parentStats = await fs.stat(parentDir);
 							const parentMode = parentStats.mode;
+
 							// Check if any write permission bit is set - owner: 0o200, group: 0o020, others: 0o002
 							const parentHasWritePermission =
 								(parentMode & 0o200) !== 0 ||
@@ -314,6 +346,7 @@ export class FileSnapshotService {
 					if (parentWritable) {
 						try {
 							await fs.mkdir(directory, {recursive: true});
+
 							try {
 								const verifyStats = await fs.stat(directory);
 								directoryExists = verifyStats.isDirectory();
@@ -340,6 +373,7 @@ export class FileSnapshotService {
 					try {
 						const dirStats = await fs.stat(directory);
 						const mode = dirStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -368,6 +402,7 @@ export class FileSnapshotService {
 					try {
 						const fileStats = await fs.stat(absolutePath);
 						const mode = fileStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -390,6 +425,7 @@ export class FileSnapshotService {
 				);
 			}
 		}
+
 		return {valid: errors.length === 0, errors};
 	}
 }

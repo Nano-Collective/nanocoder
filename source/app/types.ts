@@ -5,7 +5,7 @@ import type {DevelopmentMode} from '@/types/core';
  * Valid user-selectable boot modes. Single source of truth — used by the
  * `--mode` CLI parser, the `defaultMode` config loader, and tests.
  */
-export const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+export const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan' ,'architect'] as const;
 
 /**
  * A user-selectable boot mode for the `--mode` CLI flag. Subset of
