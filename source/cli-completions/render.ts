@@ -113,7 +113,7 @@ function zshArgumentLine(flag: CompletionFlag): string {
 			? `${pair}${description}${valueSpec}'`
 			: `${long}='${description}${valueSpec}'`;
 	}
-	return pair ? `${pair}${description}'` : `${long}${description}`;
+	return pair ? `${pair}${description}'` : `'${long}${description}'`;
 }
 
 function zshChildrenCase(
@@ -175,13 +175,12 @@ fi
 }
 
 function fishFlagLine(flag: CompletionFlag): string {
-	const condition = `-n '__fish_use_subcommand'`;
 	const names = flag.short
 		? `-s ${flag.short} -l ${flag.name}`
 		: `-l ${flag.name}`;
 	const values = flag.values ? ` -a '${flag.values.join(' ')}'` : '';
 	const requireParam = flag.takesValue ? ' -r' : '';
-	return `\tcomplete -c nanocoder -f ${condition} ${names}${requireParam}${values} -d '${fishEscape(flag.description)}'`;
+	return `\tcomplete -c nanocoder -f ${names}${requireParam}${values} -d '${fishEscape(flag.description)}'`;
 }
 
 function fishSubcommandLines(): string {

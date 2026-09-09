@@ -44,7 +44,7 @@ nanocoder completion fish > ~/.config/fish/completions/nanocoder.fish
 
 The scripts cover the full command-line surface:
 
-- **Subcommands** — `init`, `run`, `daemon`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `codex|copilot login`, and the shell names for `completion`).
+- **Subcommands** — `init`, `run`, `daemon`, `config`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `config list|show|diff`, `codex|copilot login`, and the shell names for `completion`).
 - **Flags** — every top-level option, including short forms (`-c`, `-r`, `-h`, `-v`).
 - **Known flag values** — `--mode normal|auto-accept|yolo|plan` and `--output-format text|json` offer their closed sets of values.
 

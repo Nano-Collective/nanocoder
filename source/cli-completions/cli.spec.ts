@@ -116,15 +116,22 @@ test.serial('every spec subcommand and child token is offered by every shell', t
 });
 
 test.serial('enum flag values are completed by every shell', t => {
-	const modeValues = ['normal', 'auto-accept', 'yolo', 'plan'];
-	const formatValues = ['text', 'json'];
 	for (const shell of COMPLETION_SHELLS) {
 		const script = scriptFor(shell);
-		for (const value of [...modeValues, ...formatValues]) {
-			t.true(
-				new RegExp(`\\b${value}\\b`).test(script),
-				`${shell}: missing value ${value}`,
-			);
+		const valueLists = COMPLETION_FLAGS.flatMap(f =>
+			f.values ? [f.values.join(' ')] : [],
+		);
+		for (const list of valueLists) {
+			// Assert the exact value-set syntax each shell uses for flag
+			// arguments, so the assertion cannot be satisfied by the value
+			// names appearing in description prose.
+			const token =
+				shell === 'bash'
+					? `"${list}"`
+					: shell === 'zsh'
+						? `(${list})`
+						: `-a '${list}'`;
+			t.true(script.includes(token), `${shell}: missing value set ${list}`);
 		}
 	}
 });
