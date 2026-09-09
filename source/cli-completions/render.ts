@@ -15,14 +15,18 @@ function longFlagNames(): string[] {
 	return COMPLETION_FLAGS.map(f => `--${f.name}`);
 }
 
-/** Escape a description for use inside a single-quoted zsh string. */
+/** Escape a description for use inside a single-quoted zsh string. zsh
+ * treats backslash as literal inside single quotes, so the only
+ * metacharacter is `'`, handled by the splice idiom. */
 function zshEscape(text: string): string {
 	return text.replace(/'/g, `'\\''`);
 }
 
-/** Escape a description for use inside a single-quoted fish string. */
+/** Escape a description for use inside a single-quoted fish string. Unlike
+ * zsh, fish treats backslash as an escape even inside single quotes, so
+ * backslashes must be doubled before quotes are escaped. */
 function fishEscape(text: string): string {
-	return text.replace(/'/g, `\\'`);
+	return text.replace(/\\/g, `\\\\`).replace(/'/g, `\\'`);
 }
 
 function flagsWithValues(): Array<{
