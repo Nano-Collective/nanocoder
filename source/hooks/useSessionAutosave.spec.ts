@@ -88,6 +88,59 @@ test('approved plan injection does not replace the user-derived title', t => {
 	t.is(title, 'Implement the greeting helper');
 });
 
+test('the first substantive user turn names the session, not the latest', t => {
+	// The bug this fixes: deriving from the latest user message made the title
+	// a rolling mirror of whatever was typed most recently, and autosave
+	// rewrote it every 30 seconds. Every other case here has a single real
+	// user turn, so it passes under both a forward and a backward scan - this
+	// one only passes forward.
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Add rate limiting to the auth endpoints'},
+		{role: 'assistant', content: 'Done.'},
+		{role: 'user', content: 'Now update the README'},
+		{role: 'assistant', content: 'Done.'},
+	]);
+
+	t.is(title, 'Add rate limiting to the auth endpoints');
+});
+
+test('bash output never names the session', t => {
+	// !bash output is pushed as a plain role:'user' turn with no displayOnly
+	// flag. The forward scan would latch onto it and, unlike the old backward
+	// scan, never recover once the real request arrived.
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content: 'Bash command output:\n```\n$ git status\nOn branch main\n```',
+		},
+		{role: 'assistant', content: 'You are on main.'},
+		{role: 'user', content: 'add retry logic to the OpenRouter client'},
+	]);
+
+	t.is(title, 'add retry logic to the OpenRouter client');
+});
+
+test('the active-file prefix never becomes the title', t => {
+	// The VS Code UI prepends this; it is plumbing, not the request.
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content: '[Active file: source/app/App.tsx]\n\nfix the crash on resume',
+		},
+	]);
+
+	t.is(title, 'fix the crash on resume');
+});
+
+test('a first turn that is only plumbing falls through to the next real one', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: '[Active file: a.ts]\n\n'},
+		{role: 'user', content: 'Add rate limiting'},
+	]);
+
+	t.is(title, 'Add rate limiting');
+});
+
 test('session titles keep the existing 50-character truncation', t => {
 	const content = 'a'.repeat(51);
 

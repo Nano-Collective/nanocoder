@@ -38,6 +38,13 @@ export const MAX_FILE_READ_RETRIES = 3;
 // === SESSION NAMES ===
 export const MAX_SESSION_NAME_LENGTH = 100;
 
+/**
+ * Opening of the synthetic `role: 'user'` turn that carries `!bash` output to
+ * the model. It is protocol, not a request, so title derivation skips it -
+ * shared with the builder so the two cannot drift.
+ */
+export const BASH_OUTPUT_PREFIX = 'Bash command output:';
+
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
 export const MAX_TIMELINE_ENTRIES = 50;
