@@ -1,3 +1,2 @@
-// Re-export the main App component and types
+// Re-export the main App component
 export {default} from './App';
-export type {AppProps} from './types';

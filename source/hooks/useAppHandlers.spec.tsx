@@ -13,6 +13,11 @@ import {
 	setKeyGeneratorSessionId,
 } from '@/session/key-generator';
 import {clearAppConfig} from '@/config/index';
+import {
+	addPendingHookContext,
+	clearPendingHookContext,
+	drainPendingHookContext,
+} from '@/services/lifecycle-hooks';
 import {resetPreferencesCache} from '@/config/preferences';
 
 console.log('\nuseAppHandlers.spec.tsx');
@@ -69,6 +74,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const setChatComponents = spy<[React.ReactNode[]]>();
 	const setLiveComponent = spy<[React.ReactNode]>();
+	const setLiveComponentCapturesInput = spy<[boolean]>();
 	const enterModelSelectionMode = spy<[]>();
 	const enterModelDatabaseMode = spy<[]>();
 	const enterSettingsMode = spy<[]>();
@@ -115,6 +121,7 @@ function makeProps(overrides: ProbeOverrides) {
 		addToChatQueue,
 		setChatComponents,
 		setLiveComponent,
+		setLiveComponentCapturesInput,
 		client: overrides.client ?? null,
 		getMessageTokens: () => 0,
 		enterModelSelectionMode,
@@ -151,6 +158,7 @@ function makeProps(overrides: ProbeOverrides) {
 			setPlanReviewState,
 			dismissActiveEditor,
 			handleModelSelect,
+			handleChatMessage,
 		},
 	};
 }
@@ -413,4 +421,109 @@ test('clearMessages resets key generator session ID', async t => {
 	const newId = getKeyGeneratorSessionId();
 	t.not(newId, 'old-session-id-prefix');
 	t.regex(newId, /^[0-9a-f]{8}$/);
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle hooks at the prompt boundary.
+//
+// The gate and the context injection live here rather than in
+// handleMessageSubmission, so this is the only place the "which inputs are
+// local actions?" question is answered. Getting it wrong silently reroutes a
+// local command to the model, so it is pinned.
+// ---------------------------------------------------------------------------
+
+test.serial(
+	'a pending hook context does not swallow a ! bash command',
+	async t => {
+		clearPendingHookContext();
+		addPendingHookContext('branch: main');
+		const {handlers, spies} = setup();
+
+		await handlers.handleMessageSubmit('!echo hooktest');
+
+		// The regression: prefixing <hook-context> onto the message defeats
+		// parseInput's leading-`!` check, so the bash command is sent to the
+		// model as chat instead of running locally.
+		t.is(
+			spies.handleChatMessage.calls.length,
+			0,
+			'a ! command must never reach the model',
+		);
+		t.is(
+			drainPendingHookContext(),
+			'branch: main',
+			'and the buffered context must survive for the next real prompt',
+		);
+	},
+);
+
+test.serial(
+	'a pending hook context does not swallow a leading-whitespace ! command',
+	async t => {
+		clearPendingHookContext();
+		addPendingHookContext('branch: main');
+		const {handlers, spies} = setup();
+
+		// parseInput trims before testing for `!`, so the local-action check
+		// has to trim too or this one slips through as chat.
+		await handlers.handleMessageSubmit('  !echo hooktest');
+
+		t.is(spies.handleChatMessage.calls.length, 0);
+		t.is(drainPendingHookContext(), 'branch: main');
+	},
+);
+
+test.serial('a pending hook context does not swallow a slash command', async t => {
+	clearPendingHookContext();
+	addPendingHookContext('branch: main');
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('/help');
+
+	t.is(spies.handleChatMessage.calls.length, 0);
+	t.is(drainPendingHookContext(), 'branch: main');
+});
+
+test.serial(
+	'a pending hook context does not swallow a leading-whitespace slash command',
+	async t => {
+		clearPendingHookContext();
+		addPendingHookContext('branch: main');
+		const {handlers, spies} = setup();
+
+		// Same trap as the `!` case: parseInput trims before testing for `/`, so
+		// an untrimmed local-action check prefixes this one and sends `/help` to
+		// the model as chat.
+		await handlers.handleMessageSubmit('  /help');
+
+		t.is(spies.handleChatMessage.calls.length, 0);
+		t.is(drainPendingHookContext(), 'branch: main');
+	},
+);
+
+test.serial('a chat prompt does receive the buffered hook context', async t => {
+	clearPendingHookContext();
+	addPendingHookContext('branch: main');
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('what changed?');
+
+	t.is(spies.handleChatMessage.calls.length, 1);
+	const sent = spies.handleChatMessage.calls[0]![0];
+	t.true(
+		sent.startsWith('<hook-context>\nbranch: main\n</hook-context>\n\n'),
+		`context should be prepended, got: ${sent}`,
+	);
+	t.true(sent.endsWith('what changed?'));
+	t.is(drainPendingHookContext(), '', 'and draining is destructive');
+});
+
+test.serial('a prompt with no pending context is passed through intact', async t => {
+	clearPendingHookContext();
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('what changed?');
+
+	t.is(spies.handleChatMessage.calls.length, 1);
+	t.is(spies.handleChatMessage.calls[0]![0], 'what changed?');
 });
