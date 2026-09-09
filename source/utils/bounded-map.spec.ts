@@ -102,6 +102,26 @@ test('BoundedMap - updating existing key does not trigger eviction', t => {
 	t.is(map.get('b'), 2);
 });
 
+test('BoundedMap - overwrite bumps access order so the key is not evicted', t => {
+	// Regression for #1143: a frequently-overwritten key used to retain its
+	// original (oldest) insertion position and be evicted before newer keys.
+	const map = new BoundedMap<string, number>({maxSize: 2});
+
+	map.set('a', 1);
+	map.set('b', 2);
+
+	// Overwriting 'a' should move it to the most-recent position.
+	map.set('a', 11);
+
+	// Inserting 'c' evicts the oldest remaining key, which is now 'b' — not 'a'.
+	map.set('c', 3);
+
+	t.is(map.size, 2);
+	t.true(map.has('a'));
+	t.false(map.has('b'));
+	t.true(map.has('c'));
+});
+
 test('BoundedMap - TTL causes entries to expire', async t => {
 	const map = new BoundedMap<string, number>({
 		maxSize: 100,

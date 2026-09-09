@@ -49,12 +49,20 @@ export class BoundedMap<K, V> {
 	 * Set a key-value pair, enforcing size limit
 	 */
 	set(key: K, value: V): this {
-		// Remove oldest entry if at capacity
+		// Remove oldest entry if at capacity (skip when overwriting an
+		// existing key — an overwrite must not evict a different entry)
 		if (this.map.size >= this.maxSize && !this.map.has(key)) {
 			const firstKey = this.map.keys().next().value;
 			if (firstKey !== undefined) {
 				this.map.delete(firstKey);
 			}
+		}
+
+		// Bump access order on overwrite: deleting before re-inserting moves
+		// the key to the most-recent position, so a frequently-overwritten key
+		// is not left at the oldest position and prematurely evicted.
+		if (this.map.has(key)) {
+			this.map.delete(key);
 		}
 
 		this.map.set(key, {
