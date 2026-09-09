@@ -182,7 +182,7 @@ nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "
 
 - Automatically executes the given prompt
 - Defaults to auto-accept (tools execute without confirmation); override with `--mode` (e.g. `--mode yolo` or `--mode plan`)
-- Renders through a dedicated shell — no welcome banner, no boot summary, no boxed user echo, no "ctrl+r to expand" hints. Assistant text prints as plain markdown; a single spinner status line shows progress below the transcript.
+- Renders through a dedicated shell — no welcome banner, no boot summary, no boxed user echo, no "ctrl+g to expand" hints. Assistant text prints as plain markdown; a single spinner status line shows progress below the transcript.
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
 - If a tool requires approval that auto-accept won't grant (e.g. bash in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1`
 - Exits automatically when the task is complete

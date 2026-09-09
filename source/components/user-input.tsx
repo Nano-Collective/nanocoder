@@ -44,6 +44,22 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
 
+export function findReverseMatch(
+	history: InputState[],
+	query: string,
+	startIndex: number,
+): {index: number; match: InputState} | null {
+	if (history.length === 0) return null;
+	const queryLower = query.toLowerCase();
+	const start = Math.min(startIndex, history.length - 1);
+	for (let i = start; i >= 0; i--) {
+		if (history[i].displayValue.toLowerCase().includes(queryLower)) {
+			return {index: i, match: history[i]};
+		}
+	}
+	return null;
+}
+
 interface ChatProps {
 	onSubmit?: (
 		message: string,
@@ -58,7 +74,7 @@ interface ChatProps {
 	disabled?: boolean; // Disable input when AI is processing
 	isBusy?: boolean; // True when in-flight work is cancellable; Escape is owned by the global handler, so it must not clear the input
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
-	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
+	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+g to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
 	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
@@ -141,6 +157,17 @@ export default function UserInput({
 	// True while mouse reporting is suspended so the terminal can select text.
 	const [selectionModeActive, setSelectionModeActive] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
+
+	// Reverse prompt search state (Ctrl+R / bck-i-search)
+	const [isReverseSearchMode, setIsReverseSearchMode] = useState(false);
+	const [reverseSearchQuery, setReverseSearchQuery] = useState('');
+	const [reverseSearchIndex, setReverseSearchIndex] = useState(-1);
+	const [reverseSearchMatch, setReverseSearchMatch] =
+		useState<InputState | null>(null);
+	const reverseSearchDraftRef = useRef<InputState>({
+		displayValue: '',
+		placeholderContent: {},
+	});
 
 	const {
 		input,
@@ -734,8 +761,8 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle ctrl+r to toggle expanded reasoning traces (always available)
-		if (key.ctrl && inputChar === 'r' && onToggleReasoningExpanded) {
+		// Handle ctrl+g to toggle expanded reasoning traces (always available)
+		if (key.ctrl && inputChar === 'g' && onToggleReasoningExpanded) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -768,6 +795,126 @@ export default function UserInput({
 
 		// Block all other input when disabled
 		if (disabled) {
+			return;
+		}
+
+		// Reverse prompt search mode (Ctrl+R / bck-i-search)
+		if (isReverseSearchMode) {
+			if (key.escape || (key.ctrl && inputChar === 'c')) {
+				// Cancel search, restore draft
+				setInputState(reverseSearchDraftRef.current);
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.return) {
+				// Accept match and exit search mode
+				if (reverseSearchMatch) {
+					setInputState(reverseSearchMatch);
+				}
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.ctrl && inputChar === 'r') {
+				// Cycle to next older match with current query (stop at oldest)
+				const history = promptHistory.getHistory();
+				if (history.length > 0 && reverseSearchIndex > 0) {
+					const olderMatch = findReverseMatch(
+						history,
+						reverseSearchQuery,
+						reverseSearchIndex - 1,
+					);
+					if (olderMatch) {
+						setReverseSearchIndex(olderMatch.index);
+						setReverseSearchMatch(olderMatch.match);
+					}
+				}
+				return;
+			}
+
+			if (key.backspace || key.delete) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery.slice(0, -1);
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			// Ignore other control/meta combinations while in search mode
+			if (key.ctrl || key.meta) {
+				return;
+			}
+
+			// Handle regular text typing into search query
+			if (
+				inputChar &&
+				inputChar.length >= 1 &&
+				!key.upArrow &&
+				!key.downArrow &&
+				!key.leftArrow &&
+				!key.rightArrow &&
+				!key.tab
+			) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery + inputChar;
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			return;
+		}
+
+		// Handle ctrl+r to enter reverse prompt search
+		if (key.ctrl && inputChar === 'r') {
+			const history = promptHistory.getHistory();
+			reverseSearchDraftRef.current = currentState;
+			setIsReverseSearchMode(true);
+			setReverseSearchQuery('');
+			setShowCompletions(false);
+			setIsFileAutocompleteMode(false);
+			setShowClearMessage(false);
+			const initialMatch = findReverseMatch(history, '', history.length - 1);
+			if (initialMatch) {
+				setReverseSearchIndex(initialMatch.index);
+				setReverseSearchMatch(initialMatch.match);
+			} else {
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+			}
 			return;
 		}
 
@@ -1043,23 +1190,61 @@ export default function UserInput({
 				borderLeftColor={isBashMode ? colors.tool : colors.primary}
 			>
 				{/* Input row */}
-				<Box>
-					{input.length === 0 && (
-						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-					)}
-					<TextInput
-						key={textInputKey}
-						value={input}
-						onChange={handleInputChange}
-						onEdgeArrow={handleHistoryNavigation}
-						onSubmit={handleSubmit}
-						onEnter={handleSubmit}
-						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={effectiveFocus}
-						wrapWidth={inputWrapWidth}
-						handleEnter={false}
-					/>
-				</Box>
+				{isReverseSearchMode ? (
+					<Box flexDirection="column">
+						<Box>
+							<Text
+								color={
+									reverseSearchMatch || reverseSearchQuery === ''
+										? colors.info
+										: colors.error
+								}
+								bold
+							>
+								{reverseSearchMatch || reverseSearchQuery === ''
+									? '(reverse-i-search)`'
+									: '(failed reverse-i-search)`'}
+							</Text>
+							<Text color={colors.primary} bold>
+								{reverseSearchQuery}
+							</Text>
+							<Text
+								color={
+									reverseSearchMatch || reverseSearchQuery === ''
+										? colors.info
+										: colors.error
+								}
+								bold
+							>
+								{"': "}
+							</Text>
+							<Text color={reverseSearchMatch ? textColor : colors.secondary}>
+								{reverseSearchMatch ? reverseSearchMatch.displayValue : ''}
+							</Text>
+						</Box>
+						<Text color={colors.secondary}>
+							Enter: select · Esc: cancel · Ctrl+R: cycle older
+						</Text>
+					</Box>
+				) : (
+					<Box>
+						{input.length === 0 && (
+							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+						)}
+						<TextInput
+							key={textInputKey}
+							value={input}
+							onChange={handleInputChange}
+							onEdgeArrow={handleHistoryNavigation}
+							onSubmit={handleSubmit}
+							onEnter={handleSubmit}
+							placeholder="/ commands, ! bash, ↑/↓ history"
+							focus={effectiveFocus}
+							wrapWidth={inputWrapWidth}
+							handleEnter={false}
+						/>
+					</Box>
+				)}
 
 				{showClearMessage && (
 					<Text color={colors.secondary}>Press escape again to clear</Text>

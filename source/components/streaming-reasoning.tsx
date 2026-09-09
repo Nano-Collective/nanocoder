@@ -54,7 +54,7 @@ export default memo(function StreamingReasoning({
 						{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 					</Text>
 				) : nonInteractive ? null : (
-					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
+					<Text color={colors.secondary}>{'  '}ctrl+g to expand</Text>
 				)}
 			</Box>
 			{expand && (

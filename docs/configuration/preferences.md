@@ -87,7 +87,7 @@ You can change this via `/settings` → **Behavior** → **Reasoning Traces**, o
 }
 ```
 
-Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
+Reasoning traces can also be toggled dynamically with the Ctrl+G keyboard shortcut.
 
 ### Usage and Cost Footer
 

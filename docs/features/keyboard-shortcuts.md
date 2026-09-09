@@ -79,6 +79,7 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
+| Reverse history search | Ctrl+R |
 
 ## During AI Response
 
@@ -92,5 +93,5 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
-| Toggle expanded reasoning traces | Ctrl+R |
+| Toggle expanded reasoning traces | Ctrl+G |
 | Toggle selection mode (fullscreen only) | Ctrl+P |

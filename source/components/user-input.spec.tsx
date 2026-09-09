@@ -6,7 +6,8 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {pasteEvents} from '../utils/terminal-paste';
-import UserInput from './user-input';
+import UserInput, {findReverseMatch} from './user-input';
+import {promptHistory} from '../prompt-history';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
 
@@ -860,6 +861,41 @@ test('UserInput does not insert a literal character when ctrl+t is pressed', asy
 	unmount();
 });
 
+test('UserInput calls onToggleReasoningExpanded when ctrl+g is pressed', async t => {
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onToggleReasoningExpanded={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0007');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput does not insert a literal character when ctrl+g is pressed', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleReasoningExpanded={() => {}} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hi');
+	await waitForFrame(lastFrame, /hi/);
+	stdin.write('\u0007');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /hig/);
+	unmount();
+});
+
 // ============================================================================
 // Command Completion Navigation Tests
 // ============================================================================
@@ -1161,6 +1197,233 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	await wait(100);
 
 	t.notRegex(lastFrame()!, /should not appear/);
+	unmount();
+});
+
+// ============================================================================
+// Reverse History Search (Ctrl+R / bck-i-search) Tests
+// ============================================================================
+
+test('findReverseMatch finds matches backwards from newest to oldest', t => {
+	const history = [
+		{displayValue: 'git log', placeholderContent: {}},
+		{displayValue: 'npm test', placeholderContent: {}},
+		{displayValue: 'git status', placeholderContent: {}},
+	];
+
+	// Search from newest (index 2)
+	const match1 = findReverseMatch(history, 'git', 2);
+	t.truthy(match1);
+	t.is(match1?.index, 2);
+	t.is(match1?.match.displayValue, 'git status');
+
+	// Search backwards from index 1
+	const match2 = findReverseMatch(history, 'git', 1);
+	t.truthy(match2);
+	t.is(match2?.index, 0);
+	t.is(match2?.match.displayValue, 'git log');
+
+	// Search non-matching
+	const matchNone = findReverseMatch(history, 'python', 2);
+	t.is(matchNone, null);
+});
+
+test('findReverseMatch is case-insensitive', t => {
+	const history = [
+		{displayValue: 'Git Commit -m "feat"', placeholderContent: {}},
+	];
+	const match = findReverseMatch(history, 'git commit', 0);
+	t.truthy(match);
+	t.is(match?.match.displayValue, 'Git Commit -m "feat"');
+});
+
+test.serial('UserInput enters reverse prompt search on ctrl+r and displays matched prompt', async t => {
+	promptHistory.addPrompt('seed alpha prompt');
+	promptHistory.addPrompt('seed beta prompt');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /seed beta prompt/);
+	t.regex(lastFrame()!, /\(reverse-i-search\)`/);
+	unmount();
+});
+
+test.serial('UserInput filters history during reverse search as query is typed', async t => {
+	promptHistory.addPrompt('special deploy command');
+	promptHistory.addPrompt('common test command');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('deploy');
+	await waitForFrame(lastFrame, /special deploy command/);
+	t.regex(stripAnsi(lastFrame() ?? ''), /\(reverse-i-search\)`deploy':/);
+	unmount();
+});
+
+test.serial('UserInput cycles older matches on repeated ctrl+r', async t => {
+	promptHistory.addPrompt('echo first unique');
+	promptHistory.addPrompt('echo second unique');
+	promptHistory.addPrompt('echo third unique');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('echo');
+	await waitForFrame(lastFrame, /echo third unique/);
+
+	// Press Ctrl+R to cycle to older match
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /echo second unique/);
+
+	// Press Ctrl+R again to cycle to oldest match
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /echo first unique/);
+
+	// Press Ctrl+R again - stops at oldest match
+	stdin.write('\u0012');
+	await wait(50);
+	t.regex(lastFrame()!, /echo first unique/);
+
+	unmount();
+});
+
+test.serial('UserInput commits matched prompt into input on Enter', async t => {
+	promptHistory.addPrompt('confirmed reusable command');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('reusable');
+	await waitForFrame(lastFrame, /confirmed reusable command/);
+
+	// Press Enter to accept
+	stdin.write('\r');
+	await wait(50);
+
+	// Search UI should be dismissed and input should contain the accepted prompt
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /confirmed reusable command/);
+	unmount();
+});
+
+test.serial('UserInput cancels reverse search on Escape and restores original draft', async t => {
+	promptHistory.addPrompt('history command to ignore');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	// Type initial draft
+	stdin.write('my in-progress draft');
+	await waitForFrame(lastFrame, /my in-progress draft/);
+
+	// Open reverse search
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// Press Escape to cancel
+	stdin.write('\u001b');
+	await wait(50);
+
+	// Search UI should be dismissed and draft restored
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /my in-progress draft/);
+	unmount();
+});
+
+test.serial('UserInput shows failed reverse search and handles backspace in search mode', async t => {
+	promptHistory.addPrompt('unique testing match');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// Type non-matching character
+	stdin.write('z');
+	await waitForFrame(lastFrame, /failed reverse-i-search/);
+	t.regex(
+		stripAnsi(lastFrame() ?? ''),
+		/\(failed reverse-i-search\)`z':/,
+	);
+
+	// Backspace to remove non-matching character, restoring empty query
+	stdin.write('\u0008');
+	await waitForCondition(() => /`':/.test(stripAnsi(lastFrame() ?? '')));
+
+	// Type matching query
+	stdin.write('testing');
+	await waitForCondition(() =>
+		/`testing':/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	t.regex(lastFrame()!, /unique testing match/);
+	unmount();
+});
+
+test.serial('UserInput cancels reverse search on ctrl+c and restores original draft', async t => {
+	promptHistory.addPrompt('some prompt in history');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('active draft text');
+	await waitForFrame(lastFrame, /active draft text/);
+
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// Ctrl+C (ASCII 3) cancels search mode
+	stdin.write('\u0003');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /active draft text/);
 	unmount();
 });
 
