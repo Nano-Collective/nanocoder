@@ -1204,6 +1204,11 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 // Reverse History Search (Ctrl+R / bck-i-search) Tests
 // ============================================================================
 
+test.beforeEach(async () => {
+	await promptHistory.clearHistory();
+	await promptHistory.loadHistory();
+});
+
 test('findReverseMatch finds matches backwards from newest to oldest', t => {
 	const history = [
 		{displayValue: 'git log', placeholderContent: {}},
