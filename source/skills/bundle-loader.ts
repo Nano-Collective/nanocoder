@@ -280,6 +280,7 @@ async function loadCommandMembers(
 			fullName,
 			metadata: entry.parsed.metadata,
 			content: entry.parsed.content,
+			source: 'project',
 		};
 		loaded.push({
 			member: {command, filePath: entry.filePath},
