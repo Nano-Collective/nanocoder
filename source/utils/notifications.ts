@@ -1,4 +1,4 @@
-import {execFile, execSync} from 'child_process';
+import childProcess, {execSync} from 'child_process';
 import {existsSync} from 'fs';
 import {basename, dirname, join} from 'path';
 import {fileURLToPath} from 'url';
@@ -90,8 +90,14 @@ function getTerminalNotifierPath(): string | null {
 	return _terminalNotifierPath;
 }
 
-function escapeAppleScript(str: string): string {
-	return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+export function buildDarwinNotificationArgs(
+	title: string,
+	message: string,
+	sound = false,
+): string[] {
+	const soundClause = sound ? ' sound name "default"' : '';
+	const script = `on run argv\n  display notification (item 2 of argv) with title (item 1 of argv)${soundClause}\nend run`;
+	return ['-e', script, title, message];
 }
 
 function sendDarwin(title: string, message: string): void {
@@ -106,7 +112,7 @@ function sendDarwin(title: string, message: string): void {
 		if (_config.sound) {
 			args.push('-sound', 'default');
 		}
-		execFile(tnPath, args, () => {});
+		childProcess.execFile(tnPath, args, () => {});
 		return;
 	}
 
@@ -118,12 +124,13 @@ function sendDarwin(title: string, message: string): void {
 		);
 	}
 
-	// Fallback to osascript
-	const escapedTitle = escapeAppleScript(title);
-	const escapedMessage = escapeAppleScript(message);
-	const sound = _config.sound ? ' sound name "default"' : '';
-	const script = `display notification "${escapedMessage}" with title "${escapedTitle}"${sound}`;
-	execFile('osascript', ['-e', script], () => {});
+	// Fallback to osascript with out-of-band arguments
+	const args = buildDarwinNotificationArgs(
+		title,
+		message,
+		Boolean(_config.sound),
+	);
+	childProcess.execFile('osascript', args, () => {});
 }
 
 function sendLinux(title: string, message: string): void {
@@ -133,7 +140,7 @@ function sendLinux(title: string, message: string): void {
 		args.push('-i', iconPath);
 	}
 	args.push(title, message);
-	execFile('notify-send', args, () => {});
+	childProcess.execFile('notify-send', args, () => {});
 }
 
 function sendWindows(title: string, message: string): void {
@@ -148,7 +155,11 @@ $notify.ShowBalloonTip(5000)
 Start-Sleep -Seconds 1
 $notify.Dispose()
 `;
-	execFile('powershell', ['-NoProfile', '-Command', script], () => {});
+	childProcess.execFile(
+		'powershell',
+		['-NoProfile', '-Command', script],
+		() => {},
+	);
 }
 
 // A terminal bell is delivered by the terminal emulator itself, so it still
