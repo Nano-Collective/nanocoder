@@ -9,6 +9,7 @@ import {
 	getDefaultConfigDir,
 	getDiscoveryFilePath,
 	generateServerToken,
+	isProcessAlive,
 	readDiscoveryFile,
 	safeEqualToken,
 	writeDiscoveryFile,
@@ -48,7 +49,6 @@ function withIsolatedConfigDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 test('safeEqualToken returns true for matching tokens', t => {
 	t.true(safeEqualToken('hunter2', 'hunter2'));
-	t.true(safeEqualToken('', ''));
 	t.true(safeEqualToken('a'.repeat(64), 'a'.repeat(64)));
 });
 
@@ -64,6 +64,14 @@ test('safeEqualToken returns false for tokens of different lengths without leaki
 	t.false(safeEqualToken('hunter2', 'hunter22'));
 	t.false(safeEqualToken('', 'x'));
 	t.false(safeEqualToken('x', ''));
+});
+
+test('safeEqualToken returns true for two empty strings', t => {
+	// Two equal empty strings do compare equal; this is a property of the
+	// constant-time primitive, not an authorisation property. The
+	// empty-token guard lives one level up, in verifyClient's
+	// `if (!provided)` check (and in the server constructor's `||`).
+	t.true(safeEqualToken('', ''));
 });
 
 // ============================================================================
@@ -117,6 +125,21 @@ test('generateServerToken produces different tokens each call', t => {
 });
 
 // ============================================================================
+// isProcessAlive
+// ============================================================================
+
+test('isProcessAlive returns true for the current process', t => {
+	t.true(isProcessAlive(process.pid));
+});
+
+test('isProcessAlive returns false for non-positive PIDs', t => {
+	t.false(isProcessAlive(0));
+	t.false(isProcessAlive(-1));
+	t.false(isProcessAlive(Number.NaN));
+	t.false(isProcessAlive(Number.POSITIVE_INFINITY));
+});
+
+// ============================================================================
 // writeDiscoveryFile + readDiscoveryFile round-trip
 // ============================================================================
 
@@ -129,7 +152,7 @@ test('writeDiscoveryFile creates the parent directory if missing', async t => {
 			version: 1,
 			port: 51820,
 			token: 'abc',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1.0.0',
 			startedAt: 0,
 		});
@@ -144,7 +167,7 @@ test('writeDiscoveryFile + readDiscoveryFile round-trips every field', async t =
 			version: 1,
 			port: 51821,
 			token: 'round-trip-token',
-			pid: 4242,
+			pid: process.pid,
 			cliVersion: '1.30.0',
 			startedAt: 1_700_000_000_000,
 		};
@@ -165,7 +188,7 @@ test('writeDiscoveryFile persists restrictive 0600 permissions on POSIX', async 
 			version: 1,
 			port: 1,
 			token: 'x',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1',
 			startedAt: 0,
 		});
@@ -182,7 +205,7 @@ test('writeDiscoveryFile overwrites an existing file atomically', async t => {
 			version: 1,
 			port: 1,
 			token: 'old',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1',
 			startedAt: 0,
 		});
@@ -190,7 +213,7 @@ test('writeDiscoveryFile overwrites an existing file atomically', async t => {
 			version: 1,
 			port: 2,
 			token: 'new',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1',
 			startedAt: 0,
 		});
@@ -220,7 +243,7 @@ test('writeDiscoveryFile cleans up the temp file when rename fails', async t => 
 					version: 1,
 					port: 1,
 					token: 'should-fail',
-					pid: 1,
+					pid: process.pid,
 					cliVersion: '1',
 					startedAt: 0,
 				}),
@@ -258,6 +281,41 @@ test('readDiscoveryFile returns null for invalid JSON', async t => {
 	});
 });
 
+test('readDiscoveryFile returns null for a stale file (PID no longer alive)', async t => {
+	await withIsolatedConfigDir(async dir => {
+		const filePath = join(dir, 'vscode-server.json');
+		// Pick a PID that is overwhelmingly unlikely to be in use. PID 1 is
+		// `init` on Linux and `launchd` on macOS - not what we want. Use a
+		// very large PID instead; the kernel will not have it.
+		await writeDiscoveryFile(filePath, {
+			version: 1,
+			port: 51820,
+			token: 'stale-token',
+			pid: 4_000_000,
+			cliVersion: '1.0.0',
+			startedAt: 0,
+		});
+		t.is(await readDiscoveryFile(filePath), null, 'stale file must look missing');
+	});
+});
+
+test('readDiscoveryFile returns the entry when the recorded PID is alive', async t => {
+	await withIsolatedConfigDir(async () => {
+		const filePath = getDiscoveryFilePath();
+		await writeDiscoveryFile(filePath, {
+			version: 1,
+			port: 51820,
+			token: 'live-token',
+			pid: process.pid,
+			cliVersion: '1.0.0',
+			startedAt: 0,
+		});
+		const read = await readDiscoveryFile(filePath);
+		t.truthy(read);
+		t.is(read?.token, 'live-token');
+	});
+});
+
 // ============================================================================
 // clearDiscoveryFile
 // ============================================================================
@@ -269,7 +327,7 @@ test('clearDiscoveryFile removes an existing file', async t => {
 			version: 1,
 			port: 1,
 			token: 'x',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1',
 			startedAt: 0,
 		});
@@ -287,6 +345,42 @@ test('clearDiscoveryFile is a no-op when the file is already gone', async t => {
 	});
 });
 
+test('clearDiscoveryFile leaves the file alone when owned by another PID', async t => {
+	// Regression for the multi-instance bug: previously, two servers
+	// sharing the same global discovery-file path would clobber each other
+	// on shutdown - whichever instance called stop() last would unlink the
+	// file belonging to the still-live other instance.
+	await withIsolatedConfigDir(async dir => {
+		const filePath = join(dir, 'vscode-server.json');
+		await writeDiscoveryFile(filePath, {
+			version: 1,
+			port: 51820,
+			token: 'belongs-to-elsewhere',
+			pid: 4_000_000, // not us
+			cliVersion: '1.0.0',
+			startedAt: 0,
+		});
+		await clearDiscoveryFile(filePath, process.pid);
+		t.true(existsSync(filePath), 'file owned by another PID must survive');
+	});
+});
+
+test('clearDiscoveryFile removes the file when expectedPid matches', async t => {
+	await withIsolatedConfigDir(async dir => {
+		const filePath = join(dir, 'vscode-server.json');
+		await writeDiscoveryFile(filePath, {
+			version: 1,
+			port: 51820,
+			token: 'belongs-to-us',
+			pid: process.pid,
+			cliVersion: '1.0.0',
+			startedAt: 0,
+		});
+		await clearDiscoveryFile(filePath, process.pid);
+		t.false(existsSync(filePath));
+	});
+});
+
 // ============================================================================
 // Security: VSCodeServer rejects unauthenticated / cross-origin handshakes.
 // These are the regression tests for the bug in
@@ -298,8 +392,13 @@ function getNextPort(): number {
 	return testPort++;
 }
 
-function authenticatedUrl(port: number, token: string): string {
-	return `ws://127.0.0.1:${port}?token=${encodeURIComponent(token)}`;
+/**
+ * Build the headers object an authenticated client should send. The token
+ * travels in an `Authorization: Bearer <token>` header rather than in the
+ * URL query string, so URL logs and access logs do not leak it.
+ */
+function authenticatedHeaders(token: string): Record<string, string> {
+	return {Authorization: `Bearer ${token}`};
 }
 
 /**
@@ -307,7 +406,10 @@ function authenticatedUrl(port: number, token: string): string {
  * first). Returns true if the handshake completed; false if the server
  * rejected us. Always tears down the socket before returning.
  */
-function attemptConnect(url: string, options: {headers?: Record<string, string>} = {}): Promise<boolean> {
+function attemptConnect(
+	url: string,
+	options: {headers?: Record<string, string>} = {},
+): Promise<boolean> {
 	return new Promise<boolean>(resolve => {
 		const ws = new WebSocket(url, options);
 		let resolved = false;
@@ -337,7 +439,10 @@ test('VSCodeServer rejects handshakes that include an Origin header', async t =>
 		await server.start();
 
 		const accepted = await attemptConnect(`ws://127.0.0.1:${port}`, {
-			headers: {Origin: 'https://evil.example'},
+			headers: {
+				Origin: 'https://evil.example',
+				Authorization: `Bearer ${token}`,
+			},
 		});
 		t.false(accepted, 'Origin-bearing handshake must be refused');
 
@@ -366,7 +471,10 @@ test('VSCodeServer rejects handshakes with a wrong token', async t => {
 		const server = new VSCodeServer(port, {token});
 		await server.start();
 
-		const accepted = await attemptConnect(authenticatedUrl(port, 'wrong-token'));
+		const accepted = await attemptConnect(
+			`ws://127.0.0.1:${port}`,
+			{headers: authenticatedHeaders('wrong-token')},
+		);
 		t.false(accepted, 'Mismatched token must be refused');
 
 		await server.stop();
@@ -380,7 +488,10 @@ test('VSCodeServer accepts a handshake with the right token and no Origin', asyn
 		const server = new VSCodeServer(port, {token});
 		await server.start();
 
-		const accepted = await attemptConnect(authenticatedUrl(port, token));
+		const accepted = await attemptConnect(
+			`ws://127.0.0.1:${port}`,
+			{headers: authenticatedHeaders(token)},
+		);
 		t.true(accepted, 'Correct token without Origin must be accepted');
 
 		await server.stop();
@@ -394,9 +505,15 @@ test('VSCodeServer rejects a correct token when Origin is also present', async t
 		const server = new VSCodeServer(port, {token});
 		await server.start();
 
-		const accepted = await attemptConnect(authenticatedUrl(port, token), {
-			headers: {Origin: 'https://evil.example'},
-		});
+		const accepted = await attemptConnect(
+			`ws://127.0.0.1:${port}`,
+			{
+				headers: {
+					Origin: 'https://evil.example',
+					Authorization: `Bearer ${token}`,
+				},
+			},
+		);
 		t.false(
 			accepted,
 			'A correct token must not override the Origin prohibition',
@@ -406,17 +523,18 @@ test('VSCodeServer rejects a correct token when Origin is also present', async t
 	});
 });
 
-test('VSCodeServer accepts a token-bearing URL even without a query-string delimiter', async t => {
+test('VSCodeServer accepts a token with Bearer prefix in Authorization header', async t => {
 	const port = getNextPort();
-	const token = 'unique-no-query';
+	const token = 'bearer-prefix';
 	await withIsolatedConfigDir(async () => {
 		const server = new VSCodeServer(port, {token});
 		await server.start();
 
 		const accepted = await attemptConnect(
-			`ws://127.0.0.1:${port}?token=${token}`,
+			`ws://127.0.0.1:${port}`,
+			{headers: authenticatedHeaders(token)},
 		);
-		t.true(accepted, 'A simple ?token=... URL must be accepted');
+		t.true(accepted, 'Bearer-prefixed Authorization header must be accepted');
 
 		await server.stop();
 	});
@@ -426,15 +544,26 @@ test('VSCodeServer rejects handshakes when the token is empty', async t => {
 	const port = getNextPort();
 	const token = 'opposite';
 	await withIsolatedConfigDir(async () => {
-		// Note the empty token: the server should still refuse.
 		const server = new VSCodeServer(port, {token});
 		await server.start();
 
-		const accepted = await attemptConnect(authenticatedUrl(port, ''));
-		t.false(accepted, 'Empty token must be refused');
+		const accepted = await attemptConnect(
+			`ws://127.0.0.1:${port}`,
+			{headers: {Authorization: 'Bearer '}},
+		);
+		t.false(accepted, 'Empty bearer token must be refused');
 
 		await server.stop();
 	});
+});
+
+test('VSCodeServer constructor rejects empty-string token and falls back to a generated one', t => {
+	// The constructor must not be tricked into producing an empty bearer
+	// token by passing `''` through the options bag. `??` would have let
+	// `''` through; `||` is what we want.
+	const server = new VSCodeServer(0, {token: ''});
+	t.not(server.getToken(), '');
+	t.is(server.getToken().length, 64);
 });
 
 // ============================================================================
@@ -479,11 +608,13 @@ test('Ephemeral mode binds an OS-chosen port and writes a discovery file', async
 test('Stop clears the discovery file even when it pre-existed', async t => {
 	await withIsolatedConfigDir(async () => {
 		const filePath = getDiscoveryFilePath();
+		// Pre-existing file owned by another PID would be left alone; here
+		// we write it owned by us, so stop() should unlink it.
 		await writeDiscoveryFile(filePath, {
 			version: 1,
 			port: 1,
 			token: 'pre-existing',
-			pid: 1,
+			pid: process.pid,
 			cliVersion: '1',
 			startedAt: 0,
 		});
@@ -499,25 +630,68 @@ test('Stop clears the discovery file even when it pre-existed', async t => {
 	});
 });
 
+test('Stop leaves a discovery file alone when another process owns it', async t => {
+	// Two CLI processes share the same global discovery-file path. A
+	// starts and writes its own entry; between A's start() and stop(),
+	// process B overwrites the file with B's PID. A.stop() must not
+	// unlink B's file - that would orphan B's still-listening server
+	// and brick the extension until the next start().
+	await withIsolatedConfigDir(async dir => {
+		const filePath = getDiscoveryFilePath();
+
+		const serverA = new VSCodeServer(0);
+		await serverA.start();
+
+		// Simulate another live process taking ownership of the file.
+		await writeDiscoveryFile(filePath, {
+			version: 1,
+			port: 51820,
+			token: 'belongs-to-other-process',
+			pid: 4_000_000, // not us
+			cliVersion: '1.0.0',
+			startedAt: 0,
+		});
+
+		await serverA.stop();
+		t.true(existsSync(filePath), 'foreign file must survive our stop()');
+		// The on-disk file must still describe the foreign process; we
+		// read it raw here because readDiscoveryFile applies stale-detection
+		// (and our foreign pid is intentionally not alive).
+		const {readFile} = await import('node:fs/promises');
+		const raw = JSON.parse(await readFile(filePath, 'utf-8'));
+		t.is(raw.token, 'belongs-to-other-process');
+		t.is(raw.pid, 4_000_000);
+	});
+});
+
 test('Discovery file failure does not abort server start', async t => {
-	await withIsolatedConfigDir(async () => {
-		const server = new VSCodeServer(0);
-		// Force the publish path to throw by handing the constructor a bogus
-		// config-dir location: a path *under* an unwritable directory.
-		const {rename} = await import('node:fs/promises');
-		const realRename = rename;
-		const stubDir = '/nonexistent-path-that-cannot-be-created/nanocoder';
-		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
-		process.env.NANOCODER_CONFIG_DIR = stubDir;
+	// Regression for the nc-review finding that this test used to be
+	// vacuous: it set NANOCODER_CONFIG_DIR to a path whose parent it
+	// expected mkdir to fail on, but on a writable / the mkdir succeeds
+	// and the test exercised the happy path. Now we make the failure real
+	// by chmod'ing the config dir read-only before the server starts;
+	// writeFile then throws EACCES and the catch in publishDiscovery is
+	// exercised.
+	if (process.platform === 'win32') {
+		t.pass('POSIX permission test skipped on Windows');
+		return;
+	}
+
+	await withIsolatedConfigDir(async dir => {
+		const {chmodSync} = await import('node:fs');
+		chmodSync(dir, 0o555); // read+execute, no write
+		let server: VSCodeServer | null = null;
+		let started: boolean;
 		try {
-			// Server should still bind its port and report success even though
-			// it cannot publish the discovery file.
-			const started = await server.start();
-			t.true(started);
+			server = new VSCodeServer(0);
+			started = await server.start();
 		} finally {
-			process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
-			realRename; // referenced only to silence unused-locals
+			chmodSync(dir, 0o755); // restore so withIsolatedConfigDir can rm
 		}
-		await server.stop();
+		t.true(
+			started,
+			'server should still bind its port even when the discovery file cannot be written',
+		);
+		await server?.stop();
 	});
 });

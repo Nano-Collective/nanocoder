@@ -16,7 +16,6 @@ export class WebSocketClient {
 	private messageHandlers: Set<MessageHandler> = new Set();
 	private isConnecting = false;
 	private shouldReconnect = true;
-	private lastUrl: string | null = null;
 
 	constructor(private outputChannel: vscode.OutputChannel) {}
 
@@ -39,19 +38,20 @@ export class WebSocketClient {
 			return false;
 		}
 
-		const {url, source, token} = await this.resolveConnection(port);
+		const {url, headers, source, hasToken} = await this.resolveConnection(
+			port,
+		);
 
 		this.isConnecting = true;
 		this.shouldReconnect = true;
 
 		return new Promise(resolve => {
 			try {
-				this.lastUrl = url;
 				this.outputChannel.appendLine(
-					`Connecting to ${url} (via ${source}, token ${token ? 'present' : 'absent'})...`,
+					`Connecting to ${sanitizeUrl(url)} (via ${source}, token ${hasToken ? 'present' : 'absent'})...`,
 				);
 
-				this.ws = new WebSocket(url);
+				this.ws = new WebSocket(url, {headers});
 
 				this.ws.on('open', () => {
 					this.isConnecting = false;
@@ -101,35 +101,56 @@ export class WebSocketClient {
 	}
 
 	/**
-	 * Build the WebSocket URL and capture the source we read it from. Order
-	 * of preference:
-	 *   1. Discovery file under the user's nanocoder config dir.
-	 *   2. `nanocoder.serverPort` setting with no token (legacy path).
+	 * Build the WebSocket URL, headers, and capture the source we read them
+	 * from. Order of preference:
 	 *
-	 * Always append `?token=...` when we have a token, never when we do not -
-	 * an empty token would otherwise look like a missing one and the new
-	 * server would (correctly) reject the handshake.
+	 *   1. Discovery file under the user's nanocoder config dir. The token
+	 *      is sent in an `Authorization: Bearer <token>` header so it never
+	 *      appears in URL bars or access logs.
+	 *   2. `nanocoder.serverToken` setting combined with
+	 *      `nanocoder.serverPort`. This is the escape hatch for SSH-style
+	 *      set-ups where the discovery file lives on the remote host: paste
+	 *      the token in manually.
+	 *   3. `nanocoder.serverPort` setting with no token (legacy path). The
+	 *      new server will refuse the handshake.
 	 */
 	private async resolveConnection(
 		fallbackPort: number,
-	): Promise<{url: string; source: string; token: string}> {
+	): Promise<{
+		url: string;
+		headers: Record<string, string>;
+		source: string;
+		hasToken: boolean;
+	}> {
 		const filePath = getDiscoveryFilePath();
 		const discovery = await readDiscoveryFile(filePath);
-		if (discovery && typeof discovery.port === 'number') {
-			const tokenQuery = discovery.token
-				? `?token=${encodeURIComponent(discovery.token)}`
-				: '';
+		if (discovery && typeof discovery.port === 'number' && discovery.token) {
 			return {
-				url: `ws://127.0.0.1:${discovery.port}${tokenQuery}`,
+				url: `ws://127.0.0.1:${discovery.port}`,
+				headers: {Authorization: `Bearer ${discovery.token}`},
 				source: `discovery file (${filePath})`,
-				token: discovery.token,
+				hasToken: true,
+			};
+		}
+
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		const configuredToken = readStringSetting(config, 'serverToken');
+		if (configuredToken) {
+			const configuredPort = readNumberSetting(config, 'serverPort');
+			const port = configuredPort ?? fallbackPort;
+			return {
+				url: `ws://127.0.0.1:${port}`,
+				headers: {Authorization: `Bearer ${configuredToken}`},
+				source: `nanocoder.serverToken + nanocoder.serverPort setting`,
+				hasToken: true,
 			};
 		}
 
 		return {
 			url: `ws://127.0.0.1:${fallbackPort}`,
+			headers: {},
 			source: 'nanocoder.serverPort setting (legacy, no token)',
-			token: '',
+			hasToken: false,
 		};
 	}
 
@@ -168,11 +189,6 @@ export class WebSocketClient {
 		return this.ws?.readyState === WebSocket.OPEN;
 	}
 
-	/** Last URL we tried to connect to; useful for diagnostics. */
-	getLastUrl(): string | null {
-		return this.lastUrl;
-	}
-
 	private handleMessage(message: ServerMessage): void {
 		this.messageHandlers.forEach(handler => {
 			try {
@@ -205,3 +221,28 @@ export class WebSocketClient {
 	}
 }
 
+function readStringSetting(
+	config: vscode.WorkspaceConfiguration,
+	key: string,
+): string {
+	const value = config.get<string | undefined>(key);
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+function readNumberSetting(
+	config: vscode.WorkspaceConfiguration,
+	key: string,
+): number | undefined {
+	const value = config.get<number | undefined>(key);
+	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Strip any query string from a URL so it is safe to drop into a log line
+ * or the output channel. Output channels are the first thing users paste
+ * into bug reports, so we never want to leak the bearer token through one.
+ */
+function sanitizeUrl(url: string): string {
+	const queryIndex = url.indexOf('?');
+	return queryIndex === -1 ? url : `${url.slice(0, queryIndex)}?<redacted>`;
+}

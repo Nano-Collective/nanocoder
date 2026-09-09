@@ -94,12 +94,12 @@ export interface VSCodeServerCallbacks {
  *
  * `token` is normally generated internally so callers do not have to think
  * about it. Tests and integrators that want to drive a deterministic value
- * (e.g. to share it with a synthetic client) may pass one explicitly.
+ * (e.g. to share it with a synthetic client) may pass one explicitly. The
+ * value must be a non-empty string; passing `''` causes a fresh token to be
+ * generated so an empty-token handshake is never accepted.
  */
 export interface VSCodeServerOptions {
 	token?: string;
-	/** Override the discovery-file location; defaults to {@link getConfigPath}. */
-	discoveryFilePath?: string;
 }
 
 export class VSCodeServer {
@@ -120,7 +120,10 @@ export class VSCodeServer {
 
 	constructor(port: number = DEFAULT_PORT, options: VSCodeServerOptions = {}) {
 		this.port = port;
-		this.token = options.token ?? generateServerToken();
+		// Use `||` (not `??`) so an empty-string option is treated as "no token"
+		// and a fresh one is generated; this prevents the constructor from
+		// ever producing a server with an empty bearer token.
+		this.token = options.token || generateServerToken();
 		// Port 0 is the conventional way to ask the kernel for a free port.
 		this.ephemeral = port === 0;
 	}
@@ -157,36 +160,44 @@ export class VSCodeServer {
 	}
 
 	/**
-	 * Extract the bearer token from a WebSocket upgrade URL. Accepts it as
-	 * the `?token=...` query parameter. Headers are inspected separately.
+	 * Extract the bearer token from the `Authorization` header on a
+	 * WebSocket upgrade. Accepts both `Bearer <token>` and the bare token;
+	 * empty/whitespace values are rejected.
+	 *
+	 * We deliberately use a header rather than a `?token=...` query parameter
+	 * because query strings get logged by HTTP intermediaries in a way headers
+	 * do not. Loopback has none of those intermediaries today, but the
+	 * rationale still applies if anything TLS-terminating is ever fronted in.
 	 */
-	private extractTokenFromUrl(url: string | undefined): string | null {
-		if (!url) return null;
-		const queryIndex = url.indexOf('?');
-		if (queryIndex === -1) return null;
-		const query = url.slice(queryIndex + 1);
-		for (const pair of query.split('&')) {
-			const eq = pair.indexOf('=');
-			if (eq === -1) continue;
-			const key = pair.slice(0, eq);
-			if (key !== 'token') continue;
-			let value = pair.slice(eq + 1);
-			try {
-				value = decodeURIComponent(value);
-			} catch {
-				// Leave the value as-is; safeEqualToken will just reject it.
-			}
-			return value;
+	private extractTokenFromHeader(
+		headers: Record<string, string | string[] | undefined>,
+	): string | null {
+		const raw = headers.authorization ?? headers.Authorization;
+		if (!raw) return null;
+		const value = Array.isArray(raw) ? raw[0] : raw;
+		if (typeof value !== 'string') return null;
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+		const bearerPrefix = 'Bearer ';
+		if (
+			trimmed.length > bearerPrefix.length &&
+			trimmed.slice(0, bearerPrefix.length).toLowerCase() ===
+				bearerPrefix.toLowerCase()
+		) {
+			const candidate = trimmed.slice(bearerPrefix.length).trim();
+			return candidate || null;
 		}
-		return null;
+		// Allow the raw token for tests and integrators that opt out of the
+		// `Bearer` prefix; the constant-time comparison still applies.
+		return trimmed;
 	}
 
 	/**
 	 * verifyClient hook for the underlying `ws` server. Enforces:
 	 *   1. No `Origin` header — a browser tab is the only thing that would
 	 *      send one, and our legitimate client is a Node `ws` connection.
-	 *   2. A token query-string parameter (`?token=...`) that matches the
-	 *      one we minted at startup, compared in constant time.
+	 *   2. A token-bearing `Authorization` header that matches the one we
+	 *      minted at startup, compared in constant time.
 	 *
 	 * Returning `false` causes `ws` to send a 401 close, before the
 	 * handshake completes. Returning `true` accepts the upgrade.
@@ -194,7 +205,7 @@ export class VSCodeServer {
 	private verifyClient(info: {
 		origin: string | undefined;
 		secure: boolean;
-		req: {url?: string};
+		req: {headers: Record<string, string | string[] | undefined>};
 	}): boolean {
 		if (info.origin) {
 			getLogger().warn(
@@ -204,7 +215,7 @@ export class VSCodeServer {
 			return false;
 		}
 
-		const provided = this.extractTokenFromUrl(info.req.url);
+		const provided = this.extractTokenFromHeader(info.req.headers);
 		if (!provided) {
 			getLogger().warn('Rejected VS Code companion connection: missing token');
 			return false;
@@ -231,7 +242,7 @@ export class VSCodeServer {
 					verifyClient: (info: {
 						origin: string | undefined;
 						secure: boolean;
-						req: {url?: string};
+						req: {headers: Record<string, string | string[] | undefined>};
 					}) => this.verifyClient(info),
 				});
 
@@ -350,8 +361,8 @@ export class VSCodeServer {
 		} catch (error) {
 			// Discovery file is a best-effort convenience for the extension.
 			// The connection will still be authenticated (the extension can
-			// be configured to provide the token manually), so do not fail
-			// the server start.
+			// be configured to provide the token manually via
+			// `nanocoder.serverToken`), so do not fail the server start.
 			getLogger().error(
 				{error: formatError(error)},
 				'Failed to write VS Code companion discovery file',
@@ -363,7 +374,12 @@ export class VSCodeServer {
 		const filePath = this.discoveryFilePath;
 		if (!filePath) return;
 		try {
-			await clearDiscoveryFile(filePath);
+			// Only unlink if the file still describes this process. A
+			// concurrent instance that took over the global discovery-file
+			// path during our lifetime owns it now; touching it would orphan
+			// the still-live server and brick the extension until the next
+			// start() overwrites the file.
+			await clearDiscoveryFile(filePath, process.pid);
 			getLogger().info({filePath}, 'Cleared VS Code companion discovery file');
 		} catch (error) {
 			getLogger().error(
@@ -386,7 +402,8 @@ export class VSCodeServer {
 		this.clients.clear();
 
 		// Always remove the discovery file before the server actually closes.
-		// If we crash mid-stop, the next start() will overwrite the stale entry.
+		// If we crash mid-stop, the next start() will overwrite the stale entry
+		// (the stale-detection logic on read also rejects it).
 		await this.unpublishDiscovery();
 
 		// Close server

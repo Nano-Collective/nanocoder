@@ -10,6 +10,7 @@ export {
 	clearDiscoveryFile,
 	getDefaultConfigDir,
 	getDiscoveryFilePath,
+	isProcessAlive,
 	readDiscoveryFile,
 	type ServerDiscovery,
 	VSCODE_DISCOVERY_FILENAME,

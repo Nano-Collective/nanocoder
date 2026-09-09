@@ -14,6 +14,7 @@ export {
 	generateServerToken,
 	getDefaultConfigDir,
 	getDiscoveryFilePath,
+	isProcessAlive,
 	readDiscoveryFile,
 	type ServerDiscovery,
 	safeEqualToken,

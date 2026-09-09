@@ -6,11 +6,23 @@
  * well-known JSON file under the user's nanocoder config directory. The VS
  * Code extension reads the file to learn where (and how) to connect.
  *
- * Publishing the port and token together replaces the old fixed-port fallback
- * scan with a discovery step. Anyone who can read the user's config directory
- * can already access anything else on the machine, so this does not weaken the
- * security boundary; it merely keeps the token off the wire during the
- * upgrade, where a passive observer could otherwise pick it up.
+ * Threat model
+ * ------------
+ * Anyone who can read the user's config directory can already act as that
+ * user on the same machine, so writing the token to disk does not widen the
+ * trust boundary: the only adversary it protects against is one who can
+ * observe the loopback network traffic but cannot read the user's files.
+ * The token therefore lives in an `Authorization: Bearer <token>` header
+ * during the WebSocket upgrade, never in the URL. Query strings are routinely
+ * logged by HTTP intermediaries; loopback has none of those but using a
+ * header keeps the rationale honest and the door closed if anything TLS-
+ * terminating ever sits in front of the socket.
+ *
+ * Stale detection
+ * ---------------
+ * Each file records the PID of the CLI that wrote it. On read we ask the
+ * kernel whether that PID is still alive; if not, the file is treated as
+ * missing so a crashed CLI cannot hold the port hostage.
  *
  * This module is intentionally self-contained (no `@/...` aliases) so the VS
  * Code extension can bundle it via esbuild without having to teach the
@@ -65,9 +77,9 @@ export function generateServerToken(): string {
  * so the writer (CLI) and reader (extension) agree on the location without
  * either having to import the shared `paths` module.
  *
- * Mirrors {@link import('@/config/paths').getConfigPath} so the two sides
- * stay in sync without sharing code at build time. Update both if a new
- * platform rule is added.
+ * Mirrors `getConfigPath` from `@/config/paths` so the two sides stay in
+ * sync without sharing code at build time. Update both if a new platform
+ * rule is added.
  */
 export function getDefaultConfigDir(): string {
 	if (process.env.NANOCODER_CONFIG_DIR) {
@@ -96,6 +108,43 @@ export function getDefaultConfigDir(): string {
 export function getDiscoveryFilePath(configDir?: string): string {
 	const base = configDir ?? getDefaultConfigDir();
 	return join(base, VSCODE_DISCOVERY_FILENAME);
+}
+
+/**
+ * Test whether the process with the given PID is still alive, without
+ * sending it a signal. Uses the canonical `kill(pid, 0)` probe, which
+ * returns/throws based on EPERM/ESRCH rather than actually killing anything.
+ *
+ * - On POSIX this works as advertised.
+ * - On Windows, signal 0 is also supported by Node's `process.kill` and
+ *   returns the same way for missing PIDs (throws `ESRCH`).
+ *
+ * Returns `false` if the check itself throws or if the supplied PID is
+ * non-positive (defensively, since neither OS will ever reuse pid 0 or 1
+ * for a regular user process).
+ */
+export function isProcessAlive(pid: number): boolean {
+	if (!Number.isFinite(pid) || pid <= 0) {
+		return false;
+	}
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		if (
+			error &&
+			typeof error === 'object' &&
+			'code' in error &&
+			((error as {code?: string}).code === 'ESRCH' ||
+				(error as {code?: string}).code === 'EPERM')
+		) {
+			// EPERM means the process exists but we can't signal it - that's
+			// still "alive" from our point of view, so honour it. We only
+			// treat ESRCH (no such process) as dead.
+			return (error as {code?: string}).code === 'EPERM';
+		}
+		return false;
+	}
 }
 
 /**
@@ -131,37 +180,18 @@ export async function writeDiscoveryFile(
 }
 
 /**
- * Read the discovery file. Returns `null` when the file does not exist or is
- * unreadable - both are normal during startup, before the CLI has written
- * the file, and the extension should treat them as "not yet ready" rather
- * than as fatal errors.
+ * Read the discovery file. Returns `null` when the file does not exist,
+ * is unreadable, has the wrong shape, or describes a PID that is no
+ * longer alive (stale). The extension should treat all of these as
+ * "not yet ready" rather than as fatal errors.
  */
 export async function readDiscoveryFile(
 	filePath: string,
 ): Promise<ServerDiscovery | null> {
+	let parsed: Partial<ServerDiscovery> | null = null;
 	try {
 		const raw = await readFile(filePath, 'utf-8');
-		const parsed = JSON.parse(raw) as Partial<ServerDiscovery>;
-		if (
-			typeof parsed.port !== 'number' ||
-			typeof parsed.token !== 'string' ||
-			typeof parsed.pid !== 'number'
-		) {
-			return null;
-		}
-		return {
-			version:
-				typeof parsed.version === 'number'
-					? parsed.version
-					: VSCODE_DISCOVERY_VERSION,
-			port: parsed.port,
-			token: parsed.token,
-			pid: parsed.pid,
-			cliVersion:
-				typeof parsed.cliVersion === 'string' ? parsed.cliVersion : '0.0.0',
-			startedAt:
-				typeof parsed.startedAt === 'number' ? parsed.startedAt : Date.now(),
-		};
+		parsed = JSON.parse(raw) as Partial<ServerDiscovery>;
 	} catch (error) {
 		if (
 			error &&
@@ -175,13 +205,62 @@ export async function readDiscoveryFile(
 		// than crashing the extension. The CLI will overwrite it on next start.
 		return null;
 	}
+
+	if (
+		!parsed ||
+		typeof parsed.port !== 'number' ||
+		typeof parsed.token !== 'string' ||
+		typeof parsed.pid !== 'number'
+	) {
+		return null;
+	}
+
+	// Stale detection: if the PID is no longer alive, the CLI that wrote
+	// this file is gone. Treat the entry as missing so a crashed CLI cannot
+	// hold the port hostage - the next start() overwrites it.
+	if (!isProcessAlive(parsed.pid)) {
+		return null;
+	}
+
+	return {
+		version:
+			typeof parsed.version === 'number'
+				? parsed.version
+				: VSCODE_DISCOVERY_VERSION,
+		port: parsed.port,
+		token: parsed.token,
+		pid: parsed.pid,
+		cliVersion:
+			typeof parsed.cliVersion === 'string' ? parsed.cliVersion : '0.0.0',
+		startedAt:
+			typeof parsed.startedAt === 'number' ? parsed.startedAt : Date.now(),
+	};
 }
 
 /**
  * Remove the discovery file. Ignores "missing" so it is safe to call during
  * shutdown without checking first.
+ *
+ * If `expectedPid` is supplied and the on-disk file describes a different
+ * PID, the file is left alone: another CLI instance owns the path and
+ * unlinking it would orphan its server (live or stale - either way it is
+ * not ours to remove). Callers that want unconditional removal (e.g.
+ * tests) may pass `undefined`.
+ *
+ * The on-disk pid is read raw rather than via {@link readDiscoveryFile},
+ * so a stale-but-foreign entry is also left alone.
  */
-export async function clearDiscoveryFile(filePath: string): Promise<void> {
+export async function clearDiscoveryFile(
+	filePath: string,
+	expectedPid?: number,
+): Promise<void> {
+	if (expectedPid !== undefined) {
+		const ownerPid = await readDiscoveryFilePidRaw(filePath);
+		if (ownerPid !== null && ownerPid !== expectedPid) {
+			// Owned by another process; do not touch.
+			return;
+		}
+	}
 	try {
 		await unlink(filePath);
 	} catch (error) {
@@ -193,6 +272,23 @@ export async function clearDiscoveryFile(filePath: string): Promise<void> {
 		) {
 			throw error;
 		}
+	}
+}
+
+/**
+ * Read the `pid` field from the discovery file without applying the
+ * stale-detection filter. Used by {@link clearDiscoveryFile} so that an
+ * ownership check works against stale-but-foreign entries too.
+ */
+async function readDiscoveryFilePidRaw(
+	filePath: string,
+): Promise<number | null> {
+	try {
+		const raw = await readFile(filePath, 'utf-8');
+		const parsed = JSON.parse(raw) as {pid?: unknown};
+		return typeof parsed.pid === 'number' ? parsed.pid : null;
+	} catch {
+		return null;
 	}
 }
 
