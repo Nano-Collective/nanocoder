@@ -1,12 +1,10 @@
-import {readFileSync} from 'fs';
-import {dirname, join} from 'path';
-import {fileURLToPath} from 'url';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import {detectInstallationMethod} from './installation-detector';
+import {getPackageVersion} from './package-version';
 
 const UPDATE_COMMANDS = {
 	NPM: 'npm update -g @nanocollective/nanocoder',
@@ -20,9 +18,6 @@ const UPDATE_MESSAGES = {
 	UNKNOWN:
 		'A new version is available. Please update using your package manager.',
 } as const;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 /**
  * Compare two semver version strings
@@ -53,26 +48,8 @@ function isNewerVersion(current: string, latest: string): boolean {
 	return false;
 }
 
-/**
- * Get the current package version from package.json
- */
-interface PackageJson {
-	version: string;
-	[key: string]: unknown;
-}
-
 function getCurrentVersion(): string {
-	try {
-		const packageJsonPath = join(__dirname, '../../package.json');
-		const packageJson = JSON.parse(
-			readFileSync(packageJsonPath, 'utf-8'),
-		) as PackageJson;
-		return packageJson.version;
-	} catch (error) {
-		const errorMessage = formatError(error);
-		logError(`Failed to read current version: ${errorMessage}`);
-		return '0.0.0';
-	}
+	return getPackageVersion();
 }
 
 /**
