@@ -29,6 +29,10 @@ export NANOCODER_SMOKE_BIN="$bin"
 npm pack --dry-run --json --ignore-scripts --loglevel=error | node -e '
 const pack = JSON.parse(require("fs").readFileSync(0, "utf8").trim());
 const data = Array.isArray(pack) ? pack[0] : pack;
+if (data && data.error) {
+	console.error("npm pack failed: " + JSON.stringify(data.error));
+	process.exit(1);
+}
 const bin = process.env.NANOCODER_SMOKE_BIN;
 const files = (data && data.files ? data.files : []).map((f) =>
 	String(f.path).replace(/^\.\//, ""),
