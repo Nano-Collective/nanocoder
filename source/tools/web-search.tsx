@@ -31,19 +31,56 @@ interface BraveSearchResponse {
 }
 
 /**
- * Escapes standard CommonMark/GFM syntax characters to prevent formatting disruption
- * and markdown injection vulnerabilities.
+ * Collapses internal newlines into single spaces so a value can never
+ * land at the start of a markdown line (heading/list/blockquote position).
  */
-export function escapeMarkdown(text: string): string {
-	return text.replace(/([\\`*_{}[\]()#+\-.!|~><])/g, '\\$1');
+function collapseNewlines(text: string): string {
+	return text.replace(/\r?\n+/g, ' ').trim();
 }
 
 /**
- * Normalizes and sanitizes a URL for safe embedding in Markdown.
- * Strips whitespace and characters that break autolink/bracket enclosures.
+ * Strips Brave's query-term highlight tags. These arrive as literal
+ * <strong>/</strong> markup in titles and descriptions; left alone they'd
+ * get escaped into ugly `\<strong\>` noise, so remove them before escaping.
+ */
+function stripHighlightTags(text: string): string {
+	return text.replace(/<\/?strong>/gi, '');
+}
+
+/**
+ * Escapes markdown syntax characters to prevent formatting disruption and
+ * injection (e.g. fake headings, spoofed links, setext-style `===` headings).
+ *
+ * Deliberately a minimal inline set rather than the full CommonMark
+ * punctuation list: `# - + . >` etc. only have special meaning at the start
+ * of a line, and callers already collapse newlines and prefix content with
+ * `## N. `, so those characters can never land in heading/list position.
+ * Escaping them anyway just burns tokens in the model's context for no
+ * safety benefit.
+ */
+export function escapeMarkdown(text: string): string {
+	return text.replace(/([\\`*_[\]<>~|=])/g, '\\$1');
+}
+
+/**
+ * Normalizes and sanitizes a URL for safe embedding in a Markdown autolink.
+ * Strips whitespace and angle brackets that would break the `<...>` wrapper,
+ * and restricts to http(s) schemes so `javascript:`/`data:` etc. can't ride
+ * along disguised as a search result link.
  */
 export function sanitizeUrl(url: string): string {
-	return url.replace(/\s+/g, '').replace(/[<>]/g, '');
+	const cleaned = url.replace(/\s+/g, '').replace(/[<>]/g, '');
+
+	try {
+		const parsed = new URL(cleaned);
+		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+			return '';
+		}
+	} catch {
+		return '';
+	}
+
+	return cleaned;
 }
 
 export const executeWebSearch = async (
@@ -87,7 +124,7 @@ export const executeWebSearch = async (
 		const data = (await response.json()) as BraveSearchResponse;
 		const results = data.web?.results ?? [];
 
-		const safeQuery = escapeMarkdown(args.query.trim());
+		const safeQuery = escapeMarkdown(collapseNewlines(args.query));
 
 		if (results.length === 0) {
 			return `No results found for query: "${safeQuery}"`;
@@ -99,18 +136,23 @@ export const executeWebSearch = async (
 			const result = results[i];
 			if (!result) continue;
 
-			// Collapse internal newlines in the title to keep heading intact
-			const normalizedTitle = (result.title || '')
-				.replace(/\r?\n+/g, ' ')
-				.trim();
+			const normalizedTitle = collapseNewlines(
+				stripHighlightTags(result.title || ''),
+			);
 			const safeTitle = escapeMarkdown(normalizedTitle);
 			const safeUrl = sanitizeUrl(result.url || '');
 
 			formattedResults += `## ${i + 1}. ${safeTitle}\n\n`;
-			formattedResults += `**URL:** <${safeUrl}>\n\n`;
+
+			if (safeUrl) {
+				formattedResults += `**URL:** <${safeUrl}>\n\n`;
+			}
 
 			if (result.description) {
-				const safeDescription = escapeMarkdown(result.description.trim());
+				const normalizedDescription = collapseNewlines(
+					stripHighlightTags(result.description),
+				);
+				const safeDescription = escapeMarkdown(normalizedDescription);
 				formattedResults += `${safeDescription}\n\n`;
 			}
 
