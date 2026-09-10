@@ -632,7 +632,7 @@ async function main(): Promise<void> {
 		if (interactiveTty) {
 			const {
 				createUtf8InputDecoder,
-				markMouseReportingAvailable,
+				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
@@ -652,6 +652,9 @@ async function main(): Promise<void> {
 			// receive paste markers as literal text.
 			restoreInputModes = () => {
 				process.stdout.write(DISABLE_BRACKETED_PASTE);
+				if (useAltScreen && useMouseReporting) {
+					process.stdout.write(MOUSE_REPORTING_OFF);
+				}
 			};
 
 			if (useAltScreen && useMouseReporting) {
@@ -661,7 +664,6 @@ async function main(): Promise<void> {
 				// events itself. When off (default), native text selection works
 				// directly.
 				process.stdout.write(MOUSE_REPORTING_ON);
-				markMouseReportingAvailable();
 			}
 
 			// Ink must never see the raw escape sequences (its keypress

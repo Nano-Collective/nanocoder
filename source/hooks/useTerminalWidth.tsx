@@ -146,3 +146,28 @@ export const useResponsiveTerminal = () => {
 		truncatePath,
 	};
 };
+
+// Prompt box width floor: keeps narrow terminals legible.
+const PROMPT_WIDTH_MIN = 40;
+// Horizontal budget the input box's rounded border + centering eats into
+// actualWidth (2 cols of margin on each side).
+const PROMPT_WIDTH_BUDGET = 4;
+
+/**
+ * Single source of truth for the input box's width and the left margin that
+ * centers it — shared with anything else that needs to visually track the
+ * input box's left border (e.g. the chat transcript, the status indicator)
+ * as the terminal resizes.
+ */
+export const usePromptWidth = () => {
+	const {actualWidth} = useResponsiveTerminal();
+	const promptWidth = Math.max(
+		PROMPT_WIDTH_MIN,
+		actualWidth - PROMPT_WIDTH_BUDGET,
+	);
+	// Mirrors the centering `alignItems="center"` performs when the input box
+	// (width=promptWidth) sits inside a width=actualWidth container.
+	const promptMargin = Math.max(0, Math.floor((actualWidth - promptWidth) / 2));
+
+	return {actualWidth, promptWidth, promptMargin};
+};

@@ -13,25 +13,6 @@ const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
-
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-
-/**
- * Column the first non-space character of the line matching `pattern` sits in,
- * with colour codes stripped so they do not count toward the offset.
- */
-function indentOf(frame: string, pattern: RegExp): number {
-	const line = frame
-		.split('\n')
-		.map(l => l.replace(ANSI, ''))
-		.find(l => pattern.test(l));
-
-	if (line === undefined) {
-		throw new Error(`no line matched ${pattern}`);
-	}
-
-	return line.search(/\S/);
-}
 const VERSION = packageJson.version;
 
 // ============================================================================
@@ -373,7 +354,7 @@ test('WelcomeMessage hides menu when rows < 15', t => {
 	process.stdout.rows = originalRows;
 });
 
-test('WelcomeMessage hides logo when rows < 16', t => {
+test('WelcomeMessage falls back to a compact text logo when rows < 16', t => {
 	const originalColumns = process.stdout.columns;
 	const originalRows = process.stdout.rows;
 	process.stdout.columns = 100;
@@ -384,8 +365,48 @@ test('WelcomeMessage hides logo when rows < 16', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /N A N O C O D E R/);
+	// Too short for the multi-row BigText art, but the wordmark should still
+	// render as a single plain-text line rather than disappearing entirely.
 	t.notRegex(output!, /█/);
+	t.regex(output!, /NANOCODER/);
+	t.regex(output!, /Welcome to Nanocoder/);
+
+	process.stdout.columns = originalColumns;
+	process.stdout.rows = originalRows;
+});
+
+test('WelcomeMessage shows a compact NC wordmark in narrow+short terminals (e.g. VS Code panel)', t => {
+	const originalColumns = process.stdout.columns;
+	const originalRows = process.stdout.rows;
+	process.stdout.columns = 60;
+	// @ts-ignore
+	process.stdout.rows = 12;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /█/);
+	t.regex(output!, /NC/);
+	t.regex(output!, /Welcome to Nanocoder/);
+
+	process.stdout.columns = originalColumns;
+	process.stdout.rows = originalRows;
+});
+
+test('WelcomeMessage hides logo entirely only when rows < 8', t => {
+	const originalColumns = process.stdout.columns;
+	const originalRows = process.stdout.rows;
+	process.stdout.columns = 100;
+	// @ts-ignore
+	process.stdout.rows = 7;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /█/);
+	t.notRegex(output!, /NANOCODER/);
 	t.regex(output!, /Welcome to Nanocoder/);
 
 	process.stdout.columns = originalColumns;
