@@ -1,5 +1,5 @@
 ---
-"@nanocollective/nanocoder": patch
+"@nanocollective/nanocoder": minor
 ---
 
-Replace tsc and tsc-alias build with Rolldown bundling to reduce CLI cold-start latency to <200ms.
+Adds an opt-in `build:fast` script powered by Rolldown that reduces CLI cold-start latency by ~33%. The default `build` script (`tsc + tsc-alias`) is unchanged.

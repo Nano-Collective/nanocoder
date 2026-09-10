@@ -18,7 +18,6 @@ const __dirname = dirname(__filename);
 const themesCandidates = [
 	join(__dirname, '../../source/config/themes.json'),
 	join(__dirname, '../source/config/themes.json'),
-	join(process.cwd(), 'source/config/themes.json'),
 ];
 const themesPath =
 	themesCandidates.find(p => existsSync(p)) ?? themesCandidates[0];

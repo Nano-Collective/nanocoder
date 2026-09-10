@@ -15,7 +15,6 @@ const __dirname = dirname(__filename);
 const sectionsCandidates = [
 	join(__dirname, '../../source/app/prompts/sections'),
 	join(__dirname, '../source/app/prompts/sections'),
-	join(process.cwd(), 'source/app/prompts/sections'),
 ];
 const sectionsDir =
 	sectionsCandidates.find(p => existsSync(p)) ?? sectionsCandidates[0];
