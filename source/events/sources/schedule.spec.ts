@@ -110,6 +110,30 @@ test('unregister stops the job and removes from the map', t => {
 	t.deepEqual(stub.stops, ['0 9 * * MON']);
 });
 
+test('shared expression stays live until the last unregister', async t => {
+	const {router, events} = captureRouter();
+	const stub = stubFactory();
+	const source = new ScheduleEventSource(router, stub.factory);
+
+	router.subscribe(cronSub('a', '0 9 * * MON'));
+	router.subscribe(cronSub('b', '0 9 * * MON'));
+	source.register('0 9 * * MON');
+	source.register('0 9 * * MON');
+	t.is(stub.jobs.length, 1);
+
+	source.unregister('0 9 * * MON');
+	t.deepEqual(source.listRegistered(), ['0 9 * * MON']);
+	t.deepEqual(stub.stops, []);
+
+	stub.jobs[0]?.onTick();
+	await new Promise(r => setImmediate(r));
+	t.is(events.length, 2);
+
+	source.unregister('0 9 * * MON');
+	t.deepEqual(source.listRegistered(), []);
+	t.deepEqual(stub.stops, ['0 9 * * MON']);
+});
+
 test('unregister on unknown expression is a no-op', t => {
 	const {router} = captureRouter();
 	const stub = stubFactory();
