@@ -1,7 +1,12 @@
 import {Box, Text, useInput} from 'ink';
 import React, {useEffect, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {
+	useResponsiveTerminal,
+	useTerminalWidth,
+} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import type {SessionMetadata} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 
@@ -48,6 +53,8 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [hasOtherSessions, setHasOtherSessions] = useState(false);
+	const {colors} = useTheme();
+	const boxWidth = useTerminalWidth();
 	const {actualWidth, truncate} = useResponsiveTerminal();
 
 	useEffect(() => {
@@ -92,25 +99,47 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 
 	if (loading) {
 		return (
-			<Box flexDirection="column" marginY={1}>
-				<Text>Loading sessions...</Text>
-			</Box>
+			<TitledBoxWithPreferences
+				title="Recent Sessions"
+				width={boxWidth}
+				borderColor={colors.primary}
+				paddingX={2}
+				paddingY={1}
+				marginBottom={1}
+			>
+				<Text color={colors.secondary}>Loading sessions...</Text>
+			</TitledBoxWithPreferences>
 		);
 	}
 
 	if (sessions.length === 0) {
 		return (
-			<Box flexDirection="column" marginY={1}>
-				{hasOtherSessions ? (
-					<>
-						<Text>No sessions for this project.</Text>
-						<Text>Use /resume --all to see all sessions.</Text>
-					</>
-				) : (
-					<Text>No saved sessions found.</Text>
-				)}
-				<Text>Press any key to continue...</Text>
-			</Box>
+			<TitledBoxWithPreferences
+				title="Recent Sessions"
+				width={boxWidth}
+				borderColor={colors.secondary}
+				paddingX={2}
+				paddingY={1}
+				marginBottom={1}
+			>
+				<Box flexDirection="column">
+					{hasOtherSessions ? (
+						<>
+							<Text>No sessions for this project.</Text>
+							<Text color={colors.secondary}>
+								Use /resume --all to see all sessions.
+							</Text>
+						</>
+					) : (
+						<Text>No saved sessions found.</Text>
+					)}
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Press any key to continue • Esc to cancel
+						</Text>
+					</Box>
+				</Box>
+			</TitledBoxWithPreferences>
 		);
 	}
 
@@ -118,7 +147,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		const prefix = `[${index + 1}] `;
 		const suffix = ` (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`;
 		// 4 accounts for the `> ` selector indicator + margin
-		const maxTitleLength = actualWidth - prefix.length - suffix.length - 4;
+		const maxTitleLength = actualWidth - prefix.length - suffix.length - 8;
 		const truncatedTitle =
 			maxTitleLength > 10
 				? truncate(session.title, maxTitleLength)
@@ -140,19 +169,27 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	};
 
 	return (
-		<Box flexDirection="column" marginY={1}>
-			<Text bold>Recent Sessions:</Text>
-			<Box marginTop={1}>
+		<TitledBoxWithPreferences
+			title="Recent Sessions"
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			marginBottom={1}
+		>
+			<Box flexDirection="column">
 				<StyledSelectInput
 					items={items}
 					onSelect={handleSelect}
 					limit={Math.min(items.length, 10)}
 				/>
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						↑/↓ to navigate • Enter to select • Esc to cancel
+					</Text>
+				</Box>
 			</Box>
-			<Box marginTop={1}>
-				<Text>↑/↓ to navigate • Enter to select • Esc to cancel</Text>
-			</Box>
-		</Box>
+		</TitledBoxWithPreferences>
 	);
 };
 

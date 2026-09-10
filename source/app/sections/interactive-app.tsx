@@ -315,13 +315,21 @@ export function InteractiveApp({
 				)}
 
 				{appState.isExplorerMode && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
 					</Box>
 				)}
 
 				{appState.isIdeSelectionMode && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<IdeSelector
 							onSelect={ide => {
 								// Completing lands in chat so the result is visible.
@@ -336,7 +344,11 @@ export function InteractiveApp({
 				)}
 
 				{showModalSelectors && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<ModalSelectors
 							activeMode={appState.activeMode}
 							isSettingsMode={appState.isSettingsMode}
