@@ -427,4 +427,12 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Mouse reporting in alternate screen mode. false (default): terminal does
+	 * not capture mouse clicks, allowing native text selection (double-click,
+	 * drag to select). true: enables mouse reporting so the mouse wheel can
+	 * scroll the chat viewport, but requires Shift+drag for text selection.
+	 * Also switchable per-run with --mouse / --no-mouse flags.
+	 */
+	mouseReporting?: boolean;
 }

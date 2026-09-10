@@ -306,12 +306,18 @@ export function InteractiveApp({
 			    input box when the transcript is tall. */}
 			<Box flexDirection="column" flexShrink={0}>
 				{appState.planReviewState?.show && (
-					<PlanReviewPrompt
-						onProceed={appHandlers.handlePlanProceed}
-						onAskMore={() => void appHandlers.handlePlanAskMore()}
-						onModify={appHandlers.handlePlanModify}
-						onDismiss={appHandlers.handlePlanModify}
-					/>
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
+						<PlanReviewPrompt
+							onProceed={appHandlers.handlePlanProceed}
+							onAskMore={() => void appHandlers.handlePlanAskMore()}
+							onModify={appHandlers.handlePlanModify}
+							onDismiss={appHandlers.handlePlanModify}
+						/>
+					</Box>
 				)}
 
 				{appState.isExplorerMode && (

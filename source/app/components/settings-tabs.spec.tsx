@@ -18,9 +18,8 @@ const {render} = await import('ink-testing-library');
 process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
 	join(tmpdir(), 'nanocoder-spec-'),
 );
-const {resetPreferencesCache, getAlternateScreen} = await import(
-	'@/config/preferences'
-);
+const {resetPreferencesCache, getAlternateScreen, getMouseReporting} =
+	await import('@/config/preferences');
 resetPreferencesCache();
 
 const {renderWithTheme} = await import('../../test-utils/render-with-theme');
@@ -347,6 +346,29 @@ test('Enter on the Alternate Screen boolean row flips the persisted preference',
 	await tick();
 
 	t.is(getAlternateScreen(), false);
+
+	unmount();
+});
+
+test('Enter on the Mouse Wheel Reporting boolean row flips the persisted preference', async t => {
+	t.is(getMouseReporting(), false);
+
+	const {stdin, unmount} = renderWithTheme(
+		<SettingsSelector onCancel={() => {}} />,
+	);
+	await tick();
+
+	// Filter down to the single boolean row so index 0 is deterministic.
+	stdin.write(DOWN);
+	await tick();
+	stdin.write('Mouse');
+	await tick();
+	stdin.write(DOWN);
+	await tick();
+	stdin.write(ENTER);
+	await tick();
+
+	t.is(getMouseReporting(), true);
 
 	unmount();
 });

@@ -20,6 +20,8 @@ import {
 	updateReasoningExpanded,
 	getPrivacyPreference,
 	updatePrivacyPreference,
+	getMouseReporting,
+	updateMouseReporting,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -1562,3 +1564,37 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 		}
 	}
 });
+
+// ============================================================================
+// Mouse Reporting Tests
+// ============================================================================
+
+test.serial('getMouseReporting returns false by default when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getMouseReporting();
+	t.is(result, false);
+});
+
+test.serial('updateMouseReporting saves and retrieves preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateMouseReporting(true);
+		t.is(getMouseReporting(), true);
+
+		updateMouseReporting(false);
+		t.is(getMouseReporting(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+

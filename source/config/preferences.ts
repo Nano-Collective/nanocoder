@@ -210,3 +210,23 @@ export function updateAlternateScreen(value: boolean): void {
 	preferences.alternateScreen = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the mouse reporting preference. When false (default), the terminal does
+ * not capture mouse clicks, allowing native text selection (double-click, drag)
+ * in alternate screen mode like OpenCode. When true, mouse reporting captures wheel
+ * scrolls but requires Shift+drag for text selection.
+ */
+export function getMouseReporting(): boolean {
+	const preferences = loadPreferences();
+	return preferences.mouseReporting ?? false;
+}
+
+/**
+ * Save the mouse reporting preference
+ */
+export function updateMouseReporting(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.mouseReporting = value;
+	savePreferences(preferences);
+}

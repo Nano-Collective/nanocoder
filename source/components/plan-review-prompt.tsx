@@ -15,6 +15,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -86,43 +87,37 @@ export default function PlanReviewPrompt({
 		OPTIONS.find(o => o.value === highlighted)?.description ?? '';
 
 	return (
-		<Box
-			flexDirection="column"
-			marginTop={1}
-			marginBottom={1}
-			padding={1}
+		<TitledBoxWithPreferences
+			title="Plan ready."
 			width={boxWidth}
-			borderStyle="bold"
-			borderLeft={true}
-			borderRight={false}
-			borderTop={false}
-			borderBottom={false}
-			borderLeftColor={colors.primary}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			marginBottom={1}
 		>
-			<Box marginBottom={1}>
-				<Text color={colors.primary} bold>
-					📋 Plan ready.{' '}
-				</Text>
-				<Text color={colors.secondary}>What would you like to do?</Text>
-			</Box>
+			<Box flexDirection="column">
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>What would you like to do?</Text>
+				</Box>
 
-			<StyledSelectInput
-				items={OPTIONS}
-				onSelect={handleSelect}
-				onHighlight={item => setHighlighted(item.value)}
-			/>
+				<StyledSelectInput
+					items={OPTIONS}
+					onSelect={handleSelect}
+					onHighlight={item => setHighlighted(item.value)}
+				/>
 
-			<Box marginTop={1}>
-				<Text color={colors.secondary} italic wrap="wrap">
-					{activeDescription}
-				</Text>
-			</Box>
+				<Box marginTop={1}>
+					<Text color={colors.secondary} italic wrap="wrap">
+						{activeDescription}
+					</Text>
+				</Box>
 
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>
-					↑/↓ to move · Enter to select · Esc to dismiss
-				</Text>
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						↑/↓ to move · Enter to select · Esc to dismiss
+					</Text>
+				</Box>
 			</Box>
-		</Box>
+		</TitledBoxWithPreferences>
 	);
 }

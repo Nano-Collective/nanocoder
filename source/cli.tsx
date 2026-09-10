@@ -87,6 +87,8 @@ Options:
                       scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
   --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
                       chat history in the terminal's native scrollback).
+  --mouse             Enable mouse wheel reporting in fullscreen mode (Shift+drag to select text)
+  --no-mouse          Disable mouse reporting in fullscreen mode (enables native text selection)
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -511,21 +513,29 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen} = await import('@/config/preferences');
+		const {getAlternateScreen, getMouseReporting} = await import(
+			'@/config/preferences'
+		);
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		const mouseReportingAllowed =
+			!args.includes('--no-mouse') &&
+			(args.includes('--mouse') || getMouseReporting());
+		const useMouseReporting = useAltScreen && mouseReportingAllowed;
 		let inkStdin: NodeJS.ReadStream | undefined;
 		let stopInputForwarding: (() => void) | undefined;
 		if (useAltScreen) {
 			process.stdout.write('\x1B[?1049h'); // Enter alternate screen
 			// SGR mouse reporting so wheel scrolling reaches the app. The alt
 			// screen has no native scrollback, so the terminal's own wheel /
-			// scrollbar can't work — the app must receive wheel events itself.
-			// (Text selection needs Shift+drag while mouse reporting is on.)
-			process.stdout.write('\x1B[?1000h\x1B[?1006h');
+			// scrollbar can't work without it. When off (default), native text
+			// selection (double-click, click-drag) works directly without Shift.
+			if (useMouseReporting) {
+				process.stdout.write('\x1B[?1000h\x1B[?1006h');
+			}
 
 			// Wipe the screen on resize BEFORE Ink repaints (this listener is
 			// registered first, so it runs first). When the terminal GROWS,
@@ -536,43 +546,45 @@ async function main(): Promise<void> {
 				process.stdout.write('\x1B[2J\x1B[H');
 			});
 
-			// Ink must never see the raw mouse sequences (its keypress parser
-			// would leak them into the chat input as text), so it reads from a
-			// filtered proxy stream: mouse reports are stripped, wheel ticks
-			// are re-emitted on the wheelEvents bus for the chat viewport.
-			const {PassThrough} = await import('node:stream');
-			const {createUtf8InputDecoder, stripMouseSequences, wheelEvents} =
-				await import('@/utils/terminal-mouse');
-			const filtered = new PassThrough();
-			const decodeInput = createUtf8InputDecoder();
-			let carry = '';
-			const forwardInput = (chunk: Buffer | string) => {
-				const text = decodeInput(chunk);
-				const result = stripMouseSequences(text, carry);
-				carry = result.carry;
-				for (const direction of result.wheel) {
-					wheelEvents.emit('wheel', direction);
-				}
-				if (result.clean) {
-					filtered.write(result.clean);
-				}
-			};
-			process.stdin.on('data', forwardInput);
-			stopInputForwarding = () => {
-				process.stdin.off('data', forwardInput);
-				process.stdin.pause();
-			};
-			// TTY facade: Ink checks isTTY for raw-mode support and calls
-			// setRawMode/ref/unref — delegate those to the real stdin.
-			inkStdin = Object.assign(filtered, {
-				isTTY: true,
-				setRawMode: (mode: boolean) => {
-					process.stdin.setRawMode?.(mode);
-					return inkStdin;
-				},
-				ref: () => process.stdin.ref(),
-				unref: () => process.stdin.unref(),
-			}) as unknown as NodeJS.ReadStream;
+			if (useMouseReporting) {
+				// Ink must never see the raw mouse sequences (its keypress parser
+				// would leak them into the chat input as text), so it reads from a
+				// filtered proxy stream: mouse reports are stripped, wheel ticks
+				// are re-emitted on the wheelEvents bus for the chat viewport.
+				const {PassThrough} = await import('node:stream');
+				const {createUtf8InputDecoder, stripMouseSequences, wheelEvents} =
+					await import('@/utils/terminal-mouse');
+				const filtered = new PassThrough();
+				const decodeInput = createUtf8InputDecoder();
+				let carry = '';
+				const forwardInput = (chunk: Buffer | string) => {
+					const text = decodeInput(chunk);
+					const result = stripMouseSequences(text, carry);
+					carry = result.carry;
+					for (const direction of result.wheel) {
+						wheelEvents.emit('wheel', direction);
+					}
+					if (result.clean) {
+						filtered.write(result.clean);
+					}
+				};
+				process.stdin.on('data', forwardInput);
+				stopInputForwarding = () => {
+					process.stdin.off('data', forwardInput);
+					process.stdin.pause();
+				};
+				// TTY facade: Ink checks isTTY for raw-mode support and calls
+				// setRawMode/ref/unref — delegate those to the real stdin.
+				inkStdin = Object.assign(filtered, {
+					isTTY: true,
+					setRawMode: (mode: boolean) => {
+						process.stdin.setRawMode?.(mode);
+						return inkStdin;
+					},
+					ref: () => process.stdin.ref(),
+					unref: () => process.stdin.unref(),
+				}) as unknown as NodeJS.ReadStream;
+			}
 		}
 
 		const result = render(
@@ -604,8 +616,12 @@ async function main(): Promise<void> {
 			terminalRestored = true;
 			stopInputForwarding?.();
 			if (useAltScreen) {
-				// Mouse reporting off, then back to the main screen buffer.
-				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');
+				if (useMouseReporting) {
+					// Mouse reporting off
+					process.stdout.write('\x1B[?1006l\x1B[?1000l');
+				}
+				// Back to the main screen buffer
+				process.stdout.write('\x1B[?1049l');
 			}
 		};
 
