@@ -15,8 +15,15 @@ import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync, mkdirSync, openSync, statSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
+import {createInterface} from 'node:readline/promises';
 import {fileURLToPath} from 'node:url';
+import {getAppConfig} from '@/config/index';
 import {formatError} from '@/utils/error-formatter';
+import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';
+import {
+	isFullCommitTrustConfirmed,
+	recordFullCommitTrustConfirmed,
+} from './full-commit-trust';
 import {
 	getLockfilePath,
 	getSocketPath,
@@ -27,6 +34,79 @@ import {
 
 function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
+}
+
+const START_USAGE =
+	'Usage: nanocoder daemon start [--trust <comment-only|auto-fix|full-commit>]';
+
+interface ParsedStartArgs {
+	trustLevel?: TrustLevel;
+}
+
+/**
+ * Parse `daemon start`'s flags. Mirrors `verify/cli.ts`'s `parseArgs`:
+ * hand-rolled loop, unknown-flag rejection, discriminated-union return.
+ */
+function parseStartArgs(args: string[]): ParsedStartArgs | {error: string} {
+	let trustLevel: TrustLevel | undefined;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--trust') {
+			const value = args[i + 1];
+			i++;
+			if (!isTrustLevel(value)) {
+				return {
+					error: `Invalid --trust value: "${value ?? ''}". Must be one of comment-only, auto-fix, full-commit.`,
+				};
+			}
+			trustLevel = value;
+		} else {
+			return {error: `Unknown flag: "${arg}".`};
+		}
+	}
+
+	return {trustLevel};
+}
+
+const FULL_COMMIT_WARNING = (projectRoot: string) => `
+⚠️  Security Warning — full-commit trust
+
+You're starting the daemon with --trust full-commit for:
+  ${projectRoot}
+
+At this trust level, when CI watch detects a failure, the daemon will
+autonomously edit files, commit, and PUSH DIRECTLY to the failing branch —
+with no human review step and no draft PR. This is equivalent to yolo mode
+for an unattended background process watching your repository.
+
+Only enable this on a project/branch where you're comfortable with an
+automated agent pushing commits without your review.
+
+This warning will not be shown again for this project.
+`;
+
+/**
+ * Default confirmation prompt for `--trust full-commit`. `daemon start`
+ * runs in the plain CLI fast-path (no Ink tree is ever mounted for it —
+ * `cli.tsx`'s daemon block exits via `process.exit()` before importing
+ * `@/app`), so a plain readline prompt is the correct mechanism here, not
+ * a stopgap.
+ */
+async function defaultConfirmFullCommitTrust(
+	projectRoot: string,
+): Promise<boolean> {
+	process.stdout.write(FULL_COMMIT_WARNING(projectRoot));
+	const rl = createInterface({input: process.stdin, output: process.stdout});
+	try {
+		const answer = await rl.question('Proceed? [y/N] ');
+		return (
+			answer.trim().toLowerCase() === 'y' ||
+			answer.trim().toLowerCase() === 'yes'
+		);
+	} finally {
+		rl.close();
+	}
 }
 
 export interface DaemonCliResult {
@@ -49,7 +129,21 @@ export interface DaemonCliOptions {
 	 * arguments without actually forking. Production uses
 	 * `defaultLaunchDaemon`.
 	 */
-	launchDaemon?: (projectRoot: string) => ChildProcess | null;
+	launchDaemon?: (
+		projectRoot: string,
+		trustLevel: TrustLevel,
+	) => ChildProcess | null;
+	/** Raw argv after the subcommand — only `start` consumes this. */
+	args?: string[];
+	/** Test seam: override the one-time full-commit confirmation prompt. */
+	confirmFullCommitTrust?: (projectRoot: string) => Promise<boolean>;
+	/** Test seam: override the persisted confirmation check. */
+	isFullCommitTrustConfirmedFn?: typeof isFullCommitTrustConfirmed;
+	/** Test seam: override persisting the confirmation. */
+	recordFullCommitTrustConfirmedFn?: typeof recordFullCommitTrustConfirmed;
+	/** Test seam: override reading the project-level trust-level config,
+	 * avoiding `getAppConfig()`'s real cwd-based filesystem reads in tests. */
+	loadVerifyConfigFn?: () => {trustLevel?: TrustLevel} | undefined;
 }
 
 /**
@@ -60,6 +154,7 @@ export interface DaemonCliOptions {
 function defaultLaunchDaemon(
 	projectRoot: string,
 	daemonEntry: string,
+	trustLevel: TrustLevel,
 ): ChildProcess {
 	const logPath = getLogPath(projectRoot);
 	mkdirSync(dirname(logPath), {recursive: true});
@@ -71,6 +166,7 @@ function defaultLaunchDaemon(
 			...process.env,
 			NANOCODER_PROJECT_ROOT: projectRoot,
 			NANOCODER_DAEMON_PROCESS: '1',
+			NANOCODER_CI_TRUST_LEVEL: trustLevel,
 		},
 		detached: true,
 		stdio: ['ignore', logFd, logFd],
@@ -127,8 +223,39 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
+	const parsed = parseStartArgs(opts.args ?? []);
+	if ('error' in parsed) {
+		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
+	}
+
+	const loadVerifyConfig =
+		opts.loadVerifyConfigFn ?? (() => getAppConfig().verify);
+	const trustLevel = resolveTrustLevel(
+		parsed.trustLevel,
+		loadVerifyConfig()?.trustLevel,
+	);
+
+	if (trustLevel === 'full-commit') {
+		const isConfirmed =
+			opts.isFullCommitTrustConfirmedFn ?? isFullCommitTrustConfirmed;
+		if (!isConfirmed(opts.projectRoot)) {
+			const confirm =
+				opts.confirmFullCommitTrust ?? defaultConfirmFullCommitTrust;
+			const confirmed = await confirm(opts.projectRoot);
+			if (!confirmed) {
+				return {
+					exitCode: 1,
+					output: 'Aborted: full-commit trust was not confirmed.',
+				};
+			}
+			(opts.recordFullCommitTrustConfirmedFn ?? recordFullCommitTrustConfirmed)(
+				opts.projectRoot,
+			);
+		}
+	}
+
 	const launcher = opts.launchDaemon ?? launchSelfHosted;
-	const child = launcher(opts.projectRoot);
+	const child = launcher(opts.projectRoot, trustLevel);
 	if (!child) {
 		return {
 			exitCode: 1,
@@ -254,9 +381,12 @@ async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	return {exitCode: 0, output: buf.slice(start)};
 }
 
-function launchSelfHosted(projectRoot: string): ChildProcess {
+function launchSelfHosted(
+	projectRoot: string,
+	trustLevel: TrustLevel,
+): ChildProcess {
 	const daemonEntry = fileURLToPath(new URL('./entry.js', import.meta.url));
-	return defaultLaunchDaemon(projectRoot, daemonEntry);
+	return defaultLaunchDaemon(projectRoot, daemonEntry, trustLevel);
 }
 
 async function waitForLockfile(

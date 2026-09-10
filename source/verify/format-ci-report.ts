@@ -4,6 +4,10 @@ export interface FormatCiReportInput {
 	branch: string;
 	url: string;
 	subagentOutput: string;
+	/** True when this run actually committed and published a fix (auto-fix's
+	 * draft PR, or full-commit's direct push) — adjusts the footer so it
+	 * doesn't falsely claim "no auto-fix applied" when one was. */
+	fixApplied?: boolean;
 }
 
 /**
@@ -14,7 +18,11 @@ export interface FormatCiReportInput {
  * content.
  */
 export function formatCiReport(input: FormatCiReportInput): string {
-	const {runId, workflowName, branch, url, subagentOutput} = input;
+	const {runId, workflowName, branch, url, subagentOutput, fixApplied} = input;
+
+	const footer = fixApplied
+		? '*Generated automatically by the Nanocoder daemon — a fix was implemented, committed, and published as described above. Review before merging.*'
+		: '*Generated automatically by the Nanocoder daemon — advisory diagnosis, no auto-fix applied.*';
 
 	return [
 		`## Nanocoder CI Investigation — "${workflowName}" failed on \`${branch}\``,
@@ -24,6 +32,6 @@ export function formatCiReport(input: FormatCiReportInput): string {
 		subagentOutput.trim(),
 		'',
 		'---',
-		'*Generated automatically by the Nanocoder daemon — advisory diagnosis, no auto-fix applied.*',
+		footer,
 	].join('\n');
 }

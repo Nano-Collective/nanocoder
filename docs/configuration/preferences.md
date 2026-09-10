@@ -107,6 +107,32 @@ There's no `/settings` wizard for this yet — set it by hand-editing the prefer
 }
 ```
 
+### Project-Level Verify Policy (`agents.config.json`)
+
+Whether CI-watch investigations can auto-fix a failure — and how aggressively — is a project policy, not a personal preference, so it lives in the project's own committed `agents.config.json` under `nanocoder.verify` instead:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nanocoder.verify.trustLevel` | `"comment-only"` \| `"auto-fix"` \| `"full-commit"` | `comment-only` | See `nanocoder daemon start --trust` below. |
+| `nanocoder.verify.pollIntervalMs` | number | — | Overrides `ciWatch.pollIntervalMs` above when set. |
+| `nanocoder.verify.maxPollIntervalMs` | number | — | Overrides `ciWatch.maxPollIntervalMs` above when set. |
+
+```json
+{
+  "nanocoder": {
+    "verify": {
+      "trustLevel": "auto-fix"
+    }
+  }
+}
+```
+
+`nanocoder daemon start --trust <comment-only|auto-fix|full-commit>` overrides this for a single run; the config value is used when the flag is omitted, falling back to `comment-only` if neither is set:
+
+- **`comment-only`** (default) — investigates and diagnoses a CI failure, posting the diagnosis as a PR comment. Never mutates anything.
+- **`auto-fix`** — additionally implements and commits a fix in an isolated `git worktree`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
+- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it.
+
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 
 ## Manual Management

@@ -115,13 +115,23 @@ export class SubagentExecutor {
 	 *                  caller enforce a trust-level allowlist (see
 	 *                  `source/verify/trust.ts`) without needing a second,
 	 *                  hand-maintained tool list in the subagent's own file.
+	 *                  `alwaysAllow` additionally skips the approval prompt
+	 *                  for the named tools (see `resolveToolApproval`'s
+	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
+	 *                  isn't mode-aware and would otherwise be silently
+	 *                  auto-denied in headless mode (no approval-queue
+	 *                  handler is ever registered there).
 	 */
 	async execute(
 		task: SubagentTask,
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
-		toolOverride?: {tools?: string[]; disallowedTools?: string[]},
+		toolOverride?: {
+			tools?: string[];
+			disallowedTools?: string[];
+			alwaysAllow?: string[];
+		},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -183,6 +193,7 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					toolOverride?.alwaysAllow,
 				);
 
 				// Read final token count from the correct progress source
@@ -395,6 +406,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		alwaysAllow?: string[],
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -551,6 +563,7 @@ export class SubagentExecutor {
 					toolCall.id,
 					config,
 					signal,
+					alwaysAllow,
 				);
 
 				// Count tokens from tool results
@@ -582,10 +595,12 @@ export class SubagentExecutor {
 	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
+		alwaysAllow?: string[],
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
+			alwaysAllow,
 		});
 	}
 
@@ -598,6 +613,7 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		alwaysAllow?: string[],
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
@@ -612,6 +628,7 @@ export class SubagentExecutor {
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
+			alwaysAllow,
 		);
 		if (needsApproval) {
 			const parsedArgs = parseToolArguments(rawArguments);

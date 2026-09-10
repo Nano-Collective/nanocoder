@@ -45,3 +45,21 @@ test('formatCiReport notes the diagnosis is advisory with no auto-fix', t => {
 	});
 	t.true(body.includes('no auto-fix applied'));
 });
+
+test('formatCiReport does not claim "no auto-fix applied" when fixApplied is true', t => {
+	const body = formatCiReport({
+		...baseInput,
+		subagentOutput: 'Opened draft PR: https://github.com/o/r/pull/99',
+		fixApplied: true,
+	});
+	t.false(body.includes('no auto-fix applied'));
+	t.true(body.includes('a fix was implemented, committed, and published'));
+});
+
+test('formatCiReport falls back to the advisory footer when fixApplied is omitted', t => {
+	const body = formatCiReport({
+		...baseInput,
+		subagentOutput: 'Looks like a flaky test.',
+	});
+	t.false(body.includes('a fix was implemented'));
+});
