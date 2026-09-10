@@ -1105,13 +1105,10 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible. marginLeft matches the
-			2-col margin promptWidth (actualWidth - 4, centered) leaves to the
-			left of the input box, so the indicator's text lines up with the
-			box's left border instead of sitting flush against the terminal
-			edge. Left-only (not paddingX) so it doesn't eat further into the
-			indicator's own actualWidth-based truncation budget. */}
-			<Box marginLeft={2}>
+			{/* Development mode indicator - always visible. marginLeft={3} shifts
+			the indicator one step to the right so it aligns cleanly under the
+			input box content. */}
+			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
 					developmentMode={developmentMode}
 					colors={colors}

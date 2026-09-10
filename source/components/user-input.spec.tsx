@@ -161,8 +161,8 @@ test.serial(
 			const modeIndent = modeLine!.search(/\S/);
 			t.is(
 				modeIndent,
-				borderIndent,
-				'Mode indicator text should start at the same column as the input box border',
+				borderIndent + 1,
+				'Mode indicator text should start one step to the right of the input box border',
 			);
 
 			unmount();

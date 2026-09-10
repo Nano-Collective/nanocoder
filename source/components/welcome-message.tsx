@@ -29,10 +29,6 @@ const LOGO_FULL = 'NANOCODER';
 const LOGO_SHORT = 'NC';
 const LOGO_FONT = 'block';
 
-// Rendered height of the block wordmark (glyph rows + cfonts blank padding),
-// used only for the 1/3-top vertical centering estimate.
-const LOGO_ROWS = 9;
-
 const MENU_FULL: Array<[string, string]> = [
 	['Resume session', '/resume'],
 	['Select model', '/model'],
@@ -66,18 +62,6 @@ export default memo(function WelcomeMessage() {
 	if (rows >= 15) {
 		menu = rows < 24 ? MENU_MIN : MENU_FULL;
 	}
-
-	// Vertical centering: roughly 1/3 of the empty space above the content
-	// and 2/3 below, when the terminal is tall enough
-	const logoRows = logoText ? LOGO_ROWS : 0;
-	const welcomeRows = 2; // Welcome + subtitle
-	const locationRows = 1;
-	const menuRows = menu.length;
-	const footerRows = 1;
-	const gaps = 3; // between logo/welcome, welcome/location, location/menu, menu/footer
-	const contentRows =
-		logoRows + welcomeRows + locationRows + menuRows + footerRows + gaps;
-	const topPad = Math.max(0, Math.floor((rows - contentRows - 1) / 3));
 
 	const branchLabel = (() => {
 		if (!gitStatus) return null;
@@ -115,11 +99,6 @@ export default memo(function WelcomeMessage() {
 
 	return (
 		<Box flexDirection="column" width={termW} marginBottom={1}>
-			{topPad > 0 &&
-				Array.from({length: topPad}).map((_, i) => (
-					<Text key={`pad-${i}`}> </Text>
-				))}
-
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
 					<Gradient colors={[colors.primary, colors.tool]}>

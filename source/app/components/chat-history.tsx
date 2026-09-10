@@ -64,13 +64,21 @@ export const ChatHistory = React.memo(function ChatHistory({
 	const viewportRef = React.useRef(null);
 	const contentRef = React.useRef(null);
 	const [scrollOffset, setScrollOffset] = React.useState(0);
+	const [isOverflowing, setIsOverflowing] = React.useState(false);
 
 	// New content or a vertical resize snaps the view back to the bottom
 	// (sticky scroll) — matching every chat TUI's behavior.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the deps are intentional TRIGGERS (new chat content / resize), not values read inside the effect.
 	React.useEffect(() => {
 		setScrollOffset(0);
-	}, [queuedComponents, liveComponent, terminalRows]);
+		if (fullscreen && viewportRef.current && contentRef.current) {
+			const vHeight = measureElement(viewportRef.current).height;
+			const cHeight = measureElement(contentRef.current).height;
+			setIsOverflowing(vHeight > 0 && cHeight > vHeight);
+		} else {
+			setIsOverflowing(false);
+		}
+	}, [queuedComponents, liveComponent, terminalRows, fullscreen]);
 
 	// Scroll by `delta` rows (positive = towards older content), clamped to
 	// the measured content extent. Shared by PageUp/PageDown and the mouse
@@ -133,9 +141,17 @@ export const ChatHistory = React.memo(function ChatHistory({
 			'key' in c &&
 			(c as {key: unknown}).key === 'welcome',
 	);
+	const isWelcomeOnly =
+		queuedComponents.length === 0 && !liveComponent && hasWelcome;
 	const isFreshInline =
 		!fullscreen && queuedComponents.length === 0 && hasWelcome;
 	const banner = fullscreen ? staticComponents[0] : undefined;
+	const isWelcomeBanner =
+		banner != null &&
+		typeof banner === 'object' &&
+		'key' in banner &&
+		(banner as {key: unknown}).key === 'welcome';
+	const showBanner = isWelcomeBanner ? isWelcomeOnly : true;
 	const frozenComponents = React.useMemo(() => {
 		if (fullscreen) return staticComponents.slice(1);
 		if (isFreshInline) return [];
@@ -162,7 +178,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 
 	const content = (
 		<>
-			{startChat && banner && (
+			{startChat && banner && showBanner && (
 				<RenderErrorBoundary label="banner">{banner}</RenderErrorBoundary>
 			)}
 
@@ -207,7 +223,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 		// after the (flexShrink=0) footer takes its natural height.
 		<Box flexGrow={1} flexBasis={0} flexDirection="column" minHeight={0}>
 			{scrollOffset > 0 && (
-				<Box flexShrink={0}>
+				<Box flexShrink={0} paddingLeft={fullscreen ? 2 : 0}>
 					<Text color={colors.secondary}>
 						{`── ↑ ${scrollOffset} rows · PgUp/PgDn · new output returns to bottom ──`}
 					</Text>
@@ -220,13 +236,16 @@ export const ChatHistory = React.memo(function ChatHistory({
 				flexDirection="column"
 				minHeight={0}
 				overflow="hidden"
-				justifyContent="flex-end"
+				justifyContent={
+					isWelcomeOnly ? 'center' : isOverflowing ? 'flex-end' : 'flex-start'
+				}
 			>
 				<Box
 					ref={contentRef}
 					flexDirection="column"
 					flexShrink={0}
 					marginBottom={-scrollOffset}
+					paddingLeft={fullscreen && !isWelcomeOnly ? 2 : 0}
 				>
 					{content}
 				</Box>
