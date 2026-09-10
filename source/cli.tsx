@@ -53,6 +53,7 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		args: args.slice(2),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -79,6 +80,10 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start [--trust <comment-only|auto-fix|full-commit>]
+                                  Trust level for daemon-triggered CI investigation/auto-fix;
+                                  defaults to agents.config.json's verify.trustLevel, then
+                                  comment-only. full-commit prompts a one-time confirmation.
   verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
                                   Headless, read-only PR review: runs the verify-pr-review
                                   subagent plus a semgrep pass. Prints the review to stdout

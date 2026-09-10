@@ -1,6 +1,7 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {TrustLevel} from '@/verify/trust';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -149,6 +150,24 @@ export interface CiWatchConfig {
 	maxPollIntervalMs?: number;
 }
 
+/**
+ * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
+ * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
+ * opt-in to background GitHub polling, kept in preferences), trust level
+ * and cadence are security/policy decisions appropriate to commit and
+ * review with the rest of the project, so they live here instead. When
+ * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
+ * preferences-backed `CiWatchConfig` values of the same name — see
+ * `loadCiWatchConfig` in `source/config/index.ts`.
+ */
+export interface VerifyConfig {
+	/** Trust level for daemon-triggered CI investigation/auto-fix. Undefined
+	 * defers to the `--trust` CLI flag, then 'comment-only'. */
+	trustLevel?: TrustLevel;
+	pollIntervalMs?: number;
+	maxPollIntervalMs?: number;
+}
+
 // Note: temperature is intentionally excluded from this interface.
 // It cannot be applied during a mode switch without proper integration into
 // the tune/ModelParameters pipeline (tune.ts). Tracked as a follow-up.
@@ -228,6 +247,9 @@ export interface AppConfig {
 
 	// Background CI-watch configuration (daemon-side)
 	ciWatch?: CiWatchConfig;
+
+	// Project-level verify/CI-watch policy: trust level, poll cadence overrides
+	verify?: VerifyConfig;
 
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
@@ -451,4 +473,12 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Absolute project-root paths for which the one-time `--trust
+	 * full-commit` security warning has already been shown and confirmed.
+	 * Mirrors `trustedDirectories`'s shape/semantics: a list of
+	 * already-confirmed targets, not a single global flag, since a user may
+	 * run the daemon against several projects with different trust postures.
+	 */
+	fullCommitConfirmedProjects?: string[];
 }

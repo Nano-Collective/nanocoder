@@ -28,9 +28,19 @@ export const TIMEOUT_GH_LOG_MS = 60_000;
 // never legitimately take long; a hang here (auth prompt, network stall)
 // should fail fast rather than block an unattended caller indefinitely.
 export const TIMEOUT_GH_METADATA_MS = 30_000;
+// Bound for `git push` (daemon auto-fix/full-commit): a network op that
+// should never legitimately hang for an unattended background caller.
+export const TIMEOUT_GIT_PUSH_MS = 60_000;
 // `semgrep scan --config auto` can fetch/update its rule registry on first
 // run, which is slower than a typical local scan.
 export const TIMEOUT_SEMGREP_MS = 120_000;
+// Ceiling for the daemon's auto-fix/full-commit one-shot fix subprocess
+// (investigate + edit files + run tests/build + commit). Generous since it
+// covers a full LLM-driven edit-and-verify loop, but bounded because
+// BackpressureDispatcher's per-subscription in-flight cap would otherwise
+// let one runaway attempt block all future ci.job.failed triggers for the
+// builtin CI investigator.
+export const TIMEOUT_CI_FIX_RUNNER_MS = 900_000; // 15 minutes
 // Ceiling on the pricing lookup for the per-response usage footer: past
 // this the message renders with token counts only rather than holding the
 // streaming-to-static swap hostage to a cold models.dev fetch.
