@@ -199,7 +199,7 @@ export function updatePrivacyPreference(value: boolean): void {
  */
 export function getAlternateScreen(): boolean {
 	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? false;
+	return preferences.alternateScreen ?? true;
 }
 
 /**

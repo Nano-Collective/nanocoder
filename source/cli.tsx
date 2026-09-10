@@ -84,10 +84,9 @@ Options:
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
   --alt-screen        Fullscreen TUI on the alternate screen buffer with in-app
-                      scrolling (mouse wheel / PgUp / PgDn). Persistent version:
-                      "alternateScreen": true in preferences.json.
-  --no-alt-screen     Force the default inline mode (main screen, chat history in
-                      the terminal's native scrollback), overriding the preference.
+                      scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
+  --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
+                      chat history in the terminal's native scrollback).
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -509,16 +508,13 @@ async function main(): Promise<void> {
 		// interactive TUI only. Run mode (`nanocoder run …`) prints a
 		// transcript the user needs to keep after exit — the alt screen
 		// would discard it when restoring the original buffer.
-		// Screen mode: inline (main screen + native scrollback) by DEFAULT —
-		// the terminal's own scrollbar, wheel, and search work there.
-		// Fullscreen (alt screen + in-app scroll) is opt-in via --alt-screen
-		// or the alternateScreen:true preference; --no-alt-screen forces
-		// inline regardless of the preference.
-		const {loadPreferences} = await import('@/config/preferences');
+		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
+		// Passing --no-alt-screen or setting alternateScreen:false in preferences
+		// forces inline mode (main screen + native scrollback).
+		const {getAlternateScreen} = await import('@/config/preferences');
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
-			(args.includes('--alt-screen') ||
-				loadPreferences().alternateScreen === true);
+			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
 		let inkStdin: NodeJS.ReadStream | undefined;

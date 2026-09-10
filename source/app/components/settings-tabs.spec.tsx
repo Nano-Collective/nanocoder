@@ -329,7 +329,7 @@ test('typing that arrives in the same stdin chunk as the down-arrow still reache
 });
 
 test('Enter on the Alternate Screen boolean row flips the persisted preference', async t => {
-	t.is(getAlternateScreen(), false);
+	t.is(getAlternateScreen(), true);
 
 	const {stdin, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
@@ -346,7 +346,7 @@ test('Enter on the Alternate Screen boolean row flips the persisted preference',
 	stdin.write(ENTER);
 	await tick();
 
-	t.is(getAlternateScreen(), true);
+	t.is(getAlternateScreen(), false);
 
 	unmount();
 });
