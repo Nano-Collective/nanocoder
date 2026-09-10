@@ -9,30 +9,15 @@ import {formatUsageIndicator} from '@/usage/format';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
-export function AssistantMessageBox({
+export function AssistantMessageBody({
 	text,
 	truncated,
 }: {
 	text: string;
 	truncated?: boolean;
 }) {
-	const {colors} = useTheme();
-	const boxWidth = useTerminalWidth();
-
 	return (
-		<Box
-			flexDirection="column"
-			marginBottom={1}
-			backgroundColor={colors.base}
-			width={boxWidth}
-			padding={1}
-			borderStyle="bold"
-			borderLeft={true}
-			borderRight={false}
-			borderTop={false}
-			borderBottom={false}
-			borderLeftColor={colors.secondary}
-		>
+		<Box flexDirection="column" marginBottom={1}>
 			{truncated && <Text>…</Text>}
 			<Text>{text}</Text>
 		</Box>
@@ -54,13 +39,13 @@ export default memo(function AssistantMessage({
 	// provider reported nothing.
 	const usageIndicator = usage ? formatUsageIndicator(usage) : null;
 
-	// Inner text width: outer width minus left border (1) and padding (1 each side)
-	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
+	const textWidth = boxWidth;
 
 	const displayMessage = message;
 
-	// Render markdown into segments: text parts (rendered inside the bordered box)
-	// and code parts (rendered without a border so they can be copied cleanly).
+	// Render markdown into segments: text parts and code parts.
+	// Both render without left border characters (┃) so terminal mouse
+	// selection and copy-paste remain clean without ASCII artifacts.
 	// For non-interactive mode we join all parts back into a flat string.
 	// Pre-wrap text parts to avoid Ink's trim:false leaving leading spaces on
 	// wrapped lines. trim() removes leading/trailing whitespace.
@@ -99,11 +84,7 @@ export default memo(function AssistantMessage({
 	// counter — keeps stdout output close to what a regular CLI would emit.
 	if (nonInteractive) {
 		const flatText = renderedParts.map(p => p?.content ?? '').join('\n');
-		return (
-			<Box flexDirection="column" marginBottom={1}>
-				<Text>{flatText}</Text>
-			</Box>
-		);
+		return <AssistantMessageBody text={flatText} />;
 	}
 
 	return (
@@ -113,17 +94,9 @@ export default memo(function AssistantMessage({
 					{model}:
 				</Text>
 			</Box>
-			{renderedParts.map((part, index) =>
-				part?.type === 'text' ? (
-					<AssistantMessageBox key={index} text={part.content} />
-				) : (
-					// Code blocks rendered without any border or margin so they can be
-					// selected and copied cleanly from the terminal.
-					<Box key={index} marginBottom={1}>
-						<Text>{part?.content}</Text>
-					</Box>
-				),
-			)}
+			{renderedParts.map((part, index) => (
+				<AssistantMessageBody key={index} text={part?.content ?? ''} />
+			))}
 			{showUsageFooter ? (
 				<Box marginBottom={2}>
 					<Text color={colors.secondary}>

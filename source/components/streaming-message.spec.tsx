@@ -116,28 +116,31 @@ test('StreamingMessage renders without crashing with empty message', t => {
 test('StreamingMessage strips leading newlines', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message="\n\nHello world" model="test-model" />
+			<StreamingMessage message={'\n\nHello world'} model="test-model" />
 		</MockThemeProvider>,
 	);
 
 	const raw = lastFrame() ?? '';
 	const output = stripAnsi(raw);
-	console.log('Stripped output:', JSON.stringify(output));
 	// The message "Hello world" should appear in the output without leading newlines
-	// The content displayed inside the box should be trimmed
 	t.true(output.includes('Hello world'));
-	// Check that the raw string content (inside box) doesn't start with newlines
-	// The visible content line should start with the actual text
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(contentMatch[1].startsWith('\n'), 'Content should not start with newline');
-	}
+	const lines = output
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean);
+	const modelIndex = lines.findIndex(l => l.includes('test-model'));
+	t.true(modelIndex !== -1, 'Model header should appear');
+	t.is(
+		lines[modelIndex + 1],
+		'Hello world',
+		'First non-empty line after header should be the message content without leading blank lines',
+	);
 });
 
 test('StreamingMessage strips trailing newlines', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message="Hello world\n\n" model="test-model" />
+			<StreamingMessage message={'Hello world\n\n'} model="test-model" />
 		</MockThemeProvider>,
 	);
 
@@ -150,18 +153,24 @@ test('StreamingMessage strips trailing newlines', t => {
 test('StreamingMessage strips leading and trailing newlines', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message="\n\n\nContent\n\n\n" model="test-model" />
+			<StreamingMessage message={'\n\n\nContent\n\n\n'} model="test-model" />
 		</MockThemeProvider>,
 	);
 
 	const output = stripAnsi(lastFrame() ?? '');
 	// Should have the trimmed content
 	t.true(output.includes('Content'));
-	// Content should not start with newlines
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(contentMatch[1].startsWith('\n'), 'Content should not start with newline');
-	}
+	const lines = output
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean);
+	const modelIndex = lines.findIndex(l => l.includes('test-model'));
+	t.true(modelIndex !== -1, 'Model header should appear');
+	t.is(
+		lines[modelIndex + 1],
+		'Content',
+		'First non-empty line after header should be the message content without leading blank lines',
+	);
 });
 
 test('StreamingMessage strips carriage return characters', t => {
@@ -174,12 +183,7 @@ test('StreamingMessage strips carriage return characters', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	// Should have the message without CR/LF issues
 	t.true(output.includes('Hello'));
-	// Content should not start with \r or \n
-	const contentMatch = output.match(/┃\s*(.+)/);
-	if (contentMatch) {
-		t.false(contentMatch[1].startsWith('\r'), 'Content should not start with \\r');
-		t.false(contentMatch[1].startsWith('\n'), 'Content should not start with \\n');
-	}
+	t.false(output.includes('\r'), 'Content should not start with \\r');
 });
 
 test('StreamingMessage strips whitespace-only content', t => {
@@ -192,20 +196,31 @@ test('StreamingMessage strips whitespace-only content', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	// Should render without crash - whitespace is stripped
 	t.true(output.includes('test-model'));
-	// JSX attribute treats "\n" as literal backslash-n, so input is
-	// `   \n\n   ` (3 spaces + literal `\n\n` + 3 spaces). After trim, only
-	// the literal `\n\n` should remain — the input's surrounding 3-space
-	// runs must be gone. The box adds 1-char padding plus may pad lines to
-	// terminal width with trailing spaces; strip only `┃` and trim trailing
-	// width-padding before asserting the leading 3-space prefix is gone.
-	const boxContent = output
+	const contentLines = output
 		.split('\n')
-		.filter(l => l.includes('┃'))
-		.map(l => l.replace(/^.*?┃/, '').trimEnd());
+		.map(l => l.trimEnd())
+		.filter(Boolean);
 	t.true(
-		boxContent.every(l => !l.startsWith('   ') && !l.endsWith('   ')),
-		`Trim should strip surrounding spaces, got: ${JSON.stringify(boxContent)}`,
+		contentLines
+			.slice(1)
+			.every(l => !l.startsWith('   ') && !l.endsWith('   ')),
+		`Trim should strip surrounding spaces, got: ${JSON.stringify(contentLines)}`,
 	);
+});
+
+test('Issue 1113: StreamingMessage output contains no ┃ border characters', t => {
+	const message = 'Line 1\nLine 2\nLine 3';
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<StreamingMessage message={message} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.false(output.includes('┃'), 'StreamingMessage output should not contain ┃');
+	t.true(output.includes('Line 1'));
+	t.true(output.includes('Line 2'));
+	t.true(output.includes('Line 3'));
 });
 
 test('StreamingMessage preserves internal newlines', t => {

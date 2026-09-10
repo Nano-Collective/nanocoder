@@ -1039,7 +1039,7 @@ test('UserInput windows long slash completion lists', async t => {
 	unmount();
 });
 
-test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
+test('UserInput renders completions BEFORE the mode indicator (inside the input container)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
@@ -1060,7 +1060,7 @@ test('UserInput renders completions BEFORE the mode indicator (inside the input 
 	t.true(modeIdx > -1, 'Mode indicator should be present');
 	t.true(
 		completionsIdx < modeIdx,
-		'Completions must render before the mode indicator (inside the bordered input box)',
+		'Completions must render before the mode indicator',
 	);
 	unmount();
 });
@@ -1164,3 +1164,16 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	unmount();
 });
 
+test('Issue 1113: UserInput output contains no ┃ border characters', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+		</TestWrapper>,
+	);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.false(
+		output.includes('┃'),
+		'UserInput output should not contain ┃ border characters',
+	);
+	unmount();
+});
