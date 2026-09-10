@@ -180,7 +180,8 @@ export function InteractiveApp({
 		(appState.isCancelling ||
 			chatHandler.isGenerating ||
 			appState.isToolExecuting ||
-			appState.abortController !== null);
+			appState.abortController !== null) &&
+		!appState.liveComponentCapturesInput;
 
 	const recallableSubmittedDraft =
 		cancellable &&
@@ -312,29 +313,44 @@ export function InteractiveApp({
 			    input box when the transcript is tall. */}
 			<Box flexDirection="column" flexShrink={0}>
 				{appState.planReviewState?.show && (
-					<PlanReviewPrompt
-						artifactPath={
-							appState.currentSessionId
-								? artifactManager.tryGetArtifactPath(
-										appState.currentSessionId,
-										'implementation_plan',
-									)
-								: undefined
-						}
-						onProceed={appHandlers.handlePlanProceed}
-						onAskMore={() => void appHandlers.handlePlanAskMore()}
-						onModify={appHandlers.handlePlanModify}
-					/>
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
+						<PlanReviewPrompt
+							artifactPath={
+								appState.currentSessionId
+									? artifactManager.tryGetArtifactPath(
+											appState.currentSessionId,
+											'implementation_plan',
+										)
+									: undefined
+							}
+							onProceed={appHandlers.handlePlanProceed}
+							onAskMore={() => void appHandlers.handlePlanAskMore()}
+							onModify={appHandlers.handlePlanModify}
+							onDismiss={appHandlers.handlePlanModify}
+						/>
+					</Box>
 				)}
 
 				{appState.isExplorerMode && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
 					</Box>
 				)}
 
 				{appState.isIdeSelectionMode && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<IdeSelector
 							onSelect={ide => {
 								// Completing lands in chat so the result is visible.
@@ -349,7 +365,11 @@ export function InteractiveApp({
 				)}
 
 				{showModalSelectors && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						paddingLeft={fullscreen ? 2 : 0}
+						flexDirection="column"
+					>
 						<ModalSelectors
 							activeMode={appState.activeMode}
 							isSettingsMode={appState.isSettingsMode}
@@ -404,7 +424,9 @@ export function InteractiveApp({
 				{appState.startChat &&
 					appState.activeMode === null &&
 					!appState.isSettingsMode &&
-					!appState.planReviewState?.show && (
+					!appState.planReviewState?.show &&
+					// Hide the composer only while a live component explicitly captures input.
+					!appState.liveComponentCapturesInput && (
 						<UIStateProvider>
 							<ChatInput
 								isCancelling={appState.isCancelling}

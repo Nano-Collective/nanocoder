@@ -1,24 +1,19 @@
-import fs from 'fs';
 import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
-import path from 'path';
-import {memo} from 'react';
-import {fileURLToPath} from 'url';
+import {memo, useState} from 'react';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
 	formatGitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {getPackageVersion} from '@/utils/package-version';
 import {homeRelative, truncateMiddle} from '@/utils/path';
+import {getRandomTip} from '@/utils/tips';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const packageJson = JSON.parse(
-	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
-) as {version: string};
+// Resolve the version once at module load time to avoid repeated file reads.
+const packageVersion = getPackageVersion();
 
 // One block-style wordmark everywhere: the full "NANOCODER" renders in the
 // block font on terminals from 90 cols up; below that we fall back to "NC"
@@ -28,19 +23,6 @@ const BLOCK_NANOCODER_WIDTH = 90;
 const LOGO_FULL = 'NANOCODER';
 const LOGO_SHORT = 'NC';
 const LOGO_FONT = 'block';
-
-// Rendered height of the block wordmark (glyph rows + cfonts blank padding),
-// used only for the 1/3-top vertical centering estimate.
-const LOGO_ROWS = 9;
-
-// The multi-row block wordmark needs LOGO_ROWS of vertical space, which
-// short terminals (VS Code's integrated panel, tmux splits, etc.) don't
-// have. Below MIN_ROWS_FOR_BLOCK_LOGO we still show the wordmark, just as a
-// single plain-text line instead of the BigText art, so the logo never
-// disappears entirely — it only degrades. Below MIN_ROWS_FOR_TEXT_LOGO there
-// truly isn't room for anything above the welcome text, so we drop it.
-const MIN_ROWS_FOR_BLOCK_LOGO = 16;
-const MIN_ROWS_FOR_TEXT_LOGO = 8;
 
 const MENU_FULL: Array<[string, string]> = [
 	['Resume session', '/resume'],
@@ -54,46 +36,38 @@ const MENU_MIN: Array<[string, string]> = [
 	['Quit', '/exit'],
 ];
 
-export default memo(function WelcomeMessage() {
+type WelcomeMessageProps = {
+	/**
+	 * Pin the tip shown under the banner. Defaults to a random one held for
+	 * the life of the component; tests pass an explicit tip so they can assert
+	 * exact text instead of scanning the catalogue.
+	 */
+	tip?: string;
+};
+
+export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 	const {actualWidth} = useResponsiveTerminal();
 	const rows = useTerminalRows();
 	const {colors} = useTheme();
+	const [randomTip] = useState(getRandomTip);
+	const shownTip = tip ?? randomTip;
 
-	const version = packageJson.version;
+	const version = packageVersion;
 	const cwd = homeRelative(process.cwd());
 	const gitStatus = getGitStatusSummarySync();
 
 	// Block wordmark in every screen — full NANOCODER on wide terminals, NC
-	// monogram on narrow (same block font, just shorter string). When the
-	// terminal is too short for the multi-row BigText art it falls back to a
-	// single-line plain-text wordmark instead of disappearing; only truly
-	// tiny terminals (rows < MIN_ROWS_FOR_TEXT_LOGO) drop it to protect the
-	// menu rows.
+	// monogram on narrow (same block font, just shorter string). Short
+	// terminals (rows < 16) skip it to protect the menu rows.
 	let logoText: string | null = null;
-	let compactLogo = false;
-	if (rows >= MIN_ROWS_FOR_BLOCK_LOGO) {
+	if (rows >= 16) {
 		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
-	} else if (rows >= MIN_ROWS_FOR_TEXT_LOGO) {
-		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
-		compactLogo = true;
 	}
 
 	let menu: Array<[string, string]> = [];
 	if (rows >= 15) {
 		menu = rows < 24 ? MENU_MIN : MENU_FULL;
 	}
-
-	// Vertical centering: roughly 1/3 of the empty space above the content
-	// and 2/3 below, when the terminal is tall enough
-	const logoRows = logoText ? (compactLogo ? 1 : LOGO_ROWS) : 0;
-	const welcomeRows = 2; // Welcome + subtitle
-	const locationRows = 1;
-	const menuRows = menu.length;
-	const footerRows = 1;
-	const gaps = 3; // between logo/welcome, welcome/location, location/menu, menu/footer
-	const contentRows =
-		logoRows + welcomeRows + locationRows + menuRows + footerRows + gaps;
-	const topPad = Math.max(0, Math.floor((rows - contentRows - 1) / 3));
 
 	const branchLabel = (() => {
 		if (!gitStatus) return null;
@@ -131,19 +105,10 @@ export default memo(function WelcomeMessage() {
 
 	return (
 		<Box flexDirection="column" width={termW} marginBottom={1}>
-			{topPad > 0 &&
-				Array.from({length: topPad}).map((_, i) => (
-					<Text key={`pad-${i}`}> </Text>
-				))}
-
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
 					<Gradient colors={[colors.primary, colors.tool]}>
-						{compactLogo ? (
-							<Text bold>{logoText}</Text>
-						) : (
-							<BigText text={logoText} font={LOGO_FONT} />
-						)}
+						<BigText text={logoText} font={LOGO_FONT} />
 					</Gradient>
 				</Box>
 			)}
@@ -206,6 +171,12 @@ export default memo(function WelcomeMessage() {
 					})}
 				</Box>
 			)}
+
+			<Box justifyContent={justify} width={termW} marginTop={1}>
+				<Text color={colors.secondary} dimColor>
+					Tip: {shownTip}
+				</Text>
+			</Box>
 		</Box>
 	);
 });

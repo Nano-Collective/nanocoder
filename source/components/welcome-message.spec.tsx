@@ -13,6 +13,25 @@ const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
+
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+/**
+ * Column the first non-space character of the line matching `pattern` sits in,
+ * with colour codes stripped so they do not count toward the offset.
+ */
+function indentOf(frame: string, pattern: RegExp): number {
+	const line = frame
+		.split('\n')
+		.map(l => l.replace(ANSI, ''))
+		.find(l => pattern.test(l));
+
+	if (line === undefined) {
+		throw new Error(`no line matched ${pattern}`);
+	}
+
+	return line.search(/\S/);
+}
 const VERSION = packageJson.version;
 
 // ============================================================================
@@ -63,6 +82,17 @@ test('WelcomeMessage shows centered welcome and location in narrow layout', t =>
 	t.regex(output!, /Resume session/);
 	t.regex(output!, /Help/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows the given tip in narrow layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 50;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('Tip: Short pinned tip.'));
 	process.stdout.columns = originalColumns;
 });
 
@@ -148,6 +178,53 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	t.regex(output!, /\/help/);
 	t.regex(output!, /\/exit/);
 
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage shows the given tip in full layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage tip="Short pinned tip." />);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('Tip: Short pinned tip.'));
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage renders the tip at various column widths', t => {
+	const originalColumns = process.stdout.columns;
+
+	for (const columns of [50, 120]) {
+		process.stdout.columns = columns;
+
+		const {lastFrame} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const output = lastFrame() ?? '';
+
+		t.true(
+			output.includes('Tip: Short pinned tip.'),
+			`tip is missing at ${columns} columns`,
+		);
+	}
+
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage falls back to a catalogue tip when none is given', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const output = lastFrame() ?? '';
+
+	// Only the label is asserted. ink-testing-library renders to a fixed 100
+	// column stdout regardless of process.stdout.columns, so a long catalogue
+	// tip wraps and a full-string match would break on tip length rather than
+	// on anything this test cares about. getRandomTip's own spec covers which
+	// tip comes back.
+	t.regex(output, /Tip: \S/);
 	process.stdout.columns = originalColumns;
 });
 
@@ -296,7 +373,7 @@ test('WelcomeMessage hides menu when rows < 15', t => {
 	process.stdout.rows = originalRows;
 });
 
-test('WelcomeMessage falls back to a compact text logo when rows < 16', t => {
+test('WelcomeMessage hides logo when rows < 16', t => {
 	const originalColumns = process.stdout.columns;
 	const originalRows = process.stdout.rows;
 	process.stdout.columns = 100;
@@ -307,48 +384,8 @@ test('WelcomeMessage falls back to a compact text logo when rows < 16', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// Too short for the multi-row BigText art, but the wordmark should still
-	// render as a single plain-text line rather than disappearing entirely.
+	t.notRegex(output!, /N A N O C O D E R/);
 	t.notRegex(output!, /█/);
-	t.regex(output!, /NANOCODER/);
-	t.regex(output!, /Welcome to Nanocoder/);
-
-	process.stdout.columns = originalColumns;
-	process.stdout.rows = originalRows;
-});
-
-test('WelcomeMessage shows a compact NC wordmark in narrow+short terminals (e.g. VS Code panel)', t => {
-	const originalColumns = process.stdout.columns;
-	const originalRows = process.stdout.rows;
-	process.stdout.columns = 60;
-	// @ts-ignore
-	process.stdout.rows = 12;
-
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.notRegex(output!, /█/);
-	t.regex(output!, /NC/);
-	t.regex(output!, /Welcome to Nanocoder/);
-
-	process.stdout.columns = originalColumns;
-	process.stdout.rows = originalRows;
-});
-
-test('WelcomeMessage hides logo entirely only when rows < 8', t => {
-	const originalColumns = process.stdout.columns;
-	const originalRows = process.stdout.rows;
-	process.stdout.columns = 100;
-	// @ts-ignore
-	process.stdout.rows = 7;
-
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.notRegex(output!, /█/);
-	t.notRegex(output!, /NANOCODER/);
 	t.regex(output!, /Welcome to Nanocoder/);
 
 	process.stdout.columns = originalColumns;
