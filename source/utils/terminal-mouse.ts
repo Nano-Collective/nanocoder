@@ -17,6 +17,49 @@ export type WheelDirection = 'up' | 'down';
 /** Singleton bus: cli.tsx publishes wheel ticks, ChatHistory subscribes. */
 export const wheelEvents = new EventEmitter();
 
+/** DECSET 1000 (button tracking) + 1006 (SGR encoding). */
+export const MOUSE_REPORTING_ON = '\x1b[?1000h\x1b[?1006h';
+const MOUSE_REPORTING_OFF = '\x1b[?1006l\x1b[?1000l';
+
+/**
+ * Selection mode: mouse reporting turned off on request so the terminal
+ * handles click-drag itself again.
+ *
+ * Button tracking is what lets the fullscreen viewport scroll, but it
+ * also takes click-drag away from the terminal, so text can't be
+ * selected with the mouse. Suspending reporting hands selection back for
+ * as long as the user needs it. Inline mode never enables reporting in
+ * the first place, so the toggle is a no-op there.
+ */
+let mouseReportingAvailable = false;
+let selectionMode = false;
+
+/** Called by cli.tsx once mouse reporting is actually on. */
+export function markMouseReportingAvailable(): void {
+	mouseReportingAvailable = true;
+}
+
+/** True while mouse reporting is suspended for text selection. */
+export function isSelectionMode(): boolean {
+	return selectionMode;
+}
+
+/**
+ * Flip selection mode. Returns false (and changes nothing) when there is
+ * no mouse reporting to suspend, so callers can let the key fall through
+ * to whatever else might want it.
+ */
+export function toggleSelectionMode(): boolean {
+	if (!mouseReportingAvailable) {
+		return false;
+	}
+	selectionMode = !selectionMode;
+	process.stdout.write(
+		selectionMode ? MOUSE_REPORTING_OFF : MOUSE_REPORTING_ON,
+	);
+	return true;
+}
+
 /**
  * Decode stdin bytes without losing a multibyte character split across
  * separate data events. TTY input is usually delivered as Buffers, and the

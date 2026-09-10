@@ -217,9 +217,9 @@ export class ConversationStateManager {
 			case 'read_file':
 				return `Read file: ${getFilename()}`;
 			case 'write_file':
-			case 'create_file':
 				return `Created/wrote file: ${getFilename()}`;
-			case 'edit_file':
+			case 'string_replace':
+			case 'diff_edit':
 				return `Edited file: ${getFilename()}`;
 			case 'execute_bash': {
 				const command = args.command;
@@ -260,13 +260,13 @@ export class ConversationStateManager {
 					'Review the command output and decide on the next action.',
 				);
 				break;
-			case 'create_file':
 			case 'write_file':
 				suggestions.push(
 					'Consider testing or verifying the file you just created.',
 				);
 				break;
-			case 'edit_file':
+			case 'string_replace':
+			case 'diff_edit':
 				suggestions.push(
 					'Consider testing the changes or making additional modifications.',
 				);

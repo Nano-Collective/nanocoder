@@ -41,6 +41,7 @@ Hosted services using the OpenAI-compatible API format.
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
 - [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
+- [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
 - [Mistral AI](mistral.md) - Mistral models
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace
@@ -80,8 +81,10 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `organizationId` | Organization ID for OpenAI (optional) |
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
+| `promptCaching` | Set to `false` to opt out of prompt caching (optional, boolean). Only read when `sdkProvider` is `anthropic`, where it defaults to `true`; ignored on every other SDK provider. See [Anthropic](anthropic.md#prompt-caching) |
 | `requestTimeout` | Overall request timeout in milliseconds (default: 120,000). Set to `-1` to disable (optional) |
 | `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
+| `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
 
 ### Context Window Overrides

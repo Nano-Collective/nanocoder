@@ -56,7 +56,7 @@ nanocoder --alt-screen
 
 Nanocoder supports two rendering modes, mirroring what Claude Code and Codex ship:
 
-- **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: mouse wheel and PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting takes click-drag selection away from the terminal, so **Ctrl+P** toggles selection mode to hand it back while you copy.
+- **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting can be toggled with `--mouse` / `--no-mouse` or in preferences.
 - **Inline** (`--no-alt-screen` flag, or `"alternateScreen": false` in preferences) — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
 
 In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly, leaving the transcript and a farewell instead of a dead input box.
@@ -67,7 +67,7 @@ Full documentation is available online at **[docs.nanocollective.org](https://do
 
 - **[Getting Started](docs/getting-started/index.md)** - Installation, setup, and first steps
 - **[Configuration](docs/configuration/index.md)** - AI providers, MCP servers, preferences, logging, timeouts
-- **[Features](docs/features/index.md)** - Skills (commands, subagents, tools, event triggers), the per-project daemon, checkpointing, development modes, task management, and more
+- **[Features](docs/features/index.md)** - Skills (commands, subagents, tools, event triggers), lifecycle hooks, the per-project daemon, checkpointing, development modes, task management, and more
 - **[Commands Reference](docs/features/commands.md)** - Complete list of built-in slash commands
 - **[Keyboard Shortcuts](docs/features/keyboard-shortcuts.md)** - Full shortcut reference
 - **[Community](docs/community.md)** - Contributing, Discord, and how to help

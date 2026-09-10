@@ -1,6 +1,7 @@
 import type {LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {COMPRESSION_CONSTANTS} from './message-compression';
+import {isModelFacing} from './message-visibility';
 
 export interface SummariseWithLLMParams {
 	messages: Message[];
@@ -82,9 +83,14 @@ export async function summariseWithLLM(
 		if (msg.role === 'system') continue;
 		if (i >= splitIndex) {
 			recent.push(msg);
-		} else {
+		} else if (isModelFacing(msg)) {
 			compressible.push(msg);
 		}
+		// Display-only notices inside the compressed segment are dropped, not
+		// summarised: they were never in the provider payload, and folding them
+		// into the summary would smuggle harness chrome back into context as a
+		// real `user` message. Notices in `recent` are kept verbatim and stay
+		// filtered at conversion time.
 	}
 
 	if (compressible.length === 0) {
@@ -163,7 +169,34 @@ function serialiseTranscript(messages: Message[]): string {
 	return lines.join('\n\n');
 }
 
-function truncate(text: string, max: number): string {
+function truncationSuffix(omitted: number): string {
+	return `... [truncated ${omitted} chars]`;
+}
+
+/**
+ * Truncate `text` so the result — suffix included — is never longer than `max`.
+ *
+ * The suffix counts against the budget, and its own width depends on how many
+ * characters were dropped, so the kept length has to be solved for rather than
+ * assumed. `keep + truncationSuffix(text.length - keep).length` is
+ * non-decreasing in `keep` (growing `keep` by one drops at most one digit from
+ * the omitted count), so budgeting for the widest possible suffix gives a
+ * valid starting point that can then be widened one character at a time.
+ *
+ * @internal exported for tests
+ */
+export function truncate(text: string, max: number): string {
 	if (text.length <= max) return text;
-	return `${text.slice(0, max)}... [truncated ${text.length - max} chars]`;
+	if (max <= 0) return '';
+
+	let keep = max - truncationSuffix(text.length).length;
+	// The suffix would eat the whole budget, leaving no room for content beside
+	// it. A notice reporting that everything was dropped carries less than the
+	// text it displaced, so spend the budget on content instead.
+	if (keep <= 0) return text.slice(0, max);
+
+	while (keep + 1 + truncationSuffix(text.length - keep - 1).length <= max) {
+		keep++;
+	}
+	return `${text.slice(0, keep)}${truncationSuffix(text.length - keep)}`;
 }

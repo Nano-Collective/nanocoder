@@ -28,6 +28,18 @@ Checkpointing lets you save a snapshot of your current session — conversation 
 - Active provider and model configuration
 - Timestamp and metadata
 
+Files are saved and restored byte for byte, so binaries — images, fonts, compiled artifacts — survive a round trip intact alongside text.
+
+## Incomplete Checkpoints
+
+A checkpoint can cover less than your whole workspace:
+
+- A file that could not be read when the checkpoint was taken — an editor or antivirus holding a lock, or permissions — was never captured
+- At most 50 modified files are captured; anything beyond that is left out
+- A file that was captured but whose stored copy has since gone missing cannot be restored
+
+Any of these are reported when you restore, naming the files that were not put back, so a partial restore never looks like a complete one.
+
 ## Example Workflow
 
 ```bash
@@ -50,5 +62,7 @@ When loading a checkpoint that would overwrite current work, Nanocoder prompts y
 ## Storage
 
 Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`.
+
+Snapshots skip anything matched by `.gitignore`, but deliberately ignore [`.nanocoderignore`](../configuration/index.md#ignoring-files). Hiding a file from the model's listings shouldn't quietly exclude it from restore, so a file in `.nanocoderignore` is still snapshotted and still reverted.
 
 > **Note:** Loading a checkpoint restores files immediately, but restoring conversation history requires restarting Nanocoder.

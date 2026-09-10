@@ -29,11 +29,19 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {
+	beginSessionStartHooks,
+	runLifecycleHooks,
+	SESSION_END_HOOK_HANDLER,
+} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
-import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {sessionManager} from '@/session/session-manager';
+import {
+	recordSubagentApiCallForStats,
+	SubagentExecutor,
+} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
@@ -395,7 +403,13 @@ export function useAppInitialization({
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
-				const executor = new SubagentExecutor(toolManager, client);
+				const executor = new SubagentExecutor(
+					toolManager,
+					client,
+					process.cwd(),
+					'normal',
+					recordSubagentApiCallForStats,
+				);
 				// Read the live development mode per tool call so subagents honor
 				// the current mode (and mid-run switches), matching the main loop.
 				if (developmentModeRef) {
@@ -563,9 +577,11 @@ export function useAppInitialization({
 			setCurrentModel('');
 			setCurrentProviderConfig(null);
 
-			// Clear task list — fire-and-forget, just deletes a JSON file;
-			// swallow failures so an unwritable cwd can't crash the process
-			clearAllTasks().catch(() => {});
+			// Reclaim artifact directories left behind by sessions that no longer
+			// exist — /clear retires a session id every time, and with autosave off
+			// no session file is ever written for the session-delete path to catch.
+			// Fire-and-forget: housekeeping must never delay or break startup.
+			void sessionManager.cleanupOrphanedArtifacts();
 
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();
@@ -592,6 +608,22 @@ export function useAppInitialization({
 			setCommandLoaderGetter(() => newCustomCommandLoader);
 
 			commandRegistry.registerLazy(lazyCommands);
+
+			// Lifecycle hooks: session-start output is buffered as context for the
+			// next prompt (so `git log -5` reaches the model without the user
+			// asking), and session-end runs through the shutdown manager at
+			// priority -5 — after the session autosave flush (-10), before the
+			// TUI teardown (0), while the process is still fully alive.
+			getShutdownManager().register({
+				name: SESSION_END_HOOK_HANDLER,
+				priority: -5,
+				handler: async () => {
+					await runLifecycleHooks('session-end');
+				},
+			});
+			// Not awaited: a slow session-start hook must not hold up the UI. The
+			// first prompt waits for it instead, when it drains the buffer.
+			void beginSessionStartHooks();
 
 			// === CRITICAL PATH ===
 			// LLM client + subagents are independent — run in parallel.

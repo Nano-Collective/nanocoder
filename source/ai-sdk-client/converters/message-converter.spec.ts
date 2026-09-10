@@ -1,3 +1,4 @@
+import type {ModelMessage} from 'ai';
 import test from 'ava';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import type {Message} from '@/types/index';
@@ -5,6 +6,7 @@ import {
 	convertToModelMessages,
 	dropOrphanedToolResults,
 	isEmptyAssistantMessage,
+	withCacheBreakpoints,
 } from './message-converter.js';
 import type {TestableMessage} from '../types.js';
 
@@ -397,4 +399,275 @@ test('dropOrphanedToolResults drops a tool result lacking a tool_call_id', t => 
 	const result = dropOrphanedToolResults(messages);
 	t.is(result.length, 1);
 	t.is(result[0].role, 'user');
+});
+
+test('convertToModelMessages drops display-only assistant notices', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'do it'},
+		{
+			role: 'assistant',
+			content: '\n\n_Cancelled by user._\n',
+			displayOnly: true,
+		},
+		{role: 'assistant', content: 'Real reply'},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 2);
+	t.is(result[0].role, 'user');
+	const content = result[1].content as Array<{type: string; text?: string}>;
+	t.is(content[0].text, 'Real reply');
+});
+
+test('convertToModelMessages keeps messages with displayOnly false or absent', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'hi', displayOnly: false},
+		{role: 'assistant', content: 'hello'},
+	];
+
+	t.is(convertToModelMessages(messages).length, 2);
+});
+
+test('convertToModelMessages drops display-only messages of every role', t => {
+	const messages: Message[] = [
+		{role: 'system', content: 'sys', displayOnly: true},
+		{role: 'user', content: 'usr', displayOnly: true},
+		{
+			role: 'tool',
+			content: 'res',
+			tool_call_id: 'call_1',
+			name: 'edit',
+			displayOnly: true,
+		},
+	];
+
+	t.deepEqual(convertToModelMessages(messages), []);
+});
+
+test('convertToModelMessages keeps tool results paired across a display-only notice', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+		},
+		{
+			role: 'assistant',
+			content: '\n\n**Error:** boom\n',
+			displayOnly: true,
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 2);
+	t.is(result[0].role, 'assistant');
+	t.is(result[1].role, 'tool');
+});
+
+test('convertToModelMessages orphans results whose tool call is display-only', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+			displayOnly: true,
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+	];
+
+	t.deepEqual(convertToModelMessages(messages), []);
+});
+
+test('convertToModelMessages emits a tool-call round trip with no synthetic assistant text', t => {
+	const history: Message[] = [
+		{role: 'user', content: 'Read config.json'},
+		{
+			role: 'assistant',
+			content: 'Reading it now.',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {name: 'read_file', arguments: {path: 'config.json'}},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			content: '{"port":3000}',
+			tool_call_id: 'call_1',
+			name: 'read_file',
+		},
+		{role: 'assistant', content: '\n\n**Error:** boom\n', displayOnly: true},
+		{role: 'user', content: 'and the port?'},
+	];
+
+	const payload = convertToModelMessages(history);
+
+	t.deepEqual(
+		payload.map(m => m.role),
+		['user', 'assistant', 'tool', 'user'],
+	);
+
+	const assistantText = payload
+		.filter(m => m.role === 'assistant')
+		.flatMap(m => m.content as Array<{type: string; text?: string}>)
+		.filter(part => part.type === 'text')
+		.map(part => part.text);
+	t.deepEqual(assistantText, ['Reading it now.']);
+
+	t.deepEqual(payload[2].content, [
+		{
+			type: 'tool-result',
+			toolCallId: 'call_1',
+			toolName: 'read_file',
+			output: {type: 'text', value: '{"port":3000}'},
+		},
+	]);
+});
+
+test('convertToModelMessages never leaks a harness notice into the payload', t => {
+	const notices = [
+		'_Cancelled by user._',
+		'**Error:** stream closed',
+		'Tool approval required for: execute_bash. Exiting non-interactive mode',
+		'Unrecognized slash command: `/nope`. Type `/help` to see available commands.',
+		'Use the model selector in the chat header to switch models.',
+	];
+
+	const history: Message[] = [
+		{role: 'user', content: 'go'},
+		...notices.map(content => ({
+			role: 'assistant' as const,
+			content,
+			displayOnly: true,
+		})),
+		{role: 'assistant', content: 'Done.'},
+	];
+
+	const serialized = JSON.stringify(convertToModelMessages(history));
+	for (const notice of notices) {
+		t.false(serialized.includes(notice), `leaked into payload: ${notice}`);
+	}
+	t.true(serialized.includes('Done.'));
+});
+
+const BIG = 'S'.repeat(5000);
+const BREAKPOINT = {anthropic: {cacheControl: {type: 'ephemeral'}}};
+
+test('withCacheBreakpoints folds the system prompt in as the first message', t => {
+	const result = withCacheBreakpoints(
+		[{role: 'user', content: 'hi'}],
+		'system text',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.role, 'system');
+	t.is(result[0]?.content, 'system text');
+});
+
+test('withCacheBreakpoints marks the system prompt and the last message', t => {
+	const result = withCacheBreakpoints(
+		[
+			{role: 'user', content: BIG},
+			{role: 'assistant', content: 'a'},
+			{role: 'user', content: 'b'},
+		],
+		'system text',
+	);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+	t.is(result[1]?.providerOptions, undefined);
+	t.is(result[2]?.providerOptions, undefined);
+	t.deepEqual(result[3]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints emits at most two breakpoints', t => {
+	const messages = Array.from({length: 12}, (_, i) => ({
+		role: 'user' as const,
+		content: `${BIG}${i}`,
+	}));
+	const marked = withCacheBreakpoints(messages, BIG).filter(
+		m => m.providerOptions !== undefined,
+	);
+	t.is(marked.length, 2);
+});
+
+test('withCacheBreakpoints skips breakpoints below the cacheable minimum', t => {
+	const result = withCacheBreakpoints(
+		[{role: 'user', content: 'hi'}],
+		'short system',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.providerOptions, undefined);
+	t.is(result[1]?.providerOptions, undefined);
+});
+
+test('withCacheBreakpoints marks only the last message when there is no system prompt', t => {
+	const result = withCacheBreakpoints(
+		[
+			{role: 'user', content: BIG},
+			{role: 'assistant', content: 'tail'},
+		],
+		'',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.providerOptions, undefined);
+	t.deepEqual(result[1]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints marks only the system prompt when there are no messages', t => {
+	const result = withCacheBreakpoints([], BIG);
+	t.is(result.length, 1);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints returns an empty array for empty input', t => {
+	t.deepEqual(withCacheBreakpoints([], ''), []);
+});
+
+test('withCacheBreakpoints counts array content toward the threshold', t => {
+	const result = withCacheBreakpoints(
+		[
+			{
+				role: 'tool',
+				content: [
+					{
+						type: 'tool-result',
+						toolCallId: '1',
+						toolName: 'read_file',
+						output: {type: 'text', value: BIG},
+					},
+				],
+			},
+		],
+		'',
+	);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints merges the breakpoint into existing providerOptions', t => {
+	const result = withCacheBreakpoints(
+		[
+			{
+				role: 'user',
+				content: BIG,
+				providerOptions: {openai: {reasoningEffort: 'high'}},
+			},
+		],
+		BIG,
+	);
+	t.deepEqual(result[1]?.providerOptions, {
+		openai: {reasoningEffort: 'high'},
+		...BREAKPOINT,
+	});
+});
+
+test('withCacheBreakpoints does not mutate its inputs', t => {
+	const messages: ModelMessage[] = [
+		{role: 'user', content: BIG},
+		{role: 'assistant', content: 'tail'},
+	];
+	withCacheBreakpoints(messages, BIG);
+	t.is(messages.length, 2);
+	t.is(messages[0]?.providerOptions, undefined);
+	t.is(messages[1]?.providerOptions, undefined);
 });

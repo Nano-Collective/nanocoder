@@ -97,7 +97,7 @@ You are a code review specialist. When given a file or directory to review:
 | `provider` | No | parent's | Provider name from `agents.config.json`. Set this to use a different API endpoint (e.g. `ollama` for local models) |
 | `model` | No | `inherit` | Model ID available on the provider. Use `inherit` to use the parent's current model |
 | `contextWindow` | No | provider/model default | Override the subagent's context window in tokens (e.g. `16384`) |
-| `tools` | No | all | Array of tool names to allow. If set, only these tools are available |
+| `tools` | No | all | Array of tool names to allow. If set, only these tools are available. Session-artifact tools are always excluded (see [Security](#security)) |
 | `disallowedTools` | No | none | Array of tool names to block |
 
 The body after the frontmatter is the system prompt.
@@ -140,14 +140,23 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 ## Security
 
 - Subagent tools respect the same approval rules as the main agent. Write tools and bash commands prompt the user for approval unless they are in the `alwaysAllow` list or the session is in auto-accept/yolo mode.
-- The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need.
+- The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need. The allow-list is enforced when a tool is *executed*, not just when the tool set is offered to the model, so a subagent cannot reach a tool it was never granted — including by naming one the model invented.
+- The session-artifact tools `write_plan`, `write_tasks`, and `write_walkthrough` are never available to a subagent, regardless of its `tools` list. Subagents run under the parent's session, so allowing them would let a subagent overwrite the plan, task list, or walkthrough the main conversation is working from. Subagents report back through their return value instead.
 - The `alwaysAllow` setting in `agents.config.json` applies to tools within subagents, so you can configure which tools run without prompts.
+
+## Loop Protection
+
+A subagent that re-issues the identical tool call(s) on consecutive turns is stopped by the same [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap the main agent uses (default 3). There is nobody to ask inside a delegated run, so it never pauses: the run fails with an error naming the setting. Calls to nonexistent tools count toward the streak too, so a subagent stuck on a tool it doesn't have hits the same cap.
+
+Whatever the subagent produced before it got stuck is still handed to the main agent under a `Partial output produced before stopping:` heading, so useful work isn't discarded along with the failure.
+
+The other two retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), and they don't use text-parsed tool calls (so `maxMalformedRetries` is too). There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
 
 ## Development Modes and Tune Profiles
 
 ### Plan Mode
 
-In plan mode, subagents can run but any write tools they attempt will require user approval (same as the main agent in plan mode). The built-in agents only have read tools configured, so they work seamlessly in plan mode.
+In plan mode, subagents can run but any write tools they attempt will require user approval (same as the main agent in plan mode). The built-in agents only have read tools configured, so they work seamlessly in plan mode. A subagent cannot write the plan artifact — `write_plan` belongs to the main conversation.
 
 ### Scheduler Mode
 

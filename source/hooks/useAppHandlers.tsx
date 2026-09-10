@@ -5,12 +5,14 @@ import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/app-util';
+import {createApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {
 	ErrorMessage,
 	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -18,6 +20,10 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+	runLifecycleHooks,
+	takePendingHookContext,
+} from '@/services/lifecycle-hooks';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -27,6 +33,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
@@ -44,6 +51,7 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -66,6 +74,8 @@ interface UseAppHandlersProps {
 	customCommandCache: Map<string, CustomCommand>;
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
+	currentSessionId: string | null;
+	ensureCurrentSessionId: () => string;
 
 	// Callbacks
 	onClearCounterIncrement?: () => void;
@@ -94,12 +104,13 @@ interface UseAppHandlersProps {
 	setPlanReviewState: (
 		value: {show: boolean; originalMessage: string} | null,
 	) => void;
-	setPendingPlanProceed: (value: boolean) => void;
+	setPendingPlanProceed: (value: string | null) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
 	setChatComponents: (components: React.ReactNode[]) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setLiveComponentCapturesInput: (value: boolean) => void;
 	client: LLMClient | null;
 	getMessageTokens: (message: Message) => number;
 
@@ -149,7 +160,7 @@ export interface AppHandlers {
 		images?: ImageAttachment[],
 	) => Promise<void>;
 	// Plan review action bar
-	handlePlanProceed: () => void;
+	handlePlanProceed: () => Promise<void>;
 	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
@@ -474,7 +485,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					validateIntegrity: true,
 				});
 
-				await manager.restoreFiles(checkpointData);
+				const gaps = await manager.restoreFiles(checkpointData);
 
 				props.addToChatQueue(
 					<SuccessMessage
@@ -483,6 +494,18 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						hideBox={true}
 					/>,
 				);
+
+				// A restore that reports only success, when the checkpoint never held
+				// every file, leaves the user believing the workspace is back.
+				if (gaps.length > 0) {
+					props.addToChatQueue(
+						<WarningMessage
+							key={generateKey('restore-gaps')}
+							message={describeGapsMessage(gaps)}
+							hideBox={true}
+						/>,
+					);
+				}
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
@@ -539,6 +562,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
+			void loadTasks(session.id).then(tasks => {
+				props.setLiveTaskList(tasks.length > 0 ? tasks : null);
+			});
 			// Replay the persisted conversation into scrollback so the user can see
 			// what they resumed (prompts, assistant replies, tool activity) instead
 			// of an empty screen with only a success line.
@@ -603,18 +629,21 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.setActiveMode, props]);
 
 	// Plan review action bar handlers
-	const handlePlanProceed = React.useCallback(() => {
-		// Hide the review bar and switch to normal mode. The actual "implement the
-		// plan" message is dispatched by an effect once developmentMode has settled
-		// to 'normal' (see InteractiveApp) — dispatching here would run the turn
-		// with the stale plan-mode system prompt and tools. We deliberately do NOT
-		// echo the user's last message: the plan is already in the conversation, and
-		// after a Modify/clarify round the last message is a follow-up question, not
-		// the original request.
+	const handlePlanProceed = React.useCallback(async () => {
+		// Approving must always be able to proceed. A missing session id or an
+		// unreadable plan artifact degrades to referring to the plan already in
+		// the conversation rather than leaving the user stuck on the review bar
+		// with "Yes" permanently broken.
+		const approvedPlanMessage = props.currentSessionId
+			? await createApprovedPlanMessage(props.currentSessionId)
+			: await createApprovedPlanMessage('');
+		// The effect in InteractiveApp waits for this mode change before it
+		// submits the persisted plan, preventing a stale plan-mode turn.
 		props.setPlanReviewState(null);
 		props.setDevelopmentMode('normal');
-		props.setPendingPlanProceed(true);
+		props.setPendingPlanProceed(approvedPlanMessage);
 	}, [
+		props.currentSessionId,
 		props.setPlanReviewState,
 		props.setDevelopmentMode,
 		props.setPendingPlanProceed,
@@ -622,18 +651,25 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	]);
 
 	const handlePlanAskMore = React.useCallback(async () => {
-		// Hide the review bar
+		// Hide the review bar and stay in plan mode; the model asks its questions
+		// and the user answers before a new plan is produced.
 		props.setPlanReviewState(null);
-		// Stay in plan mode and ask the model to ask additional questions
 		await props.handleChatMessage(
 			'please ask me any additional clarifying questions before proceeding',
 		);
 	}, [props.setPlanReviewState, props.handleChatMessage, props]);
 
 	const handlePlanModify = React.useCallback(() => {
-		// Just dismiss the bar — the user will edit and re-submit
+		// Return to input without changing mode so the user can request revisions.
 		props.setPlanReviewState(null);
-	}, [props.setPlanReviewState, props]);
+		props.addToChatQueue(
+			<SuccessMessage
+				key={generateKey('plan-revision-request')}
+				message="Plan Mode remains active. Tell Nanocoder what to change."
+				hideBox={true}
+			/>,
+		);
+	}, [props.setPlanReviewState, props.addToChatQueue, props]);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
@@ -642,6 +678,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			displayValue?: string,
 			images?: ImageAttachment[],
 		) => {
+			props.ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -649,8 +686,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// The VS Code editor pill is appended at the end of the message
 			// (\n\n[@…]<!--vscode-context-->…<!--/vscode-context-->); strip it
 			// so it doesn't leak into the parsed args.
-			const commandArgs = message.startsWith('/')
-				? message
+			// Trimmed to agree with parseInput, which is what actually routes the
+			// message downstream — `  /rename foo` is a slash command there.
+			const trimmedMessage = message.trim();
+			const isSlashCommand = trimmedMessage.startsWith('/');
+			const commandArgs = isSlashCommand
+				? trimmedMessage
 						.replace(
 							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
 							'',
@@ -661,8 +702,57 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
+			// user-prompt-submit hooks gate chat prompts only. A slash command and
+			// a `!` bash passthrough are local UI actions: they never reach the
+			// model, and prefixing either one breaks the routing that recognises it
+			// (handleMessageSubmission dispatches on parseInput, which keys bash off
+			// a leading `!`). Both must therefore leave the pending context buffer
+			// undrained, so it reaches the next prompt that actually goes to the model.
+			//
+			// Both checks are trimmed because parseInput trims before testing for
+			// either prefix — `  /help` and `  !ls` are still local actions there,
+			// so an untrimmed check here would prefix them and reroute them to the
+			// model.
+			const isLocalAction = isSlashCommand || trimmedMessage.startsWith('!');
+			let submittedMessage = message;
+			if (!isLocalAction) {
+				const gate = await runLifecycleHooks('user-prompt-submit', {
+					prompt: message,
+				});
+				if (gate.blocked) {
+					// Echo the prompt first, so the denial that follows has a visible
+					// cause in the scrollback instead of appearing on its own.
+					props.addToChatQueue(
+						<UserMessage
+							key={generateKey('user')}
+							message={displayValue ?? message}
+							tokenContent={message}
+							imageCount={images?.length ?? 0}
+						/>,
+					);
+					props.addToChatQueue(
+						<ErrorMessage
+							key={generateKey('hook-blocked-prompt')}
+							message={gate.reason ?? 'Prompt blocked by a hook.'}
+							hideBox={true}
+						/>,
+					);
+					props.setIsConversationComplete(true);
+					return;
+				}
+
+				// Fold in whatever session-start left buffered plus this hook's own
+				// stdout. displayValue keeps the user's original text on screen.
+				const injected = [await takePendingHookContext(), gate.output]
+					.filter(Boolean)
+					.join('\n\n');
+				if (injected) {
+					submittedMessage = `<hook-context>\n${injected}\n</hook-context>\n\n${message}`;
+				}
+			}
+
 			await handleMessageSubmission(
-				message,
+				submittedMessage,
 				{
 					customCommandCache: props.customCommandCache,
 					customCommandLoader: props.customCommandLoader,
@@ -685,6 +775,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onSwitchModel: props.handleModelSelect,
 					onAddToChatQueue: props.addToChatQueue,
 					setLiveComponent: props.setLiveComponent,
+					setLiveComponentCapturesInput: props.setLiveComponentCapturesInput,
 					setIsToolExecuting: props.setIsToolExecuting,
 					onCommandComplete: () => props.setIsConversationComplete(true),
 					setMessages: props.updateMessages,
@@ -700,8 +791,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: props.developmentMode,
 					lastApiUsage: props.lastApiUsage,
 					apiCallHistory: props.apiCallHistory,
+					sessionId: props.ensureCurrentSessionId(),
 				},
-				displayValue,
+				// Injected hook context must not reach the transcript — fall back to
+				// the raw message so the user still sees what they typed.
+				displayValue ?? message,
 				images,
 			);
 		},
@@ -732,6 +826,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.developmentMode,
 			props.lastApiUsage,
 			props.apiCallHistory,
+			props.ensureCurrentSessionId,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

@@ -11,9 +11,12 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
 	updateMouseReporting,
+	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -38,6 +41,7 @@ import {
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
 	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
@@ -199,6 +203,13 @@ function buildRowsForTab(
 					panel: 'reasoning-traces',
 				},
 				{
+					kind: 'boolean',
+					id: 'professional-tone',
+					label: 'Professional Tone',
+					value: getProfessionalTone(),
+					onToggle: () => updateProfessionalTone(!getProfessionalTone()),
+				},
+				{
 					kind: 'managed',
 					id: 'default-mode',
 					label: 'Default Mode',
@@ -259,6 +270,15 @@ function buildRowsForTab(
 			];
 		case 'advanced': {
 			const rows: SettingRow[] = [
+				{
+					kind: 'managed',
+					id: 'semantic-memory',
+					label: 'Semantic Memory',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
+					panel: 'semantic-memory',
+				},
 				{
 					kind: 'managed',
 					id: 'privacy',
@@ -408,6 +428,8 @@ function renderManagedPanel(
 			return <SettingsNotificationsPanel onBack={onBack} onCancel={onBack} />;
 		case 'display-settings':
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
+		case 'semantic-memory':
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':

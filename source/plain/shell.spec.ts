@@ -1,4 +1,16 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "ava";
+import { clearAppConfig, reloadAppConfig } from "@/config/index";
+import {
+	clearPendingHookContext,
+	resetSessionStartHooks,
+	SESSION_END_HOOK_HANDLER,
+} from "@/services/lifecycle-hooks";
+import { setProjectRoot } from "@/services/session-cwd";
+import type { HooksConfig } from "@/types/config";
+import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
 import type { PlainConversationOutcome } from "./conversation.js";
@@ -23,6 +35,10 @@ interface CapturedShutdown {
 
 function makeFakeShutdownManager(captured: CapturedShutdown) {
 	return () => ({
+		// runPlainShell registers its session-end lifecycle hook here; the fake
+		// only has to accept the registration, never run it.
+		register: () => undefined,
+		unregister: () => undefined,
 		gracefulShutdown: async (code: number) => {
 			captured.code = code;
 		},
@@ -93,10 +109,135 @@ function baseDeps(
 	return {
 		loadPreferences: () => ({ trustedDirectories: [] }) as never,
 		savePreferences: () => undefined,
+		artifacts: {
+			cleanupStaleEphemeralSessions: async () => undefined,
+			markEphemeralSession: async () => undefined,
+			deleteSessionArtifacts: async () => undefined,
+		},
 		getShutdownManager: makeFakeShutdownManager({ code: null }),
 		...overrides,
 	};
 }
+
+test.serial("plain shell creates a session for artifact tools", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	let sessionId: string | undefined;
+	let workingDirectory: string | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async options => {
+					sessionId = options.sessionId;
+					workingDirectory = options.workingDirectory;
+					return {
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.regex(sessionId ?? "", /^[0-9a-f-]{36}$/);
+	t.is(workingDirectory, process.cwd());
+});
+
+test.serial("plain shell marks and cleans its ephemeral artifact session", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	const calls: string[] = [];
+	let conversationSessionId = "";
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async options => {
+					conversationSessionId = options.sessionId ?? "";
+					return {
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						toolCalls: [],
+					};
+				},
+				artifacts: {
+					cleanupStaleEphemeralSessions: async () => {
+						calls.push("sweep");
+					},
+					markEphemeralSession: async sessionId => {
+						calls.push(`mark:${sessionId}`);
+					},
+					deleteSessionArtifacts: async sessionId => {
+						calls.push(`delete:${sessionId}`);
+					},
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.deepEqual(calls, [
+		"sweep",
+		`mark:${conversationSessionId}`,
+		`delete:${conversationSessionId}`,
+	]);
+});
+
+test.serial("plain shell cleans its ephemeral session when the conversation throws", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	let markedSessionId = "";
+	let deletedSessionId = "";
+	try {
+		await t.throwsAsync(
+			runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async () => {
+						throw new Error("conversation failed");
+					},
+					artifacts: {
+						cleanupStaleEphemeralSessions: async () => undefined,
+						markEphemeralSession: async sessionId => {
+							markedSessionId = sessionId;
+						},
+						deleteSessionArtifacts: async sessionId => {
+							deletedSessionId = sessionId;
+						},
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			}),
+			{message: "conversation failed"},
+		);
+	} finally {
+		stdout.restore();
+	}
+
+	t.regex(markedSessionId, /^[0-9a-f-]{36}$/);
+	t.is(deletedSessionId, markedSessionId);
+});
 
 test.serial(
 	"--json success outcome emits a well-formed report with exit code 0",
@@ -227,7 +368,7 @@ test.serial(
 				deps: baseDeps({
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
-						kind: "tool-approval-required",
+						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
@@ -241,7 +382,7 @@ test.serial(
 		}
 
 		const report = JSON.parse(stdout.get());
-		t.is(report.kind, "tool-approval-required");
+		t.is(report.kind, TOOL_APPROVAL_REQUIRED_KIND);
 		t.is(report.exitCode, 2);
 		t.deepEqual(report.toolNames, ["risky_tool"]);
 		t.is(shutdown.code, 2);
@@ -267,20 +408,21 @@ test.serial(
 						reasoning: null,
 						toolCalls: [
 							{
-								name: "write_to_file",
+								name: "write_file",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
 								// Same path written twice — should be deduped.
-								name: "edit_file",
+								name: "diff_edit",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
-								name: "create_file",
+								// write_file accepts file_path as a legacy alias.
+								name: "write_file",
 								arguments: { file_path: "/repo/b.ts" },
 								result: "ok",
 								error: null,
@@ -524,6 +666,86 @@ test.serial(
 );
 
 test.serial(
+	"text mode recalls relevant project memories and surfaces the count on stderr",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		const calls: Array<{ systemPrompt: string; query: string }> = [];
+		try {
+			await runPlainShell({
+				prompt: "refactor the auth module",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendRelevantProjectContextWithCount: async (systemPrompt, query) => {
+						calls.push({ systemPrompt, query });
+						return {
+							systemPrompt: `${systemPrompt}\n\n## Project Context\n\n- Auth uses Clerk.`,
+							memoryCount: 2,
+						};
+					},
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.is(calls.length, 1);
+		t.is(calls[0]?.query, "refactor the auth module");
+		t.regex(stderr.get(), /Recalling 2 project memories\.\.\./);
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
+	"text mode stays silent when no relevant memories are recalled",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
+						systemPrompt,
+						memoryCount: 0,
+					}),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.false(stderr.get().includes("Recalling"));
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
 	"text error outcome writes the error message to stderr with exit code 1",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
@@ -572,7 +794,7 @@ test.serial(
 				deps: baseDeps({
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
-						kind: "tool-approval-required",
+						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
@@ -653,3 +875,191 @@ test.serial(
 		t.is(shutdown.code, 1);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Lifecycle hooks in the headless shell.
+//
+// `run` / --plain is a session too, so it fires session-start, session-end and
+// user-prompt-submit. None of that is exercised by the TUI's tests, and a veto
+// here has to stop the run before any model call rather than after one.
+// ---------------------------------------------------------------------------
+
+const HOOK_DIR = join(tmpdir(), `nanocoder-plain-hooks-${Date.now()}`);
+
+function withPlainHooks(hooks: HooksConfig): void {
+	writeFileSync(
+		join(HOOK_DIR, "agents.config.json"),
+		JSON.stringify({ nanocoder: { hooks } }),
+		"utf-8",
+	);
+	reloadAppConfig();
+}
+
+// Portable hook bodies: `sh -c` on POSIX, `cmd /c` on Windows.
+const hookNode = (script: string) => `node -e "${script}"`;
+
+test.serial(
+	"plain shell prepends session-start hook output to the prompt",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const stdout = capturingStdout();
+		let firstUserMessage = "";
+		try {
+			withPlainHooks({
+				"session-start": [{ command: hookNode("console.log('branch: main')") }],
+			});
+			await runPlainShell({
+				prompt: "what changed?",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async (options) => {
+						firstUserMessage = String(
+							options.initialMessages.find((m) => m.role === "user")?.content ?? "",
+						);
+						return {
+							kind: "success",
+							finalText: "done",
+							reasoning: null,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager({ code: null }),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		t.true(
+			firstUserMessage.startsWith(
+				"<hook-context>\nbranch: main\n</hook-context>\n\n",
+			),
+			`expected the hook context in front of the prompt, got: ${firstUserMessage}`,
+		);
+		t.true(firstUserMessage.endsWith("what changed?"));
+	},
+);
+
+test.serial(
+	"a user-prompt-submit veto stops the run before any model call",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		let conversationRan = false;
+		try {
+			withPlainHooks({
+				"user-prompt-submit": [
+					{
+						name: "guard",
+						command: hookNode("console.log('not on a Friday');process.exit(1)"),
+					},
+				],
+			});
+			await runPlainShell({
+				prompt: "ship it",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async () => {
+						conversationRan = true;
+						return {
+							kind: "success",
+							finalText: "done",
+							reasoning: null,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		t.false(conversationRan, "the model must never be reached");
+		t.is(shutdown.code, 1, "and the run exits non-zero");
+		t.true(
+			stdout.get().includes("not on a Friday"),
+			"the hook's reason is reported",
+		);
+	},
+);
+
+test.serial("plain shell registers a session-end hook handler", async (t) => {
+	const registered: string[] = [];
+	const stdout = capturingStdout();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					toolCalls: [],
+				}),
+				getShutdownManager: () =>
+					({
+						register: (handler: { name: string }) => {
+							registered.push(handler.name);
+						},
+						unregister: () => undefined,
+						gracefulShutdown: async () => undefined,
+					}) as never,
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.true(
+		registered.includes(SESSION_END_HOOK_HANDLER),
+		`session-end must be registered for every exit path, got: ${registered.join(", ")}`,
+	);
+});

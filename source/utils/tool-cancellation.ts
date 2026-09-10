@@ -19,10 +19,40 @@ import type {ToolCall, ToolResult} from '@/types/index';
  * }));
  */
 export function createCancellationResults(toolCalls: ToolCall[]): ToolResult[] {
+	return createUnexecutedResults(
+		toolCalls,
+		'Tool execution was cancelled by the user.',
+	);
+}
+
+/**
+ * Create results for tool calls that could not be approved because the run has
+ * no one to ask (non-interactive mode).
+ *
+ * Deliberately distinct from the cancellation wording: nobody declined these
+ * tools, so a resumed interactive session must not read the saved history as a
+ * user refusal and stop retrying them.
+ *
+ * @param toolCalls - Array of tool calls left unapproved
+ * @returns Array of tool results explaining why they did not run
+ */
+export function createApprovalUnavailableResults(
+	toolCalls: ToolCall[],
+): ToolResult[] {
+	return createUnexecutedResults(
+		toolCalls,
+		'Tool was not executed: approval unavailable in non-interactive mode.',
+	);
+}
+
+function createUnexecutedResults(
+	toolCalls: ToolCall[],
+	content: string,
+): ToolResult[] {
 	return toolCalls.map(toolCall => ({
 		tool_call_id: toolCall.id,
 		role: 'tool' as const,
 		name: toolCall.function.name,
-		content: 'Tool execution was cancelled by the user.',
+		content,
 	}));
 }

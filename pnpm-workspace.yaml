@@ -10,12 +10,15 @@ overrides:
   tmp: ">=0.2.6"
 
 allowBuilds:
+  # Native file-watcher pulled in by @tailwindcss/cli. Only needed for
+  # --watch; the extension build is one-shot, so it stays unbuilt.
+  '@parcel/watcher': false
   '@vscode/vsce-sign': true
   esbuild: true
   keytar: true
   node-llama-cpp: false
 
-auditConfig: {}
+auditConfig: { ignoreGhsas: null }
 
 ignoredBuiltDependencies:
   - protobufjs

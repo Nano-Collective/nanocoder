@@ -15,10 +15,12 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
-import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {
+	recordSubagentApiCallForStats,
+	SubagentExecutor,
+} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, MCPInitResult} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
@@ -45,10 +47,6 @@ export interface PlainInitOptions {
 export async function initializePlain(
 	options: PlainInitOptions = {},
 ): Promise<PlainInitResult> {
-	// Fire-and-forget; must not crash the process when cwd is unwritable
-	// (e.g. ACP spawned by an editor with cwd=/)
-	clearAllTasks().catch(() => {});
-
 	const toolManager = new ToolManager();
 	const customCommandLoader = new CustomCommandLoader();
 	const preferences = loadPreferences();
@@ -98,7 +96,13 @@ export async function initializePlain(
 
 	updateLastUsed(actualProvider, finalModel);
 
-	const subagentExecutor = new SubagentExecutor(toolManager, client);
+	const subagentExecutor = new SubagentExecutor(
+		toolManager,
+		client,
+		process.cwd(),
+		'normal',
+		recordSubagentApiCallForStats,
+	);
 	setAgentToolExecutor(subagentExecutor);
 
 	const subagentLoader = getSubagentLoader();

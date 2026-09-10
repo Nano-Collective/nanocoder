@@ -3,6 +3,7 @@ import type {
 	NanocoderToolExport,
 	StreamingFormatter,
 	ToolEntry,
+	ToolExecutionContext,
 	ToolFormatter,
 	ToolHandler,
 	ToolValidator,
@@ -232,13 +233,13 @@ export class ToolRegistry {
 			const rawHandler = async (
 				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 				args: any,
-				options?: {abortSignal?: AbortSignal},
+				options?: ToolExecutionContext,
 			) =>
 				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 				await (t.tool as any).execute(args, {
 					toolCallId: 'manual',
 					messages: [],
-					abortSignal: options?.abortSignal,
+					...options,
 				});
 			registry.register({
 				name: t.name,

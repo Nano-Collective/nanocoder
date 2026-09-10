@@ -7,6 +7,8 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } fro
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {ArtifactController} from './artifact-controller';
+import {PlanReviewController} from './plan-review-controller';
 import { SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
@@ -39,6 +41,11 @@ export class ChatWebviewProvider
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
+	/** Non-null while a timeline revert is in flight. See `_handleRevert`. */
+	private _revertReplayBuffer: any[] | null = null;
+	private readonly _planReview = new PlanReviewController();
+	private readonly _artifacts = new ArtifactController();
 	/** Code lens prompt waiting on the webview shell and the ACP session. */
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,11 +61,33 @@ export class ChatWebviewProvider
 		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			this._planReview.observeSessionUpdate(update);
+			if (this._artifacts.observeSessionUpdate(update)) {
+				this.postArtifacts();
+			}
 			this.handleDiffs(update);
+			// A revert replays the whole truncated thread from inside the
+			// timeline/revert call, so those updates arrive before the call
+			// resolves. Hold them until we know the revert succeeded, then
+			// clear and flush; a refused revert drops them and leaves the
+			// existing thread on screen.
+			if (this._revertReplayBuffer) {
+				this._revertReplayBuffer.push(update);
+				return;
+			}
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			});
+			const kind = update?.update?.sessionUpdate ?? update?.sessionUpdate;
+			if (kind === 'tool_call' || kind === 'tool_call_update') {
+				this.scheduleTimelineRefresh();
+			}
+		};
+
+		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			this._artifacts.replaceFromMeta(meta);
+			this.postArtifacts();
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -159,6 +188,10 @@ export class ChatWebviewProvider
 	 */
 	public dispose() {
 		this._clearPendingPrompt();
+		if (this._timelineRefreshTimer) {
+			clearTimeout(this._timelineRefreshTimer);
+			this._timelineRefreshTimer = undefined;
+		}
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -173,6 +206,52 @@ export class ChatWebviewProvider
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleHistory' });
 		}
+	}
+
+	public resetPlanReview(): void {
+		this._planReview.reset();
+	}
+
+	public resetSessionState(): void {
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+	}
+
+	private postArtifacts(): void {
+		this.postMessage({
+			type: 'artifactsUpdated',
+			artifacts: this._artifacts.artifacts,
+		});
+	}
+
+	/**
+	 * Signal turn completion so the webview can flip back to the send button.
+	 * Forwards the per-turn token usage and estimated cost so the webview can
+	 * render the usage indicator under the response. `outcome` distinguishes a
+	 * user cancel from a real failure; pass 'failed' explicitly when the turn
+	 * threw before a response existed.
+	 */
+	private postPromptResponse(
+		response?: import('@agentclientprotocol/sdk').PromptResponse,
+		outcomeOverride?: 'completed' | 'cancelled' | 'failed',
+	): void {
+		const outcome =
+			outcomeOverride ??
+			(response?.stopReason === 'cancelled'
+				? 'cancelled'
+				: response
+					? 'completed'
+					: 'failed');
+		this.postMessage({
+			type: 'acpUpdate',
+			update: {
+				sessionUpdate: 'prompt_response',
+				outcome,
+				usage: response?.usage,
+				cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+			},
+		});
 	}
 
 	public toggleSettings() {
@@ -254,7 +333,18 @@ export class ChatWebviewProvider
 
 					case 'setMode':
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
+						if (message.mode !== 'plan') {
+							this._planReview.revise();
+						}
 						this._acpClient.setSessionMode(message.mode);
+						break;
+					case 'approvePlan':
+						this._outputChannel.appendLine('[Webview] User approved the implementation plan.');
+						this._approvePlan();
+						break;
+					case 'revisePlan':
+						this._outputChannel.appendLine('[Webview] User requested plan revisions.');
+						this._planReview.revise();
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
@@ -273,9 +363,13 @@ export class ChatWebviewProvider
 						break;
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
+						this._planReview.reset();
+						this._artifacts.reset();
+						this.postArtifacts();
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
+							this._broadcastTimeline();
 						});
 						break;
 					case 'deleteSession':
@@ -312,8 +406,13 @@ export class ChatWebviewProvider
 							const kind = stat.isDirectory() ? 'folder' : 'file';
 							const name = path.basename(message.path);
 							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
-						} catch {
-							// path doesn't exist or access denied — silently ignore
+						} catch (err) {
+							// Path doesn't exist or access denied. Nothing to attach, but
+							// log it — a drop that resolves to a bad path is otherwise a
+							// completely silent no-op with no way to diagnose it.
+							this._outputChannel.appendLine(
+								`[Webview] Could not resolve dropped path "${message.path}": ${err}`,
+							);
 						}
 						break;
 					}
@@ -359,6 +458,12 @@ export class ChatWebviewProvider
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
 						break;
+					case 'requestTimeline':
+						this._broadcastTimeline();
+						break;
+					case 'revertToCheckpoint':
+						this._handleRevert(message.checkpointId);
+						break;
 				}
 			}
 		);
@@ -382,6 +487,7 @@ export class ChatWebviewProvider
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				await this._broadcastTimeline();
 				this._flushPendingPrompt();
 			}
 		} catch (error) {
@@ -406,21 +512,68 @@ export class ChatWebviewProvider
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
+	private scheduleTimelineRefresh() {
+		if (this._timelineRefreshTimer) {
+			clearTimeout(this._timelineRefreshTimer);
+		}
+		this._timelineRefreshTimer = setTimeout(() => {
+			this._broadcastTimeline();
+		}, 150);
+	}
+
+	private async _broadcastTimeline() {
+		const entries = await this._acpClient.listTimeline();
+		this.postMessage({type: 'updateTimeline', entries});
+	}
+
+	/**
+	 * Clearing the panel before the revert resolves would leave it blank with
+	 * nothing to replay into it whenever the revert is refused (an in-flight
+	 * turn, a dropped connection). So buffer the agent's replay instead, and
+	 * only clear once the revert has actually happened.
+	 */
+	private async _handleRevert(checkpointId: string) {
+		this._outputChannel.appendLine(`[Webview] User reverted timeline to ${checkpointId}`);
+		const buffer: any[] = [];
+		this._revertReplayBuffer = buffer;
+		try {
+			await this._acpClient.revertTimeline(checkpointId);
+		} catch {
+			// Error toast is raised by the ACP client. The thread is untouched,
+			// so drop whatever was buffered and leave the panel as it was.
+			return;
+		} finally {
+			this._revertReplayBuffer = null;
+		}
+
+		this.postMessage({type: 'clear', isLoading: true});
+		for (const update of buffer) {
+			this.postMessage({type: 'acpUpdate', update});
+		}
+		this.postMessage({type: 'sessionLoaded'});
+		await this._broadcastTimeline();
+	}
+
 	private _handleRequestSettings() {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const settings = this._settingsManager.readSettings(cwd);
-		this.postMessage({ type: 'settingsData', settings });
+		this.postMessage({type: 'settingsData', settings});
 	}
 
 	private _handleUpdateSetting(key: string, value: unknown) {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const result = this._settingsManager.updateSetting(cwd, key, value);
-		this.postMessage({ type: 'settingsUpdated', key, success: result.success, error: result.error });
+		this.postMessage({
+			type: 'settingsUpdated',
+			key,
+			success: result.success,
+			error: result.error,
+		});
 
 		// If successful, send refreshed settings so the UI stays in sync
 		if (result.success) {
 			const settings = this._settingsManager.readSettings(cwd);
-			this.postMessage({ type: 'settingsData', settings });
+			this.postMessage({type: 'settingsData', settings});
 		} else {
 			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
 		}
@@ -429,16 +582,23 @@ export class ChatWebviewProvider
 	private async _handleOpenConfigFile(file: string) {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const paths = this._settingsManager.getConfigPaths(cwd);
-		const filePath = file === 'agents.config.json' ? paths.agentsConfig : paths.preferences;
+		const filePath =
+			file === 'agents.config.json' ? paths.agentsConfig
+			: file === '.mcp.json' ? paths.mcpConfig
+			: paths.preferences;
 
 		try {
 			if (!fs.existsSync(filePath)) {
-				fs.mkdirSync(path.dirname(filePath), { recursive: true });
-				fs.writeFileSync(filePath, '{}\n', 'utf-8');
+				fs.mkdirSync(path.dirname(filePath), {recursive: true});
+				// Seed .mcp.json with the wrapper the loader expects, so an empty
+				// file is still a usable starting point. Matches the CLI's
+				// settings-json-config.tsx.
+				const seed = file === '.mcp.json' ? '{\n\t"mcpServers": {}\n}\n' : '{}\n';
+				fs.writeFileSync(filePath, seed, 'utf-8');
 			}
 			const doc = await vscode.workspace.openTextDocument(filePath);
 			await vscode.window.showTextDocument(doc);
-		} catch (err) {
+		} catch {
 			vscode.window.showErrorMessage(
 				`Could not open ${file} at ${filePath}. Ensure the file exists.`,
 			);
@@ -583,7 +743,9 @@ export class ChatWebviewProvider
 			// transcript too so the UI matches (the server's confirmation
 			// message then streams into the fresh view).
 			if (text.trim() === '/clear') {
+				this._planReview.reset();
 				this.postMessage({type: 'clear'});
+				this.postMessage({type: 'updateTimeline', entries: []});
 			}
 
 			// Expand any @[file] / @[folder] attachments into their contents
@@ -599,6 +761,7 @@ export class ChatWebviewProvider
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (!sessionId) {
 				vscode.window.showErrorMessage('Nanocoder: Failed to create ACP session.');
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
 				return;
 			}
 			
@@ -612,22 +775,58 @@ export class ChatWebviewProvider
 			});
 
 			const response = await this._acpClient.prompt(expandedText, images);
-			// Signal turn completion so the Webview can flip back to the send
-			// button. Forward the per-turn token usage and estimated cost so
-			// the webview can render the usage indicator under the response.
-			this.postMessage({
-				type: 'acpUpdate',
-				update: {
-					sessionUpdate: 'prompt_response',
-					usage: response?.usage,
-					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
-				},
-			});
+			// A cancelled turn never produced a plan for review.
+			const review =
+				response?.stopReason === 'cancelled'
+					? undefined
+					: this._planReview.completeTurn(this._acpClient.currentMode);
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postPromptResponse(response);
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			this.postPromptResponse(undefined, 'failed');
+		}
+	}
+
+	private async _approvePlan(): Promise<void> {
+		try {
+			let response: import('@agentclientprotocol/sdk').PromptResponse | undefined;
+			await this._planReview.approve({
+				readFile: async artifactPath => fs.promises.readFile(artifactPath, 'utf8'),
+				setMode: async mode => {
+					await this._acpClient.setSessionMode(mode);
+					if (this._acpClient.currentMode !== mode) {
+						throw new Error('Unable to exit Plan Mode');
+					}
+				},
+				prompt: async message => {
+					response = await this._acpClient.prompt(message);
+					if (!response) {
+						throw new Error('Failed to execute the approved plan');
+					}
+				},
+			});
+			this.postPromptResponse(response);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`Plan approval failed: ${message}`);
+			const review = this._planReview.pendingReview;
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postMessage({type: 'planReviewError', message});
+			this.postPromptResponse(undefined, 'failed');
+			vscode.window.showErrorMessage(`Nanocoder: Unable to approve plan: ${message}`);
 		}
 	}
 
@@ -636,10 +835,38 @@ export class ChatWebviewProvider
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
 		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
+		// Bust the webview cache per asset rather than per extension version, so
+		// editing a media file in the dev host shows up on reload. Never let a
+		// missing asset take the whole panel down with it: chat-panel.css is a
+		// build output, and before this existed an unbuilt one merely rendered
+		// the panel unstyled instead of throwing out of getHtml.
+		const assetVersion = (fileName: string) => {
+			try {
+				// fileName is never user input — every call site passes a media/
+				// filename literal. Basename keeps the join inside media/.
+				const safeName = path.basename(fileName);
+				const assetPath = path.join(this._extensionUri.fsPath, 'media', safeName); // nosemgrep
+				return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
+			} catch {
+				return extVersion;
+			}
+		};
+		const scriptUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'))
+			.with({query: `v=${assetVersion('chat-panel.js')}`});
+		const styleUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'))
+			.with({query: `v=${assetVersion('chat-panel.css')}`});
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
-		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
+		const mentionUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
+			.with({query: `v=${assetVersion('mention-utils.js')}`});
+		const uriUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'uri-utils.js'))
+			.with({query: `v=${assetVersion('uri-utils.js')}`});
+		const slashCommandUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'slash-command-utils.js'))
+			.with({query: `v=${assetVersion('slash-command-utils.js')}`});
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -648,6 +875,8 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
 		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
+		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
+		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());
 
 		return html;
 	}

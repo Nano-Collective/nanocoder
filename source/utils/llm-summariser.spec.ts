@@ -1,7 +1,7 @@
 import test from 'ava';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
-import {summariseWithLLM} from './llm-summariser';
+import {summariseWithLLM, truncate} from './llm-summariser';
 
 function makeTokenizer(): Tokenizer {
 	return {
@@ -45,6 +45,55 @@ const systemMessage: Message = {
 	role: 'system',
 	content: 'You are a coding agent.',
 };
+
+test('truncate returns text untouched when it already fits', t => {
+	t.is(truncate('short', 10), 'short');
+	t.is(truncate('exact', 5), 'exact', 'a string of exactly max is not truncated');
+	t.is(truncate('', 0), '');
+});
+
+test('truncate never exceeds max, suffix included', t => {
+	// The suffix is part of the budget, so the total must fit — the bug was
+	// returning `max + suffix.length` characters.
+	for (const max of [30, 31, 40, 100, 400, 1200, 1500]) {
+		for (const length of [max + 1, max + 9, max + 10, max * 3, 100_000]) {
+			const result = truncate('a'.repeat(length), max);
+			t.true(
+				result.length <= max,
+				`truncate(${length} chars, ${max}) returned ${result.length} chars`,
+			);
+		}
+	}
+});
+
+test('truncate keeps as much content as the budget allows', t => {
+	const max = 60;
+	const result = truncate('a'.repeat(500), max);
+
+	t.is(result.length, max, 'the budget is spent, not undershot');
+	const kept = result.indexOf('...');
+	t.is(result, `${'a'.repeat(kept)}... [truncated ${500 - kept} chars]`);
+	// One more kept character would push the total past the budget.
+	t.true(kept + 1 + `... [truncated ${500 - kept - 1} chars]`.length > max);
+});
+
+test('truncate degrades to a hard slice when the notice would crowd out content', t => {
+	// Budgets too small for the notice at all.
+	for (const max of [1, 5, 20, 25]) {
+		const result = truncate('a'.repeat(1000), max);
+		t.is(result, 'a'.repeat(max));
+	}
+
+	// The boundary: for 30 chars of text a budget of 24 fits the notice
+	// `... [truncated 30 chars]` exactly, but with zero characters left beside
+	// it. A notice saying everything was dropped carries less than the text it
+	// displaced, so content wins — and the cap holds either way.
+	t.is(truncate('a'.repeat(30), 24), 'a'.repeat(24));
+
+	// One character of headroom more and the notice earns its place.
+	t.is(truncate('a'.repeat(30), 25), 'a... [truncated 29 chars]');
+	t.is(truncate('a'.repeat(30), 26), 'aa... [truncated 28 chars]');
+});
 
 test('summariseWithLLM returns [summary, ...recent] when segment is non-empty', async t => {
 	const tokenizer = makeTokenizer();
@@ -257,4 +306,70 @@ test('summariseWithLLM never starts the recent tail with an orphaned tool result
 		owningAssistant !== -1 && owningAssistant < firstTool,
 		'every kept tool result is preceded by its owning assistant(tool_calls)',
 	);
+});
+
+test('summariseWithLLM never summarises a display-only notice', async t => {
+	const tokenizer = makeTokenizer();
+	let lastUserPrompt = '';
+	const client = makeClient(messages => {
+		const userMsg = messages.find(m => m.role === 'user');
+		lastUserPrompt = userMsg?.content || '';
+		return '## Context\nok';
+	});
+
+	const messages: Message[] = [
+		{role: 'user', content: `please run tests ${'a'.repeat(2000)}`},
+		{role: 'assistant', content: 'running'.repeat(300)},
+		{
+			role: 'assistant',
+			content: '**Error:** stream closed',
+			displayOnly: true,
+		},
+		{role: 'user', content: 'again'},
+		{role: 'assistant', content: 'rerunning'},
+	];
+
+	const result = await summariseWithLLM({
+		messages,
+		systemMessage,
+		client,
+		tokenizer,
+		keepRecentMessages: 2,
+	});
+
+	// The notice was never in the provider payload, so folding it into the
+	// summary would smuggle harness chrome back in as a real `user` message.
+	t.notRegex(lastUserPrompt, /stream closed/);
+	t.regex(lastUserPrompt, /please run tests/);
+	t.truthy(result);
+	t.false(result!.some(m => m.content.includes('stream closed')));
+});
+
+test('summariseWithLLM keeps a display-only notice that falls in the recent tail', async t => {
+	const tokenizer = makeTokenizer();
+	const client = makeClient(() => '## Context\nok');
+
+	const messages: Message[] = [
+		{role: 'user', content: 'a'.repeat(2000)},
+		{role: 'assistant', content: 'b'.repeat(2000)},
+		{role: 'user', content: 'cancel that'},
+		{
+			role: 'assistant',
+			content: '_Cancelled by user._',
+			displayOnly: true,
+		},
+	];
+
+	const result = await summariseWithLLM({
+		messages,
+		systemMessage,
+		client,
+		tokenizer,
+		keepRecentMessages: 2,
+	});
+
+	t.truthy(result);
+	const notice = result!.find(m => m.content.includes('Cancelled by user'));
+	t.truthy(notice, 'recent notices stay in history for rendering');
+	t.true(notice!.displayOnly, 'and stay filtered from the payload');
 });

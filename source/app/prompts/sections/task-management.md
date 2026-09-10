@@ -7,6 +7,6 @@
 2. To start a step, resend the full list with that task set to `in_progress` (keep at most one `in_progress` at a time)
 3. To finish a step, resend the full list with that task set to `completed`
 4. To add or drop work, resend the list with tasks added or omitted
-5. When the request is complete, call `write_tasks` with an empty array to clear the list
+5. When the request is complete, leave the completed tasks in place so the session retains its execution record. Clear them only when the user explicitly asks.
 
-Tasks persist in `.nanocoder/tasks.json` across sessions. Running `/clear` resets all tasks.
+Tasks persist with the current session outside the working repository. Resuming that session restores them; `/clear` starts a new session without deleting the old task record.

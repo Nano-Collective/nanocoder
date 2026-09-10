@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {
@@ -6,8 +9,10 @@ import {
 	parseCustomCommandArgs,
 } from './app-util.js';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -254,6 +259,7 @@ function createResumeTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -269,6 +275,84 @@ function createResumeTestOptions(overrides: {
 }
 
 // --- Direct !command handling ---
+
+test.serial('stats command captures input and releases it on close', async t => {
+	let liveComponent: React.ReactNode = null;
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('/stats all-time', options);
+
+	t.deepEqual(captureStates, [true]);
+	t.true(React.isValidElement(liveComponent));
+	const onClose = (liveComponent as React.ReactElement<{onClose: () => void}>).props
+		.onClose;
+	t.truthy(onClose);
+	onClose();
+	t.deepEqual(captureStates, [true, false]);
+});
+
+test.serial('stats reset command clears the ledger and reports success', async t => {
+	const previousDataDir = process.env.NANOCODER_DATA_DIR;
+	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-stats-reset-'));
+	process.env.NANOCODER_DATA_DIR = dataDir;
+
+	try {
+		const {flushStatsLedgerSync, recordTokenUsage} = await import('@/stats/record');
+		recordTokenUsage({
+			provider: 'OpenRouter',
+			model: 'gpt-5',
+			tokens: 100,
+		});
+		flushStatsLedgerSync();
+
+		let queued: React.ReactNode = null;
+		let completed = 0;
+		const options = createResumeTestOptions({
+			onAddToChatQueue: component => {
+				queued = component;
+			},
+			onCommandComplete: () => {
+				completed++;
+			},
+		});
+
+		await handleMessageSubmission('/stats reset', options);
+
+		t.false(fs.existsSync(path.join(dataDir, 'stats.json')));
+		t.true(React.isValidElement(queued));
+		t.is(
+			(queued as React.ReactElement<{message: string}>).props.message,
+			'Lifetime stats reset.',
+		);
+		t.is(completed, 1);
+	} finally {
+		if (previousDataDir === undefined) {
+			delete process.env.NANOCODER_DATA_DIR;
+		} else {
+			process.env.NANOCODER_DATA_DIR = previousDataDir;
+		}
+		fs.rmSync(dataDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('bash command does not capture input', async t => {
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.deepEqual(captureStates, []);
+});
 
 test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
 	let queued: React.ReactNode = null;
@@ -313,6 +397,25 @@ test.serial('chat message - forwards displayValue to onHandleChatMessage so the 
 		'[@app.tsx]',
 		'bubble receives the placeholder, not the expanded contents',
 	);
+});
+
+test.serial('slash command - leading whitespace still dispatches as a command', async t => {
+	// parseInput trims before testing for `/`, so routing has to trim too —
+	// dispatching on the raw string sent `  /stats` to the model as chat.
+	let chatMessage: string | undefined;
+	let liveComponent: React.ReactNode = null;
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async message => {
+		chatMessage = message;
+	};
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+
+	await handleMessageSubmission('  /stats all-time', options);
+
+	t.is(chatMessage, undefined, 'a slash command must not reach the model');
+	t.true(React.isValidElement(liveComponent));
 });
 
 test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
@@ -451,6 +554,39 @@ test('retry command - lazy registry exposes /retry', t => {
 		retry?.description,
 		'Re-run the last user turn (use --model <id> to switch models first)',
 	);
+});
+
+test.serial('/plan is rejected and cannot bypass the Shift+Tab mode cycle', async t => {
+	const modeChanges: string[] = [];
+	let queued: React.ReactNode = null;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: component => {
+			queued = component;
+		},
+	});
+	options.developmentMode = 'normal';
+	Object.assign(options, {
+		onSetDevelopmentMode: (mode: string) => {
+			modeChanges.push(mode);
+		},
+	});
+
+	await handleMessageSubmission('/plan', options);
+	await Promise.resolve();
+
+	t.deepEqual(modeChanges, []);
+	t.true(
+		React.isValidElement(queued) &&
+			String((queued.props as {message?: string}).message).includes(
+				'Unknown command: plan',
+			),
+	);
+});
+
+test('/plan is not discoverable because Shift+Tab is the only mode switch', t => {
+	const plan = lazyCommands.find(command => command.name === 'plan');
+
+	t.is(plan, undefined);
 });
 
 test.serial('resume command - /resume with no args enters session selector mode', async t => {
@@ -690,6 +826,7 @@ function createRenameTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -849,6 +986,7 @@ function createSettingsTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -962,4 +1100,90 @@ test('retired setup commands - no longer registered in the slash menu', t => {
 	t.false(names.includes('setup-mcp'));
 	t.true(names.includes('settings'));
 	t.true(names.includes('setup-config'), 'unrelated /setup-config stays');
+});
+
+// --- Command progress spinner (Command.progressLabel) ---
+
+// The registry is populated at app init, not at module load, so the spec has
+// to register the lazy entries itself before driving a built-in command.
+commandRegistry.registerLazy(lazyCommands);
+
+function createProgressTestOptions(overrides: {
+	setLiveComponent?: (component: React.ReactNode) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+}): MessageSubmissionOptions {
+	return {
+		...createResumeTestOptions({
+			onAddToChatQueue: overrides.onAddToChatQueue,
+		}),
+		setLiveComponent: overrides.setLiveComponent ?? (() => {}),
+	};
+}
+
+test.serial(
+	'progress spinner - /commit mounts CommandProgress then clears it',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/commit', options);
+
+		t.is(live.length, 2, 'spinner is mounted once and cleared once');
+
+		const spinner = live[0] as React.ReactElement<{label?: string}>;
+		t.true(React.isValidElement(spinner));
+		t.is(spinner.type, CommandProgress);
+		t.is(spinner.props.label, 'Generating commit message');
+
+		t.is(live[1], null, 'live slot is released after the handler settles');
+	},
+);
+
+test.serial(
+	'progress spinner - cleared even when the command handler throws',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		// getMessageTokens runs after the spinner is mounted, so throwing there
+		// aborts the command with a spinner already on screen.
+		const boom = {
+			...options,
+			messages: [{role: 'user' as const, content: 'x'}],
+			getMessageTokens: () => {
+				throw new Error('boom');
+			},
+		};
+
+		await t.throwsAsync(() => handleMessageSubmission('/commit', boom));
+
+		t.is(live.length, 2);
+		t.is(live[1], null, 'a throwing handler must not strand the spinner');
+	},
+);
+
+test.serial(
+	'progress spinner - commands without progressLabel leave the live slot alone',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/help', options);
+
+		t.deepEqual(live, [], '/help is instant and declares no progressLabel');
+	},
+);
+
+test('progress spinner - only slow commands opt in', t => {
+	const commit = lazyCommands.find(c => c.name === 'commit');
+	t.is(commit?.progressLabel, 'Generating commit message');
+
+	const help = lazyCommands.find(c => c.name === 'help');
+	t.is(help?.progressLabel, undefined);
 });

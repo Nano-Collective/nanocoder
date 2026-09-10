@@ -27,16 +27,32 @@ For complex, multi-step work, the task system helps you and the AI stay aligned 
 
 ## AI-Managed Tasks
 
-The AI has access to task management tools (`create_task`, `list_tasks`, `update_task`, `delete_task`) and will use them proactively when working on complex problems. You can ask the AI to break work into tasks:
+The AI has a single task tool, `write_tasks`, and will use it proactively when working on complex problems. It always sends the complete list, which replaces the previous one — that is how a task moves from pending to in-progress to completed. You can ask the AI to break work into tasks:
 
 ```
 Break this feature into tasks and work through them one by one.
 ```
 
-The AI will create a task list, mark tasks as in-progress or complete as it works, and keep the list updated.
+The AI will create a task list, mark tasks as in-progress or complete as it works, and keep the list updated. Completed tasks are left in place so the session keeps a record of what was done; the AI only clears the list if you ask it to.
 
 ## Storage
 
-- Tasks are stored in `.nanocoder/tasks.json` in your project directory
-- Tasks are automatically cleared on startup and when using `/clear` to keep the list fresh
-- Consider adding `.nanocoder/tasks.json` to your `.gitignore`
+Task state belongs to the session, not to your project directory.
+
+- Tasks are stored with the session's other artifacts, under the platform app data directory: `<app data>/nanocoder/artifacts/<session id>/`
+- `tasks.json` holds the internal state; `task.md` is a readable Markdown rendering of the same list, reachable from the **Tasks** shortcut above the prompt
+- Nothing is written into your repository, so there is nothing to add to `.gitignore`
+- Resuming a session with `--resume` or `--continue` restores its task list
+- `/clear` starts a new session with an empty list. The previous session keeps its task record, so you can resume it later
+- Deleting a session (or letting session retention expire it) deletes its task artifacts too
+
+> **Upgrading from an earlier version?** Tasks used to live in `.nanocoder/tasks.json` inside the working directory. That file is no longer read or written. If one is left over from a previous version you can safely delete it.
+
+## Tasks and Tool Profiles
+
+`write_tasks` is part of the **full** tool profile. The `minimal` and `nano` profiles deliberately trade it away for a smaller prompt, so the AI will not create or update tasks while one of those profiles is active — `/tasks` still works for managing the list by hand. See [Tune](tune.md) for how profiles resolve.
+
+## Related
+
+- [Development Modes](development-modes.md) — plan mode produces a plan artifact alongside the task list
+- [Session Management](session-management.md) — how sessions and their artifacts are stored and resumed

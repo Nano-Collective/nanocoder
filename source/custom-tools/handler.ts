@@ -5,6 +5,7 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
+import {isRealPathInside} from '@/utils/path-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
@@ -53,7 +54,7 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(options.shell, ['-c', script], {
+		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
@@ -125,9 +126,20 @@ function formatScriptOutput(
 
 /**
  * Resolve the working directory with `${VAR}` substitution from process.env.
- * Relative paths resolve against the project root. Returns the project root
- * if the configured directory doesn't exist (so we don't hard-fail on a
- * stale checkout).
+ * Relative paths resolve against the project root.
+ *
+ * Returns the project root if the configured directory doesn't exist, so we
+ * don't hard-fail on a stale checkout.
+ *
+ * Throws if the directory exists but really sits outside the project once
+ * symlinks are resolved (a symlinked `./scripts`, an absolute path, `${HOME}`).
+ * Falling back to the project root would be worse than refusing: a tool whose
+ * body is `rm -rf ./*` and whose cwd was meant to be a scratch directory would
+ * then run that against the project itself. The escape is a misconfiguration
+ * and the user needs to see it, not have it silently redirected.
+ *
+ * Note this is containment, not a sandbox — the rendered body is arbitrary
+ * shell and can `cd` anywhere it likes.
  */
 export function resolveCwd(
 	configured: string | undefined,
@@ -138,7 +150,13 @@ export function resolveCwd(
 	const absolute = isAbsolute(expanded)
 		? expanded
 		: resolve(projectRoot, expanded);
-	return existsSync(absolute) ? absolute : projectRoot;
+	if (!existsSync(absolute)) return projectRoot;
+	if (!isRealPathInside(absolute, projectRoot)) {
+		throw new Error(
+			`Custom tool cwd escapes the project directory: ${configured} -> ${absolute}`,
+		);
+	}
+	return absolute;
 }
 
 /**
@@ -170,6 +188,16 @@ export function expandVars(value: string): string {
 		if (v !== undefined) return v;
 		return def ?? '';
 	});
+}
+
+/** cmd.exe: /d (skip AutoRun), /s (deterministic quotes), /c. POSIX: -c. */
+export function shellArgs(shell: string, script: string): string[] {
+	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
+}
+
+function isWindowsCmd(shell: string): boolean {
+	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
+	return /^cmd(\.exe)?$/i.test(name);
 }
 
 function pickShell(configured: string | undefined): string {

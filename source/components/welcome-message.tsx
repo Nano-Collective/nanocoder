@@ -1,24 +1,19 @@
-import fs from 'fs';
 import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
-import path from 'path';
-import {memo} from 'react';
-import {fileURLToPath} from 'url';
+import {memo, useState} from 'react';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
 	formatGitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {getPackageVersion} from '@/utils/package-version';
 import {homeRelative, truncateMiddle} from '@/utils/path';
+import {getRandomTip} from '@/utils/tips';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const packageJson = JSON.parse(
-	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
-) as {version: string};
+// Resolve the version once at module load time to avoid repeated file reads.
+const packageVersion = getPackageVersion();
 
 // One block-style wordmark everywhere: the full "NANOCODER" renders in the
 // block font on terminals from 90 cols up; below that we fall back to "NC"
@@ -41,12 +36,23 @@ const MENU_MIN: Array<[string, string]> = [
 	['Quit', '/exit'],
 ];
 
-export default memo(function WelcomeMessage() {
+type WelcomeMessageProps = {
+	/**
+	 * Pin the tip shown under the banner. Defaults to a random one held for
+	 * the life of the component; tests pass an explicit tip so they can assert
+	 * exact text instead of scanning the catalogue.
+	 */
+	tip?: string;
+};
+
+export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 	const {actualWidth} = useResponsiveTerminal();
 	const rows = useTerminalRows();
 	const {colors} = useTheme();
+	const [randomTip] = useState(getRandomTip);
+	const shownTip = tip ?? randomTip;
 
-	const version = packageJson.version;
+	const version = packageVersion;
 	const cwd = homeRelative(process.cwd());
 	const gitStatus = getGitStatusSummarySync();
 
@@ -165,6 +171,12 @@ export default memo(function WelcomeMessage() {
 					})}
 				</Box>
 			)}
+
+			<Box justifyContent={justify} width={termW} marginTop={1}>
+				<Text color={colors.secondary} dimColor>
+					Tip: {shownTip}
+				</Text>
+			</Box>
 		</Box>
 	);
 });

@@ -1,3 +1,5 @@
+import {getProfessionalTone} from '@/config/preferences';
+
 const adjectives = [
 	'brisk',
 	'swift',
@@ -38,4 +40,18 @@ export const formatElapsedTime = (startTime: number): string => {
 		return `${minutes}m ${seconds}s`;
 	}
 	return `${seconds}s`;
+};
+
+/**
+ * Build the end-of-turn progress note. Professional tone strips the random
+ * adjective so the line stays strictly functional.
+ */
+export const buildCompletionNote = (
+	startTime: number,
+	professionalTone: boolean = getProfessionalTone(),
+): string => {
+	const elapsed = formatElapsedTime(startTime);
+	return professionalTone
+		? `Completed in ${elapsed}.`
+		: `Worked for a ${getRandomAdjective()} ${elapsed}.`;
 };

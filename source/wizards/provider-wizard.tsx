@@ -140,12 +140,21 @@ function ProviderWizardSteps({
 }) {
 	const [step, setStep] = useState<'providers' | 'modes'>('providers');
 	const [providers, setProviders] = useState(items.providers);
+	const [modeProviders, setModeProviders] = useState(items.modeProviders);
 
+	// The provider menu is the hub: "Done & Save" goes straight to the summary,
+	// and mode-specific providers are an advanced option you opt into and come
+	// back from. Interposing the mode step between "Done & Save" and the
+	// summary made a first run walk through a screen it had nothing to say to.
 	if (step === 'providers') {
 		return (
 			<ProviderStep
 				existingProviders={providers}
 				onComplete={newProviders => {
+					setProviders(newProviders);
+					onComplete({providers: newProviders, modeProviders});
+				}}
+				onConfigureModes={newProviders => {
 					setProviders(newProviders);
 					setStep('modes');
 				}}
@@ -160,9 +169,10 @@ function ProviderWizardSteps({
 	return (
 		<ModeProviderStep
 			providers={providers}
-			existingModeProviders={items.modeProviders}
-			onComplete={modeProviders => {
-				onComplete({providers, modeProviders});
+			existingModeProviders={modeProviders}
+			onComplete={newModeProviders => {
+				setModeProviders(newModeProviders);
+				setStep('providers');
 			}}
 			onBack={() => setStep('providers')}
 		/>

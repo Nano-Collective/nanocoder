@@ -78,6 +78,15 @@ test('execute includes args variable with all arguments', t => {
 	t.true(result.includes('hello world'));
 });
 
+test('execute includes args variable without declared parameters', t => {
+	const command = createTestCommand({
+		content: 'All args: {{args}}',
+	});
+
+	const result = executor.execute(command, ['hello', 'world']);
+	t.true(result.includes('All args: hello world'));
+});
+
 test('execute wraps the prompt with the command name', t => {
 	const command = createTestCommand();
 

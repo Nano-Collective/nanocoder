@@ -7,12 +7,16 @@ import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
+import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
+import {resetStatsLedger} from '@/stats/record';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
-import {clearAllTasks} from '@/tools/tasks/storage';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -312,8 +316,7 @@ async function handleSpecialCommand(
 		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
-			await clearAllTasks();
-			// Increment clear counter to force re-render of static components
+			sharedProposalStore.clear();
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -461,6 +464,68 @@ function handleCopilotLogin(
 }
 
 /**
+ * Handles /stats as a live component so ←/→ can switch ranges without the
+ * chat composer swallowing the keys.
+ * Returns true if handled.
+ */
+function handleStatsCommand(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'stats') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setLiveComponentCapturesInput,
+		onAddToChatQueue,
+		onCommandComplete,
+	} = options;
+
+	const args = commandParts.slice(1);
+	const resetArg = args[0]?.toLowerCase();
+	if (resetArg === 'reset' || resetArg === '--reset') {
+		if (args.length !== 1) {
+			onAddToChatQueue(
+				errorMsg('Usage: /stats [7d|3m|all-time|reset]', 'stats-error'),
+			);
+			onCommandComplete?.();
+			return true;
+		}
+		resetStatsLedger();
+		onAddToChatQueue(infoMsg('Lifetime stats reset.', 'stats-reset'));
+		onCommandComplete?.();
+		return true;
+	}
+
+	setLiveComponentCapturesInput(true);
+
+	const close = () => {
+		// Leave a static snapshot in the transcript, then release focus.
+		onAddToChatQueue(
+			createStatsDisplayElement({
+				args,
+				interactive: false,
+			}),
+		);
+		setLiveComponent(null);
+		setLiveComponentCapturesInput(false);
+		onCommandComplete?.();
+	};
+
+	setLiveComponent(
+		createStatsDisplayElement({
+			args,
+			interactive: true,
+			onClose: close,
+		}),
+	);
+
+	return true;
+}
+
+/**
  * Handles /codex-login as a live component.
  * Returns true if handled.
  */
@@ -522,27 +587,54 @@ async function handleBuiltInCommand(
 	const {
 		onAddToChatQueue,
 		onCommandComplete,
+		setLiveComponent,
 		messages,
 		lastApiUsage,
 		apiCallHistory,
 	} = options;
 
-	const totalTokens = messages.reduce(
-		(sum, msg) => sum + options.getMessageTokens(msg),
-		0,
-	);
+	// Commands that declare a progressLabel do slow work (LLM round-trip,
+	// network) before returning their result component. Hold a spinner in the
+	// live slot for the duration so the UI is not silent for seconds. Mount it
+	// before any other work here — tokenizing a long transcript is itself
+	// perceptible — and release it in `finally` so a throwing handler cannot
+	// strand a spinner that never resolves.
+	const commandName = message.slice(1).trim().split(/\s+/)[0];
+	const progressLabel = commandRegistry.get(commandName)?.progressLabel;
 
-	const result = await commandRegistry.execute(message.slice(1), messages, {
-		provider: options.provider,
-		model: options.model,
-		tokens: totalTokens,
-		getMessageTokens: options.getMessageTokens,
-		client: options.client,
-		tune: options.tune,
-		developmentMode: options.developmentMode,
-		lastApiUsage,
-		apiCallHistory,
-	});
+	if (progressLabel) {
+		setLiveComponent(
+			React.createElement(CommandProgress, {
+				key: generateKey(`${commandName}-progress`),
+				label: progressLabel,
+			}),
+		);
+	}
+
+	let result: Awaited<ReturnType<typeof commandRegistry.execute>>;
+	try {
+		const totalTokens = messages.reduce(
+			(sum, msg) => sum + options.getMessageTokens(msg),
+			0,
+		);
+
+		result = await commandRegistry.execute(message.slice(1), messages, {
+			provider: options.provider,
+			model: options.model,
+			tokens: totalTokens,
+			getMessageTokens: options.getMessageTokens,
+			client: options.client,
+			tune: options.tune,
+			developmentMode: options.developmentMode,
+			lastApiUsage,
+			apiCallHistory,
+			sessionId: options.sessionId,
+		});
+	} finally {
+		if (progressLabel) {
+			setLiveComponent(null);
+		}
+	}
 
 	if (!result) {
 		onCommandComplete?.();
@@ -610,6 +702,7 @@ async function handleSlashCommand(
 		return;
 	if (handleCopilotLogin(commandParts, options)) return;
 	if (handleCodexLogin(commandParts, options)) return;
+	if (handleStatsCommand(commandParts, options)) return;
 
 	await handleBuiltInCommand(message, options);
 }
@@ -631,8 +724,13 @@ export async function handleMessageSubmission(
 		return;
 	}
 
-	if (message.startsWith('/')) {
-		await handleSlashCommand(message, options);
+	// Trimmed, to agree with parseInput above: `  /help` is a slash command
+	// there, so dispatching on the raw string sent it to the model as chat
+	// instead. handleSlashCommand slices from the leading `/`, so it needs the
+	// trimmed form rather than the original.
+	const trimmed = message.trim();
+	if (trimmed.startsWith('/')) {
+		await handleSlashCommand(trimmed, options);
 		return;
 	}
 
@@ -648,6 +746,9 @@ export function createClearMessagesHandler(
 		// Drop read-before-edit history so a stale "seen" from the prior
 		// conversation can't authorize a blind edit/overwrite after /clear.
 		clearReadTracker();
+		// Undelivered session-start hook context belongs to the cleared
+		// conversation — don't graft it onto the next one.
+		clearPendingHookContext();
 		if (client) {
 			await client.clearContext();
 		}

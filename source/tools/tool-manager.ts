@@ -36,9 +36,9 @@ export interface ToolVisibilityOptions {
 
 // Tools to exclude per development mode
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
-	yolo: [],
+	normal: ['write_plan'],
+	'auto-accept': ['write_plan'],
+	yolo: ['write_plan'],
 	plan: [
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
@@ -48,13 +48,27 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
+		'write_walkthrough',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
-	headless: ['ask_user', 'agent'],
+	headless: ['ask_user', 'agent', 'write_plan'],
 };
+
+/**
+ * Session-artifact tools. These write to the *parent session's* artifact
+ * directory, so a subagent calling one would silently overwrite the plan,
+ * task list, or walkthrough the user is about to act on. Subagents converse
+ * in text and report back through their return value; they have no business
+ * owning the session's lifecycle artifacts.
+ */
+export const SESSION_ARTIFACT_TOOLS = [
+	'write_plan',
+	'write_tasks',
+	'write_walkthrough',
+] as const;
 
 /**
  * Manages built-in tools, MCP tools, and file-based custom tools.
@@ -84,13 +98,21 @@ export class ToolManager {
 	}
 
 	/**
-	 * Initialize MCP servers and register their tools
+	 * Initialize MCP servers and register their tools.
+	 *
+	 * Servers marked `"enabled": false` are skipped entirely — no connection,
+	 * no tools, no init result. That flag is the documented server-level gate
+	 * (see docs/configuration/mcp-configuration.md), and it is the only opt-out
+	 * for headless runs, where every MCP tool executes unattended. An absent
+	 * flag means enabled, so existing configs are unaffected.
 	 */
 	async initializeMCP(
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
 	): Promise<MCPInitResult[]> {
-		if (servers && servers.length > 0) {
+		const enabledServers = servers?.filter(server => server.enabled !== false);
+
+		if (enabledServers && enabledServers.length > 0) {
 			// Dynamic import — only paid for by sessions with configured MCP servers.
 			const {MCPClient} = await import('@/mcp/mcp-client');
 			this.mcpClient = new MCPClient();
@@ -104,7 +126,7 @@ export class ToolManager {
 			});
 
 			const results = await this.mcpClient.connectToServers(
-				servers,
+				enabledServers,
 				onProgress,
 			);
 
@@ -181,6 +203,20 @@ export class ToolManager {
 			}
 		}
 
+		// The plan artifact is a mode capability, not a general-purpose tool.
+		// Keep it available even when a slim profile filters the normal tool set.
+		// Copy rather than push: `names` may still alias the shared, module-level
+		// profile array from getToolsForProfile(), and mutating that would leak
+		// write_plan into every later lookup of that profile for the life of the
+		// process.
+		if (
+			developmentMode === 'plan' &&
+			this.registry.hasTool('write_plan') &&
+			!names.includes('write_plan')
+		) {
+			names = [...names, 'write_plan'];
+		}
+
 		// Apply mode-based exclusions
 		if (developmentMode) {
 			const excluded = MODE_EXCLUDED_TOOLS[developmentMode];
@@ -190,11 +226,27 @@ export class ToolManager {
 			}
 
 			// Custom tools follow the same posture as built-ins but with policy
-			// applied per-tool from their approval/readOnly metadata.
+			// applied per-tool from their approval/readOnly metadata. MCP tools
+			// can't be enumerated in MODE_EXCLUDED_TOOLS (their names come from
+			// the server), so plan mode gates them on the server's read-only
+			// annotation instead — an unannotated tool may mutate, so it's hidden.
+			// The annotation is read off getToolMapping() rather than the registry
+			// entry: it is a server-supplied hint, and isReadOnly() also decides
+			// checkpointing and parallel batching, which it must not influence.
 			if (developmentMode === 'plan' || developmentMode === 'headless') {
+				const mcpTools =
+					developmentMode === 'plan'
+						? this.mcpClient?.getToolMapping()
+						: undefined;
 				names = names.filter(n => {
 					const meta = this.customTools.get(n);
-					if (!meta) return true;
+					if (!meta) {
+						const mcpTool = mcpTools?.get(n);
+						if (mcpTool) {
+							return mcpTool.readOnly;
+						}
+						return true;
+					}
 					if (developmentMode === 'headless') {
 						return meta.approval === 'never';
 					}
@@ -375,9 +427,6 @@ export class ToolManager {
 			this.registry.unregisterMany(mcpToolNames);
 			await this.mcpClient.disconnect();
 
-			// Reset registry to only static tools
-			this.registry = ToolRegistry.fromToolExports(allToolExports);
-			this.customTools.clear();
 			this.mcpClient = null;
 		}
 

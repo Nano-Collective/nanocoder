@@ -519,3 +519,121 @@ test('alternating deltas with no start markers keep their own callbacks', async 
 	t.deepEqual(routed.reasoning, ['Thinking', 'More thinking']);
 	t.deepEqual(routed.text, ['Answer', ' continues']);
 });
+
+function capturingModel(captured: {prompt?: unknown}): LanguageModel {
+	return {
+		specificationVersion: 'v3',
+		provider: 'anthropic',
+		modelId: 'claude-sonnet-4-5',
+		doStream: async (options: {prompt: unknown}) => {
+			captured.prompt = options.prompt;
+			return {
+				stream: new ReadableStream({
+					start(controller) {
+						controller.enqueue({type: 'text-start', id: '0'});
+						controller.enqueue({type: 'text-delta', id: '0', delta: 'ok'});
+						controller.enqueue({type: 'text-end', id: '0'});
+						controller.enqueue({
+							type: 'finish',
+							finishReason: 'stop',
+							usage: {inputTokens: 5000, outputTokens: 10, totalTokens: 5010},
+						});
+						controller.close();
+					},
+				}),
+			};
+		},
+	} as unknown as LanguageModel;
+}
+
+const anthropicConfig: AIProviderConfig = {
+	name: 'Anthropic',
+	type: 'anthropic',
+	sdkProvider: 'anthropic',
+	models: ['claude-sonnet-4-5'],
+	config: {apiKey: 'test-key'},
+};
+
+const LONG_SYSTEM = 'SYSTEM '.repeat(1000);
+
+test('handleChat sends the system prompt as a cache-marked message on anthropic', async t => {
+	const captured: {prompt?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'claude-sonnet-4-5',
+		providerConfig: anthropicConfig,
+		messages: [
+			{role: 'system', content: LONG_SYSTEM},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+	});
+
+	const prompt = captured.prompt as Array<{
+		role: string;
+		providerOptions?: Record<string, unknown>;
+	}>;
+	t.is(prompt[0]?.role, 'system');
+	t.deepEqual(prompt[0]?.providerOptions, {
+		anthropic: {cacheControl: {type: 'ephemeral'}},
+	});
+	t.deepEqual(prompt[prompt.length - 1]?.providerOptions, {
+		anthropic: {cacheControl: {type: 'ephemeral'}},
+	});
+});
+
+test('handleChat does not emit the AI SDK system-in-messages warning', async t => {
+	const warnings: string[] = [];
+	const originalWarn = console.warn;
+	console.warn = (...args: unknown[]) => {
+		warnings.push(args.join(' '));
+	};
+	try {
+		await handleChat({
+			model: capturingModel({}),
+			currentModel: 'claude-sonnet-4-5',
+			providerConfig: anthropicConfig,
+			messages: [
+				{role: 'system', content: LONG_SYSTEM},
+				{role: 'user', content: 'hello'},
+			],
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	} finally {
+		console.warn = originalWarn;
+	}
+	t.false(warnings.some(w => w.includes('System messages in the prompt')));
+});
+
+test('handleChat keeps the system string for non-anthropic providers', async t => {
+	const captured: {prompt?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [
+			{role: 'system', content: LONG_SYSTEM},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+	});
+
+	const prompt = captured.prompt as Array<{
+		role: string;
+		providerOptions?: Record<string, unknown>;
+	}>;
+	t.is(prompt[0]?.role, 'system');
+	t.is(prompt[0]?.providerOptions, undefined);
+	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
+});

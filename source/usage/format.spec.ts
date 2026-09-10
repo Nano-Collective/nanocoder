@@ -80,6 +80,8 @@ test('getTotalTokens sums input and output when total is missing', t => {
 test('getTotalTokens uses whichever partial field is reported', t => {
 	t.is(getTotalTokens({inputTokens: 100}), 100);
 	t.is(getTotalTokens({outputTokens: 50}), 50);
+	t.is(getTotalTokens({outputTokens: 50, cacheReadTokens: 100}), 150);
+	t.is(getTotalTokens({inputTokens: 100, outputTokens: 50, totalTokens: 0}), 150);
 });
 
 test('getTotalTokens returns null when nothing usable is reported', t => {
@@ -113,4 +115,24 @@ test('formatUsageIndicator omits cost when unavailable or zero', t => {
 test('formatUsageIndicator returns null without usable token counts', t => {
 	t.is(formatUsageIndicator({}), null);
 	t.is(formatUsageIndicator({cost: 0.5}), null);
+});
+
+test('formatUsageIndicator reports cached tokens when the provider read from cache', t => {
+	t.is(
+		formatUsageIndicator({
+			inputTokens: 12_000,
+			outputTokens: 400,
+			cacheReadTokens: 9800,
+			cost: 0.02,
+		}),
+		'Tokens: 12.4k | 9.8k cached | ~$0.02',
+	);
+});
+
+test('formatUsageIndicator omits the cached segment when nothing was cached', t => {
+	t.is(formatUsageIndicator({totalTokens: 4200}), 'Tokens: 4.2k');
+	t.is(
+		formatUsageIndicator({totalTokens: 4200, cacheReadTokens: 0}),
+		'Tokens: 4.2k',
+	);
 });

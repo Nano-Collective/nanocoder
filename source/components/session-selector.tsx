@@ -86,13 +86,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	}, [showAll]);
 
 	useInput((_input, key) => {
-		if (key.escape) {
-			if (!loading) {
-				onCancel();
-			}
-			return;
-		}
-		if (!loading && sessions.length === 0) {
+		if (key.escape && !loading) {
 			onCancel();
 		}
 	});
@@ -135,7 +129,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 					)}
 					<Box marginTop={1}>
 						<Text color={colors.secondary}>
-							Press any key to continue • Esc to cancel
+							Press Escape to continue • Esc to cancel
 						</Text>
 					</Box>
 				</Box>
