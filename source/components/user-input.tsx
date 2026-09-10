@@ -5,7 +5,7 @@ import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
-import {usePromptWidth, useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -43,6 +43,9 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
 
+// Prompt box width floor: keeps narrow terminals legible.
+const PROMPT_WIDTH_MIN = 40;
+
 interface ChatProps {
 	onSubmit?: (
 		message: string,
@@ -59,6 +62,7 @@ interface ChatProps {
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
+	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
@@ -73,7 +77,6 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
-	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 }
 
 export default function UserInput({
@@ -88,6 +91,7 @@ export default function UserInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
+	onToggleTaskList,
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
@@ -102,7 +106,6 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
-	onToggleTaskList,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -112,9 +115,8 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals. Shared with the chat transcript
-	// (usePromptWidth) so both track the same left edge as the terminal resizes.
-	const {promptWidth} = usePromptWidth();
+	// cols for legibility on tiny terminals.
+	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
@@ -182,7 +184,10 @@ export default function UserInput({
 		void promptHistory.loadHistory();
 	}, []);
 
-	// Real pastes, as reported by the terminal via bracketed paste.
+	// Real pastes, as reported by the terminal via bracketed paste. The
+	// payload is lifted off stdin before Ink's keypress parser sees it, so
+	// a multi-line paste can no longer submit the prompt on its first
+	// newline — it arrives here whole, in one event.
 	useEffect(() => {
 		if (disabled || !effectiveFocus) {
 			return;
@@ -739,7 +744,9 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle ctrl+t to collapse/expand the live task list (always available)
+		// Handle ctrl+t to collapse/expand the live task list (always available -
+		// this sits above the disabled guard so it still works while the agent
+		// is working, which is when the task list is on screen)
 		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
 			onToggleTaskList();
 			return;
@@ -758,8 +765,10 @@ export default function UserInput({
 		}
 
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
-		// Terminal paste of regular text arrives as a bracketed paste, not as
-		// Ctrl+V, so this binding is free to mean "paste image".
+		// Text pasted into the terminal arrives as a bracketed paste on stdin
+		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
+		// never as a Ctrl+V keypress, so this binding is free to mean
+		// "paste image".
 		if (key.ctrl && inputChar === 'v') {
 			const image = readClipboardImage();
 			if (image) {
@@ -1035,6 +1044,7 @@ export default function UserInput({
 							handleEnter={false}
 						/>
 					</Box>
+
 					{showClearMessage && (
 						<Text color={colors.secondary}>Press escape again to clear</Text>
 					)}
@@ -1106,6 +1116,20 @@ export default function UserInput({
 									</Text>
 								);
 							})}
+						</Box>
+					)}
+					{isBusy && (
+						<Box marginTop={1}>
+							<Text color={colors.secondary}>
+								<Spinner type="dots" /> Press Esc to cancel
+								{onToggleCompactDisplay && (
+									<Text>
+										{' '}
+										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+										{isNarrow ? '' : 'tool results'}
+									</Text>
+								)}
+							</Text>
 						</Box>
 					)}
 				</Box>
