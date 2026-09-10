@@ -14,6 +14,7 @@ import type {
 	TimelineRevertResult,
 	TimelineScanResult,
 } from '@/types/timeline';
+import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
@@ -450,11 +451,21 @@ export class TimelineManager {
 	private async saveIndex(index: TimelineIndex): Promise<void> {
 		this.index = index;
 		await this.ensureDir();
-		await fs.writeFile(
-			this.indexPath(),
-			JSON.stringify(index, null, 2),
-			'utf-8',
-		);
+		try {
+			// The index is the session's only record of its checkpoints, so a
+			// torn write must never replace a readable index with a truncated
+			// one. This covers process death mid-save; rename without fsync
+			// does not cover power loss.
+			await atomicWriteFile(this.indexPath(), JSON.stringify(index, null, 2));
+		} catch (error) {
+			// The rename either never ran or failed before replacing the live
+			// file, so the previous on-disk index is still the source of truth.
+			// Drop the unpersisted cache entry or later reads would report
+			// checkpoints that were never saved.
+			this.index = null;
+			await this.loadIndex();
+			throw error;
+		}
 	}
 
 	private assertSafeId(id: string): void {
