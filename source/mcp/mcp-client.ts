@@ -33,6 +33,8 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
+import {getToolJsonSchema} from '@/utils/schema-validate';
+import {withValidation} from '@/utils/tool-validation';
 import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
@@ -471,10 +473,22 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					// Create handler that calls this tool
-					const handler = async (args: Record<string, unknown>) => {
-						return this.callTool(toolName, args);
-					};
+					// Run the same lenient schema type-check the approval prompt
+					// renders (tool-confirmation → getToolJsonSchema), so a
+					// malformed call is rejected locally — it never reaches the
+					// server, and approving a "wrong type" call no longer silently
+					// skips the schema gate. No per-tool validator exists for MCP;
+					// the server remains the authority on value constraints.
+					const handler = withValidation(
+						async (args: Record<string, unknown>) => {
+							return this.callTool(toolName, args);
+						},
+						undefined,
+						getToolJsonSchema(coreTool),
+						// The wrapper types its result as the generic
+						// ToolExecuteResult union; MCP handlers always resolve a
+						// string, so the narrower entry signature is safe here.
+					) as (args: Record<string, unknown>) => Promise<string>;
 
 					// MCP tools take the same mode posture as built-in tools:
 					//   - auto-accept and headless both run unattended — headless is

@@ -39,9 +39,6 @@ export default function ToolConfirmation({
 	const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
 	const [hasFormatterError, setHasFormatterError] = React.useState(false);
 	const [hasValidationError, setHasValidationError] = React.useState(false);
-	const [_validationError, setValidationError] = React.useState<string | null>(
-		null,
-	);
 
 	// Get MCP tool info for display
 	const toolManager = getToolManager();
@@ -74,7 +71,6 @@ export default function ToolConfirmation({
 					'one or more arguments have the wrong type — fix the types and call the tool again',
 					typeErrors,
 				);
-				setValidationError(msg);
 				setHasValidationError(true);
 				setFormatterPreview(<Text color={colors.error}>{msg}</Text>);
 				return;
@@ -86,7 +82,6 @@ export default function ToolConfirmation({
 				try {
 					const validationResult = await validator(parsedArgs);
 					if (!validationResult.valid) {
-						setValidationError(validationResult.error);
 						setHasValidationError(true);
 						setFormatterPreview(
 							<Text color={colors.error}>{validationResult.error}</Text>,
@@ -97,7 +92,6 @@ export default function ToolConfirmation({
 					const logger = getLogger();
 					logger.error({error: formatError(error)}, 'Error running validator');
 					const errorMsg = `Validation error: ${formatError(error)}`;
-					setValidationError(errorMsg);
 					setHasValidationError(true);
 					setFormatterPreview(<Text color={colors.error}>{errorMsg}</Text>);
 					return;
@@ -137,16 +131,22 @@ export default function ToolConfirmation({
 		}
 	});
 
-	// Auto-handle errors without user interaction
+	// Auto-handle formatter crashes without user interaction. Schema-validation
+	// errors are deliberately NOT auto-resolved: auto-approving would execute the
+	// tool without the user ever seeing the consent prompt. Instead the prompt
+	// renders below together with the validation error, and approving re-runs
+	// the validator so the error is fed back to the model for self-correction.
+	//
+	// Deliberate trade-off: a malformed approval-required call now costs the user
+	// a consent prompt that previously self-resolved silently (auto-execute →
+	// validation error → model correction → one approval for the valid call).
+	// Nothing executes without consent is the requirement; the prompt is the
+	// cost. Revisit only if prompt fatigue becomes measurably worse than the
+	// consent gap it closes.
 	React.useEffect(() => {
 		if (hasFormatterError && !hasValidationError) {
 			// Automatically cancel the tool execution only for formatter crashes
 			onConfirm(false);
-		}
-		if (hasValidationError) {
-			// Automatically proceed to execution phase where the validator
-			// will fail again and pass the error back to the model to correct
-			onConfirm(true);
 		}
 	}, [hasFormatterError, hasValidationError, onConfirm]);
 
@@ -183,8 +183,10 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 
-				{/* Only show approval prompt if there's no error */}
-				{!hasFormatterError && !hasValidationError && (
+				{/* Show the approval prompt unless a formatter crash already
+					auto-cancelled the call. Validation errors render above the
+					prompt so the user sees what is wrong before deciding. */}
+				{!hasFormatterError && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
