@@ -881,3 +881,49 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'captureFiles refuses a path outside the workspace and reports it as skipped',
+	async t => {
+		const tempDir = await createTempDir();
+		// A sibling of the workspace. Keys are path.relative(workspaceRoot, file),
+		// so this is keyed `../name` and would escape a checkpoint's files
+		// directory once joined onto it.
+		const outsideFile = path.join(tempDir, '..', `escaped-${Date.now()}.txt`);
+		try {
+			await fs.writeFile(outsideFile, 'secret', 'utf-8');
+			const service = new FileSnapshotService(tempDir);
+
+			const {snapshots, skipped} = await service.captureFiles([outsideFile]);
+
+			t.is(snapshots.size, 0, 'the file must not be captured');
+			t.is(skipped.length, 1, 'the drop must be reported, not silent');
+			t.true(skipped[0]!.path.startsWith('..'));
+			t.is(skipped[0]!.reason, 'Outside the workspace');
+		} finally {
+			await fs.rm(outsideFile, {force: true});
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'captureFiles still captures a file inside the workspace',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const insideFile = path.join(tempDir, 'src', 'kept.txt');
+			await fs.mkdir(path.dirname(insideFile), {recursive: true});
+			await fs.writeFile(insideFile, 'kept', 'utf-8');
+			const service = new FileSnapshotService(tempDir);
+
+			const {snapshots, skipped} = await service.captureFiles([insideFile]);
+
+			t.deepEqual([...snapshots.keys()], ['src/kept.txt']);
+			t.is(snapshots.get('src/kept.txt')?.toString(), 'kept');
+			t.is(skipped.length, 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
