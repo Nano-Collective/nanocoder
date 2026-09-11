@@ -333,7 +333,10 @@ test('bash-style live execution keeps the composer mounted', t => {
 		/>,
 	);
 
-	t.regex(stripAnsi(lastFrame() ?? ''), /\/ commands, ! bash/);
+	// Asserts the composer is on screen via its placeholder. The welcome
+	// redesign replaced "/ commands, ! bash, ↑/↓ history" with "Ask
+	// anything..." and this assertion was left behind.
+	t.regex(stripAnsi(lastFrame() ?? ''), /Ask anything\.\.\./);
 });
 
 test('Escape cancels when only an abort controller is live (state flicker)', async t => {
