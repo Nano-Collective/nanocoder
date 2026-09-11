@@ -511,3 +511,64 @@ test('COMPRESSION_CONSTANTS exports expected values', t => {
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_USER_MESSAGE_THRESHOLD, 1000);
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT, 500);
 });
+
+test('compressMessages preserves display-only messages in output but excludes them from token counts and recent window', t => {
+	const tokenizer = createMockTokenizer();
+	const oldBanner = 'Notice: Old cancellation banner';
+	const recentBanner = 'Error: Recent notification banner '.repeat(20);
+
+	const messages: Message[] = [
+		createUserMessage('Old user message that is compressible'),
+		createAssistantMessage('Old assistant response'),
+		{
+			role: 'assistant' as const,
+			content: oldBanner,
+			displayOnly: true,
+		},
+		createUserMessage('Recent user turn'),
+		createAssistantMessage('Recent assistant turn'),
+		{
+			role: 'assistant' as const,
+			content: recentBanner,
+			displayOnly: true,
+		},
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	// Both display-only messages must be preserved verbatim in output to maintain scrollback
+	t.true(result.compressedMessages.some(msg => msg.content === oldBanner));
+	t.true(result.compressedMessages.some(msg => msg.content === recentBanner));
+	t.is(result.compressedMessages.length, messages.length);
+
+	// The recent window must not be consumed by the trailing display-only banner:
+	// exactly 2 model-facing messages ('Recent user turn' and 'Recent assistant turn') are preserved
+	t.is(result.preservedInfo.recentMessages, 2);
+
+	// Both recent turns must be uncompressed (verbatim) in the recent tail
+	const recentTail = result.compressedMessages.slice(-3);
+	t.is(recentTail[0]?.content, 'Recent user turn');
+	t.is(recentTail[1]?.content, 'Recent assistant turn');
+	t.is(recentTail[2]?.content, recentBanner);
+
+	// Original token count must strictly match only the model-facing messages
+	const modelFacingOriginal = messages.filter(m => !m.displayOnly);
+	const expectedOriginalTokens = modelFacingOriginal.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.originalTokenCount, expectedOriginalTokens);
+
+	// Compressed token count must also strictly exclude the display-only banners
+	const modelFacingCompressed = result.compressedMessages.filter(
+		m => !m.displayOnly,
+	);
+	const expectedCompressedTokens = modelFacingCompressed.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.compressedTokenCount, expectedCompressedTokens);
+});
