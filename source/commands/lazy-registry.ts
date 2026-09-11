@@ -139,6 +139,16 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/status').then(m => m.statusCommand),
 	},
 	{
+		name: 'whoami',
+		description: 'Show active provider configuration, API keys, and base URLs',
+		load: () => import('@/commands/whoami').then(m => m.whoamiCommand),
+	},
+	{
+		name: 'auth',
+		description: 'Show active provider configuration, API keys, and base URLs',
+		load: () => import('@/commands/whoami').then(m => m.authCommand),
+	},
+	{
 		name: 'setup-config',
 		description: 'Open a configuration file in your editor',
 		load: () =>
