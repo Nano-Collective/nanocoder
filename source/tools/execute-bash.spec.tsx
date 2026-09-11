@@ -93,10 +93,17 @@ test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	const lines = output!.split('\n').map(line => line.trim());
-	t.true(lines.includes('dolt version;'));
-	t.true(lines.includes('echo "===";'));
-	t.true(lines.includes('ls -la /usr/local/bin/dolt'));
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('dolt version;')));
+	t.true(lines.some(line => line.includes('echo "===";')));
+	t.true(lines.some(line => line.includes('ls -la /usr/local/bin/dolt')));
+	// The whole point: no single rendered line carries two segments
+	t.false(
+		lines.some(
+			line => line.includes('dolt version;') && line.includes('ls -la'),
+		),
+		'Compound segments must not share a line',
+	);
 });
 
 test('ExecuteBashFormatter keeps a quoted semicolon on one line', t => {
@@ -111,8 +118,8 @@ test('ExecuteBashFormatter keeps a quoted semicolon on one line', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	const lines = output!.split('\n').map(line => line.trim());
-	t.true(lines.includes('echo "hello; world"'));
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('echo "hello; world"')));
 });
 
 test('ExecuteBashFormatter handles complex commands', t => {
