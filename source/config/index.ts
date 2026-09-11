@@ -702,7 +702,12 @@ function loadAppConfig(): AppConfig {
 
 	// Load MCP servers from the new hierarchical configuration system
 	const mcpServersWithSource = loadAllMCPConfigs();
-	const mcpServers = mcpServersWithSource.map(item => item.server);
+	// Keep provenance on the runtime objects: validateProjectConfigSecurity
+	// filters on MCPServerConfig.source, which the loader only tracks on the wrapper.
+	const mcpServers = mcpServersWithSource.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
 
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
