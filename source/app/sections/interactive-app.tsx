@@ -280,135 +280,160 @@ export function InteractiveApp({
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
 
 	return (
-		// Fullscreen layout on the alternate screen buffer: the root Box is
-		// pinned to the exact terminal height so the frame can never exceed
-		// the viewport. The chat area (ChatHistory) flexes and clips at the
-		// top; everything below it (modals, status line, input) keeps its
-		// natural height, so Yoga shrinks the chat area to make room — the
-		// input can never be pushed off-screen.
-		<Box
-			flexDirection="column"
-			padding={1}
-			width="100%"
-			height={fullscreen ? terminalRows : undefined}
-		>
-			{/* Chat area — fullscreen bottom-anchored viewport */}
-			<ChatHistory
-				startChat={appState.startChat}
-				staticComponents={staticComponents}
-				queuedComponents={appState.chatComponents}
-				liveComponent={liveComponent}
-				renderLastQueuedComponentLive={recallableSubmittedDraft}
-				clearKey={clearKey}
-				fullscreen={fullscreen}
-				scrollActive={
-					!showModalSelectors &&
-					!appState.isExplorerMode &&
-					!appState.isIdeSelectionMode
-				}
-			/>
+		// One provider for the whole interactive tree, not just the composer.
+		// FileExplorer reads the same context to hand its selection over as
+		// pending file mentions, and it renders while ChatInput is unmounted
+		// (explorer mode sets activeMode) — a provider scoped to the composer
+		// would both throw for the explorer and lose the handoff on the way
+		// back.
+		<UIStateProvider>
+			{/* Fullscreen layout on the alternate screen buffer: the root Box is
+			    pinned to the exact terminal height so the frame can never exceed
+			    the viewport. The chat area (ChatHistory) flexes and clips at the
+			    top; everything below it (modals, status line, input) keeps its
+			    natural height, so Yoga shrinks the chat area to make room — the
+			    input can never be pushed off-screen. */}
+			<Box
+				flexDirection="column"
+				padding={1}
+				width="100%"
+				height={fullscreen ? terminalRows : undefined}
+			>
+				{/* Chat area — fullscreen bottom-anchored viewport */}
+				<ChatHistory
+					startChat={appState.startChat}
+					staticComponents={staticComponents}
+					queuedComponents={appState.chatComponents}
+					liveComponent={liveComponent}
+					renderLastQueuedComponentLive={recallableSubmittedDraft}
+					clearKey={clearKey}
+					fullscreen={fullscreen}
+					scrollActive={
+						!showModalSelectors &&
+						!appState.isExplorerMode &&
+						!appState.isIdeSelectionMode
+					}
+				/>
 
-			{/* Footer: modals, input. flexShrink=0 so the chat viewport above
+				{/* Footer: modals, input. flexShrink=0 so the chat viewport above
 			    absorbs ALL vertical shrink — without it Yoga crushes the
 			    input box when the transcript is tall. */}
-			<Box flexDirection="column" flexShrink={0}>
-				{appState.planReviewState?.show && (
-					<PlanReviewPrompt
-						artifactPath={
-							appState.currentSessionId
-								? artifactManager.tryGetArtifactPath(
-										appState.currentSessionId,
-										'implementation_plan',
-									)
-								: undefined
-						}
-						onProceed={appHandlers.handlePlanProceed}
-						onAskMore={() => void appHandlers.handlePlanAskMore()}
-						onModify={appHandlers.handlePlanModify}
-					/>
-				)}
+				<Box flexDirection="column" flexShrink={0}>
+					{appState.planReviewState?.show && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<PlanReviewPrompt
+								artifactPath={
+									appState.currentSessionId
+										? artifactManager.tryGetArtifactPath(
+												appState.currentSessionId,
+												'implementation_plan',
+											)
+										: undefined
+								}
+								onProceed={appHandlers.handlePlanProceed}
+								onAskMore={() => void appHandlers.handlePlanAskMore()}
+								onModify={appHandlers.handlePlanModify}
+								onDismiss={appHandlers.handlePlanModify}
+							/>
+						</Box>
+					)}
 
-				{appState.isExplorerMode && (
-					<Box marginLeft={-1} flexDirection="column">
-						<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
-					</Box>
-				)}
+					{appState.isExplorerMode && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
+						</Box>
+					)}
 
-				{appState.isIdeSelectionMode && (
-					<Box marginLeft={-1} flexDirection="column">
-						<IdeSelector
-							onSelect={ide => {
-								// Completing lands in chat so the result is visible.
-								launchedFromSettingsRef.current = false;
-								handleIdeSelect(ide);
-							}}
-							onCancel={returnFromLaunchedWizard(
-								modeHandlers.handleIdeSelectionCancel,
-							)}
-						/>
-					</Box>
-				)}
+					{appState.isIdeSelectionMode && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<IdeSelector
+								onSelect={ide => {
+									// Completing lands in chat so the result is visible.
+									launchedFromSettingsRef.current = false;
+									handleIdeSelect(ide);
+								}}
+								onCancel={returnFromLaunchedWizard(
+									modeHandlers.handleIdeSelectionCancel,
+								)}
+							/>
+						</Box>
+					)}
 
-				{showModalSelectors && (
-					<Box marginLeft={-1} flexDirection="column">
-						<ModalSelectors
-							activeMode={appState.activeMode}
-							isSettingsMode={appState.isSettingsMode}
-							settingsInitialTab={appState.settingsActiveTab}
-							onSettingsTabChange={appState.setSettingsActiveTab}
-							showAllSessions={appState.showAllSessions}
-							currentModel={appState.currentModel}
-							currentProvider={appState.currentProvider}
-							checkpointLoadData={appState.checkpointLoadData}
-							onModelSelect={modeHandlers.handleModelSelect}
-							onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-							onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
-							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
-							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-							onSettingsCancel={modeHandlers.handleSettingsCancel}
-							onProvidersChanged={modeHandlers.reloadProviders}
-							onMcpChanged={modeHandlers.reloadMcpServers}
-							onLaunchTune={() => {
-								// Capture the current tab before closing settings.
-								launchedFromTabRef.current = appState.settingsActiveTab;
-								launchedFromSettingsRef.current = true;
-								modeHandlers.handleSettingsCancel();
-								modeHandlers.enterTune();
-							}}
-							onLaunchIde={() => {
-								// Capture the current tab before closing settings.
-								launchedFromTabRef.current = appState.settingsActiveTab;
-								launchedFromSettingsRef.current = true;
-								modeHandlers.handleSettingsCancel();
-								modeHandlers.enterIdeSelectionMode();
-							}}
-							tuneConfig={appState.tune}
-							onTuneSelect={config => {
-								// Tune clears the conversation and prints a summary — land in
-								// chat so that output isn't hidden behind the settings panel.
-								launchedFromSettingsRef.current = false;
-								return modeHandlers.handleTuneSelect(config);
-							}}
-							onTuneCancel={returnFromLaunchedWizard(
-								modeHandlers.handleTuneCancel,
-							)}
-							onCheckpointSelect={appHandlers.handleCheckpointSelect}
-							onCheckpointCancel={appHandlers.handleCheckpointCancel}
-							onSessionSelect={sessionId =>
-								void appHandlers.handleSessionSelect(sessionId)
-							}
-							onSessionCancel={appHandlers.handleSessionCancel}
-						/>
-					</Box>
-				)}
+					{showModalSelectors && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<ModalSelectors
+								activeMode={appState.activeMode}
+								isSettingsMode={appState.isSettingsMode}
+								settingsInitialTab={appState.settingsActiveTab}
+								onSettingsTabChange={appState.setSettingsActiveTab}
+								showAllSessions={appState.showAllSessions}
+								currentModel={appState.currentModel}
+								currentProvider={appState.currentProvider}
+								checkpointLoadData={appState.checkpointLoadData}
+								onModelSelect={modeHandlers.handleModelSelect}
+								onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
+								onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
+								onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
+								onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+								onSettingsCancel={modeHandlers.handleSettingsCancel}
+								onProvidersChanged={modeHandlers.reloadProviders}
+								onMcpChanged={modeHandlers.reloadMcpServers}
+								onLaunchTune={() => {
+									// Capture the current tab before closing settings.
+									launchedFromTabRef.current = appState.settingsActiveTab;
+									launchedFromSettingsRef.current = true;
+									modeHandlers.handleSettingsCancel();
+									modeHandlers.enterTune();
+								}}
+								onLaunchIde={() => {
+									// Capture the current tab before closing settings.
+									launchedFromTabRef.current = appState.settingsActiveTab;
+									launchedFromSettingsRef.current = true;
+									modeHandlers.handleSettingsCancel();
+									modeHandlers.enterIdeSelectionMode();
+								}}
+								tuneConfig={appState.tune}
+								onTuneSelect={config => {
+									// Tune clears the conversation and prints a summary — land in
+									// chat so that output isn't hidden behind the settings panel.
+									launchedFromSettingsRef.current = false;
+									return modeHandlers.handleTuneSelect(config);
+								}}
+								onTuneCancel={returnFromLaunchedWizard(
+									modeHandlers.handleTuneCancel,
+								)}
+								onCheckpointSelect={appHandlers.handleCheckpointSelect}
+								onCheckpointCancel={appHandlers.handleCheckpointCancel}
+								onSessionSelect={sessionId =>
+									void appHandlers.handleSessionSelect(sessionId)
+								}
+								onSessionCancel={appHandlers.handleSessionCancel}
+							/>
+						</Box>
+					)}
 
-				{appState.startChat &&
-					appState.activeMode === null &&
-					!appState.isSettingsMode &&
-					!appState.planReviewState?.show &&
-					// Hide the composer only while a live component explicitly captures input.
-					!appState.liveComponentCapturesInput && (
-						<UIStateProvider>
+					{appState.startChat &&
+						appState.activeMode === null &&
+						!appState.isSettingsMode &&
+						!appState.planReviewState?.show &&
+						// Hide the composer only while a live component explicitly captures input.
+						!appState.liveComponentCapturesInput && (
 							<ChatInput
 								isCancelling={appState.isCancelling}
 								isToolExecuting={appState.isToolExecuting}
@@ -452,20 +477,20 @@ export function InteractiveApp({
 								fullscreen={fullscreen}
 								isSaving={isSaving}
 							/>
-						</UIStateProvider>
-					)}
+						)}
 
-				{/* Artifact shortcuts sit below the input alongside the mode
+					{/* Artifact shortcuts sit below the input alongside the mode
 				    indicator — everything ambient lives under the composer. The
 				    marginLeft mirrors ChatInput's own offset so the row lines up
 				    with the mode line rather than sitting one column in. */}
-				<Box marginLeft={fullscreen ? 0 : -1}>
-					<SessionArtifactLinks
-						sessionId={appState.currentSessionId}
-						refreshKey={artifactRefreshKey}
-					/>
+					<Box marginLeft={fullscreen ? 0 : -1}>
+						<SessionArtifactLinks
+							sessionId={appState.currentSessionId}
+							refreshKey={artifactRefreshKey}
+						/>
+					</Box>
 				</Box>
 			</Box>
-		</Box>
+		</UIStateProvider>
 	);
 }

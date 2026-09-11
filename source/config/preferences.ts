@@ -347,7 +347,7 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
  */
 export function getAlternateScreen(): boolean {
 	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? false;
+	return preferences.alternateScreen ?? true;
 }
 
 /**
@@ -356,6 +356,27 @@ export function getAlternateScreen(): boolean {
 export function updateAlternateScreen(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.alternateScreen = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the mouse reporting preference. When true (default), the terminal reports
+ * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
+ * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
+ * terminal does not capture the mouse at all, so native text selection
+ * (double-click, drag) works directly and the wheel does nothing.
+ */
+export function getMouseReporting(): boolean {
+	const preferences = loadPreferences();
+	return preferences.mouseReporting ?? true;
+}
+
+/**
+ * Save the mouse reporting preference
+ */
+export function updateMouseReporting(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.mouseReporting = value;
 	savePreferences(preferences);
 }
 

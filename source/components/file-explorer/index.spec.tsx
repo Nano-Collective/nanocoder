@@ -1,11 +1,13 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import {Box, Text} from 'ink';
 import {ThemeContext} from '../../hooks/useTheme';
 import {TitleShapeContext} from '../../hooks/useTitleShape';
 import {UIStateProvider} from '../../hooks/useUIState';
 import type {Colors, ThemePreset} from '../../types/ui';
+import {FileExplorer} from './index.js';
 
 console.log(`\nfile-explorer/index.spec.tsx – ${React.version}`);
 
@@ -353,4 +355,27 @@ test('FileExplorer preview directory error shows message', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Cannot preview directory/);
+});
+
+// === Real component ===
+// Everything above renders hand-written stand-ins, so none of it exercises
+// FileExplorer itself. These render the actual component.
+
+test('FileExplorer renders inside a rounded titled frame', t => {
+	const {lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Rounded box corners, the same chrome the session / IDE selectors use.
+	t.regex(output, /╭.*╮/s);
+	t.regex(output, /╰.*╯/s);
+	t.regex(output, /\/explorer/);
+});
+
+test('FileExplorer keeps the frame while the tree is still loading', t => {
+	// First frame is the loading branch — the chrome must not pop in later.
+	const {lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /╭/);
+	t.regex(output, /Loading file tree/);
 });
