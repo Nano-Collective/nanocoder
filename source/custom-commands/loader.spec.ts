@@ -1,8 +1,35 @@
-import { writeFileSync, rmSync, existsSync, mkdirSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
-import { CustomCommandLoader } from './loader';
+import {CustomCommandLoader} from './loader';
+
+let configDir: string;
+let originalConfigDir: string | undefined;
+
+test.before(() => {
+	originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	configDir = join(tmpdir(), `nanocoder-cmd-config-${Date.now()}`);
+	mkdirSync(configDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = configDir;
+});
+
+test.after.always(() => {
+	if (originalConfigDir !== undefined) {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	} else {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	}
+	if (configDir && existsSync(configDir)) {
+		rmSync(configDir, {recursive: true, force: true});
+	}
+});
 
 // Helper to create a valid custom command file
 function createCommandFile(path: string, content: string) {
@@ -597,4 +624,81 @@ test('CustomCommandLoader - commands have lastModified set', t => {
 	t.truthy(command?.lastModified);
 	t.true(command!.lastModified instanceof Date);
 });
+
+test(
+	'CustomCommandLoader - continues loading commands when a subdirectory throws permission error',
+	t => {
+		if (process.platform === 'win32' || process.getuid?.() === 0) {
+			t.pass(
+				'Skipping on Windows/root where chmod 000 does not block directory access',
+			);
+			return;
+		}
+
+		const testDir = createTestDir('permission-error');
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const unreadableSubDir = join(commandsDir, 'unreadable');
+		mkdirSync(unreadableSubDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'root-cmd.md'), 'Root command');
+		createCommandFile(join(unreadableSubDir, 'hidden.md'), 'Hidden command');
+
+		chmodSync(unreadableSubDir, 0o000);
+
+		t.teardown(() => {
+			try {
+				chmodSync(unreadableSubDir, 0o755);
+			} catch {
+				// ignore
+			}
+			cleanupTestDir(testDir);
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'root-cmd');
+	},
+);
+
+test(
+	'CustomCommandLoader - continues scanning when statSync throws on an unreadable entry',
+	t => {
+		if (process.platform === 'win32' || process.getuid?.() === 0) {
+			t.pass(
+				'Skipping on Windows/root where chmod 000 does not block directory access',
+			);
+			return;
+		}
+
+		const testDir = createTestDir('stat-error');
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const unsearchableDir = join(commandsDir, 'unsearchable');
+		mkdirSync(unsearchableDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'valid-cmd.md'), 'Valid command');
+		createCommandFile(join(unsearchableDir, 'child.md'), 'Child command');
+
+		// 0o400 allows readdir on unsearchableDir, but statSync on unsearchableDir/child.md fails with EACCES
+		chmodSync(unsearchableDir, 0o400);
+
+		t.teardown(() => {
+			try {
+				chmodSync(unsearchableDir, 0o755);
+			} catch {
+				// ignore
+			}
+			cleanupTestDir(testDir);
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'valid-cmd');
+	},
+);
 
