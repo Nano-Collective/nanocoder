@@ -107,7 +107,7 @@ export class CustomToolLoader {
 
 	private scanDirectory(
 		dir: string,
-		source: 'personal' | 'project',
+		source: 'built-in' | 'personal' | 'project',
 	): LoadedCustomTool[] {
 		if (!existsSync(dir)) return [];
 		const out: LoadedCustomTool[] = [];

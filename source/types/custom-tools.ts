@@ -58,7 +58,7 @@ export interface LoadedCustomTool {
 	metadata: CustomToolMetadata;
 	body: string;
 	filePath: string;
-	source: 'personal' | 'project';
+	source: 'built-in' | 'personal' | 'project';
 	/**
 	 * Event subscriptions declared in the file's frontmatter, if any.
 	 * Carried through the loader so the skill registrar can wire them up.
