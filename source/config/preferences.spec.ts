@@ -11,6 +11,7 @@ import {
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
 import {
+	ensureDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -20,6 +21,7 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
+	isDirectoryTrusted,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	resetPreferencesCache,
@@ -1968,3 +1970,112 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 		}
 	}
 });
+
+// ============================================================================
+// Directory Trust Tests — shared by the interactive TUI, --plain, and the
+// daemon boot path (see source/daemon/cli.ts's `start`).
+// ============================================================================
+
+test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
+	t.false(isDirectoryTrusted('/some/project', {}));
+});
+
+test('isDirectoryTrusted matches an exact entry', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted resolves relative entries before comparing', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+});
+
+test('isDirectoryTrusted does not match an unrelated directory', t => {
+	t.false(
+		isDirectoryTrusted(process.cwd(), {
+			trustedDirectories: ['/some/other/project'],
+		}),
+	);
+});
+
+test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
+	let saveCalled = false;
+	const result = ensureDirectoryTrust('/untrusted/project', true, {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
+	const dir = process.cwd();
+	let saveCalled = false;
+	const result = ensureDirectoryTrust(dir, false, {
+		loadPreferences: () => ({trustedDirectories: [dir]}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test.serial(
+	'ensureDirectoryTrust refuses an unrecorded directory when NANOCODER_TRUST_DIRECTORY is unset',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const result = ensureDirectoryTrust('/untrusted/project', false, {
+			loadPreferences: () => ({trustedDirectories: []}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const target = join(tmpdir(), 'nanocoder-untrusted-project');
+			const result = ensureDirectoryTrust(target, false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 does not duplicate an already-trusted directory',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const dir = process.cwd();
+			let saveCalled = false;
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: () => {
+					saveCalled = true;
+				},
+			});
+			t.deepEqual(result, {trusted: true, persisted: false});
+			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);

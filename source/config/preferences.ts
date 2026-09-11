@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
@@ -86,6 +87,69 @@ export function savePreferences(preferences: UserPreferences): void {
 	for (const listener of preferencesListeners) {
 		listener();
 	}
+}
+
+/**
+ * True if `directory` (or an equivalent absolute path) is recorded in
+ * `preferences.trustedDirectories`. Shared by every trust-gated entry point
+ * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
+ * and the daemon boot path — so the resolution rule can't drift between them.
+ */
+export function isDirectoryTrusted(
+	directory: string,
+	preferences: UserPreferences,
+): boolean {
+	const resolved = path.resolve(directory); // nosemgrep
+	return (preferences.trustedDirectories ?? []).some(
+		dir => path.resolve(dir) === resolved, // nosemgrep
+	);
+}
+
+export interface DirectoryTrustResult {
+	trusted: boolean;
+	/** True if this call persisted a new trust entry (env-var bypass only). */
+	persisted: boolean;
+}
+
+export interface DirectoryTrustDeps {
+	loadPreferences: typeof loadPreferences;
+	savePreferences: typeof savePreferences;
+}
+
+/**
+ * Resolves directory trust for a non-interactive entry point (`--plain`,
+ * `nanocoder daemon start`) — anywhere that has no disclaimer UI to show.
+ *
+ * `bypass` is the caller's own one-shot override (each entry point's own
+ * `--trust-directory` flag); it never persists, matching the interactive
+ * disclaimer's per-run nature. Absent that, a directory already recorded in
+ * `trustedDirectories` (from a prior interactive run, or a previous
+ * `NANOCODER_TRUST_DIRECTORY=1` run) is trusted as-is. A first-time
+ * `NANOCODER_TRUST_DIRECTORY=1` run persists the directory so later runs
+ * don't need the env var again.
+ */
+export function ensureDirectoryTrust(
+	directory: string,
+	bypass: boolean,
+	deps: DirectoryTrustDeps = {loadPreferences, savePreferences},
+): DirectoryTrustResult {
+	if (bypass) return {trusted: true, persisted: false};
+
+	const preferences = deps.loadPreferences();
+	if (isDirectoryTrusted(directory, preferences)) {
+		return {trusted: true, persisted: false};
+	}
+
+	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
+		const resolved = path.resolve(directory); // nosemgrep
+		deps.savePreferences({
+			...preferences,
+			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
+		});
+		return {trusted: true, persisted: true};
+	}
+
+	return {trusted: false, persisted: false};
 }
 
 export function updateLastUsed(provider: string, model: string): void {
