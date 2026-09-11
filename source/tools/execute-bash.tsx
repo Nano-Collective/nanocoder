@@ -9,6 +9,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
@@ -103,9 +104,11 @@ function ExecuteBashFormatterComponent({
 			<Text color={colors.tool}>⚒ execute_bash</Text>
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
-				<Text wrap="wrap" color={colors.primary}>
-					{command}
-				</Text>
+				{splitCommandForDisplay(command).map((segment, i) => (
+					<Text key={i} wrap="wrap" color={colors.primary}>
+						{segment}
+					</Text>
+				))}
 			</Box>
 		</Box>
 	);

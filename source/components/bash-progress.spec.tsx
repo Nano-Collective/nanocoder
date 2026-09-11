@@ -53,6 +53,47 @@ test('BashProgress displays the command', t => {
 	t.regex(output!, /npm run build/);
 });
 
+test('BashProgress splits compound commands onto separate lines', t => {
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command={command}
+			completedState={createCompletedState({command})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('dolt version;')));
+	t.true(lines.some(line => line.includes('echo "===";')));
+	t.true(lines.some(line => line.includes('ls -la /usr/local/bin/dolt')));
+	// The whole point: no single rendered line carries two segments
+	t.false(
+		lines.some(
+			line => line.includes('dolt version;') && line.includes('ls -la'),
+		),
+		'Compound segments must not share a line',
+	);
+});
+
+test('BashProgress keeps a quoted semicolon on one line', t => {
+	const command = 'echo "hello; world"';
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command={command}
+			completedState={createCompletedState({command})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('echo "hello; world"')));
+});
+
 test('BashProgress displays execute_bash tool name', t => {
 	const {lastFrame} = renderWithTheme(
 		<BashProgress
