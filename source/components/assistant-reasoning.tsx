@@ -56,7 +56,7 @@ export default memo(function AssistantReasoning({
 			<Box>
 				<Text color={colors.tool}>{'\u2699'} Thought</Text>
 				{!expand && !nonInteractive && (
-					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
+					<Text color={colors.secondary}>{'  '}ctrl+g to expand</Text>
 				)}
 			</Box>
 			{expand && (

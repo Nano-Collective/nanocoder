@@ -29,7 +29,7 @@ The `sdkProvider: "chatgpt-codex"` field enables the ChatGPT/Codex authenticatio
 
 ## Reasoning Traces
 
-GPT-5 and other reasoning models return chain-of-thought only when the Responses API is asked to emit it. Nanocoder sets `reasoningSummary: "auto"` and `reasoningEffort: "medium"` by default for this provider so reasoning shows up in the `⚙ Thinking` block out of the box. Toggle visibility with **Ctrl+R** or set `reasoningExpanded: true` in your preferences.
+GPT-5 and other reasoning models return chain-of-thought only when the Responses API is asked to emit it. Nanocoder sets `reasoningSummary: "auto"` and `reasoningEffort: "medium"` by default for this provider so reasoning shows up in the `⚙ Thinking` block out of the box. Toggle visibility with **Ctrl+G** or set `reasoningExpanded: true` in your preferences.
 
 Override either setting via `tune.modelParameters` in `agents.config.json`:
 

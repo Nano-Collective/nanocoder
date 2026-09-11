@@ -95,7 +95,7 @@ nanocoder run "Add error handling to src/api.ts"
 
 This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
 
-Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+g to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
 
 By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
 

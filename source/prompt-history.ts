@@ -158,6 +158,17 @@ export class PromptHistory {
 		this.currentIndex = -1;
 	}
 
+	async clearHistory(): Promise<void> {
+		this.history = [];
+		this.currentIndex = -1;
+		try {
+			await fs.writeFile(this.historyFile, '', 'utf8');
+		} catch (error) {
+			const errorMessage = formatError(error);
+			logError(`Failed to clear prompt history: ${errorMessage}`);
+		}
+	}
+
 	getHistory(): InputState[] {
 		return [...this.history];
 	}
