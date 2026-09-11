@@ -83,6 +83,7 @@ export default function App({
 
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
+
 	const userMessageQueue = useUserMessageQueue();
 	const queuedUserSubmitRef = React.useRef<
 		| ((
