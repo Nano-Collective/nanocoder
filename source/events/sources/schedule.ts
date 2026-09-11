@@ -32,6 +32,7 @@ const defaultFactory: CronFactory = (expression, onTick) =>
 
 export class ScheduleEventSource {
 	private readonly jobs: Map<string, CronJobLike> = new Map();
+	private readonly refCounts: Map<string, number> = new Map();
 
 	constructor(
 		private readonly router: EventRouter,
@@ -39,13 +40,14 @@ export class ScheduleEventSource {
 	) {}
 
 	/**
-	 * Register a cron expression. Subsequent calls with the same expression
-	 * are no-ops, so multiple subscriptions sharing a cron expression only
-	 * create one underlying job. The router fans the resulting event out to
-	 * all of them.
+	 * Register a cron expression. Shared expressions are reference-counted:
+	 * the first caller creates the underlying job, later callers only bump
+	 * the count. The router fans each tick out to every matching subscription.
 	 */
 	register(expression: string): void {
-		if (this.jobs.has(expression)) return;
+		const count = this.refCounts.get(expression) ?? 0;
+		this.refCounts.set(expression, count + 1);
+		if (count > 0) return;
 		const job = this.factory(expression, () => {
 			void this.router.emit({
 				kind: 'schedule.cron',
@@ -56,7 +58,18 @@ export class ScheduleEventSource {
 		this.jobs.set(expression, job);
 	}
 
+	/**
+	 * Drop one subscription for an expression. The underlying job is stopped
+	 * only when the last remaining subscription unregisters.
+	 */
 	unregister(expression: string): void {
+		const count = this.refCounts.get(expression);
+		if (count === undefined) return;
+		if (count > 1) {
+			this.refCounts.set(expression, count - 1);
+			return;
+		}
+		this.refCounts.delete(expression);
 		const job = this.jobs.get(expression);
 		if (!job) return;
 		job.stop();
@@ -66,6 +79,7 @@ export class ScheduleEventSource {
 	stop(): void {
 		for (const job of this.jobs.values()) job.stop();
 		this.jobs.clear();
+		this.refCounts.clear();
 	}
 
 	listRegistered(): string[] {
