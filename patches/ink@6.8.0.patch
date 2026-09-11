@@ -15,3 +15,38 @@ index 30019a073d38ed05dca08f6221af187c429a536b..5254bf400cda5f4d7fdc95c0a0f6ccd8
  import ansiEscapes from 'ansi-escapes';
  import isInCi from 'is-in-ci';
  import autoBind from 'auto-bind';
+diff --git a/build/hooks/use-input.js b/build/hooks/use-input.js
+index 52b4487e..c182b5ed 100644
+--- a/build/hooks/use-input.js
++++ b/build/hooks/use-input.js
+@@ -68,6 +68,11 @@ const useInput = (inputHandler, options = {}) => {
+                 capsLock: keypress.capsLock ?? false,
+                 numLock: keypress.numLock ?? false,
+                 eventType: keypress.eventType,
++                // Patched by nanocoder: expose the raw input sequence (e.g.
++                // '\x7f' for physical Backspace vs '\x1b[3~' for forward Delete)
++                // so handlers can disambiguate keys that Ink parses to the same
++                // name (both map to `delete`).
++                raw: keypress.raw,
+             };
+             let input;
+             if (keypress.isKittyProtocol) {
+diff --git a/build/hooks/use-input.d.ts b/build/hooks/use-input.d.ts
+index e2a9f07c..2497c9ae 100644
+--- a/build/hooks/use-input.d.ts
++++ b/build/hooks/use-input.d.ts
+@@ -96,6 +96,14 @@ export type Key = {
+     Only available with kitty keyboard protocol.
+     */
+     eventType?: 'press' | 'repeat' | 'release';
++    /**
++    Raw input sequence that was parsed for this key. Useful to disambiguate
++    keys that Ink maps to the same name — e.g. physical Backspace ('\x7f') vs
++    forward Delete ('\x1b[3~'), which both set `delete: true`.
++
++    Patched by nanocoder.
++    */
++    raw?: string;
+ };
+ type Handler = (input: string, key: Key) => void;
+ type Options = {

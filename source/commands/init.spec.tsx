@@ -19,7 +19,11 @@ function Providers({children}: {children: React.ReactNode}) {
 			}}
 		>
 			<TitleShapeContext.Provider
-				value={{currentTitleShape: 'pill', setCurrentTitleShape: () => {}}}
+				value={{
+					currentTitleShape: 'pill',
+					setCurrentTitleShape: () => {},
+					commitTitleShape: () => {},
+				}}
 			>
 				{children}
 			</TitleShapeContext.Provider>

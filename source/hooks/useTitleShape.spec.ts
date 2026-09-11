@@ -67,6 +67,7 @@ function MockTitleShapeProvider({
 	const value = {
 		currentTitleShape,
 		setCurrentTitleShape,
+		commitTitleShape: setCurrentTitleShape,
 	};
 
 	return React.createElement(TitleShapeContext.Provider, {value}, children);
@@ -89,6 +90,7 @@ test('useTitleShape returns title shape context when used within provider', t =>
 	t.truthy(capturedTitleShape);
 	t.is(capturedTitleShape!.currentTitleShape, 'rounded');
 	t.is(typeof capturedTitleShape!.setCurrentTitleShape, 'function');
+	t.is(typeof capturedTitleShape!.commitTitleShape, 'function');
 });
 
 test('useTitleShape provides currentTitleShape and setCurrentTitleShape', t => {
@@ -108,6 +110,7 @@ test('useTitleShape provides currentTitleShape and setCurrentTitleShape', t => {
 	t.truthy(capturedTitleShape);
 	t.is(capturedTitleShape!.currentTitleShape, 'square');
 	t.is(typeof capturedTitleShape!.setCurrentTitleShape, 'function');
+	t.is(typeof capturedTitleShape!.commitTitleShape, 'function');
 });
 
 test('useTitleShape throws error when used outside of TitleShapeProvider', t => {

@@ -209,10 +209,16 @@ export default function App({
 	);
 
 	// Create title shape context value (memoized to prevent unnecessary re-renders)
+	// `setCurrentTitleShape` is a preview-only update (no persistence); `commitTitleShape`
+	// persists. Decoupling the two lets a selector navigate/highlight without writing to
+	// disk — the shape is only saved when the user confirms (Enter).
 	const titleShapeContextValue = React.useMemo(
 		() => ({
 			currentTitleShape: appState.currentTitleShape,
 			setCurrentTitleShape: (shape: TitleShape) => {
+				appState.setCurrentTitleShape(shape);
+			},
+			commitTitleShape: (shape: TitleShape) => {
 				appState.setCurrentTitleShape(shape);
 				updateTitleShape(shape);
 			},

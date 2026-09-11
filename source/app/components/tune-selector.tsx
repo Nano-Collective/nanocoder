@@ -172,7 +172,7 @@ function TuneMainMenu({
 					onSelect={item => onAction(item.value)}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		);
 	}
@@ -197,7 +197,7 @@ function TuneMainMenu({
 				onSelect={item => onAction(item.value)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter to select, Esc to cancel</Text>
+				<Text color={colors.secondary}>Enter to select · Esc to cancel</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
@@ -268,7 +268,9 @@ function ToolProfilePanel({
 					</Text>
 				</Box>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to apply · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -285,7 +287,7 @@ function ToolProfilePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to cancel
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 			<StyledSelectInput
@@ -363,7 +365,9 @@ function PresetPanel({
 					</Box>
 				)}
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to apply · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -380,7 +384,7 @@ function PresetPanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to load preset, Shift+Tab to go back, Esc to cancel
+					Enter to load preset · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 			<StyledSelectInput
@@ -583,7 +587,9 @@ function ParametersPanel({
 					</Box>
 				)}
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter to cycle/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to cycle values · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -600,7 +606,7 @@ function ParametersPanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to cycle values, Shift+Tab to go back, Esc to cancel
+					Enter to cycle values · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 			<StyledSelectInput

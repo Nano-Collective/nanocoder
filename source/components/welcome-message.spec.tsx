@@ -141,7 +141,7 @@ test('WelcomeMessage shows welcome message for normal terminal', t => {
 	t.truthy(output);
 	t.regex(output!, /Welcome to Nanocoder/);
 	t.regex(output!, /local-first coding agent/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -159,7 +159,7 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 	t.regex(output!, /Quit/);
 	// New design footer has mode + version
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -256,7 +256,7 @@ test('WelcomeMessage shows centered footer for wide terminal', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });

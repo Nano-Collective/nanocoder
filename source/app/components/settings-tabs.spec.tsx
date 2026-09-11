@@ -56,6 +56,7 @@ function renderWithTitleShape(shape: TitleShape) {
 	const titleShapeValue = {
 		currentTitleShape: shape,
 		setCurrentTitleShape: () => {},
+		commitTitleShape: () => {},
 	};
 	return render(
 		<ThemeContext.Provider value={themeValue}>
