@@ -360,14 +360,15 @@ export function updateAlternateScreen(value: boolean): void {
 }
 
 /**
- * Get the mouse reporting preference. When false (default), the terminal does
- * not capture mouse clicks, allowing native text selection (double-click, drag)
- * in alternate screen mode like OpenCode. When true, mouse reporting captures wheel
- * scrolls but requires Shift+drag for text selection.
+ * Get the mouse reporting preference. When true (default), the terminal reports
+ * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
+ * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
+ * terminal does not capture the mouse at all, so native text selection
+ * (double-click, drag) works directly and the wheel does nothing.
  */
 export function getMouseReporting(): boolean {
 	const preferences = loadPreferences();
-	return preferences.mouseReporting ?? false;
+	return preferences.mouseReporting ?? true;
 }
 
 /**

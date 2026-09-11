@@ -171,8 +171,10 @@ Options:
                       scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
   --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
                       chat history in the terminal's native scrollback).
-  --mouse             Enable mouse wheel reporting in fullscreen mode (Shift+drag to select text)
-  --no-mouse          Disable mouse reporting in fullscreen mode (enables native text selection)
+  --mouse             Mouse wheel scrolls the chat viewport in fullscreen mode, with
+                      Shift+drag (Option+drag in iTerm2) to select text. Enabled by default.
+  --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
+                      works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -631,6 +633,8 @@ async function main(): Promise<void> {
 		}
 		if (interactiveTty) {
 			const {
+				ALTERNATE_SCROLL_OFF,
+				ALTERNATE_SCROLL_ON,
 				createUtf8InputDecoder,
 				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
@@ -652,18 +656,27 @@ async function main(): Promise<void> {
 			// receive paste markers as literal text.
 			restoreInputModes = () => {
 				process.stdout.write(DISABLE_BRACKETED_PASTE);
-				if (useAltScreen && useMouseReporting) {
-					process.stdout.write(MOUSE_REPORTING_OFF);
+				if (useAltScreen) {
+					process.stdout.write(
+						useMouseReporting ? MOUSE_REPORTING_OFF : ALTERNATE_SCROLL_ON,
+					);
 				}
 			};
 
-			if (useAltScreen && useMouseReporting) {
-				// SGR mouse reporting so wheel scrolling reaches the app. The
-				// alt screen has no native scrollback, so the terminal's own
-				// wheel / scrollbar can't work — the app must receive wheel
-				// events itself. When off (default), native text selection works
-				// directly.
-				process.stdout.write(MOUSE_REPORTING_ON);
+			if (useAltScreen) {
+				if (useMouseReporting) {
+					// SGR mouse reporting so wheel scrolling reaches the app. The
+					// alt screen has no native scrollback, so the terminal's own
+					// wheel / scrollbar can't work — the app must receive wheel
+					// events itself. Text selection then needs Shift+drag
+					// (Option+drag in iTerm2).
+					process.stdout.write(MOUSE_REPORTING_ON);
+				} else {
+					// Native text selection is opted into, so nothing consumes
+					// wheel ticks — stop the terminal turning them into arrow
+					// keys that would cycle prompt history.
+					process.stdout.write(ALTERNATE_SCROLL_OFF);
+				}
 			}
 
 			// Ink must never see the raw escape sequences (its keypress

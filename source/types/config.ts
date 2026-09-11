@@ -632,10 +632,10 @@ export interface UserPreferences {
 	 */
 	alternateScreen?: boolean;
 	/**
-	 * Mouse reporting in alternate screen mode. false (default): terminal does
-	 * not capture mouse clicks, allowing native text selection (double-click,
-	 * drag to select). true: enables mouse reporting so the mouse wheel can
-	 * scroll the chat viewport, but requires Shift+drag for text selection.
+	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
+	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag
+	 * in iTerm2). false: the terminal does not capture the mouse, so native text
+	 * selection (double-click, drag) works directly and the wheel does nothing.
 	 * Also switchable per-run with --mouse / --no-mouse flags.
 	 */
 	mouseReporting?: boolean;

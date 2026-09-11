@@ -363,7 +363,7 @@ test('Enter on the Alternate Screen boolean row flips the persisted preference',
 });
 
 test('Enter on the Mouse Wheel Reporting boolean row flips the persisted preference', async t => {
-	t.is(getMouseReporting(), false);
+	t.is(getMouseReporting(), true);
 
 	const {stdin, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
@@ -380,7 +380,7 @@ test('Enter on the Mouse Wheel Reporting boolean row flips the persisted prefere
 	stdin.write(ENTER);
 	await tick();
 
-	t.is(getMouseReporting(), true);
+	t.is(getMouseReporting(), false);
 
 	unmount();
 });

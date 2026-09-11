@@ -1600,14 +1600,14 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 // Mouse Reporting Tests
 // ============================================================================
 
-test.serial('getMouseReporting returns false by default when not set', t => {
+test.serial('getMouseReporting returns true by default when not set', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
 		rmSync(preferencesPath, {force: true});
 	}
 
 	const result = getMouseReporting();
-	t.is(result, false);
+	t.is(result, true);
 });
 
 test.serial('updateMouseReporting saves and retrieves preference correctly', t => {

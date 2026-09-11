@@ -22,6 +22,17 @@ export const MOUSE_REPORTING_ON = '\x1b[?1000h\x1b[?1006h';
 export const MOUSE_REPORTING_OFF = '\x1b[?1006l\x1b[?1000l';
 
 /**
+ * DECSET 1007 (alternate scroll). Most terminals turn this on by default:
+ * while the alt screen is active and the app is NOT reporting mouse events,
+ * they translate wheel ticks into cursor up/down key sequences. Those are
+ * indistinguishable from real arrow keys, so they reach the prompt and cycle
+ * input history instead of scrolling. Turn it off whenever we run on the alt
+ * screen without mouse reporting, and restore it on exit.
+ */
+export const ALTERNATE_SCROLL_OFF = '\x1b[?1007l';
+export const ALTERNATE_SCROLL_ON = '\x1b[?1007h';
+
+/**
  * Decode stdin bytes without losing a multibyte character split across
  * separate data events. TTY input is usually delivered as Buffers, and the
  * default Buffer#toString('utf8') replaces an incomplete trailing sequence
