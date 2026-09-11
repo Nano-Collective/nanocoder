@@ -191,6 +191,32 @@ test('renders FileExplorer in explorer mode', t => {
 	t.true(output.length > 0);
 });
 
+// InteractiveApp is mounted by App.tsx with no UIStateProvider above it, so it
+// has to supply its own. Rendering with the harness's provider hid a crash:
+// FileExplorer calls useUIStateContext, which threw and took the CLI down with
+// exit 1 when the provider only wrapped ChatInput. Render without it.
+test('explorer mode renders without an ambient UIStateProvider', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp {...makeProps({isExplorerMode: true})} />,
+		{withUIState: false},
+	);
+	// Ink renders a thrown error into the frame rather than rethrowing, so
+	// assert on the frame — t.notThrows would pass either way.
+	const output = stripAnsi(lastFrame() ?? '');
+	t.notRegex(output, /must be used within a UIStateProvider/);
+	t.true(output.length > 0);
+});
+
+test('chat input renders without an ambient UIStateProvider', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp {...makeProps({startChat: true})} />,
+		{withUIState: false},
+	);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.notRegex(output, /must be used within a UIStateProvider/);
+	t.true(output.length > 0);
+});
+
 test('renders without crashing in IDE-selection mode', t => {
 	const {lastFrame} = renderWithTheme(
 		<InteractiveApp {...makeProps({isIdeSelectionMode: true})} />,

@@ -75,7 +75,9 @@ test('WelcomeMessage shows centered welcome and location in narrow layout', t =>
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Welcome to Nanocoder/);
-	t.regex(output!, /local-first coding agent/);
+	// Tagline matches the GitHub repo description, wrapped across rows.
+	t.regex(output!, /An open coding agent for your terminal/);
+	t.regex(output!, /owe nothing to anyone\./);
 	// Location line centered with branch + dir (no NC shorthand)
 	t.regex(output!, /⎇/);
 	// Menu present when rows >=24
@@ -140,7 +142,9 @@ test('WelcomeMessage shows welcome message for normal terminal', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Welcome to Nanocoder/);
-	t.regex(output!, /local-first coding agent/);
+	// Tagline matches the GitHub repo description, wrapped across rows.
+	t.regex(output!, /An open coding agent for your terminal/);
+	t.regex(output!, /owe nothing to anyone\./);
 	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
 
 	process.stdout.columns = originalColumns;

@@ -10,6 +10,7 @@ import {
 } from '@/tools/git/utils';
 import {getPackageVersion} from '@/utils/package-version';
 import {homeRelative, truncateMiddle} from '@/utils/path';
+import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {getRandomTip} from '@/utils/tips';
 
 // Resolve the version once at module load time to avoid repeated file reads.
@@ -23,6 +24,14 @@ const BLOCK_NANOCODER_WIDTH = 90;
 const LOGO_FULL = 'NANOCODER';
 const LOGO_SHORT = 'NC';
 const LOGO_FONT = 'block';
+
+// Kept verbatim in sync with the GitHub repo description so the banner and
+// the repo say the same thing.
+const TAGLINE =
+	'An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.';
+// Narrower than the terminal so the tagline breaks into a readable block
+// instead of one edge-to-edge run on wide screens.
+const TAGLINE_MAX_WIDTH = 72;
 
 const MENU_FULL: Array<[string, string]> = [
 	['Resume session', '/resume'],
@@ -86,6 +95,18 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 	const termW = actualWidth;
 	const justify = 'center';
 
+	// Wrap here rather than letting Ink do it: a wrapping <Text> fills the
+	// whole row, so justifyContent would have nothing left to center. Splitting
+	// into rows first lets each line sit on the same center axis as the logo.
+	const taglineLines = wrapWithTrimmedContinuations(
+		TAGLINE,
+		Math.max(20, Math.min(termW - 4, TAGLINE_MAX_WIDTH)),
+	)
+		.split('\n')
+		// wrap-ansi keeps the break's space at the end of the line; centering a
+		// line with a trailing space nudges its text half a column off axis.
+		.map(line => line.trimEnd());
+
 	// Location line must fit even when stale (e.g., 44-char branch·dir in 50-col term).
 	// Branch shrinks too: 2 (⎇ ) + 3 ( · ) + 10 (cwd min) = 15 reserved cols,
 	// +1 safety col — some fonts render ⎇/· wider than ink measures them.
@@ -126,9 +147,11 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 					Welcome to Nanocoder
 				</Text>
 			</Box>
-			<Box justifyContent={justify} width={termW}>
-				<Text color={colors.secondary}>local-first coding agent</Text>
-			</Box>
+			{taglineLines.map(line => (
+				<Box key={line} justifyContent={justify} width={termW}>
+					<Text color={colors.secondary}>{line}</Text>
+				</Box>
+			))}
 
 			<Box justifyContent={justify} width={termW} marginTop={1}>
 				<Text>
