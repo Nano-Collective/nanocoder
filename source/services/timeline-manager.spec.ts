@@ -432,3 +432,137 @@ test.serial('TimelineManager prunes timelines from abandoned sessions', async t 
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test.serial(
+	'TimelineManager prunes abandoned sessions whose lockfile points to a dead process',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+			const stale = path.join(timelineRoot, 'stale-no-lock');
+			await fs.mkdir(stale, {recursive: true});
+			await fs.writeFile(path.join(stale, 'timeline.json'), '{}', 'utf-8');
+			// A lockfile pointing at a PID that cannot exist. isProcessAlive
+			// returns false, so the pruner is allowed to remove the dir.
+			// Write it before utimes so the utimes call is the final
+			// touch on the directory.
+			await fs.writeFile(
+				path.join(stale, '.lock'),
+				JSON.stringify({
+					pid: 2_000_000_000,
+					startedAt: 0,
+					purpose: 'session-active',
+				}),
+				'utf-8',
+			);
+			const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+			await fs.utimes(stale, longAgo, longAgo);
+
+			const manager = new TimelineManager(tempDir, 'session-fresh');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+
+			t.false(existsSync(stale), 'dead-lock stale session is reaped');
+			t.true(existsSync(path.join(timelineRoot, 'session-fresh')));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'TimelineManager skips pruning a stale-but-live session (issue #1149)',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+			const active = path.join(timelineRoot, 'active-but-stale');
+			await fs.mkdir(active, {recursive: true});
+			await fs.writeFile(
+				path.join(active, 'timeline.json'),
+				'{}',
+				'utf-8',
+			);
+			// Force the dir's mtime to be ancient so it lands in the
+			// "would normally be pruned" set. The lockfile still
+			// points at our own PID, so the pruner must skip it.
+			const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+			await fs.utimes(active, longAgo, longAgo);
+			await fs.writeFile(
+				path.join(active, '.lock'),
+				JSON.stringify({
+					pid: process.pid,
+					startedAt: Date.now(),
+					purpose: 'session-active',
+				}),
+				'utf-8',
+			);
+
+			const manager = new TimelineManager(tempDir, 'session-fresh');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+
+			t.true(
+				existsSync(active),
+				'active session is preserved even when its mtime is stale',
+			);
+			t.true(existsSync(path.join(timelineRoot, 'session-fresh')));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial('TimelineManager.dispose releases the session lock', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-dispose');
+		// Trigger the lock acquisition by writing any entry.
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'x']]),
+		});
+		const lockPath = path.join(tempDir, '.nanocoder', 'timeline', 'session-dispose', '.lock');
+		t.true(existsSync(lockPath), 'lock is acquired on first write');
+
+		await manager.dispose();
+		t.false(existsSync(lockPath), 'lock is released on dispose');
+
+		// Calling dispose again is a safe no-op.
+		await manager.dispose();
+		t.false(existsSync(lockPath));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial(
+	'TimelineManager.dispose does not throw when the lock was never acquired',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new TimelineManager(tempDir, 'session-never-locked');
+			// No capture happened, so tryAcquireSessionLock was never called.
+			// A second dispose must still be safe.
+			await manager.dispose();
+			await manager.dispose();
+			t.pass();
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
