@@ -66,11 +66,17 @@ const executeListDirectory = async (
 				const items = await readdir(currentPath, {withFileTypes: true});
 
 				for (const item of items) {
-					// Skip hidden files unless showHiddenFiles is true
+					// Skip hidden files unless showHiddenFiles is true. The extra
+					// path check keeps nested hidden entries visible when the user
+					// explicitly listed a hidden directory (`.github`, `.config`).
+					// Do not treat the project root (`.` / `./`) as a hidden dir —
+					// `'.'.startsWith('.')` is true and used to leak every dotfile.
+					// See #1237.
+					const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(dirPath);
 					if (
 						!showHiddenFiles &&
 						item.name.startsWith('.') &&
-						!dirPath.startsWith('.')
+						!listingHiddenDir
 					) {
 						continue;
 					}
