@@ -36,6 +36,7 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
 	buildProviderOptions,
 	isPromptCachingEnabled,
@@ -163,32 +164,15 @@ export async function handleChat(
 			let finalSystemContent = systemContent;
 			let finalNonSystemMessages = nonSystemMessages;
 			if (privacyEnabled && privacySessionMapRef) {
-				const {scrub} = await import('@nanocollective/prompt-scrub');
-
-				const prevCount = Object.keys(privacySessionMapRef.current).length;
-
-				finalSystemContent = scrub({
-					content: systemContent,
-					sessionMap: privacySessionMapRef.current,
-					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-				}).scrubbedContent as string;
-
-				finalNonSystemMessages = nonSystemMessages.map(m => {
-					if (m.role === 'tool') return m;
-					return {
-						...m,
-						content: scrub({
-							content: m.content,
-							sessionMap: privacySessionMapRef.current,
-							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-						}).scrubbedContent as string,
-					};
-				});
-
-				const newCount = Object.keys(privacySessionMapRef.current).length;
-				const delta = newCount - prevCount;
-				if (delta > 0 && onPrivacyEvent) {
-					onPrivacyEvent(delta);
+				const scrubbed = await scrubOutgoing(
+					systemContent,
+					nonSystemMessages,
+					privacySessionMapRef.current,
+				);
+				finalSystemContent = scrubbed.systemContent;
+				finalNonSystemMessages = scrubbed.messages;
+				if (scrubbed.newPlaceholders > 0 && onPrivacyEvent) {
+					onPrivacyEvent(scrubbed.newPlaceholders);
 				}
 			}
 
@@ -408,64 +392,17 @@ export async function handleChat(
 			let finalToolCalls = toolCalls;
 
 			if (privacyEnabled && privacySessionMapRef) {
-				const {rehydrate} = await import('@nanocollective/prompt-scrub');
-
-				if (finalContent) {
-					const result = rehydrate({
+				const rehydrated = await rehydrateResponse(
+					{
 						content: finalContent,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalContent = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (content)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalReasoning) {
-					const result = rehydrate({
-						content: finalReasoning,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalReasoning = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalToolCalls.length > 0) {
-					finalToolCalls = finalToolCalls.map(tc => {
-						try {
-							const argsStr = JSON.stringify(tc.function.arguments);
-							const result = rehydrate({
-								content: argsStr,
-								sessionMap: privacySessionMapRef.current,
-							});
-							if (result.warnings && result.warnings.length > 0) {
-								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
-									toolName: tc.function.name,
-									warnings: result.warnings,
-								});
-							}
-							return {
-								...tc,
-								function: {
-									...tc.function,
-									arguments: JSON.parse(result.content as string),
-								},
-							};
-						} catch (e) {
-							logger.error('Failed to rehydrate tool call', {
-								toolName: tc.function.name,
-								error: e,
-							});
-							return tc;
-						}
-					});
-				}
+						reasoning: finalReasoning,
+						toolCalls: finalToolCalls,
+					},
+					privacySessionMapRef.current,
+				);
+				finalContent = rehydrated.content;
+				finalReasoning = rehydrated.reasoning;
+				finalToolCalls = rehydrated.toolCalls;
 			}
 
 			// Calculate performance metrics
