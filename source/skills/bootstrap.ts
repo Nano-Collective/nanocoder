@@ -217,7 +217,9 @@ function synthesizeCommandSkills(loader: CustomCommandLoader): Skill[] {
 				? 'project'
 				: command.source === 'personal'
 					? 'personal'
-					: 'project';
+					: command.source === 'built-in'
+						? 'built-in'
+						: 'project';
 		out.push(
 			commandToSkill(command, {
 				filePath: command.path,
@@ -259,7 +261,13 @@ function synthesizeToolSkills(manager: ToolManager): Skill[] {
 		const entry = manager.getToolEntry(name);
 		if (!info || !entry) continue;
 		const priority: SkillPriority =
-			info.source === 'project' ? 'project' : 'personal';
+			info.source === 'project'
+				? 'project'
+				: info.source === 'personal'
+					? 'personal'
+					: info.source === 'built-in'
+						? 'built-in'
+						: 'project';
 		out.push(
 			toolToSkill(entry, {
 				filePath: info.filePath,
