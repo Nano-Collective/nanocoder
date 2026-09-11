@@ -7,47 +7,30 @@ import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
+import {
+	autoCompactSession,
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactEnabled,
+	setAutoCompactMode,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from './auto-compact-session';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {compressMessages} from './message-compression';
 import {filterModelFacing} from './message-visibility';
-import {createSessionOverride} from './session-override';
 
-export interface AutoCompactSessionOverrides {
-	enabled: boolean | null;
-	threshold: number | null;
-	mode: CompressionMode | null;
-	strategy: CompressionStrategy | null;
-}
-
-// Session overrides for auto-compact. `threshold` is clamped to 50–95.
-const autoCompactSession = {
-	enabled: createSessionOverride<boolean>(),
-	threshold: createSessionOverride<number>(value =>
-		value !== null ? Math.max(50, Math.min(95, value)) : null,
-	),
-	mode: createSessionOverride<CompressionMode>(),
-	strategy: createSessionOverride<CompressionStrategy>(),
+export type {AutoCompactSessionOverrides} from './auto-compact-session';
+export {
+	autoCompactSession,
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactEnabled,
+	setAutoCompactMode,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
 };
-
-// Legacy object-style accessor (read by useAppHandlers + performAutoCompact).
-export const autoCompactSessionOverrides: AutoCompactSessionOverrides =
-	new Proxy({} as AutoCompactSessionOverrides, {
-		get(_target, prop) {
-			if (prop === 'enabled') return autoCompactSession.enabled.get();
-			if (prop === 'threshold') return autoCompactSession.threshold.get();
-			if (prop === 'mode') return autoCompactSession.mode.get();
-			if (prop === 'strategy') return autoCompactSession.strategy.get();
-			return undefined;
-		},
-		set(_target, prop, value) {
-			if (prop === 'enabled') autoCompactSession.enabled.set(value);
-			else if (prop === 'threshold') autoCompactSession.threshold.set(value);
-			else if (prop === 'mode') autoCompactSession.mode.set(value);
-			else if (prop === 'strategy') autoCompactSession.strategy.set(value);
-			return true;
-		},
-	});
 
 /**
  * Perform auto-compact on messages (async)
@@ -305,34 +288,4 @@ export async function maybeAutoCompact(
 		getLogger().debug('auto-compact failed; leaving history unchanged', error);
 		return messages;
 	}
-}
-
-// Set session override for auto-compact enabled state
-export function setAutoCompactEnabled(enabled: boolean | null): void {
-	autoCompactSession.enabled.set(enabled);
-}
-
-// Set session override for auto-compact threshold
-export function setAutoCompactThreshold(threshold: number | null): void {
-	autoCompactSession.threshold.set(threshold);
-}
-
-// Set session override for auto-compact mode
-export function setAutoCompactMode(mode: CompressionMode | null): void {
-	autoCompactSession.mode.set(mode);
-}
-
-// Set session override for auto-compact strategy
-export function setAutoCompactStrategy(
-	strategy: CompressionStrategy | null,
-): void {
-	autoCompactSession.strategy.set(strategy);
-}
-
-// Reset all session overrides
-export function resetAutoCompactSession(): void {
-	autoCompactSession.enabled.reset();
-	autoCompactSession.threshold.reset();
-	autoCompactSession.mode.reset();
-	autoCompactSession.strategy.reset();
 }
