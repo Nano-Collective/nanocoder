@@ -19,8 +19,9 @@ import {
 	openSync,
 	statSync,
 } from 'node:fs';
-import {dirname, join} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import type {UserPreferences} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
@@ -28,6 +29,7 @@ import {
 	readLockfile,
 	removeLockfile,
 } from './lockfile';
+import {type DirectoryTrustDeps, ensureDirectoryTrust} from './trust';
 
 function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
@@ -48,6 +50,20 @@ export type DaemonCliCommand =
 
 export interface DaemonCliOptions {
 	projectRoot: string;
+	/**
+	 * Trust the project directory for this start (the `--trust-directory`
+	 * flag). Like NANOCODER_TRUST_DIRECTORY=1, it records standing trust so
+	 * the detached boot and any autostart boot pass the same gate. Defaults
+	 * to false.
+	 */
+	trustDirectory?: boolean;
+	/**
+	 * Preferences access for the trust gate. Tests inject fakes; production
+	 * resolves the real module on demand to keep the daemon module graph
+	 * light.
+	 */
+	loadPreferences?: () => UserPreferences;
+	savePreferences?: (preferences: UserPreferences) => void;
 	/**
 	 * Launch the detached daemon process. Tests pass a stub that records the
 	 * arguments without actually forking. Production uses
@@ -122,7 +138,39 @@ async function uninstallCommand(
 	return {exitCode: 0, output: result.message};
 }
 
+async function resolveTrustDeps(
+	opts: DaemonCliOptions,
+): Promise<DirectoryTrustDeps> {
+	if (opts.loadPreferences && opts.savePreferences) {
+		return {
+			loadPreferences: opts.loadPreferences,
+			savePreferences: opts.savePreferences,
+		};
+	}
+	const preferences = await import('@/config/preferences');
+	return preferences;
+}
+
 async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
+	// The daemon arms skill subscriptions and dispatches subagents in
+	// headless mode, where tool confirmations are skipped — refuse to arm
+	// any of that for a directory the user has not trusted.
+	const trust = ensureDirectoryTrust(
+		opts.projectRoot,
+		opts.trustDirectory === true,
+		await resolveTrustDeps(opts),
+	);
+	if (!trust.trusted) {
+		return {
+			exitCode: 1,
+			output:
+				`Directory ${resolve(opts.projectRoot)} is not trusted. Run ` +
+				'nanocoder interactively in this directory once to trust it, ' +
+				'pass --trust-directory, or set NANOCODER_TRUST_DIRECTORY=1 to ' +
+				'start the daemon anyway.',
+		};
+	}
+
 	const live = await readLiveLockfile(opts.projectRoot);
 	if (live) {
 		return {
@@ -151,9 +199,12 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
+	const marked = trust.markedTrusted
+		? `Marked ${resolve(opts.projectRoot)} as trusted.\n`
+		: '';
 	return {
 		exitCode: 0,
-		output: `Daemon started (pid ${lock.pid}, socket ${lock.socketPath}).`,
+		output: `${marked}Daemon started (pid ${lock.pid}, socket ${lock.socketPath}).`,
 	};
 }
 

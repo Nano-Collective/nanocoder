@@ -1,12 +1,52 @@
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import test from 'ava';
+import type {ChildProcess} from 'node:child_process';
 import {runDaemonCli} from './cli';
+import {writeLockfile} from './lockfile';
+import type {UserPreferences} from '@/types/index';
 
 console.log(`\ncli.spec.ts`);
 
 const TAIL_BYTES = 64 * 1024;
+
+interface TrustHarness {
+	stored: UserPreferences;
+	saved: UserPreferences[];
+	loadPreferences: () => UserPreferences;
+	savePreferences: (preferences: UserPreferences) => void;
+}
+
+function makeTrustHarness(trustedDirectories: string[] = []): TrustHarness {
+	const harness: TrustHarness = {
+		stored: {trustedDirectories},
+		saved: [],
+		loadPreferences: () => ({...harness.stored}),
+		savePreferences: preferences => {
+			harness.saved.push(preferences);
+			harness.stored = {...preferences};
+		},
+	};
+	return harness;
+}
+
+function makeLockfileLauncher() {
+	const calls: string[] = [];
+	const launcher = (projectRoot: string): ChildProcess => {
+		calls.push(projectRoot);
+		// Satisfy waitForLockfile without spawning anything: a lockfile with
+		// our own pid always reads as live.
+		void writeLockfile({
+			pid: process.pid,
+			socketPath: 'test-socket',
+			startedAt: Date.now(),
+			projectRoot,
+		});
+		return {} as ChildProcess;
+	};
+	return {calls, launcher};
+}
 
 async function tempProject(logContent?: string): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'daemon-cli-'));
@@ -139,6 +179,111 @@ test.serial('logs starts the tail on a line boundary', async t => {
 			t.is(entry.length, 120);
 		}
 	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('start refuses to spawn when the project directory is not trusted', async t => {
+	const root = await tempProject();
+	const harness = makeTrustHarness();
+	const {calls, launcher} = makeLockfileLauncher();
+	const previousEnv = process.env.NANOCODER_TRUST_DIRECTORY;
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			launchDaemon: launcher,
+			loadPreferences: harness.loadPreferences,
+			savePreferences: harness.savePreferences,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /not trusted/i);
+		t.regex(result.output, /--trust-directory/);
+		t.deepEqual(calls, [], 'daemon must not be spawned in an untrusted directory');
+		t.is(harness.saved.length, 0);
+	} finally {
+		if (previousEnv === undefined) {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		} else {
+			process.env.NANOCODER_TRUST_DIRECTORY = previousEnv;
+		}
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('start proceeds when the directory is already trusted', async t => {
+	const root = await tempProject();
+	const harness = makeTrustHarness([resolve(root)]);
+	const {calls, launcher} = makeLockfileLauncher();
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			launchDaemon: launcher,
+			loadPreferences: harness.loadPreferences,
+			savePreferences: harness.savePreferences,
+		});
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Daemon started/);
+		t.deepEqual(calls, [root]);
+		t.is(harness.saved.length, 0, 'an already-trusted directory must not be rewritten');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('start marks the directory trusted and proceeds when NANOCODER_TRUST_DIRECTORY=1', async t => {
+	const root = await tempProject();
+	const harness = makeTrustHarness();
+	const {calls, launcher} = makeLockfileLauncher();
+	const previousEnv = process.env.NANOCODER_TRUST_DIRECTORY;
+	process.env.NANOCODER_TRUST_DIRECTORY = '1';
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			launchDaemon: launcher,
+			loadPreferences: harness.loadPreferences,
+			savePreferences: harness.savePreferences,
+		});
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Daemon started/);
+		t.deepEqual(calls, [root]);
+		t.is(harness.saved.length, 1);
+		t.deepEqual(harness.saved[0]?.trustedDirectories, [resolve(root)]);
+	} finally {
+		if (previousEnv === undefined) {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		} else {
+			process.env.NANOCODER_TRUST_DIRECTORY = previousEnv;
+		}
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('start records standing trust when --trust-directory is passed', async t => {
+	const root = await tempProject();
+	const harness = makeTrustHarness();
+	const {calls, launcher} = makeLockfileLauncher();
+	const previousEnv = process.env.NANOCODER_TRUST_DIRECTORY;
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			launchDaemon: launcher,
+			loadPreferences: harness.loadPreferences,
+			savePreferences: harness.savePreferences,
+		});
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Daemon started/);
+		t.deepEqual(calls, [root]);
+		t.is(harness.saved.length, 1);
+		t.deepEqual(harness.saved[0]?.trustedDirectories, [resolve(root)]);
+	} finally {
+		if (previousEnv === undefined) {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		} else {
+			process.env.NANOCODER_TRUST_DIRECTORY = previousEnv;
+		}
 		await rm(root, {recursive: true, force: true});
 	}
 });

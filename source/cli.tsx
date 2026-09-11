@@ -67,6 +67,7 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		trustDirectory: args.slice(2).includes('--trust-directory'),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);

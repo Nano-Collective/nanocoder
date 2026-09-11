@@ -13,6 +13,7 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {loadPreferences, savePreferences} from '@/config/preferences';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
@@ -26,6 +27,7 @@ import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {startDaemon} from './daemon';
+import {ensureDirectoryTrust} from './trust';
 
 async function main(): Promise<void> {
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
@@ -42,6 +44,25 @@ async function main(): Promise<void> {
 		// but the rewrite costs nothing and silences the format-string warning.
 		const detail = formatError(err);
 		console.error(`Failed to chdir into ${projectRoot}: ${detail}`);
+		process.exit(1);
+	}
+
+	// Boot gate: this process arms skill subscriptions and dispatches
+	// subagents in headless mode, so an untrusted directory must never reach
+	// startDaemon. The `nanocoder daemon start` CLI checks the same rule
+	// before spawning, but autostart boots (launchd/systemd, set up by
+	// `daemon install`) arrive here without the CLI, so the gate has to live
+	// in the boot itself.
+	const trust = ensureDirectoryTrust(projectRoot, false, {
+		loadPreferences,
+		savePreferences,
+	});
+	if (!trust.trusted) {
+		console.error(
+			`Refusing to start the daemon for ${projectRoot}: the directory is not trusted. ` +
+				'Run nanocoder interactively in this directory once to trust it, or set ' +
+				'NANOCODER_TRUST_DIRECTORY=1 for this boot.',
+		);
 		process.exit(1);
 	}
 
