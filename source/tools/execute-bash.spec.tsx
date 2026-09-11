@@ -80,6 +80,41 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.regex(output!, /ls/);
 });
 
+test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const element = formatter({command});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n').map(line => line.trim());
+	t.true(lines.includes('dolt version;'));
+	t.true(lines.includes('echo "===";'));
+	t.true(lines.includes('ls -la /usr/local/bin/dolt'));
+});
+
+test('ExecuteBashFormatter keeps a quoted semicolon on one line', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({command: 'echo "hello; world"'});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n').map(line => line.trim());
+	t.true(lines.includes('echo "hello; world"'));
+});
+
 test('ExecuteBashFormatter handles complex commands', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {

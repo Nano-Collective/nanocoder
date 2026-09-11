@@ -53,6 +53,40 @@ test('BashProgress displays the command', t => {
 	t.regex(output!, /npm run build/);
 });
 
+test('BashProgress splits compound commands onto separate lines', t => {
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command={command}
+			completedState={createCompletedState({command})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n').map(line => line.trim());
+	t.true(lines.includes('dolt version;'));
+	t.true(lines.includes('echo "===";'));
+	t.true(lines.includes('ls -la /usr/local/bin/dolt'));
+});
+
+test('BashProgress keeps a quoted semicolon on one line', t => {
+	const command = 'echo "hello; world"';
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command={command}
+			completedState={createCompletedState({command})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n').map(line => line.trim());
+	t.true(lines.includes('echo "hello; world"'));
+});
+
 test('BashProgress displays execute_bash tool name', t => {
 	const {lastFrame} = renderWithTheme(
 		<BashProgress

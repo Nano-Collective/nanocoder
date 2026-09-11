@@ -5,6 +5,7 @@ import ToolMessage from '@/components/tool-message';
 import {BASH_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
+import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface BashProgressProps {
@@ -115,9 +116,11 @@ export default function BashProgress({
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
-				<Text wrap="wrap" color={colors.primary}>
-					{command}
-				</Text>
+				{splitCommandForDisplay(command).map((segment, i) => (
+					<Text key={i} wrap="wrap" color={colors.primary}>
+						{segment}
+					</Text>
+				))}
 			</Box>
 			{state.isComplete && (
 				<Box>
