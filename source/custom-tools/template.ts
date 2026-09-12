@@ -19,6 +19,7 @@
  * same quotes are not quoting, so this is not an injection barrier.
  */
 
+import {isWindowsCmd} from '@/custom-tools/handler';
 import {expandSections} from '@/utils/template-sections';
 
 /**
@@ -35,14 +36,28 @@ export function shellQuote(value: string): string {
 }
 
 /**
+ * Wrap a string in cmd.exe-safe double quotes.
+ *
+ * Escapes %, &, |, <, >, and ^ by prefixing them with ^.
+ */
+export function cmdQuote(value: string): string {
+	const escaped = value.replace(/[%&|<>^]/g, '^$&');
+	return `"${escaped}"`;
+}
+
+/**
  * Render an argument value as a shell-safe token (or token list, for arrays).
  */
-export function renderValue(value: unknown): string {
+export function renderValue(value: unknown, shell?: string): string {
 	if (value === null || value === undefined) return '';
+
+	const quote = shell && isWindowsCmd(shell) ? cmdQuote : shellQuote;
+
 	if (Array.isArray(value)) {
-		return value.map(v => shellQuote(stringify(v))).join(' ');
+		return value.map(v => quote(stringify(v))).join(' ');
 	}
-	return shellQuote(stringify(value));
+
+	return quote(stringify(value));
 }
 
 function stringify(value: unknown): string {
@@ -75,20 +90,22 @@ function isTruthyArg(value: unknown): boolean {
 export function renderBody(
 	body: string,
 	args: Record<string, unknown>,
+	shell?: string,
 ): string {
 	const afterSections = expandSections(body, name => isTruthyArg(args[name]));
-	return expandSubstitutions(afterSections, args);
+	return expandSubstitutions(afterSections, args, shell);
 }
 
 function expandSubstitutions(
 	body: string,
 	args: Record<string, unknown>,
+	shell?: string,
 ): string {
 	return body.replace(
 		/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g,
 		(_match, name: string) => {
 			if (!(name in args)) return '';
-			return renderValue(args[name]);
+			return renderValue(args[name], shell);
 		},
 	);
 }

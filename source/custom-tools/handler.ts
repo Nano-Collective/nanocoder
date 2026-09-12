@@ -19,10 +19,10 @@ export function buildHandler(
 	projectRoot: string,
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
-		const rendered = renderBody(body, args ?? {});
+		const shell = pickShell(metadata.shell);
+		const rendered = renderBody(body, args ?? {}, shell);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
 		const env = mergeEnv(metadata.env);
-		const shell = pickShell(metadata.shell);
 		return runScript(rendered, {
 			cwd,
 			env,
@@ -195,7 +195,7 @@ export function shellArgs(shell: string, script: string): string[] {
 	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
 }
 
-function isWindowsCmd(shell: string): boolean {
+export function isWindowsCmd(shell: string): boolean {
 	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
 	return /^cmd(\.exe)?$/i.test(name);
 }

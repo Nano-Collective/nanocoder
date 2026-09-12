@@ -1,5 +1,5 @@
 import test from 'ava';
-import {renderBody, renderValue, shellQuote} from './template';
+import {renderBody, renderValue, shellQuote, cmdQuote} from './template';
 
 console.log('\ncustom-tools/template.spec.ts');
 
@@ -34,6 +34,17 @@ test('renderValue handles arrays', t => {
 test('renderValue handles numbers and booleans', t => {
 	t.is(renderValue(42), `'42'`);
 	t.is(renderValue(true), `'true'`);
+});
+
+test('cmdQuote escapes %, &, |, <, >, ^', t => {
+	t.is(cmdQuote('%PATH%'), '"^%PATH^%"');
+	t.is(cmdQuote('a & b | c < d > e ^ f'), '"a ^& b ^| c ^< d ^> e ^^ f"');
+});
+
+test('renderValue uses cmdQuote for cmd.exe', t => {
+	t.is(renderValue(['a', 'b & c'], 'cmd.exe'), '"a" "b ^& c"');
+	t.is(renderValue(42, 'cmd.exe'), '"42"');
+	t.is(renderValue('hello', 'cmd'), '"hello"');
 });
 
 test('renderBody substitutes parameters with shell-quoted values', t => {
@@ -103,4 +114,9 @@ test('renderBody positive and inverted sections on the same var', t => {
 	const tpl = `{{# json }}A {{ id }}{{/ json }}{{^ json }}B {{ id }}{{/ json }}`;
 	t.is(renderBody(tpl, {id: '1', json: true}), "A '1'");
 	t.is(renderBody(tpl, {id: '1', json: false}), "B '1'");
+});
+
+test('renderBody uses cmd quoting when shell is cmd.exe', t => {
+	const out = renderBody('echo {{ msg }}', {msg: "hello & world"}, 'cmd.exe');
+	t.is(out, 'echo "hello ^& world"');
 });
