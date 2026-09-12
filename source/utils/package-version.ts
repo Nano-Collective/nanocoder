@@ -12,7 +12,13 @@ const __dirname = path.dirname(__filename);
  */
 export const UNKNOWN_VERSION = 'unknown';
 
-const DEFAULT_PACKAGE_JSON_PATH = path.join(__dirname, '../../package.json');
+const defaultPackageJsonCandidates = [
+	path.join(__dirname, '../package.json'),
+	path.join(__dirname, '../../package.json'),
+];
+const DEFAULT_PACKAGE_JSON_PATH =
+	defaultPackageJsonCandidates.find(p => fs.existsSync(p)) ??
+	defaultPackageJsonCandidates[0];
 
 /**
  * Read this package's version off disk, never throwing.
