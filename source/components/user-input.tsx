@@ -155,6 +155,7 @@ export default function UserInput({
 		resetInput,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
+		currentStateRef,
 		setInputState,
 		insertPaste,
 	} = inputState;
@@ -444,9 +445,14 @@ export default function UserInput({
 	const handleSubmit = useCallback(() => {
 		if (!onSubmit && !onQueueMessage) return;
 
+		// Read the ref, not the destructured currentState: Enter can fire in
+		// direct response to the same stdin flush as a just-applied paste,
+		// before React has re-rendered this component with it.
+		const latestState = currentStateRef.current;
+
 		let images = attachments;
-		let assembled = assemblePrompt(currentState);
-		let display = currentState.displayValue;
+		let assembled = assemblePrompt(latestState);
+		let display = latestState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
 		// (often quoted, mixed in with prose) become attachments; the literal
@@ -471,8 +477,8 @@ export default function UserInput({
 		if (!assembled.trim() && images.length === 0) return;
 
 		const inputStateForHistory: InputState = {
-			displayValue: currentState.displayValue,
-			placeholderContent: {...currentState.placeholderContent},
+			displayValue: latestState.displayValue,
+			placeholderContent: {...latestState.placeholderContent},
 		};
 
 		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
@@ -511,7 +517,7 @@ export default function UserInput({
 		onQueueMessage,
 		resetInput,
 		resetUIState,
-		currentState,
+		currentStateRef,
 		isBusy,
 		onSubmittedDraft,
 	]);
