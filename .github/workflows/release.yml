@@ -146,6 +146,11 @@ jobs:
           echo "$CONTRIBUTORS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      # Workspace `test -f dist/cli.js` is not the publish tarball. Pack listing
+      # must include bin.nanocoder, and that binary must print package.json's version.
+      - name: Smoke pack and CLI --version
+        run: ./scripts/release-smoke.sh
+
       - name: Publish to NPM
         run: npm publish --access public
         env:
