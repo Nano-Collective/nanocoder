@@ -137,10 +137,34 @@ export function createErrorInfo(
 }
 
 /**
+ * Check if error is a validation error
+ */
+function isValidationError(error: Error): boolean {
+	const msg = error.message.toLowerCase();
+	return (
+		error.name === 'ValidationError' ||
+		error.name === 'ZodError' ||
+		msg.includes('validation') ||
+		msg.includes('invalid') ||
+		msg.includes('required')
+	);
+}
+
+/**
  * Check if error is a network-related error
  */
 function isNetworkError(error: Error): boolean {
+	// If it's a validation error, don't classify it as a network error
+	// just because it might contain a word like "connection" in its body.
+	if (
+		isValidationError(error) &&
+		!['FetchError', 'NetworkError'].includes(error.name)
+	) {
+		return false;
+	}
+
 	const errorCode = (error as NodeJS.ErrnoException).code;
+	const msg = error.message.toLowerCase();
 
 	return (
 		error.name === 'NetworkError' ||
@@ -149,9 +173,9 @@ function isNetworkError(error: Error): boolean {
 		errorCode === 'ENOTFOUND' ||
 		errorCode === 'ECONNRESET' ||
 		errorCode === 'ETIMEDOUT' ||
-		error.message.includes('network') ||
-		error.message.includes('fetch') ||
-		error.message.includes('connection')
+		msg.includes('network') ||
+		msg.includes('fetch') ||
+		msg.includes('connection')
 	);
 }
 
@@ -160,25 +184,13 @@ function isNetworkError(error: Error): boolean {
  */
 function isTimeoutError(error: Error): boolean {
 	const errorCode = (error as NodeJS.ErrnoException).code;
+	const msg = error.message.toLowerCase();
 
 	return (
 		error.name === 'TimeoutError' ||
 		errorCode === 'ETIMEDOUT' ||
-		error.message.includes('timeout') ||
-		error.message.includes('timed out')
-	);
-}
-
-/**
- * Check if error is a validation error
- */
-function isValidationError(error: Error): boolean {
-	return (
-		error.name === 'ValidationError' ||
-		error.name === 'ZodError' ||
-		error.message.includes('validation') ||
-		error.message.includes('invalid') ||
-		error.message.includes('required')
+		msg.includes('timeout') ||
+		msg.includes('timed out')
 	);
 }
 
