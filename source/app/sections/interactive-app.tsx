@@ -101,6 +101,9 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+	const drainInProgressRef = React.useRef(false);
+	const lastFailedDrainIdRef = React.useRef<string | null>(null);
+	const [drainAttempt, setDrainAttempt] = React.useState(0);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -182,6 +185,99 @@ export function InteractiveApp({
 			appState.isToolExecuting ||
 			appState.abortController !== null) &&
 		!appState.liveComponentCapturesInput;
+
+	// Drain queued prompts only after the previous turn is fully idle and all
+	// modal modes have closed. Command handlers and conversation completion can
+	// both signal completion, so keeping the drain here makes it idempotent and
+	// prevents nested or duplicate turns.
+	const queueDrainBlocked =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null ||
+		appState.isToolConfirmationMode ||
+		appState.isQuestionMode ||
+		pendingSubagentApproval !== null ||
+		pendingToolConfirmation !== null ||
+		appState.planReviewState?.show === true ||
+		appState.pendingPlanProceed !== null;
+	const queuedMessageCount = userMessageQueue.queuedMessages.length;
+	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
+
+	React.useEffect(() => {
+		// Re-run after a successful dispatch settles, once its queue update has
+		// rendered and the next item can be considered.
+		void drainAttempt;
+		if (
+			queueDrainBlocked ||
+			appState.activeMode !== null ||
+			appState.isSettingsMode ||
+			!appState.client ||
+			!appState.toolManager ||
+			!appState.isConversationComplete ||
+			queuedMessageCount === 0 ||
+			lastFailedDrainIdRef.current === queuedMessageId ||
+			drainInProgressRef.current
+		) {
+			return;
+		}
+
+		drainInProgressRef.current = true;
+		let started = false;
+		const timeout = setTimeout(() => {
+			started = true;
+			let drainedMessageId = queuedMessageId ?? null;
+			void Promise.resolve()
+				.then(() =>
+					userMessageQueue.drainNextMessage(async message => {
+						drainedMessageId = message.id;
+						await handleUserSubmit(
+							message.message,
+							message.displayValue,
+							message.images,
+						);
+						return true;
+					}),
+				)
+				.then(
+					dispatched => {
+						drainInProgressRef.current = false;
+						if (!dispatched) {
+							// Keep a failed head queued, but do not immediately re-enter
+							// the effect while it still has the same identity.
+							lastFailedDrainIdRef.current = drainedMessageId;
+							return;
+						}
+						lastFailedDrainIdRef.current = null;
+						// The queue state update happens before the dispatch resolves. A
+						// separate render is needed to notice and drain the next item after
+						// the dispatched turn returns to idle.
+						setDrainAttempt(attempt => attempt + 1);
+					},
+					() => {
+						drainInProgressRef.current = false;
+						lastFailedDrainIdRef.current = drainedMessageId;
+					},
+				);
+		}, 0);
+
+		return () => {
+			clearTimeout(timeout);
+			if (!started) drainInProgressRef.current = false;
+		};
+	}, [
+		appState.activeMode,
+		appState.client,
+		appState.isConversationComplete,
+		appState.isSettingsMode,
+		appState.toolManager,
+		queueDrainBlocked,
+		handleUserSubmit,
+		userMessageQueue.drainNextMessage,
+		queuedMessageCount,
+		queuedMessageId,
+		drainAttempt,
+	]);
 
 	const recallableSubmittedDraft =
 		cancellable &&

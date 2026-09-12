@@ -1,6 +1,8 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
+import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import stripAnsi from 'strip-ansi';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
@@ -43,6 +45,13 @@ interface Overrides {
 	setPendingPlanProceed?: (v: string | null) => void;
 	handleMessageSubmit?: (message: string) => Promise<void>;
 	currentSessionId?: string | null;
+	toolManager?: unknown;
+	queuedMessages?: Array<{id: string; message: string; displayValue: string}>;
+	handleUserSubmit?: (message: string) => Promise<void>;
+	drainNextMessage?: (
+		dispatch: (message: {id: string; message: string; displayValue: string}) =>
+			boolean | Promise<boolean>,
+	) => boolean | Promise<boolean>;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -51,6 +60,7 @@ function makeProps(o: Overrides = {}) {
 
 	const appState = {
 		client: o.client ?? null,
+		toolManager: o.toolManager ?? null,
 		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
@@ -143,24 +153,238 @@ function makeProps(o: Overrides = {}) {
 		pendingToolConfirmation: null,
 		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
-		handleUserSubmit: noopAsync,
+		handleUserSubmit: o.handleUserSubmit ?? noopAsync,
 		userMessageQueue: {
-			queuedMessages: [],
+			queuedMessages: o.queuedMessages ?? [],
 			enqueueMessage: () => ({
 				id: 'queued-test',
 				message: '',
 				displayValue: '',
 			}),
 			removeMessage: noop,
-			drainNextMessage: () => false,
+			drainNextMessage: o.drainNextMessage ?? (async () => false),
 		},
 		handleIdeSelect: noop,
 	} as never;
 }
 
+function QueuedPromptHarness({overrides}: {overrides: Overrides}) {
+	const userMessageQueue = useUserMessageQueue();
+
+	React.useEffect(() => {
+		userMessageQueue.enqueueMessage({
+			message: 'queued prompt',
+			displayValue: 'queued prompt',
+		});
+	}, [userMessageQueue.enqueueMessage]);
+
+	return (
+		<InteractiveApp
+			{...makeProps(overrides)}
+			userMessageQueue={userMessageQueue}
+		/>
+	);
+}
+
 test('renders without crashing in default state', t => {
 	const {lastFrame} = renderWithTheme(<InteractiveApp {...makeProps()} />);
 	t.truthy(lastFrame());
+});
+
+test('does not drain queued prompts while a turn is generating', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isGenerating: true,
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts while a modal mode is active', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				activeMode: 'model',
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts while plan review is active', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts while plan proceed is pending', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				developmentMode: 'plan',
+				pendingPlanProceed: 'approved plan',
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not immediately retry a failed queued dispatch', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+					throw new Error('dispatch failed');
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.is(dispatchAttempts, 1);
+	unmount();
+});
+
+test('drains every queued prompt after each dispatched turn returns to idle', async t => {
+	const submitted: string[] = [];
+
+	const QueueDrainHarness = () => {
+		const userMessageQueue = useUserMessageQueue();
+		const [isConversationComplete, setIsConversationComplete] =
+			React.useState(true);
+
+		React.useEffect(() => {
+			userMessageQueue.enqueueMessage({message: 'first', displayValue: 'first'});
+			userMessageQueue.enqueueMessage({message: 'second', displayValue: 'second'});
+		}, [userMessageQueue.enqueueMessage]);
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					toolManager: {},
+					isConversationComplete,
+					handleUserSubmit: async message => {
+						submitted.push(message);
+						setIsConversationComplete(false);
+						await new Promise(resolve => setTimeout(resolve, 10));
+						setIsConversationComplete(true);
+					},
+				})}
+				userMessageQueue={userMessageQueue}
+			/>
+		);
+	};
+
+	const {unmount} = renderWithTheme(<QueueDrainHarness />);
+	await new Promise(resolve => setTimeout(resolve, 100));
+	t.deepEqual(submitted, ['first', 'second']);
+	unmount();
+});
+
+test('drains a prompt after delayed command completion when the app is idle', async t => {
+	const submitted: string[] = [];
+
+	const DelayedCommandHarness = () => {
+		const userMessageQueue = useUserMessageQueue();
+		const [isToolExecuting, setIsToolExecuting] = React.useState(true);
+		const [isConversationComplete, setIsConversationComplete] =
+			React.useState(false);
+
+		React.useEffect(() => {
+			userMessageQueue.enqueueMessage({
+				message: 'after compact',
+				displayValue: 'after compact',
+			});
+			const timeout = setTimeout(() => {
+				setIsToolExecuting(false);
+				setIsConversationComplete(true);
+			}, DELAY_COMMAND_COMPLETE_MS);
+
+			return () => clearTimeout(timeout);
+		}, [userMessageQueue.enqueueMessage]);
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					toolManager: {},
+					isToolExecuting,
+					isConversationComplete,
+					handleUserSubmit: async message => {
+						submitted.push(message);
+					},
+				})}
+				userMessageQueue={userMessageQueue}
+			/>
+		);
+	};
+
+	const {unmount} = renderWithTheme(<DelayedCommandHarness />);
+	await new Promise(resolve =>
+		setTimeout(resolve, DELAY_COMMAND_COMPLETE_MS + 40),
+	);
+	t.deepEqual(submitted, ['after compact']);
+	unmount();
 });
 
 test('renders the static-component marker through ChatHistory', t => {
