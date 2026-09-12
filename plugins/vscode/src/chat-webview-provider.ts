@@ -9,7 +9,7 @@ import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
 import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
-import { SettingsManager } from './settings-manager';
+import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
 
@@ -304,6 +304,7 @@ export class ChatWebviewProvider
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
+						this._handleTokenUsageVisibility();
 						this._initializeSessionIfReady();
 						break;
 					case 'submitMessage':
@@ -390,7 +391,9 @@ export class ChatWebviewProvider
 						break;
 					case 'updateSetting':
 						this._outputChannel.appendLine(`[Webview] Update setting: ${message.key}`);
-						this._handleUpdateSetting(message.key, message.value);
+						void this._handleUpdateSetting(message.key, message.value).catch(error => {
+							this._outputChannel.appendLine(`[Webview] Failed to update setting: ${error}`);
+						});
 						break;
 					case 'openConfigFile':
 						this._outputChannel.appendLine(`[Webview] Open config file: ${message.file}`);
@@ -475,6 +478,10 @@ export class ChatWebviewProvider
 		}
 	}
 
+	public refreshSettings(): void {
+		this._handleRequestSettings();
+	}
+
 	private async _initializeSessionIfReady() {
 		if (!this._isWebviewReady || !this._acpClient.connection) {
 			return;
@@ -556,27 +563,81 @@ export class ChatWebviewProvider
 
 	private _handleRequestSettings() {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const settings = this._settingsManager.readSettings(cwd);
+		const settings = this._readWebviewSettings(cwd);
 		this.postMessage({type: 'settingsData', settings});
 	}
 
-	private _handleUpdateSetting(key: string, value: unknown) {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const result = this._settingsManager.updateSetting(cwd, key, value);
+	private _handleTokenUsageVisibility() {
 		this.postMessage({
-			type: 'settingsUpdated',
-			key,
-			success: result.success,
-			error: result.error,
+			type: 'tokenUsageVisibility',
+			showTokenUsage: this._readShowTokenUsage(),
 		});
+	}
 
-		// If successful, send refreshed settings so the UI stays in sync
-		if (result.success) {
-			const settings = this._settingsManager.readSettings(cwd);
-			this.postMessage({type: 'settingsData', settings});
-		} else {
-			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
+	private async _handleUpdateSetting(key: string, value: unknown) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		try {
+			const result =
+				key === 'showTokenUsage'
+					? await this._updateShowTokenUsage(value)
+					: this._settingsManager.updateSetting(cwd, key, value);
+			this.postMessage({
+				type: 'settingsUpdated',
+				key,
+				success: result.success,
+				error: result.error,
+			});
+
+			// If successful, send refreshed settings so the UI stays in sync
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+			} else {
+				vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to update ${key}: ${message}`);
+			this.postMessage({
+				type: 'settingsUpdated',
+				key,
+				success: false,
+				error: message,
+			});
+			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${message}`);
 		}
+	}
+
+	private _readWebviewSettings(cwd: string): SettingsData & {showTokenUsage: boolean} {
+		return {
+			...this._settingsManager.readSettings(cwd),
+			showTokenUsage: this._readShowTokenUsage(),
+		};
+	}
+
+	private _readShowTokenUsage(): boolean {
+		return vscode.workspace
+			.getConfiguration('nanocoder')
+			.get<boolean>('showTokenUsage', false);
+	}
+
+	private async _updateShowTokenUsage(value: unknown): Promise<{ success: boolean; error?: string }> {
+		if (typeof value !== 'boolean') {
+			return {success: false, error: 'showTokenUsage must be a boolean'};
+		}
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const scope = workspaceFolder?.uri;
+		const config = vscode.workspace.getConfiguration('nanocoder', scope);
+		const inspected = config.inspect<boolean>('showTokenUsage');
+		const target =
+			inspected?.workspaceFolderValue !== undefined && workspaceFolder
+				? vscode.ConfigurationTarget.WorkspaceFolder
+				: inspected?.workspaceValue !== undefined
+					? vscode.ConfigurationTarget.Workspace
+					: vscode.ConfigurationTarget.Global;
+
+		await config.update('showTokenUsage', value, target);
+		return {success: true};
 	}
 
 	private async _handleOpenConfigFile(file: string) {

@@ -38,6 +38,7 @@
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
+	let showTokenUsage = false;
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -2063,6 +2064,7 @@
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
 	function appendUsageIndicator(usage, cost) {
+		if (!showTokenUsage) return;
 		if (!usage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
@@ -2077,7 +2079,7 @@
 
 		endCurrentTextBlock();
 		const el = document.createElement('div');
-		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
 		scrollToBottom();
@@ -2190,6 +2192,9 @@
 				break;
 			case 'settingsData':
 				renderSettingsData(message.settings);
+				break;
+			case 'tokenUsageVisibility':
+				renderTokenUsageVisibility(message.showTokenUsage);
 				break;
 			case 'settingsUpdated':
 				if (!message.success) {
@@ -2559,6 +2564,14 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
 			});
 		}
+
+		// Token usage footer
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) {
+			tuToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2645,6 +2658,21 @@
 
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+
+		renderTokenUsageVisibility(settings.showTokenUsage === true);
+	}
+
+	function renderTokenUsageVisibility(enabled) {
+		showTokenUsage = enabled === true;
+		updateTokenUsageIndicators();
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) tuToggle.checked = showTokenUsage;
+	}
+
+	function updateTokenUsageIndicators() {
+		document.querySelectorAll('.token-usage-indicator').forEach(el => {
+			el.style.display = showTokenUsage ? '' : 'none';
+		});
 	}
 
 	function escapeHtml(str) {
