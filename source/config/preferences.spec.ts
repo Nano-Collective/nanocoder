@@ -37,6 +37,8 @@ import {
 	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
+	getMouseReporting,
+	updateMouseReporting,
 	updateShowUsageFooter,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
@@ -1595,6 +1597,39 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 });
 
 // ============================================================================
+// Mouse Reporting Tests
+// ============================================================================
+
+test.serial('getMouseReporting returns true by default when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getMouseReporting();
+	t.is(result, true);
+});
+
+test.serial('updateMouseReporting saves and retrieves preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateMouseReporting(true);
+		t.is(getMouseReporting(), true);
+
+		updateMouseReporting(false);
+		t.is(getMouseReporting(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
 // Usage Footer Tests
 // ============================================================================
 
@@ -1614,7 +1649,6 @@ test.serial('getShowUsageFooter defaults to true when not set', t => {
 		}
 	}
 });
-
 test.serial('getShowUsageFooter defaults to true when file does not exist', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {

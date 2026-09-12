@@ -1,8 +1,22 @@
 import test from 'ava';
 import {
+	ALTERNATE_SCROLL_OFF,
+	ALTERNATE_SCROLL_ON,
 	createUtf8InputDecoder,
+	MOUSE_REPORTING_OFF,
+	MOUSE_REPORTING_ON,
 	stripMouseSequences,
 } from './terminal-mouse.js';
+
+test('mode-setting sequences are the documented DEC private modes', t => {
+	t.is(MOUSE_REPORTING_ON, '\x1b[?1000h\x1b[?1006h');
+	t.is(MOUSE_REPORTING_OFF, '\x1b[?1006l\x1b[?1000l');
+	// 1007 must be turned OFF, not on: with alternate scroll enabled the
+	// terminal converts wheel ticks into arrow keys, which the prompt reads
+	// as history navigation.
+	t.is(ALTERNATE_SCROLL_OFF, '\x1b[?1007l');
+	t.is(ALTERNATE_SCROLL_ON, '\x1b[?1007h');
+});
 
 test('preserves multibyte text split across stdin chunks', t => {
 	const decode = createUtf8InputDecoder();
