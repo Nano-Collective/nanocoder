@@ -115,8 +115,14 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals.
-	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
+	// cols for legibility on tiny terminals. Clamped back down to actualWidth
+	// so that floor can never exceed the parent it's centered in - Ink centers
+	// an over-wide child by giving it a negative left offset, which clips the
+	// border, the prompt marker, and the start of the text instead of the end.
+	const promptWidth = Math.min(
+		actualWidth,
+		Math.max(PROMPT_WIDTH_MIN, actualWidth - 4),
+	);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
