@@ -30,6 +30,59 @@ interface BraveSearchResponse {
 	};
 }
 
+/**
+ * Collapses internal newlines into single spaces so a value can never
+ * land at the start of a markdown line (heading/list/blockquote position).
+ */
+function collapseNewlines(text: string): string {
+	return text.replace(/\r?\n+/g, ' ').trim();
+}
+
+/**
+ * Strips Brave's query-term highlight tags. These arrive as literal
+ * <strong>/</strong> markup in titles and descriptions; left alone they'd
+ * get escaped into ugly `\<strong\>` noise, so remove them before escaping.
+ */
+function stripHighlightTags(text: string): string {
+	return text.replace(/<\/?strong>/gi, '');
+}
+
+/**
+ * Escapes markdown syntax characters to prevent formatting disruption and
+ * injection (e.g. fake headings, spoofed links, setext-style `===` headings).
+ *
+ * Deliberately a minimal inline set rather than the full CommonMark
+ * punctuation list: `# - + . >` etc. only have special meaning at the start
+ * of a line, and callers already collapse newlines and prefix content with
+ * `## N. `, so those characters can never land in heading/list position.
+ * Escaping them anyway just burns tokens in the model's context for no
+ * safety benefit.
+ */
+export function escapeMarkdown(text: string): string {
+	return text.replace(/([\\`*_[\]<>~|=])/g, '\\$1');
+}
+
+/**
+ * Normalizes and sanitizes a URL for safe embedding in a Markdown autolink.
+ * Strips whitespace and angle brackets that would break the `<...>` wrapper,
+ * and restricts to http(s) schemes so `javascript:`/`data:` etc. can't ride
+ * along disguised as a search result link.
+ */
+export function sanitizeUrl(url: string): string {
+	const cleaned = url.replace(/\s+/g, '').replace(/[<>]/g, '');
+
+	try {
+		const parsed = new URL(cleaned);
+		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+			return '';
+		}
+	} catch {
+		return '';
+	}
+
+	return cleaned;
+}
+
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
@@ -71,20 +124,38 @@ export const executeWebSearch = async (
 		const data = (await response.json()) as BraveSearchResponse;
 		const results = data.web?.results ?? [];
 
+		const safeQuery = escapeMarkdown(collapseNewlines(args.query));
+
 		if (results.length === 0) {
-			return `No results found for query: "${args.query}"`;
+			return `No results found for query: "${safeQuery}"`;
 		}
 
-		let formattedResults = `# Web Search Results: "${args.query}"\n\n`;
+		let formattedResults = `# Web Search Results: "${safeQuery}"\n\n`;
 
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-			formattedResults += `**URL:** ${result.url}\n\n`;
-			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+
+			const normalizedTitle = collapseNewlines(
+				stripHighlightTags(result.title || ''),
+			);
+			const safeTitle = escapeMarkdown(normalizedTitle);
+			const safeUrl = sanitizeUrl(result.url || '');
+
+			formattedResults += `## ${i + 1}. ${safeTitle}\n\n`;
+
+			if (safeUrl) {
+				formattedResults += `**URL:** <${safeUrl}>\n\n`;
 			}
+
+			if (result.description) {
+				const normalizedDescription = collapseNewlines(
+					stripHighlightTags(result.description),
+				);
+				const safeDescription = escapeMarkdown(normalizedDescription);
+				formattedResults += `${safeDescription}\n\n`;
+			}
+
 			formattedResults += '---\n\n';
 		}
 
@@ -101,7 +172,7 @@ export const executeWebSearch = async (
 			throw error;
 		}
 
-		throw new Error(`Web search failed: Unknown error`);
+		throw new Error('Web search failed: Unknown error');
 	}
 };
 
@@ -140,7 +211,6 @@ function WebSearchFormatterComponent({
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
-	// Parse result to count actual results
 	let resultCount = 0;
 	let estimatedTokens = 0;
 	if (result) {
@@ -200,7 +270,6 @@ export const webSearchValidator = (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const query = args.query?.trim();
 
-	// Check if query is empty
 	if (!query) {
 		return Promise.resolve({
 			valid: false,
@@ -208,7 +277,6 @@ export const webSearchValidator = (
 		});
 	}
 
-	// Check query length (reasonable limit)
 	if (query.length > MAX_WEB_SEARCH_QUERY_LENGTH) {
 		return Promise.resolve({
 			valid: false,
