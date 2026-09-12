@@ -7,6 +7,7 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
+	ensureDirectoryTrust,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
@@ -109,7 +110,16 @@ export async function runPlainShell(
 
 	const isJson = outputFormat === 'json';
 
-	if (!ensureDirectoryTrust(trustDirectory, deps)) {
+	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
+		loadPreferences: deps.loadPreferences,
+		savePreferences: deps.savePreferences,
+	});
+	if (trust.persisted) {
+		writeStatus(
+			`Marked ${path.resolve(process.cwd())} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
+		);
+	}
+	if (!trust.trusted) {
 		if (isJson) {
 			const cwd = path.resolve(process.cwd());
 			emitJsonReport({
@@ -382,29 +392,6 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	const providerConfig = config.providers?.find(p => p.name === provider);
 	if (!providerConfig) return false;
 	return providerConfig.disableToolModels?.includes(model) ?? false;
-}
-
-function ensureDirectoryTrust(
-	trustDirectoryFlag: boolean,
-	deps: RunPlainShellDeps,
-): boolean {
-	if (trustDirectoryFlag) return true;
-	const cwd = path.resolve(process.cwd());
-	const preferences = deps.loadPreferences();
-	const trusted = (preferences.trustedDirectories ?? []).some(
-		dir => path.resolve(dir) === cwd,
-	);
-	if (trusted) return true;
-
-	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const updated = preferences.trustedDirectories ?? [];
-		updated.push(cwd);
-		deps.savePreferences({...preferences, trustedDirectories: updated});
-		writeStatus(`Marked ${cwd} as trusted (NANOCODER_TRUST_DIRECTORY=1).`);
-		return true;
-	}
-
-	return false;
 }
 
 /**
