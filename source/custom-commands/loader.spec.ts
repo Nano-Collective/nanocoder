@@ -1,4 +1,4 @@
-import { writeFileSync, rmSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, rmSync, existsSync, mkdirSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import test from 'ava';
@@ -294,6 +294,33 @@ test('CustomCommandLoader - ignores non-markdown files', t => {
 
 	// Should only load the .md file
 	t.is(loader.getAllCommands().length, 1);
+});
+
+test('CustomCommandLoader - handles unreadable directories gracefully', t => {
+	const testDir = createTestDir('unreadable-dir');
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	const unreadableDir = join(commandsDir, 'unreadable');
+
+	t.teardown(() => {
+		if (existsSync(unreadableDir)) {
+			try { chmodSync(unreadableDir, 0o777); } catch {}
+		}
+		cleanupTestDir(testDir);
+	});
+
+	mkdirSync(commandsDir, {recursive: true});
+	createCommandFile(join(commandsDir, 'test.md'), 'Test command');
+
+	mkdirSync(unreadableDir);
+	chmodSync(unreadableDir, 0o000);
+
+	const loader = new CustomCommandLoader(testDir);
+
+	t.notThrows(() => loader.loadCommands());
+
+	const commands = loader.getAllCommands();
+	t.is(commands.length, 1);
+	t.is(commands[0].name, 'test');
 });
 
 test('CustomCommandLoader - loadCommands clears aliases on reload', t => {
