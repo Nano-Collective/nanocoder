@@ -147,6 +147,7 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
@@ -196,6 +197,9 @@ Examples:
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
+  nanocoder review main
+  nanocoder review feature/auth
+  nanocoder review 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -333,53 +337,41 @@ async function main(): Promise<void> {
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
 	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const afterRunArgs =
-		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--mode') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--mode=')) {
-				continue; // skip fused form
-			} else if (arg === '--json') {
-				continue; // skip this flag
-			} else if (arg === '--output-format') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--output-format=')) {
-				continue; // skip fused form
-			} else if (arg === '--trust-directory') {
-				continue; // skip this flag
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		nonInteractivePrompt = promptArgs.join(' ');
+	const isRunCommand = runCommandIndex !== -1;
+	const afterRunArgs = isRunCommand ? args.slice(runCommandIndex + 1) : [];
+	if (isRunCommand && afterRunArgs.length > 0) {
+		const {filterCliFlags} = await import('@/utils/cli-flags');
+		nonInteractivePrompt = filterCliFlags(afterRunArgs).join(' ');
 	}
 
-	const nonInteractiveMode = runCommandIndex !== -1;
+	let nonInteractiveMode = isRunCommand;
+
+	// Check for `nanocoder review <target>` — syntactic sugar for
+	// `nanocoder run /review <target>`. The target is the branch or PR number
+	// to review. Flags between `review` and the target are filtered the same
+	// way as `run`. Lazy-loaded to keep it off the lightweight path.
+	let isReviewCommand = false;
+	let reviewPrompt: string | undefined;
+	if (args[0] === 'review') {
+		const {parseReviewCliArgs} = await import('./commands/review-cli');
+		const result = parseReviewCliArgs(args);
+		isReviewCommand = result.isReviewCommand;
+		reviewPrompt = result.prompt;
+		if (result.error) {
+			console.error(`Error: ${result.error}`);
+			process.exit(1);
+		}
+	}
+
+	if (isRunCommand && isReviewCommand) {
+		console.error('Cannot use both `run` and `review` in the same invocation.');
+		process.exit(1);
+	}
+
+	if (isReviewCommand) {
+		nonInteractivePrompt = reviewPrompt;
+		nonInteractiveMode = true;
+	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
@@ -436,7 +428,7 @@ async function main(): Promise<void> {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
 	}
-	if (plainRequested && !nonInteractiveMode) {
+	if (plainRequested && !isRunCommand) {
 		console.error(
 			'--plain requires the `run` subcommand in this version. Try: nanocoder --plain run "..."',
 		);
@@ -453,6 +445,13 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	if (outputFormat === 'json' && isReviewCommand) {
+		console.error(
+			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
+		);
+		process.exit(1);
+	}
+
 	const ciDetected =
 		process.env.CI === 'true' ||
 		Boolean(
@@ -463,11 +462,21 @@ async function main(): Promise<void> {
 				process.env.JENKINS_URL,
 		);
 	const plainAuto =
-		nonInteractiveMode &&
+		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
+
+	// Hard-error when `review` lands in a non-interactive context (piped
+	// stdout, CI). The plain shell has no slash-command dispatch, so
+	// `/review <target>` would be sent verbatim to the model as chat.
+	if (isReviewCommand && !process.stdout.isTTY) {
+		console.error(
+			'Error: `nanocoder review` requires an interactive terminal (TTY).',
+		);
+		process.exit(1);
+	}
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
