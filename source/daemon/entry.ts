@@ -13,6 +13,7 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {loadPreferences, savePreferences} from '@/config/preferences';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
@@ -26,6 +27,7 @@ import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {startDaemon} from './daemon';
+import {checkDaemonBootTrust} from './trust';
 
 async function main(): Promise<void> {
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
@@ -42,6 +44,22 @@ async function main(): Promise<void> {
 		// but the rewrite costs nothing and silences the format-string warning.
 		const detail = formatError(err);
 		console.error(`Failed to chdir into ${projectRoot}: ${detail}`);
+		process.exit(1);
+	}
+
+	// Boot gate: this process arms skill subscriptions and dispatches
+	// subagents in headless mode, so an untrusted directory must never reach
+	// startDaemon. The `nanocoder daemon start` CLI checks the same rule
+	// before spawning, but autostart boots (launchd/systemd, set up by
+	// `daemon install`) arrive here without the CLI, so the gate has to live
+	// in the boot itself. The rule lives in `./trust` so it stays testable:
+	// this module runs `main()` on load and cannot be imported by a spec.
+	const gate = checkDaemonBootTrust(projectRoot, {
+		loadPreferences,
+		savePreferences,
+	});
+	if (!gate.trusted) {
+		console.error(gate.message);
 		process.exit(1);
 	}
 
