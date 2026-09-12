@@ -180,7 +180,7 @@ export type HookEvent = (typeof HOOK_EVENTS)[number];
 
 /**
  * A single lifecycle hook: one shell command, optionally scoped to a set of
- * tools (tool events only) and with its own timeout.
+ * tools and/or the file they acted on (tool events only), with its own timeout.
  */
 export interface HookDefinition {
 	/** Shell command to run. Receives hook context via NANOCODER_* env vars. */
@@ -190,6 +190,17 @@ export interface HookDefinition {
 	 * Ignored by non-tool events.
 	 */
 	matchTools?: string[];
+	/**
+	 * Globs the acted-on file must match for this hook to run, so a formatter
+	 * or linter can be bound to a language without shell dispatch inside the
+	 * command. Omitted means "every file". Same dialect as skill subscriptions
+	 * (`**`, `*`, `?`, `{a,b}`) — e.g. `["**\/*.{ts,tsx}"]`.
+	 *
+	 * Unlike `matchTools`, this excludes tools with no file to match: a hook
+	 * scoped to `**\/*.ts` is asking about files, so it must not fire for
+	 * `execute_bash`. Ignored by non-tool events, which have no file either.
+	 */
+	matchPaths?: string[];
 	/**
 	 * Milliseconds before the hook is killed. Defaults to 30s, except
 	 * `session-end`, which defaults to 2s so it fits inside the shutdown budget.

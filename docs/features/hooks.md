@@ -66,10 +66,37 @@ Every hook is one object with:
 |-------|----------|---------|
 | `command` | yes | Shell command to run. Runs through `sh -c` (`cmd.exe` on Windows). |
 | `matchTools` | no | Tool names this hook applies to. Omitted means every tool. Ignored by non-tool events. |
+| `matchPaths` | no | Globs the acted-on file must match. Omitted means every file. See [Scoping by file](#scoping-by-file). |
 | `timeout` | no | Milliseconds before the hook is killed. Defaults to 30000, except `session-end` (see below). |
 | `name` | no | Label shown in transcripts, error messages, and `/doctor`. Defaults to the command. |
 
 Entries without a usable `command` string are dropped with an error in the log rather than failing the session, and an unknown event name is ignored the same way. `/doctor` prints everything that actually loaded, so you can see what is wired up.
+
+## Scoping by file
+
+`matchTools` narrows a hook to a set of tools; `matchPaths` narrows it to the file those tools acted on. That is what lets one formatter per language be declared directly, instead of dispatching inside the command:
+
+```json
+"post-tool-use": [
+  {
+    "matchTools": ["write_file", "string_replace"],
+    "matchPaths": ["**/*.{ts,tsx}"],
+    "command": "npx prettier --write \"$NANOCODER_FILE\""
+  },
+  {
+    "matchTools": ["write_file", "string_replace"],
+    "matchPaths": ["**/*.go"],
+    "command": "gofmt -w \"$NANOCODER_FILE\""
+  }
+]
+```
+
+The patterns use the same dialect as [skill subscriptions](skills.md#event-subscriptions) — `**` across directories, `*` within one, `?` for a single character, and `{a,b}` alternation. The file is whichever of `path`, `file_path`, or `filePath` the tool was called with, which is every file tool.
+
+Two behaviours are worth knowing:
+
+- **A hook scoped by path does not fire for tools that touch no file.** `matchPaths` is a question about a file, so `execute_bash` — which has none — is excluded rather than waved through. This is the opposite of an omitted `matchTools`, which widens to every tool. Events with no file at all (`session-start`, `session-end`, `user-prompt-submit`, `pre-compact`) ignore `matchPaths` entirely.
+- **Absolute paths are also matched relative to the project root.** The model chooses whether to write `src/a.ts` or `/home/you/proj/src/a.ts` for the same edit, so a root-anchored pattern like `src/**` matches both spellings. Patterns starting with `**/` already match either way.
 
 **Project config wins outright — hooks are not merged.** Like the rest of `agents.config.json`, the nearest `hooks` block replaces the one above it rather than combining with it. A project that defines any hook at all disables *every* global hook, including a global `pre-tool-use` policy. If you rely on a global rule, repeat it in the projects that define their own hooks.
 
