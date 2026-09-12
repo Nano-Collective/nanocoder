@@ -384,6 +384,11 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	return providerConfig.disableToolModels?.includes(model) ?? false;
 }
 
+// Same rules as `source/daemon/trust.ts`'s `ensureDirectoryTrust`, with one
+// deliberate difference: here `--trust-directory` is run-scoped and never
+// touches the preferences file, while the daemon helper persists standing
+// trust so the detached/autostart boot passes its own gate. Change both
+// together.
 function ensureDirectoryTrust(
 	trustDirectoryFlag: boolean,
 	deps: RunPlainShellDeps,

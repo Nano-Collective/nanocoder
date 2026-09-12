@@ -65,9 +65,13 @@ if (args[0] === 'daemon') {
 		process.exit(sub ? 1 : 0);
 	}
 	const {runDaemonCli} = await import('@/daemon/cli');
+	// Shared with the daemon boot gate and position-agnostic on purpose: the
+	// general parser below accepts `--trust-directory` before or after the
+	// subcommand, and this fast path short-circuits before it ever runs.
+	const {hasTrustDirectoryFlag} = await import('@/daemon/trust');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
-		trustDirectory: args.slice(2).includes('--trust-directory'),
+		trustDirectory: hasTrustDirectoryFlag(args),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -163,8 +167,10 @@ Options:
   --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
                       Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
-  --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Only valid with the "run" command. Does not modify the preferences file.
+  --trust-directory   Trust the current directory without the first-run prompt.
+                      Valid with "run" (that run only) and with "daemon start"
+                      (also records the directory as trusted, so the detached
+                      boot and any autostart boot skip the prompt too).
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -192,6 +198,7 @@ Examples:
   nanocoder --mode yolo run "refactor database module"
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
+  nanocoder daemon start --trust-directory
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
   nanocoder --continue

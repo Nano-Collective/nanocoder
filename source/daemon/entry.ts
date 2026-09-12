@@ -27,7 +27,7 @@ import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {startDaemon} from './daemon';
-import {ensureDirectoryTrust} from './trust';
+import {checkDaemonBootTrust} from './trust';
 
 async function main(): Promise<void> {
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
@@ -52,17 +52,14 @@ async function main(): Promise<void> {
 	// startDaemon. The `nanocoder daemon start` CLI checks the same rule
 	// before spawning, but autostart boots (launchd/systemd, set up by
 	// `daemon install`) arrive here without the CLI, so the gate has to live
-	// in the boot itself.
-	const trust = ensureDirectoryTrust(projectRoot, false, {
+	// in the boot itself. The rule lives in `./trust` so it stays testable:
+	// this module runs `main()` on load and cannot be imported by a spec.
+	const gate = checkDaemonBootTrust(projectRoot, {
 		loadPreferences,
 		savePreferences,
 	});
-	if (!trust.trusted) {
-		console.error(
-			`Refusing to start the daemon for ${projectRoot}: the directory is not trusted. ` +
-				'Run nanocoder interactively in this directory once to trust it, or set ' +
-				'NANOCODER_TRUST_DIRECTORY=1 for this boot.',
-		);
+	if (!gate.trusted) {
+		console.error(gate.message);
 		process.exit(1);
 	}
 
