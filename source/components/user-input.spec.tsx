@@ -1211,3 +1211,55 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	unmount();
 });
 
+test.serial(
+	'UserInput keeps a paste placeholder when typing lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', 'line one\nline two\nline three');
+		// No await between the paste and the keystroke: this is the race the
+		// bug reports - typing immediately after a paste, before React has
+		// re-rendered with the placeholder, must not clobber it.
+		stdin.write('x');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]x/);
+
+		t.regex(lastFrame()!, /\[Paste #\d+: \d+ chars\]x/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput submits a paste when Enter lands immediately after it',
+	async t => {
+		let submittedDisplay: string | undefined;
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={(_message, display) => {
+						submittedDisplay = display;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', 'line one\nline two\nline three');
+		// No await: Enter races the same re-render as above.
+		stdin.write('\r');
+
+		await waitForCondition(() => submittedDisplay !== undefined);
+
+		t.regex(submittedDisplay!, /\[Paste #\d+: \d+ chars\]/);
+		t.is(lastFrame()!.includes('[Paste #'), false);
+		unmount();
+	},
+);
+
