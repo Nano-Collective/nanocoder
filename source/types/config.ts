@@ -382,6 +382,16 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
+		/** Generate a title once per session. ACP clients only. Default true. */
+		smartTitles?: boolean;
+		/** Title generation model. Defaults to the session's. */
+		titleModel?: string;
+		/**
+		 * Title generation provider. Defaults to the session's; a different one is
+		 * sent the opening user turns and tool summaries, which include file paths
+		 * and bash command strings.
+		 */
+		titleProvider?: string;
 	};
 
 	// Headless / non-interactive conversation limits (--plain and ACP loops)
@@ -604,6 +614,9 @@ export interface UserPreferences {
 			maxMessages?: number;
 			retentionDays?: number;
 			directory?: string;
+			smartTitles?: boolean;
+			titleModel?: string;
+			titleProvider?: string;
 		};
 		paste?: PasteConfig;
 	};
