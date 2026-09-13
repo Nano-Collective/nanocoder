@@ -36,6 +36,40 @@ import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
+// biome-ignore lint/suspicious/noExplicitAny: Required for deeply nested dynamic schemas
+function sanitizeArgs(args: any, schema: any): any {
+	if (!schema || typeof schema !== 'object') return args;
+
+	if (schema.type === 'string' && args !== null && typeof args === 'object') {
+		return ensureString(args);
+	}
+
+	if (!args || typeof args !== 'object') return args;
+
+	if (Array.isArray(args)) {
+		if ('type' in schema && schema.type === 'array' && 'items' in schema) {
+			// biome-ignore lint/suspicious/noExplicitAny: Required for deeply nested array items
+			return args.map((item: any) => sanitizeArgs(item, schema.items));
+		}
+		return args;
+	}
+
+	// biome-ignore lint/suspicious/noExplicitAny: Required for deeply nested dynamic sanitisation
+	const sanitized: any = {...args};
+	if ('properties' in schema && typeof schema.properties === 'object' && schema.properties !== null) {
+		for (const [key, value] of Object.entries(args)) {
+			// biome-ignore lint/suspicious/noExplicitAny: schema.properties might not be strongly typed
+			const propSchema = (schema.properties as any)[key];
+			if (propSchema && typeof propSchema === 'object') {
+				if (typeof value === 'object' && value !== null) {
+					sanitized[key] = sanitizeArgs(value, propSchema);
+				}
+			}
+		}
+	}
+	return sanitized;
+}
+
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
@@ -549,24 +583,10 @@ export class MCPClient {
 		// Sanitize arguments: If schema expects a string but we got an object, ensureString it.
 		const serverTools = this.serverTools.get(mapping.serverName) || [];
 		const toolDef = serverTools.find(t => t.name === mapping.originalName);
-		const sanitizedArgs = {...args};
+		let sanitizedArgs = {...args};
 
 		if (toolDef?.inputSchema) {
-			const schema = toolDef.inputSchema;
-			if (schema.properties) {
-				for (const [key, value] of Object.entries(args)) {
-					const propSchema = schema.properties[key];
-					// Only coerce if the schema explicitly demands a string and we have an object
-					if (
-						typeof propSchema === 'object' &&
-						propSchema?.type === 'string' &&
-						typeof value === 'object' &&
-						value !== null
-					) {
-						sanitizedArgs[key] = ensureString(value);
-					}
-				}
-			}
+			sanitizedArgs = sanitizeArgs(args, toolDef.inputSchema);
 		}
 
 		return this.executeToolCall(client, mapping.originalName, sanitizedArgs);

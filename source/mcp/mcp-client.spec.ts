@@ -1216,6 +1216,78 @@ test('callTool sanitizes object arguments to strings when schema expects a strin
 	}
 });
 
+test('callTool sanitizes deeply nested object and array arguments when schema expects a string', async t => {
+	const client = new MCPClient();
+
+	const mockServerName = 'test-server';
+	const mockToolName = 'complex_tool';
+
+	// @ts-ignore
+	client.serverTools.set(mockServerName, [
+		{
+			name: mockToolName,
+			description: 'A test tool with nested schemas',
+			serverName: mockServerName,
+			inputSchema: {
+				type: 'object',
+				properties: {
+					config: {
+						type: 'object',
+						properties: {
+							options: {
+								type: 'array',
+								items: {
+									type: 'object',
+									properties: {
+										value: { type: 'string' }
+									}
+								}
+							},
+							metadata: { type: 'string' },
+							tags: {
+								type: 'array',
+								items: { type: 'string' }
+							}
+						}
+					}
+				},
+			},
+		},
+	]);
+	// @ts-ignore
+	client.clients.set(mockServerName, {});
+
+	let capturedArgs: any;
+	// @ts-ignore
+	client.executeToolCall = async (_client: unknown, _toolName: string, args: Record<string, unknown>) => {
+		capturedArgs = args;
+		return "Mock success";
+	};
+
+	await client.callTool(mockToolName, {
+		config: {
+			options: [
+				{ value: { "complex": "object" } },
+				{ value: "normal string" }
+			],
+			metadata: { "some": "data" },
+			tags: [ { "bad": "tag" }, "good tag" ]
+		}
+	});
+
+	t.truthy(capturedArgs);
+	if (capturedArgs) {
+		t.is(typeof capturedArgs.config.metadata, 'string');
+		t.is(capturedArgs.config.metadata, '{"some":"data"}');
+		t.is(typeof capturedArgs.config.options[0].value, 'string');
+		t.is(capturedArgs.config.options[0].value, '{"complex":"object"}');
+		t.is(capturedArgs.config.options[1].value, 'normal string');
+		t.is(typeof capturedArgs.config.tags[0], 'string');
+		t.is(capturedArgs.config.tags[0], '{"bad":"tag"}');
+		t.is(capturedArgs.config.tags[1], 'good tag');
+	}
+});
+
 // ============================================================================
 // Regression Tests for connectToServer lifecycle (failed tool discovery)
 // ============================================================================
