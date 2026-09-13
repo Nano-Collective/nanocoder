@@ -16,6 +16,7 @@
 			"!agents",
 			"!node_modules",
 			"!plugins",
+			"plugins/voice/src/**",
 			"!**/*.spec.ts",
 			"!**/*.spec.tsx",
 			"!.husky",

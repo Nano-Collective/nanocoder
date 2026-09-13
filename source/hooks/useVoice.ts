@@ -78,8 +78,20 @@ export interface UseVoiceReturn {
 	startStopRecording: () => void;
 }
 
-const defaultLoadPlugin = async (): Promise<VoicePlugin> =>
-	(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin;
+const defaultLoadPlugin = async (): Promise<VoicePlugin> => {
+	try {
+		return (await import(
+			'@nanocollective/nanocoder-voice'
+		)) as unknown as VoicePlugin;
+	} catch (error) {
+		try {
+			const bundledPath = new URL('../voice/index.js', import.meta.url).href;
+			return (await import(bundledPath)) as unknown as VoicePlugin;
+		} catch {
+			throw error;
+		}
+	}
+};
 
 function isBlankAudio(text: string): boolean {
 	const trimmed = text.trim();
@@ -155,25 +167,36 @@ export function useVoice({
 	const hasEmittedDeclinedSessionNoticeRef = React.useRef(false);
 	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
 
-	const cleanupRecordingFile = React.useCallback(() => {
-		if (recordingFileRef.current && existsSync(recordingFileRef.current)) {
+	const cleanupRecordingFile = React.useCallback((expectedPath?: string) => {
+		const filePath = recordingFileRef.current;
+		if (
+			filePath &&
+			(!expectedPath || filePath === expectedPath) &&
+			existsSync(filePath)
+		) {
 			try {
-				unlinkSync(recordingFileRef.current);
+				unlinkSync(filePath);
 			} catch {
 				// Best effort
 			}
-			recordingFileRef.current = null;
+			if (recordingFileRef.current === filePath)
+				recordingFileRef.current = null;
 		}
 	}, []);
 
-	const cleanupTtsFile = React.useCallback(() => {
-		if (ttsFileRef.current && existsSync(ttsFileRef.current)) {
+	const cleanupTtsFile = React.useCallback((expectedPath?: string) => {
+		const filePath = ttsFileRef.current;
+		if (
+			filePath &&
+			(!expectedPath || filePath === expectedPath) &&
+			existsSync(filePath)
+		) {
 			try {
-				unlinkSync(ttsFileRef.current);
+				unlinkSync(filePath);
 			} catch {
 				// Best effort
 			}
-			ttsFileRef.current = null;
+			if (ttsFileRef.current === filePath) ttsFileRef.current = null;
 		}
 	}, []);
 
@@ -392,7 +415,7 @@ export function useVoice({
 						transcribed = await plugin.transcribeAudio(evt.filePath, 60_000);
 					}
 
-					cleanupRecordingFile();
+					cleanupRecordingFile(evt.filePath);
 
 					if (isBlankAudio(transcribed)) {
 						addToChatQueueRef.current(
@@ -419,7 +442,7 @@ export function useVoice({
 
 					await handleUserSubmitRef.current(transcribed, transcribed);
 				} catch (err) {
-					cleanupRecordingFile();
+					cleanupRecordingFile(evt.filePath);
 					setState('idle');
 					const errorMsg = `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`;
 					const now = Date.now();
@@ -575,7 +598,7 @@ export function useVoice({
 				if (ttsAbortControllerRef.current === ttsAbortController) {
 					ttsAbortControllerRef.current = null;
 				}
-				cleanupTtsFile();
+				cleanupTtsFile(ttsFile);
 				if (stateRef.current === 'speaking') {
 					setState('idle');
 				}

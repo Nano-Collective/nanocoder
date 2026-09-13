@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && mkdir -p dist/voice && cp plugins/voice/dist/*.js plugins/voice/dist/*.d.ts dist/voice/ && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",

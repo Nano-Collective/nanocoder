@@ -438,9 +438,6 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
-
-	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
-	sandbox?: boolean;
 }
 
 // MCP Server configuration with source tracking
