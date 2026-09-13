@@ -33,8 +33,10 @@ export function shellQuote(value: string): string {
 /**
  * Wrap a string in cmd.exe-safe double quotes.
  *
- * cmd.exe has no command-line escape for percent expansion or command
- * separators, so reject those values instead of silently changing them.
+ * Percent expansion cannot be escaped reliably in a command string, and
+ * newlines would introduce another command. Reject those values instead of
+ * silently changing them. Other cmd metacharacters stay literal inside the
+ * surrounding double quotes.
  */
 export function cmdQuote(value: string): string {
 	if (/[\0%\r\n]/.test(value)) {
