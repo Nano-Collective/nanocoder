@@ -298,6 +298,8 @@ export interface DiskNanocoderConfig {
 	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
 	 */
 	retries?: Partial<RetryLimitsConfig>;
+	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
+	sandbox?: boolean;
 }
 
 /**
@@ -387,6 +389,9 @@ export interface AppConfig {
 		// Maximum LLM turns before the loop forces a final, tool-free answer.
 		maxTurns?: number;
 	};
+
+	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
+	sandbox?: boolean;
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
@@ -626,6 +631,14 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
+	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag
+	 * in iTerm2). false: the terminal does not capture the mouse, so native text
+	 * selection (double-click, drag) works directly and the wheel does nothing.
+	 * Also switchable per-run with --mouse / --no-mouse flags.
+	 */
+	mouseReporting?: boolean;
 	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is

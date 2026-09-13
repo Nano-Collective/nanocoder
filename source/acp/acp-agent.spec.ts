@@ -249,6 +249,118 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
 });
 
+test('AcpAgent.loadSession - restores persisted response usage metadata', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await sessionManager.initialize();
+		const timestamp = new Date().toISOString();
+		await sessionManager.saveSession({
+			id: session.sessionId,
+			title: 'Usage replay',
+			createdAt: timestamp,
+			lastAccessedAt: timestamp,
+			messageCount: 2,
+			provider: 'test-provider',
+			model: 'test-model',
+			workingDirectory: '/tmp',
+			messages: [
+				{role: 'user', content: 'count this'},
+				{
+					role: 'assistant',
+					content: 'Counted.',
+					responseUsage: {
+						inputTokens: 6500,
+						outputTokens: 500,
+						totalTokens: 7000,
+						cost: 0.004,
+					},
+				},
+			],
+		});
+
+		const reloadedAgent = new AcpAgent(createMockInitContext(), conn);
+		updates.length = 0;
+		await reloadedAgent.loadSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+
+		const usageUpdate = updates.find(
+			update =>
+				update.update?._meta?.['nanocoder/response-usage'] !== undefined,
+		);
+		t.deepEqual(usageUpdate?.update._meta['nanocoder/response-usage'], {
+			inputTokens: 6500,
+			outputTokens: 500,
+			totalTokens: 7000,
+			cost: 0.004,
+		});
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent - attaches provider-reported usage to the response message', async t => {
+	const agent = new AcpAgent(createMockInitContext(), createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		const activeSession = (agent as any).sessions.get(session.sessionId);
+		activeSession.messages = [
+			{role: 'user', content: 'measure this'},
+			{role: 'assistant', content: 'Measured.'},
+		];
+		(agent as any).attachResponseUsage(activeSession, {
+			stopReason: 'end_turn',
+			usage: {inputTokens: 12, outputTokens: 3, totalTokens: 15},
+			_meta: {'nanocoder/usage': {cost: 0.0002}},
+		});
+
+		const assistant = [...activeSession.messages]
+			.reverse()
+			.find(message => message.role === 'assistant');
+		t.deepEqual(assistant?.responseUsage, {
+			inputTokens: 12,
+			outputTokens: 3,
+			totalTokens: 15,
+			cost: 0.0002,
+		});
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent - does not attach new usage to a previous response', async t => {
+	const agent = new AcpAgent(createMockInitContext(), createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		const activeSession = (agent as any).sessions.get(session.sessionId);
+		const previousAssistant: any = {role: 'assistant', content: 'Previous'};
+		activeSession.messages = [previousAssistant, {role: 'user', content: 'next'}];
+		(agent as any).attachResponseUsage(
+			activeSession,
+			{
+				stopReason: 'end_turn',
+				usage: {inputTokens: 12, outputTokens: 3, totalTokens: 15},
+			},
+			previousAssistant,
+		);
+
+		t.is(previousAssistant.responseUsage, undefined);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
 test('AcpAgent.loadSession - hides internal walkthrough fallback messages', async t => {
 	const conn = createMockConn();
 	const updates: any[] = [];

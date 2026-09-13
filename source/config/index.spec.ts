@@ -1304,3 +1304,77 @@ test.serial(
 		}
 	},
 );
+
+const sandboxConfigTestDir = join(
+	tmpdir(),
+	`nanocoder-sandbox-config-test-${Date.now()}`,
+);
+
+test.before(() => {
+	mkdirSync(sandboxConfigTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(sandboxConfigTestDir)) {
+		rmSync(sandboxConfigTestDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('sandbox true in project config is on', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(sandboxConfigTestDir, 'on');
+	mkdirSync(projectDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {sandbox: true}}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = join(projectDir, 'no-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.true(getAppConfig().sandbox);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('invalid project sandbox does not fall through to global true', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(sandboxConfigTestDir, 'bad-project');
+	const globalDir = join(sandboxConfigTestDir, 'global-on');
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {sandbox: 'true'}}),
+			'utf-8',
+		);
+		writeFileSync(
+			join(globalDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {sandbox: true}}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.false(getAppConfig().sandbox);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});

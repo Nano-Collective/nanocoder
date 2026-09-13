@@ -6,6 +6,7 @@ import {StyledTitle} from '@/components/ui/styled-title';
 import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
+	getMouseReporting,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
@@ -14,6 +15,7 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
+	updateMouseReporting,
 	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -153,6 +155,13 @@ function buildRowsForTab(
 					label: 'Alternate Screen',
 					value: getAlternateScreen(),
 					onToggle: () => updateAlternateScreen(!getAlternateScreen()),
+				},
+				{
+					kind: 'boolean',
+					id: 'mouse-reporting',
+					label: 'Mouse Wheel Reporting',
+					value: getMouseReporting(),
+					onToggle: () => updateMouseReporting(!getMouseReporting()),
 				},
 			];
 		}

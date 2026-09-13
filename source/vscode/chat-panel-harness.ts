@@ -35,7 +35,6 @@ const SHELL_IDS = [
 	'chat-view',
 	'close-modal-btn',
 	'composer-box',
-	'composer-mode-badge',
 	'composer-settings',
 	'composer-settings-trigger',
 	'context-chips',

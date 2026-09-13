@@ -50,7 +50,7 @@ Automatically accepts and executes **every** tool call without exception — inc
 - The status bar turns red to make it clear you're in yolo mode
 - One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
-**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators and the repeated-call pause above.
+**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — yolo skips the confirm prompt. File tools still stay inside the project; `execute_bash` does not unless you turn on `nanocoder.sandbox` (writes and network only — see [Configuration](../configuration/index.md#os-sandbox)).
 
 ## Plan Mode
 
