@@ -18,6 +18,7 @@ import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
+let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
 
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
@@ -33,6 +34,7 @@ function getPreferencesPath(): string {
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
+	cachedVoicePreference = undefined;
 }
 
 export function loadPreferences(): UserPreferences {
@@ -83,6 +85,7 @@ export function savePreferences(preferences: UserPreferences): void {
 	}
 
 	preferencesVersion++;
+	cachedVoicePreference = preferences.voice;
 	for (const listener of preferencesListeners) {
 		listener();
 	}
@@ -402,15 +405,15 @@ export function updateProfessionalTone(value: boolean): void {
  * Get the voice configuration from preferences
  */
 export function getVoicePreference(): import('@/types/config').VoiceConfig {
+	if (cachedVoicePreference) return cachedVoicePreference;
 	const preferences = loadPreferences();
-	return (
-		preferences.voice ?? {
-			enabled: false,
-			activationMode: 'push-to-talk',
-			sttBackend: 'local',
-			ttsBackend: 'local',
-		}
-	);
+	cachedVoicePreference = preferences.voice ?? {
+		enabled: false,
+		activationMode: 'push-to-talk',
+		sttBackend: 'local',
+		ttsBackend: 'local',
+	};
+	return cachedVoicePreference;
 }
 
 /**
