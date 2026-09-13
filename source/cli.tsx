@@ -407,14 +407,15 @@ async function main(): Promise<void> {
 	}
 
 	// --trust-directory is only respected with `run`. Surface a warning
-	// (rather than silently dropping) if the user passes it interactively.
+	// (rather than silently dropping) if the user passes it interactively
+	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !nonInteractiveMode) {
+	if (trustDirectoryRequested && !isRunCommand) {
 		console.error(
 			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
 		);
 	}
-	const trustDirectory = trustDirectoryRequested && nonInteractiveMode;
+	const trustDirectory = trustDirectoryRequested && isRunCommand;
 
 	// --plain: lightweight, Ink-free runtime. Only valid with `run` in v1.
 	// Auto-detect: enable when stdout isn't a TTY or the env looks like CI,

@@ -194,7 +194,7 @@ nanocoder review 42
 
 This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI.
 
-**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error). Use the `/review` slash command inside the interactive TUI for scripting workflows.
+**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file.
 
 **Non-interactive mode behavior:**
 
