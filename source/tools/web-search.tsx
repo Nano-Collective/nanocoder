@@ -11,6 +11,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {escapeMarkdown} from '@/utils/markdown-escape';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
@@ -80,10 +81,10 @@ export const executeWebSearch = async (
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
+			formattedResults += `## ${i + 1}. ${escapeMarkdown(result.title)}\n\n`;
 			formattedResults += `**URL:** ${result.url}\n\n`;
 			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+				formattedResults += `${escapeMarkdown(result.description)}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}

@@ -589,6 +589,43 @@ test('executeWebSearch parses API results correctly', async t => {
 	}
 });
 
+test('executeWebSearch escapes markdown in title and description', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	const mockApiResponse = {
+		web: {
+			results: [
+				{
+					title: 'Title with *markdown* and _underscores_',
+					url: 'https://example.com/test',
+					description: 'Description with [link](https://example.com) and `code`',
+				},
+			],
+		},
+	};
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		return {
+			ok: true,
+			status: 200,
+			json: async () => mockApiResponse,
+		} as any;
+	}) as any;
+
+	try {
+		const result = await executeWebSearch({query: 'test'}, 'test-key');
+		t.regex(result, /1\. Title with \\\*markdown\\\* and \\\_underscores\\\_/);
+		t.regex(result, /Description with \\\[link\\\]\(https:\/\/example\.com\) and \\\`code\\\`/);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+
 test('executeWebSearch handles results without descriptions', async t => {
 	if (!executeWebSearch) {
 		t.pass('Skipping test - web-search module not available');
