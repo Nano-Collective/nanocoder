@@ -1,4 +1,4 @@
-import {execFileSync, execSync} from 'child_process';
+import {execFileSync} from 'child_process';
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -138,29 +138,37 @@ export class FileSnapshotService {
 		available: boolean;
 	} {
 		try {
-			let hasHead = true;
+			// This scan runs on every checkpoint and twice per ACP tool call, so
+			// the common path - HEAD exists - must cost a single spawn. Rather
+			// than probing with `git rev-parse --verify HEAD` first, ask for the
+			// diff and let the unborn case fail.
+			let modifiedOutput = '';
 			try {
-				execSync('git rev-parse --verify HEAD', {
-					cwd: this.workspaceRoot,
-					stdio: ['pipe', 'pipe', 'pipe'],
-				});
-			} catch {
-				hasHead = false;
-			}
-
-			// An unborn branch has no HEAD to diff against, but its index can still be
-			// full (`git init && git add .`), so diff the index instead of skipping.
-			const modifiedOutput = execSync(
-				hasHead ? 'git diff --name-only HEAD' : 'git diff --name-only --cached',
-				{
+				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
 					stdio: ['pipe', 'pipe', 'pipe'],
-				},
-			).trim();
+				}).trim();
+			} catch {
+				// Unborn HEAD: nothing to diff against, but the index can still be
+				// full (`git init && git add .`, or `git checkout --orphan`, which
+				// starts fully populated), and `git ls-files --others` excludes
+				// anything already staged. Diff the index so a staged tree is
+				// captured rather than silently skipped.
+				modifiedOutput = execFileSync(
+					'git',
+					['diff', '--name-only', '--cached'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+					},
+				).trim();
+			}
 
-			const untrackedOutput = execSync(
-				'git ls-files --others --exclude-standard',
+			const untrackedOutput = execFileSync(
+				'git',
+				['ls-files', '--others', '--exclude-standard'],
 				{
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
