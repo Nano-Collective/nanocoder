@@ -645,3 +645,58 @@ test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async
 		t.false(isAliveAfter, 'Process must be killed by SIGKILL fallback after 2 seconds');
 	}
 });
+
+test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback (group-kill throws)', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows — no process groups');
+		return;
+	}
+
+	const executor = createExecutor();
+
+	// Spawn a process that traps SIGTERM and prints its PID on a single line.
+	const cmd = "node -e \"process.on('SIGTERM',()=>{});console.log('PID:'+process.pid);setInterval(()=>{},1000)\"";
+	const { executionId, promise } = executor.execute(cmd);
+
+	// Wait for process to spawn and capture PID from output
+	let childPid: number | undefined;
+	for (let tick = 0; tick < 30 && !childPid; tick++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+		const state = executor.getState(executionId);
+		const match = state?.output?.match(/PID:(\d+)/);
+		if (match) childPid = Number(match[1]);
+	}
+	t.truthy(childPid, 'Should have captured child PID');
+
+	// Kill the process group BEFORE calling cancel(), so that when
+	// killProcessTree tries process.kill(-pid, 'SIGTERM') it throws ESRCH,
+	// forcing the fallback to proc.kill('SIGTERM') — which sets proc.killed = true.
+	try {
+		process.kill(-childPid!, 'SIGTERM');
+	} catch {
+		// Group may already be gone — fine
+	}
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	// Now cancel. killProcessTree will:
+	// 1. Try process.kill(-pid, 'SIGTERM') — throws (group already signalled)
+	// 2. Fall back to proc.kill('SIGTERM') — sets proc.killed = true
+	// 3. Timer fires after 2s: gate must be exitCode-only, NOT !proc.killed
+	const cancelled = executor.cancel(executionId);
+	t.true(cancelled, 'cancel() should return true');
+
+	// Wait past the 2000ms SIGKILL timeout
+	await new Promise(resolve => setTimeout(resolve, 2500));
+
+	// Process MUST be dead — SIGKILL cannot be trapped
+	let isAliveAfter = false;
+	try {
+		process.kill(childPid!, 0);
+		isAliveAfter = true;
+	} catch {
+		isAliveAfter = false;
+	}
+	t.false(isAliveAfter, 'Process must be killed by SIGKILL even when proc.killed was set by SIGTERM fallback');
+
+	await promise;
+});
