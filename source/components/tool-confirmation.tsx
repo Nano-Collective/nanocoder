@@ -40,7 +40,7 @@ export default function ToolConfirmation({
 	const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
 	const [hasFormatterError, setHasFormatterError] = React.useState(false);
 	const [hasValidationError, setHasValidationError] = React.useState(false);
-	const [_validationError, setValidationError] = React.useState<string | null>(
+	const [validationError, setValidationError] = React.useState<string | null>(
 		null,
 	);
 
@@ -140,16 +140,11 @@ export default function ToolConfirmation({
 
 	// Auto-handle errors without user interaction
 	React.useEffect(() => {
-		if (hasFormatterError && !hasValidationError) {
+		if (hasFormatterError) {
 			// Automatically cancel the tool execution only for formatter crashes
 			onConfirm(false);
 		}
-		if (hasValidationError) {
-			// Automatically proceed to execution phase where the validator
-			// will fail again and pass the error back to the model to correct
-			onConfirm(true);
-		}
-	}, [hasFormatterError, hasValidationError, onConfirm]);
+	}, [hasFormatterError, onConfirm]);
 
 	const options: ConfirmationOption[] = [
 		{label: '✓ Yes, execute this tool', value: true},
@@ -191,8 +186,15 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 
+				{/* Show validation errors clearly above the prompt */}
+				{hasValidationError && validationError && (
+					<Box marginBottom={1}>
+						<Text color={colors.error}>{validationError}</Text>
+					</Box>
+				)}
+
 				{/* Only show approval prompt if there's no error */}
-				{!hasFormatterError && !hasValidationError && (
+				{!hasFormatterError && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
@@ -213,7 +215,7 @@ export default function ToolConfirmation({
 				)}
 
 				{/* Show automatic cancellation message for formatter crashes only */}
-				{hasFormatterError && !hasValidationError && (
+				{hasFormatterError && (
 					<Box marginTop={1}>
 						<Text color={colors.error}>
 							Tool execution cancelled due to formatter error.

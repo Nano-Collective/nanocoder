@@ -1,7 +1,7 @@
 import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {BASH_MAX_OUTPUT_BYTES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
@@ -58,26 +58,86 @@ export function runScript(
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			detached: process.platform !== 'win32',
 		});
 
 		let stdout = '';
 		let stderr = '';
 		let timedOut = false;
+		let outputBytes = 0;
+		let outputTruncated = false;
 
 		const timer = setTimeout(() => {
 			timedOut = true;
-			child.kill('SIGTERM');
+
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			// stdin was ignored in stdio array so it is null/never, do not destroy
+			// child.stdin?.destroy();
+
+			if (child.pid !== undefined) {
+				if (process.platform === 'win32') {
+					child.kill('SIGTERM');
+				} else {
+					try {
+						process.kill(-child.pid, 'SIGTERM');
+					} catch {
+						try {
+							child.kill('SIGTERM');
+						} catch {
+							// Process already exited
+						}
+					}
+				}
+			}
+
 			// Force-kill if the process refuses to exit within a grace window.
 			setTimeout(() => {
-				if (!child.killed) child.kill('SIGKILL');
+				if (!child.killed) {
+					if (child.pid !== undefined) {
+						if (process.platform === 'win32') {
+							child.kill('SIGKILL');
+						} else {
+							try {
+								process.kill(-child.pid, 'SIGKILL');
+							} catch {
+								try {
+									child.kill('SIGKILL');
+								} catch {
+									// Process already exited
+								}
+							}
+						}
+					}
+				}
 			}, 1_000).unref();
 		}, options.timeoutMs);
 
 		child.stdout?.on('data', chunk => {
-			stdout += chunk.toString();
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limitedChunk = chunk.subarray(0, remaining);
+				stdout += limitedChunk.toString();
+				outputBytes += limitedChunk.length;
+
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
+					outputTruncated = true;
+					stdout += '\n... [Output truncated to prevent memory exhaustion]';
+				}
+			}
 		});
 		child.stderr?.on('data', chunk => {
-			stderr += chunk.toString();
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limitedChunk = chunk.subarray(0, remaining);
+				stderr += limitedChunk.toString();
+				outputBytes += limitedChunk.length;
+
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
+					outputTruncated = true;
+					stderr += '\n... [Stderr truncated to prevent memory exhaustion]';
+				}
+			}
 		});
 
 		child.on('error', err => {

@@ -250,6 +250,35 @@ test('runScript: timeout kills long-running script', async t => {
 	);
 });
 
+test('runScript: timeout cleans up process tree and does not hang', async t => {
+	const start = Date.now();
+	// Spanws a grandchild (sleep) that would keep stdout open if not killed.
+	await t.throwsAsync(
+		runScript(`sh -c 'sleep 5'`, {
+			cwd: testDir,
+			env: process.env,
+			shell: '/bin/sh',
+			timeoutMs: 100,
+		}),
+		{message: /timed out/},
+	);
+	t.true(Date.now() - start < 1000, 'Process took too long to time out');
+});
+
+test('runScript: output is truncated', async t => {
+	// 5 MB limit. Here we generate ~10 MB of output rapidly
+	const result = await runScript(
+		`head -c 10000000 /dev/zero | tr '\\0' 'A'`,
+		{
+			cwd: testDir,
+			env: process.env,
+			shell: '/bin/sh',
+			timeoutMs: 5_000,
+		}
+	);
+	t.true(result.includes('... [Output truncated to prevent memory exhaustion]'));
+});
+
 test('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);
 	const result = await handler({name: 'world'});
