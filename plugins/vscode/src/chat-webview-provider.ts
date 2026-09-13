@@ -243,6 +243,7 @@ export class ChatWebviewProvider
 				: response
 					? 'completed'
 					: 'failed');
+		const showTokenUsage = vscode.workspace.getConfiguration('nanocoder').get<boolean>('showTokenUsage', false);
 		this.postMessage({
 			type: 'acpUpdate',
 			update: {
@@ -250,6 +251,7 @@ export class ChatWebviewProvider
 				outcome,
 				usage: response?.usage,
 				cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+				showTokenUsage,
 			},
 		});
 	}
