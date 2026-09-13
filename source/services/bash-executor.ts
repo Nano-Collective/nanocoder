@@ -379,9 +379,13 @@ export class BashExecutor extends EventEmitter {
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
 
-		// SIGKILL fallback after 2 seconds if process survives SIGTERM
+		// SIGKILL fallback after 2 seconds if process survives SIGTERM.
+		// Gate on exitCode only — NOT proc.killed. Node sets proc.killed = true
+		// on ANY successful proc.kill() call (including the SIGTERM fallback
+		// above), so gating on !proc.killed would prevent SIGKILL from ever
+		// firing when the group-kill threw and we fell back to proc.kill().
 		const sigkillTimer = setTimeout(() => {
-			if (proc.exitCode === null && !proc.killed) {
+			if (proc.exitCode === null) {
 				sendKillSignal('SIGKILL');
 			}
 		}, 2000);
