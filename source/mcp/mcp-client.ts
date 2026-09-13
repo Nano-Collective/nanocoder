@@ -56,7 +56,11 @@ function sanitizeArgs(args: any, schema: any): any {
 
 	// biome-ignore lint/suspicious/noExplicitAny: Required for deeply nested dynamic sanitisation
 	const sanitized: any = {...args};
-	if ('properties' in schema && typeof schema.properties === 'object' && schema.properties !== null) {
+	if (
+		'properties' in schema &&
+		typeof schema.properties === 'object' &&
+		schema.properties !== null
+	) {
 		for (const [key, value] of Object.entries(args)) {
 			// biome-ignore lint/suspicious/noExplicitAny: schema.properties might not be strongly typed
 			const propSchema = (schema.properties as any)[key];
