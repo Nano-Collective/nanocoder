@@ -180,9 +180,11 @@ export function resolveFilePath(
 export function isPathInside(target: string, root: string): boolean {
 	const normalizedRoot = path.resolve(root);
 	const normalizedTarget = path.resolve(target);
+	const prefix = normalizedRoot.endsWith(path.sep)
+		? normalizedRoot
+		: normalizedRoot + path.sep;
 	return (
-		normalizedTarget === normalizedRoot ||
-		normalizedTarget.startsWith(normalizedRoot + path.sep)
+		normalizedTarget === normalizedRoot || normalizedTarget.startsWith(prefix)
 	);
 }
 

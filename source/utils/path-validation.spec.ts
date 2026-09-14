@@ -6,7 +6,7 @@ import {
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve, sep} from 'node:path';
 import test from 'ava';
 import {
 	isPathInside,
@@ -305,6 +305,17 @@ test('isPathInside: accepts the root itself and paths beneath it', t => {
 	t.true(isPathInside('/proj', '/proj'));
 	t.true(isPathInside('/proj/src/app.ts', '/proj'));
 	t.true(isPathInside('/proj/', '/proj'));
+});
+
+test('isPathInside: works when root is the filesystem root', t => {
+	const fsRoot = resolve('/');
+	t.true(isPathInside('/home/user', fsRoot));
+	t.true(isPathInside(fsRoot, fsRoot));
+
+	// Test on Windows-style absolute paths if on Windows, else skip or mock
+	if (sep === '\\') {
+		t.true(isPathInside('C:\\Windows\\System32', 'C:\\'));
+	}
 });
 
 test('isPathInside: rejects siblings, ancestors, and shared prefixes', t => {
