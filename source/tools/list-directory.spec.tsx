@@ -553,13 +553,8 @@ test.serial('list_directory hides dotfiles by default', async t => {
 
 		process.chdir(testDir);
 
-		// List a subdirectory explicitly (not the current dir) to hide dotfiles
-		mkdirSync(join(testDir, 'subdir'), {recursive: true});
-		writeFileSync(join(testDir, 'subdir', '.hidden'), 'content');
-		writeFileSync(join(testDir, 'subdir', 'visible.ts'), 'content');
-
 		const result = await listDirectoryTool.tool.execute!(
-			{path: 'subdir'},
+			{path: '.'},
 			{toolCallId: 'test', messages: []},
 		);
 

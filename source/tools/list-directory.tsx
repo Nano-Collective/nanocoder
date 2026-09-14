@@ -67,11 +67,7 @@ const executeListDirectory = async (
 
 				for (const item of items) {
 					// Skip hidden files unless showHiddenFiles is true
-					if (
-						!showHiddenFiles &&
-						item.name.startsWith('.') &&
-						!dirPath.startsWith('.')
-					) {
+					if (!showHiddenFiles && item.name.startsWith('.')) {
 						continue;
 					}
 
