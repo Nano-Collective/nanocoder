@@ -110,6 +110,23 @@ test('unregister stops the job and removes from the map', t => {
 	t.deepEqual(stub.stops, ['0 9 * * MON']);
 });
 
+test('unregistering a shared expression only stops job when ref count reaches zero', t => {
+	const {router} = captureRouter();
+	const stub = stubFactory();
+	const source = new ScheduleEventSource(router, stub.factory);
+
+	source.register('0 9 * * MON'); // Sub 1
+	source.register('0 9 * * MON'); // Sub 2
+
+	source.unregister('0 9 * * MON'); // Unregister sub 1
+	t.deepEqual(source.listRegistered(), ['0 9 * * MON']);
+	t.deepEqual(stub.stops, []);
+
+	source.unregister('0 9 * * MON'); // Unregister sub 2
+	t.deepEqual(source.listRegistered(), []);
+	t.deepEqual(stub.stops, ['0 9 * * MON']);
+});
+
 test('unregister on unknown expression is a no-op', t => {
 	const {router} = captureRouter();
 	const stub = stubFactory();

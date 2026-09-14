@@ -32,6 +32,7 @@ const defaultFactory: CronFactory = (expression, onTick) =>
 
 export class ScheduleEventSource {
 	private readonly jobs: Map<string, CronJobLike> = new Map();
+	private readonly refCounts: Map<string, number> = new Map();
 
 	constructor(
 		private readonly router: EventRouter,
@@ -45,7 +46,11 @@ export class ScheduleEventSource {
 	 * all of them.
 	 */
 	register(expression: string): void {
+		const currentCount = this.refCounts.get(expression) ?? 0;
+		this.refCounts.set(expression, currentCount + 1);
+
 		if (this.jobs.has(expression)) return;
+
 		const job = this.factory(expression, () => {
 			void this.router.emit({
 				kind: 'schedule.cron',
@@ -59,6 +64,16 @@ export class ScheduleEventSource {
 	unregister(expression: string): void {
 		const job = this.jobs.get(expression);
 		if (!job) return;
+
+		const currentCount = this.refCounts.get(expression) ?? 0;
+		const nextCount = currentCount - 1;
+
+		if (nextCount > 0) {
+			this.refCounts.set(expression, nextCount);
+			return;
+		}
+
+		this.refCounts.delete(expression);
 		job.stop();
 		this.jobs.delete(expression);
 	}
@@ -66,6 +81,7 @@ export class ScheduleEventSource {
 	stop(): void {
 		for (const job of this.jobs.values()) job.stop();
 		this.jobs.clear();
+		this.refCounts.clear();
 	}
 
 	listRegistered(): string[] {
