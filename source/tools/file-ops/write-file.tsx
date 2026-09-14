@@ -15,6 +15,7 @@ import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
+import {computeLineDiff} from '@/utils/inline-diff';
 import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
@@ -27,12 +28,31 @@ import {
 	sendFileChangeToVSCode,
 } from '@/vscode/index';
 
+// Captures each file's pre-write content, keyed by absolute path, so the
+// tool-result formatter can still render a diff after execute() overwrites
+// the file on disk. Populated here (covers auto-accept/yolo, where the
+// confirmation preview never renders) and, redundantly but harmlessly, by
+// the preview-phase formatter below (covers a rejected call, where execute()
+// never runs).
+const previousContentCache = new Map<string, string | null>();
+
 const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
+
+	if (fileExists) {
+		try {
+			const cached = await getCachedFileContent(absPath);
+			previousContentCache.set(absPath, cached.content);
+		} catch {
+			previousContentCache.set(absPath, null);
+		}
+	} else {
+		previousContentCache.set(absPath, null);
+	}
 
 	// Type guard: ensure content is string for write operation
 	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
@@ -87,91 +107,200 @@ interface WriteFileArgs {
 	content?: string;
 }
 
+/** Truncate a plain (non-highlighted) line to fit terminal width */
+const truncateLine = (line: string, maxWidth: number): string => {
+	if (line.length <= maxWidth) return line;
+	return line.slice(0, maxWidth - 1) + '…';
+};
+
 // Create a component that will re-render when theme changes
-const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
-	const themeContext = React.useContext(ThemeContext);
-	if (!themeContext) {
-		throw new Error('ThemeContext is required');
-	}
-	const {colors} = themeContext;
-	const path = args.path || args.file_path || 'unknown';
-	const newContent = ensureString(args.content);
-	const lineCount = newContent.split('\n').length;
-	const charCount = newContent.length;
+const WriteFileFormatter = React.memo(
+	({
+		args,
+		previousContent,
+	}: {
+		args: WriteFileArgs;
+		previousContent: string | null;
+	}) => {
+		const themeContext = React.useContext(ThemeContext);
+		if (!themeContext) {
+			throw new Error('ThemeContext is required');
+		}
+		const {colors} = themeContext;
+		const path = args.path || args.file_path || 'unknown';
+		const newContent = ensureString(args.content);
+		const lineCount = newContent.split('\n').length;
+		const charCount = newContent.length;
+		const ext = path.split('.').pop()?.toLowerCase() ?? '';
+		const language = getLanguageFromExtension(ext);
 
-	// Estimate tokens (rough approximation: ~4 characters per token)
-	const estimatedTokens = calculateTokens(newContent);
+		// Estimate tokens (rough approximation: ~4 characters per token)
+		const estimatedTokens = calculateTokens(newContent);
 
-	// Normalize indentation for display
-	const lines = newContent.split('\n');
-	const normalizedLines = normalizeIndentation(lines);
+		// Calculate available width for line content (terminal width - line number prefix - padding)
+		const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
 
-	// Calculate available width for line content (terminal width - line number prefix - padding)
-	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
-	const lineNumPrefixWidth = 6; // "1234 " = 5 chars + 1 for safety
-	const availableWidth = Math.max(terminalWidth - lineNumPrefixWidth - 2, 20);
+		const isDiff = previousContent !== null && previousContent !== newContent;
 
-	const messageContent = (
-		<Box flexDirection="column">
-			<Text color={colors.tool}>⚒ write_file</Text>
+		const body = isDiff ? (
+			(() => {
+				const diffLineNumPrefixWidth = 8; // "1234 - " = 7 chars + 1 for safety
+				const availableWidth = Math.max(
+					terminalWidth - diffLineNumPrefixWidth - 2,
+					20,
+				);
+				const entries = computeLineDiff(previousContent as string, newContent);
+				const addedCount = entries.filter(e => e.type === 'added').length;
+				const removedCount = entries.filter(e => e.type === 'removed').length;
 
-			<Box>
-				<Text color={colors.secondary}>Path: </Text>
-				<Text wrap="truncate-end" color={colors.text}>
-					{path}
-				</Text>
+				return (
+					<Box flexDirection="column" marginTop={1}>
+						<Box>
+							<Text color={colors.text}>Diff: </Text>
+							<Text color={colors.diffAddedText}>+{addedCount}</Text>
+							<Text color={colors.text}> </Text>
+							<Text color={colors.diffRemovedText}>-{removedCount}</Text>
+						</Box>
+						<Box flexDirection="column">
+							{entries.map((entry, i) => {
+								if (entry.type === 'unchanged') {
+									const lineNumStr = String(entry.newLine).padStart(4, ' ');
+									let displayLine: string;
+									try {
+										displayLine = truncateAnsi(
+											highlight(entry.text, {
+												language,
+												theme: getSyntaxTheme(colors),
+											}),
+											availableWidth,
+										);
+									} catch {
+										displayLine = truncateLine(entry.text, availableWidth);
+									}
+									return (
+										<Box key={i}>
+											<Text color={colors.secondary}>{lineNumStr} </Text>
+											<Text wrap="truncate-end">{displayLine}</Text>
+										</Box>
+									);
+								}
+
+								if (entry.type === 'removed') {
+									const lineNumStr = String(entry.oldLine).padStart(4, ' ');
+									return (
+										<Box key={i}>
+											<Text
+												backgroundColor={colors.diffRemoved}
+												color={colors.diffRemovedText}
+											>
+												{lineNumStr} -
+											</Text>
+											<Text
+												wrap="truncate-end"
+												backgroundColor={colors.diffRemoved}
+												color={colors.diffRemovedText}
+											>
+												{truncateLine(entry.text, availableWidth)}
+											</Text>
+										</Box>
+									);
+								}
+
+								const lineNumStr = String(entry.newLine).padStart(4, ' ');
+								return (
+									<Box key={i}>
+										<Text
+											backgroundColor={colors.diffAdded}
+											color={colors.diffAddedText}
+										>
+											{lineNumStr} +
+										</Text>
+										<Text
+											wrap="truncate-end"
+											backgroundColor={colors.diffAdded}
+											color={colors.diffAddedText}
+										>
+											{truncateLine(entry.text, availableWidth)}
+										</Text>
+									</Box>
+								);
+							})}
+						</Box>
+					</Box>
+				);
+			})()
+		) : newContent.length > 0 ? (
+			(() => {
+				const lineNumPrefixWidth = 6; // "1234 " = 5 chars + 1 for safety
+				const availableWidth = Math.max(
+					terminalWidth - lineNumPrefixWidth - 2,
+					20,
+				);
+				const lines = newContent.split('\n');
+				const normalizedLines = normalizeIndentation(lines);
+
+				return (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.text}>File content:</Text>
+						{normalizedLines.map((line: string, i: number) => {
+							const lineNumStr = String(i + 1).padStart(4, ' ');
+
+							try {
+								const highlighted = highlight(line, {
+									language,
+									theme: getSyntaxTheme(colors),
+								});
+								const truncated = truncateAnsi(highlighted, availableWidth);
+								return (
+									<Box key={i}>
+										<Text color={colors.secondary}>{lineNumStr} </Text>
+										<Text wrap="truncate-end">{truncated}</Text>
+									</Box>
+								);
+							} catch {
+								const truncated = truncateLine(line, availableWidth);
+								return (
+									<Box key={i}>
+										<Text color={colors.secondary}>{lineNumStr} </Text>
+										<Text wrap="truncate-end">{truncated}</Text>
+									</Box>
+								);
+							}
+						})}
+					</Box>
+				);
+			})()
+		) : (
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>File will be empty</Text>
 			</Box>
-			<Box>
-				<Text color={colors.secondary}>Size: </Text>
-				<Text color={colors.text}>
-					{lineCount} lines, {charCount} characters (~{estimatedTokens} tokens)
-				</Text>
+		);
+
+		const messageContent = (
+			<Box flexDirection="column">
+				<Text color={colors.tool}>⚒ write_file</Text>
+
+				<Box>
+					<Text color={colors.secondary}>Path: </Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{path}
+					</Text>
+				</Box>
+				<Box>
+					<Text color={colors.secondary}>Size: </Text>
+					<Text color={colors.text}>
+						{lineCount} lines, {charCount} characters (~{estimatedTokens}{' '}
+						tokens)
+					</Text>
+				</Box>
+
+				{body}
 			</Box>
+		);
 
-			{newContent.length > 0 ? (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.text}>File content:</Text>
-					{normalizedLines.map((line: string, i: number) => {
-						const lineNumStr = String(i + 1).padStart(4, ' ');
-						const ext = path.split('.').pop()?.toLowerCase() ?? '';
-						const language = getLanguageFromExtension(ext);
-
-						try {
-							const highlighted = highlight(line, {
-								language,
-								theme: getSyntaxTheme(colors),
-							});
-							const truncated = truncateAnsi(highlighted, availableWidth);
-							return (
-								<Box key={i}>
-									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="truncate-end">{truncated}</Text>
-								</Box>
-							);
-						} catch {
-							const truncated =
-								line.length > availableWidth
-									? line.slice(0, availableWidth - 1) + '…'
-									: line;
-							return (
-								<Box key={i}>
-									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="truncate-end">{truncated}</Text>
-								</Box>
-							);
-						}
-					})}
-				</Box>
-			) : (
-				<Box marginTop={1}>
-					<Text color={colors.secondary}>File will be empty</Text>
-				</Box>
-			)}
-		</Box>
-	);
-
-	return <ToolMessage message={messageContent} hideBox={true} />;
-});
+		return <ToolMessage message={messageContent} hideBox={true} />;
+	},
+);
 
 // Track VS Code change IDs for cleanup
 const vscodeChangeIds = new Map<string, string>();
@@ -183,24 +312,30 @@ const writeFileFormatter = async (
 	const path = args.path || args.file_path || '';
 	const absPath = resolve(getSafeSessionCwd(), path);
 
+	let previousContent: string | null;
+	if (result === undefined) {
+		previousContent = null;
+		if (existsSync(absPath)) {
+			try {
+				const cached = await getCachedFileContent(absPath);
+				previousContent = cached.content;
+			} catch {
+				// File might exist but not be readable; fall back to full-dump rendering.
+			}
+		}
+		previousContentCache.set(absPath, previousContent);
+	} else {
+		previousContent = previousContentCache.get(absPath) ?? null;
+		previousContentCache.delete(absPath);
+	}
+
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
 		const content = args.content || '';
 
-		// Get original content if file exists (use cache if available)
-		let originalContent = '';
-		if (existsSync(absPath)) {
-			try {
-				const cached = await getCachedFileContent(absPath);
-				originalContent = cached.content;
-			} catch {
-				// File might exist but not be readable
-			}
-		}
-
 		const changeId = sendFileChangeToVSCode(
 			absPath,
-			originalContent,
+			previousContent ?? '',
 			content,
 			'write_file',
 			{
@@ -220,7 +355,7 @@ const writeFileFormatter = async (
 		}
 	}
 
-	return <WriteFileFormatter args={args} />;
+	return <WriteFileFormatter args={args} previousContent={previousContent} />;
 };
 
 const writeFileValidator = async (args: {
