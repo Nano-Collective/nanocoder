@@ -17,6 +17,7 @@ export interface CheckpointMetadata {
 	timestamp: string; // ISO 8601 format
 	messageCount: number;
 	filesChanged: string[]; // Relative file paths
+	filesMissing?: string[];
 	provider: {
 		name: string;
 		model: string;
@@ -45,8 +46,6 @@ export interface CheckpointConversation {
 export interface CheckpointData {
 	metadata: CheckpointMetadata;
 	conversation: CheckpointConversation;
-	// Raw bytes, so a checkpoint round-trip preserves binaries as faithfully as
-	// text. Nothing downstream reads a snapshot as a string.
 	fileSnapshots: Map<string, Buffer>;
 }
 

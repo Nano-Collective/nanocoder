@@ -28,10 +28,16 @@ export interface UseChatHandlerProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
-	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	developmentMode?:
+		| 'normal'
+		| 'auto-accept'
+		| 'yolo'
+		| 'plan'
+		| 'headless'
+		| 'architect';
 	// Live mode ref so the conversation loop can read mode changes mid-turn.
 	developmentModeRef?: React.RefObject<
-		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless' | 'architect'
 	>;
 	nonInteractiveMode?: boolean;
 	onConversationComplete?: () => void;
@@ -41,6 +47,7 @@ export interface UseChatHandlerProps {
 	// which is racy: the user can toggle modes mid-generation, so a completing
 	// normal-mode turn would otherwise look like a finished plan.
 	onPlanTurnComplete?: () => void;
+	onArchitectTurnComplete?: (checkpointName: string) => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;

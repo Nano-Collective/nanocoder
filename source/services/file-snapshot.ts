@@ -3,7 +3,7 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
-import type {CaptureResult, SkippedFile} from '@/types/checkpoint';
+import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
@@ -49,11 +49,9 @@ export class FileSnapshotService {
 	 */
 	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
 		const snapshots = new Map<string, Buffer>();
-		const skipped: SkippedFile[] = [];
+		const skipped: {path: string; reason: string}[] = [];
 
 		for (const filePath of filePaths) {
-			// Normalized up front so a skipped file is keyed the same way a
-			// captured one is; filesChanged and skippedFiles are read side by side.
 			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 			const relativePath = path.relative(this.workspaceRoot, absolutePath);
 			const normalizedPath = relativePath.split(path.sep).join('/');
@@ -63,11 +61,14 @@ export class FileSnapshotService {
 				snapshots.set(normalizedPath, content);
 			} catch (error) {
 				const reason = formatError(error);
+
 				if (!isMissingFile(error)) {
-					skipped.push({path: normalizedPath, reason});
+					skipped.push({
+						path: normalizedPath,
+						reason,
+					});
 				}
-				// Logged either way: a deleted file is not a gap, but it is still
-				// worth seeing in the log when a capture comes out short.
+
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
@@ -86,7 +87,7 @@ export class FileSnapshotService {
 	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
 		const errors: string[] = [];
 
-		for (const [relativePath, content] of snapshots) {
+		for (const [relativePath, snapshot] of snapshots) {
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
 				// Snapshot keys are read back from user-writable metadata on disk
@@ -98,10 +99,11 @@ export class FileSnapshotService {
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
 				}
+
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content);
+				await fs.writeFile(absolutePath, snapshot);
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -268,9 +270,11 @@ export class FileSnapshotService {
 	 */
 	getSnapshotSize(snapshots: Map<string, Buffer>): number {
 		let totalSize = 0;
-		for (const content of snapshots.values()) {
-			totalSize += content.byteLength;
+
+		for (const snapshot of snapshots.values()) {
+			totalSize += snapshot.length;
 		}
+
 		return totalSize;
 	}
 
@@ -301,6 +305,7 @@ export class FileSnapshotService {
 						try {
 							const parentStats = await fs.stat(parentDir);
 							const parentMode = parentStats.mode;
+
 							// Check if any write permission bit is set - owner: 0o200, group: 0o020, others: 0o002
 							const parentHasWritePermission =
 								(parentMode & 0o200) !== 0 ||
@@ -322,6 +327,7 @@ export class FileSnapshotService {
 					if (parentWritable) {
 						try {
 							await fs.mkdir(directory, {recursive: true});
+
 							try {
 								const verifyStats = await fs.stat(directory);
 								directoryExists = verifyStats.isDirectory();
@@ -348,6 +354,7 @@ export class FileSnapshotService {
 					try {
 						const dirStats = await fs.stat(directory);
 						const mode = dirStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -376,6 +383,7 @@ export class FileSnapshotService {
 					try {
 						const fileStats = await fs.stat(absolutePath);
 						const mode = fileStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -398,6 +406,7 @@ export class FileSnapshotService {
 				);
 			}
 		}
+
 		return {valid: errors.length === 0, errors};
 	}
 }

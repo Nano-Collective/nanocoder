@@ -133,15 +133,20 @@ export class TimelineManager {
 		}
 
 		if (existing.length > 0) {
-			const {snapshots} = await this.fileSnapshotService.captureFiles(existing);
-			for (const [relative, content] of snapshots) {
+			const {snapshots: captured} =
+				await this.fileSnapshotService.captureFiles(existing);
+
+			for (const [relative, snapshot] of captured) {
+				const content = snapshot.toString('utf-8');
+
 				if (isProbablyBinary(content)) {
 					logWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
 				}
-				result.set(relative, content.toString('utf-8'));
+
+				result.set(relative, content);
 			}
 		}
 
@@ -165,6 +170,7 @@ export class TimelineManager {
 
 		const createdFiles: string[] = [];
 		const existing = new Map<string, string>();
+
 		for (const [relative, content] of input.files) {
 			const normalized = this.toRelativePath(relative);
 			if (!normalized) {
@@ -215,6 +221,7 @@ export class TimelineManager {
 	async revertTo(checkpointId: string): Promise<TimelineRevertResult> {
 		const index = await this.loadIndex();
 		const found = index.entries.findIndex(entry => entry.id === checkpointId);
+
 		if (found === -1) {
 			throw new Error(`Timeline checkpoint '${checkpointId}' does not exist`);
 		}
@@ -253,8 +260,12 @@ export class TimelineManager {
 			nextSeq: 1,
 			entries: [],
 		};
+
 		if (existsSync(this.timelineDir)) {
-			await fs.rm(this.timelineDir, {recursive: true, force: true});
+			await fs.rm(this.timelineDir, {
+				recursive: true,
+				force: true,
+			});
 		}
 	}
 
@@ -265,12 +276,14 @@ export class TimelineManager {
 	private expandToTurnStart(index: TimelineIndex, entryIndex: number): number {
 		const turn = index.entries[entryIndex].truncateToMessageIndex;
 		let start = entryIndex;
+
 		while (
 			start > 0 &&
 			index.entries[start - 1].truncateToMessageIndex === turn
 		) {
 			start -= 1;
 		}
+
 		return start;
 	}
 
@@ -310,6 +323,7 @@ export class TimelineManager {
 			try {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const content = await fs.readFile(filePath);
+
 				snapshots.set(relativePath, content);
 			} catch (error) {
 				logWarning('Could not load timeline file snapshot', true, {
@@ -340,8 +354,12 @@ export class TimelineManager {
 
 	private async removeEntryDir(id: string): Promise<void> {
 		const dir = path.join(this.timelineDir, 'entries', id); // nosemgrep
+
 		if (existsSync(dir)) {
-			await fs.rm(dir, {recursive: true, force: true});
+			await fs.rm(dir, {
+				recursive: true,
+				force: true,
+			});
 		}
 	}
 
@@ -364,6 +382,7 @@ export class TimelineManager {
 
 	private async ensureDir(): Promise<void> {
 		await this.pruneStaleSessions();
+
 		if (!existsSync(this.timelineDir)) {
 			await fs.mkdir(this.timelineDir, {recursive: true});
 		}
@@ -384,27 +403,39 @@ export class TimelineManager {
 		try {
 			const names = await fs.readdir(this.timelineRoot);
 			const others: Array<{dir: string; mtimeMs: number}> = [];
+
 			for (const name of names) {
 				const dir = path.join(this.timelineRoot, name); // nosemgrep
+
 				if (dir === this.timelineDir) {
 					continue;
 				}
+
 				const stats = await fs.stat(dir);
+
 				if (stats.isDirectory()) {
-					others.push({dir, mtimeMs: stats.mtimeMs});
+					others.push({
+						dir,
+						mtimeMs: stats.mtimeMs,
+					});
 				}
 			}
 
 			const cutoff = Date.now() - MAX_TIMELINE_SESSION_AGE_MS;
+
 			// Newest first, so the slice past the cap is the oldest sessions.
 			others.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
 			const stale = others.filter(
 				(entry, position) =>
 					entry.mtimeMs < cutoff || position >= MAX_TIMELINE_SESSIONS,
 			);
 
 			for (const entry of stale) {
-				await fs.rm(entry.dir, {recursive: true, force: true});
+				await fs.rm(entry.dir, {
+					recursive: true,
+					force: true,
+				});
 			}
 		} catch {
 			// The root may not exist yet, or may not be readable. Pruning is
@@ -422,27 +453,40 @@ export class TimelineManager {
 		}
 
 		const indexPath = this.indexPath();
+
 		if (!existsSync(indexPath)) {
-			this.index = {nextSeq: 1, entries: []};
+			this.index = {
+				nextSeq: 1,
+				entries: [],
+			};
 			return this.index;
 		}
 
 		try {
 			const raw = await fs.readFile(indexPath, 'utf-8');
 			const parsed = JSON.parse(raw) as TimelineIndex;
+
 			if (
 				!Array.isArray(parsed.entries) ||
 				typeof parsed.nextSeq !== 'number'
 			) {
 				throw new Error('Invalid timeline index');
 			}
+
 			this.index = parsed;
 			return this.index;
 		} catch (error) {
 			logWarning('Could not read timeline index, starting empty', true, {
-				context: {error: formatError(error)},
+				context: {
+					error: formatError(error),
+				},
 			});
-			this.index = {nextSeq: 1, entries: []};
+
+			this.index = {
+				nextSeq: 1,
+				entries: [],
+			};
+
 			return this.index;
 		}
 	}
@@ -450,6 +494,7 @@ export class TimelineManager {
 	private async saveIndex(index: TimelineIndex): Promise<void> {
 		this.index = index;
 		await this.ensureDir();
+
 		await fs.writeFile(
 			this.indexPath(),
 			JSON.stringify(index, null, 2),
@@ -461,6 +506,7 @@ export class TimelineManager {
 		if (!id || id.length > 100 || id.includes('..') || id.startsWith('.')) {
 			throw new Error(`Invalid timeline session id: '${id}'`);
 		}
+
 		if (/[<>:"/\\|?*]/.test(id)) {
 			throw new Error(`Invalid timeline session id: '${id}'`);
 		}
