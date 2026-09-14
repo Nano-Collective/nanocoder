@@ -609,6 +609,8 @@ export interface UserPreferences {
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/** Show output on agent `execute_bash` cards, even in compact display. Default false. */
+	showAgentBashOutput?: boolean;
 	/**
 	 * Show the per-response usage footer under each assistant message
 	 * (provider-reported tokens + estimated cost). Defaults to true. When

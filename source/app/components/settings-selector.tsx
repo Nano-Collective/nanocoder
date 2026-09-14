@@ -13,6 +13,7 @@ import {
 	getPrivacyPreference,
 	getProjectContextPreferences,
 	getReasoningExpanded,
+	getShowAgentBashOutput,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
@@ -24,6 +25,7 @@ import {
 	updateSemanticMemoryEnabled,
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
+	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
@@ -832,6 +834,7 @@ export function SettingsDisplayPanel({
 
 	const currentReasoningExpanded = getReasoningExpanded();
 	const currentCompactToolDisplay = getCompactToolDisplay();
+	const currentShowAgentBashOutput = getShowAgentBashOutput();
 	const currentShowUsageFooter = getShowUsageFooter();
 
 	useInput((_, key) => {
@@ -846,6 +849,7 @@ export function SettingsDisplayPanel({
 	type ToggleKey =
 		| 'reasoningExpanded'
 		| 'compactToolDisplay'
+		| 'showAgentBashOutput'
 		| 'showUsageFooter';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
@@ -862,6 +866,12 @@ export function SettingsDisplayPanel({
 				value: 'compactToolDisplay' as ToggleKey,
 			},
 			{
+				// Show the command output on bash tool cards the agent runs,
+				// compact or not.
+				label: `Agent Bash Output: ${isOn(currentShowAgentBashOutput)}`,
+				value: 'showAgentBashOutput' as ToggleKey,
+			},
+			{
 				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
 				value: 'showUsageFooter' as ToggleKey,
 			},
@@ -869,6 +879,7 @@ export function SettingsDisplayPanel({
 	}, [
 		currentReasoningExpanded,
 		currentCompactToolDisplay,
+		currentShowAgentBashOutput,
 		currentShowUsageFooter,
 	]);
 
@@ -879,6 +890,10 @@ export function SettingsDisplayPanel({
 		} else if (item.value === 'compactToolDisplay') {
 			const newValue = !currentCompactToolDisplay;
 			updateCompactToolDisplay(newValue);
+		} else if (item.value === 'showAgentBashOutput') {
+			// Applies to the next bash card, no restart needed - read from
+			// preferences when the card renders.
+			updateShowAgentBashOutput(!currentShowAgentBashOutput);
 		} else if (item.value === 'showUsageFooter') {
 			// Applies to the next response, no restart needed - the footer is
 			// read from preferences per message.

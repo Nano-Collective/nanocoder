@@ -3,6 +3,7 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import {getShowAgentBashOutput} from '@/config/preferences';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -125,6 +126,14 @@ export const displayExecutedTool = async (
 ): Promise<void> => {
 	const {toolCall, result, bashState} = execution;
 
+	// Show the full bash card (command + status + output) instead of folding it
+	// into the compact tally. Needs a completed execution, so validation
+	// failures with no bashState still condense.
+	const showBashCard =
+		getShowAgentBashOutput() &&
+		result.name === 'execute_bash' &&
+		bashState !== undefined;
+
 	conversationStateManager.current.updateAfterToolExecution(
 		toolCall,
 		result.content,
@@ -144,7 +153,8 @@ export const displayExecutedTool = async (
 		options?.onLiveTaskUpdate?.(tasks);
 	} else if (
 		options?.compactDisplay &&
-		!ALWAYS_EXPANDED_TOOLS.has(result.name)
+		!ALWAYS_EXPANDED_TOOLS.has(result.name) &&
+		!showBashCard
 	) {
 		// In compact mode, signal the count callback for live display
 		// (skip for tools that should always show expanded output).
@@ -190,6 +200,7 @@ export const displayExecutedTool = async (
 				executionId={bashState.executionId}
 				command={bashState.command}
 				completedState={bashState}
+				showOutput={showBashCard}
 			/>,
 		);
 	} else {
