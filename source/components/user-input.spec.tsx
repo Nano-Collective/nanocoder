@@ -132,6 +132,50 @@ test('UserInput renders development mode indicator', t => {
 	unmount();
 });
 
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+test.serial(
+	'UserInput aligns the mode indicator with the input box left border',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 100,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const lines = output.split('\n');
+
+			const borderLine = lines.find(line => line.includes('╭'));
+			const modeLine = lines.find(line => line.includes('normal mode on'));
+			t.truthy(borderLine, 'Should find the input box top border');
+			t.truthy(modeLine, 'Should find the mode indicator line');
+
+			const borderIndent = borderLine!.indexOf('╭');
+			const modeIndent = modeLine!.search(/\S/);
+			t.is(
+				modeIndent,
+				borderIndent + 1,
+				'Mode indicator text should start one step to the right of the input box border',
+			);
+
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
 test('UserInput renders auto-accept mode indicator', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
@@ -558,7 +602,9 @@ test('UserInput renders help text when not disabled', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /What would you like me to help with\?/);
+	// New design: heading removed, shorter placeholder inside rounded border
+	t.regex(output!, /Ask anything\.\.\./);
+	t.notRegex(output!, /What would you like me to help with\?/);
 	unmount();
 });
 
@@ -572,6 +618,7 @@ test('UserInput hides help text when disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /What would you like me to help with\?/);
+	t.notRegex(output!, /Ask anything\.\.\./);
 	unmount();
 });
 

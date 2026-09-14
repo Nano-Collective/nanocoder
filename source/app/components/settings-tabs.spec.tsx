@@ -29,9 +29,8 @@ const {render} = await import('ink-testing-library');
 process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
 	join(tmpdir(), 'nanocoder-spec-'),
 );
-const {resetPreferencesCache, getAlternateScreen} = await import(
-	'@/config/preferences'
-);
+const {resetPreferencesCache, getAlternateScreen, getMouseReporting} =
+	await import('@/config/preferences');
 resetPreferencesCache();
 
 const {renderWithTheme} = await import('../../test-utils/render-with-theme');
@@ -341,7 +340,7 @@ test('typing that arrives in the same stdin chunk as the down-arrow still reache
 });
 
 test('Enter on the Alternate Screen boolean row flips the persisted preference', async t => {
-	t.is(getAlternateScreen(), false);
+	t.is(getAlternateScreen(), true);
 
 	const {stdin, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
@@ -358,7 +357,30 @@ test('Enter on the Alternate Screen boolean row flips the persisted preference',
 	stdin.write(ENTER);
 	await tick();
 
-	t.is(getAlternateScreen(), true);
+	t.is(getAlternateScreen(), false);
+
+	unmount();
+});
+
+test('Enter on the Mouse Wheel Reporting boolean row flips the persisted preference', async t => {
+	t.is(getMouseReporting(), true);
+
+	const {stdin, unmount} = renderWithTheme(
+		<SettingsSelector onCancel={() => {}} />,
+	);
+	await tick();
+
+	// Filter down to the single boolean row so index 0 is deterministic.
+	stdin.write(DOWN);
+	await tick();
+	stdin.write('Mouse');
+	await tick();
+	stdin.write(DOWN);
+	await tick();
+	stdin.write(ENTER);
+	await tick();
+
+	t.is(getMouseReporting(), false);
 
 	unmount();
 });

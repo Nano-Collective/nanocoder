@@ -382,6 +382,16 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
+		/** Generate a title once per session. ACP clients only. Default true. */
+		smartTitles?: boolean;
+		/** Title generation model. Defaults to the session's. */
+		titleModel?: string;
+		/**
+		 * Title generation provider. Defaults to the session's; a different one is
+		 * sent the opening user turns and tool summaries, which include file paths
+		 * and bash command strings.
+		 */
+		titleProvider?: string;
 	};
 
 	// Headless / non-interactive conversation limits (--plain and ACP loops)
@@ -604,6 +614,9 @@ export interface UserPreferences {
 			maxMessages?: number;
 			retentionDays?: number;
 			directory?: string;
+			smartTitles?: boolean;
+			titleModel?: string;
+			titleProvider?: string;
 		};
 		paste?: PasteConfig;
 	};
@@ -631,6 +644,14 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
+	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag
+	 * in iTerm2). false: the terminal does not capture the mouse, so native text
+	 * selection (double-click, drag) works directly and the wheel does nothing.
+	 * Also switchable per-run with --mouse / --no-mouse flags.
+	 */
+	mouseReporting?: boolean;
 	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is

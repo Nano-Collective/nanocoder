@@ -168,10 +168,13 @@ Options:
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
   --alt-screen        Fullscreen TUI on the alternate screen buffer with in-app
-                      scrolling (mouse wheel / PgUp / PgDn). Persistent version:
-                      "alternateScreen": true in preferences.json.
-  --no-alt-screen     Force the default inline mode (main screen, chat history in
-                      the terminal's native scrollback), overriding the preference.
+                      scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
+  --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
+                      chat history in the terminal's native scrollback).
+  --mouse             Mouse wheel scrolls the chat viewport in fullscreen mode, with
+                      Shift+drag (Option+drag in iTerm2) to select text. Enabled by default.
+  --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
+                      works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -594,18 +597,21 @@ async function main(): Promise<void> {
 		// interactive TUI only. Run mode (`nanocoder run …`) prints a
 		// transcript the user needs to keep after exit — the alt screen
 		// would discard it when restoring the original buffer.
-		// Screen mode: inline (main screen + native scrollback) by DEFAULT —
-		// the terminal's own scrollbar, wheel, and search work there.
-		// Fullscreen (alt screen + in-app scroll) is opt-in via --alt-screen
-		// or the alternateScreen:true preference; --no-alt-screen forces
-		// inline regardless of the preference.
-		const {loadPreferences} = await import('@/config/preferences');
+		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
+		// Passing --no-alt-screen or setting alternateScreen:false in preferences
+		// forces inline mode (main screen + native scrollback).
+		const {getAlternateScreen, getMouseReporting} = await import(
+			'@/config/preferences'
+		);
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
-			(args.includes('--alt-screen') ||
-				loadPreferences().alternateScreen === true);
+			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		const mouseReportingAllowed =
+			!args.includes('--no-mouse') &&
+			(args.includes('--mouse') || getMouseReporting());
+		const useMouseReporting = useAltScreen && mouseReportingAllowed;
 		// The stdin proxy below is needed in BOTH screen modes, because
 		// bracketed paste applies to both — only mouse reporting is
 		// fullscreen-only.
@@ -627,8 +633,10 @@ async function main(): Promise<void> {
 		}
 		if (interactiveTty) {
 			const {
+				ALTERNATE_SCROLL_OFF,
+				ALTERNATE_SCROLL_ON,
 				createUtf8InputDecoder,
-				markMouseReportingAvailable,
+				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
@@ -648,17 +656,27 @@ async function main(): Promise<void> {
 			// receive paste markers as literal text.
 			restoreInputModes = () => {
 				process.stdout.write(DISABLE_BRACKETED_PASTE);
+				if (useAltScreen) {
+					process.stdout.write(
+						useMouseReporting ? MOUSE_REPORTING_OFF : ALTERNATE_SCROLL_ON,
+					);
+				}
 			};
 
 			if (useAltScreen) {
-				// SGR mouse reporting so wheel scrolling reaches the app. The
-				// alt screen has no native scrollback, so the terminal's own
-				// wheel / scrollbar can't work — the app must receive wheel
-				// events itself. This is also what takes click-drag selection
-				// away from the terminal, so UserInput offers a toggle that
-				// suspends it (see toggleSelectionMode).
-				process.stdout.write(MOUSE_REPORTING_ON);
-				markMouseReportingAvailable();
+				if (useMouseReporting) {
+					// SGR mouse reporting so wheel scrolling reaches the app. The
+					// alt screen has no native scrollback, so the terminal's own
+					// wheel / scrollbar can't work — the app must receive wheel
+					// events itself. Text selection then needs Shift+drag
+					// (Option+drag in iTerm2).
+					process.stdout.write(MOUSE_REPORTING_ON);
+				} else {
+					// Native text selection is opted into, so nothing consumes
+					// wheel ticks — stop the terminal turning them into arrow
+					// keys that would cycle prompt history.
+					process.stdout.write(ALTERNATE_SCROLL_OFF);
+				}
 			}
 
 			// Ink must never see the raw escape sequences (its keypress
@@ -735,8 +753,12 @@ async function main(): Promise<void> {
 			stopInputForwarding?.();
 			restoreInputModes?.();
 			if (useAltScreen) {
-				// Mouse reporting off, then back to the main screen buffer.
-				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');
+				if (useMouseReporting) {
+					// Mouse reporting off
+					process.stdout.write('\x1B[?1006l\x1B[?1000l');
+				}
+				// Back to the main screen buffer
+				process.stdout.write('\x1B[?1049l');
 			}
 		};
 
