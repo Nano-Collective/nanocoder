@@ -58,7 +58,7 @@ The paste threshold is also stored in the preferences file under the namespaced 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer pastes become `[Paste #N: X chars]` placeholders, and multi-line pastes become `[Paste #N: X lines]`. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
