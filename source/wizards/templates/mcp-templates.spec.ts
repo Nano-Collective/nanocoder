@@ -1,5 +1,5 @@
 import test from 'ava';
-import {MCP_TEMPLATES} from './mcp-templates.js';
+import {MCP_TEMPLATES, resolveMcpTemplateId} from './mcp-templates.js';
 import type {McpTransportType} from './mcp-templates.js';
 
 test('filesystem template: single directory', t => {
@@ -327,6 +327,142 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	});
 });
 
+test('you template: builds authenticated HTTP config with API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'you-paid',
+		apiKey: 'ydc_test_key_123',
+	});
+
+	t.is(config.name, 'you-paid');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+	t.deepEqual(config.tags, ['you', 'search', 'web', 'research', 'http']);
+});
+
+test('you template: defaults server name to you when unset', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
+});
+
+test('you template: builds keyless free-profile config without API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
+test('you template: trims whitespace from API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '  ydc_test_key_123  ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+});
+
+test('you template: empty-string API key falls back to free profile', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '   ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
+test('you template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'you-paid',
+		apiKey: 'ydc_test_key_123',
+	});
+
+	t.is(config.templateId, 'you');
+	// The custom name no longer matches a template id, but resolution must
+	// still find `you` via the stamp rather than falling through to `custom`.
+	t.is(resolveMcpTemplateId(config), 'you');
+});
+
+test('resolveMcpTemplateId: prefers templateId over tags and name', t => {
+	t.is(
+		resolveMcpTemplateId({
+			name: 'you-paid',
+			transport: 'http',
+			templateId: 'you',
+		}),
+		'you',
+	);
+});
+
+test('resolveMcpTemplateId: falls back to a matching tag for hand-edited configs', t => {
+	t.is(
+		resolveMcpTemplateId({name: 'you-paid', transport: 'http', tags: ['you']}),
+		'you',
+	);
+});
+
+test('resolveMcpTemplateId: tag fallback respects transport (github-remote)', t => {
+	// `github-remote` tags include `github`, but that template is stdio —
+	// an http server must not resolve to it.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-enterprise',
+			transport: 'http',
+			tags: ['remote', 'github'],
+		}),
+		undefined,
+	);
+	// The stdio counterpart keeps resolving by tag.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-local',
+			transport: 'stdio',
+			tags: ['github'],
+		}),
+		'github',
+	);
+});
+
+test('resolveMcpTemplateId: falls back to the server name for default names', t => {
+	t.is(resolveMcpTemplateId({name: 'you', transport: 'http'}), 'you');
+});
+
+test('resolveMcpTemplateId: returns undefined for unmatched servers', t => {
+	t.is(resolveMcpTemplateId({name: 'my-custom-server', transport: 'http'}), undefined);
+	t.is(
+		resolveMcpTemplateId({name: 'x', transport: 'http', tags: ['not-a-template']}),
+		undefined,
+	);
+	// The generic `custom` tag must not resolve to the custom template —
+	// callers handle that fallback themselves and it carries no fields.
+	t.is(resolveMcpTemplateId({name: 'x', transport: 'http', tags: ['custom']}), undefined);
+});
+
 test('remote templates: have no required fields', t => {
 	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
 
@@ -479,7 +615,7 @@ test('local templates: use stdio transport', t => {
 });
 
 test('remote templates: use http transport', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);
