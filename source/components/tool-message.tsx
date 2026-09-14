@@ -2,8 +2,48 @@ import {Box, Text} from 'ink';
 import React, {memo} from 'react';
 
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {TOOL_OUTPUT_DISPLAY_LINES} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+
+/**
+ * Display state for one tool result: `expanded` lifts the line cap (set by
+ * `/expand`), and `expandId` is the number `/expand` accepts for it.
+ */
+export const ToolOutputContext = React.createContext<{
+	expanded: boolean;
+	expandId?: number;
+}>({expanded: false});
+
+/**
+ * Renders the first TOOL_OUTPUT_DISPLAY_LINES items, then a "+N more lines"
+ * note. Only the visible items are rendered, so a huge file costs nothing.
+ */
+export function CappedLines<T>({
+	items,
+	renderItem,
+}: {
+	items: T[];
+	renderItem: (item: T, index: number) => React.ReactNode;
+}) {
+	const {expanded, expandId} = React.useContext(ToolOutputContext);
+	const {colors} = useTheme();
+	const hiddenCount = expanded
+		? 0
+		: Math.max(0, items.length - TOOL_OUTPUT_DISPLAY_LINES);
+	const hint = expandId === undefined ? '' : ` · /expand ${expandId}`;
+
+	return (
+		<>
+			{items.slice(0, items.length - hiddenCount).map(renderItem)}
+			{hiddenCount > 0 && (
+				<Text color={colors.secondary}>
+					{`… (+${hiddenCount} more lines${hint})`}
+				</Text>
+			)}
+		</>
+	);
+}
 
 export default memo(function ToolMessage({
 	title,
@@ -25,7 +65,14 @@ export default memo(function ToolMessage({
 	// Handle both string and ReactNode messages
 	const messageContent =
 		typeof message === 'string' ? (
-			<Text color={colors.text}>{message}</Text>
+			<CappedLines
+				items={message.split('\n')}
+				renderItem={(line, index) => (
+					<Text key={index} color={colors.text}>
+						{line}
+					</Text>
+				)}
+			/>
 		) : (
 			message
 		);

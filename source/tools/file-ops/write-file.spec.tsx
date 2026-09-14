@@ -893,3 +893,23 @@ test('write_file formatter: handles object content (regression test)', async t =
 	t.regex(plainOutput, /"test_id":1/);
 });
 
+test('write_file formatter: caps a long file at 20 lines', async t => {
+	const formatter = writeFileTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const content = Array.from({length: 30}, (_, i) => `line ${i + 1}`).join(
+		'\n',
+	);
+	const element = await formatter({path: 'long.txt', content});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /line 20/);
+	t.notRegex(output, /line 21/);
+	t.regex(output, /\+10 more lines/);
+});
+

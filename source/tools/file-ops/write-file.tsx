@@ -4,7 +4,7 @@ import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
@@ -131,36 +131,39 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 			{newContent.length > 0 ? (
 				<Box flexDirection="column" marginTop={1}>
 					<Text color={colors.text}>File content:</Text>
-					{normalizedLines.map((line: string, i: number) => {
-						const lineNumStr = String(i + 1).padStart(4, ' ');
-						const ext = path.split('.').pop()?.toLowerCase() ?? '';
-						const language = getLanguageFromExtension(ext);
+					<CappedLines
+						items={normalizedLines}
+						renderItem={(line: string, i: number) => {
+							const lineNumStr = String(i + 1).padStart(4, ' ');
+							const ext = path.split('.').pop()?.toLowerCase() ?? '';
+							const language = getLanguageFromExtension(ext);
 
-						try {
-							const highlighted = highlight(line, {
-								language,
-								theme: getSyntaxTheme(colors),
-							});
-							const truncated = truncateAnsi(highlighted, availableWidth);
-							return (
-								<Box key={i}>
-									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="truncate-end">{truncated}</Text>
-								</Box>
-							);
-						} catch {
-							const truncated =
-								line.length > availableWidth
-									? line.slice(0, availableWidth - 1) + '…'
-									: line;
-							return (
-								<Box key={i}>
-									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="truncate-end">{truncated}</Text>
-								</Box>
-							);
-						}
-					})}
+							try {
+								const highlighted = highlight(line, {
+									language,
+									theme: getSyntaxTheme(colors),
+								});
+								const truncated = truncateAnsi(highlighted, availableWidth);
+								return (
+									<Box key={i}>
+										<Text color={colors.secondary}>{lineNumStr} </Text>
+										<Text wrap="truncate-end">{truncated}</Text>
+									</Box>
+								);
+							} catch {
+								const truncated =
+									line.length > availableWidth
+										? line.slice(0, availableWidth - 1) + '…'
+										: line;
+								return (
+									<Box key={i}>
+										<Text color={colors.secondary}>{lineNumStr} </Text>
+										<Text wrap="truncate-end">{truncated}</Text>
+									</Box>
+								);
+							}
+						}}
+					/>
 				</Box>
 			) : (
 				<Box marginTop={1}>

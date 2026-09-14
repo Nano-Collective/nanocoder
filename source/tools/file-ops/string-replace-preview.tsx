@@ -2,7 +2,7 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
@@ -381,9 +381,10 @@ export async function formatStringReplacePreview(
 								{newStrLines.length > 1 ? 's' : ''}
 							</Text>
 							<Box flexDirection="column">
-								{contextBefore}
-								{diffLines}
-								{contextAfter}
+								<CappedLines
+									items={[...contextBefore, ...diffLines, ...contextAfter]}
+									renderItem={line => line}
+								/>
 							</Box>
 						</Box>
 					</Box>

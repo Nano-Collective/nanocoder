@@ -2,7 +2,7 @@ import test from 'ava';
 import React from 'react';
 import {Text} from 'ink';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
-import ToolMessage from './tool-message';
+import ToolMessage, {CappedLines, ToolOutputContext} from './tool-message';
 
 console.log('\ntool-message.spec.tsx');
 
@@ -275,4 +275,61 @@ test('ToolMessage memo prevents unnecessary re-renders', t => {
 	// React TestRenderer may count renders differently
 	// The important thing is that the component is memoized
 	t.true(renderCount >= initialCount);
+});
+
+// ============================================================================
+// Line Cap Tests
+// ============================================================================
+
+const manyRows = (count: number) =>
+	Array.from({length: count}, (_, i) => `row ${i + 1}`).join('\n');
+
+test('ToolMessage caps a long string message and says how much is hidden', t => {
+	const {lastFrame} = renderWithTheme(
+		<ToolMessage message={manyRows(25)} hideBox={true} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /row 20/);
+	t.notRegex(output, /row 21/);
+	t.regex(output, /\+5 more lines/);
+	t.notRegex(output, /\/expand/);
+});
+
+test('ToolMessage shows every line inside an expanded ToolOutputContext', t => {
+	const {lastFrame} = renderWithTheme(
+		<ToolOutputContext.Provider value={{expanded: true}}>
+			<ToolMessage message={manyRows(25)} hideBox={true} />
+		</ToolOutputContext.Provider>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /row 25/);
+	t.notRegex(output, /more lines/);
+});
+
+test('CappedLines renders short output in full with no note', t => {
+	const {lastFrame} = renderWithTheme(
+		<CappedLines
+			items={manyRows(20).split('\n')}
+			renderItem={(line, index) => <Text key={index}>{line}</Text>}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /row 20/);
+	t.notRegex(output, /more lines/);
+});
+
+test('CappedLines names the /expand number when it has one', t => {
+	const {lastFrame} = renderWithTheme(
+		<ToolOutputContext.Provider value={{expanded: false, expandId: 7}}>
+			<CappedLines
+				items={manyRows(21).split('\n')}
+				renderItem={(line, index) => <Text key={index}>{line}</Text>}
+			/>
+		</ToolOutputContext.Provider>,
+	);
+
+	t.regex(lastFrame()!, /\+1 more lines · \/expand 7/);
 });
