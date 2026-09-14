@@ -44,6 +44,16 @@ export interface CiFixRunnerResult {
 	error?: string;
 }
 
+/** Write a result file and exit. Shared by the normal completion path and
+ * the SIGTERM handler below. */
+function writeResultAndExit(
+	resultPath: string,
+	result: CiFixRunnerResult,
+): void {
+	writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf-8');
+	process.exit(result.success ? 0 : 1);
+}
+
 async function main(): Promise<void> {
 	const inputPath = process.env.NANOCODER_CI_FIX_INPUT_PATH;
 	const resultPath = process.env.NANOCODER_CI_FIX_RESULT_PATH;
@@ -53,6 +63,20 @@ async function main(): Promise<void> {
 		);
 		process.exit(1);
 	}
+
+	// Write a failure result on SIGTERM (orchestrator's timeout) so the
+	// orchestrator's child.on('close') resolves with a clear "exceeded
+	// TIMEOUT_CI_FIX_RUNNER_MS" error instead of a generic
+	// "no readable result" fallback. SIGKILL can't be trapped.
+	process.on('SIGTERM', () => {
+		writeResultAndExit(resultPath, {
+			success: false,
+			committed: false,
+			commitShas: [],
+			output: '',
+			error: 'ci-fix-runner was terminated: exceeded TIMEOUT_CI_FIX_RUNNER_MS',
+		});
+	});
 
 	const input = JSON.parse(
 		readFileSync(inputPath, 'utf-8'),
@@ -123,8 +147,7 @@ async function main(): Promise<void> {
 		};
 	}
 
-	writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf-8');
-	process.exit(result.success ? 0 : 1);
+	writeResultAndExit(resultPath, result);
 }
 
 main().catch(err => {
