@@ -17,8 +17,8 @@ import {
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {getProjectRoot} from '@/services/session-cwd';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,

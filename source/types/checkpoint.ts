@@ -43,15 +43,10 @@ export interface CheckpointConversation {
 	}>;
 }
 
-export interface FileSnapshot {
-	existed: boolean;
-	content?: string;
-}
-
 export interface CheckpointData {
 	metadata: CheckpointMetadata;
 	conversation: CheckpointConversation;
-	fileSnapshots: Map<string, FileSnapshot>;
+	fileSnapshots: Map<string, Buffer>;
 }
 
 export interface CheckpointListItem {

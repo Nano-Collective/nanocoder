@@ -9,7 +9,6 @@ import type {
 	CheckpointMetadata,
 	CheckpointRestoreOptions,
 	CheckpointValidationResult,
-	FileSnapshot,
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
 import {
@@ -140,9 +139,13 @@ export class CheckpointManager {
 			timestamp: new Date().toISOString(),
 			messageCount: messages.length,
 			filesChanged: Array.from(fileSnapshots.keys()),
-			filesMissing: Array.from(fileSnapshots.entries())
-				.filter(([, snapshot]) => !snapshot.existed)
-				.map(([relativePath]) => relativePath),
+			filesMissing: filesToSnapshot
+				.map(filePath => filePath.split(path.sep).join('/'))
+				.filter(
+					filePath =>
+						!fileSnapshots.has(filePath) &&
+						!skipped.some(skippedFile => skippedFile.path === filePath),
+				),
 			provider: {name: provider, model},
 			description: this.generateDescription(messages),
 			// Only recorded when the checkpoint really is incomplete, so a clean
@@ -183,14 +186,11 @@ export class CheckpointManager {
 			await fs.mkdir(filesDir, {recursive: true});
 
 			for (const [relativePath, snapshot] of fileSnapshots) {
-				if (!snapshot.existed) {
-					continue;
-				}
-
-				const filePath = path.join(filesDir, relativePath); // nosemgrep
+				const filePath = path.join(filesDir, relativePath);
 				const fileDir = path.dirname(filePath);
+
 				await fs.mkdir(fileDir, {recursive: true});
-				await fs.writeFile(filePath, snapshot.content ?? '', 'utf-8');
+				await fs.writeFile(filePath, snapshot);
 			}
 		}
 
@@ -230,20 +230,17 @@ export class CheckpointManager {
 		}
 
 		//Capture the new paths BEFORE their mutations execute.
-		const fileSnapshots = await this.fileSnapshotService.captureFiles(newFiles);
+		const {snapshots: fileSnapshots, skipped} =
+			await this.fileSnapshotService.captureFiles(newFiles);
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 		await fs.mkdir(filesDir, {recursive: true});
 
 		for (const [relativePath, snapshot] of fileSnapshots) {
-			if (!snapshot.existed) {
-				continue;
-			}
-
-			const filePath = path.join(filesDir, relativePath); // nosemgrep
+			const filePath = path.join(filesDir, relativePath);
 			const fileDir = path.dirname(filePath);
 
 			await fs.mkdir(fileDir, {recursive: true});
-			await fs.writeFile(filePath, snapshot.content ?? '', 'utf-8');
+			await fs.writeFile(filePath, snapshot);
 		}
 
 		// Extend metadata while preserving the original checkpoint
@@ -252,13 +249,22 @@ export class CheckpointManager {
 
 		const existingMissing = new Set(metadata.filesMissing ?? []);
 
-		for (const [relativePath, snapshot] of fileSnapshots) {
-			if (!snapshot.existed) {
-				existingMissing.add(relativePath);
+		for (const relativePath of newFiles) {
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
+			if (
+				!fileSnapshots.has(normalizedPath) &&
+				!skipped.some(skippedFile => skippedFile.path === normalizedPath)
+			) {
+				existingMissing.add(normalizedPath);
 			}
 		}
 
 		metadata.filesMissing = [...existingMissing];
+
+		if (skipped.length > 0) {
+			metadata.skippedFiles = [...(metadata.skippedFiles ?? []), ...skipped];
+		}
 
 		await fs.writeFile(
 			metadataPath,
@@ -307,30 +313,25 @@ export class CheckpointManager {
 
 		// nosemgrep
 		// Load file snapshots
-		const fileSnapshots = new Map<string, FileSnapshot>();
+		const fileSnapshots = new Map<string, Buffer>();
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 		const missingFiles = new Set(metadata.filesMissing ?? []);
 
 		for (const relativePath of metadata.filesChanged) {
 			// The file did not exist when the checkpoint was created.
 			if (missingFiles.has(relativePath)) {
-				fileSnapshots.set(relativePath, {
-					existed: false,
-				});
 				continue;
 			}
+
 			if (!existsSync(filesDir)) {
 				continue;
 			}
 
 			try {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
-				const content = await fs.readFile(filePath, 'utf-8');
+				const content = await fs.readFile(filePath);
 
-				fileSnapshots.set(relativePath, {
-					existed: true,
-					content,
-				});
+				fileSnapshots.set(relativePath, content);
 			} catch (error) {
 				logWarning('Could not load file snapshot', true, {
 					context: {

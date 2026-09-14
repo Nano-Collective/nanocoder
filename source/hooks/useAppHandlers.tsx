@@ -20,11 +20,11 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {getProjectRoot} from '@/services/session-cwd';
 import {
 	runLifecycleHooks,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -179,7 +179,7 @@ export interface AppHandlers {
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
 	handleArchitectRevert: () => Promise<void>;
-	handleArchitectRevertAndRevise: () => Promise<void>;
+	handleArchitectRevertAndRevise: (instructions: string) => Promise<void>;
 	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
@@ -252,7 +252,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'
 		> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 		const currentIndex = modes.indexOf(
-			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+			props.developmentMode as
+				| 'normal'
+				| 'auto-accept'
+				| 'yolo'
+				| 'plan'
+				| 'architect',
 		);
 		const nextIndex = (currentIndex + 1) % modes.length;
 		const nextMode = modes[nextIndex];
@@ -724,45 +729,48 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props,
 	]);
 
-	const handleArchitectRevertAndRevise = React.useCallback(async () => {
-		const reviewState = props.architectReviewState;
+	const handleArchitectRevertAndRevise = React.useCallback(
+		async (instructions: string) => {
+			const reviewState = props.architectReviewState;
 
-		if (!reviewState?.checkpointName) {
-			return;
-		}
+			if (!reviewState?.checkpointName) {
+				return;
+			}
 
-		try {
-			const manager = new CheckpointManager(getProjectRoot());
+			try {
+				const manager = new CheckpointManager(getProjectRoot());
 
-			const checkpointData = await manager.loadCheckpoint(
-				reviewState.checkpointName,
-				{
-					validateIntegrity: true,
-				},
-			);
+				const checkpointData = await manager.loadCheckpoint(
+					reviewState.checkpointName,
+					{
+						validateIntegrity: true,
+					},
+				);
 
-			await manager.restoreFiles(checkpointData);
+				await manager.restoreFiles(checkpointData);
 
-			props.setArchitectReviewState(null);
+				props.setArchitectReviewState(null);
 
-			await props.handleChatMessage(
-				'Please review the changes you just made, revise them based on the previous result, and try again.',
-			);
-		} catch (error) {
-			props.addToChatQueue(
-				<ErrorMessage
-					key={generateKey('architect-revise-error')}
-					message={`Failed to revert Architect changes: ${formatError(error)}`}
-					hideBox={true}
-				/>,
-			);
-		}
-	}, [
-		props.architectReviewState,
-		props.setArchitectReviewState,
-		props.addToChatQueue,
-		props,
-	]);
+				await props.handleChatMessage(
+					`Please review the changes you just made and revise them based on these instructions:\n\n${instructions}`,
+				);
+			} catch (error) {
+				props.addToChatQueue(
+					<ErrorMessage
+						key={generateKey('architect-revise-error')}
+						message={`Failed to revert Architect changes: ${formatError(error)}`}
+						hideBox={true}
+					/>,
+				);
+			}
+		},
+		[
+			props.architectReviewState,
+			props.setArchitectReviewState,
+			props.addToChatQueue,
+			props,
+		],
+	);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(

@@ -1,5 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
+import TextInput from '@/components/text-input';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -10,7 +11,7 @@ export interface ArchitectReviewPromptProps {
 	/** Revert the changes made during the Architect turn. */
 	onRevert: () => void;
 	/** Revert the changes and ask the model to revise them. */
-	onRevertAndRevise: () => void;
+	onRevertAndRevise: (instructions: string) => void;
 	/** Dismiss the review prompt without taking an action. */
 	onDismiss: () => void;
 	/** Files changed during the Architect turn. */
@@ -56,12 +57,26 @@ export default function ArchitectReviewPrompt({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const [highlighted, setHighlighted] = useState<ArchitectAction>('keep');
+	const [isReviseMode, setIsReviseMode] = useState(false);
+	const [reviseInstructions, setReviseInstructions] = useState('');
 
 	useInput((_input, key) => {
 		if (key.escape) {
-			onDismiss();
+			if (isReviseMode) {
+				setIsReviseMode(false);
+				setReviseInstructions('');
+			} else {
+				onRevert();
+			}
 		}
 	});
+
+	const handleReviseSubmit = (value: string) => {
+		const instructions = value.trim();
+		if (!instructions) return;
+
+		onRevertAndRevise(instructions);
+	};
 
 	const handleSelect = (item: {value: ArchitectAction}) => {
 		if (item.value === 'keep') {
@@ -69,7 +84,7 @@ export default function ArchitectReviewPrompt({
 		} else if (item.value === 'revert') {
 			onRevert();
 		} else {
-			onRevertAndRevise();
+			setIsReviseMode(true);
 		}
 	};
 
@@ -127,11 +142,30 @@ export default function ArchitectReviewPrompt({
 				)}
 			</Box>
 
-			<StyledSelectInput
-				items={OPTIONS}
-				onSelect={handleSelect}
-				onHighlight={item => setHighlighted(item.value)}
-			/>
+			{isReviseMode ? (
+				<Box flexDirection="column">
+					<Box>
+						<Text color={colors.secondary}>{'> '}</Text>
+						<TextInput
+							value={reviseInstructions}
+							onChange={setReviseInstructions}
+							onSubmit={handleReviseSubmit}
+							placeholder="Enter revision instructions..."
+						/>
+					</Box>
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Press Enter to submit, Escape to go back
+						</Text>
+					</Box>
+				</Box>
+			) : (
+				<StyledSelectInput
+					items={OPTIONS}
+					onSelect={handleSelect}
+					onHighlight={item => setHighlighted(item.value)}
+				/>
+			)}
 
 			<Box marginTop={1}>
 				<Text color={colors.secondary} italic wrap="wrap">

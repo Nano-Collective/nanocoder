@@ -3,7 +3,7 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
-import type {FileSnapshot} from '@/types/checkpoint';
+import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
@@ -47,43 +47,28 @@ export class FileSnapshotService {
 	 * did not put back. A file that is simply gone is not one of them - see
 	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, FileSnapshot>> {
-		const snapshots = new Map<string, FileSnapshot>();
+	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
+		const snapshots = new Map<string, Buffer>();
+		const skipped: {path: string; reason: string}[] = [];
 
 		for (const filePath of filePaths) {
-			// Normalized up front so a skipped file is keyed the same way a
-			// captured one is; filesChanged and skippedFiles are read side by side.
 			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 			const relativePath = path.relative(this.workspaceRoot, absolutePath);
 			const normalizedPath = relativePath.split(path.sep).join('/');
 
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
-				const relativePath = path.relative(this.workspaceRoot, absolutePath);
-				const normalizedPath = relativePath.split(path.sep).join('/');
-
-				try {
-					const content = await fs.readFile(absolutePath, 'utf-8');
-					snapshots.set(normalizedPath, {
-						existed: true,
-						content,
-					});
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-						snapshots.set(normalizedPath, {
-							existed: false,
-						});
-					} else {
-						throw error;
-					}
-				}
+				const content = await fs.readFile(absolutePath);
+				snapshots.set(normalizedPath, content);
 			} catch (error) {
 				const reason = formatError(error);
+
 				if (!isMissingFile(error)) {
-					skipped.push({path: normalizedPath, reason});
+					skipped.push({
+						path: normalizedPath,
+						reason,
+					});
 				}
-				// Logged either way: a deleted file is not a gap, but it is still
-				// worth seeing in the log when a capture comes out short.
+
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
@@ -99,7 +84,7 @@ export class FileSnapshotService {
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, FileSnapshot>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
 		const errors: string[] = [];
 
 		for (const [relativePath, snapshot] of snapshots) {
@@ -115,20 +100,10 @@ export class FileSnapshotService {
 					);
 				}
 
-				if (!snapshot.existed) {
-					try {
-						await fs.unlink(absolutePath);
-					} catch (error) {
-						if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-							throw error;
-						}
-					}
-					continue;
-				}
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, snapshot.content ?? '', 'utf-8');
+				await fs.writeFile(absolutePath, snapshot);
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -285,13 +260,11 @@ export class FileSnapshotService {
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, FileSnapshot>): number {
+	getSnapshotSize(snapshots: Map<string, Buffer>): number {
 		let totalSize = 0;
 
 		for (const snapshot of snapshots.values()) {
-			if (snapshot.existed && snapshot.content !== undefined) {
-				totalSize += Buffer.byteLength(snapshot.content, 'utf-8');
-			}
+			totalSize += snapshot.length;
 		}
 
 		return totalSize;
@@ -301,7 +274,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, FileSnapshot>,
+		snapshots: Map<string, Buffer>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 

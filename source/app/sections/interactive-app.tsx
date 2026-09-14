@@ -338,7 +338,9 @@ export function InteractiveApp({
 						}}
 						onRevert={() => void appHandlers.handleArchitectRevert()}
 						onRevertAndRevise={() =>
-							void appHandlers.handleArchitectRevertAndRevise()
+							void appHandlers.handleArchitectRevertAndRevise(
+								'Please review the changes you just made, revise them based on the previous result, and try again.',
+							)
 						}
 						onDismiss={() => {
 							appState.setArchitectReviewState(null);

@@ -6,7 +6,6 @@ import {
 	MAX_TIMELINE_SESSION_AGE_MS,
 	MAX_TIMELINE_SESSIONS,
 } from '@/constants';
-import type {FileSnapshot} from '@/types/checkpoint';
 import type {
 	TimelineCaptureInput,
 	TimelineEntryMeta,
@@ -134,15 +133,11 @@ export class TimelineManager {
 		}
 
 		if (existing.length > 0) {
-			const captured = await this.fileSnapshotService.captureFiles(existing);
+			const {snapshots: captured} =
+				await this.fileSnapshotService.captureFiles(existing);
 
 			for (const [relative, snapshot] of captured) {
-				if (!snapshot.existed) {
-					result.set(relative, null);
-					continue;
-				}
-
-				const content = snapshot.content ?? '';
+				const content = snapshot.toString('utf-8');
 
 				if (isProbablyBinary(content)) {
 					logWarning('Skipping binary file in action timeline', true, {
@@ -295,7 +290,7 @@ export class TimelineManager {
 	private async restoreEntry(entry: TimelineIndexEntry): Promise<string[]> {
 		const restored: string[] = [];
 		const created = new Set(entry.createdFiles);
-		const snapshots = new Map<string, FileSnapshot>();
+		const snapshots = new Map<string, Buffer>();
 		const filesDir = this.entryFilesDir(entry.id);
 
 		for (const indexedPath of entry.filesChanged) {
@@ -327,12 +322,9 @@ export class TimelineManager {
 
 			try {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
-				const content = await fs.readFile(filePath, 'utf-8');
+				const content = await fs.readFile(filePath);
 
-				snapshots.set(relativePath, {
-					existed: true,
-					content,
-				});
+				snapshots.set(relativePath, content);
 			} catch (error) {
 				logWarning('Could not load timeline file snapshot', true, {
 					context: {
