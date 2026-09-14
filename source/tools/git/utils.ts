@@ -8,7 +8,7 @@
 import {execSync, spawn} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 import {isAbsolute, join} from 'node:path';
-import {TIMEOUT_GH_METADATA_MS} from '@/constants';
+import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -326,8 +326,11 @@ function execProcess(
 /**
  * Execute a git command and return the output
  */
-export async function execGit(args: string[]): Promise<string> {
-	return execProcess('git', args, 'Git');
+export async function execGit(
+	args: string[],
+	timeoutMs?: number,
+): Promise<string> {
+	return execProcess('git', args, 'Git', timeoutMs);
 }
 
 /**
@@ -485,6 +488,62 @@ export async function getPrNumberForBranch(
  */
 export async function postPrComment(pr: number, body: string): Promise<void> {
 	await execGh(['pr', 'review', pr.toString(), '--comment', '--body', body]);
+}
+
+/**
+ * Push a branch to `origin`. Harness-only (not an agent-facing tool) —
+ * used by the daemon's auto-fix/full-commit flow to publish a fix that was
+ * committed inside an isolated clone (see `ci-fix-worktree.ts`). Pass `cwd`
+ * to run this against that clone rather than the current process's own
+ * directory — the clone has its own independent object database, so the
+ * new commits only exist there, not wherever this function happens to be
+ * called from. Bounded by TIMEOUT_GIT_PUSH_MS since this backs an
+ * unattended background caller that must not hang forever on a stalled
+ * network push.
+ */
+export async function pushBranch(
+	branch: string,
+	opts?: {setUpstream?: boolean; cwd?: string},
+): Promise<void> {
+	const args: string[] = [];
+	if (opts?.cwd) args.push('-C', opts.cwd);
+	args.push('push');
+	if (opts?.setUpstream) args.push('-u');
+	args.push('origin', branch);
+	await execGit(args, TIMEOUT_GIT_PUSH_MS);
+}
+
+/**
+ * Open a draft PR. Harness-only (not an agent-facing tool) — deliberately
+ * NOT a reuse of `git-pr.tsx`'s `create` action, which infers `head` from
+ * `getCurrentBranch()` (the *caller's* current branch). That's wrong here:
+ * the daemon's own cwd is `projectRoot`, not the worktree whose branch is
+ * the actual PR head, so `head` must be passed explicitly. Bounded by
+ * TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function createDraftPr(opts: {
+	title: string;
+	body: string;
+	base: string;
+	head: string;
+}): Promise<string> {
+	const output = await execGh(
+		[
+			'pr',
+			'create',
+			'--title',
+			opts.title,
+			'--base',
+			opts.base,
+			'--head',
+			opts.head,
+			'--draft',
+			'--body',
+			opts.body,
+		],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return output.trim();
 }
 
 /**

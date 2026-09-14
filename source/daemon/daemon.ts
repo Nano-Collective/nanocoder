@@ -182,6 +182,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	const handleCiInvestigationComplete = async (
 		payload: CiJobFailedPayload,
 		subagentOutput: string,
+		fixApplied: boolean,
 	): Promise<void> => {
 		const report = formatCiReport({
 			runId: payload.runId,
@@ -189,6 +190,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			branch: payload.branch,
 			url: payload.url,
 			subagentOutput,
+			fixApplied,
 		});
 		console.log(report);
 		try {
@@ -231,6 +233,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			void handleCiInvestigationComplete(
 				activity.event.payload,
 				activity.result.output,
+				activity.result.fixApplied ?? false,
 			);
 			return;
 		}

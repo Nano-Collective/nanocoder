@@ -853,6 +853,86 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 	t.true(await needsApproval('execute_bash'));
 });
 
+// ============================================================================
+// Phase 4: toolOverride.alwaysAllow bypasses approval for otherwise
+// mode-blind, unconditionally-approval-required tools (e.g. git_commit's
+// `approval: true`, which would otherwise be silently auto-denied in
+// headless mode since no approval-queue handler is ever registered there).
+// ============================================================================
+
+test.serial('needsApprovalForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
+	const toolManager = createMockToolManager({
+		git_commit: {handler: async () => 'committed', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const needsApproval = (alwaysAllow?: string[]) =>
+		(executor as unknown as {
+			needsApprovalForTool: (
+				n: string,
+				a: unknown,
+				alwaysAllow?: string[],
+			) => Promise<boolean>;
+		}).needsApprovalForTool('git_commit', {}, alwaysAllow);
+
+	t.true(
+		await needsApproval(undefined),
+		'without alwaysAllow, git_commit still requires approval even in headless mode',
+	);
+	t.false(
+		await needsApproval(['git_commit']),
+		'alwaysAllow including git_commit bypasses its approval:true policy',
+	);
+	t.true(
+		await needsApproval(['some_other_tool']),
+		'alwaysAllow not including git_commit does not bypass it',
+	);
+});
+
+test.serial('execute(): toolOverride.alwaysAllow lets an approval-required tool run without signalToolApproval', async t => {
+	const commitHandler = async () => 'committed';
+	const toolManager = createMockToolManager({
+		git_commit: {handler: commitHandler, readOnly: false, needsApproval: true},
+	});
+
+	let approvalRequested = false;
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true;
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'tc1', function: {name: 'git_commit', arguments: '{"message":"fix"}'}},
+			],
+		},
+		{content: 'Committed the fix'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Commit a fix'},
+		undefined,
+		0,
+		undefined,
+		{tools: ['git_commit'], alwaysAllow: ['git_commit']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Committed the fix');
+	t.false(
+		approvalRequested,
+		'signalToolApproval should never be reached when alwaysAllow covers the tool',
+	);
+
+	// Restore auto-approve handler for other tests
+	setGlobalToolApprovalHandler(async () => true);
+});
+
 test('without a resolver, approval falls back to the static parentMode', async t => {
 	const toolManager = createMockToolManager({
 		execute_bash: {handler: async () => 'ok', readOnly: false, needsApproval: true},

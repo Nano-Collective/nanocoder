@@ -4,7 +4,13 @@
 
 import test from 'ava';
 import {SubagentLoader} from '@/subagents/subagent-loader';
-import {getAllowedToolNames, isActionAllowed} from './trust';
+import {
+	getAllowedToolNames,
+	getHeadlessAutoApproveToolNames,
+	isActionAllowed,
+	isTrustLevel,
+	resolveTrustLevel,
+} from './trust';
 
 console.log('\ntrust.spec.ts – Trust Levels');
 
@@ -150,20 +156,73 @@ test.serial(
 );
 
 test.serial(
-	"verify-ci-investigator's frontmatter tools match trust.ts's comment-only allowlist",
+	"verify-ci-investigator's frontmatter tools match trust.ts's auto-fix allowlist",
 	async t => {
+		// Unlike verify-pr-review (always comment-only), this subagent runs at
+		// a runtime-resolved trust level (Phase 4: comment-only/auto-fix/
+		// full-commit — see source/daemon/entry.ts and ci-fix-runner.ts, both
+		// of which pass an explicit toolOverride that always wins at runtime).
+		// Its frontmatter is therefore checked against the *widest* level
+		// (auto-fix, identical to full-commit by design) it can ever run at,
+		// so a human reading the file isn't misled into thinking it's
+		// unconditionally read-only.
 		const loader = new SubagentLoader();
 		await loader.initialize();
 		const config = await loader.getSubagent('verify-ci-investigator');
 
 		t.truthy(config, 'verify-ci-investigator subagent should exist');
 		const frontmatterTools = new Set(config?.tools ?? []);
-		const trustTools = new Set(getAllowedToolNames('comment-only'));
+		const trustTools = new Set(getAllowedToolNames('auto-fix'));
 
 		t.deepEqual(
 			frontmatterTools,
 			trustTools,
-			'verify-ci-investigator.md tools: list has drifted from trust.ts comment-only allowlist',
+			'verify-ci-investigator.md tools: list has drifted from trust.ts auto-fix allowlist',
 		);
 	},
 );
+
+// ============================================================================
+// isTrustLevel / getHeadlessAutoApproveToolNames / resolveTrustLevel (Phase 4)
+// ============================================================================
+
+test('isTrustLevel accepts exactly the three known levels', t => {
+	t.true(isTrustLevel('comment-only'));
+	t.true(isTrustLevel('auto-fix'));
+	t.true(isTrustLevel('full-commit'));
+});
+
+test('isTrustLevel rejects anything else', t => {
+	t.false(isTrustLevel('yolo'));
+	t.false(isTrustLevel(''));
+	t.false(isTrustLevel(undefined));
+	t.false(isTrustLevel(null));
+	t.false(isTrustLevel(42));
+});
+
+test('getHeadlessAutoApproveToolNames is empty at comment-only', t => {
+	t.deepEqual(getHeadlessAutoApproveToolNames('comment-only'), []);
+});
+
+test('getHeadlessAutoApproveToolNames includes git_commit at auto-fix and full-commit', t => {
+	t.deepEqual(getHeadlessAutoApproveToolNames('auto-fix'), ['git_commit']);
+	t.deepEqual(getHeadlessAutoApproveToolNames('full-commit'), ['git_commit']);
+});
+
+test('getHeadlessAutoApproveToolNames never includes git_pr at any level', t => {
+	for (const level of ['comment-only', 'auto-fix', 'full-commit'] as const) {
+		t.false(getHeadlessAutoApproveToolNames(level).includes('git_pr'));
+	}
+});
+
+test('resolveTrustLevel: CLI flag wins when given', t => {
+	t.is(resolveTrustLevel('full-commit', 'auto-fix'), 'full-commit');
+});
+
+test('resolveTrustLevel: config value used when no flag given', t => {
+	t.is(resolveTrustLevel(undefined, 'auto-fix'), 'auto-fix');
+});
+
+test('resolveTrustLevel: defaults to comment-only when neither is given', t => {
+	t.is(resolveTrustLevel(undefined, undefined), 'comment-only');
+});

@@ -28,9 +28,11 @@ import type {
 	ProviderConfig,
 	SystemPromptConfig,
 	TuneConfig,
+	VerifyConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {isTrustLevel} from '@/verify/trust';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -493,9 +495,46 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
-// Load CI-watch configuration from preferences
+// Load project-level verify policy (trust level, poll cadence overrides)
+// from agents.config.json. Unlike ciWatch.enabled (a personal, per-machine
+// opt-in kept in preferences), trust level and cadence are security/policy
+// decisions appropriate to commit and review with the rest of the project.
+function loadVerifyConfig(): VerifyConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'verify', config => {
+			const verify = config.nanocoder?.verify;
+			if (!verify || typeof verify !== 'object') return null;
+			const result: VerifyConfig = {};
+			if (isTrustLevel(verify.trustLevel)) {
+				result.trustLevel = verify.trustLevel;
+			}
+			if (typeof verify.pollIntervalMs === 'number') {
+				result.pollIntervalMs = verify.pollIntervalMs;
+			}
+			if (typeof verify.maxPollIntervalMs === 'number') {
+				result.maxPollIntervalMs = verify.maxPollIntervalMs;
+			}
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
+// Load CI-watch configuration: `enabled` always comes from preferences (a
+// personal opt-in); `pollIntervalMs`/`maxPollIntervalMs` prefer the
+// project-level `verify` overrides from agents.config.json when set, since
+// poll cadence is more appropriately a reviewable project policy.
 function loadCiWatchConfig(): CiWatchConfig | undefined {
-	return getCiWatchPreference();
+	const preferencesValue = getCiWatchPreference();
+	const projectOverrides = loadVerifyConfig();
+	if (!preferencesValue && !projectOverrides) return undefined;
+	return {
+		enabled: preferencesValue?.enabled ?? false,
+		pollIntervalMs:
+			projectOverrides?.pollIntervalMs ?? preferencesValue?.pollIntervalMs,
+		maxPollIntervalMs:
+			projectOverrides?.maxPollIntervalMs ??
+			preferencesValue?.maxPollIntervalMs,
+	};
 }
 
 export function loadDefaultMode(): CliMode | undefined {
@@ -548,6 +587,9 @@ function loadAppConfig(): AppConfig {
 
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
+	// Load project-level verify policy (must load before ciWatch, which
+	// layers its poll-cadence overrides on top of the preferences value)
+	const verify = loadVerifyConfig();
 	// Load CI-watch configuration
 	const ciWatch = loadCiWatchConfig();
 
@@ -569,6 +611,7 @@ function loadAppConfig(): AppConfig {
 		systemPrompt,
 		notifications,
 		ciWatch,
+		verify,
 		modeProviders,
 		tune,
 	};

@@ -27,12 +27,13 @@ const stubBuildExecutor = () => ({
 	}),
 });
 
-function successBuildExecutor(output: string) {
+function successBuildExecutor(output: string, fixApplied = false) {
 	return () => ({
 		execute: async (_task: SubagentTask): Promise<SubagentResult> => ({
 			subagentName: 'stub',
 			output,
 			success: true,
+			fixApplied,
 			executionTimeMs: 0,
 		}),
 	});
@@ -246,6 +247,36 @@ test.serial('posts the CI investigation to the PR when one exists for the branch
 			t.is(postCalls.length, 1);
 			t.is(postCalls[0]?.[0], 42);
 			t.true(postCalls[0]?.[1].includes('diagnosis text'));
+		} finally {
+			await handle.stop();
+		}
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('posted report says a fix was applied when the SubagentResult says so', async t => {
+	const root = await tempProject();
+	const ciFactory = detectingCiEventSourceFactory(CI_PAYLOAD);
+	const postCalls: Array<[number, string]> = [];
+	try {
+		const handle = await startDaemon({
+			projectRoot: root,
+			buildExecutor: successBuildExecutor('Opened draft PR: https://x/pull/1', true),
+			ciWatch: {enabled: true},
+			ciEventSourceFactory: ciFactory.factory,
+			isGhAvailableFn: () => true,
+			fileWatcherFactory: noopFileWatcherFactory(),
+			getPrNumberForBranchFn: async () => 42,
+			postPrCommentFn: async (pr, body) => {
+				postCalls.push([pr, body]);
+			},
+		});
+		try {
+			await flush();
+			t.is(postCalls.length, 1);
+			t.false(postCalls[0]?.[1].includes('no auto-fix applied'));
+			t.true(postCalls[0]?.[1].includes('a fix was implemented, committed, and published'));
 		} finally {
 			await handle.stop();
 		}

@@ -65,6 +65,12 @@ export interface SubagentResult {
 	tokensUsed?: number;
 	/** Execution time in milliseconds */
 	executionTimeMs: number;
+	/** Set by `ci-fix-orchestrator.ts` when a CI-fix run actually committed
+	 * and published a fix (auto-fix's draft PR, or full-commit's direct
+	 * push) — lets a caller distinguish "a fix was applied" from "just a
+	 * diagnosis" without string-sniffing `output`. Undefined/false for every
+	 * other kind of subagent run. */
+	fixApplied?: boolean;
 }
 
 /**

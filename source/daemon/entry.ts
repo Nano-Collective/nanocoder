@@ -13,6 +13,7 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
@@ -22,29 +23,35 @@ import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
-import {getAllowedToolNames} from '@/verify/trust';
+import {
+	getAllowedToolNames,
+	getHeadlessAutoApproveToolNames,
+	isTrustLevel,
+} from '@/verify/trust';
 import {startDaemon} from './daemon';
 
-// Built-in, daemon-triggered subagents that must be pinned to a trust-level
-// tool allowlist at execution time rather than trusting their frontmatter
-// `tools:` list alone — see `source/verify/trust.ts`. Mirrors the same
-// `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`: name-level
-// only, so it doesn't stop `git_pr`'s comment/review/create argument shapes
-// on its own. What actually blocks those calls today is that this
-// `buildExecutor` never registers a tool-approval-queue handler, so any
-// `git_pr` call requiring confirmation is auto-denied by
-// `signalToolApproval()`'s default — a property of headless mode, not of
-// this list. If a future change ever registers an approval handler here,
-// this override alone would no longer be sufficient.
-// `resolveToolApproval`'s first check (`ctx.alwaysAllow`) would also bypass
-// approval, but is equally unreachable here: `SubagentExecutor`'s own
-// `needsApprovalForTool` builds that context as just `{mode:
-// this.currentMode()}`, never populating `alwaysAllow`.
-const TRUST_OVERRIDDEN_SUBAGENTS: Record<
-	string,
-	ReturnType<typeof getAllowedToolNames>
-> = {
-	'verify-ci-investigator': getAllowedToolNames('comment-only'),
+// The daemon's own `verify-ci-investigator` subagent must be pinned to a
+// trust-level tool allowlist at execution time rather than trusting its
+// frontmatter `tools:` list alone — see `source/verify/trust.ts`. Mirrors
+// the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`:
+// name-level only, so it doesn't stop `git_pr`'s comment/review/create
+// argument shapes on its own. What actually blocks those calls at
+// `comment-only` is that this `buildExecutor` never registers a
+// tool-approval-queue handler, so any `git_pr` call requiring confirmation
+// is auto-denied by `signalToolApproval()`'s default — a property of
+// headless mode, not of this list. `resolveToolApproval`'s first check
+// (`ctx.alwaysAllow`) would also bypass approval; at `auto-fix`/
+// `full-commit` it's deliberately populated with `git_commit` (see
+// `getHeadlessAutoApproveToolNames`) but never `git_pr` — GitHub-mutating
+// calls stay harness-mediated (`ci-fix-orchestrator.ts`'s push/PR step)
+// even at the most-trusted level.
+const trustLevel = isTrustLevel(process.env.NANOCODER_CI_TRUST_LEVEL)
+	? process.env.NANOCODER_CI_TRUST_LEVEL
+	: 'comment-only';
+
+const ciInvestigatorOverride = {
+	tools: getAllowedToolNames(trustLevel),
+	alwaysAllow: getHeadlessAutoApproveToolNames(trustLevel),
 };
 
 async function main(): Promise<void> {
@@ -94,13 +101,18 @@ async function main(): Promise<void> {
 		);
 		return {
 			execute: (task: SubagentTask): Promise<SubagentResult> => {
-				const tools = TRUST_OVERRIDDEN_SUBAGENTS[task.subagent_type];
+				if (task.subagent_type !== 'verify-ci-investigator') {
+					return executor.execute(task);
+				}
+				if (trustLevel !== 'comment-only') {
+					return runCiAutoFixFlow(task, trustLevel, projectRoot);
+				}
 				return executor.execute(
 					task,
 					undefined,
 					0,
 					undefined,
-					tools ? {tools} : undefined,
+					ciInvestigatorOverride,
 				);
 			},
 		};
