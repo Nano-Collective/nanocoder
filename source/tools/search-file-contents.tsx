@@ -13,7 +13,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
-import {isValidFilePath} from '@/utils/path-validation';
+import {isPathInside, isValidFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -54,7 +54,7 @@ const executeSearchFileContents = async (
 			return `Error: Invalid path "${args.path}"`;
 		}
 		searchPath = path.resolve(cwd, args.path);
-		if (searchPath !== root && !searchPath.startsWith(root + path.sep)) {
+		if (!isPathInside(searchPath, root)) {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}

@@ -1,6 +1,6 @@
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, parse as parsePath} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -1952,6 +1952,33 @@ test.serial(
 			resetSessionCwd();
 			rmSync(root, {recursive: true, force: true});
 			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents accepts an absolute path when the project root is a filesystem root',
+	async t => {
+		// Containers mount the workspace at `/`, so the project root is `/` (or a
+		// drive root on Windows). The containment prefix must not become `//`. See #1240.
+		const root = parsePath(process.cwd()).root;
+		const dir = mkdtempSync(join(tmpdir(), 'nc-fsroot-'));
+		try {
+			writeFileSync(join(dir, 'found.txt'), 'fsroot_needle here');
+			setProjectRoot(root);
+			setSessionCwd(dir);
+			const result = await searchFileContentsTool.tool.execute!(
+				{query: 'fsroot_needle', path: dir, maxResults: 30},
+				{toolCallId: 'test', messages: []},
+			);
+			t.false(
+				result.includes('escapes project directory'),
+				'a path under the filesystem root is contained',
+			);
+			t.true(result.includes('found.txt'), 'searches the requested path');
+		} finally {
+			resetSessionCwd();
+			rmSync(dir, {recursive: true, force: true});
 		}
 	},
 );
