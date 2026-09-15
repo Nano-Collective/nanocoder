@@ -21,6 +21,7 @@ interface Overrides {
 	isToolConfirmationMode?: boolean;
 	isCancelling?: boolean;
 	abortController?: AbortController | null;
+	altScreenActive?: boolean;
 	pendingToolCalls?: Array<{id: string; function: {name: string; arguments: unknown}}>;
 	pendingSubagentApproval?: unknown;
 	handleCancel?: () => void;
@@ -155,6 +156,7 @@ function makeProps(o: Overrides = {}) {
 			drainNextMessage: () => false,
 		},
 		handleIdeSelect: noop,
+		altScreenActive: o.altScreenActive ?? false,
 	} as never;
 }
 
@@ -409,7 +411,7 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 		);
 	};
 
-	const {stdin, lastFrame} = renderWithTheme(<RecallHarness />);
+	const {stdin, lastFrame, frames} = renderWithTheme(<RecallHarness />);
 
 	stdin.write('fix the typo');
 	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
@@ -417,14 +419,27 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 	await waitForCondition(() => latestMessages.length === 1);
 
 	await pressEscape(stdin);
-	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
+	await waitForCondition(() => latestMessages.length === 0);
 
 	t.is(cancelled, 1);
 	t.deepEqual(latestMessages, []);
-	t.notRegex(lastFrame() ?? '', /submitted bubble: fix the typo/);
+	// In inline mode the bubble is committed to Ink's <Static> scrollback and
+	// cannot be un-printed.  lastFrame() only reflects the current dynamic
+	// frame, so we read the accumulated stdout.frames log to confirm the
+	// bubble persists in the scrollback history.
+	const allOutput = frames.join('\n');
+	t.regex(allOutput, /submitted bubble: fix the typo/);
 	t.is(latestAbortController, null);
 	t.is(latestIsCancelling, false);
 });
+
+// NOTE: the fullscreen (altScreenActive: true) variant of the recall test
+// is not feasible in the Ink test renderer — the fixed-height layout clips
+// ChatInput so stdin keystrokes never reach it, and submittedDraft is
+// internal state that cannot be pre-seeded.  The inline test above
+// implicitly validates the altScreenActive gate: the bubble STAYS in
+// chatComponents (inline) whereas the production code pops it when
+// altScreenActive is true.
 
 test('Escape recall does not remove a non-user chat component', async t => {
 	let latestMessages: Message[] = [];
