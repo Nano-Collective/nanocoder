@@ -87,24 +87,27 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	else process.env.NCT_FOO = prev;
 });
 
-test('shellArgs uses /d /v:off /c for cmd.exe and -c for posix shells', t => {
+test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells', t => {
 	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
 		'/d',
 		'/v:off',
+		'/s',
 		'/c',
-		'echo hi',
+		'"echo hi"',
 	]);
 	t.deepEqual(shellArgs('cmd', 'echo hi'), [
 		'/d',
 		'/v:off',
+		'/s',
 		'/c',
-		'echo hi',
+		'"echo hi"',
 	]);
 	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
 		'/d',
 		'/v:off',
+		'/s',
 		'/c',
-		'echo hi',
+		'"echo hi"',
 	]);
 	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
 	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
@@ -123,7 +126,7 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 		shell: bin,
 		timeoutMs: 5_000,
 	});
-	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/c\necho hi');
+	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/s\n/c\n"echo hi"');
 });
 
 const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
