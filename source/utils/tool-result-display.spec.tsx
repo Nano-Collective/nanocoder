@@ -674,6 +674,35 @@ test('LiveCompactCounts - renders hammer icon for each entry', t => {
 	unmount();
 });
 
+const distinctToolCounts = (toolCount: number) =>
+	Object.fromEntries(
+		Array.from({length: toolCount}, (_, i) => [`mcp_tool_${i + 1}`, 1]),
+	);
+
+test('LiveCompactCounts - caps rows at 5 with a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(8)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /mcp_tool_6/);
+	t.regex(output, /\+3 more/);
+	t.is(output.trim().split('\n').length, 6);
+	unmount();
+});
+
+test('LiveCompactCounts - shows exactly 5 tools without a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(5)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /more/);
+	unmount();
+});
+
 // ============================================================================
 // Compact Description Mapping Tests (via displayToolResult compact mode)
 // ============================================================================
