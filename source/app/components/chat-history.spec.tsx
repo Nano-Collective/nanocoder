@@ -206,7 +206,6 @@ test('clearKey prop is accepted and does not change output for equal transcripts
 	b.unmount();
 });
 
-<<<<<<< HEAD
 test('fullscreen mode shows welcome banner before first prompt', t => {
 	const props = createDefaultProps({
 		fullscreen: true,
