@@ -235,6 +235,22 @@ test('hasCommandFailed: exit code takes precedence over success messages', t => 
 	t.true(hasCommandFailed(output));
 });
 
+test('hasCommandFailed: does not false positive on "0 failed" summary with exit code 0', t => {
+	// A package manager can exit 0 and print a benign summary containing "failed"
+	const output = 'EXIT_CODE: 0\nadded 1 package, removed 2 packages, 0 failed';
+	t.false(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: does not false positive on "0 cannot" with exit code 0', t => {
+	const output = 'EXIT_CODE: 0\n0 cannot be updated';
+	t.false(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with a real "error:" line is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nerror: update failed';
+	t.true(hasCommandFailed(output));
+});
+
 // Homebrew error handling
 test('updateCommand: detects homebrew "not found" error', t => {
 	const output =
