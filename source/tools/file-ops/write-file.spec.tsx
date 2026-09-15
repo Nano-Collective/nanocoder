@@ -893,6 +893,104 @@ test('write_file formatter: handles object content (regression test)', async t =
 	t.regex(plainOutput, /"test_id":1/);
 });
 
+// ============================================================================
+// Diff Display Tests (overwriting an existing file shows a real diff)
+// ============================================================================
+
+test('write_file formatter: shows a diff against previous content when overwriting an existing file', async t => {
+	const filePath = await createTestFile(
+		'diff-preview.txt',
+		'line one\nline two\nline three\n',
+	);
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: 'line one\nCHANGED\nline three\n',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /Diff:\s*\+1\s*-1/);
+	t.regex(output, /CHANGED/);
+	t.regex(output, /line two/); // removed line is still shown, not just the new content
+	t.regex(output, /line one/); // unchanged context is still shown
+	t.false(output.includes('File content:'));
+});
+
+test('write_file formatter: still dumps full content for a brand-new file', async t => {
+	const filePath = join(testDir, 'diff-new.txt');
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: 'hello\nworld\n',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /File content:/);
+	t.false(output.includes('Diff:'));
+});
+
+test('write_file formatter: shows a diff in the post-execution result render even without a preview render (auto-accept/yolo)', async t => {
+	const filePath = await createTestFile('diff-result.txt', 'alpha\nbeta\n');
+
+	// Simulate auto-accept/yolo mode, where the tool executes directly without
+	// the confirmation UI ever calling the preview-phase formatter first.
+	const result = await executeWriteFile({
+		path: filePath,
+		content: 'alpha\ngamma\n',
+	});
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter(
+		{path: filePath, content: 'alpha\ngamma\n'},
+		result,
+	);
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /Diff:\s*\+1\s*-1/);
+	t.regex(output, /gamma/);
+	t.regex(output, /beta/);
+});
+
+test('write_file formatter: falls back to a full dump when new content equals the previous content', async t => {
+	const filePath = await createTestFile('diff-nochange.txt', 'same\ncontent\n');
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: 'same\ncontent\n',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /File content:/);
+	t.false(output.includes('Diff:'));
+});
+
 test('write_file formatter: caps a long file at 20 lines', async t => {
 	const formatter = writeFileTool.formatter;
 	if (!formatter) {
@@ -911,5 +1009,29 @@ test('write_file formatter: caps a long file at 20 lines', async t => {
 	t.regex(output, /line 20/);
 	t.notRegex(output, /line 21/);
 	t.regex(output, /\+10 more lines/);
+});
+
+test('write_file formatter: caps a long diff at 20 lines', async t => {
+	const oldContent = Array.from({length: 30}, (_, i) => `old ${i + 1}`).join(
+		'\n',
+	);
+	const filePath = await createTestFile('diff-long.txt', oldContent);
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: Array.from({length: 30}, (_, i) => `new ${i + 1}`).join('\n'),
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /Diff:\s*\+30\s*-30/);
+	t.regex(output, /\+40 more lines/);
+	t.notRegex(output, /new 30/);
 });
 

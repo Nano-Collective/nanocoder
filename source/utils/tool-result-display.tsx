@@ -95,6 +95,10 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 	}
 }
 
+// The live summary sits in the non-shrinking footer, so a turn that uses many
+// distinct tools (e.g. several MCP servers) must not push the input off screen.
+const MAX_LIVE_COMPACT_ROWS = 5;
+
 /**
  * Live display component for running compact tool counts.
  * Shows accumulated counts during execution (e.g. "⚒ Read 7 files").
@@ -102,13 +106,18 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
  */
 export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
 	const {colors} = useTheme();
+	const entries = Object.entries(counts);
+	const hiddenCount = entries.length - MAX_LIVE_COMPACT_ROWS;
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			{Object.entries(counts).map(([toolName, count]) => (
+			{entries.slice(0, MAX_LIVE_COMPACT_ROWS).map(([toolName, count]) => (
 				<Text key={toolName} color={colors.tool}>
 					{'\u2692'} {getGroupedCompactDescription(toolName, count)}
 				</Text>
 			))}
+			{hiddenCount > 0 && (
+				<Text color={colors.secondary}>+{hiddenCount} more</Text>
+			)}
 		</Box>
 	);
 }

@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url);
 type DiffChange = {value: string; added?: boolean; removed?: boolean};
 type DiffModule = {
 	diffWordsWithSpace: (oldText: string, newText: string) => DiffChange[];
+	diffLines: (oldText: string, newText: string) => DiffChange[];
 };
 let diffLib: DiffModule | null = null;
 function loadDiffLib(): DiffModule {
@@ -22,6 +23,50 @@ function loadDiffLib(): DiffModule {
 		diffLib = require('diff') as DiffModule;
 	}
 	return diffLib;
+}
+
+export type LineDiffEntry =
+	| {type: 'unchanged'; text: string; oldLine: number; newLine: number}
+	| {type: 'added'; text: string; newLine: number}
+	| {type: 'removed'; text: string; oldLine: number};
+
+/**
+ * Compute a line-level diff between two full texts, tracking each line's
+ * position in the original and/or updated file (unlike computeInlineDiff,
+ * which assumes both inputs are already the same known region).
+ */
+export function computeLineDiff(
+	oldText: string,
+	newText: string,
+): LineDiffEntry[] {
+	const {diffLines} = loadDiffLib();
+	const changes = diffLines(oldText, newText);
+	const entries: LineDiffEntry[] = [];
+	let oldLine = 0;
+	let newLine = 0;
+
+	for (const change of changes) {
+		const lines = change.value.split('\n');
+		if (lines.length > 0 && lines[lines.length - 1] === '') {
+			lines.pop();
+		}
+
+		for (const line of lines) {
+			if (change.added) {
+				newLine++;
+				entries.push({type: 'added', text: line, newLine});
+			} else if (change.removed) {
+				oldLine++;
+				entries.push({type: 'removed', text: line, oldLine});
+			} else {
+				oldLine++;
+				newLine++;
+				entries.push({type: 'unchanged', text: line, oldLine, newLine});
+			}
+		}
+	}
+
+	return entries;
 }
 
 /**
