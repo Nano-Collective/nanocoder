@@ -168,7 +168,7 @@ test('empty-results state shows message', t => {
 	stdin.write('zzzzz');
 	return new Promise<void>(resolve => {
 		setTimeout(() => {
-			t.regex(lastFrame()!, /No models matching "zzzzz"/);
+			t.regex(lastFrame()!, /No matches for "zzzzz"/);
 			unmount();
 			resolve();
 		}, 50);

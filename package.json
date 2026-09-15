@@ -166,7 +166,12 @@
 	"c8": {
 		"exclude": [
 			"source/app/App.tsx",
+			"source/cli.tsx",
 			"source/web/page.ts"
+		],
+		"include": [
+			"source/**/*.ts",
+			"source/**/*.tsx"
 		],
 		"reporter": [
 			"text",

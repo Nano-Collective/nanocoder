@@ -1,6 +1,8 @@
 import {type ChildProcess, spawn} from 'node:child_process';
+import {isAbsolute, relative} from 'node:path';
 
 import {getAppConfig} from '@/config/index';
+import {matchGlob} from '@/events/event-router';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -208,13 +210,57 @@ function hookLabel(hook: HookDefinition): string {
 }
 
 /**
+ * Whether a hook is in scope for the moment that fired.
+ *
  * A tool-scoped hook with no `matchTools` applies to every tool; otherwise the
- * tool name must be listed. Non-tool events ignore `matchTools` entirely.
+ * tool name must be listed. `matchPaths` then narrows by the file the tool
+ * acted on. Non-tool events have neither a tool nor a file, so both filters are
+ * ignored there — matching how `matchTools` has always behaved.
+ *
+ * The asymmetry between the two is deliberate: a missing `matchTools` widens
+ * to every tool, but a `matchPaths` that cannot be evaluated *excludes*. A hook
+ * scoped to `**\/*.ts` is asking a question about files, so firing it for
+ * `execute_bash` — which has no file — would be the wrong answer, not a
+ * permissive one.
  */
-function appliesTo(hook: HookDefinition, toolName?: string): boolean {
-	if (!hook.matchTools) return true;
-	if (!toolName) return true;
-	return hook.matchTools.includes(toolName);
+function appliesTo(hook: HookDefinition, context: HookContext): boolean {
+	const {toolName} = context;
+	if (hook.matchTools && toolName && !hook.matchTools.includes(toolName)) {
+		return false;
+	}
+
+	// Non-tool event: no file exists to match, so path scoping does not apply.
+	if (!hook.matchPaths || !toolName) return true;
+
+	const filePath = resolveFilePath(context.toolArgs);
+	if (!filePath) return false;
+
+	return matchesAnyPath(hook.matchPaths, filePath);
+}
+
+/**
+ * Match a tool's file argument against a hook's globs.
+ *
+ * The model supplies the path and may write it either way, so an absolute path
+ * is also tried relative to the project root. Without that, a root-anchored
+ * pattern like `src/**` would fire or not depending on whether the model
+ * happened to emit `src/a.ts` or `/home/me/proj/src/a.ts` — the same edit
+ * either way. Patterns that lead with `**\/` already match both forms.
+ */
+function matchesAnyPath(patterns: string[], filePath: string): boolean {
+	const candidates = [filePath];
+	if (isAbsolute(filePath)) {
+		const relativePath = relative(getProjectRoot(), filePath);
+		// Skip a path that escapes the root: `../` segments cannot usefully be
+		// matched against project-relative globs.
+		if (relativePath && !relativePath.startsWith('..')) {
+			candidates.push(relativePath);
+		}
+	}
+
+	return patterns.some(pattern =>
+		candidates.some(candidate => matchGlob(pattern, candidate)),
+	);
 }
 
 /**
@@ -434,7 +480,7 @@ export async function runLifecycleHooks(
 	context: HookContext = {},
 ): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
-		appliesTo(hook, context.toolName),
+		appliesTo(hook, context),
 	);
 	if (hooks.length === 0) return {blocked: false, output: ''};
 
