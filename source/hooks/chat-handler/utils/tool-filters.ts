@@ -47,13 +47,28 @@ const partitionToolCalls = (
 			continue;
 		}
 
+		const isXmlValidationError =
+			toolCall.function.name === XML_VALIDATION_ERROR_TOOL;
 		const isUnknown =
-			toolCall.function.name === XML_VALIDATION_ERROR_TOOL ||
+			isXmlValidationError ||
 			(!!toolManager && !toolManager.hasTool(toolCall.function.name));
 
 		if (isUnknown) {
 			unknownToolCalls.push(toolCall);
-			errorResults.push(describeUnknown(toolCall));
+			if (
+				isXmlValidationError &&
+				typeof toolCall.function.arguments?.error === 'string'
+			) {
+				errorResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool' as const,
+					name: toolCall.function.name,
+					content: toolCall.function.arguments.error,
+					isError: true,
+				});
+			} else {
+				errorResults.push(describeUnknown(toolCall));
+			}
 			continue;
 		}
 

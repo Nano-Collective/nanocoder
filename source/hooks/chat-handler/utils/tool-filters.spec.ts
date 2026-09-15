@@ -174,6 +174,30 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 	);
 });
 
+test('partitionUnknownToolCalls - uses the parser error message for XML validation errors', t => {
+	const {validToolCalls, unknownToolCalls, errorResults} =
+		partitionUnknownToolCalls(
+			[
+				{id: 'call_1', function: {name: 'known_tool', arguments: {}}},
+				{id: 'call_2', function: {name: '__xml_validation_error__', arguments: {error: 'XML tool call syntax error: unclosed tag'}}},
+			],
+			managerWith(['known_tool']),
+		);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(
+		unknownToolCalls.map(c => c.id),
+		['call_2'],
+	);
+	t.deepEqual(
+		errorResults.map(r => r.content),
+		['XML tool call syntax error: unclosed tag'],
+	);
+});
+
 test('buildAbandonedTurnMessages - every emitted call has a matching result', t => {
 	// The invariant: a result whose tool_call is missing from the assistant
 	// message is orphaned and pruned before the request goes out.

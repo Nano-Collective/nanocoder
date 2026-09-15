@@ -53,12 +53,6 @@ export async function processToolUse(
 	toolCall: ToolCall,
 	options?: ToolExecutionContext,
 ): Promise<ToolResult> {
-	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
-	if (toolCall.function.name === '__xml_validation_error__') {
-		const args = toolCall.function.arguments as {error: string};
-		throw new Error(args.error);
-	}
-
 	if (!toolRegistryGetter) {
 		throw new Error('Tool registry not initialized');
 	}

@@ -88,31 +88,6 @@ test('getToolManager - returns tool manager from getter', t => {
 	t.is(result, mockManager);
 });
 
-// Test processToolUse - XML validation errors
-test('processToolUse - throws on __xml_validation_error__', async t => {
-	setToolRegistryGetter(createMockToolRegistry({}));
-
-	const toolCall = createMockToolCall('__xml_validation_error__', {
-		error: 'Invalid XML format',
-	});
-
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Invalid XML format',
-	});
-});
-
-test('processToolUse - throws on __xml_validation_error__ with custom message', async t => {
-	setToolRegistryGetter(createMockToolRegistry({}));
-
-	const toolCall = createMockToolCall('__xml_validation_error__', {
-		error: 'Missing closing tag',
-	});
-
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Missing closing tag',
-	});
-});
-
 // Note: Testing uninitialized registry state is not feasible without module-level access
 // The setToolRegistryGetter must be called before processToolUse, which is enforced by the
 // application architecture. The beforeEach hook ensures proper initialization for all tests.
