@@ -17,6 +17,7 @@ import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
+	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
 import type {
@@ -379,6 +380,7 @@ export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
 	maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
 	maxEmptyTurns: MAX_EMPTY_TURNS,
 	maxMalformedRetries: MAX_MALFORMED_RETRIES,
+	maxTruncatedTurns: MAX_TRUNCATED_TURNS,
 };
 
 function loadRetryLimitsConfig(): RetryLimitsConfig {
@@ -422,6 +424,11 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 						retries.maxMalformedRetries,
 						0,
 						defaults.maxMalformedRetries,
+					),
+					maxTruncatedTurns: normalizeLimit(
+						retries.maxTruncatedTurns,
+						0,
+						defaults.maxTruncatedTurns,
 					),
 				};
 			}
@@ -841,6 +848,7 @@ export function getRetryLimits(): RetryLimitsConfig {
 			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
 		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
 		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+		maxTruncatedTurns: retries?.maxTruncatedTurns ?? MAX_TRUNCATED_TURNS,
 	};
 }
 

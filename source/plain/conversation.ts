@@ -105,6 +105,18 @@ const FINAL_TURN_INSTRUCTION =
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
 
+// Sent after a turn the provider truncated at its output-token limit. The
+// partial reply is already in the history above this, so the model can see
+// where it was cut off. The explicit steer away from re-explaining exists
+// because the commonest way to spend a whole output budget without finishing
+// is narrating analysis that was only ever meant to end in a tool call.
+const TRUNCATED_TURN_INSTRUCTION =
+	'Your previous reply was cut off at the output-token limit before it ' +
+	'finished. Continue from exactly where it stopped. Do not repeat or ' +
+	'summarise what you already wrote, and keep any remaining explanation ' +
+	'brief. If the task requires a tool call to be complete, make that call ' +
+	'now rather than describing what it would do.';
+
 /**
  * Headless conversation loop. Streams assistant text to stdout, runs tools
  * via processToolUse, and recurses until the model produces a content-only
@@ -210,13 +222,18 @@ async function runPlainConversationBody(
 	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
 	// interactive loop applies. There is nobody to ask in a plain run, so
 	// hitting any of them hard-stops with a clear error instead of pausing.
-	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
-		getRetryLimits();
+	const {
+		maxRepeatedToolCalls,
+		maxEmptyTurns,
+		maxMalformedRetries,
+		maxTruncatedTurns,
+	} = getRetryLimits();
 
 	// Consecutive-failure streaks. Each kind of failing turn increments its own
 	// counter and resets the others; any healthy turn resets all of them.
 	let emptyTurnCount = 0;
 	let malformedRetryCount = 0;
+	let truncatedTurnCount = 0;
 	let lastToolSignature = '';
 	let repeatedToolCallCount = 0;
 
@@ -580,6 +597,51 @@ async function runPlainConversationBody(
 				];
 				continue;
 			}
+			// A turn the provider cut off at its output-token limit is a fragment,
+			// not an answer — but it arrives with no tool calls, which is exactly
+			// what a finished turn looks like from here. Without this check the
+			// loop returns `success` carrying half a sentence, and a run whose
+			// whole deliverable was a tool call (write the file, open the PR)
+			// reports that it completed having produced nothing at all.
+			//
+			// Nudge rather than error: the model has the context it needs and its
+			// own truncated prose is still in `messages`, so asking it to carry on
+			// usually recovers the turn — and when the task was "call this tool",
+			// being told the budget is spent is what gets it to stop narrating and
+			// make the call. Capped like the other retry limits so a model that
+			// truncates every time cannot spin to maxTurns.
+			//
+			// Skipped on the final turn, which has already stripped tools and
+			// asked for a wrap-up: there is no turn left to continue into, so
+			// returning the fragment beats burning the last one.
+			if (result.finishReason === 'length' && !finalTurn) {
+				if (truncatedTurnCount < maxTruncatedTurns) {
+					truncatedTurnCount += 1;
+					emptyTurnCount = 0;
+					malformedRetryCount = 0;
+					lastToolSignature = '';
+					repeatedToolCallCount = 0;
+					if (!isJson) {
+						writeStatus(
+							`response truncated at the output limit — continuing ${truncatedTurnCount}/${maxTruncatedTurns}`,
+						);
+					}
+					// The truncated reply is already in `messages` — the
+					// hasAssistantPayload append above ran for it, since we only
+					// get here with non-empty content. Only the nudge is needed.
+					messages = [
+						...messages,
+						{role: 'user', content: TRUNCATED_TURN_INSTRUCTION},
+					];
+					continue;
+				}
+				if (!isJson) {
+					writeStatus(
+						`response truncated at the output limit after ${maxTruncatedTurns} continuation${maxTruncatedTurns === 1 ? '' : 's'} — stopping`,
+					);
+				}
+			}
+
 			// Only nudge when the walkthrough will actually outlive the run.
 			// `nanocoder --plain` deletes its ephemeral artifact directory on
 			// exit and reports nothing about the walkthrough, so forcing one

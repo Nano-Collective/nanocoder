@@ -67,6 +67,7 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		trustDirectory: args.includes('--trust-directory'),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -186,6 +187,8 @@ Commands:
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start refuses to run in an untrusted directory; pass
+                                  --trust-directory to bypass the check for this run only.
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
@@ -205,7 +208,8 @@ Options:
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
                       Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Only valid with the "run" command. Does not modify the preferences file.
+                      Valid with the "run" command and "daemon start". Does not modify
+                      the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
