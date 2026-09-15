@@ -656,6 +656,9 @@
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},
+				"maxOutputTokens": {
+					"type": "number"
+				},
 				"maxRetries": {
 					"type": "number"
 				},

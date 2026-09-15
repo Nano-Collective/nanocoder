@@ -206,6 +206,20 @@ export async function handleChat(
 				modeOverrides?.modelParameters,
 			);
 
+			// Resolved out here, not inside the `modelParameters` spread below,
+			// because that spread is skipped entirely when nothing has been tuned
+			// — which is every headless and CI run, exactly the ones that need a
+			// working ceiling. `/tune` wins when set; the provider entry is the
+			// baseline.
+			//
+			// ModelParameters keeps the user-facing name `maxTokens`: it is
+			// persisted in tune preferences, so renaming it would silently drop
+			// what existing users have configured. The AI SDK name is applied at
+			// this boundary instead.
+			const resolvedMaxOutputTokens =
+				modeOverrides?.modelParameters?.maxTokens ??
+				providerConfig.maxOutputTokens;
+
 			const result = streamText({
 				model,
 				...(finalSystemContent && !promptCaching
@@ -248,12 +262,21 @@ export async function handleChat(
 				// buildProviderOptions are all JSON-serialisable, but TypeScript
 				// can't infer that through our looser internal shape.
 				providerOptions: providerOptions as SDKProviderOptions,
+				// The AI SDK calls this `maxOutputTokens`. It was previously sent
+				// as `maxTokens`, the v4 name, which v5+ does not read — and
+				// because object spreads bypass excess-property checking it was
+				// dropped silently rather than failing to compile, so every run
+				// fell back to whatever ceiling the provider inferred from the
+				// model id. Keep the key spelled the way the installed SDK spells
+				// it.
+				...(resolvedMaxOutputTokens != null && {
+					maxOutputTokens: resolvedMaxOutputTokens,
+				}),
 				// Model parameters from /tune — passed directly to AI SDK
 				...(modeOverrides?.modelParameters && {
 					temperature: modeOverrides.modelParameters.temperature,
 					topP: modeOverrides.modelParameters.topP,
 					topK: modeOverrides.modelParameters.topK,
-					maxTokens: modeOverrides.modelParameters.maxTokens,
 					frequencyPenalty: modeOverrides.modelParameters.frequencyPenalty,
 					presencePenalty: modeOverrides.modelParameters.presencePenalty,
 					...(modeOverrides.modelParameters.stop && {
