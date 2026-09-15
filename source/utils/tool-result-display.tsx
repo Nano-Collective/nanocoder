@@ -1,8 +1,10 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
 import {useTheme} from '@/hooks/useTheme';
+import type {BashExecutionState} from '@/services/bash-executor';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
@@ -84,6 +86,8 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Ran ${count} git command${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
+		case 'lsp_format_document':
+			return `Formatted ${count} file${s}`;
 		case 'ask_user':
 			return `Asked ${count} question${s}`;
 		case 'agent':
@@ -93,6 +97,10 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 	}
 }
 
+// The live summary sits in the non-shrinking footer, so a turn that uses many
+// distinct tools (e.g. several MCP servers) must not push the input off screen.
+const MAX_LIVE_COMPACT_ROWS = 5;
+
 /**
  * Live display component for running compact tool counts.
  * Shows accumulated counts during execution (e.g. "⚒ Read 7 files").
@@ -100,13 +108,18 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
  */
 export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
 	const {colors} = useTheme();
+	const entries = Object.entries(counts);
+	const hiddenCount = entries.length - MAX_LIVE_COMPACT_ROWS;
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			{Object.entries(counts).map(([toolName, count]) => (
+			{entries.slice(0, MAX_LIVE_COMPACT_ROWS).map(([toolName, count]) => (
 				<Text key={toolName} color={colors.tool}>
 					{'\u2692'} {getGroupedCompactDescription(toolName, count)}
 				</Text>
 			))}
+			{hiddenCount > 0 && (
+				<Text color={colors.secondary}>+{hiddenCount} more</Text>
+			)}
 		</Box>
 	);
 }
@@ -146,6 +159,100 @@ export function displayCompactCountsSummary(
 	);
 }
 
+interface ExpandableToolResult {
+	id: number;
+	toolCall: ToolCall;
+	result: ToolResult;
+	bashState?: BashExecutionState;
+}
+
+// Results older than this can no longer be expanded; bounds memory in long
+// sessions while covering everything a user can still scroll back to.
+const MAX_EXPANDABLE_RESULTS = 50;
+const expandableResults: ExpandableToolResult[] = [];
+let nextExpandId = 1;
+
+/**
+ * Remember a tool result so `/expand <id>` can print it in full later, even
+ * when it was folded into a compact tally. Returns undefined for tools whose
+ * output is never collapsed.
+ */
+export function recordExpandableToolResult(
+	toolCall: ToolCall,
+	result: ToolResult,
+	bashState?: BashExecutionState,
+): number | undefined {
+	if (
+		ALWAYS_EXPANDED_TOOLS.has(result.name) ||
+		LIVE_TASK_TOOLS.has(result.name)
+	) {
+		return undefined;
+	}
+
+	const id = nextExpandId++;
+	expandableResults.push({id, toolCall, result, bashState});
+	if (expandableResults.length > MAX_EXPANDABLE_RESULTS) {
+		expandableResults.shift();
+	}
+	return id;
+}
+
+export function getExpandableToolResults(): readonly ExpandableToolResult[] {
+	return expandableResults;
+}
+
+export function clearExpandableToolResults(): void {
+	expandableResults.length = 0;
+}
+
+/**
+ * Generic failures are prefixed "Error: "; validation failures (bad arg
+ * types, failed per-tool validators) come back as "⚒ Validation failed: …".
+ * Both render as a red error so the user sees the same feedback the model
+ * gets. Returns undefined for a successful result.
+ */
+function getToolErrorMessage(result: ToolResult): string | undefined {
+	if (result.content.startsWith('⚒ Validation failed')) return result.content;
+	if (result.content.startsWith('Error: ')) {
+		return result.content.slice('Error: '.length);
+	}
+	return undefined;
+}
+
+/** The tool's formatter output, or its raw content when there is none. */
+async function renderToolOutput(
+	toolCall: ToolCall,
+	result: ToolResult,
+	toolManager: ToolManager,
+): Promise<React.ReactElement> {
+	const rawOutput = (
+		<ToolMessage
+			title={`⚒ ${result.name}`}
+			message={result.content}
+			hideBox={true}
+		/>
+	);
+	const formatter = toolManager.getToolFormatter(result.name);
+	if (!formatter) return rawOutput;
+
+	try {
+		const parsedArgs = parseToolArguments(toolCall.function.arguments);
+		const formattedResult = await formatter(parsedArgs, result.content);
+		return React.isValidElement(formattedResult) ? (
+			formattedResult
+		) : (
+			<ToolMessage
+				title={`⚒ ${result.name}`}
+				message={String(formattedResult)}
+				hideBox={true}
+			/>
+		);
+	} catch {
+		// If formatter fails, show raw result
+		return rawOutput;
+	}
+}
+
 /**
  * Display tool result with proper formatting
  * Extracted to eliminate duplication between useChatHandler and useToolHandler
@@ -155,6 +262,7 @@ export function displayCompactCountsSummary(
  * @param toolManager - The tool manager instance (for formatters)
  * @param addToChatQueue - Function to add components to chat queue
  * @param compact - When true, show one-liner instead of full formatter output
+ * @param expandId - `/expand` number, shown in the "+N more lines" note
  */
 export async function displayToolResult(
 	toolCall: ToolCall,
@@ -162,15 +270,11 @@ export async function displayToolResult(
 	toolManager: ToolManager | null,
 	addToChatQueue: (component: React.ReactNode) => void,
 	compact?: boolean,
+	expandId?: number,
 ): Promise<void> {
-	// Check if this is an error result. Generic failures are prefixed "Error: ";
-	// validation failures (bad arg types, failed per-tool validators) come back
-	// as "⚒ Validation failed: …" — both should render as a red error so the
-	// user sees the same feedback the model gets.
-	const isValidationError = result.content.startsWith('⚒ Validation failed');
-	const isError = result.content.startsWith('Error: ') || isValidationError;
+	const errorMessage = getToolErrorMessage(result);
 
-	if (isError) {
+	if (errorMessage !== undefined) {
 		// Compact mode: condense failures to a short red one-liner
 		// ("⚒ write_file ") instead of the full error output.
 		// The model still receives the full error in conversation history,
@@ -186,9 +290,6 @@ export async function displayToolResult(
 		}
 
 		// Display as error message - shown in full
-		const errorMessage = isValidationError
-			? result.content
-			: result.content.replace(/^Error: /, '');
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey(`tool-error-${result.tool_call_id}`)}
@@ -213,50 +314,60 @@ export async function displayToolResult(
 		return;
 	}
 
-	if (toolManager) {
-		const formatter = toolManager.getToolFormatter(result.name);
-		if (formatter) {
-			try {
-				const parsedArgs = parseToolArguments(toolCall.function.arguments);
-				const formattedResult = await formatter(parsedArgs, result.content);
+	if (!toolManager) return;
 
-				if (React.isValidElement(formattedResult)) {
-					addToChatQueue(
-						React.cloneElement(formattedResult, {
-							key: generateKey(`tool-result-${result.tool_call_id}`),
-						}),
-					);
-				} else {
-					addToChatQueue(
-						<ToolMessage
-							key={generateKey(`tool-result-${result.tool_call_id}`)}
-							title={`⚒ ${result.name}`}
-							message={String(formattedResult)}
-							hideBox={true}
-						/>,
-					);
-				}
-			} catch {
-				// If formatter fails, show raw result
-				addToChatQueue(
-					<ToolMessage
-						key={generateKey(`tool-result-${result.tool_call_id}`)}
-						title={`⚒ ${result.name}`}
-						message={result.content}
-						hideBox={true}
-					/>,
-				);
-			}
-		} else {
-			// No formatter, show raw result
-			addToChatQueue(
-				<ToolMessage
-					key={generateKey(`tool-result-${result.tool_call_id}`)}
-					title={`⚒ ${result.name}`}
-					message={result.content}
-					hideBox={true}
-				/>,
-			);
-		}
+	const key = generateKey(`tool-result-${result.tool_call_id}`);
+	const output = await renderToolOutput(toolCall, result, toolManager);
+	addToChatQueue(
+		expandId === undefined ? (
+			React.cloneElement(output, {key})
+		) : (
+			<ToolOutputContext.Provider key={key} value={{expanded: false, expandId}}>
+				{output}
+			</ToolOutputContext.Provider>
+		),
+	);
+}
+
+/** Full, uncapped view of a recorded tool result, printed by `/expand`. */
+export async function renderExpandedToolResult(
+	entry: ExpandableToolResult,
+	toolManager: ToolManager | null,
+): Promise<React.ReactElement> {
+	const {toolCall, result, bashState} = entry;
+	const errorMessage = getToolErrorMessage(result);
+
+	let output: React.ReactElement;
+	if (errorMessage !== undefined) {
+		output = <ErrorMessage message={errorMessage} hideBox={true} />;
+	} else if (result.name === 'execute_bash' && bashState) {
+		// The transcript card for a model-run command omits its output.
+		output = (
+			<BashProgress
+				executionId={bashState.executionId}
+				command={bashState.command}
+				completedState={bashState}
+				showOutput={true}
+			/>
+		);
+	} else if (toolManager) {
+		output = await renderToolOutput(toolCall, result, toolManager);
+	} else {
+		output = (
+			<ToolMessage
+				title={`⚒ ${result.name}`}
+				message={result.content}
+				hideBox={true}
+			/>
+		);
 	}
+
+	return (
+		<ToolOutputContext.Provider
+			key={generateKey(`tool-expand-${entry.id}`)}
+			value={{expanded: true}}
+		>
+			{output}
+		</ToolOutputContext.Provider>
+	);
 }

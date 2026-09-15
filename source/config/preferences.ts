@@ -29,7 +29,8 @@ function getPreferencesPath(): string {
 	return PREFERENCES_PATH;
 }
 
-// Export for testing purposes - allows tests to reset the cache
+// Test hook: drops the resolved path cache only. `cachedPreference` values
+// survive, since they key on NANOCODER_CONFIG_DIR + the write counter.
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
@@ -69,6 +70,20 @@ export function subscribeToPreferences(listener: () => void): () => void {
  */
 export function getPreferencesVersion(): number {
 	return preferencesVersion;
+}
+
+// Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
+// (bumped on every write), so the value never goes stale after a settings change.
+function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
+	let cache: {dir?: string; version: number; value: T} | null = null;
+	return () => {
+		const dir = process.env.NANOCODER_CONFIG_DIR;
+		const version = getPreferencesVersion();
+		if (!cache || cache.dir !== dir || cache.version !== version) {
+			cache = {dir, version, value: read(loadPreferences())};
+		}
+		return cache.value;
+	};
 }
 
 export function savePreferences(preferences: UserPreferences): void {
@@ -221,6 +236,27 @@ export function getCompactToolDisplay(): boolean {
 export function updateCompactToolDisplay(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.compactToolDisplay = value;
+	savePreferences(preferences);
+}
+
+// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
+const cachedShowAgentBashOutput = cachedPreference(
+	prefs => prefs.showAgentBashOutput === true,
+);
+
+/**
+ * Get the agent bash output preference. Default false.
+ */
+export function getShowAgentBashOutput(): boolean {
+	return cachedShowAgentBashOutput();
+}
+
+/**
+ * Save the agent bash output preference
+ */
+export function updateShowAgentBashOutput(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.showAgentBashOutput = value;
 	savePreferences(preferences);
 }
 

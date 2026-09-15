@@ -359,6 +359,26 @@ test('diff_edit formatter renders a preview', async t => {
 	t.regex(lastFrame()!, /const newValue/);
 });
 
+test('diff_edit formatter says when the line cap hides edits', async t => {
+	const formatter = diffEditTool.formatter;
+	if (!formatter) {
+		t.fail('diff_edit formatter not defined');
+		return;
+	}
+
+	const lines = (prefix: string) =>
+		Array.from({length: 15}, (_, i) => `${prefix} ${i + 1}`).join('\n');
+	const preview = await formatter({
+		path: 'test.ts',
+		diff: diffBlock(lines('old'), lines('new')),
+	});
+	const {lastFrame} = render(
+		<TestThemeProvider>{preview}</TestThemeProvider>,
+	);
+
+	t.regex(lastFrame()!, /\+11 more lines, 11 changed/);
+});
+
 test('diff_edit description tells models not to wrap diff in code fences', t => {
 	t.regex(
 		diffEditTool.tool.description,
@@ -368,6 +388,42 @@ test('diff_edit description tells models not to wrap diff in code fences', t => 
 
 // `$$`, `$&`, "$`" and `$'` are substitution tokens to String.prototype.replace
 // but ordinary characters in the shell scripts and CI YAML models edit.
+test('diff_edit refuses a .pdf and leaves the document untouched', async t => {
+	const pdfBytes = '%PDF-1.4 fake document bytes';
+	const filePath = await createTestFile('doc.pdf', pdfBytes);
+
+	await t.throwsAsync(
+		executeDiffEdit({
+			path: projectRelativePath(filePath),
+			diff: sampleDiff,
+		}),
+		{message: /markdown transcript/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), pdfBytes);
+});
+
+test('diff_edit validator refuses a .docx path', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const filePath = await createTestFile('notes.docx', 'PK fake docx bytes');
+	markFileSeen(filePath);
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: sampleDiff,
+	});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /markdown transcript/);
+	}
+});
+
 test('diff_edit writes $ substitution tokens literally', async t => {
 	const filePath = await createTestFile(
 		'dollars.sh',

@@ -407,6 +407,10 @@ export default function App({
 		cliModel,
 		nonInteractiveMode,
 		developmentModeRef: appState.developmentModeRef,
+		// Nothing initializes until the trust disclaimer is accepted: the
+		// conditional `<SecurityDisclaimer />` return below runs after every
+		// hook, so it cannot gate this on its own.
+		isTrusted: isEffectivelyTrusted,
 	});
 
 	// Setup mode handlers

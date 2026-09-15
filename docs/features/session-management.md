@@ -19,6 +19,8 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+In the selector, start typing to filter sessions by title; Backspace edits the filter, arrow keys and Enter pick a result, and Esc cancels.
+
 ### From the Command Line
 
 You can resume a session directly at launch instead of using a slash command:

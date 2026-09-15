@@ -20,7 +20,8 @@
 	},
 	"include": [
 		"src/**/*",
-		"../../source/vscode/cli-path-discovery.ts"
+		"../../source/vscode/cli-path-discovery.ts",
+		"../../source/vscode/discovery.ts"
 	],
 	"exclude": [
 		"node_modules",

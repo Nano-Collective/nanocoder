@@ -1,4 +1,4 @@
-import {execFileSync, execSync} from 'child_process';
+import {execFileSync} from 'child_process';
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -34,6 +34,20 @@ export class FileSnapshotService {
 	}
 
 	/**
+	 * Is `absolutePath` inside the workspace?
+	 *
+	 * Snapshot keys are `path.relative(workspaceRoot, file)`, so anything
+	 * outside the workspace is keyed `../..` and would escape the checkpoint's
+	 * files directory when joined onto it. The same rule guards capture,
+	 * restore and delete, which is why it lives here rather than at each of
+	 * the three call sites.
+	 */
+	private isInsideWorkspace(absolutePath: string): boolean {
+		const relative = path.relative(this.workspaceRoot, absolutePath);
+		return !relative.startsWith('..') && !path.isAbsolute(relative);
+	}
+
+	/**
 	 * Capture the contents of specified files.
 	 *
 	 * Read as bytes, never as text. Snapshots cover whatever git reports as
@@ -57,6 +71,17 @@ export class FileSnapshotService {
 			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 			const relativePath = path.relative(this.workspaceRoot, absolutePath);
 			const normalizedPath = relativePath.split(path.sep).join('/');
+
+			if (!this.isInsideWorkspace(absolutePath)) {
+				skipped.push({
+					path: normalizedPath,
+					reason: 'Outside the workspace',
+				});
+				logWarning('Refusing to capture a file outside the workspace', true, {
+					context: {filePath},
+				});
+				continue;
+			}
 
 			try {
 				const content = await fs.readFile(absolutePath);
@@ -92,8 +117,7 @@ export class FileSnapshotService {
 				// Snapshot keys are read back from user-writable metadata on disk
 				// (checkpoint / timeline index files), so a corrupted or tampered
 				// index must not be able to write outside the workspace.
-				const relative = path.relative(this.workspaceRoot, absolutePath);
-				if (relative.startsWith('..') || path.isAbsolute(relative)) {
+				if (!this.isInsideWorkspace(absolutePath)) {
 					throw new Error(
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
@@ -138,29 +162,37 @@ export class FileSnapshotService {
 		available: boolean;
 	} {
 		try {
-			let hasHead = true;
+			// This scan runs on every checkpoint and twice per ACP tool call, so
+			// the common path - HEAD exists - must cost a single spawn. Rather
+			// than probing with `git rev-parse --verify HEAD` first, ask for the
+			// diff and let the unborn case fail.
+			let modifiedOutput = '';
 			try {
-				execSync('git rev-parse --verify HEAD', {
-					cwd: this.workspaceRoot,
-					stdio: ['pipe', 'pipe', 'pipe'],
-				});
-			} catch {
-				hasHead = false;
-			}
-
-			// An unborn branch has no HEAD to diff against, but its index can still be
-			// full (`git init && git add .`), so diff the index instead of skipping.
-			const modifiedOutput = execSync(
-				hasHead ? 'git diff --name-only HEAD' : 'git diff --name-only --cached',
-				{
+				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
 					stdio: ['pipe', 'pipe', 'pipe'],
-				},
-			).trim();
+				}).trim();
+			} catch {
+				// Unborn HEAD: nothing to diff against, but the index can still be
+				// full (`git init && git add .`, or `git checkout --orphan`, which
+				// starts fully populated), and `git ls-files --others` excludes
+				// anything already staged. Diff the index so a staged tree is
+				// captured rather than silently skipped.
+				modifiedOutput = execFileSync(
+					'git',
+					['diff', '--name-only', '--cached'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+					},
+				).trim();
+			}
 
-			const untrackedOutput = execSync(
-				'git ls-files --others --exclude-standard',
+			const untrackedOutput = execFileSync(
+				'git',
+				['ls-files', '--others', '--exclude-standard'],
 				{
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
@@ -244,8 +276,7 @@ export class FileSnapshotService {
 	 */
 	async deleteFile(relativePath: string): Promise<void> {
 		const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
-		const relative = path.relative(this.workspaceRoot, absolutePath);
-		if (relative.startsWith('..') || path.isAbsolute(relative)) {
+		if (!this.isInsideWorkspace(absolutePath)) {
 			throw new Error(
 				`Refusing to delete path outside workspace: ${relativePath}`,
 			);

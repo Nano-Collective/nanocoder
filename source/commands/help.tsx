@@ -67,6 +67,10 @@ function Help({
 			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
 			<Text color={colors.text}> • Run commands {'>'} /help</Text>
 			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
+			<Text color={colors.text}>
+				{' '}
+				• Keyboard shortcuts {'>'} press ? in an empty prompt
+			</Text>
 
 			<Box marginTop={1}>
 				<Text color={colors.primary} bold>

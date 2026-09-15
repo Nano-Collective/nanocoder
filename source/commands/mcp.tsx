@@ -89,6 +89,10 @@ export function MCP({toolManager}: MCPProps) {
 
 					{connectedServers.map((serverName, index) => {
 						const serverTools = toolManager?.getServerTools(serverName) || [];
+						const mcpClient = toolManager?.getMCPClient?.();
+						const serverResources =
+							mcpClient?.getServerResources(serverName) || [];
+						const serverPrompts = mcpClient?.getServerPrompts(serverName) || [];
 						const serverInfo = toolManager?.getServerInfo(serverName);
 						const transportIcon = getTransportIcon(
 							serverInfo?.transport || 'stdio',
@@ -105,6 +109,10 @@ export function MCP({toolManager}: MCPProps) {
 										</Text>{' '}
 										• {serverTools.length} tool
 										{serverTools.length !== 1 ? 's' : ''}
+										{serverResources.length > 0 &&
+											`, ${serverResources.length} resource${serverResources.length !== 1 ? 's' : ''}`}
+										{serverPrompts.length > 0 &&
+											`, ${serverPrompts.length} prompt${serverPrompts.length !== 1 ? 's' : ''}`}
 									</Text>
 
 									{serverInfo?.url && (
@@ -131,6 +139,19 @@ export function MCP({toolManager}: MCPProps) {
 											Tools:{' '}
 											{serverTools
 												.map((t: {name: string}) => t.name)
+												.join(', ')}
+										</Text>
+									)}
+									{serverResources.length > 0 && (
+										<Text color={colors.tool}>
+											Resources: {serverResources.map(r => r.name).join(', ')}
+										</Text>
+									)}
+									{serverPrompts.length > 0 && (
+										<Text color={colors.tool}>
+											Prompts:{' '}
+											{serverPrompts
+												.map(p => `/mcp:${serverName}:${p.name}`)
 												.join(', ')}
 										</Text>
 									)}

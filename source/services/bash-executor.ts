@@ -14,11 +14,15 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
-	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
 import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
 import {
 	getProjectRoot,
@@ -168,23 +172,16 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		let outputBytes = 0;
-		let outputTruncated = false;
+		const collectStdout = makeStreamCollector(text => {
+			state.fullOutput += text;
+		}, STDOUT_TRUNCATION_NOTICE);
+		const collectStderr = makeStreamCollector(text => {
+			state.stderr += text;
+		}, STDERR_TRUNCATION_NOTICE);
 
 		// Collect output
 		proc.stdout?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.fullOutput += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.fullOutput +=
-						'\n... [Output truncated to prevent memory exhaustion]';
-				}
-			}
+			collectStdout(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
@@ -192,18 +189,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.stderr += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.stderr +=
-						'\n... [Stderr truncated to prevent memory exhaustion]';
-				}
-			}
+			collectStderr(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});

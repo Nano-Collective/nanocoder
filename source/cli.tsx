@@ -72,6 +72,25 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder skills <sub>` — fast path, only loads the skill
+// installer (no Ink, no providers, no tool registry).
+if (args[0] === 'skills') {
+	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
+	if (args[1] !== 'add') {
+		console.error(SKILLS_CLI_USAGE);
+		process.exit(args[1] ? 1 : 0);
+	}
+	const result = await runSkillsCli({
+		projectRoot: process.cwd(),
+		args: args.slice(2),
+	});
+	if (result.output) {
+		if (result.exitCode === 0) console.log(result.output);
+		else console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
@@ -138,6 +157,23 @@ Examples:
 	}
 }
 
+// Handle `nanocoder completion <shell>` — fast path, prints a static
+// completion script and exits without loading any app code. The shell
+// argument is required so a missing argument fails loudly with usage
+// instead of silently installing the wrong script.
+if (args[0] === 'completion') {
+	const {runCompletionCli} = await import('@/cli-completions/cli');
+	const result = runCompletionCli(args.slice(1));
+	if (result.output) {
+		if (result.stream === 'stderr') {
+			console.error(result.output);
+		} else {
+			console.log(result.output);
+		}
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -147,10 +183,16 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+  skills add <target>             Install a skill bundle from a git repository.
+                                  <target> is an index name, owner/repo, a git URL, or a local path.
+                                  Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  completion <shell>              Generate a shell completion script (bash, zsh, or fish).
+                                  Example: eval "$(nanocoder completion zsh)"
 
 Options:
   -v, --version       Show version number
@@ -189,6 +231,8 @@ Options:
 
 Examples:
   nanocoder init --preset nextjs
+  nanocoder skills add pr-reviewer
+  nanocoder skills add Nano-Collective/nanocoder-skills --subdir skills/pr-reviewer
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
@@ -217,9 +261,17 @@ async function main(): Promise<void> {
 
 	// Extract VS Code port if specified
 	let vscodePort: number | undefined;
-	const portArgIndex = args.findIndex(arg => arg === '--vscode-port');
-	if (portArgIndex !== -1 && args[portArgIndex + 1]) {
-		const port = parseInt(args[portArgIndex + 1], 10);
+	const portArgIndex = args.findIndex(
+		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
+	);
+	const portValue =
+		portArgIndex === -1
+			? undefined
+			: args[portArgIndex].startsWith('--vscode-port=')
+				? args[portArgIndex].slice('--vscode-port='.length)
+				: args[portArgIndex + 1];
+	if (portValue) {
+		const port = parseInt(portValue, 10);
 		if (!isNaN(port) && port > 0 && port < 65536) {
 			vscodePort = port;
 		}
@@ -227,10 +279,18 @@ async function main(): Promise<void> {
 
 	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
-	const providerArgIndex = args.findIndex(arg => arg === '--provider');
-	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
+	const providerArgIndex = args.findIndex(
+		arg => arg === '--provider' || arg.startsWith('--provider='),
+	);
+	const providerValue =
+		providerArgIndex === -1
+			? undefined
+			: args[providerArgIndex].startsWith('--provider=')
+				? args[providerArgIndex].slice('--provider='.length)
+				: args[providerArgIndex + 1];
+	if (providerValue) {
 		// Allow alphanumeric, hyphen, underscore only to prevent injection
-		const value = args[providerArgIndex + 1];
+		const value = providerValue;
 		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
 			cliProvider = value;
 		} else {
@@ -243,10 +303,18 @@ async function main(): Promise<void> {
 
 	// Extract --model if specified — validate against allowlist pattern
 	let cliModel: string | undefined;
-	const modelArgIndex = args.findIndex(arg => arg === '--model');
-	if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
+	const modelArgIndex = args.findIndex(
+		arg => arg === '--model' || arg.startsWith('--model='),
+	);
+	const modelValue =
+		modelArgIndex === -1
+			? undefined
+			: args[modelArgIndex].startsWith('--model=')
+				? args[modelArgIndex].slice('--model='.length)
+				: args[modelArgIndex + 1];
+	if (modelValue) {
 		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
-		const value = args[modelArgIndex + 1];
+		const value = modelValue;
 		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
 			cliModel = value;
 		} else {
@@ -258,18 +326,26 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --context-max if specified (framework-free parser — no React/Ink)
-	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
-	if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
+	const contextMaxArgIndex = args.findIndex(
+		arg => arg === '--context-max' || arg.startsWith('--context-max='),
+	);
+	const contextMaxValue =
+		contextMaxArgIndex === -1
+			? undefined
+			: args[contextMaxArgIndex].startsWith('--context-max=')
+				? args[contextMaxArgIndex].slice('--context-max='.length)
+				: args[contextMaxArgIndex + 1];
+	if (contextMaxValue) {
 		const [{parseContextLimit}, {setSessionContextLimit}] = await Promise.all([
 			import('@/utils/parse-context-limit'),
 			import('@/models/index'),
 		]);
-		const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
+		const limit = parseContextLimit(contextMaxValue);
 		if (limit !== null) {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${args[contextMaxArgIndex + 1]}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
 			);
 			process.exit(1);
 		}
@@ -345,15 +421,23 @@ async function main(): Promise<void> {
 			} else if (arg === '--vscode-port') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg.startsWith('--vscode-port=')) {
+				continue; // skip fused form
 			} else if (arg === '--provider') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg.startsWith('--provider=')) {
+				continue; // skip fused form
 			} else if (arg === '--model') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg.startsWith('--model=')) {
+				continue; // skip fused form
 			} else if (arg === '--context-max') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg.startsWith('--context-max=')) {
+				continue; // skip fused form
 			} else if (arg === '--mode') {
 				i++; // skip this flag and its value
 				continue;
