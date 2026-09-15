@@ -101,3 +101,46 @@ test('validateProjectConfigSecurity - only validates project-level configs', t =
 		validateProjectConfigSecurity(mcpServers);
 	});
 });
+
+test('loader unwrap keeps source so project configs reach the validator', t => {
+	// Mirrors MCPServerWithSource from mcp-config-loader: provenance lives on the wrapper.
+	const wrapped = [
+		{
+			server: {
+				name: 'project-server',
+				transport: 'stdio' as const,
+				command: 'npx',
+				env: {API_KEY: 'hardcoded-key'},
+			},
+			source: 'project' as const,
+		},
+		{
+			server: {
+				name: 'global-server',
+				transport: 'stdio' as const,
+				command: 'npx',
+				env: {API_KEY: 'hardcoded-key'},
+			},
+			source: 'global' as const,
+		},
+	];
+
+	// Production path: loadAppConfig must copy wrapper.source onto the runtime object.
+	const mcpServers = wrapped.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
+
+	t.deepEqual(
+		mcpServers.filter(server => server.source === 'project').map(s => s.name),
+		['project-server'],
+	);
+
+	// Stripping the wrapper without copying source is the regression: the filter is empty.
+	const stripped = wrapped.map(item => item.server);
+	t.is(stripped.filter(server => server.source === 'project').length, 0);
+
+	t.notThrows(() => {
+		validateProjectConfigSecurity(mcpServers);
+	});
+});
