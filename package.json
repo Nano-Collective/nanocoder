@@ -34,6 +34,7 @@
 	},
 	"scripts": {
 		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build:fast": "rolldown -c rolldown.config.js && mkdir -p dist/commands && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
@@ -124,6 +125,7 @@
 		"ink-testing-library": "^4.0.0",
 		"knip": "^6.0.0",
 		"lint-staged": "^17.0.7",
+		"rolldown": "^1.2.6",
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
