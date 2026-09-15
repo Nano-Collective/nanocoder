@@ -19,7 +19,7 @@ let sanitizeUrl: any;
 
 test.before(async () => {
     try {
-        const module = await import('./web-search.js');
+        const module = await import('./web-search');
         webSearchTool = module.webSearchTool;
         executeWebSearch = module.executeWebSearch;
         webSearchValidator = module.webSearchValidator;
