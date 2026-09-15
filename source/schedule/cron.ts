@@ -53,6 +53,10 @@ export function formatCronHuman(expression: string): string {
 		month === '*' &&
 		dayOfWeek === '*'
 	) {
+		if (minute.startsWith('*/')) {
+			const step = minute.slice(2);
+			return `every ${step} minutes`;
+		}
 		return `every hour at minute ${minute}`;
 	}
 

@@ -69,6 +69,11 @@ test('formatCronHuman formats hourly pattern', t => {
 	t.is(formatCronHuman('0 * * * *'), 'every hour at minute 0');
 });
 
+test('formatCronHuman formats step minutes', t => {
+	t.is(formatCronHuman('*/5 * * * *'), 'every 5 minutes');
+	t.is(formatCronHuman('*/10 * * * *'), 'every 10 minutes');
+});
+
 test('formatCronHuman formats daily pattern', t => {
 	t.is(formatCronHuman('0 9 * * *'), 'daily at 9:00');
 	t.is(formatCronHuman('30 14 * * *'), 'daily at 14:30');
