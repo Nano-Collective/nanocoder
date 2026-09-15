@@ -3,7 +3,9 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput from '@/components/text-input';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -42,6 +44,28 @@ import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
+
+// Legend for the `?` overlay. Keep in sync with the bindings handled below,
+// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
+const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
+	['Enter', 'Submit prompt'],
+	['Ctrl+J', 'New line'],
+	['↑ / ↓', 'Prompt history'],
+	['Tab', 'Accept file / command suggestion'],
+	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
+	['Ctrl+W', 'Delete previous word'],
+	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
+	['Esc Esc', 'Clear input'],
+	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
+	['Shift+Tab', 'Cycle development mode'],
+	['Ctrl+O', 'Toggle compact tool output'],
+	['Ctrl+R', 'Toggle reasoning traces'],
+	['Ctrl+T', 'Collapse / expand task list'],
+	['Ctrl+S', 'Attach / cycle running subagents'],
+	['Esc', 'Cancel response'],
+	['Ctrl+C', 'Exit'],
+	['?', 'Toggle this overlay (in an empty prompt)'],
+];
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
@@ -144,6 +168,7 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
@@ -158,6 +183,16 @@ export default function UserInput({
 		setInputState,
 		insertPaste,
 	} = inputState;
+
+	// Read through refs in key handlers: both our useInput and TextInput's see
+	// every keystroke, and either handler can still hold a render-old closure.
+	const showShortcutsRef = useRef(false);
+	const inputRef = useRef(input);
+	inputRef.current = input;
+	const setShortcutsOpen = (open: boolean) => {
+		showShortcutsRef.current = open;
+		setShowShortcuts(open);
+	};
 
 	const {
 		showClearMessage,
@@ -629,6 +664,9 @@ export default function UserInput({
 	// auto-show so editing a recalled command surfaces suggestions again.
 	const handleInputChange = useCallback(
 		(value: string) => {
+			// Nothing reaches the prompt while the shortcuts overlay is open, and a
+			// lone `?` in an empty prompt is the overlay toggle (see useInput).
+			if (showShortcutsRef.current || value === '?') return;
 			inputFromHistoryRef.current = false;
 			updateInput(value);
 		},
@@ -718,6 +756,21 @@ export default function UserInput({
 	]);
 
 	useInput((inputChar, key) => {
+		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
+		// every other key until `?` or Escape closes it.
+		if (
+			inputChar === '?' &&
+			!disabled &&
+			(showShortcutsRef.current || inputRef.current === '')
+		) {
+			setShortcutsOpen(!showShortcutsRef.current);
+			return;
+		}
+		if (showShortcutsRef.current) {
+			if (key.escape) setShortcutsOpen(false);
+			return;
+		}
+
 		// Cancelling in-flight work is owned by the single section-level Escape
 		// handler (see InteractiveApp), which fires no matter which component is
 		// mounted. Here we only swallow Escape while busy so it doesn't fall
@@ -1017,7 +1070,31 @@ export default function UserInput({
 			)}
 
 			<Box width={actualWidth} alignItems="center" flexDirection="column">
+				{showShortcuts && (
+					<TitledBoxWithPreferences
+						title="Keyboard Shortcuts"
+						width={promptWidth}
+						borderColor={colors.primary}
+						paddingX={2}
+						paddingY={1}
+						marginTop={1}
+						flexDirection="column"
+					>
+						{KEYBOARD_SHORTCUTS.map(([keybind, label]) => (
+							<HelpRow
+								key={keybind}
+								keybind={keybind}
+								label={label}
+								colors={colors}
+							/>
+						))}
+						<Box marginTop={1}>
+							<Text color={colors.secondary}>Press ? or Esc to close</Text>
+						</Box>
+					</TitledBoxWithPreferences>
+				)}
 				<Box
+					display={showShortcuts ? 'none' : 'flex'}
 					flexDirection="column"
 					marginTop={1}
 					width={promptWidth}

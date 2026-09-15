@@ -28,6 +28,7 @@ import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
 	LIVE_TASK_TOOLS,
+	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
 
 /**
@@ -138,6 +139,7 @@ export const displayExecutedTool = async (
 		toolCall,
 		result.content,
 	);
+	const expandId = recordExpandableToolResult(toolCall, result, bashState);
 
 	if (
 		LIVE_TASK_TOOLS.has(result.name) &&
@@ -205,7 +207,14 @@ export const displayExecutedTool = async (
 		);
 	} else {
 		// Full display mode
-		await displayToolResult(toolCall, result, toolManager, addToChatQueue);
+		await displayToolResult(
+			toolCall,
+			result,
+			toolManager,
+			addToChatQueue,
+			false,
+			expandId,
+		);
 	}
 };
 
@@ -406,6 +415,7 @@ const executeAgentBatch = async (
 		};
 
 		results.push({toolCall: e.toolCall, result});
+		recordExpandableToolResult(e.toolCall, result);
 
 		// Compact: feed into the shared count accumulator so delegated-task
 		// summaries group with other tool counts. Errors are still shown in

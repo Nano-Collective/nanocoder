@@ -1,5 +1,10 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
+import {
+	type SessionMetadata,
+	sessionManager,
+} from '../session/session-manager.js';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {formatMessageCount, formatTimeAgo} from './session-selector.js';
 import SessionSelector from './session-selector.js';
@@ -294,5 +299,150 @@ test('session-selector shows Esc hint in footer', async t => {
 	} else {
 		// Empty state — just verify it rendered
 		t.pass();
+	}
+});
+
+// ============================================================================
+// SessionSelector keyword filter
+// ============================================================================
+
+const makeSession = (
+	id: string,
+	title: string,
+	messageCount: number,
+): SessionMetadata => ({
+	id,
+	title,
+	createdAt: new Date().toISOString(),
+	lastAccessedAt: new Date().toISOString(),
+	messageCount,
+	provider: 'test',
+	model: 'test',
+	workingDirectory: process.cwd(),
+});
+
+const stubSessions: SessionMetadata[] = [
+	makeSession('a', 'Fix login bug', 3),
+	makeSession('b', 'Refactor parser', 2),
+];
+
+// Serial: these swap the sessionManager singleton's listSessions.
+const renderWithStubbedSessions = (
+	props: Partial<React.ComponentProps<typeof SessionSelector>> = {},
+) => {
+	const original = sessionManager.listSessions;
+	sessionManager.listSessions = async () => stubSessions;
+	const rendered = renderWithTheme(
+		React.createElement(SessionSelector, {
+			onSelect: () => {},
+			onCancel: () => {},
+			...props,
+		}),
+	);
+	return {
+		...rendered,
+		frame: () => stripAnsi(rendered.lastFrame() ?? ''),
+		restore: () => {
+			rendered.unmount();
+			sessionManager.listSessions = original;
+		},
+	};
+};
+
+const waitUntil = async (condition: () => boolean, timeoutMs = 3000) => {
+	const startedAt = Date.now();
+	while (!condition()) {
+		if (Date.now() - startedAt > timeoutMs) {
+			throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+		}
+		await new Promise(resolve => setTimeout(resolve, 20));
+	}
+};
+
+// The list mounts only after sessions load, and Ink subscribes its key handler
+// in an effect, so a write sent right after the first frame can be dropped. A
+// dropped write leaves no trace, so resend until the filter row appears.
+const typeFilter = async (
+	stdin: {write: (data: string) => void},
+	frame: () => string,
+	text: string,
+) => {
+	let lastWriteAt = 0;
+	await waitUntil(() => {
+		if (frame().includes('Filter:')) return true;
+		if (Date.now() - lastWriteAt > 250) {
+			stdin.write(text);
+			lastWriteAt = Date.now();
+		}
+		return false;
+	});
+};
+
+test.serial('session-selector filters sessions by title as you type', async t => {
+	const {stdin, frame, restore} = renderWithStubbedSessions();
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		t.regex(frame(), /Type to filter/);
+
+		await typeFilter(stdin, frame, 'parser');
+		t.regex(frame(), /Filter: parser/);
+		t.regex(frame(), /Refactor parser/);
+		t.notRegex(frame(), /Fix login bug/);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector filter ignores the message count and age suffix', async t => {
+	const {stdin, frame, restore} = renderWithStubbedSessions();
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+
+		await typeFilter(stdin, frame, 'messages');
+		await waitUntil(() => frame().includes('No matches for "messages"'));
+		t.notRegex(frame(), /Refactor parser|Fix login bug/);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector selects the filtered session on Enter', async t => {
+	let selected: SessionMetadata | null = null;
+	const {stdin, frame, restore} = renderWithStubbedSessions({
+		onSelect: session => {
+			selected = session;
+		},
+	});
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+
+		await typeFilter(stdin, frame, 'parser');
+		await waitUntil(() => !frame().includes('Fix login bug'));
+		stdin.write('\r');
+		await waitUntil(() => selected !== null);
+		t.is(selected!.id, 'b');
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector cancels once on Escape while the list is shown', async t => {
+	let cancelCount = 0;
+	const {stdin, frame, restore} = renderWithStubbedSessions({
+		onCancel: () => {
+			cancelCount++;
+		},
+	});
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		// Prove the list's key handler is live (see typeFilter) before Escape.
+		await typeFilter(stdin, frame, 'fix');
+
+		stdin.write('\u001B');
+		await waitUntil(() => cancelCount > 0);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		t.is(cancelCount, 1);
+	} finally {
+		restore();
 	}
 });

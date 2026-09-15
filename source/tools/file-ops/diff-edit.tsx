@@ -3,7 +3,7 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -328,13 +328,31 @@ function DiffEditPreview({
 				<Text color={colors.error}>{parseError}</Text>
 			) : (
 				<Box flexDirection="column" marginTop={1}>
-					{blocks.map((block, index) => (
-						<Box key={index} flexDirection="column" marginBottom={1}>
-							<Text color={colors.secondary}>Block {index + 1}</Text>
-							<Text color={colors.error}>- {block.search}</Text>
-							<Text color={colors.success}>+ {block.replace}</Text>
-						</Box>
-					))}
+					<CappedLines
+						items={blocks.flatMap((block, index) => [
+							{
+								text: `Block ${index + 1}`,
+								color: colors.secondary,
+								changed: false,
+							},
+							...block.search.split('\n').map(line => ({
+								text: `- ${line}`,
+								color: colors.error,
+								changed: true,
+							})),
+							...block.replace.split('\n').map(line => ({
+								text: `+ ${line}`,
+								color: colors.success,
+								changed: true,
+							})),
+						])}
+						isChange={row => row.changed}
+						renderItem={(row, index) => (
+							<Text key={index} color={row.color}>
+								{row.text}
+							</Text>
+						)}
+					/>
 				</Box>
 			)}
 		</Box>
