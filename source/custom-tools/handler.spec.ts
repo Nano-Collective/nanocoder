@@ -69,9 +69,9 @@ function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
 		approval: 'never',
 		readOnly: true,
 		timeoutMs: 5_000,
-		// Most execution tests assert POSIX behavior regardless of the host OS.
-		// Keep that contract explicit rather than relying on pickShell's platform default.
-		shell: '/bin/sh',
+		// Use the public configuration value rather than an implementation path.
+		// POSIX-only handler execution assertions are gated below on Windows.
+		shell: 'sh',
 		...extra,
 	};
 }
@@ -246,7 +246,7 @@ test('resolveCwd throws for ${HOME} outside the project', t => {
 	t.throws(() => resolveCwd('${HOME}', root), {message: ESCAPES});
 });
 
-test('runScript: captures stdout', async t => {
+shellCase('runScript: captures stdout', async t => {
 	const result = await runScript(`echo 'hello world'`, {
 		cwd: testDir,
 		env: process.env,
@@ -256,7 +256,7 @@ test('runScript: captures stdout', async t => {
 	t.is(result, 'EXIT_CODE: 0\nhello world');
 });
 
-test('runScript: non-zero exit returns output with EXIT_CODE prefix', async t => {
+shellCase('runScript: non-zero exit returns output with EXIT_CODE prefix', async t => {
 	const result = await runScript(`echo oops >&2; exit 3`, {
 		cwd: testDir,
 		env: process.env,
@@ -268,7 +268,7 @@ test('runScript: non-zero exit returns output with EXIT_CODE prefix', async t =>
 	t.regex(result, /^EXIT_CODE: 3\nSTDERR:\noops\nSTDOUT:\n$/);
 });
 
-test('runScript: audit-style non-zero exit with stdout output', async t => {
+shellCase('runScript: audit-style non-zero exit with stdout output', async t => {
 	// Mirrors `pnpm audit`: vulnerabilities go to stdout, exit code 1.
 	const result = await runScript(
 		`printf 'vulnerability table here\\n'; exit 1`,
@@ -282,7 +282,7 @@ test('runScript: audit-style non-zero exit with stdout output', async t => {
 	t.is(result, 'EXIT_CODE: 1\nvulnerability table here');
 });
 
-test('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
+shellCase('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
 	const result = await runScript(`echo hello`, {
 		cwd: testDir,
 		env: process.env,
@@ -294,7 +294,7 @@ test('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
 	t.is(result, 'EXIT_CODE: 0\nhello');
 });
 
-test('runScript: timeout kills long-running script', async t => {
+shellCase('runScript: timeout kills long-running script', async t => {
 	await t.throwsAsync(
 		runScript(`sleep 5`, {
 			cwd: testDir,
@@ -557,13 +557,13 @@ shellCase(
 	},
 );
 
-test('buildHandler renders body and executes', async t => {
+shellCase('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);
 	const result = await handler({name: 'world'});
 	t.is(result, 'EXIT_CODE: 0\nworld');
 });
 
-test('buildHandler: shell-escape blocks injection', async t => {
+shellCase('buildHandler: shell-escape blocks injection', async t => {
 	const handler = buildHandler(meta(), `echo {{ payload }}`, testDir);
 	// If quoting were broken, the inner `; ls` would run separately and
 	// stdout would not contain the literal payload.
@@ -571,7 +571,7 @@ test('buildHandler: shell-escape blocks injection', async t => {
 	t.is(result, 'EXIT_CODE: 0\n; ls / ; echo done');
 });
 
-test('buildHandler honors env merging', async t => {
+shellCase('buildHandler honors env merging', async t => {
 	const handler = buildHandler(
 		meta({env: {NCT_CUSTOM_HANDLER_TEST: 'hello-env'}}),
 		`echo "$NCT_CUSTOM_HANDLER_TEST"`,
