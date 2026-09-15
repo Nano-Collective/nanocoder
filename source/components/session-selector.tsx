@@ -85,15 +85,16 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		loadSessions();
 	}, [showAll]);
 
-	// Once sessions are listed, FilterableSelectList owns Escape; keeping this
-	// active too would fire onCancel twice (Ink useInput is broadcast).
+	// Escape is ignored while loading, and once sessions are listed
+	// FilterableSelectList owns it (Ink useInput is broadcast, so a second
+	// active handler would fire onCancel twice). Only the empty state needs this.
 	useInput(
 		(_input, key) => {
-			if (key.escape && !loading) {
+			if (key.escape) {
 				onCancel();
 			}
 		},
-		{isActive: sessions.length === 0},
+		{isActive: !loading && sessions.length === 0},
 	);
 
 	if (loading) {
