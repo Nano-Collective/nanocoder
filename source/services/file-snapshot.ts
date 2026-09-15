@@ -34,6 +34,20 @@ export class FileSnapshotService {
 	}
 
 	/**
+	 * Is `absolutePath` inside the workspace?
+	 *
+	 * Snapshot keys are `path.relative(workspaceRoot, file)`, so anything
+	 * outside the workspace is keyed `../..` and would escape the checkpoint's
+	 * files directory when joined onto it. The same rule guards capture,
+	 * restore and delete, which is why it lives here rather than at each of
+	 * the three call sites.
+	 */
+	private isInsideWorkspace(absolutePath: string): boolean {
+		const relative = path.relative(this.workspaceRoot, absolutePath);
+		return !relative.startsWith('..') && !path.isAbsolute(relative);
+	}
+
+	/**
 	 * Capture the contents of specified files.
 	 *
 	 * Read as bytes, never as text. Snapshots cover whatever git reports as
@@ -57,6 +71,17 @@ export class FileSnapshotService {
 			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 			const relativePath = path.relative(this.workspaceRoot, absolutePath);
 			const normalizedPath = relativePath.split(path.sep).join('/');
+
+			if (!this.isInsideWorkspace(absolutePath)) {
+				skipped.push({
+					path: normalizedPath,
+					reason: 'Outside the workspace',
+				});
+				logWarning('Refusing to capture a file outside the workspace', true, {
+					context: {filePath},
+				});
+				continue;
+			}
 
 			try {
 				const content = await fs.readFile(absolutePath);
@@ -92,8 +117,7 @@ export class FileSnapshotService {
 				// Snapshot keys are read back from user-writable metadata on disk
 				// (checkpoint / timeline index files), so a corrupted or tampered
 				// index must not be able to write outside the workspace.
-				const relative = path.relative(this.workspaceRoot, absolutePath);
-				if (relative.startsWith('..') || path.isAbsolute(relative)) {
+				if (!this.isInsideWorkspace(absolutePath)) {
 					throw new Error(
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
@@ -252,8 +276,7 @@ export class FileSnapshotService {
 	 */
 	async deleteFile(relativePath: string): Promise<void> {
 		const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
-		const relative = path.relative(this.workspaceRoot, absolutePath);
-		if (relative.startsWith('..') || path.isAbsolute(relative)) {
+		if (!this.isInsideWorkspace(absolutePath)) {
 			throw new Error(
 				`Refusing to delete path outside workspace: ${relativePath}`,
 			);
