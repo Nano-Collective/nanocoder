@@ -3,7 +3,7 @@ import {basename, join} from 'path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;
@@ -59,7 +59,13 @@ export class CustomCommandLoader {
 		namespace?: string,
 		source?: 'personal' | 'project',
 	): void {
-		const entries = readdirSync(dir);
+		let entries: string[];
+		try {
+			entries = readdirSync(dir);
+		} catch (error) {
+			logWarning(`Failed to read directory ${dir}: ${String(error)}`);
+			return;
+		}
 
 		for (const entry of entries) {
 			if (!isSafeEntry(entry)) continue;
