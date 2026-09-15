@@ -289,6 +289,103 @@ test('handler - returns error for out of range task number', async t => {
 });
 
 // ============================================================================
+// Done Task Tests
+// ============================================================================
+
+test('handler - marks task as completed with "done" subcommand', async t => {
+	const env = await setupTestEnv('done-task');
+	try {
+		await saveTasks(getSampleTasks());
+
+		await tasksCommand.handler(['done', '2']);
+
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[1]?.status, 'completed');
+		t.truthy(tasks[1]?.updatedAt);
+		t.truthy(tasks[1]?.completedAt);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - marks task as completed with "complete" alias', async t => {
+	const env = await setupTestEnv('complete-task');
+	try {
+		await saveTasks(getSampleTasks());
+
+		await tasksCommand.handler(['complete', '1']);
+
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.status, 'completed');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - marks task as completed with "finish" alias', async t => {
+	const env = await setupTestEnv('finish-task');
+	try {
+		await saveTasks(getSampleTasks());
+
+		await tasksCommand.handler(['finish', '1']);
+
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.status, 'completed');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error when done has no number', async t => {
+	const env = await setupTestEnv('done-no-num');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['done']);
+
+		t.truthy(result);
+		// Tasks should remain unchanged
+		const tasks = await loadTasks();
+		t.is(tasks[0]?.status, 'pending');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for invalid task number on done', async t => {
+	const env = await setupTestEnv('done-invalid');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['done', 'abc']);
+
+		t.truthy(result);
+		const tasks = await loadTasks();
+		t.is(tasks[0]?.status, 'pending');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for out of range task number on done', async t => {
+	const env = await setupTestEnv('done-range');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['done', '99']);
+
+		t.truthy(result);
+		const tasks = await loadTasks();
+		t.is(tasks[0]?.status, 'pending');
+	} finally {
+		env.restore();
+	}
+});
+
+// ============================================================================
 // Clear Tasks Tests
 // ============================================================================
 

@@ -131,6 +131,57 @@ export const tasksCommand: Command = {
 			});
 		}
 
+		// Mark task as done
+		if (
+			subcommand === 'done' ||
+			subcommand === 'complete' ||
+			subcommand === 'finish'
+		) {
+			if (!rest.trim()) {
+				return React.createElement(TaskMessage, {
+					key: generateKey('tasks-error'),
+					message: `Usage: /tasks ${subcommand} <number>`,
+					isError: true,
+				});
+			}
+
+			const taskNumber = parseInt(rest.trim(), 10);
+			if (isNaN(taskNumber) || taskNumber < 1) {
+				return React.createElement(TaskMessage, {
+					key: generateKey('tasks-error'),
+					message: `Please provide a valid task number (e.g., /tasks ${subcommand} 1)`,
+					isError: true,
+				});
+			}
+
+			const tasks = await loadTasks();
+			const taskIndex = taskNumber - 1;
+
+			if (taskIndex >= tasks.length) {
+				return React.createElement(TaskMessage, {
+					key: generateKey('tasks-error'),
+					message: `Task ${taskNumber} not found. You have ${tasks.length} task(s).`,
+					isError: true,
+				});
+			}
+
+			const now = new Date().toISOString();
+			const task = tasks[taskIndex];
+			if (task) {
+				task.status = 'completed';
+				task.updatedAt = now;
+				task.completedAt = now;
+			}
+
+			await saveTasks(tasks);
+
+			return React.createElement(TasksDisplay, {
+				key: generateKey('tasks-completed'),
+				tasks,
+				message: `Completed: ${task?.title}`,
+			});
+		}
+
 		// Unknown subcommand - treat as task title to add
 		const fullTitle = args.join(' ').trim();
 		const tasks = await loadTasks();
