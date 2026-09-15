@@ -12,13 +12,28 @@ const __dirname = path.dirname(__filename);
  */
 export const UNKNOWN_VERSION = 'unknown';
 
-const defaultPackageJsonCandidates = [
-	path.join(__dirname, '../package.json'),
-	path.join(__dirname, '../../package.json'),
-];
-const DEFAULT_PACKAGE_JSON_PATH =
-	defaultPackageJsonCandidates.find(p => fs.existsSync(p)) ??
-	defaultPackageJsonCandidates[0];
+/**
+ * Given the directory of the compiled module, return the path to the nearest
+ * `package.json` by trying two candidate locations:
+ *
+ * - `../package.json`  — rolldown layout: everything compiles into a flat `dist/`
+ * - `../../package.json` — tsc layout: module lands in `dist/utils/`
+ *
+ * The first candidate that exists on disk wins; if neither exists the first
+ * candidate is returned as-is (so the error surfaces at read time, not here).
+ *
+ * Exported so that tests can drive the resolution logic directly with a
+ * temporary directory, without relying on the module-load-time `__dirname`.
+ */
+export function resolvePackageJsonPath(moduleDir: string): string {
+	const candidates = [
+		path.join(moduleDir, '../package.json'),
+		path.join(moduleDir, '../../package.json'),
+	];
+	return candidates.find(p => fs.existsSync(p)) ?? candidates[0];
+}
+
+const DEFAULT_PACKAGE_JSON_PATH = resolvePackageJsonPath(__dirname);
 
 /**
  * Read this package's version off disk, never throwing.
