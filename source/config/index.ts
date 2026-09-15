@@ -725,7 +725,10 @@ function loadAppConfig(): AppConfig {
 
 	// Load MCP servers from the new hierarchical configuration system
 	const mcpServersWithSource = loadAllMCPConfigs();
-	const mcpServers = mcpServersWithSource.map(item => item.server);
+	const mcpServers = mcpServersWithSource.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
 
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
