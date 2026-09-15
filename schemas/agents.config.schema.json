@@ -577,6 +577,9 @@
 				},
 				"maxRepeatedToolCalls": {
 					"type": "number"
+				},
+				"maxTruncatedTurns": {
+					"type": "number"
 				}
 			},
 			"type": "object",

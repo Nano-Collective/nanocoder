@@ -11,6 +11,7 @@ import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	LLMChatResponse,
+	LLMFinishReason,
 	Message,
 	ModeOverrides,
 	StreamCallbacks,
@@ -436,6 +437,11 @@ export async function handleChat(
 					},
 				],
 				toolsDisabled: shouldDisableTools,
+				// Carried out of the client, not just logged: a `length` finish with
+				// no tool calls is a response truncated at the output-token limit,
+				// and the conversation loop cannot tell that from a model that
+				// finished talking unless it can see this.
+				finishReason: finishReason as LLMFinishReason,
 				usage: {
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,

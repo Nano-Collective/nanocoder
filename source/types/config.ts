@@ -123,6 +123,14 @@ export interface RetryLimitsConfig {
 	// plus (interactive only) native responses that emit tool-call text
 	// instead of native tool calls. Not used by subagent runs.
 	maxMalformedRetries: number;
+	// Consecutive content-only turns that the provider cut off at its
+	// output-token limit (finishReason `length`) before the loop stops asking
+	// the model to continue. Such a turn is a fragment, not an answer, but it
+	// carries no tool calls — so without this cap the --plain loop treats it as
+	// a finished turn and returns the fragment as a successful result.
+	// 0 restores that behaviour (accept the first truncated turn as final).
+	// Applies to the --plain/headless runtime.
+	maxTruncatedTurns: number;
 }
 
 // Custom system prompt configuration
