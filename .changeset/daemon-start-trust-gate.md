@@ -1,0 +1,5 @@
+---
+'@nanocollective/nanocoder': patch
+---
+
+`nanocoder daemon start` now refuses to boot in a directory that hasn't been trusted. The daemon fast path (`cli.tsx`) went straight to `runDaemonCli` → `startDaemon` → `bootSkillPipeline` without ever touching `App.tsx` / `useDirectoryTrust`, so it loaded and registered every `.nanocoder/agents|commands|tools/*.md` and `skills/<name>/skill.yaml` in the project unconditionally. Once booted, headless mode (used for every daemon-triggered run) executes `execute_bash`, `write_file`, `string_replace`, `diff_edit`, and MCP tools with no confirmation prompt. `start` now checks `preferences.trustedDirectories` (reusing the same `ensureDirectoryTrust` helper `--plain` already used, now shared via `@/config/preferences`) before spawning the daemon process, and refuses with a clear message otherwise. A new `--trust-directory` flag bypasses the check for a single `daemon start` run without persisting it; `NANOCODER_TRUST_DIRECTORY=1` still persists trust as it does for `--plain`. Closes #1245.
