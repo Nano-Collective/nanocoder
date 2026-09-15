@@ -1264,6 +1264,44 @@ function repeatingToolResponse(): Partial<LLMChatResponse> {
 	};
 }
 
+test.serial(
+	"reports steps equal to maxTurns when the loop runs out without a final answer",
+	async (t) => {
+		// An empty reply on the final turn is nudged like any other (the empty
+		// cap is not hit yet), which leaves the loop with no turn left and lands
+		// on the post-loop "exceeded" fallback.
+		process.env.NANOCODER_MAX_TURNS = "2";
+		reloadAppConfig();
+
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{ choices: [{ message: { role: "assistant", content: "" } }] },
+				{ choices: [{ message: { role: "assistant", content: "" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /exceeded 2 turns without a final answer/);
+		}
+		t.is(calls.length, 2);
+		t.is(outcome.steps, 2);
+	},
+);
+
 // Scope a retry-limit override to one test; afterEach.always reloads config,
 // but restore explicitly so a mid-test failure cannot leak into another test.
 async function withRetryLimit<K extends "maxRepeatedToolCalls" | "maxEmptyTurns" | "maxMalformedRetries" | "maxTruncatedTurns">(
@@ -1646,6 +1684,7 @@ test.serial(
 			t.regex(outcome.message, /maxMalformedRetries/);
 		}
 		t.is(calls.length, 3);
+		t.is(outcome.steps, 3, "every malformed retry is a model round-trip");
 
 		// The self-correction feedback must reach the model on retry turns.
 		const retryTurnMessages = calls[1].messages;
@@ -1690,6 +1729,7 @@ test.serial(
 		});
 
 		t.is(outcome.kind, "success");
+		t.is(outcome.steps, 2, "the malformed turn and its retry both count");
 	},
 );
 
@@ -2061,6 +2101,7 @@ test.serial(
 		t.is(outcome.kind, "success");
 		t.is(handlerCalls, 1, "the deliverable tool call must still happen");
 		t.is(calls.length, 3, "the truncated turn must be continued, not accepted");
+		t.is(outcome.steps, 3, "a truncation continuation is a step of its own");
 
 		// The nudge goes in as a user turn after the partial reply, and the
 		// partial must be carried exactly once — the assistant append upstream
@@ -2111,6 +2152,7 @@ test.serial(
 
 		t.is(outcome.kind, "success");
 		t.is(calls.length, 3);
+		t.is(outcome.steps, 3);
 	},
 );
 
@@ -2144,6 +2186,7 @@ test.serial(
 
 			t.is(outcome.kind, "success");
 			t.is(calls.length, 1, "no continuation when the cap is 0");
+			t.is(outcome.steps, 1);
 		});
 	},
 );
