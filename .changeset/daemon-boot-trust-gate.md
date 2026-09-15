@@ -1,0 +1,5 @@
+---
+'@nanocollective/nanocoder': patch
+---
+
+Fixed `nanocoder daemon start` booting a daemon in a directory the user had never trusted. The daemon arms skill subscriptions and dispatches sub-agents in headless mode, where tool confirmations are already skipped, so an untrusted directory's `.nanocoder/` content ran unattended — the trust gate only existed on the interactive and `run` entry points, and the `daemon` fast path in `cli.tsx` short-circuited past both. `daemon start` now refuses with a message naming the directory, and the daemon process re-checks the same rule on boot so launchd/systemd autostart launched by `daemon install` is covered too, since those boots never run the CLI. `--trust-directory` is now valid with `daemon start` and records standing trust (unlike the run-scoped meaning it keeps for `run`), and `NANOCODER_TRUST_DIRECTORY=1` works for a single boot. The flag is also read position-agnostically, so `nanocoder --trust-directory daemon start` no longer silently degrades to "untrusted". Closes #1245.
