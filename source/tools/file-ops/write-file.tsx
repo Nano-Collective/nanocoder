@@ -15,7 +15,7 @@ import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {computeLineDiff} from '@/utils/inline-diff';
+import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
@@ -152,6 +152,9 @@ const WriteFileFormatter = React.memo(
 				const entries = computeLineDiff(previousContent as string, newContent);
 				const addedCount = entries.filter(e => e.type === 'added').length;
 				const removedCount = entries.filter(e => e.type === 'removed').length;
+				// Collapse untouched stretches so the line cap never spends its
+				// budget on unchanged lines while hiding the edits themselves.
+				const rows = collapseUnchangedLines(entries);
 
 				return (
 					<Box flexDirection="column" marginTop={1}>
@@ -163,8 +166,19 @@ const WriteFileFormatter = React.memo(
 						</Box>
 						<Box flexDirection="column">
 							<CappedLines
-								items={entries}
+								items={rows}
+								isChange={entry =>
+									entry.type === 'added' || entry.type === 'removed'
+								}
 								renderItem={(entry, i) => {
+									if (entry.type === 'gap') {
+										return (
+											<Text key={i} color={colors.secondary}>
+												{`   ⋯ ${entry.count} unchanged line${entry.count === 1 ? '' : 's'}`}
+											</Text>
+										);
+									}
+
 									if (entry.type === 'unchanged') {
 										const lineNumStr = String(entry.newLine).padStart(4, ' ');
 										let displayLine: string;

@@ -333,3 +333,29 @@ test('CappedLines names the /expand number when it has one', t => {
 
 	t.regex(lastFrame()!, /\+1 more lines · \/expand 7/);
 });
+
+test('CappedLines says how many hidden lines are changes', t => {
+	const {lastFrame} = renderWithTheme(
+		<CappedLines
+			items={manyRows(25).split('\n')}
+			renderItem={(line, index) => <Text key={index}>{line}</Text>}
+			isChange={(_, index) => index >= 22}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /\+5 more lines, 3 changed\)/);
+});
+
+test('CappedLines leaves out the change count when no hidden line is a change', t => {
+	const {lastFrame} = renderWithTheme(
+		<CappedLines
+			items={manyRows(25).split('\n')}
+			renderItem={(line, index) => <Text key={index}>{line}</Text>}
+			isChange={(_, index) => index < 3}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /\+5 more lines\)/);
+	t.notRegex(output, /changed/);
+});

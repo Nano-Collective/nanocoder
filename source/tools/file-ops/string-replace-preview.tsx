@@ -191,6 +191,8 @@ export async function formatStringReplacePreview(
 
 		// Build unified diff
 		const diffLines: React.ReactElement[] = [];
+		// Indexes into diffLines of lines the replacement leaves as they were.
+		const unchangedDiffRows = new Set<number>();
 		let oldIdx = 0;
 		let newIdx = 0;
 		let diffKey = 0;
@@ -205,6 +207,7 @@ export async function formatStringReplacePreview(
 				newIdx < normalizedNewLines.length ? normalizedNewLines[newIdx] : null;
 
 			if (oldLine !== null && newLine !== null && oldLine === newLine) {
+				unchangedDiffRows.add(diffLines.length);
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
 				diffLines.push(
 					<Box key={`diff-${diffKey++}`}>
@@ -384,6 +387,14 @@ export async function formatStringReplacePreview(
 								<CappedLines
 									items={[...contextBefore, ...diffLines, ...contextAfter]}
 									renderItem={line => line}
+									isChange={(_, index) => {
+										const row = index - contextBefore.length;
+										return (
+											row >= 0 &&
+											row < diffLines.length &&
+											!unchangedDiffRows.has(row)
+										);
+									}}
 								/>
 							</Box>
 						</Box>

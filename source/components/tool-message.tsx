@@ -18,27 +18,40 @@ export const ToolOutputContext = React.createContext<{
 /**
  * Renders the first TOOL_OUTPUT_DISPLAY_LINES items, then a "+N more lines"
  * note. Only the visible items are rendered, so a huge file costs nothing.
+ *
+ * Diff views pass `isChange` so the note can say when the cap hides edits
+ * rather than trailing context ("+N more lines, K changed").
  */
 export function CappedLines<T>({
 	items,
 	renderItem,
+	isChange,
 }: {
 	items: T[];
 	renderItem: (item: T, index: number) => React.ReactNode;
+	isChange?: (item: T, index: number) => boolean;
 }) {
 	const {expanded, expandId} = React.useContext(ToolOutputContext);
 	const {colors} = useTheme();
 	const hiddenCount = expanded
 		? 0
 		: Math.max(0, items.length - TOOL_OUTPUT_DISPLAY_LINES);
+	const visibleCount = items.length - hiddenCount;
+	const hiddenChanges =
+		isChange && hiddenCount > 0
+			? items
+					.slice(visibleCount)
+					.filter((item, i) => isChange(item, visibleCount + i)).length
+			: 0;
+	const changes = hiddenChanges > 0 ? `, ${hiddenChanges} changed` : '';
 	const hint = expandId === undefined ? '' : ` · /expand ${expandId}`;
 
 	return (
 		<>
-			{items.slice(0, items.length - hiddenCount).map(renderItem)}
+			{items.slice(0, visibleCount).map(renderItem)}
 			{hiddenCount > 0 && (
 				<Text color={colors.secondary}>
-					{`… (+${hiddenCount} more lines${hint})`}
+					{`… (+${hiddenCount} more lines${changes}${hint})`}
 				</Text>
 			)}
 		</>

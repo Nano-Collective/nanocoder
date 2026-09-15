@@ -330,14 +330,23 @@ function DiffEditPreview({
 				<Box flexDirection="column" marginTop={1}>
 					<CappedLines
 						items={blocks.flatMap((block, index) => [
-							{text: `Block ${index + 1}`, color: colors.secondary},
-							...block.search
-								.split('\n')
-								.map(line => ({text: `- ${line}`, color: colors.error})),
-							...block.replace
-								.split('\n')
-								.map(line => ({text: `+ ${line}`, color: colors.success})),
+							{
+								text: `Block ${index + 1}`,
+								color: colors.secondary,
+								changed: false,
+							},
+							...block.search.split('\n').map(line => ({
+								text: `- ${line}`,
+								color: colors.error,
+								changed: true,
+							})),
+							...block.replace.split('\n').map(line => ({
+								text: `+ ${line}`,
+								color: colors.success,
+								changed: true,
+							})),
 						])}
+						isChange={row => row.changed}
 						renderItem={(row, index) => (
 							<Text key={index} color={row.color}>
 								{row.text}

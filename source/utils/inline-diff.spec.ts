@@ -1,9 +1,53 @@
 import test from 'ava';
 import {
 	areLinesSimilar,
+	collapseUnchangedLines,
 	computeInlineDiff,
 	computeLineDiff,
 } from './inline-diff.js';
+
+// ============================================================================
+// collapseUnchangedLines Tests
+// ============================================================================
+
+const numberedLines = (count: number, change?: {at: number; text: string}) =>
+	Array.from({length: count}, (_, i) =>
+		change && i + 1 === change.at ? change.text : `line ${i + 1}`,
+	).join('\n');
+
+test('collapseUnchangedLines: keeps three lines of context around a change', t => {
+	const entries = computeLineDiff(
+		numberedLines(100),
+		numberedLines(100, {at: 80, text: 'CHANGED'}),
+	);
+	const collapsed = collapseUnchangedLines(entries);
+
+	t.deepEqual(collapsed[0], {type: 'gap', count: 76});
+	t.deepEqual(
+		collapsed.slice(1, 4).map(e => e.type !== 'gap' && e.text),
+		['line 77', 'line 78', 'line 79'],
+	);
+	t.true(collapsed.some(e => e.type === 'added' && e.text === 'CHANGED'));
+	t.true(collapsed.some(e => e.type === 'removed' && e.text === 'line 80'));
+	t.deepEqual(collapsed[collapsed.length - 1], {type: 'gap', count: 17});
+});
+
+test('collapseUnchangedLines: leaves a short unchanged run between changes intact', t => {
+	const oldText = numberedLines(10);
+	const newText = numberedLines(10)
+		.replace('line 2\n', 'two\n')
+		.replace('line 7\n', 'seven\n');
+	const collapsed = collapseUnchangedLines(computeLineDiff(oldText, newText));
+
+	t.false(collapsed.some(e => e.type === 'gap'));
+});
+
+test('collapseUnchangedLines: returns only a gap when nothing changed', t => {
+	const text = numberedLines(10);
+	t.deepEqual(collapseUnchangedLines(computeLineDiff(text, text)), [
+		{type: 'gap', count: 10},
+	]);
+});
 
 // ============================================================================
 // computeInlineDiff Tests
