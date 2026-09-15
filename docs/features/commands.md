@@ -148,6 +148,7 @@ The emitted object looks like:
       "error": null
     }
   ],
+  "steps": 2,
   "filesChanged": ["src/api.ts"],
   "usage": {
     "inputTokens": 4520,
@@ -162,6 +163,7 @@ The emitted object looks like:
 - `finalText` — the model's final response text
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
+- `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
 - `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 

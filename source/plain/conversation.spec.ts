@@ -117,6 +117,7 @@ test("returns success when model emits content and no tool calls", async (t) => 
 	});
 
 	t.is(outcome.kind, "success");
+	t.is(outcome.steps, 1);
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
@@ -144,6 +145,7 @@ test("nudges through empty responses up to the cap, then returns error", async (
 	if (outcome.kind === "error") {
 		t.regex(outcome.message, /produced no output after 3 attempts/i);
 	}
+	t.is(outcome.steps, 3);
 });
 
 test("recovers when a nudge after an empty response gets the model talking", async (t) => {
@@ -168,6 +170,9 @@ test("recovers when a nudge after an empty response gets the model talking", asy
 	// finalText stays empty here because the fake client never streams tokens;
 	// the success outcome (driven by the message content) is the behavior under test.
 	t.is(outcome.kind, "success");
+	// The nudged retry is a step of its own even though it made no tool call.
+	t.is(outcome.steps, 2);
+	t.is(outcome.toolCalls.length, 0);
 });
 
 test("executes a tool call that does not need approval and recurses to success", async (t) => {
@@ -217,6 +222,9 @@ test("executes a tool call that does not need approval and recurses to success",
 
 	t.is(outcome.kind, "success");
 	t.is(handlerCalls, 1);
+	// One step issued the tool call, the next produced the answer.
+	t.is(outcome.steps, 2);
+	t.is(outcome.toolCalls.length, 1);
 });
 
 test("returns tool-approval-required when a tool needs approval and mode is not yolo", async (t) => {
@@ -255,6 +263,7 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	});
 
 	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
 	}
@@ -663,6 +672,7 @@ test("aborted signal short-circuits with an error outcome", async (t) => {
 	});
 
 	t.is(outcome.kind, "error");
+	t.is(outcome.steps, 0);
 });
 
 // --- Tool execution error telemetry (isError) ---

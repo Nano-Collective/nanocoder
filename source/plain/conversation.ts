@@ -67,12 +67,15 @@ export interface PlainConversationUsage {
 	cacheWriteTokens?: number;
 }
 
+// `steps` counts model round-trips, including retried turns. It is not
+// `toolCalls.length`: one step can issue zero or several tool calls.
 export type PlainConversationOutcome =
 	| {
 			kind: 'success';
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  }
 	| {
@@ -81,6 +84,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  }
 	| {
@@ -89,6 +93,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  };
 
@@ -175,6 +180,7 @@ async function runPlainConversationBody(
 	let finalTextBeforeWalkthroughNudge: string | undefined;
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
+	let steps = 0;
 
 	let hasReportedUsage = false;
 	let accumulatedInputTokens = 0;
@@ -237,6 +243,7 @@ async function runPlainConversationBody(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -255,6 +262,7 @@ async function runPlainConversationBody(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -327,6 +335,7 @@ async function runPlainConversationBody(
 			abortSignal,
 			modeOverrides,
 		);
+		steps++;
 
 		// The client always returns a `usage` object, but every field inside it is
 		// optional — providers that report nothing leave all three undefined, and
@@ -395,6 +404,7 @@ async function runPlainConversationBody(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -425,6 +435,7 @@ async function runPlainConversationBody(
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
+					steps,
 					usage: getUsage(),
 				};
 			}
@@ -516,6 +527,7 @@ async function runPlainConversationBody(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -547,6 +559,7 @@ async function runPlainConversationBody(
 						finalText: accumulatedFinalText,
 						reasoning: accumulatedReasoning || null,
 						toolCalls: toolCallsLog,
+						steps,
 						usage: getUsage(),
 					};
 				}
@@ -588,6 +601,7 @@ async function runPlainConversationBody(
 				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -631,6 +645,7 @@ async function runPlainConversationBody(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -689,6 +704,7 @@ async function runPlainConversationBody(
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
 		toolCalls: toolCallsLog,
+		steps,
 		usage: getUsage(),
 	};
 }

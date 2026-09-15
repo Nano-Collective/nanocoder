@@ -257,6 +257,7 @@ test.serial(
 						finalText: "all done",
 						reasoning: null,
 						toolCalls: [],
+						steps: 3,
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
 				}),
@@ -270,6 +271,7 @@ test.serial(
 		t.is(report.exitCode, 0);
 		t.is(report.finalText, "all done");
 		t.deepEqual(report.toolCalls, []);
+		t.is(report.steps, 3);
 		t.deepEqual(report.filesChanged, []);
 		t.is(report.usage, undefined);
 		t.is(shutdown.code, 0);
@@ -500,6 +502,7 @@ test.serial(
 		t.is(report.kind, "error");
 		t.is(report.exitCode, 1);
 		t.regex(report.message, /not trusted/i);
+		t.is(report.steps, 0);
 		t.is(shutdown.code, 1);
 		t.false(
 			initCalled,

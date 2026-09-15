@@ -118,6 +118,7 @@ export async function runPlainShell(
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
 				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
 			});
@@ -144,6 +145,7 @@ export async function runPlainShell(
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
 				message: formattedErr,
 			});
@@ -228,6 +230,7 @@ export async function runPlainShell(
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
 				message,
 			});
@@ -345,6 +348,7 @@ export async function runPlainShell(
 			finalText: sanitizeOutput(outcome.finalText || ''),
 			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
 			toolCalls: formattedToolCalls,
+			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
 			...(outcome.usage && {
 				usage: outcome.usage,
