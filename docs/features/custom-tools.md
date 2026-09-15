@@ -139,9 +139,9 @@ The body is a shell script with two placeholder forms:
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes and embedded quotes are doubled; delayed expansion is disabled. Because cmd.exe has no reliable command-line escape for percent expansion or embedded command separators, values containing percent signs, newlines, null bytes, or carriage returns are rejected instead of being executed.
+Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes and embedded quotes are doubled; delayed expansion is disabled. Because cmd.exe has no reliable command-line escape for percent expansion or embedded command separators, values containing percent signs, newlines, null bytes, or carriage returns are rejected instead of being executed. The cmd.exe path has focused regression coverage, but its full Windows CI job must pass before treating this as a broadly verified compatibility guarantee.
 
-This blocks shell injection through parameter values:
+On POSIX shells, this blocks shell injection through parameter values:
 
 ```markdown
 echo {{ name }}
@@ -160,7 +160,7 @@ echo '; rm -rf /; #'
 When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
-2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /s /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
+2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
 3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
 5. The output always starts with `EXIT_CODE: N`, followed by the captured output. When the script wrote to stderr, the output is split into `STDERR:` and `STDOUT:` sections. Everything is truncated at the standard output limit.

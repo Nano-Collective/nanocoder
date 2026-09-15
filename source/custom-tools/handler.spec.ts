@@ -70,6 +70,9 @@ function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
 		approval: 'never',
 		readOnly: true,
 		timeoutMs: 5_000,
+		// Most execution tests assert POSIX behavior regardless of the host OS.
+		// Keep that contract explicit rather than relying on pickShell's platform default.
+		shell: '/bin/sh',
 		...extra,
 	};
 }
@@ -99,25 +102,22 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	else process.env.NCT_FOO = prev;
 });
 
-test('shellArgs uses /d /s /c for cmd.exe and -c for posix shells', t => {
+test('shellArgs uses /d /v:off /c for cmd.exe and -c for posix shells', t => {
 	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
 		'/d',
 		'/v:off',
-		'/s',
 		'/c',
 		'echo hi',
 	]);
 	t.deepEqual(shellArgs('cmd', 'echo hi'), [
 		'/d',
 		'/v:off',
-		'/s',
 		'/c',
 		'echo hi',
 	]);
 	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
 		'/d',
 		'/v:off',
-		'/s',
 		'/c',
 		'echo hi',
 	]);
@@ -138,7 +138,7 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 		shell: bin,
 		timeoutMs: 5_000,
 	});
-	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/s\n/c\necho hi');
+	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/c\necho hi');
 });
 
 const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
@@ -149,12 +149,12 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 		'console.log(JSON.stringify(process.argv.slice(2)));\n',
 	);
 	const handler = buildHandler(
-		meta(),
-		'node {{ probe }} {{ value }}',
+		meta({shell: 'cmd.exe'}),
+		'{{ node }} {{ probe }} {{ value }}',
 		testDir,
 	);
 	const value = 'a b&c|d<e>f^g"h!i';
-	const result = await handler({probe, value});
+	const result = await handler({node: 'node', probe, value});
 	t.is(result, `EXIT_CODE: 0\n${JSON.stringify([value])}`);
 });
 

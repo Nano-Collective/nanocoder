@@ -296,10 +296,10 @@ export function expandVars(value: string): string {
 	});
 }
 
-/** cmd.exe: disable AutoRun/delayed expansion, normalize quotes, then run. */
+/** cmd.exe: disable AutoRun/delayed expansion, then run. */
 export function shellArgs(shell: string, script: string): string[] {
 	return isWindowsCmd(shell)
-		? ['/d', '/v:off', '/s', '/c', script]
+		? ['/d', '/v:off', '/c', script]
 		: ['-c', script];
 }
 
