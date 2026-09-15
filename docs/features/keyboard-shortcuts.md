@@ -8,6 +8,8 @@ sidebar_order: 11
 
 This page covers the main chat input and common interactive views. Some specialised screens may show additional inline controls.
 
+Press `?` in an empty prompt to open an in-app overlay listing the main shortcuts; press `?` or Esc to close it.
+
 ## Submitting & Multi-line Input
 
 | Action | Shortcut | Notes |
