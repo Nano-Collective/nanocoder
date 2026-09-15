@@ -161,6 +161,9 @@ export class AcpProcessManager {
 			},
 			requestPermission: async (params: any) => {
 				return this.acpClient.handlePermissionRequest(params);
+			},
+			extNotification: async (method: string, params: any) => {
+				return this.acpClient.handleExtNotification(method, params);
 			}
 		} as any), stream);
 		this.acpClient.setConnection(connection);

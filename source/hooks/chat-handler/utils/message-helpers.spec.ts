@@ -1,42 +1,42 @@
 import test from 'ava';
-import {displayError} from './message-helpers.js';
 import type React from 'react';
 
-test('displayError - handles cancellation errors specially', t => {
+import {ErrorMessage} from '@/components/message-box';
+import {displayError} from './message-helpers.js';
+
+function captureErrorMessage(error: unknown): React.ReactElement {
 	let capturedComponent: React.ReactNode = null;
-	const addToChatQueue = (component: React.ReactNode) => {
+	displayError(error, 'test', component => {
 		capturedComponent = component;
-	};
+	});
 
-	const error = new Error('Operation was cancelled');
-	displayError(error, 'test', addToChatQueue, () => 1);
+	if (!capturedComponent || typeof capturedComponent !== 'object' || !('props' in capturedComponent)) {
+		throw new Error('displayError did not enqueue a React element');
+	}
 
-	t.truthy(capturedComponent);
-	// Check that component was created (we can't easily inspect JSX in tests)
-	t.pass();
+	return capturedComponent as React.ReactElement;
+}
+
+test('displayError - handles cancellation errors specially', t => {
+	const component = captureErrorMessage(new Error('Operation was cancelled'));
+
+	t.is(component.type, ErrorMessage);
+	t.is(component.props.message, 'Interrupted by user.');
+	t.true(component.props.hideBox);
 });
 
-test('displayError - handles generic errors', t => {
-	let capturedComponent: React.ReactNode = null;
-	const addToChatQueue = (component: React.ReactNode) => {
-		capturedComponent = component;
-	};
+test('displayError - formats generic errors', t => {
+	const component = captureErrorMessage(new Error('Test error'));
 
-	const error = new Error('Test error');
-	displayError(error, 'test', addToChatQueue, () => 1);
-
-	t.truthy(capturedComponent);
-	t.pass();
+	t.is(component.type, ErrorMessage);
+	t.is(component.props.message, 'Test error');
+	t.true(component.props.hideBox);
 });
 
 test('displayError - handles non-Error objects', t => {
-	let capturedComponent: React.ReactNode = null;
-	const addToChatQueue = (component: React.ReactNode) => {
-		capturedComponent = component;
-	};
+	const component = captureErrorMessage({reason: 'string error'});
 
-	displayError('string error', 'test', addToChatQueue, () => 1);
-
-	t.truthy(capturedComponent);
-	t.pass();
+	t.is(component.type, ErrorMessage);
+	t.is(component.props.message, '{"reason":"string error"}');
+	t.true(component.props.hideBox);
 });

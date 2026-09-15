@@ -14,7 +14,11 @@ import {
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {summariseWithLLM} from '@/utils/llm-summariser';
-import {compressMessages} from '@/utils/message-compression';
+import {
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from '@/utils/message-compression';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -118,14 +122,10 @@ export async function handleCompactCommand(
 			return true;
 		} else if (arg === '--threshold' && i + 1 < args.length) {
 			const thresholdValue = Number.parseFloat(args[i + 1]);
-			if (
-				Number.isNaN(thresholdValue) ||
-				thresholdValue < 50 ||
-				thresholdValue > 95
-			) {
+			if (Number.isNaN(thresholdValue) || !isThresholdInRange(thresholdValue)) {
 				onAddToChatQueue(
 					errorMsg(
-						'Threshold must be a number between 50 and 95.',
+						`Threshold must be a number between ${COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT} and ${COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT}.`,
 						'compact-threshold-error',
 					),
 				);

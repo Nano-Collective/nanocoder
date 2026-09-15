@@ -131,6 +131,9 @@ export function activate(context: vscode.ExtensionContext) {
 			if (event.affectsConfiguration('nanocoder.codeLens')) {
 				codeLensProvider.refresh();
 			}
+			if (event.affectsConfiguration('nanocoder.showTokenUsage')) {
+				chatProvider.refreshSettings();
+			}
 		}),
 		vscode.commands.registerCommand('nanocoder.explainCode', (uri?: vscode.Uri, range?: vscode.Range) =>
 			sendCodeLensPrompt(chatProvider, 'Explain what this code does.', uri, range),

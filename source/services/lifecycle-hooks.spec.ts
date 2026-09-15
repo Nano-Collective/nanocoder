@@ -155,6 +155,119 @@ test.serial('matchTools scopes a hook to the named tools', async t => {
 	t.is(skipped.output, '');
 });
 
+test.serial('matchPaths scopes a hook to the files it names', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				matchTools: ['write_file'],
+				matchPaths: ['**/*.{ts,tsx}'],
+				command: node("console.log('formatted')"),
+			},
+		],
+	});
+
+	const ts = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'source/a.ts'},
+	});
+	const tsx = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'a.tsx'},
+	});
+	const go = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'cmd/main.go'},
+	});
+
+	t.is(ts.output, 'formatted');
+	t.is(tsx.output, 'formatted');
+	t.is(go.output, '');
+});
+
+test.serial('matchPaths accepts the file_path spelling too', async t => {
+	withHooks({
+		'post-tool-use': [
+			{matchPaths: ['**/*.ts'], command: node("console.log('ran')")},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'string_replace',
+		toolArgs: {file_path: 'source/a.ts'},
+	});
+
+	t.is(outcome.output, 'ran');
+});
+
+test.serial('a root-anchored matchPaths matches an absolute path', async t => {
+	// The model may write either form for the same edit, so a pattern that is
+	// not `**`-prefixed must not fire only for the relative spelling.
+	withHooks({
+		'post-tool-use': [
+			{matchPaths: ['src/**'], command: node("console.log('ran')")},
+		],
+	});
+
+	const relativePath = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'src/a.ts'},
+	});
+	const absolutePath = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: join(realpathSync(testDir), 'src', 'a.ts')},
+	});
+	const outsideRoot = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'other/a.ts'},
+	});
+
+	t.is(relativePath.output, 'ran');
+	t.is(absolutePath.output, 'ran');
+	t.is(outsideRoot.output, '');
+});
+
+test.serial('matchPaths excludes a tool that acted on no file', async t => {
+	// A hook scoped to files is asking a question `execute_bash` cannot answer,
+	// so it must not fire — unlike a missing matchTools, which widens.
+	withHooks({
+		'post-tool-use': [
+			{matchPaths: ['**/*.ts'], command: node("console.log('ran')")},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'execute_bash',
+		toolArgs: {command: 'ls'},
+	});
+
+	t.is(outcome.output, '');
+});
+
+test.serial('matchPaths is ignored by events that have no file', async t => {
+	withHooks({
+		'session-start': [
+			{matchPaths: ['**/*.ts'], command: node("console.log('ran')")},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('session-start');
+
+	t.is(outcome.output, 'ran');
+});
+
+test.serial('a hook with no matchPaths still runs for every file', async t => {
+	withHooks({
+		'post-tool-use': [{command: node("console.log('ran')")}],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'cmd/main.go'},
+	});
+
+	t.is(outcome.output, 'ran');
+});
+
 test.serial('a non-zero exit on an observe-only event never blocks', async t => {
 	withHooks({
 		'post-tool-use': [

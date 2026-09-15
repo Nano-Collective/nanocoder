@@ -2037,3 +2037,42 @@ test('SearchFileContentsFormatter hides context when 0', t => {
 	t.truthy(output);
 	t.notRegex(output!, /Context:/);
 });
+
+test('SearchFileContentsFormatter lists the file:line hits', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'handleSubmit'},
+		'Found 2 matches:\n\nsrc/form.ts:3:handleSubmit()\nsrc/app.ts:9:const handleSubmit = 1;',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame()!;
+	t.regex(output, /src\/form\.ts:3:handleSubmit\(\)/);
+	t.regex(output, /src\/app\.ts:9:const handleSubmit = 1;/);
+	t.notRegex(output, /more lines/);
+});
+
+test('SearchFileContentsFormatter caps a long hit list like bash output', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const hits = Array.from(
+		{length: 25},
+		(_, i) => `src/file${i + 1}.ts:1:match`,
+	).join('\n');
+	const element = formatter({query: 'match'}, `Found 25 matches:\n\n${hits}`);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame()!;
+	t.regex(output, /src\/file20\.ts:1:match/);
+	t.notRegex(output, /src\/file21\.ts/);
+	t.regex(output, /\+5 more lines/);
+});

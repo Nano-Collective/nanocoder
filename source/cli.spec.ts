@@ -327,45 +327,46 @@ test('plain mode: --vscode suppresses auto-detection', t => {
 });
 
 // --alt-screen / --no-alt-screen flag tests. The resolution rule mirrors
-// the logic in cli.tsx: --no-alt-screen always wins (forces inline), then
-// --alt-screen or the "alternateScreen" preference opt in, and the whole
-// thing is gated on being an interactive TTY session (never in
+// the logic in cli.tsx: fullscreen (alt screen) is enabled by default in
+// interactive TTY sessions. --no-alt-screen or "alternateScreen": false in
+// preferences forces inline mode. --alt-screen explicitly enables it, and
+// the whole thing is gated on being an interactive TTY session (never in
 // nonInteractiveMode, e.g. `run`, and never off a real TTY).
 function resolveAltScreenMode(opts: {
 	args: string[];
 	stdoutIsTTY: boolean;
 	nonInteractiveMode: boolean;
-	preferenceAlternateScreen: boolean;
+	preferenceAlternateScreen?: boolean;
 }): boolean {
 	const {args, stdoutIsTTY, nonInteractiveMode, preferenceAlternateScreen} =
 		opts;
+	const pref = preferenceAlternateScreen ?? true;
 	const altScreenAllowed =
 		!args.includes('--no-alt-screen') &&
-		(args.includes('--alt-screen') || preferenceAlternateScreen === true);
+		(args.includes('--alt-screen') || pref === true);
 	return stdoutIsTTY && !nonInteractiveMode && altScreenAllowed;
 }
 
-test('alt-screen: off by default (no flag, no preference)', t => {
+test('alt-screen: on by default (no flag, no preference)', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: [],
 		stdoutIsTTY: true,
 		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
-	});
-	t.false(useAltScreen);
-});
-
-test('alt-screen: --alt-screen flag turns it on over a TTY', t => {
-	const useAltScreen = resolveAltScreenMode({
-		args: ['--alt-screen'],
-		stdoutIsTTY: true,
-		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
 	});
 	t.true(useAltScreen);
 });
 
-test('alt-screen: "alternateScreen" preference turns it on without the flag', t => {
+test('alt-screen: --alt-screen flag explicitly keeps it on over a TTY', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: true,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: "alternateScreen": true preference keeps it on without the flag', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: [],
 		stdoutIsTTY: true,
@@ -375,12 +376,20 @@ test('alt-screen: "alternateScreen" preference turns it on without the flag', t 
 	t.true(useAltScreen);
 });
 
-test('alt-screen: --no-alt-screen overrides the flag', t => {
+test('alt-screen: --no-alt-screen turns it off', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--no-alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: --no-alt-screen overrides the --alt-screen flag', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: ['--alt-screen', '--no-alt-screen'],
 		stdoutIsTTY: true,
 		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
@@ -395,22 +404,40 @@ test('alt-screen: --no-alt-screen overrides the persisted preference', t => {
 	t.false(useAltScreen);
 });
 
-test('alt-screen: never enabled off a non-TTY, even with the flag', t => {
+test('alt-screen: "alternateScreen": false preference turns it off without the flag', t => {
 	const useAltScreen = resolveAltScreenMode({
-		args: ['--alt-screen'],
-		stdoutIsTTY: false,
+		args: [],
+		stdoutIsTTY: true,
 		nonInteractiveMode: false,
 		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
 
-test('alt-screen: never enabled for non-interactive `run` mode, even with the flag', t => {
+test('alt-screen: --alt-screen overrides "alternateScreen": false preference', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: never enabled off a non-TTY, even with the flag or default', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: false,
+		nonInteractiveMode: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: never enabled for non-interactive `run` mode, even with the flag or default', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: ['--alt-screen'],
 		stdoutIsTTY: true,
 		nonInteractiveMode: true,
-		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
