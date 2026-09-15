@@ -152,3 +152,33 @@ test.serial('CLI integration: init invalid preset exits with an error', t => {
 		rmSync(projectPath, {recursive: true, force: true});
 	}
 });
+
+test.serial('CLI integration: completion zsh prints the zsh script to stdout', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'completion', 'zsh'], {
+		encoding: 'utf8',
+	});
+
+	t.is(result.status, 0);
+	t.true(result.stdout.startsWith('#compdef nanocoder'));
+});
+
+test.serial('CLI integration: completion without a shell exits 1 with usage', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'completion'], {
+		encoding: 'utf8',
+	});
+
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('shell argument is required'));
+	t.true(result.stderr.includes('Usage: nanocoder completion'));
+});
+
+test.serial('CLI integration: completion with an unknown shell exits 1', t => {
+	const result = spawnSync(
+		process.execPath,
+		[cliPath, 'completion', 'tcsh'],
+		{encoding: 'utf8'},
+	);
+
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('unknown shell "tcsh"'));
+});

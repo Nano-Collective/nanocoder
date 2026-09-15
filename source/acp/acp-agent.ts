@@ -54,7 +54,12 @@ import {
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {TimelineManager} from '@/services/timeline-manager';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
+import {
+	ACTIVE_FILE_PREFIX,
+	deriveTitleFromFirstMessage,
+} from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -79,6 +84,13 @@ async function listSessionArtifacts(sessionId: string) {
 }
 
 export class AcpAgent implements Agent {
+	/**
+	 * The in-flight background titling run. Exposed only so tests can await
+	 * work that production deliberately fires and forgets - asserting on it
+	 * with a fixed sleep goes flaky the moment CI is loaded.
+	 */
+	private pendingTitleGeneration: Promise<void> = Promise.resolve();
+
 	private sessions = new Map<string, AcpSession>();
 	private initContext: AcpInitContext;
 	private conn: AgentSideConnection;
@@ -191,6 +203,11 @@ export class AcpAgent implements Agent {
 		}
 
 		session.beginTurn();
+
+		// Both the cancel early-return below and the rethrow after it still run
+		// the finally, so a clean turn has to be tracked explicitly rather than
+		// inferred from getting there.
+		let turnSucceeded = false;
 
 		try {
 			const {text: userText, images} = await acpContentToUserMessage(
@@ -371,6 +388,7 @@ export class AcpAgent implements Agent {
 				nonInteractiveAlwaysAllow,
 			});
 			this.attachResponseUsage(session, response, previousAssistant);
+			turnSucceeded = true;
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
@@ -421,6 +439,30 @@ export class AcpAgent implements Agent {
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
+
+			// Fire and forget: the turn must return to idle immediately, and a
+			// cosmetic title landing a moment later is fine. The promise is kept
+			// only so tests can await it instead of sleeping; nothing in
+			// production reads it.
+			if (turnSucceeded) {
+				this.pendingTitleGeneration = maybeGenerateTitle({
+					sessionId: session.sessionId,
+					messages: session.messages,
+					client: this.initContext.client,
+					onTitle: title => {
+						// notify(), not the deprecated extNotification() alias.
+						// The client receives it as extNotification(method, params).
+						// Lands after the turn went idle, so the client may already be
+						// gone; an unhandled rejection here would kill the agent.
+						void this.conn
+							.notify('_nanocoder/sessionTitleChanged', {
+								sessionId: session.sessionId,
+								title,
+							})
+							.catch(() => {});
+					},
+				}).catch(() => {});
+			}
 		}
 	}
 
@@ -933,17 +975,17 @@ export class AcpAgent implements Agent {
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
-				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
-					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
-				} else {
-					title = 'New Session';
-				}
+				title =
+					(typeof firstUserMessage?.content === 'string'
+						? deriveTitleFromFirstMessage(firstUserMessage.content)
+						: null) ?? 'New Session';
 			}
 
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
@@ -954,7 +996,7 @@ export class AcpAgent implements Agent {
 					if (m.role === 'user' && typeof m.content === 'string') {
 						return {
 							...m,
-							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+							content: m.content.replace(ACTIVE_FILE_PREFIX, ''),
 						};
 					}
 					return m;

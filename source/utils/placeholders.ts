@@ -6,6 +6,7 @@ const ORDINAL = /^\d+$/;
 const ID_PREFIX: Record<PlaceholderType, string> = {
 	[PlaceholderType.PASTE]: 'paste',
 	[PlaceholderType.FILE]: 'file',
+	[PlaceholderType.RESOURCE]: 'resource',
 };
 
 const PASTE_MARKER = `${ID_PREFIX[PlaceholderType.PASTE]}_`;

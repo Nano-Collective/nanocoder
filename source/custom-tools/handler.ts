@@ -63,15 +63,26 @@ export function runScript(
 		let stdout = '';
 		let stderr = '';
 		let timedOut = false;
+		let killTimer: NodeJS.Timeout | undefined;
 
 		const timer = setTimeout(() => {
 			timedOut = true;
 			child.kill('SIGTERM');
 			// Force-kill if the process refuses to exit within a grace window.
-			setTimeout(() => {
-				if (!child.killed) child.kill('SIGKILL');
-			}, 1_000).unref();
+			// No `child.killed` check here: Node sets that flag as soon as a
+			// signal is delivered, so the SIGTERM above already made it true.
+			// `clearTimers` cancels this on exit, so if it fires the child is
+			// still alive by construction.
+			killTimer = setTimeout(() => {
+				child.kill('SIGKILL');
+			}, 1_000);
+			killTimer.unref();
 		}, options.timeoutMs);
+
+		const clearTimers = () => {
+			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
+		};
 
 		child.stdout?.on('data', chunk => {
 			stdout += chunk.toString();
@@ -81,18 +92,30 @@ export function runScript(
 		});
 
 		child.on('error', err => {
-			clearTimeout(timer);
+			clearTimers();
 			rejectPromise(new Error(`Custom tool failed to start: ${err.message}`));
 		});
 
+		// Settle the timeout path here, not on 'close'. 'close' additionally
+		// waits for the stdio pipes to drain, and SIGKILL only reaches the
+		// shell - a grandchild that inherited stdout (a background job, a dev
+		// server, a wrapper script) holds those pipes open long after the
+		// shell is gone, so 'close' can land far past the timeout. The
+		// captured output is discarded on this path anyway. Destroying the
+		// streams drops our end of the pipe so an orphan cannot keep them
+		// readable, mirroring what BashExecutor does when it cancels.
+		child.on('exit', () => {
+			clearTimers();
+			if (!timedOut) return;
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			rejectPromise(
+				new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
+			);
+		});
+
 		child.on('close', code => {
-			clearTimeout(timer);
-			if (timedOut) {
-				rejectPromise(
-					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
-				);
-				return;
-			}
+			clearTimers();
 			resolvePromise(
 				truncateToolResult(
 					formatScriptOutput(code, stdout, stderr),

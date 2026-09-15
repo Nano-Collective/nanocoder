@@ -314,7 +314,12 @@ export async function runPlainShell(
 		// Must match the registered names in source/tools/file-ops/. Any name
 		// listed here that isn't a real tool silently drops its edits from
 		// `filesChanged`.
-		const mutatingTools = ['write_file', 'string_replace', 'diff_edit'];
+		const mutatingTools = [
+			'write_file',
+			'string_replace',
+			'diff_edit',
+			'lsp_format_document',
+		];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
