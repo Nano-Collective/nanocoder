@@ -11,7 +11,10 @@ import type {
 	CheckpointValidationResult,
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
-import {validateCheckpointName} from '@/utils/checkpoint-utils';
+import {
+	describeCheckpointGaps,
+	validateCheckpointName,
+} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
@@ -120,12 +123,14 @@ export class CheckpointManager {
 			throw new Error(`Checkpoint '${checkpointName}' already exists`);
 		}
 
-		// Get modified files if not provided
-		const filesToSnapshot =
-			modifiedFiles || this.fileSnapshotService.getModifiedFiles();
+		// Get modified files if not provided. An explicit list is taken as given, so
+		// nothing was dropped by the cap in that case.
+		const {files: filesToSnapshot, truncatedCount} = modifiedFiles
+			? {files: modifiedFiles, truncatedCount: 0}
+			: this.fileSnapshotService.getModifiedFilesResult();
 
 		// Capture file snapshots
-		const fileSnapshots =
+		const {snapshots: fileSnapshots, skipped} =
 			await this.fileSnapshotService.captureFiles(filesToSnapshot);
 
 		// Create metadata
@@ -136,6 +141,10 @@ export class CheckpointManager {
 			filesChanged: Array.from(fileSnapshots.keys()),
 			provider: {name: provider, model},
 			description: this.generateDescription(messages),
+			// Only recorded when the checkpoint really is incomplete, so a clean
+			// capture writes the same metadata it always did.
+			...(skipped.length > 0 && {skippedFiles: skipped}),
+			...(truncatedCount > 0 && {truncatedFileCount: truncatedCount}),
 		};
 
 		// Create conversation data
@@ -163,7 +172,8 @@ export class CheckpointManager {
 		);
 
 		// nosemgrep
-		// Save file snapshots
+		// Save file snapshots. No encoding argument: Node writes a Buffer verbatim,
+		// which is what keeps binary files intact at rest inside the checkpoint.
 		if (fileSnapshots.size > 0) {
 			const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 			await fs.mkdir(filesDir, {recursive: true});
@@ -172,7 +182,7 @@ export class CheckpointManager {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const fileDir = path.dirname(filePath);
 				await fs.mkdir(fileDir, {recursive: true});
-				await fs.writeFile(filePath, content, 'utf-8');
+				await fs.writeFile(filePath, content);
 			}
 		}
 
@@ -218,14 +228,14 @@ export class CheckpointManager {
 
 		// nosemgrep
 		// Load file snapshots
-		const fileSnapshots = new Map<string, string>();
+		const fileSnapshots = new Map<string, Buffer>();
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 
 		if (existsSync(filesDir)) {
 			for (const relativePath of metadata.filesChanged) {
 				try {
 					const filePath = path.join(filesDir, relativePath); // nosemgrep
-					const content = await fs.readFile(filePath, 'utf-8');
+					const content = await fs.readFile(filePath);
 					fileSnapshots.set(relativePath, content);
 				} catch (error) {
 					logWarning('Could not load file snapshot', true, {
@@ -388,11 +398,21 @@ export class CheckpointManager {
 	}
 
 	/**
-	 * Restore files from a checkpoint
+	 * Restore files from a checkpoint.
+	 *
+	 * Returns every way this restore put back less than the whole workspace, so
+	 * a caller cannot report plain success over an incomplete one. Derived here
+	 * rather than left to each restore path: there are three of them today and
+	 * the fourth would have to remember.
 	 */
-	async restoreFiles(checkpointData: CheckpointData): Promise<void> {
+	async restoreFiles(checkpointData: CheckpointData): Promise<string[]> {
+		// Independent of whether there is anything to write back - a checkpoint
+		// whose every file was skipped at capture has no snapshots and nothing
+		// but gaps.
+		const gaps = describeCheckpointGaps(checkpointData);
+
 		if (checkpointData.fileSnapshots.size === 0) {
-			return; // No files to restore
+			return gaps; // No files to restore
 		}
 
 		// Validate restore paths
@@ -405,6 +425,8 @@ export class CheckpointManager {
 
 		// Restore files
 		await this.fileSnapshotService.restoreFiles(checkpointData.fileSnapshots);
+
+		return gaps;
 	}
 
 	/**

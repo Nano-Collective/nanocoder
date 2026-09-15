@@ -152,7 +152,12 @@
 				"nanocoder.serverPort": {
 					"type": "number",
 					"default": 51820,
-					"description": "WebSocket server port for communication with Nanocoder CLI"
+					"description": "WebSocket server port for communication with Nanocoder CLI. Used as a fallback when the discovery file is missing or stale (e.g. when the CLI is running on a remote host over SSH)."
+				},
+				"nanocoder.serverToken": {
+					"type": "string",
+					"default": "",
+					"description": "Per-session bearer token for the Nanocoder CLI companion server. The CLI normally publishes this to its discovery file and the extension reads it from there. Set this manually only when the discovery file is unreachable (e.g. SSH forwarding) and you have copied the token from the CLI's startup logs."
 				},
 				"nanocoder.autoConnect": {
 					"type": "boolean",
@@ -195,6 +200,12 @@
 					"default": true,
 					"scope": "resource",
 					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
+				},
+				"nanocoder.showTokenUsage": {
+					"type": "boolean",
+					"default": false,
+					"scope": "resource",
+					"description": "Show token usage and estimated cost below chat responses."
 				}
 			}
 		}
@@ -215,7 +226,7 @@
 		"@types/vscode": "^1.125.0",
 		"@types/ws": "^8.5.10",
 		"@vscode/vsce": "^3.9.1",
-		"concurrently": "^8.2.2",
+		"concurrently": "^10.0.5",
 		"esbuild": "^0.28.1",
 		"eslint": "^10.1.0",
 		"tailwindcss": "^4.3.3",

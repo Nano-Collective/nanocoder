@@ -399,6 +399,25 @@ test.serial('chat message - forwards displayValue to onHandleChatMessage so the 
 	);
 });
 
+test.serial('slash command - leading whitespace still dispatches as a command', async t => {
+	// parseInput trims before testing for `/`, so routing has to trim too —
+	// dispatching on the raw string sent `  /stats` to the model as chat.
+	let chatMessage: string | undefined;
+	let liveComponent: React.ReactNode = null;
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async message => {
+		chatMessage = message;
+	};
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+
+	await handleMessageSubmission('  /stats all-time', options);
+
+	t.is(chatMessage, undefined, 'a slash command must not reach the model');
+	t.true(React.isValidElement(liveComponent));
+});
+
 test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
 	let received: {message?: string; displayValue?: string} = {};
 	const options = createResumeTestOptions({});

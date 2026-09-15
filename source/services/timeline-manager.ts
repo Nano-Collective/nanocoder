@@ -32,9 +32,14 @@ const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
 /**
  * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
  * byte is the same heuristic git uses to call a blob binary.
+ *
+ * Capture hands over raw bytes, so the check runs before any decode. The
+ * HEAD path is already decoded by `git show` and arrives as text.
  */
-function isProbablyBinary(content: string): boolean {
-	return content.includes('\u0000');
+function isProbablyBinary(content: string | Buffer): boolean {
+	return typeof content === 'string'
+		? content.includes('\u0000')
+		: content.includes(0);
 }
 
 /**
@@ -128,15 +133,15 @@ export class TimelineManager {
 		}
 
 		if (existing.length > 0) {
-			const captured = await this.fileSnapshotService.captureFiles(existing);
-			for (const [relative, content] of captured) {
+			const {snapshots} = await this.fileSnapshotService.captureFiles(existing);
+			for (const [relative, content] of snapshots) {
 				if (isProbablyBinary(content)) {
 					logWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
 				}
-				result.set(relative, content);
+				result.set(relative, content.toString('utf-8'));
 			}
 		}
 
@@ -272,7 +277,7 @@ export class TimelineManager {
 	private async restoreEntry(entry: TimelineIndexEntry): Promise<string[]> {
 		const restored: string[] = [];
 		const created = new Set(entry.createdFiles);
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, Buffer>();
 		const filesDir = this.entryFilesDir(entry.id);
 
 		for (const indexedPath of entry.filesChanged) {
@@ -304,7 +309,7 @@ export class TimelineManager {
 
 			try {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
-				const content = await fs.readFile(filePath, 'utf-8');
+				const content = await fs.readFile(filePath);
 				snapshots.set(relativePath, content);
 			} catch (error) {
 				logWarning('Could not load timeline file snapshot', true, {

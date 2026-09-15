@@ -38,6 +38,7 @@
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
+	let showTokenUsage = false;
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -55,35 +56,64 @@
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
+		const formatDropdownLabel = (value, triggerId) => {
+			if (triggerId === 'mode-trigger') {
+				const modeLabels = {
+					normal: 'Normal',
+					'auto-accept': 'Auto-Accept',
+					yolo: 'YOLO',
+					plan: 'Plan',
+				};
+				return modeLabels[value] || value;
+			}
+
+			if (value.includes('/')) {
+				return value.split('/').pop();
+			}
+
+			return value;
+		};
+
 		class CustomDropdown {
 			constructor(triggerId, dropdownId, labelId, onChange) {
+				this.triggerId = triggerId;
 				this.trigger = document.getElementById(triggerId);
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
 
 				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute('aria-haspopup', 'menu');
+				this.trigger.setAttribute('aria-expanded', 'false');
+				this.trigger.setAttribute('aria-controls', dropdownId);
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
+					const nested = triggerId === 'provider-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
+					this.syncTriggerExpanded();
 				});
 			}
 
-			syncModeBadge() {
+			syncModeTriggerLabel() {
 				if (this.label?.id !== 'mode-trigger-label') return;
-				const badge = document.getElementById('composer-mode-badge');
-				if (badge) badge.textContent = this.label.textContent || '';
-				const settingsTrigger = document.getElementById('composer-settings-trigger');
-				if (settingsTrigger && this.label.textContent) {
-					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
-					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
+				if (this.trigger && this.label.textContent) {
+					const accessibleLabel = `Mode: ${this.label.textContent}`;
+					this.trigger.title = accessibleLabel;
+					this.trigger.setAttribute('aria-label', accessibleLabel);
 				}
+			}
+
+			syncTriggerExpanded() {
+				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute(
+					'aria-expanded',
+					this.dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
 			}
 
 			setOptions(options, selectedValue) {
@@ -93,7 +123,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
-					this.syncModeBadge();
+					this.syncModeTriggerLabel();
 					return;
 				}
 
@@ -106,16 +136,12 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					item.textContent = opt;
+					const displayValue = formatDropdownLabel(opt, this.triggerId);
+					item.textContent = displayValue;
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
-						
-						let displayValue = opt;
-						if (displayValue.includes('/')) {
-							displayValue = displayValue.split('/').pop();
-						}
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -126,19 +152,17 @@
 					item.addEventListener('click', () => {
 						this.onChange(opt);
 						this.dropdown.classList.add('hidden');
+						this.syncTriggerExpanded();
 					});
 
 					this.dropdown.appendChild(item);
 				});
 
 				if (!hasSelected && options.length > 0) {
-					let displayValue = options[0];
-					if (displayValue.includes('/')) {
-						displayValue = displayValue.split('/').pop();
-					}
+					const displayValue = formatDropdownLabel(options[0], this.triggerId);
 					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.syncModeBadge();
+				this.syncModeTriggerLabel();
 			}
 		}
 
@@ -185,6 +209,20 @@
 			}
 		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		[
+			['provider-trigger', 'provider-dropdown'],
+			['model-trigger', 'model-dropdown'],
+			['mode-trigger', 'mode-dropdown'],
+		].forEach(([triggerId, dropdownId]) => {
+			const trigger = document.getElementById(triggerId);
+			const dropdown = document.getElementById(dropdownId);
+			if (trigger && dropdown) {
+				trigger.setAttribute(
+					'aria-expanded',
+					dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
+			}
+		});
 		const composerSettings = document.getElementById('composer-settings');
 		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
 		if (composerSettingsTrigger) {
@@ -685,8 +723,17 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-2 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
+
+		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			return footer;
+		}
 
 		const btn = document.createElement('button');
 		btn.type = 'button';
@@ -718,19 +765,8 @@
 				}, 1500);
 			});
 		});
-
-		const timeEl = document.createElement('span');
-		timeEl.className = 'leading-none';
-		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-
-		if (role === 'user') {
-			footer.appendChild(timeEl);
-			footer.appendChild(btn);
-		} else {
-			footer.appendChild(btn);
-			footer.appendChild(timeEl);
-		}
-
+		footer.appendChild(btn);
+		footer.appendChild(timeEl);
 		return footer;
 	}
 
@@ -2026,6 +2062,7 @@
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
 	function appendUsageIndicator(usage, cost) {
+		if (!showTokenUsage) return;
 		if (!usage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
@@ -2040,7 +2077,7 @@
 
 		endCurrentTextBlock();
 		const el = document.createElement('div');
-		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
 		scrollToBottom();
@@ -2153,6 +2190,9 @@
 				break;
 			case 'settingsData':
 				renderSettingsData(message.settings);
+				break;
+			case 'tokenUsageVisibility':
+				renderTokenUsageVisibility(message.showTokenUsage);
 				break;
 			case 'settingsUpdated':
 				if (!message.success) {
@@ -2387,6 +2427,10 @@
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
+			const replayedUsage = update._meta && update._meta['nanocoder/response-usage'];
+			if (replayedUsage) {
+				appendUsageIndicator(replayedUsage, replayedUsage.cost);
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
 			// Whitespace-only reasoning is not worth a section of its own: it
@@ -2518,6 +2562,14 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
 			});
 		}
+
+		// Token usage footer
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) {
+			tuToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2604,6 +2656,21 @@
 
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+
+		renderTokenUsageVisibility(settings.showTokenUsage === true);
+	}
+
+	function renderTokenUsageVisibility(enabled) {
+		showTokenUsage = enabled === true;
+		updateTokenUsageIndicators();
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) tuToggle.checked = showTokenUsage;
+	}
+
+	function updateTokenUsageIndicators() {
+		document.querySelectorAll('.token-usage-indicator').forEach(el => {
+			el.style.display = showTokenUsage ? '' : 'none';
+		});
 	}
 
 	function escapeHtml(str) {

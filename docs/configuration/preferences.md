@@ -49,22 +49,25 @@ Preferences follow the same location hierarchy as configuration files:
 | `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
 | `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |
 | `semanticMemoryLimit` | Maximum memories considered for a single prompt. Default `8`, clamped to 1-50. Adjustable from `/settings` → **Advanced**. |
-| `alternateScreen` | When `true`, starts in fullscreen mode (alternate screen buffer with in-app scrolling) by default. The `--alt-screen`/`--no-alt-screen` CLI flags override this for a single run. See [CLI Options](../getting-started/index.md#cli-options). |
+| `alternateScreen` | When `true` (default), starts in fullscreen mode (alternate screen buffer with in-app scrolling). Set to `false` or pass `--no-alt-screen` to force inline mode. See [CLI Options](../getting-started/index.md#cli-options). |
+| `mouseReporting` | When `true`, terminal reports mouse events for scrolling in alternate screen mode. Default `false` for native text selection. Switchable with `--mouse` / `--no-mouse`. |
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the top-level `paste` key:
+The paste threshold is also stored in the preferences file under the namespaced `nanocoder.paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer pastes become `[Paste #N: X chars]` placeholders, and multi-line pastes become `[Paste #N: X lines]`. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "paste": {
-    "singleLineThreshold": 1500
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 1500
+    }
   }
 }
 ```
@@ -104,6 +107,24 @@ You can change this via `/settings` → **Behavior** → **Tool Results and Thin
 ```
 
 The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
+
+### Agent Bash Output
+
+By default, a completed card for a command the agent runs shows the command and its status. The command output is not kept on the card. Set `showAgentBashOutput` to keep the output on the card regardless of `compactToolDisplay` being true or false:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `showAgentBashOutput` | boolean | `false` | When true, a completed card for a command the agent runs shows the command output. This applies whether compact tool display is on or off, and also covers failed commands. |
+
+You can change this via `/settings` → **Behavior** → **Tool Results and Thinking**, or by editing the preferences file directly:
+
+```json
+{
+  "showAgentBashOutput": true
+}
+```
+
+This setting only affects commands the agent runs. Output for commands you type yourself with `!command` is always shown. Toggling it from `/settings` applies from the next command onwards, with no restart needed. Editing the preferences file by hand needs a restart.
 
 ### Professional Tone
 

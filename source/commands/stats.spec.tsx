@@ -98,14 +98,27 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 	const {lastFrame, stdin, unmount} = renderWithTheme(
 		<StatsDisplay ledger={ledger} initialRange="7d" interactive />,
 	);
-	const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+	// A keypress reaches Ink through stdin, so the re-render lands on a later
+	// tick that a fixed sleep cannot bound - on a loaded CI runner the second
+	// arrow press was still unrendered after 20ms. Poll for the frame instead.
+	const waitFor = async (condition: () => boolean, timeoutMs = 2000) => {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			if (condition()) return;
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+		throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+	};
+	const frameMatches = (pattern: RegExp) => () =>
+		pattern.test(stripAnsi(lastFrame() ?? ''));
 
 	stdin.write('\u001B[C');
-	await tick();
+	await waitFor(frameMatches(/\[3m\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[3m\]/);
 
 	stdin.write('\u001B[C');
-	await tick();
+	await waitFor(frameMatches(/\[all-time\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[all-time\]/);
 
 	let closed = 0;
@@ -120,7 +133,7 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 			}}
 		/>,
 	).stdin.write('\u001B');
-	await tick();
+	await waitFor(() => closed === 1);
 	t.is(closed, 1);
 });
 

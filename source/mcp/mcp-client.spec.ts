@@ -297,10 +297,12 @@ test('MCPClient.getToolMapping: maps tools to servers', t => {
 	t.deepEqual(mapping.get('tool1'), {
 		serverName: 'test-server',
 		originalName: 'tool1',
+		readOnly: false,
 	});
 	t.deepEqual(mapping.get('tool2'), {
 		serverName: 'test-server',
 		originalName: 'tool2',
+		readOnly: false,
 	});
 });
 
@@ -331,10 +333,12 @@ test('MCPClient.getToolMapping: handles multiple servers', t => {
 	t.deepEqual(mapping.get('tool1'), {
 		serverName: 'server1',
 		originalName: 'tool1',
+		readOnly: false,
 	});
 	t.deepEqual(mapping.get('tool2'), {
 		serverName: 'server2',
 		originalName: 'tool2',
+		readOnly: false,
 	});
 });
 
@@ -886,10 +890,11 @@ testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server
 		const [toolName, mappingInfo] = firstMapping;
 
 		t.is(typeof toolName, 'string');
-		t.deepEqual(mappingInfo, {
-			serverName: 'test-deepwiki',
-			originalName: toolName,
-		});
+		t.is(mappingInfo.serverName, 'test-deepwiki');
+		t.is(mappingInfo.originalName, toolName);
+		// Whether the live server annotates this tool is its business; the
+		// mapping must always resolve the hint to a boolean.
+		t.is(typeof mappingInfo.readOnly, 'boolean');
 	}
 
 	await client.disconnect();
@@ -1012,6 +1017,151 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 		{mode: 'normal'},
 	);
 	t.true(needsApproval);
+});
+
+// ============================================================================
+// Regression: MCP tools must obey the central development-mode policy
+// ----------------------------------------------------------------------------
+// MCP used to hand-roll `isAutoApproved ? false : mode !== 'auto-accept'`,
+// which failed in both directions: an alwaysAllow-ed tool executed in plan
+// mode with no prompt, and an ordinary tool was auto-denied in headless (where
+// the approval slot defaults to "denied" because no user is present).
+// ============================================================================
+
+/**
+ * Build a one-tool MCP client with the given alwaysAllow list / annotation.
+ * Returns both the registered entry (what the approval resolver sees) and the
+ * tool mapping record (what plan-mode filtering sees).
+ */
+function mcpFixtureFor(
+	toolName: string,
+	opts: {alwaysAllow?: string[]; readOnly?: boolean} = {},
+) {
+	const client = new MCPClient();
+	const serverName = 'policy-server';
+
+	(client as any).serverTools.set(serverName, [
+		{
+			name: toolName,
+			description: 'Policy fixture',
+			inputSchema: {type: 'object'},
+			serverName,
+			readOnly: opts.readOnly,
+		},
+	]);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		alwaysAllow: opts.alwaysAllow ?? [],
+	});
+
+	const entry = client.getToolEntries().find(e => e.name === toolName);
+	if (!entry) throw new Error(`fixture tool ${toolName} not registered`);
+	const mapping = client.getToolMapping().get(toolName);
+	if (!mapping) throw new Error(`fixture tool ${toolName} not mapped`);
+	return {entry, mapping};
+}
+
+/** Just the registered entry, for the approval-policy tests. */
+function mcpEntryFor(
+	toolName: string,
+	opts: {alwaysAllow?: string[]; readOnly?: boolean} = {},
+) {
+	return mcpFixtureFor(toolName, opts).entry;
+}
+
+test('MCPClient: plan mode requires approval for an alwaysAllow-ed tool', async t => {
+	const entry = mcpEntryFor('create_issue', {alwaysAllow: ['create_issue']});
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'alwaysAllow still skips the prompt in normal mode',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'plan'}),
+		'a server alwaysAllow entry must not let plan mode execute a mutation',
+	);
+});
+
+test('MCPClient: headless does not require approval for an ordinary tool', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'headless'}),
+		'headless is daemon-driven — no foreground prompt exists to answer',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'normal mode still prompts',
+	);
+});
+
+test('MCPClient: auto-accept and yolo still run tools unattended', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'auto-accept'}),
+	);
+	t.false(await resolveToolApproval('create_issue', entry, {}, {mode: 'yolo'}));
+});
+
+test('MCPClient: readOnlyHint unblocks plan mode but never normal mode', async t => {
+	const annotated = mcpFixtureFor('list_issues', {readOnly: true});
+	const readOnly = annotated.entry;
+	const unannotated = mcpEntryFor('list_issues');
+
+	t.true(annotated.mapping.readOnly);
+	t.false(
+		mcpFixtureFor('list_issues').mapping.readOnly,
+		'an absent readOnlyHint must fail safe to "may mutate"',
+	);
+
+	// The hint lives on the tool mapping, which only plan-mode filtering reads.
+	// It must NOT reach the registered entry: ToolManager.isReadOnly() feeds ACP
+	// checkpoint capture and parallel batching, and a server must not be able to
+	// talk itself out of a restore point.
+	t.is(
+		(readOnly as {readOnly?: boolean}).readOnly,
+		undefined,
+		'a server-supplied readOnlyHint must not become the entry readOnly flag',
+	);
+
+	// A server-annotated reader is the one thing plan mode may run.
+	t.false(
+		await resolveToolApproval('list_issues', readOnly, {}, {mode: 'plan'}),
+		'a read-only MCP tool is safe to run in plan mode',
+	);
+	t.true(
+		await resolveToolApproval('list_issues', unannotated, {}, {mode: 'plan'}),
+		'an unannotated MCP tool must still be gated in plan mode',
+	);
+
+	// `readOnlyHint` comes from the very server being gated, so it must not be
+	// able to silence its own prompt. Only the user's alwaysAllow list can.
+	t.true(
+		await resolveToolApproval('list_issues', readOnly, {}, {mode: 'normal'}),
+		'a server-supplied readOnlyHint must not skip the normal-mode prompt',
+	);
+	t.false(
+		await resolveToolApproval(
+			'list_issues',
+			mcpEntryFor('list_issues', {
+				readOnly: true,
+				alwaysAllow: ['list_issues'],
+			}),
+			{},
+			{mode: 'normal'},
+		),
+		'the user-controlled alwaysAllow list is what skips a normal-mode prompt',
+	);
+
+	// Unattended modes run it either way.
+	for (const mode of ['headless', 'auto-accept'] as const) {
+		t.false(
+			await resolveToolApproval('list_issues', readOnly, {}, {mode}),
+			`read-only MCP tool should not prompt in ${mode} mode`,
+		);
+	}
 });
 
 // ============================================================================
@@ -1140,4 +1290,187 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.true(client.isServerConnected('seam-server'));
 	t.is(client.getServerTools('seam-server').length, 1);
 	t.is(client.getServerInfo('seam-server')?.connected, true);
+});
+
+// ============================================================================
+// Regression: annotations.readOnlyHint must be read by production code
+// ----------------------------------------------------------------------------
+// Driven through connectToServer() with a stubbed listTools() so the mapping in
+// mcp-client.ts actually runs. A test that re-implements the mapping and writes
+// the result into serverTools would still pass if that line were deleted.
+// ============================================================================
+
+test('MCPClient.connectToServer: carries annotations.readOnlyHint onto discovered tools', async t => {
+	const annotatingClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'reader',
+						description: 'Annotated read-only',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: true},
+					},
+					{
+						name: 'writer',
+						description: 'Annotated as mutating',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: false},
+					},
+					{
+						name: 'unannotated',
+						description: 'No annotations at all',
+						inputSchema: {type: 'object', properties: {}},
+					},
+					{
+						name: 'empty_annotations',
+						description: 'Annotations present but no readOnlyHint',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {title: 'Some title'},
+					},
+					{
+						name: 'truthy_not_true',
+						description: 'readOnlyHint that is truthy but not `true`',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: 'yes'},
+					},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(annotatingClient);
+	await client.connectToServer(httpServer);
+
+	// The discovered MCPTool records carry the flag...
+	const discovered = new Map(
+		client.getServerTools('seam-server').map(tool => [tool.name, tool.readOnly]),
+	);
+	t.true(discovered.get('reader'), 'readOnlyHint: true must be carried through');
+	t.false(discovered.get('writer'), 'readOnlyHint: false means "may mutate"');
+	t.false(
+		discovered.get('unannotated'),
+		'an absent annotations block must fail safe to "may mutate"',
+	);
+	t.false(
+		discovered.get('empty_annotations'),
+		'annotations without readOnlyHint must fail safe to "may mutate"',
+	);
+	t.false(
+		discovered.get('truthy_not_true'),
+		'only an explicit boolean true counts — no truthiness coercion',
+	);
+
+	// ...and so does the tool mapping plan mode filters on.
+	const mapped = new Map(
+		[...client.getToolMapping()].map(([name, record]) => [
+			name,
+			record.readOnly,
+		]),
+	);
+	t.true(mapped.get('reader'));
+	t.false(mapped.get('writer'));
+	t.false(mapped.get('unannotated'));
+	t.false(mapped.get('empty_annotations'));
+	t.false(mapped.get('truthy_not_true'));
+
+	// But it must stop there. Copying the hint onto the registry entry would
+	// hand it to ToolManager.isReadOnly(), which suppresses ACP checkpoint
+	// capture (acp-timeline.ts) and enables parallel batching
+	// (tool-executor.tsx) — neither of which a server may decide about itself.
+	for (const entry of client.getToolEntries()) {
+		t.is(
+			(entry as {readOnly?: boolean}).readOnly,
+			undefined,
+			`${entry.name} must not carry the server hint as an entry readOnly flag`,
+		);
+	}
+
+	// The annotation must decide plan mode end to end, straight off the wire.
+	t.false(
+		await resolveToolApproval(
+			'reader',
+			client.getToolEntries().find(e => e.name === 'reader'),
+			{},
+			{mode: 'plan'},
+		),
+		'an annotated reader is runnable in plan mode',
+	);
+	t.true(
+		await resolveToolApproval(
+			'writer',
+			client.getToolEntries().find(e => e.name === 'writer'),
+			{},
+			{mode: 'plan'},
+		),
+		'a tool the server did not annotate read-only is gated in plan mode',
+	);
+});
+
+test('MCPClient.getToolMapping: is cached and invalidated on connect/disconnect', async t => {
+	const okClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'ok_tool',
+						description: 'A working tool',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(okClient);
+	await client.connectToServer(httpServer);
+
+	const first = client.getToolMapping();
+	t.is(first, client.getToolMapping(), 'repeat calls reuse the cached Map');
+	t.true(first.has('ok_tool'));
+
+	// Disconnecting must not leave the stale mapping behind.
+	await client.disconnect();
+	const afterDisconnect = client.getToolMapping();
+	t.not(first, afterDisconnect, 'the cache is dropped on disconnect');
+	t.is(afterDisconnect.size, 0);
+});
+
+test('MCPClient.getToolMapping: a mapping taken before connect is not left stale', async t => {
+	const okClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'late_tool',
+						description: 'Discovered after the first mapping call',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(okClient);
+
+	// Anything that asks before the servers are up caches an empty Map. If
+	// connecting did not invalidate it, plan mode would stop recognising these
+	// names as MCP tools and wave every one of them through unfiltered.
+	const beforeConnect = client.getToolMapping();
+	t.is(beforeConnect.size, 0);
+
+	await client.connectToServer(httpServer);
+
+	const afterConnect = client.getToolMapping();
+	t.not(beforeConnect, afterConnect, 'the cache is dropped on connect');
+	t.true(
+		afterConnect.has('late_tool'),
+		'tools discovered after the first call must still be mapped',
+	);
 });

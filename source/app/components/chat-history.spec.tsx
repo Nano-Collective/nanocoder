@@ -205,3 +205,43 @@ test('clearKey prop is accepted and does not change output for equal transcripts
 	a.unmount();
 	b.unmount();
 });
+
+test('fullscreen mode shows welcome banner before first prompt', t => {
+	const props = createDefaultProps({
+		fullscreen: true,
+		staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+		queuedComponents: [],
+	});
+	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	const output = lastFrame() ?? '';
+	t.regex(output, /WELCOME-BANNER/);
+	unmount();
+});
+
+test('fullscreen mode hides welcome banner once queuedComponents are present', t => {
+	const props = createDefaultProps({
+		fullscreen: true,
+		staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+		queuedComponents: [<div key="msg-1">USER-PROMPT</div>],
+	});
+	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	const output = lastFrame() ?? '';
+	t.notRegex(output, /WELCOME-BANNER/);
+	t.regex(output, /USER-PROMPT/);
+	unmount();
+});
+
+test('fullscreen mode hides welcome banner while liveComponent is active', t => {
+	const props = createDefaultProps({
+		fullscreen: true,
+		staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+		queuedComponents: [],
+		liveComponent: <div key="live">LIVE-STREAMING</div>,
+	});
+	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	const output = lastFrame() ?? '';
+	t.notRegex(output, /WELCOME-BANNER/);
+	t.regex(output, /LIVE-STREAMING/);
+	unmount();
+});
+

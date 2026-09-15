@@ -94,7 +94,7 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 
 | Tool | Local models | MCP | Extensibility | Tool calling | Subagents / scheduled |
 |---|---|---|---|---|---|
-| **Nanocoder** | **7 local servers (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (both fallbacks with malformed-output repair)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
+| **Nanocoder** | **7 local servers (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (both fallbacks with malformed-output repair)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
 | Claude Code | None (cloud only) | Client | Slash commands, Skills, Hooks, Agent SDK | Native | Subagents + Routines (cloud cron) |
 | Codex CLI | Via OpenAI-compatible config | Client | Slash commands, AGENTS.md, Skills, lifecycle hooks | Native | Subagents; no cron |
 | Gemini CLI | Not documented | Client | Custom commands, Extensions, tools, hooks | Native | Subagents; no scheduler |
@@ -252,7 +252,7 @@ This is real and worth being clear about.
 
 - **Community size.** Every other tool here sits above Nanocoder (<!--stars:Nano-Collective/nanocoder-->2.4k<!--/stars--> stars): OpenCode <!--stars:anomalyco/opencode-->203k<!--/stars-->, Claude Code <!--stars:anthropics/claude-code-->143k<!--/stars-->, Codex <!--stars:openai/codex-->120k<!--/stars-->, Gemini CLI <!--stars:google-gemini/gemini-cli-->107k<!--/stars-->, Pi <!--stars:earendil-works/pi-->99k<!--/stars-->, Aider <!--stars:Aider-AI/aider-->49k<!--/stars-->, OMP <!--stars:can1357/oh-my-pi-->28k<!--/stars-->, Crush <!--stars:charmbracelet/crush-->28k<!--/stars-->. Growth and contribution velocity matter more than absolute count, but the gap is large and it is not closing on its own.
 - **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus ACP plus `--plain`. Enough for most CLI users, not all.
-- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools combination. Claude Code's Hooks system (process-level event hooks) also has no direct Nanocoder equivalent; Nanocoder's event story runs through Skill `subscribe:` blocks via the daemon, not arbitrary user-defined shell hooks on the agent lifecycle.
+- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools + hooks combination.
 - **IDE-level code intelligence.** OMP wires full LSP and DAP into the agent's tool surface. Nanocoder has an LSP client but nothing at that depth, and no debugger integration at all.
 - **Distribution polish.** Crush's single Go binary and OMP's prebuilt binaries are both smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
 

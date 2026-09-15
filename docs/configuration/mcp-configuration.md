@@ -198,7 +198,7 @@ These fields work with all transport types:
 |-------|-------------|
 | `description` | Human-readable description shown in `/mcp` output |
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
-| `enabled` | Whether the server is active (default: `true`) |
+| `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
 | `tags` | Array of tags for categorization |
 
 ## Auto-Approve Tools
@@ -220,6 +220,40 @@ The `alwaysAllow` field specifies MCP tools that execute without confirmation in
 - Tools not listed still require approval
 - In auto-accept and yolo modes, all MCP tools run without confirmation regardless
 - Only auto-approve read-only tools; avoid auto-approving tools that modify files or execute commands
+
+### How `alwaysAllow` interacts with development modes
+
+`alwaysAllow` is a **normal-mode** setting. It is not a global exemption — the
+[development mode](../features/development-modes.md) decides first:
+
+| Mode | MCP tool behaviour | Does `alwaysAllow` apply? |
+|------|--------------------|---------------------------|
+| `normal` | Prompts for confirmation | **Yes** — listed tools skip the prompt |
+| `auto-accept` | Runs without confirmation | No — everything already runs |
+| `yolo` | Runs without confirmation | No — everything already runs |
+| `plan` | Only tools the server annotates `readOnlyHint: true` are available at all; the rest are hidden | **No** — it cannot re-enable a mutating tool |
+| `headless` | Runs without confirmation | No — everything already runs |
+
+Two consequences worth calling out:
+
+- **`alwaysAllow` cannot override plan mode.** Plan mode exists to inspect a
+  model's intentions without side effects, so listing a mutating tool there has
+  no effect. Availability in plan mode is decided solely by the server's
+  `readOnlyHint` annotation, and a tool with no annotation is treated as a
+  possible mutation and hidden. Note this is only about *availability*:
+  `readOnlyHint` is supplied by the same server being gated, so it is confined
+  to that one decision. It never skips a confirmation prompt in normal mode
+  (only your `alwaysAllow` list does that), never suppresses a checkpoint before
+  the call, and never promotes the tool into a parallel batch.
+- **Headless runs every MCP tool unattended, with no per-server opt-out.**
+  Headless is the internal mode the daemon uses for triggered skill runs, where
+  no user is present to answer a prompt. MCP tools there behave like
+  `execute_bash` and the file tools. This is deliberately more permissive than
+  [custom tools](../features/custom-tools.md), which must declare
+  `approval: never` to run in headless. If a server exposes tools you do not
+  want a triggered run to reach, gate it at the server level — set
+  `"enabled": false`, or don't configure that server in a project whose skills
+  run under the daemon.
 
 ## Environment Variables
 
