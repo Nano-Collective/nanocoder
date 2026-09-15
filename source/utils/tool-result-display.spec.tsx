@@ -674,6 +674,35 @@ test('LiveCompactCounts - renders hammer icon for each entry', t => {
 	unmount();
 });
 
+const distinctToolCounts = (toolCount: number) =>
+	Object.fromEntries(
+		Array.from({length: toolCount}, (_, i) => [`mcp_tool_${i + 1}`, 1]),
+	);
+
+test('LiveCompactCounts - caps rows at 5 with a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(8)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /mcp_tool_6/);
+	t.regex(output, /\+3 more/);
+	t.is(output.trim().split('\n').length, 6);
+	unmount();
+});
+
+test('LiveCompactCounts - shows exactly 5 tools without a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(5)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /more/);
+	unmount();
+});
+
 // ============================================================================
 // Compact Description Mapping Tests (via displayToolResult compact mode)
 // ============================================================================
@@ -706,4 +735,33 @@ test('displayToolResult compact - unknown tool uses default description', t => {
 	displayToolResult(toolCall, result, null, addToChatQueue, true);
 
 	t.is(queue.length, 1);
+});
+
+// ============================================================================
+// Line Cap Tests
+// ============================================================================
+
+test('displayToolResult - names the /expand number when raw output is capped', async t => {
+	const content = Array.from({length: 25}, (_, i) => `row ${i + 1}`).join(
+		'\n',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(
+		createMockToolCall('call-1', 'NoFormatterTool'),
+		createMockToolResult('call-1', 'NoFormatterTool', content),
+		asMockToolManager(new MockToolManager()),
+		addToChatQueue,
+		false,
+		4,
+	);
+
+	const element = queue[0] as React.ReactElement;
+	t.regex(element.key as string, /call-1/);
+	const {lastFrame, unmount} = renderWithTheme(element);
+	const output = lastFrame()!;
+	t.regex(output, /row 20/);
+	t.notRegex(output, /row 21/);
+	t.regex(output, /\+5 more lines · \/expand 4/);
+	unmount();
 });

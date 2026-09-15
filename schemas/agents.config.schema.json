@@ -149,11 +149,18 @@
 			"additionalProperties": false
 		},
 		"HookDefinition": {
-			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools (tool events only) and with its own timeout.",
+			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools and/or the file they acted on (tool events only), with its own timeout.",
 			"properties": {
 				"command": {
 					"description": "Shell command to run. Receives hook context via NANOCODER_* env vars.",
 					"type": "string"
+				},
+				"matchPaths": {
+					"description": "Globs the acted-on file must match for this hook to run, so a formatter\nor linter can be bound to a language without shell dispatch inside the\ncommand. Omitted means \"every file\". Same dialect as skill subscriptions\n(`**`, `*`, `?`, `{a,b}`) — e.g. `[\"**\\/*.{ts,tsx}\"]`.\n\nUnlike `matchTools`, this excludes tools with no file to match: a hook\nscoped to `**\\/*.ts` is asking about files, so it must not fire for\n`execute_bash`. Ignored by non-tool events, which have no file either.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
 				},
 				"matchTools": {
 					"description": "Tool names this hook applies to. Omitted means \"every tool\".\nIgnored by non-tool events.",

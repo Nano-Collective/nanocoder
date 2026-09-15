@@ -48,7 +48,10 @@ export function FilterableSelectList<TValue extends string = string>({
 	const filteredItems = useMemo(() => {
 		if (!query) return items;
 		return items
-			.map(item => ({item, score: fuzzyScore(item.label, query)}))
+			.map(item => ({
+				item,
+				score: fuzzyScore(item.searchText ?? item.label, query),
+			}))
 			.filter(entry => entry.score > 0)
 			.sort((a, b) => b.score - a.score)
 			.map(entry => entry.item);
@@ -143,7 +146,7 @@ export function FilterableSelectList<TValue extends string = string>({
 				</Text>
 			</Box>
 			{visibleItems.length === 0 ? (
-				<Text color={colors.secondary}>No models matching "{query}"</Text>
+				<Text color={colors.secondary}>No matches for "{query}"</Text>
 			) : (
 				visibleItems.map((item, index) => {
 					const actualIndex = scrollStart + index;
