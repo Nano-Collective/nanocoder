@@ -10,7 +10,11 @@ import {CopilotLogin} from '@/commands/copilot-login';
 import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
-import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {
+	BASH_OUTPUT_PREFIX,
+	DELAY_COMMAND_COMPLETE_MS,
+	MAX_SESSION_NAME_LENGTH,
+} from '@/constants';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
@@ -22,6 +26,7 @@ import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
+import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -185,7 +190,7 @@ async function handleBashCommand(
 		if (llmContext) {
 			const userMessage: Message = {
 				role: 'user',
-				content: `Bash command output:\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
+				content: `${BASH_OUTPUT_PREFIX}\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
 			};
 			setMessages([...messages, userMessage]);
 		}
@@ -766,6 +771,8 @@ export function createClearMessagesHandler(
 		// Drop read-before-edit history so a stale "seen" from the prior
 		// conversation can't authorize a blind edit/overwrite after /clear.
 		clearReadTracker();
+		// Expandable tool results point into the transcript being cleared.
+		clearExpandableToolResults();
 		// Undelivered session-start hook context belongs to the cleared
 		// conversation — don't graft it onto the next one.
 		clearPendingHookContext();

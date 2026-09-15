@@ -264,6 +264,7 @@ export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
 	maxMessages: 1000,
 	retentionDays: 30,
 	directory: '',
+	smartTitles: true,
 };
 
 // Load session configuration and Returns default config if not specified
@@ -311,6 +312,19 @@ function loadSessionConfig(): AppConfig['sessions'] {
 						defaults.retentionDays ?? 30,
 					),
 					directory: sessions.directory || defaults.directory,
+					smartTitles:
+						sessions.smartTitles !== undefined
+							? Boolean(sessions.smartTitles)
+							: defaults.smartTitles,
+					// No default model: unset means "use the session's own".
+					titleModel:
+						typeof sessions.titleModel === 'string'
+							? sessions.titleModel
+							: undefined,
+					titleProvider:
+						typeof sessions.titleProvider === 'string'
+							? sessions.titleProvider
+							: undefined,
 				};
 			}
 			return null;
@@ -555,6 +569,14 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 		if (matchTools.length > 0) definition.matchTools = matchTools;
 	}
 
+	if (Array.isArray(entry.matchPaths)) {
+		const matchPaths = entry.matchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) definition.matchPaths = matchPaths;
+	}
+
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
 		definition.timeout = Math.max(1, Math.round(entry.timeout));
 	}
@@ -767,6 +789,30 @@ function loadAppConfig(): AppConfig {
 let _appConfig: AppConfig | null = null;
 
 /**
+ * Bumped whenever the cached config is dropped or reloaded.
+ *
+ * Modules that derive something expensive from config (a constructed client,
+ * say) cache it against this number instead of re-deriving on every read. They
+ * cannot simply be reset from here: the interesting ones sit above config in
+ * the import graph, and reaching down to them would give this module - which
+ * everything imports - a cycle back through client-factory.
+ */
+let _configGeneration = 0;
+
+/**
+ * How many times the config has been dropped or reloaded this process.
+ *
+ * Fold it into a cache key to have that cache follow config edits. A key built
+ * only from the config values a module reads misses changes underneath them:
+ * `titleProvider: "ollama"` is the same string before and after its baseURL is
+ * edited, but it no longer names the same endpoint.
+ * @public
+ */
+export function getConfigGeneration(): number {
+	return _configGeneration;
+}
+
+/**
  * Lazy-loaded app config to avoid circular dependencies during module initialization
  * @public
  */
@@ -800,11 +846,13 @@ export function getRetryLimits(): RetryLimitsConfig {
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
 	_appConfig = loadAppConfig();
+	_configGeneration++;
 }
 
 // Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
 	_appConfig = null;
+	_configGeneration++;
 }
 
 let cachedColors: Colors | null = null;

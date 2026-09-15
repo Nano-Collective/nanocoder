@@ -72,6 +72,25 @@ if (args[0] === 'daemon') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder skills <sub>` — fast path, only loads the skill
+// installer (no Ink, no providers, no tool registry).
+if (args[0] === 'skills') {
+	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
+	if (args[1] !== 'add') {
+		console.error(SKILLS_CLI_USAGE);
+		process.exit(args[1] ? 1 : 0);
+	}
+	const result = await runSkillsCli({
+		projectRoot: process.cwd(),
+		args: args.slice(2),
+	});
+	if (result.output) {
+		if (result.exitCode === 0) console.log(result.output);
+		else console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
@@ -138,6 +157,23 @@ Examples:
 	}
 }
 
+// Handle `nanocoder completion <shell>` — fast path, prints a static
+// completion script and exits without loading any app code. The shell
+// argument is required so a missing argument fails loudly with usage
+// instead of silently installing the wrong script.
+if (args[0] === 'completion') {
+	const {runCompletionCli} = await import('@/cli-completions/cli');
+	const result = runCompletionCli(args.slice(1));
+	if (result.output) {
+		if (result.stream === 'stderr') {
+			console.error(result.output);
+		} else {
+			console.log(result.output);
+		}
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -147,10 +183,16 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+  skills add <target>             Install a skill bundle from a git repository.
+                                  <target> is an index name, owner/repo, a git URL, or a local path.
+                                  Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  completion <shell>              Generate a shell completion script (bash, zsh, or fish).
+                                  Example: eval "$(nanocoder completion zsh)"
 
 Options:
   -v, --version       Show version number
@@ -168,10 +210,13 @@ Options:
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
   --alt-screen        Fullscreen TUI on the alternate screen buffer with in-app
-                      scrolling (mouse wheel / PgUp / PgDn). Persistent version:
-                      "alternateScreen": true in preferences.json.
-  --no-alt-screen     Force the default inline mode (main screen, chat history in
-                      the terminal's native scrollback), overriding the preference.
+                      scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
+  --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
+                      chat history in the terminal's native scrollback).
+  --mouse             Mouse wheel scrolls the chat viewport in fullscreen mode, with
+                      Shift+drag (Option+drag in iTerm2) to select text. Enabled by default.
+  --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
+                      works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -186,6 +231,8 @@ Options:
 
 Examples:
   nanocoder init --preset nextjs
+  nanocoder skills add pr-reviewer
+  nanocoder skills add Nano-Collective/nanocoder-skills --subdir skills/pr-reviewer
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
@@ -594,18 +641,21 @@ async function main(): Promise<void> {
 		// interactive TUI only. Run mode (`nanocoder run …`) prints a
 		// transcript the user needs to keep after exit — the alt screen
 		// would discard it when restoring the original buffer.
-		// Screen mode: inline (main screen + native scrollback) by DEFAULT —
-		// the terminal's own scrollbar, wheel, and search work there.
-		// Fullscreen (alt screen + in-app scroll) is opt-in via --alt-screen
-		// or the alternateScreen:true preference; --no-alt-screen forces
-		// inline regardless of the preference.
-		const {loadPreferences} = await import('@/config/preferences');
+		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
+		// Passing --no-alt-screen or setting alternateScreen:false in preferences
+		// forces inline mode (main screen + native scrollback).
+		const {getAlternateScreen, getMouseReporting} = await import(
+			'@/config/preferences'
+		);
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
-			(args.includes('--alt-screen') ||
-				loadPreferences().alternateScreen === true);
+			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		const mouseReportingAllowed =
+			!args.includes('--no-mouse') &&
+			(args.includes('--mouse') || getMouseReporting());
+		const useMouseReporting = useAltScreen && mouseReportingAllowed;
 		// The stdin proxy below is needed in BOTH screen modes, because
 		// bracketed paste applies to both — only mouse reporting is
 		// fullscreen-only.
@@ -627,8 +677,10 @@ async function main(): Promise<void> {
 		}
 		if (interactiveTty) {
 			const {
+				ALTERNATE_SCROLL_OFF,
+				ALTERNATE_SCROLL_ON,
 				createUtf8InputDecoder,
-				markMouseReportingAvailable,
+				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
@@ -648,17 +700,27 @@ async function main(): Promise<void> {
 			// receive paste markers as literal text.
 			restoreInputModes = () => {
 				process.stdout.write(DISABLE_BRACKETED_PASTE);
+				if (useAltScreen) {
+					process.stdout.write(
+						useMouseReporting ? MOUSE_REPORTING_OFF : ALTERNATE_SCROLL_ON,
+					);
+				}
 			};
 
 			if (useAltScreen) {
-				// SGR mouse reporting so wheel scrolling reaches the app. The
-				// alt screen has no native scrollback, so the terminal's own
-				// wheel / scrollbar can't work — the app must receive wheel
-				// events itself. This is also what takes click-drag selection
-				// away from the terminal, so UserInput offers a toggle that
-				// suspends it (see toggleSelectionMode).
-				process.stdout.write(MOUSE_REPORTING_ON);
-				markMouseReportingAvailable();
+				if (useMouseReporting) {
+					// SGR mouse reporting so wheel scrolling reaches the app. The
+					// alt screen has no native scrollback, so the terminal's own
+					// wheel / scrollbar can't work — the app must receive wheel
+					// events itself. Text selection then needs Shift+drag
+					// (Option+drag in iTerm2).
+					process.stdout.write(MOUSE_REPORTING_ON);
+				} else {
+					// Native text selection is opted into, so nothing consumes
+					// wheel ticks — stop the terminal turning them into arrow
+					// keys that would cycle prompt history.
+					process.stdout.write(ALTERNATE_SCROLL_OFF);
+				}
 			}
 
 			// Ink must never see the raw escape sequences (its keypress
@@ -735,8 +797,12 @@ async function main(): Promise<void> {
 			stopInputForwarding?.();
 			restoreInputModes?.();
 			if (useAltScreen) {
-				// Mouse reporting off, then back to the main screen buffer.
-				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');
+				if (useMouseReporting) {
+					// Mouse reporting off
+					process.stdout.write('\x1B[?1006l\x1B[?1000l');
+				}
+				// Back to the main screen buffer
+				process.stdout.write('\x1B[?1049l');
 			}
 		};
 

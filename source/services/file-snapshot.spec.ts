@@ -1,4 +1,4 @@
-import {execFile, execSync} from 'child_process';
+import {execFile, execFileSync} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
 import {promisify} from 'util';
@@ -535,21 +535,54 @@ test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 	}
 });
 
+/**
+ * These are the first git-invoking tests in this file.
+ *
+ * The exact `deepEqual` assertions below are sensitive to a contributor's
+ * global git config: `core.excludesFile` adds ignore rules to the nested repo,
+ * and `init.templateDir` can seed it with extra files. Both apply to a repo
+ * created inside a temp dir.
+ *
+ * `GIT_CONFIG_GLOBAL` and `-c` only cover the `init` process. The service runs
+ * its own `git` children, which this test cannot pass an environment to, and
+ * `-c` is not persisted into the new repo. So neutralise the setting in the
+ * repo's own config, which every later call against it reads.
+ */
+function initGitRepo(cwd: string): void {
+	execFileSync('git', ['init'], {
+		cwd,
+		stdio: 'pipe',
+		env: {...process.env, GIT_CONFIG_GLOBAL: '/dev/null'},
+	});
+	execFileSync('git', ['config', 'core.excludesFile', '/dev/null'], {
+		cwd,
+		stdio: 'pipe',
+	});
+}
+
 test.serial(
 	'FileSnapshotService returns untracked files from a repository without commits',
 	async t => {
 		const tempDir = await createTempDir();
 		try {
-			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			initGitRepo(tempDir);
 			await createTestFile(tempDir, 'file.txt', 'new file');
 			await createTestFile(tempDir, 'nested/other.txt', 'nested file');
 			await createTestFile(tempDir, 'ignored.txt', 'ignored');
 			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
 
 			const service = new FileSnapshotService(tempDir);
-			const files = service.getModifiedFiles();
+			const result = service.getModifiedFilesResult();
 
-			t.deepEqual(files.sort(), ['.gitignore', 'file.txt', 'nested/other.txt']);
+			// `available` is the assertion that matters beyond the file list:
+			// acp-timeline skips checkpointing entirely when it is false, which
+			// is exactly how an unborn repo used to read.
+			t.true(result.available);
+			t.false(result.truncated);
+			t.deepEqual(
+				[...result.files].sort(),
+				['.gitignore', 'file.txt', 'nested/other.txt'],
+			);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -561,22 +594,22 @@ test.serial(
 	async t => {
 		const tempDir = await createTempDir();
 		try {
-			execSync('git init', {cwd: tempDir, stdio: 'pipe'});
+			initGitRepo(tempDir);
 			await createTestFile(tempDir, 'staged.txt', 'staged file');
 			await createTestFile(tempDir, 'nested/also-staged.txt', 'nested staged');
 			await createTestFile(tempDir, 'ignored.txt', 'ignored');
 			await createTestFile(tempDir, '.gitignore', 'ignored.txt\n');
-			execSync('git add .', {cwd: tempDir, stdio: 'pipe'});
+			execFileSync('git', ['add', '.'], {cwd: tempDir, stdio: 'pipe'});
 
 			const service = new FileSnapshotService(tempDir);
 			const result = service.getModifiedFilesResult();
 
 			t.true(result.available);
-			t.deepEqual(result.files.sort(), [
-				'.gitignore',
-				'nested/also-staged.txt',
-				'staged.txt',
-			]);
+			t.false(result.truncated);
+			t.deepEqual(
+				[...result.files].sort(),
+				['.gitignore', 'nested/also-staged.txt', 'staged.txt'],
+			);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
