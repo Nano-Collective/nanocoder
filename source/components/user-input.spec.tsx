@@ -119,6 +119,62 @@ test('UserInput renders with disabled state', t => {
 	unmount();
 });
 
+test('UserInput shows a suggested command in the empty prompt and inserts it on Tab', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/checkpoint create"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		/Try \/checkpoint create · Tab to insert · Esc to dismiss/.test(
+			stripAnsi(lastFrame() ?? ''),
+		),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/checkpoint create') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /checkpoint create'),
+	);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput dismisses the suggested command on Esc in an empty prompt', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\x1B');
+	await waitForCondition(() => dismissed === 1);
+	// The first Esc went to the suggestion, not the clear-input double press.
+	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
 test('UserInput renders development mode indicator', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
