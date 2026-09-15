@@ -1522,7 +1522,7 @@ test('runAcpConversation - __xml_validation_error__ tool creates error result', 
 			m.role === 'tool' && m.name === '__xml_validation_error__',
 	);
 	t.truthy(errorMsg);
-	t.is(errorMsg?.content, 'Unknown tool: __xml_validation_error__');
+	t.is(errorMsg?.content, 'Bad XML');
 });
 
 // ============================================================================
