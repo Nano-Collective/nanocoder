@@ -147,7 +147,7 @@ echo '; rm -rf /; #'
 When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
-2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
+2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /s /c` with one outer command wrapper for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
 3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
 5. On exit code 0, stdout (and any stderr) is returned to the model, truncated at the standard output limit.
