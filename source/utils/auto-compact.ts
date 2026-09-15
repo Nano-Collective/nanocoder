@@ -9,7 +9,7 @@ import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
-import {compressMessages} from './message-compression';
+import {clampThreshold, compressMessages} from './message-compression';
 import {filterModelFacing} from './message-visibility';
 import {createSessionOverride} from './session-override';
 
@@ -20,11 +20,11 @@ export interface AutoCompactSessionOverrides {
 	strategy: CompressionStrategy | null;
 }
 
-// Session overrides for auto-compact. `threshold` is clamped to 50–95.
+// Session overrides for auto-compact. `threshold` is clamped to the configured range.
 const autoCompactSession = {
 	enabled: createSessionOverride<boolean>(),
 	threshold: createSessionOverride<number>(value =>
-		value !== null ? Math.max(50, Math.min(95, value)) : null,
+		value !== null ? clampThreshold(value) : null,
 	),
 	mode: createSessionOverride<CompressionMode>(),
 	strategy: createSessionOverride<CompressionStrategy>(),
