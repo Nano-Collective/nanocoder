@@ -49,7 +49,6 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 | Accept file/command suggestion, or insert the suggested next command in an empty prompt | Tab |
 | Navigate file suggestions | Up/Down |
 | Exit file autocomplete | Space |
-| Insert the suggested next command | Tab (empty prompt) |
 | Dismiss the suggested next command | Esc (empty prompt) |
 
 When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.

@@ -214,6 +214,45 @@ test('UserInput clears the suggested command when a message is submitted', async
 	unmount();
 });
 
+test('UserInput submits an inserted suggested command on Enter and clears the suggestion', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	// Wait for the inserted value itself, not the "Try /commit" placeholder.
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/commit') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/commit');
+	// Tab dismissed once on insert; submitting dismisses again.
+	await waitForCondition(() => dismissed === 2);
+	t.is(submittedMessage, '/commit');
+	t.is(dismissed, 2);
+	unmount();
+});
+
 test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
