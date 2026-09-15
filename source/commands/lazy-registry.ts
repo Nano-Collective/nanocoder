@@ -68,6 +68,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'expand',
+		description:
+			'Show one tool result in full (/expand <n>); run without a number to list recent results',
+		load: () => import('@/commands/expand').then(m => m.expandCommand),
+	},
+	{
 		name: 'commit',
 		description:
 			'Generate a conventional commit message from staged changes (--copy)',

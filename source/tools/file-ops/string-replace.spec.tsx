@@ -837,6 +837,30 @@ test('string_replace formatter: renders preview with basic replacement', async t
 	t.regex(output!, /Replacing 1 line/);
 });
 
+test('string_replace formatter: says when the line cap hides edits', async t => {
+	const oldLines = Array.from({length: 25}, (_, i) => `old line ${i + 1}`);
+	const filePath = await createTestFile(
+		'long-replace.txt',
+		[...oldLines, 'tail 1', 'tail 2', 'tail 3'].join('\n'),
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: oldLines.join('\n'),
+		new_str: Array.from({length: 25}, (_, i) => `NEW_${i + 1}`).join('\n'),
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	t.regex(lastFrame()!, /more lines, \d+ changed/);
+});
+
 test('string_replace formatter: shows normalized indentation for deeply indented code', async t => {
 	const filePath = await createTestFile(
 		'nested.tsx',

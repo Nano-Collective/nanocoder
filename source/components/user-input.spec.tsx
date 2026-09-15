@@ -4,6 +4,7 @@ import React from 'react';
 import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
@@ -19,7 +20,14 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 	};
 
 	return (
-		<ThemeContext.Provider value={mockTheme}>{children}</ThemeContext.Provider>
+		<ThemeContext.Provider value={mockTheme}>
+			{/* The `?` shortcuts overlay renders a titled box, which reads this. */}
+			<TitleShapeContext.Provider
+				value={{currentTitleShape: 'pill', setCurrentTitleShape: () => {}}}
+			>
+				{children}
+			</TitleShapeContext.Provider>
+		</ThemeContext.Provider>
 	);
 };
 
@@ -172,6 +180,92 @@ test('UserInput dismisses the suggested command on Esc in an empty prompt', asyn
 	await waitForCondition(() => dismissed === 1);
 	// The first Esc went to the suggestion, not the clear-input double press.
 	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
+test('UserInput clears the suggested command when a message is submitted', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'hello');
+	await waitForCondition(() => dismissed === 1);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	t.regex(lastFrame()!, /Shift\+Tab/);
+	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
+
+	// Keys are swallowed while the overlay is open, so the prompt stays empty
+	// (the placeholder only renders for an empty value).
+	stdin.write('x');
+	stdin.write('\x1B');
+	await waitForCondition(() => !/Keyboard Shortcuts/.test(lastFrame() ?? ''));
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	unmount();
+});
+
+test('UserInput closes the shortcuts overlay on a second ?', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	stdin.write('?');
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
+	unmount();
+});
+
+test('UserInput types ? literally when the prompt is not empty', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('why');
+	await waitForFrame(lastFrame, /why/);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /why\?/);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
 	unmount();
 });
 
@@ -1230,7 +1324,7 @@ test.serial(
 
 		await wait(50);
 		pasteEvents.emit('paste', 'line one\nline two\nline three');
-		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]/);
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
 
 		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
 		unmount();

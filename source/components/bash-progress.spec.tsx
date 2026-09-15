@@ -286,7 +286,7 @@ test('BashProgress does not show output preview when complete', t => {
 });
 
 // ============================================================================
-// Completed Output Tests (showOutput, used by user-typed !commands)
+// Completed Output Tests (showOutput)
 // ============================================================================
 
 test('BashProgress shows stdout when complete with showOutput', t => {
