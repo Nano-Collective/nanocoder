@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import WelcomeMessage from '@/components/welcome-message';
+import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
@@ -22,6 +23,24 @@ export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
 	// common case and stays unmarked; the /status panel shows every marker.
 	if (!marker || marker === 'default') return `⎇ ${branch}`;
 	return `⎇ ${branch} (${marker})`;
+}
+
+/**
+ * Format the project/workspace segment shown in the startup summary.
+ *
+ * Keep this compact and user-oriented: show the directory Nanocoder is
+ * operating in, then append the active branch when one is available.
+ */
+export function formatBootSummaryProjectLabel(
+	workingDirectory: string,
+	status: GitStatusSummary | null,
+): string {
+	const workspace = homeRelative(workingDirectory);
+	if (!status) return workspace;
+
+	const {branch, marker} = formatGitStatusSummary(status);
+	const branchLabel = marker ? `${branch} (${marker})` : branch;
+	return `${workspace} · ${branchLabel}`;
 }
 
 export interface AppContainerProps {
@@ -57,13 +76,16 @@ function BootSummary({
 }): React.ReactElement {
 	const {colors} = useTheme();
 	const {isNarrow} = useResponsiveTerminal();
-	const shortConfig = homeRelative(process.cwd());
+	// Trigger config discovery as before, but avoid surfacing that unrelated
+	// file path as the primary startup context. Users need to see the workspace
+	// Nanocoder will operate in.
+	getClosestConfigFile('agents.config.json');
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
 	const gitStatus = getGitStatusSummarySync();
-	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
+	const projectLabel = formatBootSummaryProjectLabel(process.cwd(), gitStatus);
 
 	// Narrow terminals: provider + model + mode on the first line, with the
-	// branch (when present) underneath so the line doesn't overflow.
+	// workspace/branch underneath so the line doesn't overflow.
 	if (isNarrow) {
 		if (!provider || !model) return <></>;
 		return (
@@ -81,7 +103,7 @@ function BootSummary({
 						</>
 					)}
 				</Text>
-				{gitLabel && <Text color={colors.primary}>{gitLabel}</Text>}
+				<Text color={colors.primary}>{projectLabel}</Text>
 			</Box>
 		);
 	}
@@ -102,24 +124,10 @@ function BootSummary({
 						</>
 					)}
 					<Text color={colors.secondary}> · </Text>
-					<Text color={colors.secondary}>{shortConfig}</Text>
-					{gitLabel && (
-						<>
-							<Text color={colors.secondary}> · </Text>
-							<Text color={colors.primary}>{gitLabel}</Text>
-						</>
-					)}
+					<Text color={colors.primary}>{projectLabel}</Text>
 				</>
 			) : (
-				<>
-					<Text color={colors.secondary}>{shortConfig}</Text>
-					{gitLabel && (
-						<>
-							<Text color={colors.secondary}> · </Text>
-							<Text color={colors.primary}>{gitLabel}</Text>
-						</>
-					)}
-				</>
+				<Text color={colors.primary}>{projectLabel}</Text>
 			)}
 		</Text>
 	);
@@ -147,10 +155,10 @@ export function createStaticComponents({
 		components.push(<WelcomeMessage key="welcome" />);
 	}
 
-	// Boot summary header: always in interactive mode (for config path
-	// visibility), and in run mode we include the active development mode
-	// so it's obvious what the agent is executing under.
-	if (currentProvider || currentModel) {
+	// Boot summary header: only in non-interactive / run mode. The welcome
+	// already shows cwd, branch, and version, so the boot summary would just
+	// duplicate that info when the user is at the welcome screen.
+	if (!shouldShowWelcome && (currentProvider || currentModel)) {
 		components.push(
 			<Box key="boot-summary" flexDirection="column" marginBottom={1}>
 				<BootSummary

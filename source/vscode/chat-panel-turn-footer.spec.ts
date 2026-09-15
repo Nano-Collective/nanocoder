@@ -82,6 +82,20 @@ test('each response gets its own footer', t => {
 
 test('replayed response usage metadata restores the token and cost line', t => {
 	const panel = createPanel();
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: true,
+		},
+	});
 	panel.userMessage('first');
 	panel.update({
 		sessionUpdate: 'agent_message_chunk',
@@ -100,6 +114,102 @@ test('replayed response usage metadata restores the token and cost line', t => {
 		(child: StubElement) => child.textContent === 'Tokens: 7k | <$0.01',
 	);
 	t.truthy(usageLine);
+});
+
+test('usage footer is hidden until the setting is enabled', t => {
+	const panel = createPanel();
+	panel.userMessage('first');
+	panel.text('Response A');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 1200},
+		cost: 0.012,
+	});
+
+	t.false(
+		panel.container.children.some((child: StubElement) =>
+			child.textContent.includes('Tokens:'),
+		),
+	);
+
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: true,
+		},
+	});
+	panel.userMessage('second');
+	panel.text('Response B');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 1200},
+		cost: 0.012,
+	});
+
+	t.true(
+		panel.container.children.some((child: StubElement) =>
+			child.textContent.includes('Tokens: 1.2k | ~$0.01'),
+		),
+	);
+});
+
+test('disabling usage hides already-rendered indicators', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: true,
+		},
+	});
+	panel.userMessage('first');
+	panel.text('Response A');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 1200},
+		cost: 0.012,
+	});
+
+	const indicator = panel.container.children.find((child: StubElement) =>
+		child.classList.contains('token-usage-indicator'),
+	);
+	t.truthy(indicator);
+	t.is(indicator.style.display, undefined);
+
+	panel.post({
+		type: 'settingsData',
+		settings: {
+			providers: [],
+			mcpServers: [],
+			alwaysAllow: [],
+			defaultMode: null,
+			autoCompact: {enabled: true, threshold: 60, mode: 'conservative'},
+			reasoningTraces: false,
+			sessions: {autoSave: true},
+			webSearch: {configured: false},
+			showTokenUsage: false,
+		},
+	});
+
+	t.is(indicator.style.display, 'none');
 });
 
 // ============================================================================

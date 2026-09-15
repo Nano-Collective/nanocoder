@@ -166,6 +166,8 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
+	const footerPadding = fullscreen ? 2 : 0;
+
 	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
 	// object on every keystroke would re-render it for nothing.
 	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
@@ -189,50 +191,66 @@ export function ChatInput({
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
-				<LiveCompactCounts counts={compactToolCounts} />
+				<Box paddingLeft={footerPadding}>
+					<LiveCompactCounts counts={compactToolCounts} />
+				</Box>
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
 			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
-				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+				<Box paddingLeft={footerPadding}>
+					<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+				</Box>
 			)}
 
-			{isCancelling && <CancellingIndicator />}
+			{isCancelling && (
+				<Box paddingLeft={footerPadding}>
+					<CancellingIndicator />
+				</Box>
+			)}
 
 			{showToolExecutionIndicator && (
-				<ToolExecutionIndicator
-					toolName={activeToolCall.function.name}
-					currentIndex={currentToolIndex}
-					totalTools={pendingToolCalls.length}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolExecutionIndicator
+						toolName={activeToolCall.function.name}
+						currentIndex={currentToolIndex}
+						totalTools={pendingToolCalls.length}
+					/>
+				</Box>
 			)}
 
 			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
 			{pendingSubagentApproval ? (
-				<ToolConfirmation
-					// Force a fresh instance per queued request: without a key, React
-					// reconciles the same component across queue advances and carries
-					// over state (formatterPreview, hasValidationError, ...) from the
-					// previous request onto the new one.
-					key={pendingSubagentApproval.toolCall.id}
-					toolCall={pendingSubagentApproval.toolCall}
-					onConfirm={onSubagentToolApproval}
-					onCancel={() => onSubagentToolApproval(false)}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						// Force a fresh instance per queued request: without a key, React
+						// reconciles the same component across queue advances and carries
+						// over state (formatterPreview, hasValidationError, ...) from the
+						// previous request onto the new one.
+						key={pendingSubagentApproval.toolCall.id}
+						toolCall={pendingSubagentApproval.toolCall}
+						onConfirm={onSubagentToolApproval}
+						onCancel={() => onSubagentToolApproval(false)}
+					/>
+				</Box>
 			) : /* Main agent tool confirmation (unified inline approval gate) */
 			pendingToolConfirmation ? (
-				<ToolConfirmation
-					key={pendingToolConfirmation.toolCall.id}
-					toolCall={pendingToolConfirmation.toolCall}
-					onConfirm={onToolConfirmation}
-					onCancel={() => onToolConfirmation(false)}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						key={pendingToolConfirmation.toolCall.id}
+						toolCall={pendingToolConfirmation.toolCall}
+						onConfirm={onToolConfirmation}
+						onCancel={() => onToolConfirmation(false)}
+					/>
+				</Box>
 			) : /* Question Prompt (ask_question tool) */
 			isQuestionMode && pendingQuestion ? (
-				<QuestionPrompt
-					question={pendingQuestion}
-					onAnswer={onQuestionAnswer}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<QuestionPrompt
+						question={pendingQuestion}
+						onAnswer={onQuestionAnswer}
+					/>
+				</Box>
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput

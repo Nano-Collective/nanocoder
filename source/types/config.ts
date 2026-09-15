@@ -180,7 +180,7 @@ export type HookEvent = (typeof HOOK_EVENTS)[number];
 
 /**
  * A single lifecycle hook: one shell command, optionally scoped to a set of
- * tools (tool events only) and with its own timeout.
+ * tools and/or the file they acted on (tool events only), with its own timeout.
  */
 export interface HookDefinition {
 	/** Shell command to run. Receives hook context via NANOCODER_* env vars. */
@@ -190,6 +190,17 @@ export interface HookDefinition {
 	 * Ignored by non-tool events.
 	 */
 	matchTools?: string[];
+	/**
+	 * Globs the acted-on file must match for this hook to run, so a formatter
+	 * or linter can be bound to a language without shell dispatch inside the
+	 * command. Omitted means "every file". Same dialect as skill subscriptions
+	 * (`**`, `*`, `?`, `{a,b}`) — e.g. `["**\/*.{ts,tsx}"]`.
+	 *
+	 * Unlike `matchTools`, this excludes tools with no file to match: a hook
+	 * scoped to `**\/*.ts` is asking about files, so it must not fire for
+	 * `execute_bash`. Ignored by non-tool events, which have no file either.
+	 */
+	matchPaths?: string[];
 	/**
 	 * Milliseconds before the hook is killed. Defaults to 30s, except
 	 * `session-end`, which defaults to 2s so it fits inside the shutdown budget.
@@ -382,6 +393,16 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
+		/** Generate a title once per session. ACP clients only. Default true. */
+		smartTitles?: boolean;
+		/** Title generation model. Defaults to the session's. */
+		titleModel?: string;
+		/**
+		 * Title generation provider. Defaults to the session's; a different one is
+		 * sent the opening user turns and tool summaries, which include file paths
+		 * and bash command strings.
+		 */
+		titleProvider?: string;
 	};
 
 	// Headless / non-interactive conversation limits (--plain and ACP loops)
@@ -604,11 +625,16 @@ export interface UserPreferences {
 			maxMessages?: number;
 			retentionDays?: number;
 			directory?: string;
+			smartTitles?: boolean;
+			titleModel?: string;
+			titleProvider?: string;
 		};
 		paste?: PasteConfig;
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/** Show output on agent `execute_bash` cards, even in compact display. Default false. */
+	showAgentBashOutput?: boolean;
 	/**
 	 * Show the per-response usage footer under each assistant message
 	 * (provider-reported tokens + estimated cost). Defaults to true. When
@@ -631,6 +657,14 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
+	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag
+	 * in iTerm2). false: the terminal does not capture the mouse, so native text
+	 * selection (double-click, drag) works directly and the wheel does nothing.
+	 * Also switchable per-run with --mouse / --no-mouse flags.
+	 */
+	mouseReporting?: boolean;
 	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is
