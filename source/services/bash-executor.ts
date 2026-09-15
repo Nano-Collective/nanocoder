@@ -345,26 +345,57 @@ export class BashExecutor extends EventEmitter {
 	 * group; signalling the negative PID reaches the whole group (the command
 	 * plus anything it spawned). Windows has no process groups here, so we fall
 	 * back to killing the single process.
+	 *
+	 * Sends SIGTERM first. If the process has not exited after a grace period
+	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
+	 * trapped or ignored.
 	 */
 	private killProcessTree(proc: ChildProcess): void {
 		const pid = proc.pid;
 		if (pid === undefined) return;
 
-		if (isWindows) {
-			proc.kill('SIGTERM');
-			return;
-		}
-
-		try {
-			process.kill(-pid, 'SIGTERM');
-		} catch {
-			// Group already gone (or never formed) - fall back to the lone process.
-			try {
-				proc.kill('SIGTERM');
-			} catch {
-				// Process already exited; nothing to terminate.
+		const sendKillSignal = (sig: 'SIGTERM' | 'SIGKILL') => {
+			if (isWindows) {
+				try {
+					proc.kill(sig);
+				} catch {
+					// Ignore if already dead
+				}
+				return;
 			}
-		}
+
+			try {
+				process.kill(-pid, sig);
+			} catch {
+				// Group already gone (or never formed) - fall back to the lone process.
+				try {
+					proc.kill(sig);
+				} catch {
+					// Process already exited; nothing to terminate.
+				}
+			}
+		};
+
+		// Initial SIGTERM
+		sendKillSignal('SIGTERM');
+
+		// SIGKILL fallback after 2 seconds if process survives SIGTERM.
+		// Gate on exitCode only — NOT proc.killed. Node sets proc.killed = true
+		// on ANY successful proc.kill() call (including the SIGTERM fallback
+		// above), so gating on !proc.killed would prevent SIGKILL from ever
+		// firing when the group-kill threw and we fell back to proc.kill().
+		const sigkillTimer = setTimeout(() => {
+			if (proc.exitCode === null) {
+				sendKillSignal('SIGKILL');
+			}
+		}, 2000);
+		sigkillTimer.unref();
+
+		const cleanupTimer = () => {
+			clearTimeout(sigkillTimer);
+		};
+		proc.once('close', cleanupTimer);
+		proc.once('exit', cleanupTimer);
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {

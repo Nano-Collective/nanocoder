@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && mkdir -p dist/voice && cp plugins/voice/dist/*.js plugins/voice/dist/*.d.ts dist/voice/ && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
@@ -60,7 +60,8 @@
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
 		"generate:schema": "tsx scripts/generate-config-schema.ts",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
-		"prepare": "husky"
+		"prepare": "husky",
+		"test:types:voice": "tsc --noEmit -p plugins/voice/tsconfig.json"
 	},
 	"files": [
 		"dist",
@@ -109,6 +110,9 @@
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0",
 		"yaml": "^2.8.3"
+	},
+	"optionalDependencies": {
+		"@nanocollective/nanocoder-voice": "workspace:*"
 	},
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",

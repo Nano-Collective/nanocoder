@@ -53,9 +53,23 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |
 | `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
+| `/voice` | Configure Voice Mode (`/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>]`) |
+
+## Voice Mode
+
+Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS.
+
+| Command | Description |
+|---------|-------------|
+| `/voice` | Toggle voice mode on/off |
+| `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+T` to record/submit) |
+| `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
+| `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
+| `/voice tts [local\|cloud]` | Configure text-to-speech backend (local Piper or opt-in cloud) |
+| `/voice status` | Display current voice configuration and backend status |
+| `/voice mode <push-to-talk\|hands-free>` | Set specific activation mode |
 
 ## Special Input Syntax
-
 These shortcuts work directly in the chat input — no `/` prefix needed.
 
 | Syntax | Description |
