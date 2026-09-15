@@ -114,18 +114,14 @@ export function runScript(
 		};
 
 		// Per-stream byte budgets, shared with the built-in bash executor.
-		child.stdout?.on(
-			'data',
-			makeStreamCollector(text => {
-				stdout += text;
-			}, STDOUT_TRUNCATION_NOTICE),
-		);
-		child.stderr?.on(
-			'data',
-			makeStreamCollector(text => {
-				stderr += text;
-			}, STDERR_TRUNCATION_NOTICE),
-		);
+		const stdoutCollector = makeStreamCollector(text => {
+			stdout += text;
+		}, STDOUT_TRUNCATION_NOTICE);
+		const stderrCollector = makeStreamCollector(text => {
+			stderr += text;
+		}, STDERR_TRUNCATION_NOTICE);
+		child.stdout?.on('data', stdoutCollector.collect);
+		child.stderr?.on('data', stderrCollector.collect);
 
 		child.on('error', err => {
 			settle(() =>
@@ -134,14 +130,18 @@ export function runScript(
 		});
 
 		child.on('close', code => {
-			settle(() =>
+			settle(() => {
+				// Release any multi-byte character the decoders were holding
+				// across a chunk boundary before the output is formatted.
+				stdoutCollector.flush();
+				stderrCollector.flush();
 				resolvePromise(
 					truncateToolResult(
 						formatScriptOutput(code, stdout, stderr),
 						TRUNCATION_OUTPUT_LIMIT,
 					),
-				),
-			);
+				);
+			});
 		});
 	});
 }
