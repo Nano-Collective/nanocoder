@@ -1,5 +1,5 @@
 import test from 'ava';
-import {renderBody, renderValue, shellQuote} from './template';
+import {cmdQuote, renderBody, renderValue, shellQuote} from './template';
 
 console.log('\ncustom-tools/template.spec.ts');
 
@@ -27,6 +27,19 @@ test('shellQuote handles newlines', t => {
 	t.is(shellQuote('a\nb'), `'a\nb'`);
 });
 
+test('cmdQuote preserves metacharacters and embedded quotes', t => {
+	t.is(
+		cmdQuote('a&b|c<d>e^f"g'),
+		'"a&b|c<d>e^f""g"',
+	);
+});
+
+test('cmdQuote rejects values cmd.exe cannot quote safely', t => {
+	for (const value of ['%PATH%', 'a\nb', 'a\rb', 'a\0b']) {
+		t.throws(() => cmdQuote(value), {message: /cannot contain/});
+	}
+});
+
 test('renderValue handles arrays', t => {
 	t.is(renderValue(['a', 'b c', "d'e"]), `'a' 'b c' 'd'\\''e'`);
 });
@@ -39,6 +52,11 @@ test('renderValue handles numbers and booleans', t => {
 test('renderBody substitutes parameters with shell-quoted values', t => {
 	const out = renderBody('echo {{ msg }}', {msg: "hi'there"});
 	t.is(out, `echo 'hi'\\''there'`);
+});
+
+test('renderBody supports cmd.exe quoting', t => {
+	const out = renderBody('echo {{ value }}', {value: 'a&"quoted"'}, cmdQuote);
+	t.is(out, 'echo "a&""quoted"""');
 });
 
 test('renderBody leaves unknown placeholders empty', t => {
