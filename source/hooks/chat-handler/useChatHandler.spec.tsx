@@ -293,6 +293,30 @@ test('useChatHandler - handles null client gracefully', t => {
 	t.truthy(hookResult);
 });
 
+test('useChatHandler - signals completion when chat dependencies are unavailable', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let completionCalls = 0;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				onConversationComplete: () => {
+					completionCalls++;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('queued after unavailable setup');
+
+	t.is(completionCalls, 1);
+	rendered.unmount();
+});
+
 test('useChatHandler - setMessages callback works', t => {
 	let hookResult: ChatHandlerReturn | null = null;
 

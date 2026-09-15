@@ -344,7 +344,13 @@ export function useChatHandler({
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
 	) => {
-		if (!client || !toolManager) return;
+		if (!client || !toolManager) {
+			// handleMessageSubmit marks a turn as incomplete before reaching this
+			// hook. Signal completion here as well so an unavailable setup cannot
+			// leave the queue blocked forever.
+			onConversationComplete?.();
+			return;
+		}
 		const sessionId = ensureCurrentSessionId?.();
 		let wrotePlan = false;
 		let finalAssistantText = '';
