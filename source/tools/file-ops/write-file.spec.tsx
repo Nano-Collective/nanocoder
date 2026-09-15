@@ -991,3 +991,72 @@ test('write_file formatter: falls back to a full dump when new content equals th
 	t.false(output.includes('Diff:'));
 });
 
+test('write_file formatter: caps a long file at 20 lines', async t => {
+	const formatter = writeFileTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const content = Array.from({length: 30}, (_, i) => `line ${i + 1}`).join(
+		'\n',
+	);
+	const element = await formatter({path: 'long.txt', content});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /line 20/);
+	t.notRegex(output, /line 21/);
+	t.regex(output, /\+10 more lines/);
+});
+
+test('write_file formatter: shows an edit deep in a long file instead of untouched lines', async t => {
+	const lines = Array.from({length: 100}, (_, i) => `line ${i + 1}`);
+	const filePath = await createTestFile('diff-deep.txt', lines.join('\n'));
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	lines[79] = 'CHANGED';
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: lines.join('\n'),
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /76 unchanged lines/);
+	t.regex(output, /-\s*line 80/);
+	t.regex(output, /\+\s*CHANGED/);
+	t.notRegex(output, /line 1\b/);
+	t.notRegex(output, /more lines/);
+});
+
+test('write_file formatter: caps a long diff at 20 lines', async t => {
+	const oldContent = Array.from({length: 30}, (_, i) => `old ${i + 1}`).join(
+		'\n',
+	);
+	const filePath = await createTestFile('diff-long.txt', oldContent);
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: filePath,
+		content: Array.from({length: 30}, (_, i) => `new ${i + 1}`).join('\n'),
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /Diff:\s*\+30\s*-30/);
+	t.regex(output, /\+40 more lines, 40 changed/);
+	t.notRegex(output, /new 30/);
+});
+

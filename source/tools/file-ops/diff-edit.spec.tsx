@@ -359,6 +359,26 @@ test('diff_edit formatter renders a preview', async t => {
 	t.regex(lastFrame()!, /const newValue/);
 });
 
+test('diff_edit formatter says when the line cap hides edits', async t => {
+	const formatter = diffEditTool.formatter;
+	if (!formatter) {
+		t.fail('diff_edit formatter not defined');
+		return;
+	}
+
+	const lines = (prefix: string) =>
+		Array.from({length: 15}, (_, i) => `${prefix} ${i + 1}`).join('\n');
+	const preview = await formatter({
+		path: 'test.ts',
+		diff: diffBlock(lines('old'), lines('new')),
+	});
+	const {lastFrame} = render(
+		<TestThemeProvider>{preview}</TestThemeProvider>,
+	);
+
+	t.regex(lastFrame()!, /\+11 more lines, 11 changed/);
+});
+
 test('diff_edit description tells models not to wrap diff in code fences', t => {
 	t.regex(
 		diffEditTool.tool.description,

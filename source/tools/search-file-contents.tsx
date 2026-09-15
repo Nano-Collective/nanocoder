@@ -3,9 +3,9 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {
-	BASH_OUTPUT_DISPLAY_LINES,
 	DEFAULT_SEARCH_RESULTS,
 	MAX_SEARCH_RESULTS,
+	TOOL_OUTPUT_DISPLAY_LINES,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {
@@ -201,7 +201,7 @@ const SearchFileContentsFormatter = React.memo(
 		}
 		const hiddenHitCount = Math.max(
 			0,
-			hitLines.length - BASH_OUTPUT_DISPLAY_LINES,
+			hitLines.length - TOOL_OUTPUT_DISPLAY_LINES,
 		);
 
 		// Calculate tokens
@@ -264,7 +264,7 @@ const SearchFileContentsFormatter = React.memo(
 
 				{hitLines.length > 0 && (
 					<Box flexDirection="column">
-						{hitLines.slice(0, BASH_OUTPUT_DISPLAY_LINES).map((line, index) => (
+						{hitLines.slice(0, TOOL_OUTPUT_DISPLAY_LINES).map((line, index) => (
 							<Text key={index} wrap="truncate-end" color={colors.text}>
 								{line || ' '}
 							</Text>

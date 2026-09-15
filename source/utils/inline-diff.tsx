@@ -69,6 +69,49 @@ export function computeLineDiff(
 	return entries;
 }
 
+export type CollapsedDiffEntry = LineDiffEntry | {type: 'gap'; count: number};
+
+/**
+ * Keep unchanged lines only within `context` lines of an added or removed
+ * line, replacing each longer unchanged run with one gap entry. A diff of a
+ * long file then opens on its edits instead of on untouched lines.
+ */
+export function collapseUnchangedLines(
+	entries: LineDiffEntry[],
+	context = 3,
+): CollapsedDiffEntry[] {
+	const nearChange = new Array<boolean>(entries.length).fill(false);
+
+	let lastChange = Number.NEGATIVE_INFINITY;
+	for (let i = 0; i < entries.length; i++) {
+		if (entries[i].type !== 'unchanged') lastChange = i;
+		if (i - lastChange <= context) nearChange[i] = true;
+	}
+
+	let nextChange = Number.POSITIVE_INFINITY;
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i].type !== 'unchanged') nextChange = i;
+		if (nextChange - i <= context) nearChange[i] = true;
+	}
+
+	const collapsed: CollapsedDiffEntry[] = [];
+	let gap = 0;
+	for (let i = 0; i < entries.length; i++) {
+		if (!nearChange[i]) {
+			gap++;
+			continue;
+		}
+		if (gap > 0) {
+			collapsed.push({type: 'gap', count: gap});
+			gap = 0;
+		}
+		collapsed.push(entries[i]);
+	}
+	if (gap > 0) collapsed.push({type: 'gap', count: gap});
+
+	return collapsed;
+}
+
 /**
  * Compute inline diff segments between two strings.
  * Uses word-level diffing for more readable results.

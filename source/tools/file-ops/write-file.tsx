@@ -4,7 +4,7 @@ import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
@@ -15,7 +15,7 @@ import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {computeLineDiff} from '@/utils/inline-diff';
+import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
@@ -152,6 +152,9 @@ const WriteFileFormatter = React.memo(
 				const entries = computeLineDiff(previousContent as string, newContent);
 				const addedCount = entries.filter(e => e.type === 'added').length;
 				const removedCount = entries.filter(e => e.type === 'removed').length;
+				// Collapse untouched stretches so the line cap never spends its
+				// budget on unchanged lines while hiding the edits themselves.
+				const rows = collapseUnchangedLines(entries);
 
 				return (
 					<Box flexDirection="column" marginTop={1}>
@@ -162,69 +165,83 @@ const WriteFileFormatter = React.memo(
 							<Text color={colors.diffRemovedText}>-{removedCount}</Text>
 						</Box>
 						<Box flexDirection="column">
-							{entries.map((entry, i) => {
-								if (entry.type === 'unchanged') {
-									const lineNumStr = String(entry.newLine).padStart(4, ' ');
-									let displayLine: string;
-									try {
-										displayLine = truncateAnsi(
-											highlight(entry.text, {
-												language,
-												theme: getSyntaxTheme(colors),
-											}),
-											availableWidth,
-										);
-									} catch {
-										displayLine = truncateLine(entry.text, availableWidth);
-									}
-									return (
-										<Box key={i}>
-											<Text color={colors.secondary}>{lineNumStr} </Text>
-											<Text wrap="truncate-end">{displayLine}</Text>
-										</Box>
-									);
+							<CappedLines
+								items={rows}
+								isChange={entry =>
+									entry.type === 'added' || entry.type === 'removed'
 								}
+								renderItem={(entry, i) => {
+									if (entry.type === 'gap') {
+										return (
+											<Text key={i} color={colors.secondary}>
+												{`   ⋯ ${entry.count} unchanged line${entry.count === 1 ? '' : 's'}`}
+											</Text>
+										);
+									}
 
-								if (entry.type === 'removed') {
-									const lineNumStr = String(entry.oldLine).padStart(4, ' ');
+									if (entry.type === 'unchanged') {
+										const lineNumStr = String(entry.newLine).padStart(4, ' ');
+										let displayLine: string;
+										try {
+											displayLine = truncateAnsi(
+												highlight(entry.text, {
+													language,
+													theme: getSyntaxTheme(colors),
+												}),
+												availableWidth,
+											);
+										} catch {
+											displayLine = truncateLine(entry.text, availableWidth);
+										}
+										return (
+											<Box key={i}>
+												<Text color={colors.secondary}>{lineNumStr} </Text>
+												<Text wrap="truncate-end">{displayLine}</Text>
+											</Box>
+										);
+									}
+
+									if (entry.type === 'removed') {
+										const lineNumStr = String(entry.oldLine).padStart(4, ' ');
+										return (
+											<Box key={i}>
+												<Text
+													backgroundColor={colors.diffRemoved}
+													color={colors.diffRemovedText}
+												>
+													{lineNumStr} -
+												</Text>
+												<Text
+													wrap="truncate-end"
+													backgroundColor={colors.diffRemoved}
+													color={colors.diffRemovedText}
+												>
+													{truncateLine(entry.text, availableWidth)}
+												</Text>
+											</Box>
+										);
+									}
+
+									const lineNumStr = String(entry.newLine).padStart(4, ' ');
 									return (
 										<Box key={i}>
 											<Text
-												backgroundColor={colors.diffRemoved}
-												color={colors.diffRemovedText}
+												backgroundColor={colors.diffAdded}
+												color={colors.diffAddedText}
 											>
-												{lineNumStr} -
+												{lineNumStr} +
 											</Text>
 											<Text
 												wrap="truncate-end"
-												backgroundColor={colors.diffRemoved}
-												color={colors.diffRemovedText}
+												backgroundColor={colors.diffAdded}
+												color={colors.diffAddedText}
 											>
 												{truncateLine(entry.text, availableWidth)}
 											</Text>
 										</Box>
 									);
-								}
-
-								const lineNumStr = String(entry.newLine).padStart(4, ' ');
-								return (
-									<Box key={i}>
-										<Text
-											backgroundColor={colors.diffAdded}
-											color={colors.diffAddedText}
-										>
-											{lineNumStr} +
-										</Text>
-										<Text
-											wrap="truncate-end"
-											backgroundColor={colors.diffAdded}
-											color={colors.diffAddedText}
-										>
-											{truncateLine(entry.text, availableWidth)}
-										</Text>
-									</Box>
-								);
-							})}
+								}}
+							/>
 						</Box>
 					</Box>
 				);
@@ -242,31 +259,34 @@ const WriteFileFormatter = React.memo(
 				return (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={colors.text}>File content:</Text>
-						{normalizedLines.map((line: string, i: number) => {
-							const lineNumStr = String(i + 1).padStart(4, ' ');
+						<CappedLines
+							items={normalizedLines}
+							renderItem={(line: string, i: number) => {
+								const lineNumStr = String(i + 1).padStart(4, ' ');
 
-							try {
-								const highlighted = highlight(line, {
-									language,
-									theme: getSyntaxTheme(colors),
-								});
-								const truncated = truncateAnsi(highlighted, availableWidth);
-								return (
-									<Box key={i}>
-										<Text color={colors.secondary}>{lineNumStr} </Text>
-										<Text wrap="truncate-end">{truncated}</Text>
-									</Box>
-								);
-							} catch {
-								const truncated = truncateLine(line, availableWidth);
-								return (
-									<Box key={i}>
-										<Text color={colors.secondary}>{lineNumStr} </Text>
-										<Text wrap="truncate-end">{truncated}</Text>
-									</Box>
-								);
-							}
-						})}
+								try {
+									const highlighted = highlight(line, {
+										language,
+										theme: getSyntaxTheme(colors),
+									});
+									const truncated = truncateAnsi(highlighted, availableWidth);
+									return (
+										<Box key={i}>
+											<Text color={colors.secondary}>{lineNumStr} </Text>
+											<Text wrap="truncate-end">{truncated}</Text>
+										</Box>
+									);
+								} catch {
+									const truncated = truncateLine(line, availableWidth);
+									return (
+										<Box key={i}>
+											<Text color={colors.secondary}>{lineNumStr} </Text>
+											<Text wrap="truncate-end">{truncated}</Text>
+										</Box>
+									);
+								}
+							}}
+						/>
 					</Box>
 				);
 			})()

@@ -1,8 +1,8 @@
 import {Box, Text} from 'ink';
-import {useEffect, useState} from 'react';
+import {useContext, useEffect, useState} from 'react';
 
-import ToolMessage from '@/components/tool-message';
-import {BASH_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
+import {TOOL_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import {splitCommandForDisplay} from '@/utils/shell-command-display';
@@ -95,6 +95,7 @@ export default function BashProgress({
 	// ordering of formatBashResultForLLM, tail-capped so a verbose command
 	// can't flood the static transcript (the model still receives the full,
 	// separately-truncated output).
+	const {expanded} = useContext(ToolOutputContext);
 	let displayedOutput = '';
 	let hiddenLineCount = 0;
 	if (showOutput && state.isComplete) {
@@ -106,8 +107,9 @@ export default function BashProgress({
 				: '',
 		].filter(Boolean);
 		const lines = sections.join('\n').split('\n');
-		hiddenLineCount = Math.max(0, lines.length - BASH_OUTPUT_DISPLAY_LINES);
-		displayedOutput = lines.slice(-BASH_OUTPUT_DISPLAY_LINES).join('\n');
+		const displayLimit = expanded ? lines.length : TOOL_OUTPUT_DISPLAY_LINES;
+		hiddenLineCount = Math.max(0, lines.length - displayLimit);
+		displayedOutput = lines.slice(-displayLimit).join('\n');
 	}
 
 	const messageContent = (

@@ -736,3 +736,32 @@ test('displayToolResult compact - unknown tool uses default description', t => {
 
 	t.is(queue.length, 1);
 });
+
+// ============================================================================
+// Line Cap Tests
+// ============================================================================
+
+test('displayToolResult - names the /expand number when raw output is capped', async t => {
+	const content = Array.from({length: 25}, (_, i) => `row ${i + 1}`).join(
+		'\n',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(
+		createMockToolCall('call-1', 'NoFormatterTool'),
+		createMockToolResult('call-1', 'NoFormatterTool', content),
+		asMockToolManager(new MockToolManager()),
+		addToChatQueue,
+		false,
+		4,
+	);
+
+	const element = queue[0] as React.ReactElement;
+	t.regex(element.key as string, /call-1/);
+	const {lastFrame, unmount} = renderWithTheme(element);
+	const output = lastFrame()!;
+	t.regex(output, /row 20/);
+	t.notRegex(output, /row 21/);
+	t.regex(output, /\+5 more lines · \/expand 4/);
+	unmount();
+});
