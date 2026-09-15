@@ -30,6 +30,15 @@ interface BraveSearchResponse {
 	};
 }
 
+// Security functions - MUST be exported
+export const escapeMarkdown = (text: string): string => {
+	return text.replace(/[[\]*_`<>#]/g, '\\$&');
+};
+
+export const sanitizeUrl = (url: string): string => {
+	return url.trim().replace(/[<>]/g, '');
+};
+
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
@@ -80,10 +89,18 @@ export const executeWebSearch = async (
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-			formattedResults += `**URL:** ${result.url}\n\n`;
-			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+
+			// Escape markdown in title and description
+			const escapedTitle = escapeMarkdown(result.title);
+			const escapedDescription = result.description
+				? escapeMarkdown(result.description)
+				: '';
+			const sanitizedUrl = sanitizeUrl(result.url);
+
+			formattedResults += `## ${i + 1}. ${escapedTitle}\n\n`;
+			formattedResults += `**URL:** <${sanitizedUrl}>\n\n`;
+			if (escapedDescription) {
+				formattedResults += `${escapedDescription}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}
