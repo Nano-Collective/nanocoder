@@ -12,12 +12,15 @@ Tool-execution safety fixes:
   of "nothing executes without consent".)
 - MCP tools: the executed handler now runs the same lenient schema type-check
   the approval prompt shows, so a "wrong type" call is rejected locally before
-  it reaches the server instead of relying on the remote validator alone.
-- Custom tools: cap captured stdout/stderr at `BASH_MAX_OUTPUT_BYTES` while
-  streaming, with a per-stream truncation notice appended to the affected
-  stdout/stderr section (mirroring the bash executor), so a large-output tool
-  can't exhaust memory before the final truncation runs.
-- Custom tools: on timeout, the shell is spawned detached (Unix), the whole
-  process group is signalled, and the tool call settles immediately instead of
-  waiting for a `close` event that a surviving descendant may leave un-fired —
-  killing both the infinite-hang and orphaned-process failure modes.
+  it reaches the server instead of relying on the remote validator alone. MCP
+  was the last registry path that bypassed `withValidation`.
+- Custom tools: cap captured stdout and stderr while streaming, so a
+  large-output tool can't exhaust memory before the final truncation runs.
+  Each stream gets its own budget via the same collector the built-in bash
+  executor uses (now shared in `source/utils/stream-collector.ts`), so a stdout
+  flood can't silently swallow the stderr explaining why the tool failed.
+- Custom tools: on timeout, the shell is spawned detached (Unix) and the whole
+  process group is signalled, so a backgrounded descendant can no longer
+  outlive the tool's timeout. The SIGKILL escalation now targets the group and
+  deliberately outlives the shell's own exit, since the shell exiting does not
+  mean its group is empty.

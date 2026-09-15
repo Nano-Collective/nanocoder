@@ -1,11 +1,16 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
-import {BASH_MAX_OUTPUT_BYTES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
@@ -66,32 +71,32 @@ export function runScript(
 
 		let stdout = '';
 		let stderr = '';
-		let outputBytes = 0;
-		let stdoutCapped = false;
-		let stderrCapped = false;
 		let settled = false;
 
-		// Combine stdout + stderr into a single byte budget, mirroring the built-in
-		// bash executor. Without a cap, a long-running tool printing large output
-		// is fully materialised in memory before the final truncation runs.
-
 		const timer = setTimeout(() => {
-			// Destroy the pipes so nothing keeps the event loop (or a detached
-			// grandchild's inherited fds) engaged, then kill the process group.
+			// Drop our end of the pipes first so a detached grandchild that
+			// inherited them cannot keep them readable, then signal the whole
+			// process group.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
 			killProcessTree(child);
-			// Force-kill the group if it refuses to exit within a grace window.
-			// Deliberately stronger than BashExecutor.cancel()'s SIGTERM-only:
-			// a custom tool is user-authored and its timeout must hold even
-			// against a child that traps SIGTERM, so the escalation is the
-			// guarantee here rather than an inconsistency to converge away.
+
+			// Force-kill the group if it refuses to die within a grace window.
+			// No `!child.killed` guard: Node sets that flag the moment a signal
+			// is delivered, so it is already true here and the escalation would
+			// never run (see #1141). Nothing cancels this timer either -- unlike
+			// the single-process case, the shell exiting does not mean its group
+			// is empty, and reaping a descendant that ignored SIGTERM is the
+			// whole point. Firing against an already-dead group is harmless:
+			// killProcessTree swallows the ESRCH, and it is unref'd so it never
+			// holds the process open.
 			setTimeout(() => {
-				if (!child.killed) killProcessTree(child, 'SIGKILL');
+				killProcessTree(child, 'SIGKILL');
 			}, 1_000).unref();
 
-			// Settle now rather than waiting for `close`, which may never fire if a
-			// descendant holds a pipe inherited from the shell.
+			// Settle now rather than waiting for `exit`/`close`: neither is
+			// guaranteed to be prompt while a descendant holds an inherited
+			// pipe, and the captured output is discarded on this path anyway.
 			settle(() =>
 				rejectPromise(
 					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
@@ -99,8 +104,8 @@ export function runScript(
 			);
 		}, options.timeoutMs);
 
-		// Guard every completion path: `error`/`close` arriving after the timeout
-		// (which already settled) must not double-resolve the promise.
+		// Guard every completion path: an `error`/`close` arriving after the
+		// timeout already settled must not settle the promise a second time.
 		const settle = (finish: () => void) => {
 			if (settled) return;
 			settled = true;
@@ -108,24 +113,19 @@ export function runScript(
 			finish();
 		};
 
-		child.stdout?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limited = data.subarray(0, remaining);
-				stdout += limited.toString();
-				outputBytes += limited.length;
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) stdoutCapped = true;
-			}
-		});
-		child.stderr?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limited = data.subarray(0, remaining);
-				stderr += limited.toString();
-				outputBytes += limited.length;
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) stderrCapped = true;
-			}
-		});
+		// Per-stream byte budgets, shared with the built-in bash executor.
+		child.stdout?.on(
+			'data',
+			makeStreamCollector(text => {
+				stdout += text;
+			}, STDOUT_TRUNCATION_NOTICE),
+		);
+		child.stderr?.on(
+			'data',
+			makeStreamCollector(text => {
+				stderr += text;
+			}, STDERR_TRUNCATION_NOTICE),
+		);
 
 		child.on('error', err => {
 			settle(() =>
@@ -134,21 +134,14 @@ export function runScript(
 		});
 
 		child.on('close', code => {
-			settle(() => {
-				// Per-stream notices let the model see which stream was cut. They
-				// ride at the end of the captured stdout/stderr section (mirroring
-				// the built-in bash executor) and, because truncateToolResult keeps
-				// the tail, they survive the 2000-character limit.
+			settle(() =>
 				resolvePromise(
 					truncateToolResult(
-						formatScriptOutput(code, stdout, stderr, {
-							stdoutCapped,
-							stderrCapped,
-						}),
+						formatScriptOutput(code, stdout, stderr),
 						TRUNCATION_OUTPUT_LIMIT,
 					),
-				);
-			});
+				),
+			);
 		});
 	});
 }
@@ -202,19 +195,12 @@ function formatScriptOutput(
 	code: number | null,
 	stdout: string,
 	stderr: string,
-	options: {stdoutCapped: boolean; stderrCapped: boolean},
 ): string {
 	const exitCode = code ?? 0;
-	let out = stdout.trimEnd();
-	let err = stderr.trimEnd();
-	// Per-stream cap notices, mirroring the bash executor's "Output truncated"
-	// / "Stderr truncated" markers.
-	if (options.stdoutCapped) {
-		out += '\n... [Output truncated to prevent memory exhaustion]';
-	}
-	if (options.stderrCapped) {
-		err += '\n... [Stderr truncated to prevent memory exhaustion]';
-	}
+	// Any cap notice is already inline at the end of its own stream (see
+	// makeStreamCollector), so it survives the tail-keeping truncation below.
+	const out = stdout.trimEnd();
+	const err = stderr.trimEnd();
 	const prefix = `EXIT_CODE: ${exitCode}\n`;
 	if (err) {
 		return `${prefix}STDERR:\n${err}\nSTDOUT:\n${out}`;

@@ -8,6 +8,7 @@ import {fileOpTool} from './file-ops/file-op.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {findFilesTool} from './find-files.js';
+import {formatDocumentTool} from './lsp-format-document.js';
 import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
 import {readFileTool} from './read-file.js';
 import {searchFileContentsTool} from './search-file-contents.js';
@@ -76,6 +77,38 @@ test('write_file requires approval in plan mode', async t => {
 		await evaluateNeedsApproval(writeFileTool, 'plan', {
 			path: 'test.txt',
 			content: 'test',
+		}),
+	);
+});
+
+test('lsp_format_document requires approval in normal mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(formatDocumentTool, 'normal', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document does NOT require approval in auto-accept mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(formatDocumentTool, 'auto-accept', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document requires approval in plan mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(formatDocumentTool, 'plan', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document does NOT require approval in headless mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(formatDocumentTool, 'headless', {
+			path: 'test.ts',
 		}),
 	);
 });

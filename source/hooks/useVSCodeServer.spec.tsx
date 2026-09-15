@@ -45,17 +45,21 @@ test('getVSCodePort returns a number', t => {
 	t.is(typeof result, 'number');
 });
 
-test('getVSCodePort returns default port when no args', t => {
-	// Default port should be returned when no --vscode-port arg
+test('getVSCodePort returns ephemeral sentinel when no args', t => {
+	// With no `--vscode-port` flag, the CLI now defaults to asking the
+	// kernel for a free port (sentinel 0). The actual port is resolved at
+	// start time and written to the discovery file.
 	const port = getVSCodePort();
-	t.true(port > 0);
-	t.true(port < 65536);
+	t.is(port, 0);
 });
 
-test('getVSCodePort returns valid port number', t => {
+test('getVSCodePort returns the sentinel value within the legal port range', t => {
+	// 0 is the documented ephemeral-port sentinel; anything that calls
+	// `getVSCodePort` should always receive a finite non-negative integer.
 	const port = getVSCodePort();
-	t.true(port >= 1);
-	t.true(port <= 65535);
+	t.true(Number.isInteger(port));
+	t.true(port >= 0);
+	t.true(port < 65536);
 });
 
 test('getVSCodePort does not throw', t => {
@@ -531,19 +535,18 @@ test('createFileChangeFromTool handles empty path', async t => {
 // Port Validation Tests
 // ============================================================================
 
-test('getVSCodePort returns number in valid range', t => {
+test('getVSCodePort returns the ephemeral sentinel in valid range', t => {
 	const port = getVSCodePort();
 
 	t.true(Number.isInteger(port));
-	t.true(port > 0);
+	t.true(port >= 0); // 0 is the ephemeral-port sentinel
 	t.true(port < 65536);
 });
 
-test('Default port is a reasonable value', t => {
+test('Default port is the ephemeral sentinel', t => {
+	// The CLI now defaults to port 0 (ephemeral) so the resolved port is
+	// not guessable by an attacker. The 10-port fallback scan and the
+	// fixed DEFAULT_PORT have both been retired.
 	const port = getVSCodePort();
-
-	// Default port should be in typical application range
-	// Based on DEFAULT_PORT from protocol.ts
-	t.true(port >= 1024); // Above privileged ports
-	t.true(port <= 65535);
+	t.is(port, 0);
 });

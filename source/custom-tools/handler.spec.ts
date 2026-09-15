@@ -298,7 +298,8 @@ shellCase(
 		);
 		const matches = result.split(marker).length - 1;
 		t.is(matches, 1, 'truncation marker must appear exactly once');
-});
+	},
+);
 
 shellCase(
 	'runScript: timeout settles promptly and, on Unix, reaps descendant processes',
@@ -429,6 +430,39 @@ shellCase(
 );
 
 shellCase(
+	'runScript: a stdout flood does not swallow stderr written after it',
+	async t => {
+		// Regression: with a single shared byte budget, stdout exhausting it
+		// first made the stderr listener a no-op — the line explaining why the
+		// tool failed was dropped with no notice that anything was missing.
+		// Per-stream budgets keep stderr intact and independently capped.
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000; echo 'CRITICAL_ERROR_LINE' >&2`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.regex(
+			result,
+			/CRITICAL_ERROR_LINE/,
+			'stderr written after a stdout flood must survive',
+		);
+		t.true(
+			result.includes('... [Output truncated to prevent memory exhaustion]'),
+			'the stdout notice must still mark the capped stream',
+		);
+		t.false(
+			result.includes('... [Stderr truncated to prevent memory exhaustion]'),
+			'stderr fit its own budget, so it must not be marked truncated',
+		);
+	},
+);
+
+shellCase(
 	'runScript: partial output is discarded when the tool times out instead of resolving half a result',
 	async t => {
 		await t.throwsAsync(
@@ -440,6 +474,53 @@ shellCase(
 			}),
 			{message: /timed out/},
 		);
+	},
+);
+
+// A script that traps SIGTERM must still be force-killed. Guarding the
+// escalation on `child.killed` never fired (Node sets that flag the moment
+// SIGTERM is delivered), so the force-kill never ran. The redirect keeps
+// this case about escalation alone - pipe drain is pinned separately below.
+shellCase(
+	'runScript: escalates to SIGKILL when the script ignores SIGTERM',
+	async t => {
+		const started = Date.now();
+		await t.throwsAsync(
+			runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 100,
+			}),
+			{message: /timed out/},
+		);
+		// SIGTERM at 100ms + a 1s grace window. Without escalation this only
+		// settles once `sleep 5` finishes.
+		t.true(Date.now() - started < 3_000);
+	},
+);
+
+// The timeout must settle even when a grandchild outlives the shell. The
+// backgrounded `sleep` inherits stdout/stderr and holds those pipes open, so
+// neither 'close' nor (with a trapped SIGTERM) 'exit' is prompt; settling
+// inside the timeout handler itself is what keeps this bounded. `& wait`
+// rather than a bare `sleep` because shells exec-optimise a trailing command,
+// which would leave no grandchild to hold the pipes at all.
+shellCase(
+	'runScript: timeout settles without waiting on an orphaned grandchild',
+	async t => {
+		const started = Date.now();
+		await t.throwsAsync(
+			runScript(`trap '' TERM; sleep 5 & wait`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 100,
+			}),
+			{message: /timed out/},
+		);
+		// Without this the promise waits out the full `sleep 5`.
+		t.true(Date.now() - started < 3_000);
 	},
 );
 

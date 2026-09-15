@@ -1,27 +1,12 @@
 import test, {type ExecutionContext} from 'ava';
-import {render} from 'ink-testing-library';
 import React from 'react';
-import {themes} from '../config/themes';
-import {ThemeContext} from '../hooks/useTheme';
 import {setToolManagerGetter} from '../message-handler';
+import {renderWithTheme} from '../test-utils/render-with-theme';
 import type {ToolManager} from '../tools/tool-manager';
 import type {ToolCall} from '../types/core';
 import ToolConfirmation from './tool-confirmation';
 
 console.log('\ntool-confirmation.spec.tsx');
-
-// Mock ThemeProvider for testing
-const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
-	const mockTheme = {
-		currentTheme: 'tokyo-night' as const,
-		colors: themes['tokyo-night'].colors,
-		setCurrentTheme: () => {},
-	};
-
-	return (
-		<ThemeContext.Provider value={mockTheme}>{children}</ThemeContext.Provider>
-	);
-};
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -72,17 +57,20 @@ function mountConfirmation(
 	name = 'schema_tool',
 ) {
 	const record: ConfirmationRecord = {confirmations: [], cancels: []};
-	setToolManagerGetter(() => mockToolManager(overrides));
-	const app = render(
-		<MockThemeProvider>
-			<ToolConfirmation
-				toolCall={toolCall(name, args)}
-				onConfirm={confirmed => record.confirmations.push(confirmed)}
-				onCancel={() => {
-					record.cancels.push(1);
-				}}
-			/>
-		</MockThemeProvider>,
+	// One instance, not one per call: the component reads getToolManager() on
+	// every render and feeds it to the preview effect's dependency array, so a
+	// fresh mock each time would re-run the effect on every render and spin
+	// React's update-depth limit. The app installs a stable singleton here.
+	const manager = mockToolManager(overrides);
+	setToolManagerGetter(() => manager);
+	const app = renderWithTheme(
+		<ToolConfirmation
+			toolCall={toolCall(name, args)}
+			onConfirm={confirmed => record.confirmations.push(confirmed)}
+			onCancel={() => {
+				record.cancels.push(1);
+			}}
+		/>,
 	);
 	t.teardown(() => {
 		app.unmount();
@@ -185,9 +173,12 @@ test('formatter crash auto-cancels without showing the approval prompt', async t
 	const frame = lastFrame();
 
 	t.deepEqual(record.confirmations, [false], 'formatter crash must auto-cancel');
+	// Match only up to the wrap point: at the harness's fixed render width the
+	// message breaks mid-sentence and the hint column is interleaved after it,
+	// so anything spanning the break would be asserting on the box layout.
 	t.regex(
 		frame,
-		/cancelled due to formatter error/,
+		/cancelled due to formatter/,
 		'cancellation message should render',
 	);
 	t.false(
