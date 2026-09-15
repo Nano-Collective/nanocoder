@@ -16,7 +16,7 @@ interface BashProgressProps {
 	/** If true, renders with reduced margins for live display */
 	isLive?: boolean;
 	/** If true, renders the captured output once the command completes.
-	 * Used for user-typed !commands; model tool calls stay compact. */
+	 * Used by user-typed !commands and by agent bash when showAgentBashOutput is on. */
 	showOutput?: boolean;
 }
 
@@ -91,10 +91,10 @@ export default function BashProgress({
 			: totalOutput;
 	const estimatedTokens = calculateTokens(truncatedOutput);
 
-	// Completed output for user-typed !commands. Mirrors the error/stderr-first
-	// ordering of formatBashResultForLLM, tail-capped so a verbose command
-	// can't flood the static transcript (the model still receives the full,
-	// separately-truncated output).
+	// Completed output for user-typed !commands and opted-in agent bash. Mirrors
+	// the error/stderr-first ordering of formatBashResultForLLM, tail-capped so
+	// a verbose command can't flood the static transcript (the model still
+	// receives the full, separately-truncated output).
 	const {expanded} = useContext(ToolOutputContext);
 	let displayedOutput = '';
 	let hiddenLineCount = 0;

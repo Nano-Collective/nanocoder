@@ -24,6 +24,7 @@ import {
 	resolveProjectContextPreferences,
 	resetPreferencesCache,
 	savePreferences,
+	getShowAgentBashOutput,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateLastUsed,
@@ -39,6 +40,7 @@ import {
 	updatePrivacyPreference,
 	getMouseReporting,
 	updateMouseReporting,
+	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
@@ -1708,6 +1710,96 @@ test.serial('full workflow: toggle usage footer off and back on', t => {
 
 		updateShowUsageFooter(true);
 		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// showAgentBashOutput Tests
+// ============================================================================
+
+test.serial('getShowAgentBashOutput defaults to false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput defaults to false when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	t.is(getShowAgentBashOutput(), false);
+});
+
+test.serial('updateShowAgentBashOutput round-trips and preserves others', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'ollama'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+		t.is(loadPreferences().lastProvider, 'ollama');
+
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput reflects a write, not a stale cached value', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		// Self-priming, so the result does not depend on what earlier serial
+		// tests left in the cache. Without version-based invalidation the final
+		// read would still serve the primed `false`.
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput serves the cached value without re-reading', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+
+		// Remove the file behind the cache's back. A getter that re-read per call
+		// would fall back to the default (false); the cached one keeps serving
+		// true, which is what keeps a bash card render off the disk.
+		rmSync(preferencesPath, {force: true});
+		t.is(getShowAgentBashOutput(), true);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

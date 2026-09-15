@@ -108,6 +108,24 @@ You can change this via `/settings` → **Behavior** → **Tool Results and Thin
 
 The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
 
+### Agent Bash Output
+
+By default, a completed card for a command the agent runs shows the command and its status. The command output is not kept on the card. Set `showAgentBashOutput` to keep the output on the card regardless of `compactToolDisplay` being true or false:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `showAgentBashOutput` | boolean | `false` | When true, a completed card for a command the agent runs shows the command output. This applies whether compact tool display is on or off, and also covers failed commands. |
+
+You can change this via `/settings` → **Behavior** → **Tool Results and Thinking**, or by editing the preferences file directly:
+
+```json
+{
+  "showAgentBashOutput": true
+}
+```
+
+This setting only affects commands the agent runs. Output for commands you type yourself with `!command` is always shown. Toggling it from `/settings` applies from the next command onwards, with no restart needed. Editing the preferences file by hand needs a restart.
+
 ### Professional Tone
 
 Professional ("boring") tone is stored in the preferences file with the `professionalTone` field:
