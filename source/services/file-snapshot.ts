@@ -34,20 +34,6 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Capture the contents of specified files.
-	 *
-	 * Read as bytes, never as text. Snapshots cover whatever git reports as
-	 * modified, which includes images, .vsix bundles and any other binary a
-	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
-	 * with U+FFFD, and since the checkpoint copy is written from this map the
-	 * original bytes would be gone at save time with nothing left to recover.
-	 *
-	 * Files that cannot be read are reported alongside the ones that could, not
-	 * just logged: the caller records them so a later restore can say what it
-	 * did not put back. A file that is simply gone is not one of them - see
-	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
-	 */
-	/**
 	 * Is `absolutePath` inside the workspace?
 	 *
 	 * Snapshot keys are `path.relative(workspaceRoot, file)`, so anything
@@ -61,6 +47,20 @@ export class FileSnapshotService {
 		return !relative.startsWith('..') && !path.isAbsolute(relative);
 	}
 
+	/**
+	 * Capture the contents of specified files.
+	 *
+	 * Read as bytes, never as text. Snapshots cover whatever git reports as
+	 * modified, which includes images, .vsix bundles and any other binary a
+	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
+	 * with U+FFFD, and since the checkpoint copy is written from this map the
+	 * original bytes would be gone at save time with nothing left to recover.
+	 *
+	 * Files that cannot be read are reported alongside the ones that could, not
+	 * just logged: the caller records them so a later restore can say what it
+	 * did not put back. A file that is simply gone is not one of them - see
+	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
+	 */
 	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
 		const snapshots = new Map<string, Buffer>();
 		const skipped: SkippedFile[] = [];
