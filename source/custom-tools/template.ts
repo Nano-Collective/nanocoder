@@ -41,7 +41,7 @@ export function shellQuote(value: string): string {
 export function cmdQuote(value: string): string {
 	if (/[\0%\r\n]/.test(value)) {
 		throw new Error(
-			'cmd.exe arguments cannot contain percent signs, null bytes, or newlines',
+			'cmd.exe arguments cannot contain percent signs, carriage returns, newlines, or null bytes',
 		);
 	}
 	return `"${value.replaceAll('"', '""')}"`;
