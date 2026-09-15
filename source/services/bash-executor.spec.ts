@@ -449,6 +449,55 @@ test('output cap trips and appends the truncation marker exactly once', async t 
 	);
 });
 
+const STDOUT_TRUNCATION_MARKER = '... [Output truncated to prevent memory exhaustion]';
+const STDERR_TRUNCATION_MARKER = '... [Stderr truncated to prevent memory exhaustion]';
+
+test('flooding stderr past the cap does not truncate stdout - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stderr.write('E' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stderr.flush(); sys.stdout.write('important stdout data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.fullOutput.includes('important stdout data'),
+		'stdout should be fully intact - stderr flooding its own budget must not affect stdout at all',
+	);
+	t.false(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
+test('flooding stdout past the cap does not truncate stderr - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stdout.write('O' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stdout.flush(); sys.stderr.write('important stderr data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.stderr.includes('important stderr data'),
+		'stderr should be fully intact - stdout flooding its own budget must not affect stderr at all',
+	);
+	t.false(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
 test('cancel() on a detached process kills a spawned child (process-group assertion)', async t => {
 	const executor = createExecutor();
 	const { promise, executionId } = executor.execute('node -e "setInterval(() => {}, 1000)" & echo $!');

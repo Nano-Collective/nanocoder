@@ -30,7 +30,8 @@ function getPreferencesPath(): string {
 	return PREFERENCES_PATH;
 }
 
-// Export for testing purposes - allows tests to reset the cache
+// Test hook: drops the resolved path cache only. `cachedPreference` values
+// survive, since they key on NANOCODER_CONFIG_DIR + the write counter.
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
@@ -70,6 +71,20 @@ export function subscribeToPreferences(listener: () => void): () => void {
  */
 export function getPreferencesVersion(): number {
 	return preferencesVersion;
+}
+
+// Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
+// (bumped on every write), so the value never goes stale after a settings change.
+function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
+	let cache: {dir?: string; version: number; value: T} | null = null;
+	return () => {
+		const dir = process.env.NANOCODER_CONFIG_DIR;
+		const version = getPreferencesVersion();
+		if (!cache || cache.dir !== dir || cache.version !== version) {
+			cache = {dir, version, value: read(loadPreferences())};
+		}
+		return cache.value;
+	};
 }
 
 export function savePreferences(preferences: UserPreferences): void {
@@ -288,6 +303,27 @@ export function updateCompactToolDisplay(value: boolean): void {
 	savePreferences(preferences);
 }
 
+// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
+const cachedShowAgentBashOutput = cachedPreference(
+	prefs => prefs.showAgentBashOutput === true,
+);
+
+/**
+ * Get the agent bash output preference. Default false.
+ */
+export function getShowAgentBashOutput(): boolean {
+	return cachedShowAgentBashOutput();
+}
+
+/**
+ * Save the agent bash output preference
+ */
+export function updateShowAgentBashOutput(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.showAgentBashOutput = value;
+	savePreferences(preferences);
+}
+
 /**
  * Get the per-response usage footer preference. On by default.
  */
@@ -411,7 +447,7 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
  */
 export function getAlternateScreen(): boolean {
 	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? false;
+	return preferences.alternateScreen ?? true;
 }
 
 /**
@@ -420,6 +456,27 @@ export function getAlternateScreen(): boolean {
 export function updateAlternateScreen(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.alternateScreen = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the mouse reporting preference. When true (default), the terminal reports
+ * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
+ * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
+ * terminal does not capture the mouse at all, so native text selection
+ * (double-click, drag) works directly and the wheel does nothing.
+ */
+export function getMouseReporting(): boolean {
+	const preferences = loadPreferences();
+	return preferences.mouseReporting ?? true;
+}
+
+/**
+ * Save the mouse reporting preference
+ */
+export function updateMouseReporting(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.mouseReporting = value;
 	savePreferences(preferences);
 }
 

@@ -1,9 +1,9 @@
-import {existsSync, readdirSync, statSync} from 'fs';
-import {basename, join} from 'path';
+import {existsSync, readdirSync, statSync} from 'node:fs';
+import {basename, join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;
@@ -59,12 +59,25 @@ export class CustomCommandLoader {
 		namespace?: string,
 		source?: 'personal' | 'project',
 	): void {
-		const entries = readdirSync(dir);
+		let entries: string[];
+		try {
+			entries = readdirSync(dir);
+		} catch (error) {
+			logWarning(`Failed to read command directory ${dir}: ${String(error)}`);
+			return;
+		}
 
+		let failedEntries = 0;
 		for (const entry of entries) {
 			if (!isSafeEntry(entry)) continue;
 			const fullPath = join(dir, entry); // nosemgrep
-			const stat = statSync(fullPath);
+			let stat: ReturnType<typeof statSync>;
+			try {
+				stat = statSync(fullPath);
+			} catch {
+				failedEntries++;
+				continue;
+			}
 
 			if (stat.isDirectory()) {
 				// Check if this is a directory-as-command pattern:
@@ -81,6 +94,12 @@ export class CustomCommandLoader {
 				// Parse and register command
 				this.loadCommand(fullPath, namespace, source);
 			}
+		}
+
+		if (failedEntries > 0) {
+			logWarning(
+				`Failed to inspect ${failedEntries} file(s) in command directory ${dir}`,
+			);
 		}
 	}
 
@@ -156,9 +175,19 @@ export class CustomCommandLoader {
 			return [];
 		}
 
-		const entries = readdirSync(resourcesDir);
+		let entries: string[];
+		try {
+			entries = readdirSync(resourcesDir);
+		} catch (error) {
+			logWarning(
+				`Failed to read resources directory ${resourcesDir}: ${String(error)}`,
+			);
+			return [];
+		}
+
 		const resources: CommandResource[] = [];
 
+		let failedResources = 0;
 		for (const entry of entries) {
 			if (!isSafeEntry(entry)) continue;
 			const resourcePath = join(resourcesDir, entry); // nosemgrep
@@ -166,6 +195,7 @@ export class CustomCommandLoader {
 			try {
 				st = statSync(resourcePath);
 			} catch {
+				failedResources++;
 				continue;
 			}
 			if (!st.isFile()) continue;
@@ -187,6 +217,12 @@ export class CustomCommandLoader {
 				type,
 				executable: executable || undefined,
 			});
+		}
+
+		if (failedResources > 0) {
+			logWarning(
+				`Failed to inspect ${failedResources} resource(s) in directory ${resourcesDir}`,
+			);
 		}
 
 		return resources;

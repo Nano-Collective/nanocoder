@@ -108,7 +108,7 @@ export function useInputState() {
 					const oldPlaceholder = placeholder.displayText;
 					const newPlaceholder = resizePasteDisplayText(
 						oldPlaceholder,
-						updatedContent.length,
+						updatedContent,
 					);
 
 					const updatedPlaceholderContent = {
@@ -175,7 +175,7 @@ export function useInputState() {
 						const oldPlaceholder = placeholder.displayText;
 						const newPlaceholder = resizePasteDisplayText(
 							oldPlaceholder,
-							updatedContent.length,
+							updatedContent,
 						);
 
 						const updatedPlaceholderContent = {
