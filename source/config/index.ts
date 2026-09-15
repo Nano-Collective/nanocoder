@@ -37,7 +37,7 @@ import type {
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
-import {COMPRESSION_CONSTANTS} from '@/utils/message-compression';
+import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
@@ -234,10 +234,7 @@ function loadTuneConfig(): Partial<TuneConfig> | undefined {
 // Validate and clamp threshold to the configured range
 function validateThreshold(threshold: unknown): number {
 	const num = typeof threshold === 'number' ? threshold : 60;
-	return Math.max(
-		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
-		Math.min(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT, Math.round(num)),
-	);
+	return clampThreshold(Math.round(num));
 }
 
 // Validate compression mode

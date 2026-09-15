@@ -1,7 +1,12 @@
 import test from 'ava';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
-import {COMPRESSION_CONSTANTS, compressMessages} from './message-compression.js';
+import {
+	clampThreshold,
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from './message-compression.js';
 
 // Mock tokenizer that counts characters as tokens (1 char = 1 token)
 function createMockTokenizer(): Tokenizer {
@@ -510,4 +515,30 @@ test('COMPRESSION_CONSTANTS exports expected values', t => {
 	t.is(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT, 95);
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_USER_MESSAGE_THRESHOLD, 1000);
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT, 500);
+});
+
+// ==================== Threshold clamp tests ====================
+
+const {MIN_THRESHOLD_PERCENT: MIN, MAX_THRESHOLD_PERCENT: MAX} =
+	COMPRESSION_CONSTANTS;
+
+test('clampThreshold pulls out-of-range values to the nearest bound', t => {
+	t.is(clampThreshold(MIN - 20), MIN);
+	t.is(clampThreshold(MAX + 20), MAX);
+	t.is(clampThreshold(Number.NEGATIVE_INFINITY), MIN);
+	t.is(clampThreshold(Number.POSITIVE_INFINITY), MAX);
+});
+
+test('clampThreshold leaves in-range values untouched', t => {
+	t.is(clampThreshold(MIN), MIN);
+	t.is(clampThreshold(MAX), MAX);
+	t.is(clampThreshold(60), 60);
+	t.is(clampThreshold(72.5), 72.5);
+});
+
+test('isThresholdInRange agrees with clampThreshold at the bounds', t => {
+	t.false(isThresholdInRange(MIN - 1));
+	t.true(isThresholdInRange(MIN));
+	t.true(isThresholdInRange(MAX));
+	t.false(isThresholdInRange(MAX + 1));
 });
