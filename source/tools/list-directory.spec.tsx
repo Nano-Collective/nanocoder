@@ -599,6 +599,35 @@ test.serial('list_directory hides dotfiles when listing the project root (.)', a
 	}
 });
 
+test.serial('list_directory hides dotfiles when the project itself sits under a hidden dir', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+	const ancestor = join(originalCwd, '.test-listdir-hidden-ancestor-temp');
+
+	try {
+		const projectDir = join(ancestor, 'proj');
+		mkdirSync(projectDir, {recursive: true});
+		writeFileSync(join(projectDir, '.hidden'), 'secret');
+		writeFileSync(join(projectDir, 'visible.ts'), 'content');
+
+		process.chdir(projectDir);
+
+		// Weak models routinely pass absolute paths. The hidden *ancestor*
+		// (`.test-listdir-hidden-ancestor-temp`) must not count as "the caller
+		// asked for a hidden directory".
+		const result = await listDirectoryTool.tool.execute!(
+			{path: process.cwd()},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.false(result.includes('.hidden'));
+		t.true(result.includes('visible.ts'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(ancestor, {recursive: true, force: true});
+	}
+});
+
 test.serial('list_directory showHiddenFiles=true shows dotfiles', async t => {
 	t.timeout(10000);
 	const originalCwd = process.cwd();

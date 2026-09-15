@@ -48,6 +48,14 @@ const executeListDirectory = async (
 	}
 
 	const resolvedPath = resolveFilePath(dirPath, cwd, root);
+	// Dotfiles stay hidden unless the caller explicitly asked for a hidden
+	// directory (`.github`, `./.config`). Match the project-relative path, not
+	// the raw argument: `'.'.startsWith('.')` is true and used to leak every
+	// dotfile at the project root (#1237), and an absolute path would otherwise
+	// pick up hidden *ancestors* of the project itself (`~/.local/share/proj`).
+	const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(
+		relative(root, resolvedPath),
+	);
 	// Load from the project root so root-level rules still apply after a `cd`
 	// into a subdir; entries are matched root-relative below.
 	const ig = loadGitignore(root);
@@ -66,13 +74,7 @@ const executeListDirectory = async (
 				const items = await readdir(currentPath, {withFileTypes: true});
 
 				for (const item of items) {
-					// Skip hidden files unless showHiddenFiles is true. The extra
-					// path check keeps nested hidden entries visible when the user
-					// explicitly listed a hidden directory (`.github`, `.config`).
-					// Do not treat the project root (`.` / `./`) as a hidden dir —
-					// `'.'.startsWith('.')` is true and used to leak every dotfile.
-					// See #1237.
-					const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(dirPath);
+					// Skip hidden files unless showHiddenFiles is true
 					if (
 						!showHiddenFiles &&
 						item.name.startsWith('.') &&
