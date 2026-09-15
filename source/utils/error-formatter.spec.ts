@@ -195,3 +195,58 @@ test('createErrorInfo - recognizes ETIMEDOUT as a network and timeout error', t 
 	t.true(result.isTimeoutError);
 	t.is(result.code, 'ETIMEDOUT');
 });
+
+test('createErrorInfo - correctly classifies "validation failed for connection" as validation only', t => {
+	const error = new Error('validation failed for connection');
+	const result = createErrorInfo(error);
+
+	t.true(result.isValidationError);
+	t.false(result.isNetworkError);
+	t.false(result.isTimeoutError);
+});
+
+test('createErrorInfo - correctly classifies HTTP error with validation message as validation only', t => {
+	const error = new Error('validation failed for required field');
+	error.name = 'HTTPError';
+	const result = createErrorInfo(error);
+
+	t.true(result.isValidationError);
+	t.false(result.isNetworkError);
+	t.false(result.isTimeoutError);
+});
+
+test('createErrorInfo - correctly classifies explicit connection error', t => {
+	const error = new Error('connection refused by peer');
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+	t.false(result.isValidationError);
+});
+
+test('createErrorInfo - retains original capability to recognize fetch failed', t => {
+	const error = new TypeError('fetch failed');
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+});
+
+test('createErrorInfo - retains original capability to recognize missing required headers', t => {
+	const error = new Error('Missing required headers');
+	const result = createErrorInfo(error);
+
+	t.true(result.isValidationError);
+});
+
+test('createErrorInfo - retains original capability to recognize invalid email', t => {
+	const error = new Error('Invalid email');
+	const result = createErrorInfo(error);
+
+	t.true(result.isValidationError);
+});
+
+test('createErrorInfo - retains original capability to recognize timeout exceeded', t => {
+	const error = new Error('request timeout exceeded');
+	const result = createErrorInfo(error);
+
+	t.true(result.isTimeoutError);
+});
