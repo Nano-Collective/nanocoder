@@ -10,7 +10,12 @@ const runtimeModules = {
 	}`,
 	'@/app': 'export default function App() {}',
 	'@/utils/perf-buffer': 'export function installPerfBufferGuard() {}',
-	'@/config/preferences': 'export function loadPreferences() { return {}; }',
+	// Every export cli.tsx pulls from this module must be stubbed here: the
+	// loader short-circuits the whole specifier, so a missing name surfaces as
+	// "<name> is not a function" at run time rather than an import error.
+	'@/config/preferences': `export function loadPreferences() { return {}; }
+		export function getAlternateScreen() { return false; }
+		export function getMouseReporting() { return false; }`,
 	ink: `export function render(element) {
 		console.log(JSON.stringify({...element.props, contextLimit: globalThis.cliTestContextLimit}));
 		process.exit(0);
