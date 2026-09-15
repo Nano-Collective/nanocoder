@@ -288,7 +288,7 @@ Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, u
 
 ### Paste Handling
 
-Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.
+Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer pastes are collapsed into a `[Paste #N: X chars]` placeholder and multi-line pastes into a `[Paste #N: X lines]` placeholder.
 
 You can change the threshold interactively via `/settings` → **Paste Threshold**, or by editing `nanocoder-preferences.json` directly:
 
