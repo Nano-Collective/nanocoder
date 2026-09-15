@@ -67,7 +67,7 @@ Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You
 | Copy last response to clipboard | `/copy` |
 | Toggle selection mode (fullscreen only) | Ctrl+P |
 
-Nanocoder enables **bracketed paste**, so the terminal hands over a pasted block in one piece rather than as a stream of keystrokes. Multi-line pastes no longer submit the prompt at the first line break. Pastes that are multi-line, or longer than the paste threshold, collapse into a `[Paste #1: 1234 chars]` placeholder to keep the input readable; the full text is still sent with your message. Adjust the threshold under `/settings`.
+Nanocoder enables **bracketed paste**, so the terminal hands over a pasted block in one piece rather than as a stream of keystrokes. Multi-line pastes no longer submit the prompt at the first line break. Pastes that are multi-line, or longer than the paste threshold, collapse into a placeholder to keep the input readable (`[Paste #1: 7 lines]` for a multi-line paste, `[Paste #1: 1234 chars]` for a single long line); the full text is still sent with your message. Adjust the threshold under `/settings`.
 
 Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste shortcut for text.
 

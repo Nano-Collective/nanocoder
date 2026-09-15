@@ -1174,7 +1174,7 @@ test.serial(
 
 		await wait(50);
 		pasteEvents.emit('paste', 'line one\nline two\nline three');
-		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]/);
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
 
 		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
 		unmount();

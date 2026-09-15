@@ -13,20 +13,37 @@ import {allocatePlaceholderId} from './placeholders';
  */
 export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
 
+const LINE_BREAK = /\r\n|\r|\n/;
+
+/**
+ * Size shown in a paste label: a line count for multi-line text, where it
+ * says more at a glance, and a character count otherwise.
+ */
+function formatPasteSize(pastedText: string): string {
+	// A trailing line break doesn't start a line the user pasted.
+	const lineCount = pastedText
+		.replace(/(\r\n|\r|\n)$/, '')
+		.split(LINE_BREAK).length;
+	return lineCount > 1 ? `${lineCount} lines` : `${pastedText.length} chars`;
+}
+
 /** Render the label shown in the input for a paste placeholder. */
-function formatPasteDisplayText(ordinal: number, size: number): string {
-	return `[Paste #${ordinal}: ${size} chars]`;
+function formatPasteDisplayText(ordinal: number, pastedText: string): string {
+	return `[Paste #${ordinal}: ${formatPasteSize(pastedText)}]`;
 }
 
 /**
- * Restate an existing paste label at a new size, keeping its ordinal.
+ * Restate an existing paste label for its grown content, keeping its ordinal.
  * Used when a chunked paste grows after its placeholder already exists.
  */
 export function resizePasteDisplayText(
 	displayText: string,
-	size: number,
+	pastedText: string,
 ): string {
-	return displayText.replace(/: \d+ chars\]$/, `: ${size} chars]`);
+	return displayText.replace(
+		/: \d+ (chars|lines)\]$/,
+		`: ${formatPasteSize(pastedText)}]`,
+	);
 }
 
 function getSingleLinePasteThreshold(): number {
@@ -49,7 +66,7 @@ export function handlePaste(
 	const threshold = getSingleLinePasteThreshold();
 
 	// If single line and <= threshold chars, paste directly
-	const lineCount = pastedText.split(/\r\n|\r|\n/).length;
+	const lineCount = pastedText.split(LINE_BREAK).length;
 	if (lineCount === 1 && pastedText.length <= threshold) {
 		return null;
 	}
@@ -58,7 +75,7 @@ export function handlePaste(
 		currentPlaceholderContent,
 		PlaceholderType.PASTE,
 	);
-	const placeholder = formatPasteDisplayText(ordinal, pastedText.length);
+	const placeholder = formatPasteDisplayText(ordinal, pastedText);
 
 	const pasteContent: PastePlaceholderContent = {
 		type: PlaceholderType.PASTE,
