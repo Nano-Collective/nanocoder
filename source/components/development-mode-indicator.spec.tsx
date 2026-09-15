@@ -205,13 +205,13 @@ test('DevelopmentModeIndicator shows context percentage when provided', t => {
 	t.regex(output!, /ctx: ~?42%/);
 });
 
-test('DevelopmentModeIndicator hides context percentage when null', t => {
+test('DevelopmentModeIndicator shows unknown context percentage when null', t => {
 	const {lastFrame} = render(
 		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
-	t.notRegex(output!, /ctx:/);
+	t.regex(output!, /ctx: \?/);
 });
 
 test('DevelopmentModeIndicator shows API-reported context without the ~ marker', t => {
@@ -531,6 +531,7 @@ test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or 
 		/>,
 	);
 	t.notRegex(missing, /Tasks/);
+	t.regex(missing, /ctx: \?/);
 });
 
 // ============================================================================
@@ -637,6 +638,7 @@ test('DevelopmentModeIndicator omits saving indicator when isSaving is false or 
 		/>,
 	);
 	t.notRegex(undefOutput, /saving/);
+	t.regex(undefOutput, /ctx: \?/);
 });
 
 test('saving indicator drops under narrow width pressure without shrinking session name', t => {

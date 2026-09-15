@@ -152,7 +152,7 @@ export const DevelopmentModeIndicator = React.memo(
 				const ctxSegment =
 					contextPercentUsed !== null
 						? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
-						: '';
+						: ' · ctx: ?';
 				const sessionSeparator = sessionName ? ' · ' : '';
 				const editorSeparator = editorFileName ? ' · ' : '';
 
@@ -318,13 +318,18 @@ export const DevelopmentModeIndicator = React.memo(
 						</Text>
 					</>
 				)}
-				{contextPercentUsed !== null && (
+				{contextPercentUsed !== null ? (
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={getContextColor(contextPercentUsed, colors)}>
 							ctx: {ctxPrefix}
 							{contextPercentUsed}%
 						</Text>
+					</>
+				) : (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.secondary}>ctx: ?</Text>
 					</>
 				)}
 				{editorLabel && (
