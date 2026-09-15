@@ -14,11 +14,15 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
-	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
 import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
 import {
 	getProjectRoot,
@@ -27,24 +31,6 @@ import {
 } from './session-cwd.js';
 
 const isWindows = platform === 'win32';
-
-// Each returned collector has its own budget, so one stream's volume can't affect the other's.
-function makeStreamCollector(append: (text: string) => void, marker: string) {
-	let bytes = 0;
-	let truncated = false;
-	return (data: Buffer) => {
-		if (bytes < BASH_MAX_OUTPUT_BYTES) {
-			const remaining = BASH_MAX_OUTPUT_BYTES - bytes;
-			const limitedChunk = data.subarray(0, remaining);
-			append(limitedChunk.toString());
-			bytes += limitedChunk.length;
-		}
-		if (bytes >= BASH_MAX_OUTPUT_BYTES && !truncated) {
-			truncated = true;
-			append(marker);
-		}
-	};
-}
 
 export interface BashExecutionState {
 	executionId: string;
@@ -188,10 +174,10 @@ export class BashExecutor extends EventEmitter {
 
 		const collectStdout = makeStreamCollector(text => {
 			state.fullOutput += text;
-		}, '\n... [Output truncated to prevent memory exhaustion]');
+		}, STDOUT_TRUNCATION_NOTICE);
 		const collectStderr = makeStreamCollector(text => {
 			state.stderr += text;
-		}, '\n... [Stderr truncated to prevent memory exhaustion]');
+		}, STDERR_TRUNCATION_NOTICE);
 
 		// Collect output
 		proc.stdout?.on('data', (data: Buffer) => {
