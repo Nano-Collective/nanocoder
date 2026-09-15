@@ -46,7 +46,7 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 
 | Action | Shortcut |
 |--------|----------|
-| Accept file/command suggestion | Tab |
+| Accept file/command suggestion, or insert the suggested next command in an empty prompt | Tab |
 | Navigate file suggestions | Up/Down |
 | Exit file autocomplete | Space |
 | Insert the suggested next command | Tab (empty prompt) |
