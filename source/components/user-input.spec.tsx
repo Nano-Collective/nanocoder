@@ -127,6 +127,132 @@ test('UserInput renders with disabled state', t => {
 	unmount();
 });
 
+test('UserInput shows a suggested command in the empty prompt and inserts it on Tab', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/checkpoint create"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		/Try \/checkpoint create · Tab to insert · Esc to dismiss/.test(
+			stripAnsi(lastFrame() ?? ''),
+		),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/checkpoint create') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /checkpoint create'),
+	);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput dismisses the suggested command on Esc in an empty prompt', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\x1B');
+	await waitForCondition(() => dismissed === 1);
+	// The first Esc went to the suggestion, not the clear-input double press.
+	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
+test('UserInput clears the suggested command when a message is submitted', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'hello');
+	await waitForCondition(() => dismissed === 1);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput submits an inserted suggested command on Enter and clears the suggestion', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	// Wait for the inserted value itself, not the "Try /commit" placeholder.
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/commit') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/commit');
+	// Tab dismissed once on insert; submitting dismisses again.
+	await waitForCondition(() => dismissed === 2);
+	t.is(submittedMessage, '/commit');
+	t.is(dismissed, 2);
+	unmount();
+});
+
 test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
