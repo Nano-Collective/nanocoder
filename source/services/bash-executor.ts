@@ -172,16 +172,27 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		const collectStdout = makeStreamCollector(text => {
+		const stdoutCollector = makeStreamCollector(text => {
 			state.fullOutput += text;
 		}, STDOUT_TRUNCATION_NOTICE);
-		const collectStderr = makeStreamCollector(text => {
+		const stderrCollector = makeStreamCollector(text => {
 			state.stderr += text;
 		}, STDERR_TRUNCATION_NOTICE);
 
+		// Both streams are finished by the time `close`/`error` runs, so release
+		// whatever the decoders were holding back mid-character. `cancel()`
+		// resolves and unregisters the execution before either handler gets
+		// here, so a cancelled run never flushes: its pending partial character
+		// is dropped along with the rest of the output it never produced.
+		const flushStreams = () => {
+			stdoutCollector.flush();
+			stderrCollector.flush();
+			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
+		};
+
 		// Collect output
 		proc.stdout?.on('data', (data: Buffer) => {
-			collectStdout(data);
+			stdoutCollector.collect(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
@@ -189,7 +200,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr?.on('data', (data: Buffer) => {
-			collectStderr(data);
+			stderrCollector.collect(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});
@@ -245,6 +256,8 @@ export class BashExecutor extends EventEmitter {
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
+				flushStreams();
+
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
 				clearInterval(intervalId);
@@ -263,6 +276,8 @@ export class BashExecutor extends EventEmitter {
 
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
+
+				flushStreams();
 
 				applyCapturedCwd();
 				clearInterval(intervalId);
