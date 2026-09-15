@@ -7,7 +7,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   actions: read
@@ -29,9 +28,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          # pull_request runs test the contributor head; a manual dispatch runs
-          # the commit selected in the Actions UI.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa

@@ -89,6 +89,10 @@ export function runScript(
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			detached: process.platform !== 'win32',
+			// cmd.exe parses a command string itself. Let it receive the wrapper and
+			// the doubled quotes from shellArgs verbatim; libuv quoting them again
+			// changes the argv seen by the child command.
+			windowsVerbatimArguments: isWindowsCmd(options.shell),
 		});
 
 		let stdout = '';
@@ -296,10 +300,10 @@ export function expandVars(value: string): string {
 	});
 }
 
-/** cmd.exe: disable AutoRun/delayed expansion, then run. */
+/** cmd.exe: disable AutoRun/delayed expansion, then run one wrapped command. */
 export function shellArgs(shell: string, script: string): string[] {
 	return isWindowsCmd(shell)
-		? ['/d', '/v:off', '/c', script]
+		? ['/d', '/v:off', '/s', '/c', `"${script}"`]
 		: ['-c', script];
 }
 
