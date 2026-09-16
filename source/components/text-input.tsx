@@ -3,6 +3,7 @@ import {Text, useInput} from 'ink';
 import {useEffect, useRef, useState} from 'react';
 import {
 	getVisualLineSegments,
+	insertAtCursor,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/utils/text-wrapping';
@@ -151,7 +152,9 @@ function TextInput({
 				return;
 			}
 
-			if (key.return) {
+			// Shift+Enter is a line break, not a submit, so it falls through to the
+			// edit chain below. Every other return submits (or is ignored).
+			if (key.return && !key.shift) {
 				if (handleEnter && onEnter) {
 					onEnter(originalValueRef.current);
 					return;
@@ -255,6 +258,20 @@ function TextInput({
 							break;
 						}
 
+						case 'j': {
+							// Newline. Terminals sending a literal LF land in the generic
+							// insert below instead; under the kitty protocol Ctrl+J arrives
+							// here, where it previously fell through to `default` and was
+							// ignored.
+							({value: nextValue, cursorOffset: nextCursorOffset} =
+								insertAtCursor(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+									'\n',
+								));
+							break;
+						}
+
 						default:
 							// Ignore all other ctrl combinations (don't insert characters)
 							break;
@@ -268,6 +285,16 @@ function TextInput({
 				if (showCursor) {
 					nextCursorOffset++;
 				}
+			} else if (key.return) {
+				// Shift+Enter (the only return reaching here). The parent cannot do
+				// this itself: the cursor lives in this component, so appending to
+				// the end of the value leaves the caret behind and scrambles
+				// everything typed afterwards.
+				({value: nextValue, cursorOffset: nextCursorOffset} = insertAtCursor(
+					originalValueRef.current,
+					cursorOffsetRef.current,
+					'\n',
+				));
 			} else if (key.backspace || key.delete) {
 				if (cursorOffset > 0) {
 					nextValue =
@@ -279,14 +306,11 @@ function TextInput({
 					nextCursorOffset--;
 				}
 			} else {
-				nextValue =
-					originalValueRef.current.slice(0, cursorOffset) +
-					input +
-					originalValueRef.current.slice(
-						cursorOffset,
-						originalValueRef.current.length,
-					);
-				nextCursorOffset += input.length;
+				({value: nextValue, cursorOffset: nextCursorOffset} = insertAtCursor(
+					originalValueRef.current,
+					cursorOffsetRef.current,
+					input,
+				));
 
 				if (input.length > 1) {
 					nextCursorWidth = input.length;

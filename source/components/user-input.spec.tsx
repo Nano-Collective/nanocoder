@@ -1274,3 +1274,64 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	unmount();
 });
 
+// Shift+Enter used to be appended to the END of the value by UserInput while
+// the caret stayed put, so each following word was spliced in at the stale
+// offset: `one`, `two`, `three` submitted as `onetwothree\n\n`. The insert
+// now happens at the caret, inside TextInput, which owns it.
+test('Shift+Enter inserts a line break instead of scrambling the message', async t => {
+	// CSI-u encoding, which is what kitty/WezTerm/Ghostty/iTerm2 actually send.
+	const SHIFT_ENTER = '\u001b[13;2u';
+	let submittedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('one');
+	await waitForFrame(lastFrame, /one/);
+	stdin.write(SHIFT_ENTER);
+	stdin.write('two');
+	await waitForFrame(lastFrame, /two/);
+	stdin.write(SHIFT_ENTER);
+	stdin.write('three');
+	await waitForFrame(lastFrame, /three/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage !== '');
+
+	t.is(submittedMessage, 'one\ntwo\nthree');
+});
+
+test('Ctrl+J still inserts a line break', async t => {
+	// A literal LF is what most terminals send for Ctrl+J.
+	let submittedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('one');
+	await waitForFrame(lastFrame, /one/);
+	stdin.write('\n');
+	stdin.write('two');
+	await waitForFrame(lastFrame, /two/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage !== '');
+
+	t.is(submittedMessage, 'one\ntwo');
+});
