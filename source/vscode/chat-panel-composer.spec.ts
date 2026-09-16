@@ -89,7 +89,7 @@ test('mode dropdown shows a readable label and matching items', t => {
 	t.is(panel.byId('mode-dropdown')?.children[1].textContent, 'Auto-Accept');
 });
 
-test('opening a nested provider list keeps composer settings open', t => {
+test('toggling a nested provider list keeps composer settings open', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
@@ -97,9 +97,13 @@ test('opening a nested provider list keeps composer settings open', t => {
 
 	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
 	t.false(panel.byId('provider-dropdown')?.classList.contains('hidden'));
+
+	panel.byId('provider-trigger')?.click();
+	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.true(panel.byId('provider-dropdown')?.classList.contains('hidden'));
 });
 
-test('opening the mode list keeps composer settings open', t => {
+test('toggling the mode list keeps composer settings open', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
@@ -112,6 +116,11 @@ test('opening the mode list keeps composer settings open', t => {
 		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
 		'true',
 	);
+
+	panel.byId('mode-trigger')?.click();
+	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.true(panel.byId('mode-dropdown')?.classList.contains('hidden'));
+	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'false');
 });
 
 test('opening the model list closes composer settings', t => {
@@ -157,7 +166,8 @@ test('provider and mode still post the existing extension messages', t => {
 	panel.byId('provider-dropdown')?.children[1].click();
 	t.true(
 		panel.sent.some(
-			(message: {type?: string; provider?: string}) =>
+			// biome-ignore lint/suspicious/noExplicitAny: testing arbitrary extension messages
+			(message: any) =>
 				message.type === 'setProvider' && message.provider === 'openai',
 		),
 	);
@@ -166,7 +176,8 @@ test('provider and mode still post the existing extension messages', t => {
 	panel.byId('mode-dropdown')?.children[2].click();
 	t.true(
 		panel.sent.some(
-			(message: {type?: string; mode?: string}) =>
+			// biome-ignore lint/suspicious/noExplicitAny: testing arbitrary extension messages
+			(message: any) =>
 				message.type === 'setMode' && message.mode === 'yolo',
 		),
 	);
