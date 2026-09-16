@@ -89,28 +89,32 @@ test('getToolManager - returns tool manager from getter', t => {
 });
 
 // Test processToolUse - XML validation errors
-test('processToolUse - throws on __xml_validation_error__', async t => {
+test('processToolUse - catches __xml_validation_error__ and returns error ToolResult', async t => {
 	setToolRegistryGetter(createMockToolRegistry({}));
 
 	const toolCall = createMockToolCall('__xml_validation_error__', {
 		error: 'Invalid XML format',
 	});
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Invalid XML format',
-	});
+	const result = await processToolUse(toolCall);
+
+	t.is(result.role, 'tool');
+	t.is(result.isError, true);
+	t.true(result.content.includes('Error: Invalid XML format'));
 });
 
-test('processToolUse - throws on __xml_validation_error__ with custom message', async t => {
+test('processToolUse - catches __xml_validation_error__ with custom message and returns error ToolResult', async t => {
 	setToolRegistryGetter(createMockToolRegistry({}));
 
 	const toolCall = createMockToolCall('__xml_validation_error__', {
 		error: 'Missing closing tag',
 	});
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Missing closing tag',
-	});
+	const result = await processToolUse(toolCall);
+
+	t.is(result.role, 'tool');
+	t.is(result.isError, true);
+	t.true(result.content.includes('Error: Missing closing tag'));
 });
 
 // Note: Testing uninitialized registry state is not feasible without module-level access
@@ -118,7 +122,7 @@ test('processToolUse - throws on __xml_validation_error__ with custom message', 
 // application architecture. The beforeEach hook ensures proper initialization for all tests.
 
 // Test processToolUse - unknown tool
-test('processToolUse - throws on unknown tool', async t => {
+test('processToolUse - catches unknown tool and returns error ToolResult', async t => {
 	setToolRegistryGetter(
 		createMockToolRegistry({
 			knownTool: async () => 'result',
@@ -127,9 +131,11 @@ test('processToolUse - throws on unknown tool', async t => {
 
 	const toolCall = createMockToolCall('unknownTool', {});
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Unknown tool: unknownTool',
-	});
+	const result = await processToolUse(toolCall);
+
+	t.is(result.role, 'tool');
+	t.is(result.isError, true);
+	t.true(result.content.includes('Error: Unknown tool: unknownTool'));
 });
 
 // Test processToolUse - successful execution

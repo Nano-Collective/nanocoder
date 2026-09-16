@@ -53,23 +53,23 @@ export async function processToolUse(
 	toolCall: ToolCall,
 	options?: ToolExecutionContext,
 ): Promise<ToolResult> {
-	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
-	if (toolCall.function.name === '__xml_validation_error__') {
-		const args = toolCall.function.arguments as {error: string};
-		throw new Error(args.error);
-	}
-
-	if (!toolRegistryGetter) {
-		throw new Error('Tool registry not initialized');
-	}
-
-	const toolRegistry = toolRegistryGetter();
-	const handler = toolRegistry[toolCall.function.name];
-	if (!handler) {
-		throw new Error(`Unknown tool: ${toolCall.function.name}`);
-	}
-
 	try {
+		// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
+		if (toolCall.function.name === '__xml_validation_error__') {
+			const args = toolCall.function.arguments as {error: string};
+			throw new Error(args.error);
+		}
+
+		if (!toolRegistryGetter) {
+			throw new Error('Tool registry not initialized');
+		}
+
+		const toolRegistry = toolRegistryGetter();
+		const handler = toolRegistry[toolCall.function.name];
+		if (!handler) {
+			throw new Error(`Unknown tool: ${toolCall.function.name}`);
+		}
+
 		// Parse arguments - use strict mode to throw error on parse failure
 		// Strict mode is required here to catch malformed arguments before tool execution
 		const parsedArgs = parseToolArguments<Record<string, unknown>>(
