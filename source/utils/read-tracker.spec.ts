@@ -9,6 +9,7 @@ import {
 	matchReadContent,
 	rememberReadContent,
 	runWithReadContentScope,
+	clearReadContentScope,
 } from './read-tracker.js';
 
 test.beforeEach(() => {
@@ -92,4 +93,20 @@ test.serial('bumpReadContentGeneration does not clear the edit guard', t => {
 	markFileSeen('/tmp/seen.txt');
 	bumpReadContentGeneration();
 	t.true(hasSeenFile('/tmp/seen.txt'));
+});
+
+test.serial('clearReadContentScope drops only that scope', t => {
+	const stats = {mtimeMs: 10, size: 4};
+	rememberReadContent('/tmp/main.txt', stats, 2);
+	runWithReadContentScope('agent-1', () => {
+		rememberReadContent('/tmp/sub.txt', stats, 2);
+	});
+	clearReadContentScope('agent-1');
+	t.deepEqual(matchReadContent('/tmp/main.txt', stats), {
+		lineCount: 2,
+		size: 4,
+	});
+	runWithReadContentScope('agent-1', () => {
+		t.is(matchReadContent('/tmp/sub.txt', stats), undefined);
+	});
 });

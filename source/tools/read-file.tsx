@@ -25,12 +25,8 @@ import {
 } from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 
-function formatReadStub(
-	path: string,
-	lineCount: number,
-	size: number,
-): string {
-	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line or metadata_only to read again.]`;
+function formatReadStub(path: string, lineCount: number, size: number): string {
+	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
 }
 
 const executeReadFile = async (args: {
@@ -204,7 +200,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass a line range or metadata_only to force a real read.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;

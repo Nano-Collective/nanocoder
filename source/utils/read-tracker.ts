@@ -72,10 +72,7 @@ export function hasSeenFile(absPath: string): boolean {
 }
 
 /** Isolate stub state so a parent read cannot stub a subagent that never saw the file. */
-export function runWithReadContentScope<T>(
-	scopeId: string,
-	fn: () => T,
-): T {
+export function runWithReadContentScope<T>(scopeId: string, fn: () => T): T {
 	return readContentScopeStorage.run(scopeId, fn);
 }
 
@@ -86,14 +83,18 @@ export function bumpReadContentGeneration(): void {
 
 /** Drop stub entries for a path after an edit. */
 export function forgetReadContent(absPath: string): void {
-	const resolved = resolve(absPath);
-	const prefix = `${resolved}\0`;
+	const prefix = `${resolve(absPath)}\0`;
 	const files = getReadContentScope().files;
 	for (const key of files.keys()) {
-		if (key === resolved || key.startsWith(prefix)) {
+		if (key.startsWith(prefix)) {
 			files.delete(key);
 		}
 	}
+}
+
+/** Drop a subagent's stub map when that agent finishes. */
+export function clearReadContentScope(scopeId: string): void {
+	readContentScopes.delete(scopeId);
 }
 
 /** Remember a content-bearing read so a matching later call can stub. */

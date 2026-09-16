@@ -599,7 +599,7 @@ test('string_replace validator: allows editing after the file is read', async t 
 	}
 });
 
-test('string_replace validator: still allows edit after a stubbed re-read', async t => {
+test.serial('string_replace validator: still allows edit after a stubbed re-read', async t => {
 	await createTestFile('test.txt', 'Hello World\n');
 
 	if (!stringReplaceTool.validator) {
