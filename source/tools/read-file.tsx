@@ -18,8 +18,20 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {markFileSeen} from '@/utils/read-tracker';
+import {
+	markFileSeen,
+	matchReadContent,
+	rememberReadContent,
+} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
+
+function formatReadStub(
+	path: string,
+	lineCount: number,
+	size: number,
+): string {
+	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line or metadata_only to read again.]`;
+}
 
 const executeReadFile = async (args: {
 	path: string;
@@ -101,12 +113,26 @@ const executeReadFile = async (args: {
 			return output;
 		}
 
+		const stats = await lstat(absPath);
+		if (stats.isFile() || stats.isSymbolicLink()) {
+			const stub = matchReadContent(
+				absPath,
+				stats,
+				args.start_line,
+				args.end_line,
+			);
+			if (stub) {
+				return formatReadStub(args.path, stub.lineCount, stub.size);
+			}
+		}
+
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
 
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
+			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -128,6 +154,13 @@ const executeReadFile = async (args: {
 			// Marking it seen keeps the read-before-edit guard aligned with the
 			// content that was actually returned, just like a ranged read.
 			markFileSeen(absPath);
+			rememberReadContent(
+				absPath,
+				stats,
+				totalLines,
+				args.start_line,
+				args.end_line,
+			);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -144,6 +177,13 @@ const executeReadFile = async (args: {
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
 		markFileSeen(absPath);
+		rememberReadContent(
+			absPath,
+			stats,
+			totalLines,
+			args.start_line,
+			args.end_line,
+		);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
@@ -164,7 +204,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass a line range or metadata_only to force a real read.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;
