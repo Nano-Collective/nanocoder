@@ -1,6 +1,7 @@
 /**
- * Composer chrome: model and mode stay on the input row; provider lives
- * behind the settings popover.
+ * Composer chrome: model stays on the input row; provider and mode live
+ * behind the settings popover using the same dropdown style as the model
+ * selector.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -35,23 +36,16 @@ const syncComposer = (panel: ReturnType<typeof createPanel>) => {
 	});
 };
 
-test('markup groups model and mode on the row while keeping provider in settings', t => {
+test('markup keeps model on the row and puts provider and mode in settings', t => {
 	const row = slice(PANEL_HTML, 'add-menu-btn', 'send-stop-btn');
 	t.true(row.includes('id="model-trigger"'));
-	t.true(row.includes('id="mode-trigger"'));
+	t.false(row.includes('id="mode-trigger"'));
 	t.true(row.includes('id="composer-settings-trigger"'));
 	t.false(row.includes('id="provider-trigger"'));
-	t.false(row.includes('id="composer-mode-badge"'));
-	t.true(
-		row.indexOf('id="model-trigger"') <
-			row.indexOf('id="mode-trigger"'),
-	);
 
 	const settings = slice(PANEL_HTML, 'composer-settings', 'model-dropdown');
 	t.true(settings.includes('id="provider-trigger"'));
-	t.true(settings.includes('id="provider-dropdown"'));
-	t.false(settings.includes('id="mode-trigger"'));
-	t.false(settings.includes('id="mode-dropdown"'));
+	t.true(settings.includes('id="mode-trigger"'));
 	t.false(settings.includes('id="model-trigger"'));
 });
 
@@ -68,7 +62,21 @@ test('settings trigger opens the composer settings popover', t => {
 	);
 });
 
-test('the mode dropdown shows a readable label', t => {
+test('provider dropdown shows a readable label and matching items', t => {
+	const panel = createPanel();
+	syncComposer(panel);
+	t.is(panel.byId('provider-trigger-label')?.textContent, 'claude');
+	t.is(panel.byId('provider-trigger')?.getAttribute('aria-haspopup'), 'menu');
+	t.is(
+		panel.byId('provider-trigger')?.getAttribute('aria-controls'),
+		'provider-dropdown',
+	);
+	t.is(panel.byId('provider-trigger')?.getAttribute('aria-expanded'), 'false');
+	t.is(panel.byId('provider-dropdown')?.children[0].textContent, 'claude');
+	t.is(panel.byId('provider-dropdown')?.children[1].textContent, 'openai');
+});
+
+test('mode dropdown shows a readable label and matching items', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	t.is(panel.byId('mode-trigger-label')?.textContent, 'Auto-Accept');
@@ -91,18 +99,18 @@ test('opening a nested provider list keeps composer settings open', t => {
 	t.false(panel.byId('provider-dropdown')?.classList.contains('hidden'));
 });
 
-test('opening the mode list closes composer settings', t => {
+test('opening the mode list keeps composer settings open', t => {
 	const panel = createPanel();
 	syncComposer(panel);
 	panel.byId('composer-settings-trigger')?.click();
 	panel.byId('mode-trigger')?.click();
 
-	t.true(panel.byId('composer-settings')?.classList.contains('hidden'));
+	t.false(panel.byId('composer-settings')?.classList.contains('hidden'));
 	t.false(panel.byId('mode-dropdown')?.classList.contains('hidden'));
 	t.is(panel.byId('mode-trigger')?.getAttribute('aria-expanded'), 'true');
 	t.is(
 		panel.byId('composer-settings-trigger')?.getAttribute('aria-expanded'),
-		'false',
+		'true',
 	);
 });
 
