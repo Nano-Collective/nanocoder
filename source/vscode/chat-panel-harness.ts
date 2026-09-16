@@ -208,7 +208,8 @@ export function createElement(tagName: string): StubElement {
 				return element.children.map((c: StubElement) => c.textContent).join('');
 			}
 			if (html) {
-				return html.replace(/<\/?[a-zA-Z][^<>]*>/g, '');
+				// Strip all HTML tags, including unclosed ones to satisfy CodeQL
+				return html.replace(/<[\s\S]*?(?:>|$)/g, '');
 			}
 			return '';
 		},
