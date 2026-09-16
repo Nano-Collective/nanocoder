@@ -155,6 +155,11 @@ test('hasCommandFailed: detects success via exit code 0', t => {
 	t.false(hasCommandFailed(output));
 });
 
+test('hasCommandFailed: detects success via exit code 0 even with false positive words', t => {
+	const output = 'EXIT_CODE: 0\nadded 1 package, removed 2 packages, 0 failed';
+	t.false(hasCommandFailed(output));
+});
+
 test('hasCommandFailed: detects "command not found" error', t => {
 	const output = 'EXIT_CODE: 127\nSTDERR:\nbash: foobar: command not found';
 	t.true(hasCommandFailed(output));

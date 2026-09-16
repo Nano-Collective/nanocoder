@@ -26,9 +26,23 @@ export function hasCommandFailed(output: string): boolean {
 		if (exitCode !== 0) {
 			return true;
 		}
+
+		// If exit code is explicitly 0, but contains an explicit error/fatal message, it failed.
+		// Exclude 'failed' and 'cannot' patterns here to avoid false positives like "0 failed"
+		const normalized = outputStr.toLowerCase();
+		const exitZeroErrors = [/^error:/im, /\berror:\s*(?!0\b)/i, /\bfatal\b/i];
+
+		for (const pattern of exitZeroErrors) {
+			if (pattern.test(normalized)) {
+				return true;
+			}
+		}
+
+		// Otherwise, an explicit 0 exit code indicates success.
+		return false;
 	}
 
-	// Strategy 2: Check for critical error patterns
+	// Strategy 2: Check for critical error patterns (when no exit code is found)
 	// Use word boundaries and case-sensitive matching to avoid false positives
 	const normalized = outputStr.toLowerCase();
 
