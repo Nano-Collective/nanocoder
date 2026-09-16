@@ -154,7 +154,9 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 test('mergeEnv overlays configured vars onto process.env', t => {
 	const env = mergeEnv({CUSTOM_VAR: 'value'});
 	t.is(env.CUSTOM_VAR, 'value');
-	t.truthy(env.PATH);
+	// Windows exposes its inherited search path as `Path`; POSIX uses `PATH`.
+	// The merge must preserve whichever spelling the host supplied.
+	t.truthy(env.PATH ?? env.Path);
 });
 
 test('resolveCwd handles missing paths by falling back to projectRoot', t => {
