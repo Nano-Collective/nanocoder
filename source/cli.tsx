@@ -510,7 +510,7 @@ async function main(): Promise<void> {
 	const trustDirectoryRequested = args.includes('--trust-directory');
 	if (trustDirectoryRequested && !nonInteractiveMode) {
 		console.error(
-			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && nonInteractiveMode;
