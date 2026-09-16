@@ -12,12 +12,29 @@ import {getSubagentDescriptions} from '@/utils/prompt-processor';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const sectionsCandidates = [
-	join(__dirname, '../../source/app/prompts/sections'),
-	join(__dirname, '../source/app/prompts/sections'),
-];
-const sectionsDir =
-	sectionsCandidates.find(p => existsSync(p)) ?? sectionsCandidates[0];
+/**
+ * Given the directory of the compiled module, return the path to the prompt
+ * `sections/` directory by trying two candidate locations:
+ *
+ * - `../../source/app/prompts/sections` — tsc layout: module lands in `dist/utils/`
+ * - `../source/app/prompts/sections`    — rolldown layout: everything compiles into a flat `dist/`
+ *
+ * The first candidate that exists on disk wins; if neither exists the first
+ * candidate is returned as-is (so a missing directory surfaces as an empty
+ * section at load time, not here).
+ *
+ * Exported so that tests can drive the resolution logic directly with a
+ * temporary directory, without relying on the module-load-time `__dirname`.
+ */
+export function resolveSectionsDir(moduleDir: string): string {
+	const candidates = [
+		join(moduleDir, '../../source/app/prompts/sections'),
+		join(moduleDir, '../source/app/prompts/sections'),
+	];
+	return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
+const sectionsDir = resolveSectionsDir(__dirname);
 
 // Cache loaded sections to avoid re-reading files
 const sectionCache = new Map<string, string>();
