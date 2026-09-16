@@ -1240,3 +1240,38 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
 	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
 });
+
+test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'first prompt'},
+		{role: 'assistant', content: 'first response'},
+		{role: 'user', content: 'second prompt'},
+		{role: 'assistant', content: 'second response'},
+	];
+
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'second prompt',
+	});
+
+	t.true(result.ok as boolean);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[0].content, 'first prompt');
+	t.is(session.messages[1].content, 'first response');
+
+	// Also verify retrying the first turn truncates all messages and saves to disk
+	const resultFirst = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+	t.true(resultFirst.ok as boolean);
+	t.is(session.messages.length, 0);
+
+	const stored = await sessionManager.loadSession(created.sessionId);
+	t.is(stored?.messageCount, 0);
+	t.deepEqual(stored?.messages, []);
+});
+

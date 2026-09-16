@@ -237,6 +237,12 @@ export interface WebviewMessageSubmitMessage {
 	images?: { data: string; mimeType: string }[];
 }
 
+export interface WebviewMessageRetryMessage {
+	type: 'retryMessage';
+	text: string;
+	images?: { data: string; mimeType: string }[];
+}
+
 export interface WebviewMessageCancel {
 	type: 'cancel';
 }
@@ -376,6 +382,7 @@ export interface WebviewMessageRevertToCheckpoint {
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
+	| WebviewMessageRetryMessage
 	| WebviewMessageCancel
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool

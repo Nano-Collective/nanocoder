@@ -202,9 +202,36 @@ export function createElement(tagName: string): StubElement {
 		},
 	});
 	Object.defineProperty(element, 'textContent', {
-		get: () => text,
+		get: () => {
+			if (text) return text;
+			if (element.children.length > 0) {
+				return element.children.map((c: StubElement) => c.textContent).join('');
+			}
+			if (html) {
+				return html.replace(/<[^>]*>/g, '');
+			}
+			return '';
+		},
 		set: (value: string) => {
 			text = String(value);
+		},
+	});
+
+	Object.defineProperty(element, 'nextElementSibling', {
+		get: () => {
+			if (!element.parentElement) return null;
+			const siblings = element.parentElement.children;
+			const idx = siblings.indexOf(element);
+			return idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
+		},
+	});
+
+	Object.defineProperty(element, 'previousElementSibling', {
+		get: () => {
+			if (!element.parentElement) return null;
+			const siblings = element.parentElement.children;
+			const idx = siblings.indexOf(element);
+			return idx > 0 ? siblings[idx - 1] : null;
 		},
 	});
 
