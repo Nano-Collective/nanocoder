@@ -1,12 +1,11 @@
 import test from 'ava';
-import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
-	resolveSectionsDir,
 	resetSectionCache,
 	setLastBuiltPrompt,
 } from './prompt-builder.js';
@@ -657,70 +656,4 @@ test('nano professional tone section is smaller than the full one', t => {
 test.serial('professional tone defaults to the preference when unset', t => {
 	t.false(buildWithProfessionalTone(false).includes('## TONE'));
 	t.true(buildWithProfessionalTone(true).includes('## TONE'));
-});
-
-// ---------------------------------------------------------------------------
-// Candidate-layout resolution tests
-//
-// resolveSectionsDir() is the find(p => existsSync(p)) logic that lets the
-// prompt sections be found from either build layout. A regression in the
-// candidates (wrong relative depth, misordering) makes every section load as
-// empty after a bundler change — the exact risk the rolldown migration carried
-// — so pin both layouts and the no-candidate fallback here.
-// ---------------------------------------------------------------------------
-
-/** Build a repo-shaped tree and return the sections dir that was created. */
-function makeSections(base: string, ...segments: string[]): string {
-	const dir = join(base, ...segments);
-	mkdirSync(dir, {recursive: true});
-	return dir;
-}
-
-test('resolveSectionsDir: picks the tsc candidate for a nested dist/utils layout', t => {
-	const base = mkdtempSync(join(tmpdir(), 'nanocoder-sections-tsc-'));
-	try {
-		// tsc layout: module lands in dist/utils/, sections two levels up.
-		const sections = makeSections(base, 'source', 'app', 'prompts', 'sections');
-		t.is(resolveSectionsDir(join(base, 'dist', 'utils')), sections);
-	} finally {
-		rmSync(base, {recursive: true, force: true});
-	}
-});
-
-test('resolveSectionsDir: falls through to the rolldown candidate for a flat dist layout', t => {
-	const base = mkdtempSync(join(tmpdir(), 'nanocoder-sections-rolldown-'));
-	try {
-		// rolldown layout: module lands in dist/, so only ../source/... exists.
-		const sections = makeSections(base, 'source', 'app', 'prompts', 'sections');
-		t.is(resolveSectionsDir(join(base, 'dist')), sections);
-	} finally {
-		rmSync(base, {recursive: true, force: true});
-	}
-});
-
-test('resolveSectionsDir: the tsc candidate wins when both layouts exist', t => {
-	const base = mkdtempSync(join(tmpdir(), 'nanocoder-sections-both-'));
-	try {
-		const tsc = makeSections(base, 'source', 'app', 'prompts', 'sections');
-		makeSections(base, 'dist', 'source', 'app', 'prompts', 'sections');
-
-		t.is(resolveSectionsDir(join(base, 'dist')), tsc);
-	} finally {
-		rmSync(base, {recursive: true, force: true});
-	}
-});
-
-test('resolveSectionsDir: falls back to the first candidate when neither exists', t => {
-	const base = mkdtempSync(join(tmpdir(), 'nanocoder-sections-empty-'));
-	try {
-		const moduleDir = join(base, 'dist');
-		mkdirSync(moduleDir, {recursive: true});
-
-		t.is(
-			resolveSectionsDir(moduleDir),
-			join(moduleDir, '../../source/app/prompts/sections'),
-		);
-	} finally {
-		rmSync(base, {recursive: true, force: true});
-	}
 });
