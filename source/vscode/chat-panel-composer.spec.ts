@@ -210,3 +210,35 @@ test('model dropdown labels keep provider prefixes out of the trigger and items'
 	t.is(panel.byId('model-dropdown')?.children[0].textContent, 'claude-sonnet-4-5');
 	t.is(panel.byId('model-dropdown')?.children[1].textContent, 'gpt-5-codex');
 });
+
+test('clicking a disabled element does not dispatch events (harness coverage)', t => {
+	const panel = createPanel();
+	const btn = panel.byId('add-menu-btn');
+	if (!btn) return t.fail('Button not found');
+	
+	let clicked = false;
+	btn.addEventListener('click', () => {
+		clicked = true;
+	});
+	btn.disabled = true;
+	btn.click();
+	t.false(clicked);
+});
+
+test('removeEventListener removes the listener (harness coverage)', t => {
+	const panel = createPanel();
+	const btn = panel.byId('add-menu-btn');
+	if (!btn) return t.fail('Button not found');
+	
+	let clicks = 0;
+	const listener = () => {
+		clicks++;
+	};
+	btn.addEventListener('click', listener);
+	btn.click();
+	t.is(clicks, 1);
+	
+	btn.removeEventListener('click', listener);
+	btn.click();
+	t.is(clicks, 1);
+});
