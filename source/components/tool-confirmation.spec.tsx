@@ -228,3 +228,65 @@ test('MCP tools render the server-qualified prompt', async t => {
 	t.regex(frame, /from server "weather"/, 'server name should be visible');
 	t.regex(frame, /MCP tool "schema_tool"/, 'MCP tool should be labelled');
 });
+
+test('a second answer from the same instance is ignored', async t => {
+	const {stdin, record} = mountConfirmation(t, {}, {path: 'a.txt'});
+
+	// Approve, then press Escape before the app would have unmounted this
+	// instance. The queue resolves its head on every answer, so a second answer
+	// here would settle the next queued request without ever showing it.
+	stdin.write('\r');
+	await waitUntil(() => record.confirmations.length > 0);
+	stdin.write('\u001B');
+	await sleep(50);
+
+	t.deepEqual(record.confirmations, [true], 'the tool must be confirmed once');
+	t.deepEqual(record.cancels, [], 'Escape after an answer must do nothing');
+});
+
+test('the guard resets when a new request reuses the instance', async t => {
+	// chat-input keys this component on toolCall.id, so a queue advance
+	// normally remounts it. This covers the other path: if that key is ever
+	// dropped, React reuses the instance and the new request must still be
+	// answerable rather than silently blocked by the previous answer.
+	const record: ConfirmationRecord = {confirmations: [], cancels: []};
+	const manager = mockToolManager();
+	setToolManagerGetter(() => manager);
+
+	let advance: (next: ToolCall) => void = () => {};
+	function Harness() {
+		const [call, setCall] = React.useState(toolCall('schema_tool', {
+			path: 'a.txt',
+		}));
+		advance = setCall;
+		return (
+			<ToolConfirmation
+				toolCall={call}
+				onConfirm={confirmed => record.confirmations.push(confirmed)}
+				onCancel={() => {
+					record.cancels.push(1);
+				}}
+			/>
+		);
+	}
+
+	const app = renderWithTheme(<Harness />);
+	t.teardown(() => {
+		app.unmount();
+		setToolManagerGetter(() => null);
+	});
+
+	app.stdin.write('\r');
+	await waitUntil(() => record.confirmations.length > 0);
+
+	advance({id: 'call-2', function: {name: 'schema_tool', arguments: {path: 'b.txt'}}});
+	await sleep(50);
+	app.stdin.write('\r');
+	await waitUntil(() => record.confirmations.length > 1);
+
+	t.deepEqual(
+		record.confirmations,
+		[true, true],
+		'the second request must be answerable in a reused instance',
+	);
+});

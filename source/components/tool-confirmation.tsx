@@ -41,6 +41,28 @@ export default function ToolConfirmation({
 	const [hasFormatterError, setHasFormatterError] = React.useState(false);
 	const [hasValidationError, setHasValidationError] = React.useState(false);
 
+	// One answer per request. The queue in useGlobalHandlerQueues resolves its
+	// head on every answer, so a second answer for a request that is already
+	// settled would consume the NEXT queued request and resolve it with this
+	// answer without ever showing it — a silent approval of a tool the user was
+	// never asked about. Escape and the formatter-crash auto-cancel below are
+	// two paths into the same slot, so the guard covers all of them.
+	//
+	// Reset when a new request arrives: chat-input keys this component on
+	// toolCall.id so queue advances remount it, but the guard must not depend on
+	// that key surviving a future refactor. Mirrors question-prompt.tsx.
+	const answeredRef = React.useRef(false);
+	const [previousToolCall, setPreviousToolCall] = React.useState(toolCall);
+	if (toolCall !== previousToolCall) {
+		setPreviousToolCall(toolCall);
+		answeredRef.current = false;
+	}
+	const answerOnce = React.useCallback((settle: () => void) => {
+		if (answeredRef.current) return;
+		answeredRef.current = true;
+		settle();
+	}, []);
+
 	// Get MCP tool info for display
 	const toolManager = getToolManager();
 	const mcpInfo = toolManager?.getMCPToolInfo(toolCall.function.name) || {
@@ -128,7 +150,7 @@ export default function ToolConfirmation({
 	// Handle escape key to cancel
 	useInput((_inputChar, key) => {
 		if (key.escape) {
-			onCancel();
+			answerOnce(onCancel);
 		}
 	});
 
@@ -147,9 +169,9 @@ export default function ToolConfirmation({
 	React.useEffect(() => {
 		if (hasFormatterError && !hasValidationError) {
 			// Automatically cancel the tool execution only for formatter crashes
-			onConfirm(false);
+			answerOnce(() => onConfirm(false));
 		}
-	}, [hasFormatterError, hasValidationError, onConfirm]);
+	}, [hasFormatterError, hasValidationError, onConfirm, answerOnce]);
 
 	const options: ConfirmationOption[] = [
 		{label: '✓ Yes, execute this tool', value: true},
@@ -157,7 +179,7 @@ export default function ToolConfirmation({
 	];
 
 	const handleSelect = (item: ConfirmationOption) => {
-		onConfirm(item.value);
+		answerOnce(() => onConfirm(item.value));
 	};
 
 	return (
