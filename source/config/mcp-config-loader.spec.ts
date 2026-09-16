@@ -108,6 +108,42 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
     t.is(server.enabled, true);
 });
 
+test('loadProjectMCPConfig - keeps pre-substitution env/headers in raw fields', t => {
+    const testDir = t.context.testDir as string;
+    const originalKey = process.env.MY_LOADER_TEST_KEY;
+    process.env.MY_LOADER_TEST_KEY = 'resolved-from-env';
+
+    try {
+        writeFileSync(
+            join(testDir, '.mcp.json'),
+            JSON.stringify({
+                mcpServers: {
+                    'raw-snapshot': {
+                        transport: 'http',
+                        url: 'http://localhost:1',
+                        env: {API_KEY: '$MY_LOADER_TEST_KEY'},
+                        headers: {Authorization: '$MY_LOADER_TEST_KEY'},
+                    },
+                },
+            }),
+        );
+
+        const result = loadProjectMCPConfig();
+        t.is(result.length, 1);
+        const server = result[0].server;
+        t.is(server.env?.API_KEY, 'resolved-from-env');
+        t.is(server.headers?.Authorization, 'resolved-from-env');
+        t.is(server.rawEnv?.API_KEY, '$MY_LOADER_TEST_KEY');
+        t.is(server.rawHeaders?.Authorization, '$MY_LOADER_TEST_KEY');
+    } finally {
+        if (originalKey !== undefined) {
+            process.env.MY_LOADER_TEST_KEY = originalKey;
+        } else {
+            delete process.env.MY_LOADER_TEST_KEY;
+        }
+    }
+});
+
 test('loadProjectMCPConfig - ignores array format', t => {
     const testDir = t.context.testDir as string;
 
