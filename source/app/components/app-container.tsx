@@ -18,7 +18,11 @@ import {homeRelative} from '@/utils/path';
  */
 export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
 	const {branch, marker} = formatGitStatusSummary(status);
-	return marker ? `⎇ ${branch} (${marker})` : `⎇ ${branch}`;
+	// The boot summary shares one line with provider/model/config, so only the
+	// detached marker earns its width here. Being on the default branch is the
+	// common case and stays unmarked; the /status panel shows every marker.
+	if (!marker || marker === 'default') return `⎇ ${branch}`;
+	return `⎇ ${branch} (${marker})`;
 }
 
 /**

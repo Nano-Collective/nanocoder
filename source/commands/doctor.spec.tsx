@@ -87,7 +87,45 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /Providers/);
 	t.regex(output!, /LSP/);
 	t.regex(output!, /MCP/);
+	t.regex(output!, /Hooks/);
 	t.regex(output!, /Daemon/);
+});
+
+test('Doctor lists configured lifecycle hooks', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const withHooks = {
+		...report,
+		hooks: {
+			status: 'ok' as const,
+			data: [
+				{
+					event: 'post-tool-use' as const,
+					label: 'format',
+					matchTools: ['write_file'],
+				},
+				{event: 'session-start' as const, label: 'git log --oneline -5'},
+			],
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(<Doctor report={withHooks} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /post-tool-use: format/);
+	t.regex(output, /write_file/);
+	t.regex(output, /session-start: git log/);
+});
+
+test('Doctor reports when no lifecycle hooks are configured', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	// The test config directory has no hooks, so this is the real collector's
+	// empty result, not a stub.
+	t.is(report.hooks.status, 'ok');
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	t.regex(lastFrame()!, /No lifecycle hooks configured/);
 });
 
 test('Doctor reports providers without leaking api keys', async t => {

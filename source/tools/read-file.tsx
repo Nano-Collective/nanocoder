@@ -306,14 +306,19 @@ const readFileFormatter = async (
 		return <></>;
 	}
 
-	// Load file info to calculate actual read information
+	// The flag that selects the metadata response shape in executeReadFile.
+	// Boolean() rather than === true so the XML fallback's string 'true'
+	// matches, and set before the read so a directory still renders the
+	// metadata layout.
+	const isMetadataOnly = Boolean(args.metadata_only);
+
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
 		readEndLine: 0,
 		tokens: 0,
 		isPartialRead: false,
-		isMetadataOnly: false,
+		isMetadataOnly,
 		isTruncated: false,
 	};
 
@@ -322,16 +327,9 @@ const readFileFormatter = async (
 		if (path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
-			const content = cached.content;
 			const lines = cached.lines;
 			const totalLines = lines.length;
 
-			// Detect if this was a metadata-only response
-			const isMetadataOnly =
-				(result?.startsWith('File:') ?? false) &&
-				!args.start_line &&
-				!args.end_line &&
-				totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
@@ -342,15 +340,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			// Calculate tokens
-			let tokens: number;
-			if (isMetadataOnly) {
-				// For metadata, show estimated tokens of the FULL FILE
-				tokens = calculateTokens(content);
-			} else {
-				// For content reads, show tokens of what was actually returned
-				tokens = result ? calculateTokens(result) : 0;
-			}
+			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,

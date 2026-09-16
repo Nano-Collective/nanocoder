@@ -30,7 +30,6 @@ export default memo(function ChatQueue({
 	renderLastQueuedComponentLive = false,
 	clearKey,
 	disableStatic = false,
-	leftMargin = 0,
 }: ChatQueueProps) {
 	const {staticQueuedComponents, liveQueuedComponents} = useMemo(() => {
 		if (!renderLastQueuedComponentLive) {
@@ -66,7 +65,7 @@ export default memo(function ChatQueue({
 		// viewport's clip window and Ink would slice off the first character of
 		// every line. Keep it in normal flow at the padded column.
 		return (
-			<Box flexDirection="column" marginLeft={leftMargin}>
+			<Box flexDirection="column">
 				{flowComponents.map((component, index) => (
 					<RenderErrorBoundary key={componentKey(component, `flow-${index}`)}>
 						{component}
@@ -92,26 +91,21 @@ export default memo(function ChatQueue({
 			{/* Static content renders at top and persists. <Static> positions its
 			    output absolutely (position:absolute in Ink), so it ignores any
 			    surrounding margin and anchors to the layout origin — a wrapper
-			    marginLeft would not move it horizontally. The left-align margin has
-			    to live on each item instead, inside the render prop. */}
+			    marginLeft would not move it horizontally. Leave it unwrapped. */}
 			{allStaticComponents.length > 0 && (
 				<Static key={clearKey} items={allStaticComponents}>
 					{(component, index) => (
-						<Box
+						<RenderErrorBoundary
 							key={componentKey(component, `static-${index}`)}
-							marginLeft={leftMargin}
 						>
-							<RenderErrorBoundary>{component}</RenderErrorBoundary>
-						</Box>
+							{component}
+						</RenderErrorBoundary>
 					)}
 				</Static>
 			)}
-			{/* Live content renders below. marginLeft=-1 already corrects for an
-			    inherent 1-column offset between normal-flow content and the
-			    absolutely-positioned Static block above it; leftMargin adds the
-			    same left-align shift as the static items and the input box. */}
+			{/* Live content renders below */}
 			{liveQueuedComponents.length > 0 && (
-				<Box marginLeft={leftMargin - 1} flexDirection="column">
+				<Box marginLeft={-1} flexDirection="column">
 					{liveQueuedComponents.map((component, index) => (
 						<RenderErrorBoundary key={componentKey(component, `live-${index}`)}>
 							{component}

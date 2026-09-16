@@ -230,6 +230,12 @@ export function useSessionAutosave({
 						// chain takes the update path, not another createSession().
 						currentSessionIdRef.current = newSession.id;
 						setCurrentSessionId(newSession.id);
+						try {
+							const {recordSessionCreated} = await import('@/stats/record');
+							recordSessionCreated();
+						} catch {
+							// Stats must never block autosave.
+						}
 					}
 				} else {
 					// No session yet for this conversation — create one.
@@ -248,6 +254,12 @@ export function useSessionAutosave({
 					// chain takes the update path, not another createSession().
 					currentSessionIdRef.current = newSession.id;
 					setCurrentSessionId(newSession.id);
+					try {
+						const {recordSessionCreated} = await import('@/stats/record');
+						recordSessionCreated();
+					} catch {
+						// Stats must never block autosave.
+					}
 				}
 
 				lastSaveRef.current = Date.now();
