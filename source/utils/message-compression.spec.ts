@@ -517,7 +517,6 @@ test('COMPRESSION_CONSTANTS exports expected values', t => {
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT, 500);
 });
 
-<<<<<<< HEAD
 // ==================== Threshold clamp tests ====================
 
 const {MIN_THRESHOLD_PERCENT: MIN, MAX_THRESHOLD_PERCENT: MAX} =
