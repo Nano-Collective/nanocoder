@@ -291,6 +291,7 @@ test('does not immediately retry a failed queued dispatch', async t => {
 				isConversationComplete: true,
 				handleUserSubmit: async () => {
 					dispatchAttempts++;
+					await new Promise(resolve => setTimeout(resolve, 5));
 					throw new Error('dispatch failed');
 				},
 			}}
@@ -299,6 +300,69 @@ test('does not immediately retry a failed queued dispatch', async t => {
 
 	await new Promise(resolve => setTimeout(resolve, 50));
 	t.is(dispatchAttempts, 1);
+	unmount();
+});
+
+test('does not drain queued prompts while conversation is incomplete', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isConversationComplete: false,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts without a client', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: null,
+				toolManager: {},
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts without a tool manager', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: null,
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
 	unmount();
 });
 
