@@ -251,6 +251,26 @@ test('hasCommandFailed: exit code 0 with a real "error:" line is still a failure
 	t.true(hasCommandFailed(output));
 });
 
+test('hasCommandFailed: exit code 0 with "command not found" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\nbash: foobar: command not found';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "no such file or directory" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\nls: no such file or directory';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "permission denied" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\npermission denied';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "fatal" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nfatal: not a git repository';
+	t.true(hasCommandFailed(output));
+});
+
 // Homebrew error handling
 test('updateCommand: detects homebrew "not found" error', t => {
 	const output =
