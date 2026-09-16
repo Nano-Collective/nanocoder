@@ -192,9 +192,9 @@ nanocoder review feature/auth
 nanocoder review 42
 ```
 
-This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI.
+This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI. This is a deliberate v1 — diff-only, one-shot review with no file reads (see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287) for the planned agentic tier).
 
-**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file.
+**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
 
 **Non-interactive mode behavior:**
 
