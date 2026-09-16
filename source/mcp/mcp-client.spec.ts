@@ -65,12 +65,12 @@ const mockTransportFactory = {
 
 console.log(`\nmcp-client.spec.ts`);
 
-// Skip integration tests in CI. These tests hit real third-party MCP servers
-// (mcp.deepwiki.com, remote.mcpservers.org, mcp.context7.com) — running them in
-// CI would couple our pipeline to those services' uptime. Run them locally to
-// verify HTTP transport against live servers.
-const isCI = process.env.CI === 'true' || process.env.CI === '1';
-const testOrSkip = isCI ? test.skip : test;
+// Live integration tests are opt-in because they depend on third-party MCP
+// servers and network availability. Run them with RUN_LIVE_MCP_TESTS=true.
+const runLiveMcpTests =
+	process.env.RUN_LIVE_MCP_TESTS === 'true' ||
+	process.env.RUN_LIVE_MCP_TESTS === '1';
+const liveTest = runLiveMcpTests ? test : test.skip;
 
 // ============================================================================
 // Tests for MCPClient - Transport Support
@@ -709,7 +709,7 @@ test('MCPClient.getServerInfo: returns undefined when only tools exist', t => {
 // These tests use real remote MCP servers via HTTP transport
 // They test the actual connection, tool listing, and tool execution flow
 
-testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
+liveTest('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
 	const client = new MCPClient();
 
 	// Use DeepWiki public MCP server (no auth required)
@@ -744,7 +744,7 @@ testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', asyn
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
+liveTest('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
 	// Pair with the DeepWiki test above so a single host going dark doesn't
 	// nuke all HTTP-transport integration coverage. context7 was picked after
 	// remote.mcpservers.org disappeared at DNS level around mid-May 2026.
@@ -780,7 +780,7 @@ testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and exec
 	t.false(client.isServerConnected('test-context7'));
 });
 
-testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
+liveTest('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
 	const client = new MCPClient();
 
 	const servers = [
@@ -816,7 +816,7 @@ testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', asyn
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
+liveTest('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -847,7 +847,7 @@ testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP ser
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
+liveTest('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -878,7 +878,7 @@ testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HT
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t => {
+liveTest('MCPClient.callTool: executes tool on connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -909,7 +909,7 @@ testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
+liveTest('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -941,7 +941,7 @@ testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
+liveTest('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -971,7 +971,7 @@ testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server
 // Error Handling Tests with Real Servers
 // ============================================================================
 
-testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
+test('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -984,7 +984,7 @@ testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t 
 	await t.throwsAsync(async () => await client.connectToServer(server));
 });
 
-testOrSkip('MCPClient.connectToServer: validates websocket URL protocol', async t => {
+test('MCPClient.connectToServer: validates websocket URL protocol', async t => {
 	const client = new MCPClient();
 
 	const server = {
