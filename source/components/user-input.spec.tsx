@@ -1309,29 +1309,32 @@ test('Shift+Enter inserts a line break instead of scrambling the message', async
 	t.is(submittedMessage, 'one\ntwo\nthree');
 });
 
-test('Ctrl+J still inserts a line break', async t => {
-	// A literal LF is what most terminals send for Ctrl+J.
-	let submittedMessage = '';
+test('Ctrl+J still inserts a line break in both encodings', async t => {
+	// Most terminals send a literal LF for Ctrl+J; under the kitty keyboard
+	// protocol it arrives as CSI-u instead, which used to be dropped entirely.
+	for (const CTRL_J of ['\n', '\u001b[106;5u']) {
+		let submittedMessage = '';
 
-	const {stdin, lastFrame, unmount} = render(
-		<TestWrapper>
-			<UserInput
-				forceFocus={true}
-				onSubmit={message => {
-					submittedMessage = message;
-				}}
-			/>
-		</TestWrapper>,
-	);
-	t.teardown(unmount);
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={message => {
+						submittedMessage = message;
+					}}
+				/>
+			</TestWrapper>,
+		);
 
-	stdin.write('one');
-	await waitForFrame(lastFrame, /one/);
-	stdin.write('\n');
-	stdin.write('two');
-	await waitForFrame(lastFrame, /two/);
-	stdin.write('\r');
-	await waitForCondition(() => submittedMessage !== '');
+		stdin.write('one');
+		await waitForFrame(lastFrame, /one/);
+		stdin.write(CTRL_J);
+		stdin.write('two');
+		await waitForFrame(lastFrame, /two/);
+		stdin.write('\r');
+		await waitForCondition(() => submittedMessage !== '');
 
-	t.is(submittedMessage, 'one\ntwo');
+		t.is(submittedMessage, 'one\ntwo');
+		unmount();
+	}
 });
