@@ -484,4 +484,32 @@ test('resuming a session from history renders the user message properly even aft
 	t.true(userWrappers[0].textContent.includes('how are you'));
 });
 
+test('clicking Retry on an image-only turn resubmits the images, not nothing', t => {
+	const panel = createPanel();
+	panel.userMessage('caption');
+	panel.text('Response to the caption.');
+	panel.finish();
+
+	const [footer] = agentFooters(panel);
+	// The harness can only feed text through `userMessage`. To exercise the
+	// empty-prompt-with-images branch the click handler gained, mutate the
+	// footer in place: blank the carry-over prompt text and attach the image
+	// payload that a real image-only turn would carry. The click handler
+	// must post a retryMessage whose text is empty and whose images match.
+	const images = [{mimeType: 'image/png', data: 'AAAA'}];
+	footer.dataset.promptText = '';
+	(footer as any)._promptImages = images;
+
+	const retryMsgsBefore = panel.sent.filter(
+		(m: any) => m.type === 'retryMessage',
+	).length;
+	const retryBtn = retryButton(footer);
+	t.false(retryBtn.disabled, 'retry must be enabled even with empty prompt text');
+	retryBtn.click();
+
+	const retryMsgs = panel.sent.filter((m: any) => m.type === 'retryMessage');
+	t.is(retryMsgs.length, retryMsgsBefore + 1);
+	t.deepEqual(retryMsgs.at(-1).images, images);
+});
+
 

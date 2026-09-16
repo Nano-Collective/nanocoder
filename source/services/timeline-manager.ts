@@ -260,6 +260,28 @@ export class TimelineManager {
 	}
 
 	/**
+	 * Drop every checkpoint whose `truncateToMessageIndex` is at or beyond
+	 * `messageIndex`. Used by `AcpAgent.retryTurn` so timeline entries from
+	 * tool calls that ran inside the retried turn do not linger and offer
+	 * themselves for revert after the conversation has moved past them.
+	 */
+	async truncateAfter(messageIndex: number): Promise<void> {
+		const index = await this.loadIndex();
+		const kept = index.entries.filter(
+			entry => entry.truncateToMessageIndex < messageIndex,
+		);
+		const removed = index.entries.filter(
+			entry => entry.truncateToMessageIndex >= messageIndex,
+		);
+		if (removed.length === 0) return;
+		index.entries = kept;
+		await this.saveIndex(index);
+		for (const entry of removed) {
+			await this.removeEntryDir(entry.id);
+		}
+	}
+
+	/**
 	 * Index of the first checkpoint belonging to the same assistant turn as
 	 * `entryIndex`.
 	 */

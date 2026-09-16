@@ -723,17 +723,13 @@ export class AcpAgent implements Agent {
 					? params.promptText.trim()
 					: undefined;
 			let targetUserIdx = -1;
-			for (let i = session.messages.length - 1; i >= 0; i--) {
-				const m = session.messages[i];
-				if (m.role === 'user') {
+			if (promptText) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					const m = session.messages[i];
+					if (m.role !== 'user') continue;
 					const contentStr =
 						typeof m.content === 'string' ? m.content.trim() : '';
-					if (
-						!promptText ||
-						contentStr === promptText ||
-						contentStr.includes(promptText) ||
-						(promptText && promptText.includes(contentStr))
-					) {
+					if (contentStr === promptText) {
 						targetUserIdx = i;
 						break;
 					}
@@ -750,6 +746,7 @@ export class AcpAgent implements Agent {
 			if (targetUserIdx >= 0) {
 				session.messages = session.messages.slice(0, targetUserIdx);
 				await this.saveAcpSessionToDisk(session);
+				await session.timeline.truncateAfter(targetUserIdx);
 			}
 			logger.info(
 				`ACP extMethod retryTurn: session=${sessionId} truncatedTo=${session.messages.length}`,

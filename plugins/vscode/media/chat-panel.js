@@ -745,8 +745,8 @@
 		retryBtn.addEventListener('click', () => {
 			if (isProcessing) return;
 			const prompt = footer.dataset.promptText || promptText || lastUserPromptText;
-			if (!prompt) return;
 			const images = footer._promptImages || promptImages || lastUserPromptImages;
+			if (!prompt && !images?.length) return;
 			retryPrompt(prompt, images, footer);
 		});
 
@@ -1452,7 +1452,8 @@
 	}
 
 	function retryPrompt(text, images, footerElement = null) {
-		if (isProcessing || !text) return;
+		if (isProcessing) return;
+		if (!text && !images?.length) return;
 		turnCancelled = false;
 		lastUserPromptText = text;
 		lastUserPromptImages = images;
