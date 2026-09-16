@@ -281,12 +281,41 @@ test('the guard resets when a new request reuses the instance', async t => {
 
 	advance({id: 'call-2', function: {name: 'schema_tool', arguments: {path: 'b.txt'}}});
 	await sleep(50);
-	app.stdin.write('\r');
-	await waitUntil(() => record.confirmations.length > 1);
+	// Escape, not Enter: it is the path that was double-firing, so answering the
+	// reused instance through it proves the reset re-opens every answer route
+	// rather than just the one the first request happened to use.
+	app.stdin.write('\u001B');
+	await waitUntil(() => record.cancels.length > 0);
 
 	t.deepEqual(
 		record.confirmations,
-		[true, true],
+		[true],
+		'the first answer must not be repeated',
+	);
+	t.deepEqual(
+		record.cancels,
+		[1],
 		'the second request must be answerable in a reused instance',
 	);
+});
+
+test('a validator that throws reports the error without auto-cancelling', async t => {
+	// Only a formatter crash auto-cancels. A validation error has to leave the
+	// prompt standing so the user still answers it, which means the answer-once
+	// guard must not be spent on the way through.
+	const {lastFrame, record} = mountConfirmation(
+		t,
+		{
+			getToolValidator: (() => async () => {
+				throw new Error('validator exploded');
+			}) as unknown as ToolManager['getToolValidator'],
+		},
+		{path: 'a.txt'},
+	);
+
+	await waitUntil(() => /Validation error/.test(lastFrame() ?? ''));
+
+	t.regex(lastFrame() ?? '', /validator exploded/);
+	t.deepEqual(record.confirmations, [], 'a validation error must not answer');
+	t.deepEqual(record.cancels, [], 'a validation error must not auto-cancel');
 });
