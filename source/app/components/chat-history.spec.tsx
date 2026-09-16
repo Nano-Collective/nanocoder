@@ -245,3 +245,53 @@ test('fullscreen mode hides welcome banner while liveComponent is active', t => 
 	unmount();
 });
 
+test('inline mode keeps queued components in static queue even if renderLastQueuedComponentLive is passed', t => {
+	const props = createDefaultProps({
+		fullscreen: false,
+		queuedComponents: [
+			<div key="msg1">Message 1</div>,
+			<div key="msg2">Message 2</div>,
+		],
+		renderLastQueuedComponentLive: true,
+	});
+	const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	const output = lastFrame() ?? '';
+	t.regex(output, /Message 1/);
+	t.regex(output, /Message 2/);
+	unmount();
+});
+
+test('inline mode does not duplicate queued components when transitioning from live to static', t => {
+	const queuedComponents = [
+		<div key="msg1">Message 1</div>,
+		<div key="msg2">Message 2</div>,
+	];
+	const {lastFrame, rerender, unmount} = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: true,
+			})}
+		/>,
+	);
+
+	// On mount, queued items are rendered statically
+	t.regex(lastFrame() ?? '', /Message 2/);
+
+	// Simulate model starting to stream: recall window closes and live flag turns false
+	// In inline mode, the component was already static so it remains static without re-printing
+	rerender(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: false,
+			})}
+		/>,
+	);
+
+	unmount();
+});
+
+

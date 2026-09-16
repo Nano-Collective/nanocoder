@@ -222,7 +222,12 @@ export function InteractiveApp({
 		if (appState.messages[appState.messages.length - 1]?.role === 'user') {
 			appState.updateMessages(appState.messages.slice(0, -1));
 
-			if (appState.chatComponents.length > 0) {
+			// In fullscreen (alt-screen) mode, the prompt bubble lives in React
+			// state only — pop it so it disappears from the viewport.  In inline
+			// mode the bubble has already been committed to Ink's <Static>
+			// scrollback and cannot be un-printed, so popping the React element
+			// would just create a mismatch; leave it in place.
+			if (altScreenActive && appState.chatComponents.length > 0) {
 				appState.setChatComponents(appState.chatComponents.slice(0, -1));
 			}
 		}
@@ -240,6 +245,7 @@ export function InteractiveApp({
 		setSubmittedDraft(null);
 	}, [
 		appHandlers,
+		altScreenActive,
 		appState.messages,
 		appState.updateMessages,
 		appState.chatComponents,
@@ -305,7 +311,7 @@ export function InteractiveApp({
 					staticComponents={staticComponents}
 					queuedComponents={appState.chatComponents}
 					liveComponent={liveComponent}
-					renderLastQueuedComponentLive={recallableSubmittedDraft}
+					renderLastQueuedComponentLive={fullscreen && recallableSubmittedDraft}
 					clearKey={clearKey}
 					fullscreen={fullscreen}
 					scrollActive={
