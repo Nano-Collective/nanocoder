@@ -169,6 +169,34 @@ test('component Backspace (\x7f) with cursor at start does nothing', async t => 
 	unmount();
 });
 
+// --- Option/Alt+Backspace (\x1b\x7f) ---
+// On macOS/Linux, Option/Alt+Backspace sends ESC followed by DEL ('\x1b\x7f').
+// Ink parses it as `key.delete`, exactly like forward Delete ('\x1b[3~'), so
+// it must be routed to a backward delete via the raw sequence.
+
+test('component Alt+Backspace (\x1b\x7f) removes the char before the cursor', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="abcde" />,
+	);
+
+	// Move left once so the cursor sits between 'd' and 'e'; Alt+Backspace
+	// must remove 'd' (the char before the cursor), leaving "abce" — the same
+	// result as bare Backspace, NOT the forward-delete result "abcd".
+	await press(stdin, '\u001b[D'); // left
+	await press(stdin, '\u001b\x7f'); // Alt+Backspace
+
+	await waitForValue(valueRef, v => v === 'abce');
+	t.is(valueRef.current, 'abce');
+
+	// The cursor must still sit between 'c' and 'e': the next typed char
+	// inserts there instead of appending at the end.
+	await press(stdin, 'x');
+	await waitForValue(valueRef, v => v === 'abcxe');
+	t.is(valueRef.current, 'abcxe');
+	unmount();
+});
+
 // A forward Delete (\x1b[3~) must NOT be treated as a Backspace even when the
 // cursor is mid-line — this pins the raw-sequence disambiguation.
 test('component Delete (\x1b[3~) still forward-deletes, distinct from Backspace', async t => {
