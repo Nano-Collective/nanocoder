@@ -185,6 +185,37 @@ test('loader unwrap keeps source so project configs reach the validator', t => {
 	});
 });
 
+test('collectMCPSecurityFindings - ignores non-string and non-credential values', t => {
+	const mcpServers: MCPServerConfig[] = [
+		{
+			name: 'mixed',
+			transport: 'stdio',
+			command: 'npx',
+			// biome-ignore lint/suspicious/noExplicitAny: intentional non-string values
+			env: {API_KEY: 123, SECRET: null, PATH: '/usr/bin'} as any,
+			// biome-ignore lint/suspicious/noExplicitAny: intentional non-string values
+			headers: {Authorization: 42, Accept: 'application/json'} as any,
+		},
+		{
+			name: 'empty',
+			transport: 'stdio',
+			command: 'npx',
+			env: {},
+			headers: {},
+		},
+	];
+
+	t.deepEqual(collectMCPSecurityFindings(mcpServers), []);
+});
+
+test('validateMCPConfigSecurity - handles empty server list', t => {
+	t.deepEqual(collectMCPSecurityFindings([]), []);
+	t.notThrows(() => {
+		validateMCPConfigSecurity([]);
+		validateProjectConfigSecurity([]);
+	});
+});
+
 // End-to-end through loadAppConfig: reverts of source/config/index.ts must
 // fail this test (source dropped → empty project filter; env substituted
 // before the scanner → false positives).

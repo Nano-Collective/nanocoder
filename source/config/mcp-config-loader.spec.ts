@@ -18,11 +18,9 @@ test.beforeEach(t => {
 });
 
 test.afterEach(t => {
-    // Clean up the temporary directory
-    rmSync(t.context.testDir as string, {recursive: true, force: true});
-
-    // Restore original working directory
+    // Restore cwd first: Windows cannot rm the current working directory.
     process.chdir(t.context.originalCwd as string);
+    rmSync(t.context.testDir as string, {recursive: true, force: true});
 });
 
 test('loadProjectMCPConfig - loads object format from .mcp.json', t => {
@@ -713,6 +711,98 @@ test('hierarchical precedence - NANOCODER_PROVIDERS overrides all', t => {
             process.env.NODE_ENV = originalNodeEnv;
         } else {
             delete process.env.NODE_ENV;
+        }
+    }
+});
+
+test('loadEnvProviderConfigs - loads from NANOCODER_PROVIDERS_FILE', t => {
+    const testDir = t.context.testDir as string;
+    const originalFile = process.env.NANOCODER_PROVIDERS_FILE;
+    const originalRaw = process.env.NANOCODER_PROVIDERS;
+    delete process.env.NANOCODER_PROVIDERS;
+
+    try {
+        const providersFile = join(testDir, 'providers.json');
+        writeFileSync(
+            providersFile,
+            JSON.stringify([
+                {name: 'from-file', baseUrl: 'http://file', apiKey: 'k'},
+            ]),
+        );
+        process.env.NANOCODER_PROVIDERS_FILE = providersFile;
+
+        const allProviders = loadAllProviderConfigs();
+        t.true(allProviders.some(p => p.name === 'from-file'));
+    } finally {
+        if (originalFile !== undefined) {
+            process.env.NANOCODER_PROVIDERS_FILE = originalFile;
+        } else {
+            delete process.env.NANOCODER_PROVIDERS_FILE;
+        }
+        if (originalRaw !== undefined) {
+            process.env.NANOCODER_PROVIDERS = originalRaw;
+        } else {
+            delete process.env.NANOCODER_PROVIDERS;
+        }
+    }
+});
+
+test('loadEnvProviderConfigs - handles invalid JSON from environment', t => {
+    const originalRaw = process.env.NANOCODER_PROVIDERS;
+    const originalFile = process.env.NANOCODER_PROVIDERS_FILE;
+    delete process.env.NANOCODER_PROVIDERS_FILE;
+
+    try {
+        process.env.NANOCODER_PROVIDERS = '{not-valid-json';
+        t.deepEqual(loadAllProviderConfigs(), []);
+    } finally {
+        if (originalRaw !== undefined) {
+            process.env.NANOCODER_PROVIDERS = originalRaw;
+        } else {
+            delete process.env.NANOCODER_PROVIDERS;
+        }
+        if (originalFile !== undefined) {
+            process.env.NANOCODER_PROVIDERS_FILE = originalFile;
+        }
+    }
+});
+
+test('loadEnvMCPConfigs - keeps pre-substitution env in raw fields', t => {
+    const originalServers = process.env.NANOCODER_MCPSERVERS;
+    const originalFile = process.env.NANOCODER_MCPSERVERS_FILE;
+    const originalKey = process.env.MY_ENV_MCP_KEY;
+    delete process.env.NANOCODER_MCPSERVERS_FILE;
+    process.env.MY_ENV_MCP_KEY = 'resolved';
+
+    try {
+        process.env.NANOCODER_MCPSERVERS = JSON.stringify([
+            {
+                name: 'env-raw',
+                transport: 'stdio',
+                command: 'npx',
+                env: {API_KEY: '$MY_ENV_MCP_KEY'},
+            },
+        ]);
+
+        const result = loadAllMCPConfigs();
+        const server = result.find(s => s.server.name === 'env-raw');
+        t.truthy(server);
+        t.is(server?.source, 'env');
+        t.is(server?.server.env?.API_KEY, 'resolved');
+        t.is(server?.server.rawEnv?.API_KEY, '$MY_ENV_MCP_KEY');
+    } finally {
+        if (originalServers !== undefined) {
+            process.env.NANOCODER_MCPSERVERS = originalServers;
+        } else {
+            delete process.env.NANOCODER_MCPSERVERS;
+        }
+        if (originalFile !== undefined) {
+            process.env.NANOCODER_MCPSERVERS_FILE = originalFile;
+        }
+        if (originalKey !== undefined) {
+            process.env.MY_ENV_MCP_KEY = originalKey;
+        } else {
+            delete process.env.MY_ENV_MCP_KEY;
         }
     }
 });
