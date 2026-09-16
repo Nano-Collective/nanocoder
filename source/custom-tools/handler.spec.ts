@@ -22,20 +22,9 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
 
-// A real POSIX shell for the two new robustness cases. We can't just use
-// `bash` by name on Windows: it can resolve to the WSL launcher
-// (`System32\bash.exe`), which prints an error and exits instead of running
-// anything. Prefer a Git Bash binary; if none is installed the cases are
-// skipped, matching how this suite already gates the symlink cases.
-const WINDOWS_BASH_CANDIDATES = [
-	'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-	'C:\\Program Files\\Git\\bin\\bash.exe',
-];
-const testShell =
-	process.platform === 'win32'
-		? (WINDOWS_BASH_CANDIDATES.find(path => existsSync(path)) ?? null)
-		: '/bin/sh';
-const shellCase = testShell === null ? test.skip : test;
+// These cases exercise POSIX syntax and paths. They must not accidentally
+// select cmd.exe on Windows; the focused cmd.exe case below covers that path.
+const shellCase = process.platform === 'win32' ? test.skip : test;
 
 let testDir: string;
 let prevLcAll: string | undefined;
@@ -137,7 +126,8 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 		'console.log(JSON.stringify(process.argv.slice(2)));\n',
 	);
 	const handler = buildHandler(
-		meta({shell: 'cmd.exe'}),
+		// An omitted shell resolves to cmd.exe on Windows through pickShell.
+		meta({shell: undefined}),
 		'{{ node }} {{ probe }} {{ value }}',
 		testDir,
 	);
@@ -319,7 +309,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -352,7 +342,7 @@ shellCase(
 			runScript(script, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 500,
 			}).then(value => ({value}), (error: Error) => ({error})),
 			(async () => {
@@ -404,7 +394,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -441,7 +431,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -474,7 +464,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -502,7 +492,7 @@ shellCase(
 			runScript(`echo 'started before timeout' ; sleep 30`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 250,
 			}),
 			{message: /timed out/},
@@ -522,7 +512,7 @@ shellCase(
 			runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 100,
 			}),
 			{message: /timed out/},
@@ -547,7 +537,7 @@ shellCase(
 			runScript(`trap '' TERM; sleep 5 & wait`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 100,
 			}),
 			{message: /timed out/},
