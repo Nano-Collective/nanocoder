@@ -102,6 +102,9 @@ export interface ChatInputProps {
 	 */
 	fullscreen?: boolean;
 	isSaving?: boolean;
+	/** Follow-up command offered in the empty prompt after a turn. */
+	suggestedCommand?: string | null;
+	onDismissSuggestion?: () => void;
 }
 
 /**
@@ -157,6 +160,8 @@ export function ChatInput({
 	onDismissActiveEditor,
 	fullscreen = false,
 	isSaving,
+	suggestedCommand,
+	onDismissSuggestion,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -280,6 +285,8 @@ export function ChatInput({
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 					isSaving={isSaving}
+					suggestedCommand={suggestedCommand}
+					onDismissSuggestion={onDismissSuggestion}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

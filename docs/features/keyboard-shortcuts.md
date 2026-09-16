@@ -46,11 +46,14 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 
 | Action | Shortcut |
 |--------|----------|
-| Accept file/command suggestion | Tab |
+| Accept file/command suggestion, or insert the suggested next command in an empty prompt | Tab |
 | Navigate file suggestions | Up/Down |
 | Exit file autocomplete | Space |
+| Dismiss the suggested next command | Esc (empty prompt) |
 
 When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.
+
+After a turn that edits files, the empty prompt suggests a follow-up command: `/commit` when changes are already staged, otherwise `/checkpoint create`. Typing replaces the suggestion, Tab inserts it, and Esc dismisses it.
 
 ## Image Attachments
 
