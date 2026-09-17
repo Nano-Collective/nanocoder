@@ -39,6 +39,8 @@
 	--color-vscode-dropdown-fg: var(--vscode-dropdown-foreground);
 	--color-vscode-dropdown-border: var(--vscode-dropdown-border, transparent);
 	--color-vscode-dropdown-foreground: var(--vscode-dropdown-foreground);
+	
+	--color-vscode-textLink-foreground: var(--vscode-textLink-foreground);
 
 	--color-vscode-symbolIcon-fileForeground: var(
 		--vscode-symbolIcon-fileForeground
