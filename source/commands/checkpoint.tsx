@@ -6,8 +6,10 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
+import type {LLMClient} from '@/types/core';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {
@@ -17,6 +19,8 @@ import {
 	warningMsg,
 } from '@/utils/message-factory';
 import {addToMessageQueue} from '@/utils/message-queue';
+import {clearReadTracker} from '@/utils/read-tracker';
+import {clearExpandableToolResults} from '@/utils/tool-result-display';
 
 // Default checkpoint manager instance (lazy-initialized)
 let defaultCheckpointManager: CheckpointManager | null = null;
@@ -133,12 +137,48 @@ async function listCheckpoints(): Promise<React.ReactElement> {
 }
 
 /**
+ * Roll the transcript back to the checkpointed conversation and reset all
+ * per-conversation state that points into the discarded transcript.
+ *
+ * Mirrors `createClearMessagesHandler` (used by /clear): restoring is a clear
+ * followed by replaying the checkpointed messages, so it needs the same three
+ * clearers plus a client context reset. Without them `/expand` can resurrect
+ * cached tool results from the thrown-away transcript and the next prompt can
+ * be prepended with stale session-start hook output.
+ */
+export async function restoreCheckpointConversation(
+	restoredMessages: Message[],
+	options: {
+		setMessages?: (messages: Message[]) => void;
+		client?: LLMClient | null;
+	},
+): Promise<void> {
+	options.setMessages?.([...restoredMessages]);
+	// Drop read-before-edit history so a stale "seen" from the discarded
+	// conversation can't authorize a blind edit after the restore.
+	clearReadTracker();
+	// Expandable tool results point into the transcript being discarded.
+	clearExpandableToolResults();
+	// Undelivered session-start hook context belongs to the discarded
+	// conversation — don't graft it onto the restored one.
+	clearPendingHookContext();
+	if (options.client) {
+		await options.client.clearContext();
+	}
+}
+
+/**
  * Load checkpoint subcommand
  */
 async function loadCheckpoint(
 	args: string[],
 	messages: Message[],
-	metadata: {provider: string; model: string},
+	metadata: {
+		provider: string;
+		model: string;
+		setMessages?: (messages: Message[]) => void;
+		client?: LLMClient | null;
+	},
 ): Promise<React.ReactElement> {
 	try {
 		const manager = getDefaultCheckpointManager();
@@ -158,18 +198,24 @@ async function loadCheckpoint(
 
 			const gaps = await manager.restoreFiles(checkpointData);
 
+			await restoreCheckpointConversation(checkpointData.conversation.messages, {
+				setMessages: metadata.setMessages,
+				client: metadata.client,
+			});
+
 			return React.createElement(
 				React.Fragment,
 				{key: generateKey('load-success')},
 				React.createElement(SuccessMessage, {
 					key: 'success',
-					message: `✓ Checkpoint '${checkpointName}' files restored successfully`,
+					message: `✓ Checkpoint '${checkpointName}' restored successfully`,
 					hideBox: true,
 				}),
 				React.createElement(InfoMessage, {
 					key: 'details',
 					message: `Restored checkpoint:
   • ${checkpointData.fileSnapshots.size} file(s) restored to workspace
+  • ${checkpointData.conversation.messages.length} message(s) restored to conversation
   • Provider: ${checkpointData.metadata.provider.name} (${
 		checkpointData.metadata.provider.model
 	})
@@ -239,6 +285,14 @@ async function loadCheckpoint(
 						});
 
 						const gaps = await manager.restoreFiles(checkpointData);
+
+						await restoreCheckpointConversation(
+							checkpointData.conversation.messages,
+							{
+								setMessages: metadata.setMessages,
+								client: metadata.client,
+							},
+						);
 
 						addToMessageQueue(
 							successMsg(
