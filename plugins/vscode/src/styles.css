@@ -11,6 +11,10 @@
 @theme {
 	--color-vscode-bg: var(--vscode-editor-background);
 	--color-vscode-fg: var(--vscode-editor-foreground);
+	/* Aliases used directly by chat-panel.html / chat-panel.js */
+	--color-vscode-editor-background: var(--vscode-editor-background);
+	--color-vscode-foreground: var(--vscode-foreground);
+	--color-vscode-descriptionForeground: var(--vscode-descriptionForeground);
 	--color-vscode-description-foreground: var(--vscode-descriptionForeground);
 
 	--color-vscode-input-bg: var(--vscode-input-background);

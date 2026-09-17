@@ -91,13 +91,13 @@
 					<div id="add-provider-form-container" class="settings-section hidden border border-vscode-focusBorder rounded-md p-3 mb-4 bg-vscode-editor-background shadow-md">
 						<div class="text-vscode-foreground font-semibold mb-3 flex items-center justify-between">
 							<span>Configure New Provider</span>
-							<button id="close-add-provider-btn" class="text-vscode-description-foreground hover:text-vscode-foreground bg-transparent border-none cursor-pointer">
+							<button id="close-add-provider-btn" class="text-vscode-descriptionForeground hover:text-vscode-foreground bg-transparent border-none cursor-pointer">
 								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
 							</button>
 						</div>
 						<div class="flex flex-col gap-3">
 							<div class="flex flex-col gap-1">
-								<label class="text-[0.85em] text-vscode-description-foreground">Provider Name</label>
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Provider Name</label>
 								<select id="add-provider-preset-select" class="settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]">
 									<option value="ollama">Ollama</option>
 									<option value="llama-cpp">llama.cpp server</option>
@@ -128,7 +128,7 @@
 							</div>
 
 							<div id="add-provider-sdk-group" class="hidden flex-col gap-1">
-								<label class="text-[0.85em] text-vscode-description-foreground">SDK</label>
+								<label class="text-[0.85em] text-vscode-descriptionForeground">SDK</label>
 								<select id="add-provider-sdk" class="settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]">
 									<option value="openai-compatible">OpenAI (or Compatible)</option>
 									<option value="anthropic">Anthropic</option>
@@ -139,17 +139,17 @@
 							</div>
 							
 							<div id="add-provider-url-group" class="hidden flex-col gap-1">
-								<label class="text-[0.85em] text-vscode-description-foreground">Base URL</label>
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Base URL</label>
 								<input type="text" id="add-provider-baseurl" placeholder="https://api.example.com/v1" class="settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]" />
 							</div>
 							
 							<div id="add-provider-apikey-group" class="flex flex-col gap-1">
-								<label class="text-[0.85em] text-vscode-description-foreground">API Key</label>
+								<label class="text-[0.85em] text-vscode-descriptionForeground">API Key</label>
 								<input type="password" id="add-provider-apikey" placeholder="Enter API Key" class="settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]" />
 							</div>
 							
 							<div class="flex flex-col gap-1">
-								<label class="text-[0.85em] text-vscode-description-foreground">Models</label>
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Models</label>
 								<div id="add-provider-models-container" class="flex flex-col gap-2">
 									<!-- Model rows will be dynamically populated here -->
 								</div>
@@ -168,7 +168,7 @@
 
 					<!-- Big button at the bottom of the Providers list -->
 					<div class="settings-section pt-2 pb-4">
-						<button id="toggle-add-provider-btn" class="w-full py-2.5 px-4 bg-transparent border border-dashed border-vscode-focusBorder text-vscode-description-foreground hover:text-vscode-foreground hover:border-vscode-foreground rounded-md cursor-pointer flex items-center justify-center gap-2 transition-colors text-sm">
+						<button id="toggle-add-provider-btn" class="w-full py-2.5 px-4 bg-transparent border border-dashed border-vscode-focusBorder text-vscode-descriptionForeground hover:text-vscode-foreground hover:border-vscode-foreground rounded-md cursor-pointer flex items-center justify-center gap-2 transition-colors text-sm">
 							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 							Add New Provider
 						</button>
