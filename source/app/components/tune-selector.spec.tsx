@@ -280,3 +280,63 @@ test('Include AGENTS.md respects explicit override (false beats nano default-on)
 	const output = lastFrame()!;
 	t.regex(output, /Include AGENTS\.md.*OFF/);
 });
+
+// ============================================================================
+// Reasoning Effort (enum parameter)
+// ============================================================================
+
+// Arrow down x6 from the top of the main menu lands on "Model Parameters",
+// then Return opens the parameters panel.
+const DOWN = '\u001B[B';
+const RETURN = '\r';
+const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+async function openParametersPanel(
+	stdin: {write: (s: string) => void},
+): Promise<void> {
+	for (let i = 0; i < 6; i++) {
+		stdin.write(DOWN);
+		await tick();
+	}
+	stdin.write(RETURN);
+	await new Promise(resolve => setTimeout(resolve, 50));
+}
+
+test('parameters panel exposes Reasoning Effort as default', async t => {
+	const {stdin, lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	await openParametersPanel(stdin);
+	const output = lastFrame()!;
+	t.regex(output, /Reasoning Effort.*default/);
+});
+
+test('parameters panel shows the configured reasoning effort value', async t => {
+	const config: TuneConfig = {
+		...ENABLED_CONFIG,
+		modelParameters: {reasoningEffort: 'high'},
+	};
+	const {stdin, lastFrame} = renderTuneSelector(config);
+	await openParametersPanel(stdin);
+	const output = lastFrame()!;
+	t.regex(output, /Reasoning Effort.*high/);
+});
+
+test('Reasoning Effort cycles minimal → low → medium → high → unset', async t => {
+	const {stdin, lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	await openParametersPanel(stdin);
+
+	for (let i = 0; i < 6; i++) {
+		stdin.write(DOWN);
+		await tick();
+	}
+
+	for (const expected of ['minimal', 'low', 'medium', 'high']) {
+		stdin.write(RETURN);
+		await tick();
+		t.regex(lastFrame()!, new RegExp(`Reasoning Effort - ${expected}`));
+	}
+
+	// Cycling past the end clears the value, so nothing is sent downstream.
+	stdin.write(RETURN);
+	await tick();
+	t.regex(lastFrame()!, /Reasoning Effort - default/);
+});

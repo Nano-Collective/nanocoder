@@ -570,7 +570,7 @@ export interface ModelParameters {
 	// Reasoning controls. Applied as follows:
 	//   chatgpt-codex (OpenAI Responses API): mapped to providerOptions.openai.
 	//   openrouter: mapped to reasoning.effort in providerOptions.openrouter.
-	//   Other providers ignore this field.
+	//   openai-compatible: forwarded as reasoning_effort for the active provider.
 	reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
 	reasoningSummary?: 'auto' | 'concise' | 'detailed';
 }

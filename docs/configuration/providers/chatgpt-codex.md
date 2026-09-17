@@ -31,25 +31,33 @@ The `sdkProvider: "chatgpt-codex"` field enables the ChatGPT/Codex authenticatio
 
 GPT-5 and other reasoning models return chain-of-thought only when the Responses API is asked to emit it. Nanocoder sets `reasoningSummary: "auto"` and `reasoningEffort: "medium"` by default for this provider so reasoning shows up in the `⚙ Thinking` block out of the box. Toggle visibility with **Ctrl+R** or set `reasoningExpanded: true` in your preferences.
 
-Override either setting via `tune.modelParameters` in `agents.config.json`:
+Override either setting via the top-level `tune` block in `agents.config.json`. Note that `tune` belongs under `nanocoder`, not inside the provider entry:
 
 ```json
 {
-	"name": "ChatGPT",
-	"sdkProvider": "chatgpt-codex",
-	"tune": {
-		"modelParameters": {
-			"reasoningEffort": "high",
-			"reasoningSummary": "detailed"
+	"nanocoder": {
+		"providers": [
+			{
+				"name": "ChatGPT",
+				"sdkProvider": "chatgpt-codex",
+				"baseUrl": "https://chatgpt.com/backend-api/codex",
+				"models": ["your-model-name"]
+			}
+		],
+		"tune": {
+			"modelParameters": {
+				"reasoningEffort": "high",
+				"reasoningSummary": "detailed"
+			}
 		}
-	},
-	"config": { "baseURL": "https://chatgpt.com/backend-api/codex" },
-	"models": ["your-model-name"]
+	}
 }
 ```
 
-- `reasoningEffort`: `"minimal" | "low" | "medium" | "high"` — higher values let the model think longer.
+- `reasoningEffort`: `"minimal" | "low" | "medium" | "high"` — higher values let the model think longer. Also settable from the `/tune` modal.
 - `reasoningSummary`: `"auto" | "concise" | "detailed"` — controls how much reasoning text is returned.
+
+`tune` is global — it applies to whichever provider is active, not just this one. A `tune` block placed inside a provider entry is ignored. See [Configuration Layers](../features/tune.md#configuration-layers) for how the layers resolve.
 
 ## Notes
 
