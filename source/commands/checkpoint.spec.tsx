@@ -2,7 +2,19 @@ import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import React from 'react';
-import {checkpointCommand} from './checkpoint';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+	addPendingHookContext,
+	clearPendingHookContext,
+	drainPendingHookContext,
+} from '@/services/lifecycle-hooks';
+import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	clearExpandableToolResults,
+	getExpandableToolResults,
+	recordExpandableToolResult,
+} from '@/utils/tool-result-display';
+import {checkpointCommand, restoreCheckpointConversation} from './checkpoint';
 
 // Helper to create mock messages
 function createMockMessages(count: number): Message[] {
@@ -274,4 +286,100 @@ test('checkpointCommand help includes examples', async t => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('Example'));
+});
+
+// Restore-conversation tests (issue #1242: load must roll back the transcript,
+// not just workspace files). These append to the suite above; they do not
+// replace the existing subcommand coverage.
+test('restoreCheckpointConversation restores messages and resets per-conversation state', async t => {
+	clearPendingHookContext();
+	clearExpandableToolResults();
+	const restored: Message[] = [
+		{role: 'user', content: 'hello'},
+		{role: 'assistant', content: 'hi'},
+	];
+	let seen: Message[] | null = null;
+	let contextCleared = false;
+
+	markFileSeen('/tmp/checkpoint-restore-seen.txt');
+	recordExpandableToolResult(
+		{toolCallId: 'c1', name: 'read_file', arguments: {}},
+		{toolCallId: 'c1', name: 'read_file', content: 'x', isError: false},
+	);
+	addPendingHookContext('stale session-start output');
+
+	await restoreCheckpointConversation(restored, {
+		setMessages: messages => {
+			seen = messages;
+		},
+		client: {clearContext: async () => {
+			contextCleared = true;
+		}} as never,
+	});
+
+	t.deepEqual(seen, restored);
+	t.false(hasSeenFile('/tmp/checkpoint-restore-seen.txt'));
+	t.is(getExpandableToolResults().length, 0);
+	t.is(drainPendingHookContext(), '');
+	t.true(contextCleared);
+});
+
+test('restoreCheckpointConversation works without setMessages or client', async t => {
+	const restored: Message[] = [{role: 'user', content: 'solo'}];
+	// Should not throw when both optionals are absent.
+	await restoreCheckpointConversation(restored, {});
+	t.pass();
+});
+
+test('checkpointCommand load restores transcript via setMessages (wired flow)', async t => {
+	const checkpointed: Message[] = [
+		{role: 'user', content: 'checkpointed question'},
+		{role: 'assistant', content: 'checkpointed answer'},
+	];
+	const current: Message[] = [
+		...checkpointed,
+		{role: 'user', content: 'later drift'},
+	];
+	let seen: Message[] | null = null;
+	let contextCleared = false;
+
+	const origExists = CheckpointManager.prototype.checkpointExists;
+	const origLoad = CheckpointManager.prototype.loadCheckpoint;
+	const origRestore = CheckpointManager.prototype.restoreFiles;
+	CheckpointManager.prototype.checkpointExists = () => true;
+	CheckpointManager.prototype.loadCheckpoint = async () =>
+		({
+			metadata: {
+				name: 'wired-cp',
+				timestamp: new Date().toISOString(),
+				messageCount: checkpointed.length,
+				filesChanged: [],
+				provider: {name: 'TestProvider', model: 'test-model'},
+				description: 'test',
+			},
+			conversation: {messages: checkpointed},
+			fileSnapshots: new Map(),
+		}) as never;
+	CheckpointManager.prototype.restoreFiles = async () => [];
+
+	try {
+		const result = await checkpointCommand.handler(['load', 'wired-cp'], current, {
+			...mockMetadata,
+			tokens: 0,
+			getMessageTokens: () => 0,
+			setMessages: messages => {
+				seen = messages;
+			},
+			client: {clearContext: async () => {
+				contextCleared = true;
+			}} as never,
+		});
+		t.true(React.isValidElement(result));
+		t.deepEqual(seen, checkpointed);
+		t.true(contextCleared);
+	} finally {
+		CheckpointManager.prototype.checkpointExists = origExists;
+		CheckpointManager.prototype.loadCheckpoint = origLoad;
+		CheckpointManager.prototype.restoreFiles = origRestore;
+	}
 });
