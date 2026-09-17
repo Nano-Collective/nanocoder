@@ -1798,9 +1798,6 @@
 	}
 
 	function appendMessage(content, role, images = undefined) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
@@ -1988,10 +1985,6 @@
 	}
 
 	function appendChunk(textChunk) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
-
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
 			const wrapper = document.createElement('div');
@@ -3673,6 +3666,21 @@
 		}
 	}
 
+	// Setup welcome container visibility observer
+	const welcomeContainer = document.getElementById('welcome-container');
+	if (welcomeContainer && messagesContainer) {
+		const updateWelcomeVisibility = () => {
+			if (messagesContainer.children.length === 0) {
+				welcomeContainer.classList.remove('hidden');
+			} else {
+				welcomeContainer.classList.add('hidden');
+			}
+		};
+		
+		const observer = new MutationObserver(updateWelcomeVisibility);
+		observer.observe(messagesContainer, { childList: true });
+		updateWelcomeVisibility(); // Initial check
+	}
 
 	// Notify extension that webview is ready
 	vscode.postMessage({ type: 'ready' });

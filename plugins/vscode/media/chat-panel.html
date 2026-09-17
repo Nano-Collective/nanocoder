@@ -24,6 +24,20 @@
 				<div id="timeline-hint" class="mt-1 h-[1.2em] text-[0.7em] opacity-60 truncate" aria-live="polite"></div>
 				<div id="timeline-confirm" class="hidden mt-2 p-2 rounded-md border border-vscode-widget-border bg-vscode-widget-bg text-[0.8em] font-vscode"></div>
 			</div>
+			
+			<div id="welcome-container" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none z-10 transition-opacity duration-300">
+				<div class="mb-6 w-16 h-16 text-vscode-textLink-foreground opacity-90 flex items-center justify-center">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-full h-full">
+						<path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" />
+						<path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" />
+					</svg>
+				</div>
+				<h2 class="text-xl font-bold mb-3 tracking-wide">Welcome to Nanocoder</h2>
+				<p class="text-[0.85em] opacity-70 max-w-[280px] font-vscode leading-relaxed">
+					An open coding agent for your editor, built by a community collective.
+				</p>
+			</div>
+
 			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
 			</div>
