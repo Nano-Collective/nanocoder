@@ -1,6 +1,15 @@
 import {spawn} from 'node:child_process';
 import type {Dirent} from 'node:fs';
-import {lstat, readdir, readFile} from 'node:fs/promises';
+import {existsSync, readFileSync} from 'node:fs';
+import {
+	lstat,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
 import ignore from 'ignore';
 import {LRUCache} from 'lru-cache';
@@ -238,21 +247,133 @@ function defaultIgnoreGlobs(
 	return globs;
 }
 
+function gitignoreRuleHasSlash(pattern: string): boolean {
+	return pattern.startsWith('/') || pattern.replace(/\/$/, '').includes('/');
+}
+
 /**
- * Hands .nanocoderignore to rg so it prunes during traversal.
+ * Re-expresses one cwd-relative gitignore rule against a deeper search root so
+ * it can be handed to rg in an `--ignore-file`, whose rules rg applies relative
+ * to the search root.
  *
- * The JS-side `projectIgnore.ignores()` filter downstream would drop these
- * paths anyway, but only after rg had walked them and after they had already
- * spent budget against `maxRawFilesScanned` - a large ignored fixtures
- * directory could crowd real files out of the results entirely.
- *
- * rg applies `--ignore-file` rules after .gitignore and after `.ignore`, which
- * is the layering {@link loadGitignore} documents. Omitted when the file does
- * not exist: rg warns on a missing path, and every search would carry it.
+ * Unanchored rules (`foo`, `foo/`, `*.log`) match at any depth and carry over
+ * unchanged. Rules anchored at cwd - a leading `/` or any `/` in the body -
+ * resolve against cwd and are re-expressed relative to `searchRoot`, so
+ * `cwd/src/generated/` becomes `/generated/` when searching `cwd/src`. Rules
+ * that resolve outside the search root are dropped: nothing inside it can match
+ * them. Returns undefined for blank and comment lines.
  */
-function nanocoderIgnoreFileArgs(cwd: string): string[] {
-	const ignoreFile = findNanocoderIgnoreFile(cwd);
-	return ignoreFile ? ['--ignore-file', ignoreFile] : [];
+function rebaseIgnoreLine(
+	line: string,
+	cwd: string,
+	searchRoot: string,
+): string | undefined {
+	const trimmed = line.trimEnd();
+	if (!trimmed || trimmed.startsWith('#')) {
+		return undefined;
+	}
+
+	const negated = trimmed.startsWith('!');
+	const pattern = negated ? trimmed.slice(1) : trimmed;
+	if (!pattern || pattern === '/') {
+		return undefined;
+	}
+
+	// Unanchored rules match a path segment at any depth, so they stay valid
+	// unchanged under any search root.
+	if (!gitignoreRuleHasSlash(pattern)) {
+		return trimmed;
+	}
+
+	const dirOnly = pattern.endsWith('/');
+	const body = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
+	const relative = normalizePathForMatch(
+		path.relative(searchRoot, path.resolve(cwd, body)),
+	);
+	if (!relative || relative === '..' || relative.startsWith('../')) {
+		return undefined;
+	}
+	return `${negated ? '!' : ''}/${relative}${dirOnly ? '/' : ''}`;
+}
+
+/**
+ * The project's ignore rules, re-expressed against `searchRoot`.
+ *
+ * Mirrors {@link loadGitignore}'s layering exactly - defaults, then .gitignore,
+ * then .nanocoderignore - so a later `!` re-include can still override an
+ * earlier rule once rg parses the merged file.
+ */
+function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
+	const lines = [...DEFAULT_IGNORE_DIRS];
+	const ignoreFiles = [
+		path.join(cwd, '.gitignore'),
+		findNanocoderIgnoreFile(cwd),
+	];
+
+	for (const ignoreFile of ignoreFiles) {
+		if (ignoreFile === undefined) {
+			continue;
+		}
+
+		let content: string;
+		try {
+			content = readFileSync(ignoreFile, 'utf-8');
+		} catch {
+			continue;
+		}
+
+		for (const line of content.split(/\r?\n/)) {
+			if (searchRoot === cwd) {
+				lines.push(line);
+				continue;
+			}
+			const rebased = rebaseIgnoreLine(line, cwd, searchRoot);
+			if (rebased !== undefined) {
+				lines.push(rebased);
+			}
+		}
+	}
+
+	return lines;
+}
+
+/**
+ * Runs `run` with the project's ignore rules handed to rg as an `--ignore-file`,
+ * so rg prunes ignored paths during traversal instead of streaming matches that
+ * the JS-side filter will drop (#1341).
+ *
+ * rg applies `--ignore-file` rules relative to the search root, so an unanchored
+ * `dist/` still prunes a nested `src/dist/`; anchored cwd rules are re-based by
+ * {@link rebaseIgnoreLine}.
+ *
+ * Projects without a .gitignore or .nanocoderignore are skipped: their only
+ * rules are the DEFAULT_IGNORE_DIRS, which `defaultIgnoreGlobs` already prunes
+ * during traversal, so a temp file would add nothing.
+ */
+async function withProjectIgnoreFile<T>(
+	cwd: string,
+	searchRoot: string,
+	run: (ignoreArgs: string[]) => Promise<T>,
+): Promise<T> {
+	if (
+		!existsSync(path.join(cwd, '.gitignore')) &&
+		findNanocoderIgnoreFile(cwd) === undefined
+	) {
+		return run([]);
+	}
+
+	const tempDir = await mkdtemp(path.join(tmpdir(), 'nanocoder-ignore-'));
+	try {
+		const ignoreFile = path.join(tempDir, 'ignore');
+		await writeFile(
+			ignoreFile,
+			`${projectIgnoreLines(cwd, searchRoot).join('\n')}\n`,
+			'utf-8',
+		);
+		return await run(['--ignore-file', normalizePathForMatch(ignoreFile)]);
+	} finally {
+		await rm(tempDir, {recursive: true, force: true});
+	}
 }
 
 async function assertPathExists(candidatePath: string): Promise<void> {
@@ -280,7 +401,6 @@ async function runRipgrep(
 	cwd: string,
 	timeoutMs: number,
 	signal?: AbortSignal,
-	maxMatches?: number,
 	maxLines?: number,
 	onLine?: (line: string) => boolean,
 ): Promise<RunRipgrepResult> {
@@ -294,7 +414,6 @@ async function runRipgrep(
 		let killedForLimit = false;
 		let hitMaxLines = false;
 		let timedOut = false;
-		let matchCount = 0;
 		let lineCount = 0;
 
 		const timer = setTimeout(() => {
@@ -324,11 +443,7 @@ async function runRipgrep(
 				return;
 			}
 
-			if (
-				maxMatches === undefined &&
-				maxLines === undefined &&
-				onLine === undefined
-			) {
+			if (maxLines === undefined && onLine === undefined) {
 				stdout += chunk;
 				return;
 			}
@@ -347,31 +462,14 @@ async function runRipgrep(
 					return;
 				}
 
-				if (line) {
-					if (maxLines !== undefined) {
-						lineCount++;
-					} else {
-						// rg's --max-count overshoots with --context, so count matches ourselves.
-						try {
-							if ((JSON.parse(line) as {type?: string}).type === 'match') {
-								matchCount++;
-							}
-						} catch {
-							// no-op
-						}
+				if (line && maxLines !== undefined) {
+					lineCount++;
+					if (lineCount >= maxLines) {
+						killedForLimit = true;
+						hitMaxLines = true;
+						child.kill();
+						return;
 					}
-				}
-
-				if (maxLines !== undefined && lineCount >= maxLines) {
-					killedForLimit = true;
-					hitMaxLines = true;
-					child.kill();
-					return;
-				}
-				if (maxMatches !== undefined && matchCount >= maxMatches) {
-					killedForLimit = true;
-					child.kill();
-					return;
 				}
 
 				newlineIndex = lineRemainder.indexOf('\n');
@@ -676,7 +774,6 @@ async function walkUnsortedFileStream(
 		cwd,
 		DEFAULT_SEARCH_TIMEOUT_MS,
 		signal,
-		undefined,
 		maxRawFilesScanned,
 		onLine,
 	);
@@ -735,102 +832,105 @@ export async function walkProjectEntries(
 	const rootPath = startPath ?? cwd;
 	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
-	const args = [
-		'--files',
-		'--hidden',
-		// No --follow (symlinks could escape cwd); --no-require-git works without a repo.
-		'--no-ignore-parent',
-		'--no-require-git',
-		'--no-config',
-		...(sorted ? ['--sort', 'path'] : []),
-		...nanocoderIgnoreFileArgs(cwd),
-		...defaultIgnoreGlobs(projectIgnore),
-		'--',
-		rootPath,
-	];
 
-	if (!sorted) {
-		return walkUnsortedFileStream(
-			cwd,
+	return withProjectIgnoreFile(cwd, rootPath, async ignoreArgs => {
+		const args = [
+			'--files',
+			'--hidden',
+			// No --follow (symlinks could escape cwd); --no-require-git works without a repo.
+			'--no-ignore-parent',
+			'--no-require-git',
+			'--no-config',
+			...(sorted ? ['--sort', 'path'] : []),
+			...ignoreArgs,
+			...defaultIgnoreGlobs(projectIgnore),
+			'--',
 			rootPath,
+		];
+
+		if (!sorted) {
+			return walkUnsortedFileStream(
+				cwd,
+				rootPath,
+				args,
+				onEntry,
+				includeDirectories,
+				projectIgnore,
+				signal,
+				maxRawFilesScanned,
+			);
+		}
+
+		const {stdout, hitMaxLines} = await runRipgrep(
 			args,
-			onEntry,
-			includeDirectories,
-			projectIgnore,
+			cwd,
+			DEFAULT_SEARCH_TIMEOUT_MS,
 			signal,
 			maxRawFilesScanned,
 		);
-	}
+		const files = stdout
+			.split(/\r?\n/)
+			.filter(Boolean)
+			.map(normalizePathForMatch);
 
-	const {stdout, hitMaxLines} = await runRipgrep(
-		args,
-		cwd,
-		DEFAULT_SEARCH_TIMEOUT_MS,
-		signal,
-		undefined,
-		maxRawFilesScanned,
-	);
-	const files = stdout
-		.split(/\r?\n/)
-		.filter(Boolean)
-		.map(normalizePathForMatch);
+		const seenDirs = new Set<string>();
+		for (const file of files) {
+			if (signal?.aborted) {
+				throw signal.reason ?? new Error('Walk aborted');
+			}
 
-	const seenDirs = new Set<string>();
-	for (const file of files) {
-		if (signal?.aborted) {
-			throw signal.reason ?? new Error('Walk aborted');
-		}
+			const relativeFile = normalizePathForMatch(path.relative(cwd, file));
+			if (projectIgnore.ignores(relativeFile)) {
+				continue;
+			}
 
-		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
-		if (projectIgnore.ignores(relativeFile)) {
-			continue;
-		}
+			if (includeDirectories) {
+				const parts = relativeFile.split('/');
 
-		if (includeDirectories) {
-			const parts = relativeFile.split('/');
-
-			let dirRelative = '';
-			for (let index = 0; index < parts.length - 1; index++) {
-				dirRelative = index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
-				if (seenDirs.has(dirRelative)) {
-					continue;
+				let dirRelative = '';
+				for (let index = 0; index < parts.length - 1; index++) {
+					dirRelative =
+						index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
+					if (seenDirs.has(dirRelative)) {
+						continue;
+					}
+					seenDirs.add(dirRelative);
+					const stop = await onEntry({
+						absolutePath: path.join(cwd, dirRelative),
+						relativePath: dirRelative,
+						isDirectory: true,
+					});
+					if (stop) {
+						return {truncated: hitMaxLines};
+					}
 				}
-				seenDirs.add(dirRelative);
-				const stop = await onEntry({
-					absolutePath: path.join(cwd, dirRelative),
-					relativePath: dirRelative,
-					isDirectory: true,
-				});
-				if (stop) {
-					return {truncated: hitMaxLines};
-				}
+			}
+
+			const stop = await onEntry({
+				absolutePath: path.join(cwd, relativeFile),
+				relativePath: relativeFile,
+				isDirectory: false,
+			});
+			if (stop) {
+				return {truncated: hitMaxLines};
 			}
 		}
 
-		const stop = await onEntry({
-			absolutePath: path.join(cwd, relativeFile),
-			relativePath: relativeFile,
-			isDirectory: false,
-		});
-		if (stop) {
-			return {truncated: hitMaxLines};
+		let hitDirCap = false;
+		if (includeDirectories && !hitMaxLines) {
+			({truncated: hitDirCap} = await walkEmptyDirectories(
+				cwd,
+				rootPath,
+				seenDirs,
+				onEntry,
+				projectIgnore,
+				signal,
+				maxRawFilesScanned,
+			));
 		}
-	}
 
-	let hitDirCap = false;
-	if (includeDirectories && !hitMaxLines) {
-		({truncated: hitDirCap} = await walkEmptyDirectories(
-			cwd,
-			rootPath,
-			seenDirs,
-			onEntry,
-			projectIgnore,
-			signal,
-			maxRawFilesScanned,
-		));
-	}
-
-	return {truncated: hitMaxLines || hitDirCap};
+		return {truncated: hitMaxLines || hitDirCap};
+	});
 }
 
 export async function findMatchingPaths(
@@ -1052,7 +1152,8 @@ export async function searchProjectContents(
 	if (!query.trim()) {
 		throw new Error('Search query cannot be empty');
 	}
-	await assertPathExists(searchPath ?? cwd);
+	const searchRoot = searchPath ?? cwd;
+	await assertPathExists(searchRoot);
 
 	const projectIgnore = loadGitignore(cwd);
 
@@ -1077,21 +1178,52 @@ export async function searchProjectContents(
 	if (include) {
 		args.push('-g', include);
 	}
-	args.push(
-		...nanocoderIgnoreFileArgs(cwd),
-		...defaultIgnoreGlobs(projectIgnore),
-		...binaryExcludeGlobs(),
-	);
 	const normalizedContextLines = Math.max(0, contextLines ?? 0);
-	if (normalizedContextLines > 0) {
-		args.push('--context', String(normalizedContextLines));
-	}
-	args.push('--regexp', query, '--', searchPath ?? cwd);
 
-	// No --max-count (overshoots with --context) - headroom of contextLines covers each match's own trailing context.
+	// No --max-count (overshoots with --context) - headroom of contextLines covers each kept match's own trailing context.
 	const rgMaxCount = Math.max(0, maxResults) + normalizedContextLines;
+	let keptMatchCount = 0;
 
-	const {stdout} = await runRipgrep(args, cwd, timeoutMs, signal, rgMaxCount);
+	// Only matches that survive the downstream projectIgnore filter may spend the
+	// kill budget. Counting raw matches let a gitignored directory walked first
+	// kill rg before any real match streamed in - the matches were then dropped
+	// downstream, so the search reported "no matches" despite real ones (#1341).
+	const onLine = (line: string): boolean => {
+		let parsed: RgJsonMatch;
+		try {
+			parsed = JSON.parse(line) as RgJsonMatch;
+		} catch {
+			return false;
+		}
+		const file = parsed.data.path?.text;
+		if (parsed.type !== 'match' || file === undefined) {
+			return false;
+		}
+		if (projectIgnore.ignores(toRelativeFile(cwd, file))) {
+			return false;
+		}
+		keptMatchCount++;
+		return keptMatchCount >= rgMaxCount;
+	};
+
+	const {stdout} = await withProjectIgnoreFile(
+		cwd,
+		searchRoot,
+		async ignoreArgs => {
+			const searchArgs = [
+				...args,
+				...ignoreArgs,
+				...defaultIgnoreGlobs(projectIgnore),
+				...binaryExcludeGlobs(),
+			];
+			if (normalizedContextLines > 0) {
+				searchArgs.push('--context', String(normalizedContextLines));
+			}
+			searchArgs.push('--regexp', query, '--', searchRoot);
+
+			return runRipgrep(searchArgs, cwd, timeoutMs, signal, undefined, onLine);
+		},
+	);
 	const rgLines = parseRgJsonLines(stdout).filter(
 		line => !projectIgnore.ignores(toRelativeFile(cwd, line.file)),
 	);
