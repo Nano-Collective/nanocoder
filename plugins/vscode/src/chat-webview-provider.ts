@@ -304,7 +304,7 @@ export class ChatWebviewProvider
 		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
 		webviewView.webview.onDidReceiveMessage(
-			(message: WebviewToExtensionMessage) => {
+			async (message: WebviewToExtensionMessage) => {
 				switch (message.type) {
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
@@ -314,6 +314,11 @@ export class ChatWebviewProvider
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
+						this._handlePrompt(message.text, message.images);
+						break;
+					case 'retryMessage':
+						this._outputChannel.appendLine(`[Webview] User retried message: ${message.text}`);
+						await this._acpClient.retryTurn(message.text);
 						this._handlePrompt(message.text, message.images);
 						break;
 					case 'cancel':

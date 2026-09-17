@@ -709,6 +709,51 @@ export class AcpAgent implements Agent {
 			};
 		}
 
+		if (method === 'retryTurn') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('retryTurn requires string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error('Cannot retry turn while a prompt is in progress');
+			}
+			const promptText =
+				typeof params.promptText === 'string'
+					? params.promptText.trim()
+					: undefined;
+			let targetUserIdx = -1;
+			if (promptText) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					const m = session.messages[i];
+					if (m.role !== 'user') continue;
+					const contentStr =
+						typeof m.content === 'string' ? m.content.trim() : '';
+					if (contentStr === promptText) {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx < 0) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					if (session.messages[i].role === 'user') {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx >= 0) {
+				session.messages = session.messages.slice(0, targetUserIdx);
+				await this.saveAcpSessionToDisk(session);
+				await session.timeline.truncateAfter(targetUserIdx);
+			}
+			logger.info(
+				`ACP extMethod retryTurn: session=${sessionId} truncatedTo=${session.messages.length}`,
+			);
+			return {ok: true, messagesCount: session.messages.length};
+		}
+
 		throw new Error(`Unknown extension method: ${method}`);
 	}
 
@@ -966,6 +1011,22 @@ export class AcpAgent implements Agent {
 			);
 
 			if (saveableMessages.length === 0) {
+				if (existingSession) {
+					await sessionManager.saveSession({
+						id: session.sessionId,
+						title: existingSession.title || 'New Session',
+						titleManuallySet: existingSession.titleManuallySet,
+						titleGenerated: existingSession.titleGenerated,
+						createdAt: existingSession.createdAt || timestamp,
+						lastAccessedAt: timestamp,
+						messageCount: 0,
+						provider:
+							this.initContext.client.getProviderConfig().name || 'openai',
+						model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+						workingDirectory: session.cwd,
+						messages: [],
+					});
+				}
 				return;
 			}
 

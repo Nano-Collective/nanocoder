@@ -690,22 +690,12 @@
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
-		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`,
+		refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`
 	};
 
-	function formatRelativeTime(iso) {
-		if (!iso) return '';
-		const date = new Date(iso);
-		if (isNaN(date.getTime())) return '';
-		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
-		if (diffMin < 1) return 'Just now';
-		if (diffMin < 60) return `${diffMin}m ago`;
-		const diffHr = Math.floor(diffMin / 60);
-		if (diffHr < 24) return `${diffHr}h ago`;
-		const diffDay = Math.floor(diffHr / 24);
-		if (diffDay < 7) return `${diffDay}d ago`;
-		return date.toLocaleDateString();
-	}
+	let lastUserPromptText = '';
+	let lastUserPromptImages = undefined;
 
 	function formatRelativeTime(iso) {
 		if (!iso) return '';
@@ -721,29 +711,54 @@
 		return date.toLocaleDateString();
 	}
 
-	function createMessageFooter(getText, role, sentAt) {
+	function createMessageFooter(getText, role, sentAt, promptText = '', promptImages = undefined) {
 		const footer = document.createElement('div');
-		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-2 text-xs text-vscode-fg opacity-60 ' +
-			(role === 'user' ? 'self-end' : 'self-start');
 
 		const timeEl = document.createElement('span');
-		timeEl.className = 'leading-none';
+		timeEl.className = 'timestamp leading-none';
 		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
 
 		if (role === 'user') {
+			footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-end';
 			footer.appendChild(timeEl);
 			return footer;
 		}
 
-		const btn = document.createElement('button');
-		btn.type = 'button';
-		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
-		btn.title = 'Copy';
-		btn.setAttribute('aria-label', 'Copy message');
-		btn.innerHTML = ICONS.clipboard;
+		footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-start';
+		footer.dataset.promptText = promptText || '';
+		footer._promptImages = promptImages;
+
+		const actionsGroup = document.createElement('div');
+		actionsGroup.className = 'message-actions flex items-center gap-1.5';
+
+		const retryBtn = document.createElement('button');
+		retryBtn.type = 'button';
+		retryBtn.className = 'retry-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		retryBtn.title = 'Retry';
+		retryBtn.setAttribute('aria-label', 'Retry response');
+		retryBtn.innerHTML = ICONS.refresh;
+		if (isProcessing) {
+			retryBtn.disabled = true;
+			retryBtn.classList.add('opacity-30', 'cursor-not-allowed');
+		}
+
+		retryBtn.addEventListener('click', () => {
+			if (isProcessing) return;
+			const prompt = footer.dataset.promptText || promptText || lastUserPromptText;
+			const images = footer._promptImages || promptImages || lastUserPromptImages;
+			if (!prompt && !images?.length) return;
+			retryPrompt(prompt, images, footer);
+		});
+
+		const copyBtn = document.createElement('button');
+		copyBtn.type = 'button';
+		copyBtn.className = 'copy-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		copyBtn.title = 'Copy';
+		copyBtn.setAttribute('aria-label', 'Copy message');
+		copyBtn.innerHTML = ICONS.clipboard;
 
 		let resetTimer = null;
-		btn.addEventListener('click', () => {
+		copyBtn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
 			(async () => {
@@ -752,21 +767,25 @@
 				}
 				await navigator.clipboard.writeText(text);
 			})().then(() => {
-				btn.innerHTML = ICONS.success;
-				btn.title = 'Copied!';
+				copyBtn.innerHTML = ICONS.success;
+				copyBtn.title = 'Copied!';
 			}).catch(() => {
-				btn.innerHTML = ICONS.error;
-				btn.title = 'Copy failed';
+				copyBtn.innerHTML = ICONS.error;
+				copyBtn.title = 'Copy failed';
 			}).finally(() => {
 				clearTimeout(resetTimer);
 				resetTimer = setTimeout(() => {
-					btn.innerHTML = ICONS.clipboard;
-					btn.title = 'Copy';
+					copyBtn.innerHTML = ICONS.clipboard;
+					copyBtn.title = 'Copy';
 				}, 1500);
 			});
 		});
-		footer.appendChild(btn);
-		footer.appendChild(timeEl);
+
+		actionsGroup.appendChild(retryBtn);
+		actionsGroup.appendChild(copyBtn);
+		timeEl.className = 'timestamp leading-none ml-1';
+		actionsGroup.appendChild(timeEl);
+		footer.appendChild(actionsGroup);
 		return footer;
 	}
 
@@ -792,6 +811,12 @@
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
+		const allRetryBtns = document.querySelectorAll('.retry-btn');
+		allRetryBtns.forEach(btn => {
+			btn.disabled = active;
+			btn.classList.toggle('opacity-30', active);
+			btn.classList.toggle('cursor-not-allowed', active);
+		});
 	}
 
 	function setPlanReviewActive(active) {
@@ -1400,6 +1425,8 @@
 		// A new turn re-opens the door to tool updates that the previous
 		// cancel closed.
 		turnCancelled = false;
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -1421,6 +1448,65 @@
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
 			currentTextEl = null;
+		}
+	}
+
+	function retryPrompt(text, images, footerElement = null) {
+		if (isProcessing) return;
+		if (!text && !images?.length) return;
+		turnCancelled = false;
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
+
+		// Erase the current response (work summaries, thoughts, tool cards, bubbles, footers)
+		if (messagesContainer) {
+			let userIdx = -1;
+			const children = Array.from(messagesContainer.children);
+			let topIdx = -1;
+			if (footerElement) {
+				let topEl = footerElement;
+				while (topEl && topEl.parentElement && topEl.parentElement !== messagesContainer) {
+					topEl = topEl.parentElement;
+				}
+				topIdx = children.indexOf(topEl);
+			}
+			const scanStart = topIdx >= 0 ? topIdx : children.length - 1;
+			for (let i = scanStart; i >= 0; i--) {
+				const child = children[i];
+				if (child.classList?.contains('self-end') || child.dataset?.role === 'user') {
+					userIdx = i;
+					break;
+				}
+			}
+			if (userIdx >= 0) {
+				for (let i = children.length - 1; i > userIdx; i--) {
+					children[i].remove();
+				}
+			}
+		}
+
+		if (currentWorkSummary) {
+			discardCurrentWorkSummary();
+		}
+		currentTurnEl = null;
+		currentTextEl = null;
+		currentTurnText = '';
+		currentTurnFooter = null;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+
+		pendingUserMessageText = null;
+
+		vscode.postMessage({
+			type: 'retryMessage',
+			text: text,
+			images: images
+		});
+
+		if (!isProcessing) {
+			setProcessing(true);
+			startVisualLoader();
+			keepVisualLoaderAtBottom();
 		}
 	}
 
@@ -1732,11 +1818,14 @@
 			turnStartedAt = Date.now();
 			agentTurnId++;
 			currentTurnFooter = null;
+			lastUserPromptText = content;
+			lastUserPromptImages = images;
 		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
-			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full w-full');
+		wrapper.dataset.role = role;
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
@@ -1848,7 +1937,13 @@
 		}
 
 		wrapper.appendChild(msgEl);
-		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+		wrapper.appendChild(createMessageFooter(
+			() => content,
+			role,
+			new Date(),
+			role === 'user' ? '' : lastUserPromptText,
+			role === 'user' ? undefined : lastUserPromptImages
+		));
 
 		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
@@ -1900,7 +1995,8 @@
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
 			const wrapper = document.createElement('div');
-			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full w-full';
+			wrapper.dataset.role = 'agent';
 
 			const msgEl = document.createElement('div');
 			msgEl.className = 'message agent min-w-0 w-full';
@@ -1924,10 +2020,19 @@
 				currentTurnFooter.remove();
 			} else {
 				// captures footer, not currentTurnFooter - avoids copying the next turn's text
-				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				const footer = createMessageFooter(
+					() => footer.dataset.rawText || '',
+					'agent',
+					new Date(),
+					lastUserPromptText,
+					lastUserPromptImages
+				);
 				currentTurnFooter = footer;
 			}
 			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			if (!currentTurnFooter.dataset.promptText && lastUserPromptText) {
+				currentTurnFooter.dataset.promptText = lastUserPromptText;
+			}
 			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
@@ -2142,6 +2247,9 @@
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
 				lastAgentRawText = '';
+				lastUserPromptText = '';
+				lastUserPromptImages = undefined;
+				pendingUserMessageText = null;
 				// The transcript was just wiped, so the summary has no DOM left to
 				// close - drop it rather than stamping a duration on a box the
 				// user can no longer see.
@@ -2155,6 +2263,7 @@
 				break;
 			case 'sessionLoaded':
 				finishCurrentWorkSummary('completed');
+				pendingUserMessageText = null;
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -2445,6 +2554,7 @@
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
+			pendingUserMessageText = null;
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button

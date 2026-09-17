@@ -1240,3 +1240,114 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
 	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
 });
+
+test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'first prompt'},
+		{role: 'assistant', content: 'first response'},
+		{role: 'user', content: 'second prompt'},
+		{role: 'assistant', content: 'second response'},
+	];
+
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'second prompt',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[0].content, 'first prompt');
+	t.is(session.messages[1].content, 'first response');
+
+	// Also verify retrying the first turn truncates all messages and saves to disk
+	const resultFirst = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+	t.true(resultFirst.ok);
+	t.is(session.messages.length, 0);
+
+	const stored = await sessionManager.loadSession(created.sessionId);
+	t.is(stored?.messageCount, 0);
+	t.deepEqual(stored?.messages, []);
+});
+
+test('AcpAgent.extMethod - retryTurn uses an exact prompt match and never picks a substring', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'foo'},
+		{role: 'assistant', content: 'r1'},
+		{role: 'user', content: 'foo bar'},
+		{role: 'assistant', content: 'r2'},
+	];
+
+	// Retrying the literal "foo bar" must truncate at the second user turn,
+	// not the earlier "foo" turn, even though "foo bar" contains "foo".
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'foo bar',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[1].content, 'r1');
+});
+
+test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried turn', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('retry');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'first prompt'},
+			{role: 'assistant', content: 'first response'},
+			{role: 'user', content: 'second prompt'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+
+		// A checkpoint captured during the first turn (kept across retry).
+		await session.timeline.capture({
+			toolCallId: 'call-0',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (first turn)',
+			truncateToMessageIndex: 0,
+			files: new Map([['a.ts', 'before']]),
+		});
+		// A checkpoint captured during the second turn (must be dropped).
+		const dropped = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (second turn)',
+			truncateToMessageIndex: 2,
+			files: new Map([['a.ts', 'before']]),
+		});
+		t.truthy(dropped);
+
+		await agent.extMethod('retryTurn', {
+			sessionId: created.sessionId,
+			promptText: 'second prompt',
+		});
+
+		const entries = (await session.timeline.list()) as Array<{
+			id: string;
+		}>;
+		t.is(entries.length, 1);
+		t.not(entries[0].id, dropped?.id);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+

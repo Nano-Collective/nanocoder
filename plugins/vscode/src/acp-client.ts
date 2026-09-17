@@ -495,4 +495,22 @@ export class NanocoderAcpClient {
 		}
 	}
 
+	/**
+	 * Erases the retried turn from session history before resending the prompt,
+	 * preventing duplicate user bubbles and stale assistant responses in history.
+	 */
+	async retryTurn(promptText?: string): Promise<void> {
+		if (!this.connection || !this._sessionId) {
+			return;
+		}
+		try {
+			await this.connection.extMethod('retryTurn', {
+				sessionId: this._sessionId,
+				promptText,
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
+		}
+	}
+
 }
