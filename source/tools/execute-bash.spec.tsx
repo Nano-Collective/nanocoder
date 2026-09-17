@@ -64,6 +64,26 @@ test('ExecuteBashFormatter shows command for confirmation preview', t => {
 	t.regex(output!, /echo test/);
 });
 
+test('ExecuteBashFormatter shows description when provided', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({
+		command: 'git commit -m "feat: add cache" && git push',
+		description: 'Commit the staged files and push to remote repository.',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Commit the staged files and push to remote repository\./);
+	t.regex(output!, /Command:/);
+});
+
 test('ExecuteBashFormatter renders without result', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {
