@@ -343,6 +343,17 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageAddProvider {
+	type: 'addProvider';
+	provider: {
+		name: string;
+		sdkProvider: string;
+		baseUrl?: string;
+		apiKey?: string;
+		models?: string[];
+	};
+}
+
 export interface WebviewMessageApprovePlan {
 	type: 'approvePlan';
 }
@@ -403,6 +414,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageAddProvider
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard

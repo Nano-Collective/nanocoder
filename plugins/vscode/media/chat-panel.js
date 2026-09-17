@@ -2673,6 +2673,240 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
 			});
 		}
+
+		// Add Provider logic
+		const toggleAddProviderBtn = document.getElementById('toggle-add-provider-btn');
+		const closeAddProviderBtn = document.getElementById('close-add-provider-btn');
+		const addProviderFormContainer = document.getElementById('add-provider-form-container');
+		const addProviderSubmit = document.getElementById('add-provider-submit-btn');
+
+		const presetSelect = document.getElementById('add-provider-preset-select');
+		const customNameInput = document.getElementById('add-provider-custom-name');
+		const sdkGroup = document.getElementById('add-provider-sdk-group');
+		const sdkSelect = document.getElementById('add-provider-sdk');
+		const urlGroup = document.getElementById('add-provider-url-group');
+		const baseUrlInput = document.getElementById('add-provider-baseurl');
+		const apiKeyGroup = document.getElementById('add-provider-apikey-group');
+		const apiKeyInput = document.getElementById('add-provider-apikey');
+		const modelsContainer = document.getElementById('add-provider-models-container');
+		const addModelBtn = document.getElementById('add-provider-add-model-btn');
+
+		const providerPresets = {
+			"ollama": { name: "Ollama", sdk: "openai-compatible", url: "http://localhost:11434/v1", requiresKey: false, models: ["llama4"] },
+			"llama-cpp": { name: "llama-cpp", sdk: "openai-compatible", url: "http://localhost:8080/v1", requiresKey: false, models: [] },
+			"mlx-server": { name: "MLX Server", sdk: "openai-compatible", url: "http://localhost:8080/v1", requiresKey: false, models: [] },
+			"lmstudio": { name: "LM Studio", sdk: "openai-compatible", url: "http://localhost:1234/v1", requiresKey: false, models: [] },
+			"gemini": { name: "Google Gemini", sdk: "google", url: "https://generativelanguage.googleapis.com/v1beta", requiresKey: true, models: ["gemini-3.6-flash"] },
+			"openrouter": { name: "OpenRouter", sdk: "openai-compatible", url: "https://openrouter.ai/api/v1", requiresKey: true, models: ["anthropic/claude-sonnet-5"] },
+			"requesty": { name: "Requesty", sdk: "openai-compatible", url: "https://router.requesty.ai/v1", requiresKey: true, models: ["openai/gpt-4o-mini"] },
+			"orcarouter": { name: "OrcaRouter", sdk: "openai-compatible", url: "https://api.orcarouter.ai/v1", requiresKey: true, models: ["openai/gpt-5.5"] },
+			"openai": { name: "OpenAI", sdk: "openai-compatible", url: "https://api.openai.com/v1", requiresKey: true, models: ["gpt-5.6-sol"] },
+			"anthropic": { name: "Anthropic Claude", sdk: "anthropic", url: "https://api.anthropic.com/v1", requiresKey: true, models: ["claude-sonnet-5"] },
+			"mistral": { name: "Mistral AI", sdk: "openai-compatible", url: "https://api.mistral.ai/v1", requiresKey: true, models: ["mistral-large-latest"] },
+			"groq": { name: "Groq", sdk: "openai-compatible", url: "https://api.groq.com/openai/v1", requiresKey: true, models: ["openai/gpt-oss-120b"] },
+			"z-ai": { name: "Z.ai", sdk: "openai-compatible", url: "https://api.z.ai/api/paas/v4/", requiresKey: true, models: ["glm-5.2"] },
+			"z-ai-coding": { name: "Z.ai Coding Subscription", sdk: "openai-compatible", url: "https://api.z.ai/api/coding/paas/v4/", requiresKey: true, models: ["glm-5.2"] },
+			"github-models": { name: "GitHub Models", sdk: "openai-compatible", url: "https://models.github.ai/inference", requiresKey: true, models: ["openai/gpt-5.6-sol"] },
+			"chatgpt-codex": { name: "ChatGPT / Codex", sdk: "chatgpt-codex", url: "https://chatgpt.com/backend-api/codex", requiresKey: false, models: ["gpt-5.3-codex"] },
+			"github-copilot": { name: "GitHub Copilot", sdk: "github-copilot", url: "https://api.githubcopilot.com", requiresKey: false, models: ["gpt-5.6-sol"] },
+			"kimi-code": { name: "Kimi Code", sdk: "anthropic", url: "https://api.kimi.com/coding/v1", requiresKey: true, models: ["kimi-for-coding"] },
+			"minimax-coding": { name: "MiniMax Coding Plan", sdk: "anthropic", url: "https://api.minimax.io/anthropic/v1", requiresKey: true, models: ["MiniMax-M3", "MiniMax-M2.7"] },
+			"thesean": { name: "Thesean AI", sdk: "anthropic", url: "https://api.thesean.ai", requiresKey: true, models: ["ship-like/claude-opus-4-8"] },
+			"poe": { name: "Poe", sdk: "openai-compatible", url: "https://api.poe.com/v1", requiresKey: true, models: ["gpt-5.6-sol"] },
+			"atlas-cloud": { name: "Atlas Cloud", sdk: "openai-compatible", url: "https://api.atlascloud.ai/v1", requiresKey: true, models: ["openai/gpt-5.6-sol"] },
+			"together": { name: "Together AI", sdk: "openai-compatible", url: "https://api.together.ai/v1", requiresKey: true, models: ["deepseek-ai/DeepSeek-V4-Pro"] },
+			"custom": { name: "", sdk: "openai-compatible", url: "", requiresKey: false, models: [] }
+		};
+
+		function createModelRow(presetModels) {
+			const row = document.createElement('div');
+			row.className = 'flex gap-2 items-start model-row';
+
+			const inputContainer = document.createElement('div');
+			inputContainer.className = 'flex-grow flex flex-col gap-1';
+
+			const select = document.createElement('select');
+			select.className = 'settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] model-select';
+			
+			presetModels.forEach(model => {
+				const option = document.createElement('option');
+				option.value = option.textContent = model;
+				select.appendChild(option);
+			});
+			const customOption = document.createElement('option');
+			customOption.value = 'custom';
+			customOption.textContent = 'Custom...';
+			select.appendChild(customOption);
+
+			const customInput = document.createElement('input');
+			customInput.type = 'text';
+			customInput.placeholder = 'Model name (e.g. my-model)';
+			customInput.className = 'hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1 custom-model-input';
+
+			select.addEventListener('change', () => {
+				if (select.value === 'custom') {
+					customInput.classList.remove('hidden');
+				} else {
+					customInput.classList.add('hidden');
+				}
+			});
+
+			inputContainer.appendChild(select);
+			inputContainer.appendChild(customInput);
+
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'text-vscode-descriptionForeground hover:text-vscode-error bg-transparent border-none cursor-pointer p-1.5';
+			removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			
+			removeBtn.addEventListener('click', () => {
+				if (modelsContainer.children.length > 1) {
+					row.remove();
+					updateRemoveButtons();
+				}
+			});
+
+			row.appendChild(inputContainer);
+			row.appendChild(removeBtn);
+
+			modelsContainer.appendChild(row);
+
+			// Hide remove button if it's the only row
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			const rows = modelsContainer.querySelectorAll('.model-row');
+			rows.forEach((row, index) => {
+				const removeBtn = row.querySelector('button');
+				removeBtn.style.visibility = '';
+				
+				// Either it's the only row, or we can just always disable the first one
+				// "disable for only for the first model box"
+				if (index === 0) {
+					removeBtn.disabled = true;
+					removeBtn.classList.add('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.remove('hover:text-vscode-error', 'cursor-pointer');
+				} else {
+					removeBtn.disabled = false;
+					removeBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.add('hover:text-vscode-error', 'cursor-pointer');
+				}
+			});
+		}
+
+		function updateProviderForm() {
+			const presetKey = presetSelect.value;
+			const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+			if (presetKey === 'custom') {
+				customNameInput.classList.remove('hidden');
+				sdkGroup.classList.remove('hidden');
+				urlGroup.classList.remove('hidden');
+				apiKeyGroup.classList.remove('hidden');
+			} else {
+				customNameInput.classList.add('hidden');
+				sdkGroup.classList.add('hidden');
+				urlGroup.classList.add('hidden');
+				apiKeyGroup.classList.toggle('hidden', !preset.requiresKey);
+				
+				sdkSelect.value = preset.sdk;
+				baseUrlInput.value = preset.url;
+			}
+
+			// Reset models to single row
+			modelsContainer.innerHTML = '';
+			createModelRow(preset.models);
+		}
+
+		if (addModelBtn) {
+			addModelBtn.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+				createModelRow(preset.models);
+			});
+		}
+
+		if (toggleAddProviderBtn && closeAddProviderBtn && addProviderFormContainer) {
+			toggleAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.remove('hidden');
+				toggleAddProviderBtn.parentElement.classList.add('hidden');
+				updateProviderForm();
+			});
+
+			closeAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.add('hidden');
+				toggleAddProviderBtn.parentElement.classList.remove('hidden');
+			});
+		}
+
+		if (presetSelect) presetSelect.addEventListener('change', updateProviderForm);
+
+		if (addProviderSubmit) {
+			addProviderSubmit.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+				const name = presetKey === 'custom' ? customNameInput.value.trim() : preset.name;
+				const sdkProvider = sdkSelect.value;
+				const baseUrl = baseUrlInput.value.trim();
+				const apiKey = apiKeyInput.value.trim();
+				
+				const models = [];
+				const modelRows = modelsContainer.querySelectorAll('.model-row');
+				modelRows.forEach(row => {
+					const select = row.querySelector('.model-select');
+					const customInput = row.querySelector('.custom-model-input');
+					
+					let modelStr = '';
+					if (select.value === 'custom') {
+						modelStr = customInput.value.trim();
+					} else {
+						modelStr = select.value;
+					}
+
+					// Split in case user pasted comma separated in custom
+					const parsedModels = modelStr ? modelStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+					models.push(...parsedModels);
+				});
+
+				// deduplicate models and check if empty
+				const uniqueModels = [...new Set(models)];
+
+				if (!name) {
+					vscode.postMessage({ type: 'showError', message: 'Provider name is required.' });
+					return;
+				}
+				if (uniqueModels.length === 0) {
+					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
+					return;
+				}
+				if (models.length !== uniqueModels.length) {
+					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
+					return;
+				}
+
+				const provider = {
+					name,
+					sdkProvider,
+					...(baseUrl ? { baseUrl } : {}),
+					...(apiKey ? { apiKey } : {}),
+					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
+				};
+
+				vscode.postMessage({ type: 'addProvider', provider });
+
+				// Reset form and hide it
+				presetSelect.value = 'ollama';
+				customNameInput.value = '';
+				baseUrlInput.value = '';
+				apiKeyInput.value = '';
+				
+				if (addProviderFormContainer) {
+					addProviderFormContainer.classList.add('hidden');
+					toggleAddProviderBtn.parentElement.classList.remove('hidden');
+				}
+			});
+		}
 	}
 	initSettingsControls();
 

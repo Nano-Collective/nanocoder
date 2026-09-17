@@ -477,6 +477,10 @@ export class ChatWebviewProvider
 					case 'revertToCheckpoint':
 						this._handleRevert(message.checkpointId);
 						break;
+					case 'addProvider':
+						this._outputChannel.appendLine(`[Webview] Add provider requested: ${message.provider.name}`);
+						void this._handleAddProvider(message.provider);
+						break;
 				}
 			}
 		);
@@ -615,6 +619,25 @@ export class ChatWebviewProvider
 				error: message,
 			});
 			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${message}`);
+		}
+	}
+
+	private async _handleAddProvider(provider: any): Promise<void> {
+		try {
+			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const result = this._settingsManager.addProvider(cwd, provider);
+
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+				vscode.commands.executeCommand('nanocoder.restartAcp');
+			} else {
+				vscode.window.showErrorMessage(`Failed to add provider '${provider.name}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to add provider: ${message}`);
+			vscode.window.showErrorMessage(`Failed to add provider: ${message}`);
 		}
 	}
 
