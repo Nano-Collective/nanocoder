@@ -90,7 +90,7 @@
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger';
+					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
