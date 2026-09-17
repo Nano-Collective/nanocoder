@@ -10,6 +10,14 @@ import {generateExportFilename} from '@/utils/generate-export-filename';
 import {resolveFilePath} from '@/utils/path-validation';
 import {writeUniqueFile} from '@/utils/write-unique-file';
 
+function fenceFor(body: string): string {
+	let longest = 0;
+	for (const match of body.matchAll(/`+/gu)) {
+		longest = Math.max(longest, match[0].length);
+	}
+	return '`'.repeat(Math.max(3, longest + 1));
+}
+
 const formatMessageContent = (message: Message) => {
 	let content = '';
 	switch (message.role) {
@@ -25,11 +33,14 @@ const formatMessageContent = (message: Message) => {
 			}
 			break;
 		case 'tool':
-			content +=
-				`## Tool Output: ${message.name}\n` +
-				'```\n' +
-				`${message.content}\n` +
-				'```\n';
+			{
+				const fence = fenceFor(message.content);
+				content +=
+					`## Tool Output: ${message.name}\n` +
+					`${fence}\n` +
+					`${message.content}\n` +
+					`${fence}\n`;
+			}
 			break;
 		case 'system':
 			// For now, we don't include system messages in the export
