@@ -1,7 +1,7 @@
 ---
 title: "Cheaper Inference"
 description: "Configure Cheaper Inference as a cloud AI provider for Nanocoder"
-sidebar_order: 19
+sidebar_order: 26
 ---
 
 # Cheaper Inference
