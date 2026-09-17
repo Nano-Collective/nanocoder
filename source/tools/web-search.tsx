@@ -30,13 +30,73 @@ interface BraveSearchResponse {
 	};
 }
 
-// Security functions - MUST be exported
-export const escapeMarkdown = (text: string): string => {
-	return text.replace(/[[\]*_`<>#]/g, '\\$&');
+/**
+ * Minimal inline markdown set. The backslash must be in the class, otherwise a
+ * backslash in Brave's output eats the escape we add right after it and the
+ * following character renders live.
+ */
+const MARKDOWN_ESCAPE_PATTERN = /[\\`*_[\]<>~|=]/g;
+
+/**
+ * Brave wraps query matches in highlight tags. Strip them before escaping so
+ * they don't surface as literal \<strong\> in the model's context.
+ */
+const HIGHLIGHT_TAG_PATTERN =
+	/<\/?(?:strong|b|em|i|mark|span)(?:\s[^>]*)?\/?>/gi;
+
+/** Whitespace plus C0/C1 control characters, which URLs should never contain. */
+const URL_STRIP_PATTERN = /[\s\u0000-\u001f\u007f-\u009f<>"'`]/g;
+
+const ALLOWED_URL_PROTOCOLS = new Set(['http:', 'https:']);
+
+export const stripHighlightTags = (text: string): string => {
+	return text.replace(HIGHLIGHT_TAG_PATTERN, '');
 };
 
-export const sanitizeUrl = (url: string): string => {
-	return url.trim().replace(/[<>]/g, '');
+/**
+ * Collapses every run of whitespace (newlines included) into a single space.
+ * Without this, a description containing "\n===\n" or "\n---\n" renders as a
+ * real setext heading no matter what we escape inline.
+ */
+export const collapseWhitespace = (text: string): string => {
+	return text.replace(/\s+/g, ' ').trim();
+};
+
+export const escapeMarkdown = (text: string): string => {
+	return text.replace(MARKDOWN_ESCAPE_PATTERN, '\\$&');
+};
+
+/**
+ * Full pipeline for any untrusted text we inline into the markdown report:
+ * strip highlight tags, flatten to one line, escape inline markdown, then
+ * neutralise a leading '#' so the text can't open an ATX heading.
+ */
+export const sanitizeInlineText = (text: string): string => {
+	const escaped = escapeMarkdown(collapseWhitespace(stripHighlightTags(text)));
+	return escaped.startsWith('#') ? `\\${escaped}` : escaped;
+};
+
+/**
+ * Returns a safe autolink target, or null when the URL is malformed or uses a
+ * scheme we don't allow. Interior whitespace is stripped too: a single space
+ * inside <...> closes the autolink and lets the rest of the string render as
+ * live markdown.
+ */
+export const sanitizeUrl = (url: string): string | null => {
+	const stripped = url.replace(URL_STRIP_PATTERN, '');
+	if (!stripped) {
+		return null;
+	}
+
+	try {
+		const parsed = new URL(stripped);
+		if (!ALLOWED_URL_PROTOCOLS.has(parsed.protocol)) {
+			return null;
+		}
+		return stripped;
+	} catch {
+		return null;
+	}
 };
 
 export const executeWebSearch = async (
@@ -90,17 +150,18 @@ export const executeWebSearch = async (
 			const result = results[i];
 			if (!result) continue;
 
-			// Escape markdown in title and description
-			const escapedTitle = escapeMarkdown(result.title);
-			const escapedDescription = result.description
-				? escapeMarkdown(result.description)
+			const safeTitle = sanitizeInlineText(result.title ?? '');
+			const safeDescription = result.description
+				? sanitizeInlineText(result.description)
 				: '';
-			const sanitizedUrl = sanitizeUrl(result.url);
+			const safeUrl = sanitizeUrl(result.url ?? '');
 
-			formattedResults += `## ${i + 1}. ${escapedTitle}\n\n`;
-			formattedResults += `**URL:** <${sanitizedUrl}>\n\n`;
-			if (escapedDescription) {
-				formattedResults += `${escapedDescription}\n\n`;
+			formattedResults += `## ${i + 1}. ${safeTitle || '(untitled)'}\n\n`;
+			formattedResults += safeUrl
+				? `**URL:** <${safeUrl}>\n\n`
+				: `**URL:** (omitted: unsupported or malformed URL)\n\n`;
+			if (safeDescription) {
+				formattedResults += `${safeDescription}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}
