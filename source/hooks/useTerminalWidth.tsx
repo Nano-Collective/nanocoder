@@ -115,6 +115,9 @@ export const useTerminalWidth = () => calculateBoxWidth(useTerminalColumns());
  * @returns Object with terminal width, size category, and utility functions
  */
 export const useResponsiveTerminal = () => {
+	// Derived from the same subscription rather than calling useTerminalWidth(),
+	// which would add a second subscription and state to every consumer for the
+	// same number. calculateBoxWidth stays the one definition of the clamp.
 	const actualWidth = useTerminalColumns();
 	const boxWidth = calculateBoxWidth(actualWidth);
 

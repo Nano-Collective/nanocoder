@@ -285,12 +285,30 @@ test('useTerminalWidth shares one resize listener across many consumers', t => {
 	process.stdout.columns = originalColumns;
 });
 
-// Resize past the box-width clamp: 300 and 400 columns both clamp boxWidth to
-// 200, so a hook that derives its reactivity from boxWidth never re-renders
-// and its consumers keep laying out for the old terminal.
+// Poll instead of sleeping a fixed span: this returns as soon as the resize
+// has propagated, and only spends the whole budget when it never does.
+const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() > deadline) return;
+		await new Promise(resolve => setImmediate(resolve));
+	}
+};
+
+// Records every render rather than every distinct value: a clamped resize
+// re-renders with an unchanged boxWidth, which an effect keyed on the width
+// would never see.
+function BoxWidthRenderProbe({onRender}: {onRender: (width: number) => void}) {
+	onRender(useTerminalWidth());
+	return null;
+}
+
 test.serial(
 	'useResponsiveTerminal tracks a resize the box-width clamp hides',
 	async t => {
+		// 300 and 400 columns both clamp boxWidth to 200, so a hook deriving its
+		// reactivity from boxWidth never re-renders and its consumers keep
+		// laying out for the terminal size that is gone.
 		const originalColumns = process.stdout.columns;
 		process.stdout.columns = 300;
 
@@ -305,7 +323,7 @@ test.serial(
 
 		process.stdout.columns = 400;
 		process.stdout.emit('resize');
-		await new Promise(resolve => setTimeout(resolve, 20));
+		await waitFor(() => widths.at(-1) === 400);
 
 		t.is(widths.at(-1), 400, 'actualWidth must follow the real terminal');
 		unmount();
@@ -313,24 +331,35 @@ test.serial(
 	},
 );
 
-test.serial('useTerminalWidth tracks a resize inside the clamp', async t => {
-	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 100;
+test.serial(
+	'useTerminalWidth re-renders on a resize the clamp hides',
+	async t => {
+		// 250 and 350 columns both clamp to 200: the width itself does not move,
+		// but direct useTerminalWidth callers must still re-render so anything
+		// they measure for themselves is recomputed for the new terminal.
+		const originalColumns = process.stdout.columns;
+		process.stdout.columns = 250;
 
-	const widths: number[] = [];
-	const {unmount} = render(
-		React.createElement(TerminalWidthConsumer, {
-			onRender: width => {
-				widths.push(width);
-			},
-		}),
-	);
+		const widths: number[] = [];
+		const {unmount} = render(
+			React.createElement(BoxWidthRenderProbe, {
+				onRender: width => {
+					widths.push(width);
+				},
+			}),
+		);
 
-	process.stdout.columns = 140;
-	process.stdout.emit('resize');
-	await new Promise(resolve => setTimeout(resolve, 20));
+		const rendersBeforeResize = widths.length;
+		process.stdout.columns = 350;
+		process.stdout.emit('resize');
+		await waitFor(() => widths.length > rendersBeforeResize);
 
-	t.is(widths.at(-1), 136, 'boxWidth must follow the resize (140 - 4)');
-	unmount();
-	process.stdout.columns = originalColumns;
-});
+		t.true(
+			widths.length > rendersBeforeResize,
+			'a resize hidden by the clamp must still re-render',
+		);
+		t.is(widths.at(-1), 200, 'boxWidth stays clamped at 200');
+		unmount();
+		process.stdout.columns = originalColumns;
+	},
+);
