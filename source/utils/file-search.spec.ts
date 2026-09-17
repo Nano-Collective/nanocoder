@@ -1,4 +1,4 @@
-import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -9,6 +9,7 @@ import {
 	GLOB_TOKEN_CACHE_MAX_TOKENS,
 	globTokenCache,
 	matchesGlob,
+	rebaseIgnoreLine,
 	searchProjectContents,
 	SearchTimeoutError,
 	walkProjectEntries,
@@ -16,6 +17,10 @@ import {
 
 function createTempDir(name: string): string {
 	return join(tmpdir(), `nanocoder-${name}-${process.pid}-${Date.now()}`);
+}
+
+function countNanocoderIgnoreDirs(): number {
+	return readdirSync(tmpdir()).filter(name => name.startsWith('nanocoder-ignore-')).length;
 }
 
 test('matchesGlob handles supported file discovery patterns', t => {
@@ -897,6 +902,201 @@ test.serial('searchProjectContents skips ignored and binary files', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test('rebaseIgnoreLine re-expresses gitignore rules against a deeper search root', t => {
+	const cwd = '/home/user/proj';
+	const root = join(cwd, 'src');
+
+	// Unanchored rules match at any depth and carry over unchanged.
+	t.is(rebaseIgnoreLine('dist/', cwd, root), 'dist/');
+	t.is(rebaseIgnoreLine('*.log', cwd, root), '*.log');
+
+	// A leading `**/` matches at any depth too; git semantics, not cwd-anchored.
+	t.is(rebaseIgnoreLine('**/generated/', cwd, root), '**/generated/');
+	t.is(rebaseIgnoreLine('**/*.log', cwd, root), '**/*.log');
+	t.is(rebaseIgnoreLine('!**/keep', cwd, root), '!**/keep');
+
+	// Backslash escapes are literals, not comment/negation markers.
+	t.is(rebaseIgnoreLine('\\#hashtag.txt', cwd, root), '\\#hashtag.txt');
+	t.is(rebaseIgnoreLine('\\!bang.txt', cwd, root), '\\!bang.txt');
+	// A backslash-escaped trailing space is part of the pattern; an unescaped
+	// trailing space is not.
+	t.is(rebaseIgnoreLine('dir\\ ', cwd, root), 'dir\\ ');
+	t.is(rebaseIgnoreLine('dir  ', cwd, root), 'dir');
+	t.is(rebaseIgnoreLine('dir\\  ', cwd, root), 'dir\\  ');
+
+	// Rules anchored in cwd are re-expressed relative to the search root.
+	t.is(rebaseIgnoreLine('/src/generated/', cwd, root), '/generated/');
+	t.is(rebaseIgnoreLine('/src/lib/generated/', cwd, root), '/lib/generated/');
+	t.is(rebaseIgnoreLine('src/generated/', cwd, root), '/generated/');
+
+	// Rules that resolve outside the search root can never match inside it.
+	t.is(rebaseIgnoreLine('docs/**', cwd, root), undefined);
+	t.is(rebaseIgnoreLine('vendor/x', cwd, root), undefined);
+	t.is(rebaseIgnoreLine('!vendor/x', cwd, root), undefined);
+
+	// Blank and comment lines are dropped.
+	t.is(rebaseIgnoreLine('', cwd, root), undefined);
+	t.is(rebaseIgnoreLine('# comment', cwd, root), undefined);
+});
+
+test('rebaseIgnoreLine drops anchored rules when searchRoot is on another Windows drive', t => {
+	if (process.platform !== 'win32') {
+		t.pass('cross-drive rebase only occurs on Windows');
+		return;
+	}
+
+	const cwd = 'D:\\work\\proj';
+	const otherRoot = 'C:\\other\\proj\\src';
+
+	// Unanchored rules still apply across drives.
+	t.is(rebaseIgnoreLine('dist/', cwd, otherRoot), 'dist/');
+	// Anchored cwd rules resolve to an absolute path on another drive; emitting
+	// them verbatim would produce an `/C:/work/proj/...` rule rg can never match.
+	t.is(rebaseIgnoreLine('/src/generated/', cwd, otherRoot), undefined);
+});
+
+test.serial(
+	'searchProjectContents honors a depth-agnostic **/ rule like git does',
+	async t => {
+		const testDir = createTempDir('test-file-search-doublestar-rule-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			mkdirSync(join(testDir, 'pkg', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '**/generated/\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'src', 'generated', 'out.js'), dense.join('\n'));
+			writeFileSync(join(testDir, 'pkg', 'generated', 'out.js'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents treats gitignore backslash escapes as literals',
+	async t => {
+		const testDir = createTempDir('test-file-search-escaped-rules-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '\\#hashtag.txt\n\\!bang.txt\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'src', '#hashtag.txt'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', '!bang.txt'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			// Neither escaped name can be ignored by unlucky comment/negation
+			// parsing - both are real filenames that gitignore semantics should hide.
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents lets .nanocoderignore re-include a gitignored dir through the ignore-file path',
+	async t => {
+		const testDir = createTempDir('test-file-search-reinclude-search-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			writeFileSync(
+				join(testDir, '.nanocoderignore'),
+				'!generated\n!generated/**\n',
+			);
+			writeFileSync(
+				join(testDir, 'src', 'generated', 'out.js'),
+				'const searchTarget = true;\n',
+			);
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				10,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/generated/out.js', 'src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents cleans up its transient ignore file when aborted',
+	async t => {
+		const testDir = createTempDir('test-file-search-abort-cleanup-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const controller = new AbortController();
+			controller.abort(new Error('cleanup-test aborted'));
+			const before = countNanocoderIgnoreDirs();
+			await t.throwsAsync(() =>
+				searchProjectContents(
+					'searchTarget',
+					testDir,
+					5,
+					false,
+					undefined,
+					join(testDir, 'src'),
+					undefined,
+					undefined,
+					undefined,
+					controller.signal,
+				),
+			);
+
+			t.is(countNanocoderIgnoreDirs(), before);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'searchProjectContents stops counting when gitignored-directory matches are filtered (#1341)',

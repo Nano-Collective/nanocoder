@@ -252,23 +252,45 @@ function gitignoreRuleHasSlash(pattern: string): boolean {
 }
 
 /**
+ * git strips unescaped trailing whitespace from an ignore pattern, but a
+ * backslash-escaped trailing space is a literal part of the rule (`foo\ `). A
+ * plain `trimEnd` mangles that rare shape, so match git's rule.
+ */
+function trimGitignoreLine(line: string): string {
+	const stripped = line.trimEnd();
+	if (line === stripped) {
+		return line;
+	}
+	let backslashes = 0;
+	for (let i = stripped.length - 1; i >= 0 && stripped[i] === '\\'; i--) {
+		backslashes++;
+	}
+	// An odd backslash run escapes the first removed character (the space).
+	return backslashes % 2 === 1 ? line : stripped;
+}
+
+/**
  * Re-expresses one cwd-relative gitignore rule against a deeper search root so
  * it can be handed to rg in an `--ignore-file`, whose rules rg applies relative
  * to the search root.
  *
- * Unanchored rules (`foo`, `foo/`, `*.log`) match at any depth and carry over
- * unchanged. Rules anchored at cwd - a leading `/` or any `/` in the body -
- * resolve against cwd and are re-expressed relative to `searchRoot`, so
- * `cwd/src/generated/` becomes `/generated/` when searching `cwd/src`. Rules
- * that resolve outside the search root are dropped: nothing inside it can match
- * them. Returns undefined for blank and comment lines.
+ * Unanchored rules (`foo`, `foo/`, `*.log`) match a path segment at any depth
+ * and carry over unchanged. Rules that begin with `**` followed by a `/` are
+ * git's depth-agnostic form and also carry over unchanged. Rules anchored at
+ * cwd - a leading `/` or any `/` in the body - resolve against cwd and are
+ * re-expressed relative to `searchRoot`, so `cwd/src/generated/` becomes
+ * `/generated/` when searching `cwd/src`. Rules that resolve outside the search
+ * root are dropped: nothing inside it can match them. Returns undefined for
+ * blank and comment lines.
+ *
+ * @internal Exported for direct unit testing only.
  */
-function rebaseIgnoreLine(
+export function rebaseIgnoreLine(
 	line: string,
 	cwd: string,
 	searchRoot: string,
 ): string | undefined {
-	const trimmed = line.trimEnd();
+	const trimmed = trimGitignoreLine(line);
 	if (!trimmed || trimmed.startsWith('#')) {
 		return undefined;
 	}
@@ -285,12 +307,25 @@ function rebaseIgnoreLine(
 		return trimmed;
 	}
 
+	// `**/foo` matches foo at any depth (gitignore spec), so it is not anchored
+	// to cwd and carries over unchanged.
+	if (pattern.startsWith('**/')) {
+		return trimmed;
+	}
+
 	const dirOnly = pattern.endsWith('/');
 	const body = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
 	const relative = normalizePathForMatch(
 		path.relative(searchRoot, path.resolve(cwd, body)),
 	);
-	if (!relative || relative === '..' || relative.startsWith('../')) {
+	// `path.relative` yields an absolute path when `cwd` and `searchRoot` are on
+	// different Windows drives; such a rule can never match inside searchRoot.
+	if (
+		!relative ||
+		path.isAbsolute(relative) ||
+		relative === '..' ||
+		relative.startsWith('../')
+	) {
 		return undefined;
 	}
 	return `${negated ? '!' : ''}/${relative}${dirOnly ? '/' : ''}`;
@@ -323,6 +358,12 @@ function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
 		}
 
 		for (const line of content.split(/\r?\n/)) {
+			// Blank and comment lines are no-ops for rg, so the temp file's line
+			// count stays comparable to DEFAULT_IGNORE_DIRS - letting withProjectIgnoreFile skip an empty/comment-only .gitignore.
+			const trimmed = trimGitignoreLine(line);
+			if (!trimmed || trimmed.startsWith('#')) {
+				continue;
+			}
 			if (searchRoot === cwd) {
 				lines.push(line);
 				continue;
@@ -362,14 +403,22 @@ async function withProjectIgnoreFile<T>(
 		return run([]);
 	}
 
+	const ignoreLines = projectIgnoreLines(cwd, searchRoot);
+	// An ignore file that only repeats the DEFAULT_IGNORE_DIRS (e.g. an empty or
+	// comment-only .gitignore, or rules that all resolve outside the search
+	// root) prunes nothing beyond what defaultIgnoreGlobs already prunes during
+	// traversal, so no temp file is needed.
+	if (ignoreLines.length === DEFAULT_IGNORE_DIRS.length) {
+		return run([]);
+	}
+
 	const tempDir = await mkdtemp(path.join(tmpdir(), 'nanocoder-ignore-'));
 	try {
 		const ignoreFile = path.join(tempDir, 'ignore');
-		await writeFile(
-			ignoreFile,
-			`${projectIgnoreLines(cwd, searchRoot).join('\n')}\n`,
-			'utf-8',
-		);
+		await writeFile(ignoreFile, `${ignoreLines.join('\n')}\n`, {
+			encoding: 'utf-8',
+			mode: 0o600,
+		});
 		return await run(['--ignore-file', normalizePathForMatch(ignoreFile)]);
 	} finally {
 		await rm(tempDir, {recursive: true, force: true});
@@ -402,7 +451,11 @@ async function runRipgrep(
 	timeoutMs: number,
 	signal?: AbortSignal,
 	maxLines?: number,
-	onLine?: (line: string) => boolean,
+	// The caller decides per line whether to keep it ('keep'), drop it ('skip'),
+	// or kill the scan now ('stop'). 'stop' double-counts as 'keep' for its own
+	// line. With onLine set, stdout only ever holds 'keep'/'stop' lines, so an
+	// ignored dir's matches can't stream into memory unboundedly.
+	onLine?: (line: string) => 'keep' | 'skip' | 'stop',
 ): Promise<RunRipgrepResult> {
 	const rgPath = await resolveRipgrepPath();
 
@@ -415,6 +468,7 @@ async function runRipgrep(
 		let hitMaxLines = false;
 		let timedOut = false;
 		let lineCount = 0;
+		let receivedOutput = false;
 
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -442,21 +496,27 @@ async function runRipgrep(
 			if (killedForLimit) {
 				return;
 			}
+			receivedOutput = true;
 
 			if (maxLines === undefined && onLine === undefined) {
 				stdout += chunk;
 				return;
 			}
 
-			// Chunks aren't line-aligned - build stdout here so it can't overshoot the cap.
+			// Chunks aren't line-aligned - with onLine set, stdout is built only
+			// from 'keep'/'stop' lines, so it can't overshoot the cap or grow from
+			// lines the caller will drop.
 			lineRemainder += chunk;
 			let newlineIndex = lineRemainder.indexOf('\n');
 			while (newlineIndex >= 0) {
 				const line = lineRemainder.slice(0, newlineIndex);
 				lineRemainder = lineRemainder.slice(newlineIndex + 1);
-				stdout += line + '\n';
 
-				if (onLine?.(line)) {
+				const action = onLine?.(line) ?? 'keep';
+				if (action !== 'skip') {
+					stdout += line + '\n';
+				}
+				if (action === 'stop') {
 					killedForLimit = true;
 					child.kill();
 					return;
@@ -521,7 +581,7 @@ async function runRipgrep(
 			// Linux ARM). Deliberately no stderr allowlist here - anything rg says that
 			// nobody enumerated would otherwise fall through to `resolve('')`, and every
 			// caller reads that as a genuine "no results" rather than a failure.
-			if (code !== null && code > 1 && stdout.length === 0) {
+			if (code !== null && code > 1 && !receivedOutput) {
 				reject(
 					new Error(
 						`ripgrep exited with code ${code}: ${
@@ -543,7 +603,7 @@ function prefixGitignoreLine(
 	line: string,
 	dirPrefix: string,
 ): string | undefined {
-	const trimmed = line.trimEnd();
+	const trimmed = trimGitignoreLine(line);
 	if (!trimmed || trimmed.startsWith('#')) {
 		return undefined;
 	}
@@ -720,17 +780,17 @@ async function walkUnsortedFileStream(
 	const seenDirs = new Set<string>();
 	let stoppedEarly = false;
 
-	const onLine = (line: string): boolean => {
+	const onLine = (line: string): 'keep' | 'skip' | 'stop' => {
 		const file = normalizePathForMatch(line);
 		if (!file) {
-			return false;
+			return 'skip';
 		}
 
 		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
 		// rg already pruned these via --ignore-file; kept as a backstop because
 		// its matcher and the `ignore` package are separate implementations.
 		if (projectIgnore.ignores(relativeFile)) {
-			return false;
+			return 'skip';
 		}
 
 		if (includeDirectories) {
@@ -750,7 +810,7 @@ async function walkUnsortedFileStream(
 					})
 				) {
 					stoppedEarly = true;
-					return true;
+					return 'stop';
 				}
 			}
 		}
@@ -763,10 +823,10 @@ async function walkUnsortedFileStream(
 			})
 		) {
 			stoppedEarly = true;
-			return true;
+			return 'stop';
 		}
 
-		return false;
+		return 'skip';
 	};
 
 	const {hitMaxLines} = await runRipgrep(
@@ -1188,22 +1248,35 @@ export async function searchProjectContents(
 	// kill budget. Counting raw matches let a gitignored directory walked first
 	// kill rg before any real match streamed in - the matches were then dropped
 	// downstream, so the search reported "no matches" despite real ones (#1341).
-	const onLine = (line: string): boolean => {
+	//
+	// The ignored-status of every line depends only on its file (projectIgnore is
+	// per-path), so a kept file's match AND context lines are all kept while an
+	// ignored file's lines are all dropped. Dropping them at source is what keeps
+	// an un-prunable ignored dir from streaming unbounded output (#1341 backstop).
+	const onLine = (line: string): 'keep' | 'skip' | 'stop' => {
 		let parsed: RgJsonMatch;
 		try {
 			parsed = JSON.parse(line) as RgJsonMatch;
 		} catch {
-			return false;
+			return 'skip';
 		}
 		const file = parsed.data.path?.text;
-		if (parsed.type !== 'match' || file === undefined) {
-			return false;
+		if (parsed.type !== 'match' && parsed.type !== 'context') {
+			return 'skip';
+		}
+		if (file === undefined) {
+			return 'skip';
 		}
 		if (projectIgnore.ignores(toRelativeFile(cwd, file))) {
-			return false;
+			return 'skip';
 		}
-		keptMatchCount++;
-		return keptMatchCount >= rgMaxCount;
+		if (parsed.type === 'match') {
+			keptMatchCount++;
+			if (keptMatchCount >= rgMaxCount) {
+				return 'stop';
+			}
+		}
+		return 'keep';
 	};
 
 	const {stdout} = await withProjectIgnoreFile(
