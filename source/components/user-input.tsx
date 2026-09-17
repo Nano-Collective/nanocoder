@@ -994,21 +994,9 @@ export default function UserInput({
 			focus('user-input');
 		}
 
-		// Handle return keys for multiline input
-		// Ctrl+J is the official newline shortcut and reliably sends a literal LF
-		if (
-			(key.ctrl && inputChar === 'j') ||
-			(inputChar === '\n' && !key.return)
-		) {
-			updateInput(input + '\n');
-			return;
-		}
-
-		// Support Shift+Enter if the terminal sends it properly
-		if (key.return && key.shift) {
-			updateInput(input + '\n');
-			return;
-		}
+		// Multiline input (Ctrl+J and Shift+Enter) is inserted by TextInput, which
+		// owns the cursor. Appending the newline here instead left the caret behind
+		// and spliced every later keystroke in at the stale offset.
 
 		// Handle Enter to select completion
 		if (

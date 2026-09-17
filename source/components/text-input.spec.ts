@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
 	getVisualLineSegments,
+	insertAtCursor,
 	moveCursorToVisualLine,
 } from '../utils/text-wrapping';
 
@@ -527,4 +528,56 @@ test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
 	t.true(called);
 });
 
+// The real insertion used by every path that adds characters: a typed
+// character, Ctrl+J and Shift+Enter. Shift+Enter used to bypass it entirely —
+// the parent appended the newline to the END of the value and left the caret
+// where it was, so the next word was spliced in at the stale offset and a
+// three-line message arrived as `onetwothree\n\n`.
+test('insertAtCursor puts the text at the caret and moves the caret past it', (t) => {
+	t.deepEqual(insertAtCursor('onethree', 3, 'two'), {
+		value: 'onetwothree',
+		cursorOffset: 6,
+	});
+});
 
+test('insertAtCursor at the end appends and still advances the caret', (t) => {
+	t.deepEqual(insertAtCursor('one', 3, '\n'), {
+		value: 'one\n',
+		cursorOffset: 4,
+	});
+});
+
+test('insertAtCursor at the start leaves the rest intact', (t) => {
+	t.deepEqual(insertAtCursor('two', 0, 'one\n'), {
+		value: 'one\ntwo',
+		cursorOffset: 4,
+	});
+});
+
+test('repeated newline inserts build a real multi-line message', (t) => {
+	// The exact sequence from the bug report: one, Shift+Enter, two,
+	// Shift+Enter, three — each insert landing at the caret the previous one
+	// left behind.
+	let state = {value: '', cursorOffset: 0};
+	const type = (text: string) => {
+		state = insertAtCursor(state.value, state.cursorOffset, text);
+	};
+
+	type('one');
+	type('\n');
+	type('two');
+	type('\n');
+	type('three');
+
+	t.is(state.value, 'one\ntwo\nthree');
+	t.is(state.cursorOffset, state.value.length);
+});
+
+test('a newline inserted mid-message splits it rather than trailing off the end', (t) => {
+	// Caret parked between the two words: the break belongs there, not appended.
+	const state = insertAtCursor('onetwo', 3, '\n');
+	t.is(state.value, 'one\ntwo');
+	t.is(state.cursorOffset, 4);
+	// Typing continues on the new line, not at the old offset.
+	t.is(insertAtCursor(state.value, state.cursorOffset, 'X').value, 'one\nXtwo');
+});
