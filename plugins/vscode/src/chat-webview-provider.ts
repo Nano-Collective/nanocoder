@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, WebviewMessageAddProvider, ExtensionMessageSettingsData } from './webview-protocol';
 
 
 
@@ -12,6 +12,7 @@ import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
+import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
 
 /**
  * Excluded from `@` search regardless of user settings — never useful context.
@@ -477,6 +478,10 @@ export class ChatWebviewProvider
 					case 'revertToCheckpoint':
 						this._handleRevert(message.checkpointId);
 						break;
+					case 'addProvider':
+						this._outputChannel.appendLine(`[Webview] Add provider requested: ${message.provider.name}`);
+						void this._handleAddProvider(message.provider);
+						break;
 				}
 			}
 		);
@@ -618,10 +623,53 @@ export class ChatWebviewProvider
 		}
 	}
 
-	private _readWebviewSettings(cwd: string): SettingsData & {showTokenUsage: boolean} {
+	private async _handleAddProvider(provider: WebviewMessageAddProvider['provider']): Promise<void> {
+		try {
+			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const result = this._settingsManager.addProvider(cwd, provider);
+
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+				this.postMessage({type: 'addProviderResult', success: true});
+				
+				try {
+					await vscode.commands.executeCommand('nanocoder.restartAcp');
+				} catch (cmdError) {
+					this._outputChannel.appendLine(`[Settings] nanocoder.restartAcp command failed: ${cmdError}`);
+				}
+			} else {
+				this.postMessage({type: 'addProviderResult', success: false, error: result.error});
+				vscode.window.showErrorMessage(`Failed to add provider '${provider.name}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to add provider: ${message}`);
+			this.postMessage({type: 'addProviderResult', success: false, error: message});
+			vscode.window.showErrorMessage(`Failed to add provider: ${message}`);
+		}
+	}
+
+	private _readWebviewSettings(cwd: string): ExtensionMessageSettingsData['settings'] {
+		const providerTemplates: Record<string, {name: string, sdk: string, url: string, requiresKey: boolean, models: string[]}> = {};
+		for (const t of PROVIDER_TEMPLATES) {
+			const dummyConfig = t.buildConfig({});
+			const modelField = t.fields.find((f: TemplateField) => f.name === 'model');
+			const requiresKey = t.fields.some((f: TemplateField) => f.name === 'apiKey' && f.required);
+			
+			providerTemplates[t.id] = {
+				name: t.name,
+				sdk: dummyConfig.sdkProvider || 'openai-compatible',
+				url: dummyConfig.baseUrl || '',
+				requiresKey: !!requiresKey,
+				models: modelField?.default ? modelField.default.split(',').map((m: string) => m.trim()) : []
+			};
+		}
+
 		return {
 			...this._settingsManager.readSettings(cwd),
 			showTokenUsage: this._readShowTokenUsage(),
+			providerTemplates
 		};
 	}
 

@@ -2301,6 +2301,11 @@
 					console.error('Failed to update setting:', message.error);
 				}
 				break;
+			case 'addProviderResult':
+				if (window._handleAddProviderResult) {
+					window._handleAddProviderResult(message);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
@@ -2673,6 +2678,254 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
 			});
 		}
+
+		// Add Provider logic
+		const toggleAddProviderBtn = document.getElementById('toggle-add-provider-btn');
+		const closeAddProviderBtn = document.getElementById('close-add-provider-btn');
+		const addProviderFormContainer = document.getElementById('add-provider-form-container');
+		const addProviderSubmit = document.getElementById('add-provider-submit-btn');
+
+		const presetSelect = document.getElementById('add-provider-preset-select');
+		const customNameInput = document.getElementById('add-provider-custom-name');
+		const sdkGroup = document.getElementById('add-provider-sdk-group');
+		const sdkSelect = document.getElementById('add-provider-sdk');
+		const urlGroup = document.getElementById('add-provider-url-group');
+		const baseUrlInput = document.getElementById('add-provider-baseurl');
+		const apiKeyGroup = document.getElementById('add-provider-apikey-group');
+		const apiKeyInput = document.getElementById('add-provider-apikey');
+		const modelsContainer = document.getElementById('add-provider-models-container');
+		const addModelBtn = document.getElementById('add-provider-add-model-btn');
+
+		let providerPresets = {}; // Will be populated from settingsData
+		
+		// Expose a function to update presets from settingsData
+		window._updateProviderPresets = (templates) => {
+			if (templates) {
+				providerPresets = templates;
+				
+				// Keep 'custom' at the end or if not present, add it
+				if (!providerPresets['custom']) {
+					providerPresets['custom'] = { name: "Custom...", sdk: "openai-compatible", url: "", requiresKey: false, models: [] };
+				}
+				
+				// Re-populate the preset select dropdown if it exists
+				if (presetSelect && presetSelect.options.length <= 1) { // Only if empty or has just default
+					presetSelect.innerHTML = '';
+					for (const [key, preset] of Object.entries(providerPresets)) {
+						const option = document.createElement('option');
+						option.value = key;
+						option.textContent = preset.name || 'Custom...';
+						presetSelect.appendChild(option);
+					}
+				}
+			}
+		};
+
+		function createModelRow(presetModels) {
+			const row = document.createElement('div');
+			row.className = 'flex gap-2 items-start model-row';
+
+			const inputContainer = document.createElement('div');
+			inputContainer.className = 'flex-grow flex flex-col gap-1';
+
+			const select = document.createElement('select');
+			select.className = 'settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] model-select';
+			
+			presetModels.forEach(model => {
+				const option = document.createElement('option');
+				option.value = option.textContent = model;
+				select.appendChild(option);
+			});
+			const customOption = document.createElement('option');
+			customOption.value = 'custom';
+			customOption.textContent = 'Custom...';
+			select.appendChild(customOption);
+
+			const customInput = document.createElement('input');
+			customInput.type = 'text';
+			customInput.placeholder = 'Model name (e.g. my-model)';
+			customInput.className = 'hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1 custom-model-input';
+
+			select.addEventListener('change', () => {
+				if (select.value === 'custom') {
+					customInput.classList.remove('hidden');
+				} else {
+					customInput.classList.add('hidden');
+				}
+			});
+
+			inputContainer.appendChild(select);
+			inputContainer.appendChild(customInput);
+
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'text-vscode-descriptionForeground hover:text-vscode-error bg-transparent border-none cursor-pointer p-1.5';
+			removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			
+			removeBtn.addEventListener('click', () => {
+				if (modelsContainer.children.length > 1) {
+					row.remove();
+					updateRemoveButtons();
+				}
+			});
+
+			row.appendChild(inputContainer);
+			row.appendChild(removeBtn);
+
+			modelsContainer.appendChild(row);
+
+			// Hide remove button if it's the only row
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			const rows = modelsContainer.querySelectorAll('.model-row');
+			rows.forEach((row, index) => {
+				const removeBtn = row.querySelector('button');
+				removeBtn.style.visibility = '';
+				
+				// Either it's the only row, or we can just always disable the first one
+				// "disable for only for the first model box"
+				if (index === 0) {
+					removeBtn.disabled = true;
+					removeBtn.classList.add('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.remove('hover:text-vscode-error', 'cursor-pointer');
+				} else {
+					removeBtn.disabled = false;
+					removeBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.add('hover:text-vscode-error', 'cursor-pointer');
+				}
+			});
+		}
+
+		function updateProviderForm() {
+			const presetKey = presetSelect.value;
+			const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+			if (presetKey === 'custom') {
+				customNameInput.classList.remove('hidden');
+				sdkGroup.classList.remove('hidden');
+				urlGroup.classList.remove('hidden');
+				apiKeyGroup.classList.remove('hidden');
+			} else {
+				customNameInput.classList.add('hidden');
+				sdkGroup.classList.add('hidden');
+				urlGroup.classList.add('hidden');
+				apiKeyGroup.classList.toggle('hidden', !preset.requiresKey);
+				
+				sdkSelect.value = preset.sdk;
+				baseUrlInput.value = preset.url;
+			}
+
+			// Reset models to single row
+			modelsContainer.innerHTML = '';
+			createModelRow(preset.models);
+		}
+
+		if (addModelBtn) {
+			addModelBtn.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+				createModelRow(preset.models);
+			});
+		}
+
+		if (toggleAddProviderBtn && closeAddProviderBtn && addProviderFormContainer) {
+			toggleAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.remove('hidden');
+				toggleAddProviderBtn.parentElement.classList.add('hidden');
+				updateProviderForm();
+			});
+
+			closeAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.add('hidden');
+				toggleAddProviderBtn.parentElement.classList.remove('hidden');
+			});
+		}
+
+		if (presetSelect) presetSelect.addEventListener('change', updateProviderForm);
+
+		if (addProviderSubmit) {
+			addProviderSubmit.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+				const name = presetKey === 'custom' ? customNameInput.value.trim() : preset.name;
+				const sdkProvider = sdkSelect.value;
+				const baseUrl = baseUrlInput.value.trim();
+				const apiKey = apiKeyInput.value.trim();
+				
+				const models = [];
+				const modelRows = modelsContainer.querySelectorAll('.model-row');
+				modelRows.forEach(row => {
+					const select = row.querySelector('.model-select');
+					const customInput = row.querySelector('.custom-model-input');
+					
+					let modelStr = '';
+					if (select.value === 'custom') {
+						modelStr = customInput.value.trim();
+					} else {
+						modelStr = select.value;
+					}
+
+					// Split in case user pasted comma separated in custom
+					const parsedModels = modelStr ? modelStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+					models.push(...parsedModels);
+				});
+
+				// deduplicate models and check if empty
+				const uniqueModels = [...new Set(models)];
+
+				if (!name) {
+					vscode.postMessage({ type: 'showError', message: 'Provider name is required.' });
+					return;
+				}
+				if (uniqueModels.length === 0) {
+					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
+					return;
+				}
+				if (models.some((m, i) => models.indexOf(m) !== i)) {
+					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
+					return;
+				}
+
+				const provider = {
+					name,
+					sdkProvider,
+					...(baseUrl ? { baseUrl } : {}),
+					...(apiKey ? { apiKey } : {}),
+					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
+				};
+
+				// Disable the submit button and show a spinner or "Saving..." state
+				const originalText = addProviderSubmit.innerHTML;
+				addProviderSubmit.innerHTML = '<span class="codicon codicon-loading codicon-modifier-spin"></span> Saving...';
+				addProviderSubmit.disabled = true;
+
+				vscode.postMessage({ type: 'addProvider', provider });
+
+				// We will wait for 'addProviderResult' message to reset and hide the form, or show an error
+				window._handleAddProviderResult = (msg) => {
+					addProviderSubmit.innerHTML = originalText;
+					addProviderSubmit.disabled = false;
+					
+					if (msg.success) {
+						presetSelect.value = 'custom';
+						presetSelect.dispatchEvent(new Event('change'));
+						customNameInput.value = '';
+						baseUrlInput.value = '';
+						apiKeyInput.value = '';
+						
+						if (addProviderFormContainer) {
+							addProviderFormContainer.classList.add('hidden');
+							toggleAddProviderBtn.parentElement.classList.remove('hidden');
+						}
+					}
+					// On error, we leave the form open so the user can fix it.
+					// The host will show the error via showErrorMessage.
+					window._handleAddProviderResult = null;
+				};
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2680,6 +2933,10 @@
 	 * Populate the settings UI with data received from the extension host.
 	 */
 	function renderSettingsData(settings) {
+		if (settings.providerTemplates && window._updateProviderPresets) {
+			window._updateProviderPresets(settings.providerTemplates);
+		}
+		
 		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {

@@ -123,12 +123,30 @@ export interface ExtensionMessageUpdateSessions {
 
 export interface ExtensionMessageSettingsData {
 	type: 'settingsData';
-	settings: SettingsData & {showTokenUsage: boolean};
+	settings: SettingsData & {
+		showTokenUsage: boolean;
+		providerTemplates: Record<
+			string,
+			{
+				name: string;
+				sdk: string;
+				url: string;
+				requiresKey: boolean;
+				models: string[];
+			}
+		>;
+	};
 }
 
 export interface ExtensionMessageSettingsUpdated {
 	type: 'settingsUpdated';
 	key: string;
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageProviderResult {
+	type: 'addProviderResult';
 	success: boolean;
 	error?: string;
 }
@@ -205,6 +223,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessagePermissionsCancelled
+	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
@@ -343,6 +362,17 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageAddProvider {
+	type: 'addProvider';
+	provider: {
+		name: string;
+		sdkProvider: string;
+		baseUrl?: string;
+		apiKey?: string;
+		models?: string[];
+	};
+}
+
 export interface WebviewMessageApprovePlan {
 	type: 'approvePlan';
 }
@@ -403,6 +433,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageAddProvider
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
