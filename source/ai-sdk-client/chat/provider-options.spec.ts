@@ -280,6 +280,69 @@ test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
 	t.deepEqual(result, {openrouter: {experimental_flag: true}});
 });
 
+test('openai-compatible forwards reasoningEffort under the provider name', t => {
+	const provider = makeProvider({
+		name: 'DeepSeek',
+		sdkProvider: 'openai-compatible',
+	});
+	const result = buildProviderOptions(provider, '', {reasoningEffort: 'high'});
+	t.deepEqual(result, {DeepSeek: {reasoningEffort: 'high'}});
+});
+
+test('openai-compatible defaults sdkProvider to the same handling when unset', t => {
+	const result = buildProviderOptions(
+		makeProvider({name: 'DeepSeek'}),
+		'',
+		{reasoningEffort: 'low'},
+	);
+	t.deepEqual(result, {DeepSeek: {reasoningEffort: 'low'}});
+});
+
+test('openai-compatible keys by the full provider name, including spaces', t => {
+	const result = buildProviderOptions(
+		makeProvider({name: 'My Provider', sdkProvider: 'openai-compatible'}),
+		'',
+		{reasoningEffort: 'medium'},
+	);
+	t.deepEqual(result, {'My Provider': {reasoningEffort: 'medium'}});
+});
+
+test('openai-compatible emits nothing when reasoningEffort is unset', t => {
+	const result = buildProviderOptions(
+		makeProvider({name: 'DeepSeek', sdkProvider: 'openai-compatible'}),
+		'',
+		{temperature: 0.5},
+	);
+	t.is(result, undefined);
+});
+
+test('openai-compatible ignores chatgpt-codex-only reasoningSummary', t => {
+	const result = buildProviderOptions(
+		makeProvider({name: 'DeepSeek', sdkProvider: 'openai-compatible'}),
+		'',
+		{reasoningSummary: 'detailed'},
+	);
+	t.is(result, undefined);
+});
+
+test('reasoningEffort is not forwarded to non-openai-compatible SDK providers', t => {
+	for (const sdkProvider of ['anthropic', 'google', 'github-copilot'] as const) {
+		const result = buildProviderOptions(
+			makeProvider({name: 'Other', sdkProvider}),
+			'',
+			{reasoningEffort: 'high'},
+		);
+		t.is(result, undefined, `${sdkProvider} must not receive reasoningEffort`);
+	}
+});
+
+test('OpenRouter keeps its own reasoning mapping over the generic branch', t => {
+	const result = buildProviderOptions(makeProvider(), '', {
+		reasoningEffort: 'high',
+	});
+	t.deepEqual(result, {openrouter: {reasoning: {effort: 'high'}}});
+});
+
 test('isPromptCachingEnabled is on by default for the anthropic SDK', t => {
 	t.true(
 		isPromptCachingEnabled(makeProvider({sdkProvider: 'anthropic'})),

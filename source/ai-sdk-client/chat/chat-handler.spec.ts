@@ -1,6 +1,7 @@
 import test from 'ava';
 import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
+import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {jsonSchema, streamText, tool} from 'ai';
 import type {
 	AIProviderConfig,
@@ -1050,4 +1051,66 @@ test('the v4 spelling maxTokens does not reach the provider', async t => {
 		4096,
 		'maxTokens is silently ignored — the bug this fix exists for',
 	);
+});
+
+// --- reasoningEffort forwarding ---
+//
+// The openai-compatible provider maps a providerOptions entry keyed by the
+// provider name to `reasoning_effort` in the request body. Assert what reaches
+// the wire: the full path (buildProviderOptions -> handleChat -> SDK) is what
+// needs pinning, and it cannot be checked from the pure helper alone.
+
+async function captureOpenAICompatibleRequestBody(
+	modelParameters: {reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'},
+): Promise<Record<string, unknown>> {
+	let captured: Record<string, unknown> = {};
+	const name = 'DeepSeek';
+	const provider = createOpenAICompatible({
+		name,
+		baseURL: 'https://api.deepseek.test/v1',
+		apiKey: 'test-key',
+		fetch: async (_url, init) => {
+			captured = JSON.parse(String(init?.body));
+			return new Response(
+				[
+					'data: {"id":"1","object":"chat.completion","created":0,"model":"deepseek-chat","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}\n\n',
+					'data: [DONE]\n\n',
+				].join(''),
+				{status: 200, headers: {'content-type': 'text/event-stream'}},
+			);
+		},
+	});
+
+	await handleChat({
+		model: provider('deepseek-chat') as LanguageModel,
+		currentModel: 'deepseek-chat',
+		providerConfig: {
+			name,
+			type: 'openai-compatible',
+			models: ['deepseek-chat'],
+			config: {baseURL: 'https://api.deepseek.test/v1', apiKey: 'test-key'},
+		},
+		messages: [{role: 'user', content: 'test'}],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		modeOverrides: {
+			nonInteractiveMode: true,
+			nonInteractiveAlwaysAllow: [],
+			modelParameters,
+		},
+	});
+	return captured;
+}
+
+test('tune reasoningEffort reaches an openai-compatible provider as reasoning_effort', async t => {
+	const body = await captureOpenAICompatibleRequestBody({
+		reasoningEffort: 'high',
+	});
+	t.is(body.reasoning_effort, 'high');
+});
+
+test('an openai-compatible provider sends no reasoning_effort when tune leaves it unset', async t => {
+	const body = await captureOpenAICompatibleRequestBody({});
+	t.is(body.reasoning_effort, undefined);
 });

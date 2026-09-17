@@ -125,7 +125,9 @@ Full reference: [openrouter.ai/docs/features/provider-routing](https://openroute
 
 `effort` accepts `"xhigh"`, `"high"`, `"medium"`, `"low"`, `"minimal"`, or `"none"`.
 
-The cross-provider `tune.modelParameters.reasoningEffort` field (`minimal | low | medium | high`) is also honoured for OpenRouter — it maps to `reasoning.effort` automatically. An explicit `openrouter.reasoning.effort` on the provider config wins over the tune shortcut.
+The cross-provider `tune.modelParameters.reasoningEffort` field (`minimal | low | medium | high`) is also honoured for OpenRouter — it maps to `reasoning.effort` automatically, and is settable from the `/tune` modal under **Model Parameters → Reasoning Effort**. An explicit `openrouter.reasoning.effort` on the provider config wins over the tune shortcut.
+
+Because the tune field is shared with other providers, it deliberately offers only the four values they have in common. To reach OpenRouter's `"xhigh"` or `"none"`, set `openrouter.reasoning.effort` directly — that also keeps the value off other providers.
 
 Full reference: [openrouter.ai/docs/use-cases/reasoning-tokens](https://openrouter.ai/docs/use-cases/reasoning-tokens).
 
