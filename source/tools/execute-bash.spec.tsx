@@ -98,6 +98,7 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.truthy(output);
 	t.regex(output!, /execute_bash/);
 	t.regex(output!, /ls/);
+	t.notRegex(output!, /Description:/);
 });
 
 test('ExecuteBashFormatter splits compound commands onto separate lines', t => {

@@ -1121,4 +1121,22 @@ test('write_file formatter: renders description when provided', async t => {
 	t.regex(output, /Path:\s*config\.json/);
 });
 
+test('write_file formatter: does not render description when omitted', async t => {
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: 'config.json',
+		content: '{\n  "version": 1\n}',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.notRegex(output, /Description:/);
+	t.regex(output, /Path:\s*config\.json/);
+});
+
 
