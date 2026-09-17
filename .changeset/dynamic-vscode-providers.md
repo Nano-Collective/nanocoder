@@ -1,5 +1,5 @@
 ---
-"@nanocollective/nanocoder-vscode": patch
+'@nanocollective/nanocoder': patch
 ---
 
 Overhaul VS Code Add Provider UI:

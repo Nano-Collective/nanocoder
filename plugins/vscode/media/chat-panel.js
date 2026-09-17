@@ -2301,6 +2301,11 @@
 					console.error('Failed to update setting:', message.error);
 				}
 				break;
+			case 'addProviderResult':
+				if (window._handleAddProviderResult) {
+					window._handleAddProviderResult(message);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
@@ -2691,31 +2696,29 @@
 		const modelsContainer = document.getElementById('add-provider-models-container');
 		const addModelBtn = document.getElementById('add-provider-add-model-btn');
 
-		const providerPresets = {
-			"ollama": { name: "Ollama", sdk: "openai-compatible", url: "http://localhost:11434/v1", requiresKey: false, models: ["llama4"] },
-			"llama-cpp": { name: "llama-cpp", sdk: "openai-compatible", url: "http://localhost:8080/v1", requiresKey: false, models: [] },
-			"mlx-server": { name: "MLX Server", sdk: "openai-compatible", url: "http://localhost:8080/v1", requiresKey: false, models: [] },
-			"lmstudio": { name: "LM Studio", sdk: "openai-compatible", url: "http://localhost:1234/v1", requiresKey: false, models: [] },
-			"gemini": { name: "Google Gemini", sdk: "google", url: "https://generativelanguage.googleapis.com/v1beta", requiresKey: true, models: ["gemini-3.6-flash"] },
-			"openrouter": { name: "OpenRouter", sdk: "openai-compatible", url: "https://openrouter.ai/api/v1", requiresKey: true, models: ["anthropic/claude-sonnet-5"] },
-			"requesty": { name: "Requesty", sdk: "openai-compatible", url: "https://router.requesty.ai/v1", requiresKey: true, models: ["openai/gpt-4o-mini"] },
-			"orcarouter": { name: "OrcaRouter", sdk: "openai-compatible", url: "https://api.orcarouter.ai/v1", requiresKey: true, models: ["openai/gpt-5.5"] },
-			"openai": { name: "OpenAI", sdk: "openai-compatible", url: "https://api.openai.com/v1", requiresKey: true, models: ["gpt-5.6-sol"] },
-			"anthropic": { name: "Anthropic Claude", sdk: "anthropic", url: "https://api.anthropic.com/v1", requiresKey: true, models: ["claude-sonnet-5"] },
-			"mistral": { name: "Mistral AI", sdk: "openai-compatible", url: "https://api.mistral.ai/v1", requiresKey: true, models: ["mistral-large-latest"] },
-			"groq": { name: "Groq", sdk: "openai-compatible", url: "https://api.groq.com/openai/v1", requiresKey: true, models: ["openai/gpt-oss-120b"] },
-			"z-ai": { name: "Z.ai", sdk: "openai-compatible", url: "https://api.z.ai/api/paas/v4/", requiresKey: true, models: ["glm-5.2"] },
-			"z-ai-coding": { name: "Z.ai Coding Subscription", sdk: "openai-compatible", url: "https://api.z.ai/api/coding/paas/v4/", requiresKey: true, models: ["glm-5.2"] },
-			"github-models": { name: "GitHub Models", sdk: "openai-compatible", url: "https://models.github.ai/inference", requiresKey: true, models: ["openai/gpt-5.6-sol"] },
-			"chatgpt-codex": { name: "ChatGPT / Codex", sdk: "chatgpt-codex", url: "https://chatgpt.com/backend-api/codex", requiresKey: false, models: ["gpt-5.3-codex"] },
-			"github-copilot": { name: "GitHub Copilot", sdk: "github-copilot", url: "https://api.githubcopilot.com", requiresKey: false, models: ["gpt-5.6-sol"] },
-			"kimi-code": { name: "Kimi Code", sdk: "anthropic", url: "https://api.kimi.com/coding/v1", requiresKey: true, models: ["kimi-for-coding"] },
-			"minimax-coding": { name: "MiniMax Coding Plan", sdk: "anthropic", url: "https://api.minimax.io/anthropic/v1", requiresKey: true, models: ["MiniMax-M3", "MiniMax-M2.7"] },
-			"thesean": { name: "Thesean AI", sdk: "anthropic", url: "https://api.thesean.ai", requiresKey: true, models: ["ship-like/claude-opus-4-8"] },
-			"poe": { name: "Poe", sdk: "openai-compatible", url: "https://api.poe.com/v1", requiresKey: true, models: ["gpt-5.6-sol"] },
-			"atlas-cloud": { name: "Atlas Cloud", sdk: "openai-compatible", url: "https://api.atlascloud.ai/v1", requiresKey: true, models: ["openai/gpt-5.6-sol"] },
-			"together": { name: "Together AI", sdk: "openai-compatible", url: "https://api.together.ai/v1", requiresKey: true, models: ["deepseek-ai/DeepSeek-V4-Pro"] },
-			"custom": { name: "", sdk: "openai-compatible", url: "", requiresKey: false, models: [] }
+		let providerPresets = {}; // Will be populated from settingsData
+		
+		// Expose a function to update presets from settingsData
+		window._updateProviderPresets = (templates) => {
+			if (templates) {
+				providerPresets = templates;
+				
+				// Keep 'custom' at the end or if not present, add it
+				if (!providerPresets['custom']) {
+					providerPresets['custom'] = { name: "Custom...", sdk: "openai-compatible", url: "", requiresKey: false, models: [] };
+				}
+				
+				// Re-populate the preset select dropdown if it exists
+				if (presetSelect && presetSelect.options.length <= 1) { // Only if empty or has just default
+					presetSelect.innerHTML = '';
+					for (const [key, preset] of Object.entries(providerPresets)) {
+						const option = document.createElement('option');
+						option.value = key;
+						option.textContent = preset.name || 'Custom...';
+						presetSelect.appendChild(option);
+					}
+				}
+			}
 		};
 
 		function createModelRow(presetModels) {
@@ -2880,7 +2883,7 @@
 					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
 					return;
 				}
-				if (models.length !== uniqueModels.length) {
+				if (models.some((m, i) => models.indexOf(m) !== i)) {
 					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
 					return;
 				}
@@ -2893,18 +2896,34 @@
 					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
 				};
 
+				// Disable the submit button and show a spinner or "Saving..." state
+				const originalText = addProviderSubmit.innerHTML;
+				addProviderSubmit.innerHTML = '<span class="codicon codicon-loading codicon-modifier-spin"></span> Saving...';
+				addProviderSubmit.disabled = true;
+
 				vscode.postMessage({ type: 'addProvider', provider });
 
-				// Reset form and hide it
-				presetSelect.value = 'ollama';
-				customNameInput.value = '';
-				baseUrlInput.value = '';
-				apiKeyInput.value = '';
-				
-				if (addProviderFormContainer) {
-					addProviderFormContainer.classList.add('hidden');
-					toggleAddProviderBtn.parentElement.classList.remove('hidden');
-				}
+				// We will wait for 'addProviderResult' message to reset and hide the form, or show an error
+				window._handleAddProviderResult = (msg) => {
+					addProviderSubmit.innerHTML = originalText;
+					addProviderSubmit.disabled = false;
+					
+					if (msg.success) {
+						presetSelect.value = 'custom';
+						presetSelect.dispatchEvent(new Event('change'));
+						customNameInput.value = '';
+						baseUrlInput.value = '';
+						apiKeyInput.value = '';
+						
+						if (addProviderFormContainer) {
+							addProviderFormContainer.classList.add('hidden');
+							toggleAddProviderBtn.parentElement.classList.remove('hidden');
+						}
+					}
+					// On error, we leave the form open so the user can fix it.
+					// The host will show the error via showErrorMessage.
+					window._handleAddProviderResult = null;
+				};
 			});
 		}
 	}
@@ -2914,6 +2933,10 @@
 	 * Populate the settings UI with data received from the extension host.
 	 */
 	function renderSettingsData(settings) {
+		if (settings.providerTemplates && window._updateProviderPresets) {
+			window._updateProviderPresets(settings.providerTemplates);
+		}
+		
 		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {
