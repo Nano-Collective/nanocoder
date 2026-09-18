@@ -129,7 +129,6 @@ export function activate(context: vscode.ExtensionContext) {
 			acpClient.newChat();
 			chatProvider.resetSessionState();
 			chatProvider.postMessage({type: 'clear'});
-			chatProvider.postMessage({type: 'updateTimeline', entries: []});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),
 		vscode.commands.registerCommand('nanocoder.cancel', () => {
