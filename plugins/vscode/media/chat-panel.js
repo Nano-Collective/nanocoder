@@ -580,9 +580,10 @@
 		retryBtn.title = 'Retry';
 		retryBtn.setAttribute('aria-label', 'Retry response');
 		retryBtn.innerHTML = ICONS.refresh;
+
 		if (isProcessing) {
-			retryBtn.disabled = true;
-			retryBtn.classList.add('opacity-30', 'cursor-not-allowed');
+			footer.style.display = 'none';
+			footer.classList.add('agent-footer-processing');
 		}
 
 		retryBtn.addEventListener('click', () => {
@@ -648,18 +649,18 @@
 			});
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
+			
+			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
+			hiddenFooters.forEach(f => {
+				f.style.display = '';
+				f.classList.remove('agent-footer-processing');
+			});
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
-		const allRetryBtns = document.querySelectorAll('.retry-btn');
-		allRetryBtns.forEach(btn => {
-			btn.disabled = active;
-			btn.classList.toggle('opacity-30', active);
-			btn.classList.toggle('cursor-not-allowed', active);
-		});
-	}
+		}
 
 	function setPlanReviewActive(active) {
 		if (active) {
