@@ -911,6 +911,7 @@ export class AcpAgent implements Agent {
 
 		if (turnDurationMs !== undefined) {
 			assistant.durationMs = turnDurationMs;
+			assistant.outcome = 'completed';
 		}
 
 		if (!response.usage) return;

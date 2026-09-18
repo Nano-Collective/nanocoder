@@ -661,7 +661,7 @@
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
-		}
+	}
 
 	function setPlanReviewActive(active) {
 		if (active) {
@@ -807,7 +807,7 @@
 		card.appendChild(body);
 		messagesContainer.appendChild(card);
 		setPlanReviewActive(true);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Shared by the Stop button and Escape so the two can't drift apart.
@@ -1822,7 +1822,11 @@
 		));
 
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom(role === 'user');
+		if (role === 'user') {
+			scrollToBottom(true);
+		} else {
+			scrollToBottomIfFollowing();
+		}
 
 		if (role === 'agent') {
 			// This opens a fresh container, so whatever block was open is done.
@@ -1846,14 +1850,14 @@
 
 		visualLoader = wrapper;
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function keepVisualLoaderAtBottom() {
 		if (visualLoader && visualLoader.parentElement) {
 			messagesContainer.appendChild(visualLoader);
 		}
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function stopVisualLoader() {
@@ -1910,7 +1914,7 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
@@ -1926,17 +1930,17 @@
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
 						renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
 			} else {
 				currentTextEl.textContent += textChunk; // Fallback
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
 		if (typeof marked === 'undefined') {
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 	}
 	let userHasScrolledUp = false;
@@ -1949,6 +1953,10 @@
 		if (force || !userHasScrolledUp) {
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
 		}
+	}
+
+	function scrollToBottomIfFollowing() {
+		scrollToBottom(false);
 	}
 
 	// --- Copy last code block ---
@@ -2064,7 +2072,7 @@
 		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Handle messages from extension.
@@ -3077,7 +3085,7 @@
 			// opens on 'Working for 0s' reads worse than one that opens on a
 			// label and grows a duration a second later.
 			this.body.appendChild(element);
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 
 		removeActivity(element) {
@@ -3231,12 +3239,12 @@
 					this.renderTimeout = setTimeout(() => {
 						this.render();
 						this.renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50);
 				}
 			} else {
 				this.render();
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
@@ -3346,7 +3354,7 @@
 				}
 			}
 
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 	}
 
