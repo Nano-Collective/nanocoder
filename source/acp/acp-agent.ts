@@ -380,6 +380,7 @@ export class AcpAgent implements Agent {
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
+			const turnStart = Date.now();
 			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
@@ -387,7 +388,13 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
-			this.attachResponseUsage(session, response, previousAssistant);
+			const turnDurationMs = Date.now() - turnStart;
+			this.attachResponseUsage(
+				session,
+				response,
+				previousAssistant,
+				turnDurationMs,
+			);
 			turnSucceeded = true;
 			return response;
 		} catch (error) {
@@ -865,14 +872,19 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
-				if (message.responseUsage) {
+				if (message.responseUsage || message.durationMs) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
 							sessionUpdate: 'agent_message_chunk',
 							content: {type: 'text', text: ''},
 							_meta: {
-								'nanocoder/response-usage': message.responseUsage,
+								...(message.responseUsage
+									? {'nanocoder/response-usage': message.responseUsage}
+									: {}),
+								...(message.durationMs
+									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
 							},
 						},
 					});
@@ -885,11 +897,16 @@ export class AcpAgent implements Agent {
 		session: AcpSession,
 		response: PromptResponse,
 		previousAssistant?: (typeof session.messages)[number],
+		turnDurationMs?: number,
 	): void {
-		if (!response.usage) return;
-
 		const assistant = findLastAssistantMessage(session);
 		if (!assistant || assistant === previousAssistant) return;
+
+		if (turnDurationMs !== undefined) {
+			assistant.durationMs = turnDurationMs;
+		}
+
+		if (!response.usage) return;
 
 		const cost = (
 			response._meta as

@@ -2409,6 +2409,11 @@
 			if (replayedUsage) {
 				appendUsageIndicator(replayedUsage, replayedUsage.cost);
 			}
+			const durationMs = update._meta && update._meta['nanocoder/durationMs'];
+			if (durationMs !== undefined && currentWorkSummary) {
+				currentWorkSummary._overrideDuration = durationMs;
+				currentWorkSummary.updateTimer();
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
 			// Whitespace-only reasoning is not worth a section of its own: it
@@ -3037,6 +3042,7 @@
 		}
 
 		elapsedMs() {
+			if (this._overrideDuration !== undefined) return this._overrideDuration;
 			return Date.now() - this.startedAt;
 		}
 

@@ -37,6 +37,7 @@ export interface Message {
 	reasoning?: string;
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
+	durationMs?: number;
 	/**
 	 * Harness-authored chrome: rendered in chat and persisted with session
 	 * history, but filtered out of the provider payload (see
