@@ -1,6 +1,7 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
 import {exportCommand} from './export';
+import {lazyCommands} from './lazy-registry';
 import {promises as fs} from 'fs';
 import path from 'path';
 import React from 'react';
@@ -64,6 +65,11 @@ test('exportCommand has correct name and description', t => {
 		exportCommand.description,
 		'Export the chat history to a markdown or JSON file',
 	);
+});
+
+test('lazy registry keeps the export description in sync', t => {
+	const entry = lazyCommands.find(command => command.name === 'export');
+	t.is(entry?.description, exportCommand.description);
 });
 
 test('exportCommand handler returns React element', async t => {
@@ -156,6 +162,21 @@ test('exportCommand uses an explicit JSON filename', async t => {
 	t.teardown(() => fs.rm(filepath, {force: true}));
 
 	await exportCommand.handler([filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	t.deepEqual(
+		JSON.parse(await fs.readFile(filepath, 'utf8')).messages,
+		JSON.parse(JSON.stringify(testMessages)),
+	);
+});
+
+test('exportCommand uses a JSON filename supplied after --json', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.json`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
 
 	t.true((await fs.stat(filepath)).isFile());
 	t.deepEqual(

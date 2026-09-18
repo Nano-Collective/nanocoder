@@ -105,11 +105,12 @@ export const exportCommand: Command = {
 		messages: Message[],
 		{provider, model, tokens},
 	) => {
-		const jsonRequested = args[0] === '--json' || isJsonExport(args[0] || '');
-		const userProvided = args.length > 0 && args[0] !== '--json';
+		const jsonFlag = args[0] === '--json';
+		const userProvided = jsonFlag ? Boolean(args[1]) : Boolean(args[0]);
+		const jsonRequested = jsonFlag || isJsonExport(args[0] || '');
 		const requestedFilename = jsonRequested
-			? args[0] === '--json'
-				? generateJsonExportFilename(messages)
+			? jsonFlag
+				? args[1] || generateJsonExportFilename(messages)
 				: args[0]
 			: args[0] || generateExportFilename(messages);
 
