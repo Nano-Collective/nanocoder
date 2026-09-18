@@ -208,6 +208,7 @@ export class AcpAgent implements Agent {
 		// the finally, so a clean turn has to be tracked explicitly rather than
 		// inferred from getting there.
 		let turnSucceeded = false;
+		const turnStart = Date.now();
 
 		try {
 			const {text: userText, images} = await acpContentToUserMessage(
@@ -380,7 +381,6 @@ export class AcpAgent implements Agent {
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
-			const turnStart = Date.now();
 			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
@@ -417,6 +417,8 @@ export class AcpAgent implements Agent {
 					role: 'assistant',
 					content: cancelNotice,
 					displayOnly: true,
+					durationMs: Date.now() - turnStart,
+					outcome: 'cancelled',
 				});
 				return {stopReason: 'cancelled'};
 			}
@@ -438,6 +440,8 @@ export class AcpAgent implements Agent {
 				role: 'assistant',
 				content: formattedError,
 				displayOnly: true,
+				durationMs: Date.now() - turnStart,
+				outcome: 'failed',
 			});
 
 			throw error;
@@ -872,7 +876,7 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
-				if (message.responseUsage || message.durationMs) {
+				if (message.responseUsage || message.durationMs || message.outcome) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
@@ -884,6 +888,9 @@ export class AcpAgent implements Agent {
 									: {}),
 								...(message.durationMs
 									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
+								...(message.outcome
+									? {'nanocoder/outcome': message.outcome}
 									: {}),
 							},
 						},

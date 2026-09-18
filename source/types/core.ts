@@ -38,6 +38,7 @@ export interface Message {
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
 	durationMs?: number;
+	outcome?: 'completed' | 'cancelled' | 'failed';
 	/**
 	 * Harness-authored chrome: rendered in chat and persisted with session
 	 * history, but filtered out of the provider payload (see

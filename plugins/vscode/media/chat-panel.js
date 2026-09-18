@@ -2130,7 +2130,7 @@
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
-				finishCurrentWorkSummary('completed');
+				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
 				pendingUserMessageText = null;
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
@@ -2414,6 +2414,10 @@
 			if (durationMs !== undefined && currentWorkSummary) {
 				currentWorkSummary._overrideDuration = durationMs;
 				currentWorkSummary.updateTimer();
+			}
+			const outcome = update._meta && update._meta['nanocoder/outcome'];
+			if (outcome && currentWorkSummary) {
+				currentWorkSummary._overrideOutcome = outcome;
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
