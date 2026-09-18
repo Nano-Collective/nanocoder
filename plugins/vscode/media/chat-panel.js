@@ -1700,15 +1700,15 @@
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
-			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full w-full');
+			(role === 'user' ? 'self-end items-end max-w-[90%]' : 'self-start items-start max-w-full w-full');
 		wrapper.dataset.role = role;
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// No max-w here: the wrapper already caps the turn at 90%. A second
 				// percentage would resolve against the wrapper's shrink-to-fit width,
-				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				// squeezing the bubble to 90% of its own content and wrapping mid-word.
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
