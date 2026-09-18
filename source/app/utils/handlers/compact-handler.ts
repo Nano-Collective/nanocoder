@@ -15,6 +15,7 @@ import {
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
+import {parseInlineOverrides} from '@/utils/inline-overrides';
 import {summariseWithLLM} from '@/utils/llm-summariser';
 import {
 	COMPRESSION_CONSTANTS,
@@ -46,7 +47,7 @@ export async function handleCompactCommand(
 		return false;
 	}
 
-	const args = commandParts.slice(1);
+	const args = parseInlineOverrides(commandParts.slice(1)).args;
 	// Explicit flags win; otherwise fall back to the same settings auto-compact
 	// uses (session overrides, tune, then `autoCompact` config).
 	let mode: CompressionMode | null = null;
