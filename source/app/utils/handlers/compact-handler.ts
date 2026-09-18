@@ -13,6 +13,7 @@ import {
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
+import {parseInlineOverrides} from '@/utils/inline-overrides';
 import {summariseWithLLM} from '@/utils/llm-summariser';
 import {
 	COMPRESSION_CONSTANTS,
@@ -44,7 +45,10 @@ export async function handleCompactCommand(
 		return false;
 	}
 
-	const args = commandParts.slice(1);
+	// Defensive: the dispatcher already strips `?key=value` tokens, but
+	// direct callers (and tests) may pass them through. Drop them here so a
+	// stray `?threshold=80` never reaches the flag loop as an unknown arg.
+	const {args} = parseInlineOverrides(commandParts.slice(1));
 	let mode: CompressionMode = 'default';
 	let preview = false;
 	// Strategy: explicit flag wins; otherwise prefer LLM when a client is available.
