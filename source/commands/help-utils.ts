@@ -79,6 +79,11 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 };
 
 const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
+	agents: {
+		usage: '/agents [show <name>|copy <name>|create <name>]',
+		options: ['show <name>', 'copy <name>', 'create <name>'],
+		examples: ['/agents', '/agents show explore', '/agents copy explore'],
+	},
 	help: {
 		category: 'System & Diagnostics',
 		usage: '/help [command]',
@@ -188,6 +193,23 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/settings [tab]',
 		options: ['providers', 'mcp', 'theme', 'appearance'],
 		examples: ['/settings', '/settings providers'],
+	},
+	skills: {
+		usage:
+			'/skills [show|create|check|promote|demote] <name> [--force] [--move]',
+		options: [
+			'show <name>',
+			'create <name>',
+			'check <name>',
+			'promote <name> [--force] [--move]',
+			'demote <name> [--force] [--move]',
+		],
+		examples: [
+			'/skills',
+			'/skills show pr-reviewer',
+			'/skills check pr-reviewer',
+			'/skills promote pr-reviewer --move',
+		],
 	},
 	stats: {
 		usage: '/stats [7d|3m|all-time|reset]',

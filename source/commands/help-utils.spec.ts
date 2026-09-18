@@ -47,15 +47,21 @@ test('getCommandHelpDetails exposes usage, options, aliases, and examples', t =>
 });
 
 test('getCommandHelpDetails documents supported command syntax', t => {
+	const agents = getCommandHelpDetails(command('agents'));
 	const checkpoint = getCommandHelpDetails(command('checkpoint'));
 	const memory = getCommandHelpDetails(command('memory'));
 	const compact = getCommandHelpDetails(command('compact'));
 	const init = getCommandHelpDetails(command('init'));
+	const skills = getCommandHelpDetails(command('skills'));
 
+	t.is(agents.usage, '/agents [show <name>|copy <name>|create <name>]');
+	t.true(agents.options?.includes('copy <name>'));
 	t.true(checkpoint.options?.includes('delete|remove|rm <name>'));
 	t.true(memory.options?.includes('accept <n>'));
 	t.true(compact.options?.includes('--threshold <50-95>'));
 	t.true(init.options?.includes('--preset <react|nextjs|rust>'));
+	t.true(skills.options?.includes('promote <name> [--force] [--move]'));
+	t.true(skills.examples?.includes('/skills check pr-reviewer'));
 	t.is(getCommandHelpDetails(command('commands')).aliases, undefined);
 });
 
