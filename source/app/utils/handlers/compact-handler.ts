@@ -21,6 +21,7 @@ import {
 } from '@/utils/message-compression';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 /**
  * Handles /compact command. Returns true if handled.
@@ -64,6 +65,7 @@ export async function handleCompactCommand(
 			const restored = compressionBackup.restore();
 			if (restored) {
 				setMessages(restored);
+				bumpReadContentGeneration();
 				onAddToChatQueue(
 					successMsg(
 						`Restored ${restored.length} messages from backup.`,
@@ -226,6 +228,7 @@ export async function handleCompactCommand(
 			} else {
 				compressionBackup.storeBackup(messages);
 				setMessages(llmResult);
+				bumpReadContentGeneration();
 				onAddToChatQueue(successMsg(summaryMessage, 'compact-success'));
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -256,6 +259,7 @@ export async function handleCompactCommand(
 				msg => msg.role !== 'system',
 			);
 			setMessages(compressedUserMessages);
+			bumpReadContentGeneration();
 
 			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(

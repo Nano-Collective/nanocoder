@@ -6,6 +6,10 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	bumpReadContentGeneration,
+	clearReadTracker,
+} from '../utils/read-tracker.js';
 import {readFileTool} from './read-file';
 
 // ============================================================================
@@ -13,6 +17,10 @@ import {readFileTool} from './read-file';
 // ============================================================================
 
 console.log(`\nread-file.spec.tsx – ${React.version}`);
+
+test.beforeEach(() => {
+	clearReadTracker();
+});
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
@@ -1205,6 +1213,129 @@ test.serial('read_file metadata_only shows converted binary encoding for DOCX', 
 		)) as string;
 
 		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file stubs a second unchanged read of the same path', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'same.ts');
+		writeFileSync(filePath, 'const a = 1;\n');
+
+		const first = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(first.includes('const a = 1;'));
+
+		const second = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(second.includes('already in context'));
+		t.false(second.includes('const a = 1;'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the body again after the file changes', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-changed-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'changed.ts');
+		writeFileSync(filePath, 'first\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		writeFileSync(filePath, 'second\n');
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('second'));
+		t.false(result.includes('already in context'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file range request is never stubbed as a full-file read', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-range-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'ranged.ts');
+		writeFileSync(filePath, 'one\ntwo\nthree\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		const ranged = await readFileTool.tool.execute!(
+			{path: filePath, start_line: 2, end_line: 2},
+			{toolCallId: 'test', messages: []},
+		);
+		t.is(ranged, 'two');
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only does not create a stub', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-meta-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'meta.ts');
+		writeFileSync(filePath, 'visible\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath, metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('visible'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the body again after compact generation bump', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-gen-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'gen.ts');
+		writeFileSync(filePath, 'keep me\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		bumpReadContentGeneration();
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('keep me'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

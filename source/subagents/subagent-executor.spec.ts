@@ -29,6 +29,13 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	clearReadTracker,
+	forgetReadContent,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -1797,3 +1804,56 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		'an audit-log hook must see the failed delegated call too',
 	);
 });
+
+test.serial(
+	'subagent read stubs stay isolated from the parent and are dropped on finish',
+	async t => {
+		clearReadTracker();
+		const filePath = '/tmp/parent-read.txt';
+		const stats = {mtimeMs: 11, size: 8};
+		rememberReadContent(filePath, stats, 3);
+
+		let seenInSubagent: ReturnType<typeof matchReadContent>;
+		seenInSubagent = {lineCount: -1, size: -1};
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => {
+					seenInSubagent = matchReadContent(filePath, stats);
+					rememberReadContent(filePath, stats, 9);
+					forgetReadContent(filePath);
+					return 'subagent body';
+				},
+				readOnly: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'read',
+						function: {
+							name: 'read_file',
+							arguments: '{"path":"/tmp/parent-read.txt"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read a file'},
+			undefined,
+			0,
+			'stub-scope-agent',
+		);
+
+		t.true(result.success);
+		t.is(seenInSubagent, undefined);
+		t.deepEqual(matchReadContent(filePath, stats), {lineCount: 3, size: 8});
+		runWithReadContentScope('stub-scope-agent', () => {
+			t.is(matchReadContent(filePath, stats), undefined);
+		});
+	},
+);
