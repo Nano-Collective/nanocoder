@@ -56,8 +56,8 @@ export class CustomCommandLoader {
 	 */
 	private scanDirectory(
 		dir: string,
-		namespace?: string,
-		source?: 'personal' | 'project',
+		namespace: string | undefined,
+		source: 'personal' | 'project',
 	): void {
 		let entries: string[];
 		try {
@@ -109,8 +109,8 @@ export class CustomCommandLoader {
 	 */
 	private loadCommand(
 		filePath: string,
-		namespace?: string,
-		source?: 'personal' | 'project',
+		namespace: string | undefined,
+		source: 'personal' | 'project',
 		commandDir?: string,
 	): void {
 		try {
