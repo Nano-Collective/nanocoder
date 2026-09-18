@@ -14,19 +14,8 @@
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
-			<div id="timeline-strip" class="hidden shrink-0 border-b border-vscode-border px-3 py-2" aria-label="Action timeline">
-				<div class="flex items-center gap-2">
-					<span class="text-[0.65em] uppercase tracking-[0.06em] opacity-50 shrink-0">Timeline</span>
-					<div id="timeline-track" class="flex-1 overflow-x-auto overflow-y-hidden">
-						<div id="timeline-nodes" class="flex items-center min-h-[28px] px-1"></div>
-					</div>
-				</div>
-				<div id="timeline-hint" class="mt-1 h-[1.2em] text-[0.7em] opacity-60 truncate" aria-live="polite"></div>
-				<div id="timeline-confirm" class="hidden mt-2 p-2 rounded-md border border-vscode-widget-border bg-vscode-widget-bg text-[0.8em] font-vscode"></div>
-			</div>
-			
 			<div id="welcome-container" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none z-10 transition-opacity duration-300">
-				<div class="mb-6 w-16 h-16 text-vscode-textLink-foreground opacity-90 flex items-center justify-center">
+				<div class="mb-6 w-16 h-16 text-vscode-fg opacity-90 flex items-center justify-center">
 					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-full h-full">
 						<path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" />
 						<path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" />
@@ -340,11 +329,22 @@
 			</div>
 		</div>
 
-		
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg items-center gap-2">
-				<span class="font-vscode text-[0.78em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
-				<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg flex-col gap-2">
+				<div class="flex items-center justify-between w-full">
+					<span class="font-vscode text-[0.75em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
+					<div class="flex items-center gap-1 opacity-60">
+						<button id="artifact-toggle" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Toggle artifacts">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-200"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+						<button id="artifact-close" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Close">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+						</button>
+					</div>
+				</div>
+				<div id="artifact-content" class="w-full">
+					<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+				</div>
 			</div>
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
