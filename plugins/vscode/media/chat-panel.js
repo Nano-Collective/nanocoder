@@ -676,9 +676,39 @@
 		if (existing) existing.remove();
 		setPlanReviewActive(false);
 	}
+	let previousArtifactCount = 0;
+	let userClosedArtifacts = false;
+	let isArtifactsCollapsed = false;
+
+	const artifactToggle = document.getElementById('artifact-toggle');
+	const artifactClose = document.getElementById('artifact-close');
+	const artifactContent = document.getElementById('artifact-content');
+
+	if (artifactToggle && artifactContent) {
+		artifactToggle.addEventListener('click', () => {
+			isArtifactsCollapsed = !isArtifactsCollapsed;
+			artifactContent.classList.toggle('hidden', isArtifactsCollapsed);
+			artifactToggle.querySelector('svg').style.transform = isArtifactsCollapsed ? 'rotate(-90deg)' : '';
+		});
+	}
+
+	if (artifactClose) {
+		artifactClose.addEventListener('click', () => {
+			userClosedArtifacts = true;
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		});
+	}
 
 	function renderArtifacts(artifacts) {
 		if (!artifactBar || !artifactLinks) return;
+
+		const currentCount = Array.isArray(artifacts) ? artifacts.length : 0;
+		if (currentCount > previousArtifactCount) {
+			userClosedArtifacts = false;
+		}
+		previousArtifactCount = currentCount;
+
 		artifactLinks.innerHTML = '';
 		const labels = {
 			implementation_plan: 'Plan',
@@ -698,8 +728,13 @@
 			artifactLinks.appendChild(button);
 		}
 		const hasArtifacts = artifactLinks.childElementCount > 0;
-		artifactBar.classList.toggle('hidden', !hasArtifacts);
-		artifactBar.classList.toggle('flex', hasArtifacts);
+		if (hasArtifacts && !userClosedArtifacts) {
+			artifactBar.classList.remove('hidden');
+			artifactBar.classList.add('flex');
+		} else {
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		}
 	}
 
 	function renderPlanReview(artifactPath) {

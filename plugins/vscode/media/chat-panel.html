@@ -329,11 +329,22 @@
 			</div>
 		</div>
 
-		
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg items-center gap-2">
-				<span class="font-vscode text-[0.78em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
-				<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg flex-col gap-2">
+				<div class="flex items-center justify-between w-full">
+					<span class="font-vscode text-[0.75em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
+					<div class="flex items-center gap-1 opacity-60">
+						<button id="artifact-toggle" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Toggle artifacts">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-200"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+						<button id="artifact-close" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Close">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+						</button>
+					</div>
+				</div>
+				<div id="artifact-content" class="w-full">
+					<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+				</div>
 			</div>
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
