@@ -176,7 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Auto-connect if configured
 	const config = vscode.workspace.getConfiguration('nanocoder');
-	if (config.get<boolean>('autoConnect', false)) {
+	if (config.get<boolean>('autoConnect', true)) {
 		setTimeout(() => connect(), 1000);
 	}
 
@@ -240,10 +240,8 @@ function disconnect(): void {
 // process is healthy — during Starting/Restarting/Failed the agent rendering
 // stays visible so a dead CLI is never masked by companion activity.
 function updateStatusBar(connected: boolean, text?: string): void {
-	const agentBusy = acpStateManager.status === ACPStatus.Starting
-		|| acpStateManager.status === ACPStatus.Restarting
-		|| acpStateManager.status === ACPStatus.Failed;
-	if (agentBusy) {
+	const agentActive = acpStateManager.status !== ACPStatus.Disconnected;
+	if (agentActive) {
 		return;
 	}
 
@@ -273,7 +271,7 @@ function handleServerMessage(message: ServerMessage): void {
 			handleOpenFile(message);
 			break;
 		case 'status':
-			if (message.model && acpStateManager.status !== ACPStatus.Connected) {
+			if (message.model && acpStateManager.status === ACPStatus.Disconnected) {
 				// Companion-only context: the agent isn't running, so let the
 				// legacy model update through. While the agent is Connected the
 				// controller owns the text and gets its model from onStateSync.
