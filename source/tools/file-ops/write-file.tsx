@@ -18,7 +18,11 @@ import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
-import {forgetReadContent, hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';

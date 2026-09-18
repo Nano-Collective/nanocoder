@@ -13,7 +13,6 @@ import {
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {summariseWithLLM} from '@/utils/llm-summariser';
 import {
 	COMPRESSION_CONSTANTS,
@@ -22,6 +21,7 @@ import {
 } from '@/utils/message-compression';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 /**
  * Handles /compact command. Returns true if handled.
