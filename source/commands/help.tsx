@@ -5,8 +5,14 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
-import {Command} from '@/types/index';
+import type {Command} from '@/types/index';
+import {errorMsg} from '@/utils/message-factory';
 import {getPackageVersion} from '@/utils/package-version';
+import {
+	findHelpCommand,
+	getCommandHelpDetails,
+	groupHelpCommands,
+} from './help-utils';
 
 let cachedVersion: string | null = null;
 
@@ -18,9 +24,11 @@ function getCachedPackageVersion(): string {
 function Help({
 	version,
 	commands,
+	selectedCommand,
 }: {
 	version: string;
-	commands: Array<{name: string; description: string}>;
+	commands: Command[];
+	selectedCommand?: Command;
 }) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -72,36 +80,110 @@ function Help({
 				• Keyboard shortcuts {'>'} press ? in an empty prompt
 			</Text>
 
-			<Box marginTop={1}>
-				<Text color={colors.primary} bold>
-					Commands:
-				</Text>
-			</Box>
-			{commands.length === 0 ? (
-				<Text color={colors.text}> No commands available.</Text>
+			{selectedCommand ? (
+				<CommandDetails command={selectedCommand} />
 			) : (
-				commands.map((cmd, index) => (
-					<Text key={index} color={colors.text}>
-						{' '}
-						• /{cmd.name} - {cmd.description}
-					</Text>
-				))
+				<CommandList commands={commands} />
 			)}
 		</TitledBoxWithPreferences>
+	);
+}
+
+function CommandList({commands}: {commands: Command[]}) {
+	const {colors} = useTheme();
+	const groups = groupHelpCommands(commands);
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			{groups.length === 0 ? (
+				<Text color={colors.text}> No commands available.</Text>
+			) : (
+				groups.map(group => (
+					<Box key={group.category} flexDirection="column" marginBottom={1}>
+						<Text color={colors.primary} bold>
+							{group.category}:
+						</Text>
+						{group.commands.map(command => (
+							<Text key={command.name} color={colors.text}>
+								{' '}
+								• /{command.name} - {command.description}
+							</Text>
+						))}
+					</Box>
+				))
+			)}
+		</Box>
+	);
+}
+
+function CommandDetails({command}: {command: Command}) {
+	const {colors} = useTheme();
+	const details = getCommandHelpDetails(command);
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			<Text color={colors.primary} bold>
+				Command: /{command.name}
+			</Text>
+			<Text color={colors.text}>{command.description}</Text>
+			<Text color={colors.secondary}>Category: {details.category}</Text>
+			<Text color={colors.secondary}>Usage: {details.usage}</Text>
+			{details.aliases?.length ? (
+				<Text color={colors.secondary}>
+					Aliases: {details.aliases.map(alias => `/${alias}`).join(', ')}
+				</Text>
+			) : null}
+			{details.options?.length ? (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.primary} bold>
+						Options & subcommands:
+					</Text>
+					{details.options.map(option => (
+						<Text key={option} color={colors.text}>
+							• {option}
+						</Text>
+					))}
+				</Box>
+			) : null}
+			{details.examples?.length ? (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.primary} bold>
+						Examples:
+					</Text>
+					{details.examples.map(example => (
+						<Text key={example} color={colors.text}>
+							• {example}
+						</Text>
+					))}
+				</Box>
+			) : null}
+		</Box>
 	);
 }
 
 export const helpCommand: Command = {
 	name: 'help',
 	description: 'Show available commands',
-	handler: async (_args: string[], _messages, _metadata) => {
+	handler: async (args: string[], _messages, _metadata) => {
 		const commands = commandRegistry.getAll();
 		const version = getCachedPackageVersion();
+		const requestedName = args[0];
+		const selectedCommand = requestedName
+			? findHelpCommand(commands, requestedName)
+			: undefined;
+
+		if (requestedName && !selectedCommand) {
+			return errorMsg(
+				`Unknown command: ${requestedName}. Type /help to see available commands.`,
+				'help-error',
+			);
+		}
 
 		return React.createElement(Help, {
 			key: generateKey('help'),
 			version,
 			commands: commands,
+			selectedCommand,
 		});
 	},
 };
