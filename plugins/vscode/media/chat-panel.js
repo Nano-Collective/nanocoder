@@ -655,6 +655,7 @@
 				f.style.display = '';
 				f.classList.remove('agent-footer-processing');
 			});
+			scrollToBottom(true);
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
@@ -1821,7 +1822,7 @@
 		));
 
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		scrollToBottom(role === 'user');
 
 		if (role === 'agent') {
 			// This opens a fresh container, so whatever block was open is done.
@@ -1938,9 +1939,16 @@
 			scrollToBottom();
 		}
 	}
+	let userHasScrolledUp = false;
+	messagesContainer.addEventListener('scroll', () => {
+		const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 50;
+		userHasScrolledUp = !isAtBottom;
+	});
 
-	function scrollToBottom() {
-		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	function scrollToBottom(force = false) {
+		if (force || !userHasScrolledUp) {
+			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+		}
 	}
 
 	// --- Copy last code block ---
@@ -2134,7 +2142,7 @@
 				pendingUserMessageText = null;
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
-				scrollToBottom();
+				scrollToBottom(true);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
