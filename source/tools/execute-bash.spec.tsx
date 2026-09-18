@@ -3,7 +3,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {executeBashTool} from './execute-bash';
+import {bashRunFailed, executeBashTool} from './execute-bash';
 
 // ============================================================================
 // Test Helpers
@@ -417,4 +417,22 @@ test('execute_bash handles whitespace-only output', async t => {
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
+});
+
+test('bashRunFailed: distinguishes a clean run from a failure', t => {
+	const base = {
+		executionId: 'exec-1',
+		command: 'x',
+		outputPreview: '',
+		fullOutput: '',
+		stderr: '',
+		isComplete: true,
+	};
+
+	t.false(bashRunFailed({...base, exitCode: 0, error: null}));
+	t.true(bashRunFailed({...base, exitCode: 1, error: null}));
+	t.true(bashRunFailed({...base, exitCode: null, error: 'spawn ENOENT'}));
+	// No exit code and no error means the run never reported one - not
+	// something to surface as a failed command.
+	t.false(bashRunFailed({...base, exitCode: null, error: null}));
 });
