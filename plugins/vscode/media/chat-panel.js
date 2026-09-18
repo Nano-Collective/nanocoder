@@ -1952,6 +1952,7 @@
 	function scrollToBottom(force = false) {
 		if (force || !userHasScrolledUp) {
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			userHasScrolledUp = false;
 		}
 	}
 

@@ -120,6 +120,9 @@ export function createElement(tagName: string): StubElement {
 		style: {},
 		dataset: {},
 		children: [] as StubElement[],
+		get childElementCount() {
+			return element.children.length;
+		},
 		parentElement: null as StubElement | null,
 		classList: {
 			add: (...names: string[]) => names.forEach(name => classes.add(name)),
@@ -266,6 +269,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	// never renders a chip looks the same here as it does on load.
 	const hiddenOnLoad = new Set([
 		'add-menu-dropdown',
+		'artifact-bar',
 		'composer-settings',
 		'context-chips',
 		'context-chips-clear',
