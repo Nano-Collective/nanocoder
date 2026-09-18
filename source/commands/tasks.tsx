@@ -109,8 +109,8 @@ export const tasksCommand: Command = {
 		if (subcommand === 'remove' || subcommand === 'rm') {
 			if (!rest.trim()) return taskNumberError('remove');
 
-			const taskNumber = parseInt(rest.trim(), 10);
-			if (isNaN(taskNumber) || taskNumber < 1) {
+			const taskNumber = Number(rest.trim());
+			if (!Number.isInteger(taskNumber) || taskNumber < 1) {
 				return invalidTaskNumberError('remove');
 			}
 

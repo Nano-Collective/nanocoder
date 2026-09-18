@@ -3,6 +3,7 @@ import {rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import React from 'react';
 import type {Command} from '@/types/index';
 import type {Task} from '@/tools/tasks/types.js';
 
@@ -332,6 +333,9 @@ test('handler - completes a task with "done" subcommand', async t => {
 		await tasksCommand.handler(['done', '1']);
 
 		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
+		t.is(tasks[0]?.title, 'First Task');
 		t.is(tasks[0]?.status, 'completed');
 		t.truthy(tasks[0]?.completedAt);
 		t.truthy(tasks[0]?.updatedAt);
@@ -348,6 +352,8 @@ test('handler - supports complete alias and clears completedAt when starting', a
 
 		await tasksCommand.handler(['start', '3']);
 		let tasks = await loadTasks();
+		t.is(tasks[2]?.id, 'task-3');
+		t.is(tasks[2]?.title, 'Third Task');
 		t.is(tasks[2]?.status, 'in_progress');
 		t.falsy(tasks[2]?.completedAt);
 
@@ -400,7 +406,10 @@ test('handler - lists tasks with "list" subcommand', async t => {
 		await saveTasks(getSampleTasks());
 		const result = await tasksCommand.handler(['list']);
 
-		t.truthy(result);
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
 		const tasks = await loadTasks();
 		t.is(tasks.length, 3);
 	} finally {
@@ -413,9 +422,28 @@ test('handler - returns error for unknown subcommand without adding a task', asy
 	try {
 		const result = await tasksCommand.handler(['completee', '1']);
 
-		t.truthy(result);
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TaskMessage');
+		}
 		const tasks = await loadTasks();
 		t.is(tasks.length, 0);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - rejects trailing characters in remove task number', async t => {
+	const env = await setupTestEnv('remove-invalid-suffix');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['remove', '1abc']);
+
+		t.true(React.isValidElement(result));
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
 	} finally {
 		env.restore();
 	}
