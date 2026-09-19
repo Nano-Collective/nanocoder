@@ -30,6 +30,16 @@ export function executeBashCommand(
 }
 
 /**
+ * Whether a run failed: the command could not be spawned at all, or it exited
+ * non-zero. The formatted output carries no `Error: ` prefix for a non-zero
+ * exit - it is ordinary stdout/stderr - so this is what callers set
+ * `ToolResult.isError` from, rather than sniffing the content.
+ */
+export function bashRunFailed(result: BashExecutionState): boolean {
+	return result.error !== null || (result.exitCode ?? 0) !== 0;
+}
+
+/**
  * Format bash execution result for LLM context
  */
 export function formatBashResultForLLM(result: BashExecutionState): string {

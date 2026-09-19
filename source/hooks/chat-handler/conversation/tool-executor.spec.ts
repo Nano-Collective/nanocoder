@@ -1,5 +1,5 @@
 import test from 'ava';
-import {executeToolsDirectly} from './tool-executor.js';
+import {displayExecutedTool, executeToolsDirectly} from './tool-executor.js';
 import type {ToolCall, ToolResult} from '@/types/core';
 
 // ============================================================================
@@ -537,6 +537,56 @@ test('executeToolsDirectly - compact display calls onCompactToolCount instead of
 	t.is(addToChatQueueCalls.length, 0);
 	// Should have called onCompactToolCount for each tool
 	t.deepEqual(compactCounts, ['tool1', 'tool1', 'tool2']);
+});
+
+// A command that ran but exited non-zero is the case issue #1371 reported: it
+// used to fold into the "Ran N commands" tally and look exactly like a clean
+// run. `isError` is the only thing that separates the two, since the content is
+// the command's own output with no "Error: " prefix to sniff for.
+const bashExecution = (isError?: boolean) => ({
+	toolCall: {
+		id: 'call_bash',
+		function: {name: 'execute_bash', arguments: '{"command":"exit 1"}'},
+	} as ToolCall,
+	result: {
+		tool_call_id: 'call_bash',
+		role: 'tool' as const,
+		name: 'execute_bash',
+		content: 'EXIT_CODE: 1\nSTDERR:\nbuild failed\nSTDOUT:\n',
+		...(isError === undefined ? {} : {isError}),
+	} as ToolResult,
+});
+
+test('displayExecutedTool - a non-zero exit is not folded into the compact tally', async t => {
+	const counts: string[] = [];
+	const queue: unknown[] = [];
+
+	await displayExecutedTool(
+		bashExecution(true),
+		null,
+		c => queue.push(c),
+		createMockConversationStateManager() as any,
+		{compactDisplay: true, onCompactToolCount: n => counts.push(n)},
+	);
+
+	t.deepEqual(counts, [], 'a failed command must not count as a clean run');
+	t.is(queue.length, 1, 'it renders its own failure one-liner instead');
+});
+
+test('displayExecutedTool - a clean run still folds into the compact tally', async t => {
+	const counts: string[] = [];
+	const queue: unknown[] = [];
+
+	await displayExecutedTool(
+		bashExecution(undefined),
+		null,
+		c => queue.push(c),
+		createMockConversationStateManager() as any,
+		{compactDisplay: true, onCompactToolCount: n => counts.push(n)},
+	);
+
+	t.deepEqual(counts, ['execute_bash']);
+	t.is(queue.length, 0);
 });
 
 test('executeToolsDirectly - non-interactive compact mode pushes one-liner per tool and skips onCompactToolCount', async t => {
