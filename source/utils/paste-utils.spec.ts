@@ -123,6 +123,32 @@ test('repeated pasted text survives the complete prompt round trip', t => {
 	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
+test('back-to-back pastes stay separated in the assembled prompt', t => {
+	// The composer shows two tidy placeholders, but with nothing between them
+	// they expanded flush against each other at submit, so the last line of the
+	// first paste fused with the first line of the second.
+	const first = 'first line\nAAA';
+	const second = 'BBB\nsecond line';
+
+	const afterFirst = handlePaste(first, '', {});
+	t.truthy(afterFirst);
+	t.false(
+		afterFirst!.displayValue.startsWith('\n'),
+		'an empty composer must not gain a leading newline',
+	);
+
+	const afterSecond = handlePaste(
+		second,
+		afterFirst!.displayValue,
+		afterFirst!.placeholderContent,
+	);
+	t.truthy(afterSecond);
+
+	const assembled = assemblePrompt(afterSecond!);
+	t.false(assembled.includes('AAABBB'), 'the paste boundary must survive');
+	t.true(assembled.includes('AAA\nBBB'));
+});
+
 test('handlePaste preserves existing pasted content', t => {
 	const existingPlaceholderContent: Record<string, PlaceholderContent> = {
 		'123': {
