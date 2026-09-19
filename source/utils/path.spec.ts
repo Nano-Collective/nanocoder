@@ -1,5 +1,6 @@
 import test from 'ava';
 import {resolve, sep} from 'node:path';
+import stringWidth from 'string-width';
 import {homeRelative, truncateMiddle} from './path.js';
 
 const HOME = resolve('/Users/will');
@@ -28,6 +29,34 @@ test('homeRelative leaves paths untouched when home is the filesystem root', t =
 	const child = resolve('/foo');
 	t.is(homeRelative(child, root), child);
 	t.is(homeRelative(root, root), root);
+});
+
+test('truncateMiddle budgets terminal columns, not characters', t => {
+	// A CJK character is one code unit but two columns, so a length-based
+	// budget lets the text run twice as wide as the row it has to fit.
+	const branch = '功能'.repeat(10);
+	t.is(branch.length, 20);
+	t.is(stringWidth(branch), 40);
+
+	const result = truncateMiddle(branch, 16);
+	t.true(
+		stringWidth(result) <= 16,
+		`result occupies ${stringWidth(result)} columns, budget was 16`,
+	);
+	t.true(result.includes('...'));
+});
+
+test('truncateMiddle does not cut an emoji in half', t => {
+	// Slicing by code unit splits a surrogate pair and the terminal renders
+	// the replacement glyph.
+	// The odd leading character pushes the slice boundary into a pair.
+	const result = truncateMiddle(`a${'🚀'.repeat(10)}`, 11);
+	t.true(stringWidth(result) <= 11);
+	t.notRegex(
+		result,
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+		'a lone surrogate means an emoji was split',
+	);
 });
 
 test('truncateMiddle leaves short strings untouched', t => {
