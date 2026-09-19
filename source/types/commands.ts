@@ -23,6 +23,7 @@ export interface Command<T = React.ReactElement | void> {
 			lastApiUsage?: ApiUsageSnapshot | null;
 			apiCallHistory?: ApiCallRecord[];
 			sessionId?: string;
+			setMessages?: (messages: Message[]) => void;
 		},
 	) => Promise<T>;
 }

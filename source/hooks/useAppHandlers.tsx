@@ -21,6 +21,7 @@ import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {
+	clearPendingHookContext,
 	runLifecycleHooks,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
@@ -55,6 +56,8 @@ import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {clearReadTracker} from '@/utils/read-tracker';
+import {clearExpandableToolResults} from '@/utils/tool-result-display';
 
 interface UseAppHandlersProps {
 	// State
@@ -486,6 +489,17 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				});
 
 				const gaps = await manager.restoreFiles(checkpointData);
+
+				// Restoring is a clear + replay: roll the transcript back and drop
+				// every piece of per-conversation state that points into the
+				// discarded transcript (same clearers as /clear).
+				props.updateMessages([...checkpointData.conversation.messages]);
+				clearReadTracker();
+				clearExpandableToolResults();
+				clearPendingHookContext();
+				if (props.client) {
+					await props.client.clearContext();
+				}
 
 				props.addToChatQueue(
 					<SuccessMessage
