@@ -197,6 +197,7 @@ export default function QuestionPrompt({
 											{description && (
 												<Text wrap="wrap" italic color={colors.secondary}>
 													{isNarrow ? description : ` — ${description}`}
+													{'\u200B'}
 												</Text>
 											)}
 										</Box>

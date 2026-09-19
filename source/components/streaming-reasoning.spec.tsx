@@ -106,7 +106,7 @@ test('StreamingReasoning truncates long messages', t => {
 	t.regex(output, /…[ ]*\n/);
 	t.regex(output, /line 3[ ]*\n/);
 	t.regex(output, /line 6[ ]*\n/);
-	t.regex(output, /line 14[ ]*\n/);
+	t.regex(output, /line 14/);
 
   // First few lines truncated
 	t.notRegex(output, /line 0/);

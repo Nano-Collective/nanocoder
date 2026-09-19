@@ -315,6 +315,7 @@ export const DevelopmentModeIndicator = React.memo(
 						<Text color={colors.secondary}> · </Text>
 						<Text color={colors.info} italic>
 							saving
+							{'\u200B'}
 						</Text>
 					</>
 				)}

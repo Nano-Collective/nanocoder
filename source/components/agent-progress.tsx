@@ -119,6 +119,7 @@ export default function AgentProgress({
 						<Box>
 							<Text color={colors.secondary} italic>
 								Press Ctrl+S to attach/cycle sessions
+								{'\u200B'}
 							</Text>
 						</Box>
 					)}

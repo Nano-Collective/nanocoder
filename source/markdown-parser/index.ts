@@ -111,7 +111,11 @@ function _parseMarkdownCore(
 	result = result.replace(
 		/(^|\s)\*([^*\n]*[a-zA-Z][^*\n]*)\*($|\s)/gm,
 		(_match, before, text, after) => {
-			return before + chalk.hex(themeColors.text).italic(text) + after;
+			// Append a Zero-Width Space (\u200B) after italic text to prevent
+			// terminal emulators from cutting off the last character with simulated italics.
+			return (
+				before + chalk.hex(themeColors.text).italic(text) + '\u200B' + after
+			);
 		},
 	);
 
@@ -131,7 +135,9 @@ function _parseMarkdownCore(
 
 	// Blockquotes (> text)
 	result = result.replace(/^>\s+(.+)$/gm, (_match, text) => {
-		return chalk.hex(themeColors.secondary).italic(`> ${text}`);
+		// Append a Zero-Width Space (\u200B) after italic text to prevent
+		// terminal emulators from cutting off the last character with simulated italics.
+		return chalk.hex(themeColors.secondary).italic(`> ${text}`) + '\u200B';
 	});
 
 	return {text: result, codeBlocks, inlineCodes};

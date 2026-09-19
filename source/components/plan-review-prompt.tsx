@@ -146,6 +146,7 @@ export default function PlanReviewPrompt({
 				<Box marginTop={1}>
 					<Text color={colors.secondary} italic wrap="wrap">
 						{activeDescription}
+						{'\u200B'}
 					</Text>
 				</Box>
 

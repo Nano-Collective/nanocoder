@@ -64,6 +64,7 @@ export default memo(function AssistantReasoning({
 					<Box marginBottom={1}>
 						<Text color={colors.secondary} italic>
 							{renderedMessage}
+							{'\u200B'}
 						</Text>
 					</Box>
 					<Box>

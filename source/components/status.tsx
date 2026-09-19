@@ -139,10 +139,12 @@ export default memo(function Status({
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							✓ AGENTS.md
+							{'\u200B'}
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
 							✗ No AGENTS.md
+							{'\u200B'}
 						</Text>
 					)}
 					{preferencesLoaded && (
@@ -249,12 +251,13 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							<Text>↳ Using AGENTS.md. Project initialized</Text>
+							<Text>↳ Using AGENTS.md. Project initialized{'\u200B'}</Text>
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
 							↳ No AGENTS.md file found, run `/init` to initialize this
 							directory
+							{'\u200B'}
 						</Text>
 					)}
 					{preferencesLoaded && (
@@ -335,6 +338,7 @@ export default memo(function Status({
 							{contextUsage.percentUsed >= 60 && (
 								<Text color={colors.warning} italic>
 									↳ Consider using /compact to reduce context usage
+									{'\u200B'}
 								</Text>
 							)}
 						</Box>
@@ -350,6 +354,7 @@ export default memo(function Status({
 								<Text color={colors.secondary} italic>
 									↳ Threshold: {autoCompactInfo.threshold}%, Mode:{' '}
 									{autoCompactInfo.mode}
+									{'\u200B'}
 								</Text>
 							)}
 						</Box>

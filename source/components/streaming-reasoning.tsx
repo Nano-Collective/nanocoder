@@ -62,6 +62,7 @@ export default memo(function StreamingReasoning({
 					{truncated && <Text color={colors.secondary}>…</Text>}
 					<Text color={colors.secondary} italic>
 						{displayText}
+						{'\u200B'}
 					</Text>
 				</Box>
 			)}
