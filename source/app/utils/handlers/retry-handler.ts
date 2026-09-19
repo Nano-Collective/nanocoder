@@ -86,6 +86,7 @@ export async function handleRetryCommand(
 		lastUserMessage.content,
 		lastUserMessage.content,
 	);
-	options.onCommandComplete?.();
+	// The retried chat turn owns its completion signal. Emitting another one
+	// here can start the next queued prompt while that turn is still unwinding.
 	return true;
 }
