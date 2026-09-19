@@ -18,10 +18,13 @@ const gates = [
 
 function runGate(script) {
 	console.log(`\n--- ${script}`);
-	// shell: true so the pnpm.cmd wrapper resolves on Windows.
+	// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true
+	// A shell is required on Windows to run the pnpm.cmd wrapper (spawning it
+	// without one fails with EINVAL); script always comes from the fixed gate
+	// list above and taint-free pnpm path.
 	const result = spawnSync(pnpm, ['run', script], {
 		stdio: 'inherit',
-		shell: true,
+		shell: process.platform === 'win32',
 	});
 	return result.status === 0;
 }
@@ -36,7 +39,6 @@ for (const [script] of gates) {
 // Semgrep is best-effort: keep skipping it when absent, mirroring scripts/test.sh.
 const semgrep = spawnSync('semgrep', ['--version'], {
 	stdio: 'ignore',
-	shell: true,
 });
 if (semgrep.status === 0) {
 	console.log('\n--- test:security');
