@@ -18,10 +18,10 @@ const gates = [
 
 function runGate(script) {
 	console.log(`\n--- ${script}`);
-	// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true
 	// A shell is required on Windows to run the pnpm.cmd wrapper (spawning it
 	// without one fails with EINVAL); script always comes from the fixed gate
 	// list above and taint-free pnpm path.
+	// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true
 	const result = spawnSync(pnpm, ['run', script], {
 		stdio: 'inherit',
 		shell: process.platform === 'win32',

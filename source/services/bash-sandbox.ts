@@ -42,6 +42,8 @@ function bwrapCanUnshareNet(bwrap: string): boolean {
 	const hit = bwrapJailCache.get(bwrap);
 	if (hit !== undefined) return hit;
 	const result = spawnSync(
+		// bwrap is a PATH-resolved binary path (findBwrap); argv is fixed/literal.
+		// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 		bwrap,
 		['--unshare-net', '--die-with-parent', '--ro-bind', '/', '/', '/bin/true'],
 		{timeout: 3000, stdio: 'ignore'},
@@ -208,5 +210,6 @@ export function spawnPlanned(
 	const bin = plan.bin === 'bwrap' ? plan.bwrap : '/usr/bin/sandbox-exec';
 	// codeql[js/shell-command-built-from-environment] resolved jail binary; argv is not a shell string
 	// codeql[js/shell-command-constructed-from-input]
+	// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 	return spawn(bin, plan.args, spawnOpts);
 }

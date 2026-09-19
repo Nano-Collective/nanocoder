@@ -62,6 +62,9 @@ export function runScript(
 		// On Unix the child leads its own process group (detached) so the whole
 		// subtree can be signalled together; a tool that backgrounds a long-lived
 		// child must not be able to outlive the shell's timeout.
+		// Shell is allow-listed by pickShell(); the script is passed as argv
+		// elements (shellArgs), never as a single shell string.
+		// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
