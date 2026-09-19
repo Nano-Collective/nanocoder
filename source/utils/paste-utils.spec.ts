@@ -149,6 +149,26 @@ test('back-to-back pastes stay separated in the assembled prompt', t => {
 	t.true(assembled.includes('AAA\nBBB'));
 });
 
+test('a composer already ending in whitespace gains no extra separator', t => {
+	// The separator exists to keep blocks apart, so whitespace the user typed
+	// is left as it is rather than doubled.
+	const pastedText = 'BBB\nsecond line';
+
+	const afterSpace = handlePaste(pastedText, 'look at this: ', {});
+	t.truthy(afterSpace);
+	t.true(
+		assemblePrompt(afterSpace!).startsWith('look at this: BBB'),
+		'a trailing space must carry the paste on the same line',
+	);
+
+	const afterNewline = handlePaste(pastedText, 'look at this:\n', {});
+	t.truthy(afterNewline);
+	t.true(
+		assemblePrompt(afterNewline!).startsWith('look at this:\nBBB'),
+		'a trailing newline must not be doubled',
+	);
+});
+
 test('handlePaste preserves existing pasted content', t => {
 	const existingPlaceholderContent: Record<string, PlaceholderContent> = {
 		'123': {
