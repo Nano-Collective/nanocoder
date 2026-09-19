@@ -2,7 +2,7 @@ import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {renderBody} from '@/custom-tools/template';
+import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
@@ -24,10 +24,14 @@ export function buildHandler(
 	projectRoot: string,
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
-		const rendered = renderBody(body, args ?? {});
+		const shell = pickShell(metadata.shell);
+		const rendered = renderBody(
+			body,
+			args ?? {},
+			isWindowsCmd(shell) ? cmdQuote : shellQuote,
+		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
 		const env = mergeEnv(metadata.env);
-		const shell = pickShell(metadata.shell);
 		return runScript(rendered, {
 			cwd,
 			env,
@@ -67,6 +71,10 @@ export function runScript(
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			detached: process.platform !== 'win32',
+			// cmd.exe parses a command string itself. Let it receive the wrapper and
+			// the doubled quotes from shellArgs verbatim; libuv quoting them again
+			// changes the argv seen by the child command.
+			windowsVerbatimArguments: isWindowsCmd(options.shell),
 		});
 
 		let stdout = '';
@@ -274,9 +282,9 @@ export function expandVars(value: string): string {
 	});
 }
 
-/** cmd.exe: /d (skip AutoRun), /s (deterministic quotes), /c. POSIX: -c. */
+/** cmd.exe: disable AutoRun/delayed expansion, then run one wrapped command. */
 export function shellArgs(shell: string, script: string): string[] {
-	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
+	return isWindowsCmd(shell) ? ['/d', '/v:off', '/s', '/c', `"${script}"`] : ['-c', script];
 }
 
 function isWindowsCmd(shell: string): boolean {
