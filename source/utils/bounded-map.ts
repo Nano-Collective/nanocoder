@@ -57,6 +57,11 @@ export class BoundedMap<K, V> {
 			}
 		}
 
+		// Delete the key if it exists so setting it moves it to the end of insertion order
+		if (this.map.has(key)) {
+			this.map.delete(key);
+		}
+
 		this.map.set(key, {
 			value,
 			timestamp: Date.now(),
