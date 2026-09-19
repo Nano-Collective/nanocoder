@@ -247,10 +247,6 @@ function defaultIgnoreGlobs(
 	return globs;
 }
 
-function gitignoreRuleHasSlash(pattern: string): boolean {
-	return pattern.startsWith('/') || pattern.replace(/\/$/, '').includes('/');
-}
-
 /**
  * git strips unescaped trailing whitespace from an ignore pattern, but a
  * backslash-escaped trailing space is a literal part of the rule (`foo\ `). A
@@ -270,75 +266,16 @@ function trimGitignoreLine(line: string): string {
 }
 
 /**
- * Re-expresses one cwd-relative gitignore rule against a deeper search root so
- * it can be handed to rg in an `--ignore-file`, whose rules rg applies relative
- * to the search root.
+ * The project's ignore rules, passed to rg as an `--ignore-file`.
  *
- * Unanchored rules (`foo`, `foo/`, `*.log`) match a path segment at any depth
- * and carry over unchanged. Rules that begin with `**` followed by a `/` are
- * git's depth-agnostic form and also carry over unchanged. Rules anchored at
- * cwd - a leading `/` or any `/` in the body - resolve against cwd and are
- * re-expressed relative to `searchRoot`, so `cwd/src/generated/` becomes
- * `/generated/` when searching `cwd/src`. Rules that resolve outside the search
- * root are dropped: nothing inside it can match them. Returns undefined for
- * blank and comment lines.
- *
- * @internal Exported for direct unit testing only.
- */
-export function rebaseIgnoreLine(
-	line: string,
-	cwd: string,
-	searchRoot: string,
-): string | undefined {
-	const trimmed = trimGitignoreLine(line);
-	if (!trimmed || trimmed.startsWith('#')) {
-		return undefined;
-	}
-
-	const negated = trimmed.startsWith('!');
-	const pattern = negated ? trimmed.slice(1) : trimmed;
-	if (!pattern || pattern === '/') {
-		return undefined;
-	}
-
-	// Unanchored rules match a path segment at any depth, so they stay valid
-	// unchanged under any search root.
-	if (!gitignoreRuleHasSlash(pattern)) {
-		return trimmed;
-	}
-
-	// `**/foo` matches foo at any depth (gitignore spec), so it is not anchored
-	// to cwd and carries over unchanged.
-	if (pattern.startsWith('**/')) {
-		return trimmed;
-	}
-
-	const dirOnly = pattern.endsWith('/');
-	const body = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
-	const relative = normalizePathForMatch(
-		path.relative(searchRoot, path.resolve(cwd, body)),
-	);
-	// `path.relative` yields an absolute path when `cwd` and `searchRoot` are on
-	// different Windows drives; such a rule can never match inside searchRoot.
-	if (
-		!relative ||
-		path.isAbsolute(relative) ||
-		relative === '..' ||
-		relative.startsWith('../')
-	) {
-		return undefined;
-	}
-	return `${negated ? '!' : ''}/${relative}${dirOnly ? '/' : ''}`;
-}
-
-/**
- * The project's ignore rules, re-expressed against `searchRoot`.
- *
+ * rg anchors rules in an `--ignore-file` at the spawned process's cwd, which is
+ * the same directory the project's `.gitignore`/`.nanocoderignore` resolve
+ * against - so raw rules already behave like git and are handed over verbatim.
  * Mirrors {@link loadGitignore}'s layering exactly - defaults, then .gitignore,
  * then .nanocoderignore - so a later `!` re-include can still override an
  * earlier rule once rg parses the merged file.
  */
-function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
+function projectIgnoreLines(cwd: string): string[] {
 	const lines = [...DEFAULT_IGNORE_DIRS];
 	const ignoreFiles = [
 		path.join(cwd, '.gitignore'),
@@ -364,14 +301,7 @@ function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
 			if (!trimmed || trimmed.startsWith('#')) {
 				continue;
 			}
-			if (searchRoot === cwd) {
-				lines.push(line);
-				continue;
-			}
-			const rebased = rebaseIgnoreLine(line, cwd, searchRoot);
-			if (rebased !== undefined) {
-				lines.push(rebased);
-			}
+			lines.push(line);
 		}
 	}
 
@@ -383,9 +313,11 @@ function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
  * so rg prunes ignored paths during traversal instead of streaming matches that
  * the JS-side filter will drop (#1341).
  *
- * rg applies `--ignore-file` rules relative to the search root, so an unanchored
- * `dist/` still prunes a nested `src/dist/`; anchored cwd rules are re-based by
- * {@link rebaseIgnoreLine}.
+ * rg applies `--ignore-file` rules relative to the spawned process's cwd - the
+ * project directory - matching where the project's own ignore files live, so the
+ * raw rules prune exactly what git would: an unanchored `dist/` prunes a nested
+ * `src/dist/` too, while a cwd-anchored `/out/` prunes only the project-root
+ * `out/`.
  *
  * Projects without a .gitignore or .nanocoderignore are skipped: their only
  * rules are the DEFAULT_IGNORE_DIRS, which `defaultIgnoreGlobs` already prunes
@@ -393,7 +325,6 @@ function projectIgnoreLines(cwd: string, searchRoot: string): string[] {
  */
 async function withProjectIgnoreFile<T>(
 	cwd: string,
-	searchRoot: string,
 	run: (ignoreArgs: string[]) => Promise<T>,
 ): Promise<T> {
 	if (
@@ -403,11 +334,10 @@ async function withProjectIgnoreFile<T>(
 		return run([]);
 	}
 
-	const ignoreLines = projectIgnoreLines(cwd, searchRoot);
+	const ignoreLines = projectIgnoreLines(cwd);
 	// An ignore file that only repeats the DEFAULT_IGNORE_DIRS (e.g. an empty or
-	// comment-only .gitignore, or rules that all resolve outside the search
-	// root) prunes nothing beyond what defaultIgnoreGlobs already prunes during
-	// traversal, so no temp file is needed.
+	// comment-only .gitignore) prunes nothing beyond what defaultIgnoreGlobs
+	// already prunes during traversal, so no temp file is needed.
 	if (ignoreLines.length === DEFAULT_IGNORE_DIRS.length) {
 		return run([]);
 	}
@@ -893,7 +823,7 @@ export async function walkProjectEntries(
 	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
 
-	return withProjectIgnoreFile(cwd, rootPath, async ignoreArgs => {
+	return withProjectIgnoreFile(cwd, async ignoreArgs => {
 		const args = [
 			'--files',
 			'--hidden',
@@ -1279,24 +1209,20 @@ export async function searchProjectContents(
 		return 'keep';
 	};
 
-	const {stdout} = await withProjectIgnoreFile(
-		cwd,
-		searchRoot,
-		async ignoreArgs => {
-			const searchArgs = [
-				...args,
-				...ignoreArgs,
-				...defaultIgnoreGlobs(projectIgnore),
-				...binaryExcludeGlobs(),
-			];
-			if (normalizedContextLines > 0) {
-				searchArgs.push('--context', String(normalizedContextLines));
-			}
-			searchArgs.push('--regexp', query, '--', searchRoot);
+	const {stdout} = await withProjectIgnoreFile(cwd, async ignoreArgs => {
+		const searchArgs = [
+			...args,
+			...ignoreArgs,
+			...defaultIgnoreGlobs(projectIgnore),
+			...binaryExcludeGlobs(),
+		];
+		if (normalizedContextLines > 0) {
+			searchArgs.push('--context', String(normalizedContextLines));
+		}
+		searchArgs.push('--regexp', query, '--', searchRoot);
 
-			return runRipgrep(searchArgs, cwd, timeoutMs, signal, undefined, onLine);
-		},
-	);
+		return runRipgrep(searchArgs, cwd, timeoutMs, signal, undefined, onLine);
+	});
 	const rgLines = parseRgJsonLines(stdout).filter(
 		line => !projectIgnore.ignores(toRelativeFile(cwd, line.file)),
 	);

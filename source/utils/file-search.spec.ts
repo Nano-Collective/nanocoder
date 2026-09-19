@@ -9,7 +9,6 @@ import {
 	GLOB_TOKEN_CACHE_MAX_TOKENS,
 	globTokenCache,
 	matchesGlob,
-	rebaseIgnoreLine,
 	searchProjectContents,
 	SearchTimeoutError,
 	walkProjectEntries,
@@ -903,59 +902,6 @@ test.serial('searchProjectContents skips ignored and binary files', async t => {
 	}
 });
 
-test('rebaseIgnoreLine re-expresses gitignore rules against a deeper search root', t => {
-	const cwd = '/home/user/proj';
-	const root = join(cwd, 'src');
-
-	// Unanchored rules match at any depth and carry over unchanged.
-	t.is(rebaseIgnoreLine('dist/', cwd, root), 'dist/');
-	t.is(rebaseIgnoreLine('*.log', cwd, root), '*.log');
-
-	// A leading `**/` matches at any depth too; git semantics, not cwd-anchored.
-	t.is(rebaseIgnoreLine('**/generated/', cwd, root), '**/generated/');
-	t.is(rebaseIgnoreLine('**/*.log', cwd, root), '**/*.log');
-	t.is(rebaseIgnoreLine('!**/keep', cwd, root), '!**/keep');
-
-	// Backslash escapes are literals, not comment/negation markers.
-	t.is(rebaseIgnoreLine('\\#hashtag.txt', cwd, root), '\\#hashtag.txt');
-	t.is(rebaseIgnoreLine('\\!bang.txt', cwd, root), '\\!bang.txt');
-	// A backslash-escaped trailing space is part of the pattern; an unescaped
-	// trailing space is not.
-	t.is(rebaseIgnoreLine('dir\\ ', cwd, root), 'dir\\ ');
-	t.is(rebaseIgnoreLine('dir  ', cwd, root), 'dir');
-	t.is(rebaseIgnoreLine('dir\\  ', cwd, root), 'dir\\  ');
-
-	// Rules anchored in cwd are re-expressed relative to the search root.
-	t.is(rebaseIgnoreLine('/src/generated/', cwd, root), '/generated/');
-	t.is(rebaseIgnoreLine('/src/lib/generated/', cwd, root), '/lib/generated/');
-	t.is(rebaseIgnoreLine('src/generated/', cwd, root), '/generated/');
-
-	// Rules that resolve outside the search root can never match inside it.
-	t.is(rebaseIgnoreLine('docs/**', cwd, root), undefined);
-	t.is(rebaseIgnoreLine('vendor/x', cwd, root), undefined);
-	t.is(rebaseIgnoreLine('!vendor/x', cwd, root), undefined);
-
-	// Blank and comment lines are dropped.
-	t.is(rebaseIgnoreLine('', cwd, root), undefined);
-	t.is(rebaseIgnoreLine('# comment', cwd, root), undefined);
-});
-
-test('rebaseIgnoreLine drops anchored rules when searchRoot is on another Windows drive', t => {
-	if (process.platform !== 'win32') {
-		t.pass('cross-drive rebase only occurs on Windows');
-		return;
-	}
-
-	const cwd = 'D:\\work\\proj';
-	const otherRoot = 'C:\\other\\proj\\src';
-
-	// Unanchored rules still apply across drives.
-	t.is(rebaseIgnoreLine('dist/', cwd, otherRoot), 'dist/');
-	// Anchored cwd rules resolve to an absolute path on another drive; emitting
-	// them verbatim would produce an `/C:/work/proj/...` rule rg can never match.
-	t.is(rebaseIgnoreLine('/src/generated/', cwd, otherRoot), undefined);
-});
-
 test.serial(
 	'searchProjectContents honors a depth-agnostic **/ rule like git does',
 	async t => {
@@ -1174,15 +1120,16 @@ test.serial(
 );
 
 test.serial(
-	'anchored gitignore rules rebased to search root do not over-prune sibling directories',
+	'cwd-anchored gitignore rules passed raw to rg do not over-prune sibling directories',
 	async t => {
-		const testDir = createTempDir('test-file-search-anchored-rebase-temp');
+		const testDir = createTempDir('test-file-search-anchored-rule-temp');
 
 		try {
 			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
 			mkdirSync(join(testDir, 'src', 'lib', 'generated'), {recursive: true});
-			// Anchored rule rooted at cwd/src → rebased to /generated under search root cwd/src;
-			// src/lib/generated must NOT be pruned.
+			// `/src/generated/` is anchored at cwd; rg anchors `--ignore-file`
+			// rules at its process cwd, so it prunes only cwd/src/generated and
+			// src/lib/generated must be kept.
 			writeFileSync(join(testDir, '.gitignore'), '/src/generated/\n');
 			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
 			writeFileSync(
