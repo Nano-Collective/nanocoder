@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && mkdir -p dist/subagents/built-in && cp source/subagents/built-in/*.md dist/subagents/built-in/ && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",

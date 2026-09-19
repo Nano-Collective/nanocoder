@@ -23,13 +23,9 @@ const __dirname = path.dirname(__filename);
  * Works from both source (dev) and dist (built) locations.
  */
 function getBuiltInAgentsDir(): string {
-	// In source: source/subagents/built-in/
-	// In dist: dist/subagents/built-in/ -- but .md files are in source/
-	// Since .md files are not compiled, always reference from source
-	const sourceDir = path.resolve(__dirname, '../../source/subagents/built-in');
-	const localDir = path.resolve(__dirname, './built-in');
-	// Prefer the local dir (works in source), fall back to source dir (works from dist)
-	return localDir.includes('source') ? localDir : sourceDir;
+	// Both in source (dev) and dist (production), the built-in agents
+	// are in the local ./built-in directory relative to this file.
+	return path.resolve(__dirname, './built-in');
 }
 
 /**
@@ -76,7 +72,7 @@ export class SubagentLoader {
 
 		// Load built-in subagents first (lowest priority)
 		const builtInDir = getBuiltInAgentsDir();
-		const builtInAgents = await this.loadFromDirectory(builtInDir, 0);
+		const builtInAgents = await this.loadFromDirectory(builtInDir, 0, true);
 		for (const config of builtInAgents) {
 			config.source.isBuiltIn = true;
 			this.cache.set(config.name, config);
@@ -245,10 +241,14 @@ export class SubagentLoader {
 	private async loadFromDirectory(
 		dirPath: string,
 		priority: SubagentLoadPriority,
+		isBuiltIn = false,
 	): Promise<SubagentConfigWithSource[]> {
 		try {
 			await fs.access(dirPath);
 		} catch {
+			if (isBuiltIn) {
+				logWarning(`Built-in subagents directory not found: ${dirPath}`);
+			}
 			// Directory doesn't exist, return empty array
 			return [];
 		}

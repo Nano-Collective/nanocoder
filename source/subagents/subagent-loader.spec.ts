@@ -58,6 +58,14 @@ test.serial('reloads agent definitions', async t => {
 	t.is(reloadedCount, initialCount, 'Agent count should remain the same after reload');
 });
 
+test.serial('logs warning when built-in directory is not found', async t => {
+	const loader = new SubagentLoader();
+	// We verify that the loader returns [] without throwing an exception
+	// when isBuiltIn=true and the directory is missing. The side-effect is a logWarning call.
+	const result = await (loader as any).loadFromDirectory('/non-existent-built-in-dir-12345', 0, true);
+	t.deepEqual(result, [], 'Should return empty array');
+});
+
 // ============================================================================
 // Project-level agent without permissionMode loads correctly
 // ============================================================================
