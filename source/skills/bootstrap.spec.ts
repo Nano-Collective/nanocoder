@@ -123,6 +123,76 @@ test.serial(
 );
 
 test.serial(
+	'synthesizes built-in flat commands and tools with built-in priority',
+	async t => {
+		resetSkillRegistry();
+		const root = await tempProject();
+		try {
+			const commandLoader = new CustomCommandLoader(root);
+			// Override to inject a built-in command
+			commandLoader.getAllCommands = () => [
+				{
+					name: 'built-in-cmd',
+					path: '/builtin/cmd.md',
+					namespace: undefined,
+					fullName: 'built-in-cmd',
+					metadata: {},
+					content: 'body',
+					source: 'built-in',
+				},
+			];
+
+			const toolManager = new ToolManager();
+			// Override to inject a built-in tool
+			toolManager.getCustomToolNames = () => ['built-in-tool'];
+			toolManager.getCustomToolInfo = (name) => {
+				if (name === 'built-in-tool') {
+					return {
+						approval: 'always',
+						readOnly: true,
+						source: 'built-in',
+						filePath: '/builtin/tool.md',
+					};
+				}
+				return undefined;
+			};
+			toolManager.getToolEntry = (name) => {
+				if (name === 'built-in-tool') {
+					return {
+						name: 'built-in-tool',
+						tool: {
+							description: 'builtin tool',
+							parameters: { type: 'object', properties: {} } as any,
+							execute: async () => 'ok',
+						},
+						handler: async () => 'ok',
+					};
+				}
+				return undefined;
+			};
+
+			const result = await bootSkillPipeline({
+				projectRoot: root,
+				toolManager,
+				commandLoader,
+				subagentLoader: new SubagentLoader(root),
+				eventRouter: noopRouter(),
+			});
+
+			const cmdSkill = result.skills.find(s => s.name === 'cmd');
+			t.truthy(cmdSkill, 'command skill should be synthesized');
+			t.is(cmdSkill?.source.priority, 'built-in', 'command should have built-in priority');
+
+			const toolSkill = result.skills.find(s => s.name === 'tool');
+			t.truthy(toolSkill, 'tool skill should be synthesized');
+			t.is(toolSkill?.source.priority, 'built-in', 'tool should have built-in priority');
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'flat-dir commands are picked up via the legacy loader and surfaced as skills',
 	async t => {
 		resetSkillRegistry();
