@@ -13,6 +13,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
@@ -122,7 +123,7 @@ async function probeLocalProvider(
 }
 
 async function getDaemonLock(): Promise<DaemonLock | null> {
-	const projectRoot = process.cwd();
+	const projectRoot = getProjectRoot();
 	const lock = await readLockfile(projectRoot);
 
 	// readLiveLockfile validates the recorded pid and removes stale lockfiles.

@@ -15,6 +15,7 @@ import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {checkSkillBundle, type SkillCheckReport} from '@/skills/check';
 import {
@@ -270,7 +271,7 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 		return errorMsg(`No skill named "${name}" is loaded.`, 'skills');
 	}
 
-	const planned = planPromotion(skill, direction, process.cwd());
+	const planned = planPromotion(skill, direction, getProjectRoot());
 	if ('error' in planned) {
 		return infoMsg(planned.error, 'skills');
 	}
@@ -319,7 +320,7 @@ export const skillsCommand: Command = {
 					'skills',
 				);
 			}
-			const report = await checkSkillBundle(process.cwd(), name);
+			const report = await checkSkillBundle(getProjectRoot(), name);
 			return React.createElement(SkillCheckView, {
 				report,
 				key: generateKey('skills'),
