@@ -1,4 +1,5 @@
 import test from 'ava';
+import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
 import {jsonSchema, streamText, tool} from 'ai';
 import type {
@@ -975,4 +976,78 @@ test('handleChat keeps the system string for non-anthropic providers', async t =
 	t.is(prompt[0]?.role, 'system');
 	t.is(prompt[0]?.providerOptions, undefined);
 	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
+});
+
+// --- Output-token ceiling ---
+//
+// @ai-sdk/anthropic derives max_tokens from the model id and falls back to
+// 4096 for anything it does not recognise as a Claude model. An
+// Anthropic-compatible endpoint serving some other model therefore truncates
+// every reply at 4096 unless the ceiling is set explicitly — and nanocoder was
+// setting it under the v4 name `maxTokens`, which v5+ ignores. Object spreads
+// skip excess-property checking, so that was dropped silently rather than
+// failing to compile.
+//
+// These pin the SDK contract the fix depends on: assert what reaches the wire,
+// since typechecking demonstrably cannot catch this class of mistake.
+
+async function captureAnthropicRequestBody(
+	settings: {maxOutputTokens?: number},
+	modelId: string,
+): Promise<Record<string, unknown>> {
+	let captured: Record<string, unknown> = {};
+	const provider = createAnthropic({
+		apiKey: 'test-key',
+		fetch: async (_url, init) => {
+			captured = JSON.parse(String(init?.body));
+			return new Response(
+				[
+					'event: message_start\ndata: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+					'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+				].join(''),
+				{status: 200, headers: {'content-type': 'text/event-stream'}},
+			);
+		},
+	});
+
+	const result = streamText({
+		model: provider(modelId),
+		prompt: 'test',
+		...settings,
+	});
+	for await (const _chunk of result.fullStream) {
+		// Drain so the request is actually issued.
+	}
+	return captured;
+}
+
+test('an unrecognised model id falls back to a 4096 output ceiling', async t => {
+	const body = await captureAnthropicRequestBody({}, 'minimax-m3');
+	t.is(
+		body.max_tokens,
+		4096,
+		'this default is the reason provider entries need an explicit ceiling',
+	);
+});
+
+test('maxOutputTokens raises the ceiling that reaches the provider', async t => {
+	const body = await captureAnthropicRequestBody(
+		{maxOutputTokens: 32_000},
+		'minimax-m3',
+	);
+	t.is(body.max_tokens, 32_000);
+});
+
+test('the v4 spelling maxTokens does not reach the provider', async t => {
+	// Regression guard: if this ever starts passing, the SDK has renamed the
+	// setting back and the mapping in chat-handler needs revisiting.
+	const body = await captureAnthropicRequestBody(
+		{maxTokens: 32_000} as {maxOutputTokens?: number},
+		'minimax-m3',
+	);
+	t.is(
+		body.max_tokens,
+		4096,
+		'maxTokens is silently ignored — the bug this fix exists for',
+	);
 });
