@@ -549,16 +549,7 @@ export class ChatWebviewProvider
 		}
 
 		this.postMessage({type: 'clear', isLoading: true});
-		const replayShowTokenUsage = vscode.workspace
-			.getConfiguration('nanocoder')
-			.get<boolean>('showTokenUsage', false);
 		for (const update of buffer) {
-			// Gate replayed usage indicators by the same setting as live turns:
-			// the panel hides the footer when showTokenUsage is false.
-			const usage = (update as Record<string, any>)?._meta?.['nanocoder/response-usage'];
-			if (usage) {
-				(update as Record<string, any>).showTokenUsage = replayShowTokenUsage;
-			}
 			this.postMessage({type: 'acpUpdate', update});
 		}
 		this.postMessage({type: 'sessionLoaded'});

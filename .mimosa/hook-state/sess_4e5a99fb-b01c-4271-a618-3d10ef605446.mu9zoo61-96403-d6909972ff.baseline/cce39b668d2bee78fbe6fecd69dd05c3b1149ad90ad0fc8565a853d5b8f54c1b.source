@@ -2062,8 +2062,6 @@
 
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
-	// showTokenUsage gates the footer; the replayed-history call site passes it
-	// via the update (set by the provider), live turns pass it explicitly.
 	function appendUsageIndicator(usage, cost, showTokenUsage) {
 		if (!usage || !showTokenUsage) return;
 		const total = Number.isFinite(usage.totalTokens)
@@ -2428,7 +2426,7 @@
 			}
 			const replayedUsage = update._meta && update._meta['nanocoder/response-usage'];
 			if (replayedUsage) {
-				appendUsageIndicator(replayedUsage, replayedUsage.cost, update.showTokenUsage);
+				appendUsageIndicator(replayedUsage, replayedUsage.cost);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
