@@ -38,14 +38,11 @@ export function shellQuote(value: string): string {
 /**
  * Wrap a string in cmd.exe-safe double quotes.
  *
- * Inside double quotes cmd.exe treats %, &, |, <, > and ^ as literal
- * characters - caret escaping is only an escape mechanism OUTSIDE quotes, so
- * prefixing ^ inside "..." leaks stray carets into the value instead of
- * protecting anything. Doubling embedded double quotes is the only escaping
- * "..." needs.
+ * Escapes %, &, |, <, >, and ^ by prefixing them with ^.
  */
 export function cmdQuote(value: string): string {
-	return `"${value.replace(/"/g, '""')}"`;
+	const escaped = value.replace(/[%&|<>^]/g, '^$&');
+	return `"${escaped}"`;
 }
 
 /**
