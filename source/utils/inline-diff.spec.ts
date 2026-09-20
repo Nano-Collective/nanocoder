@@ -1,5 +1,5 @@
 import test from 'ava';
-import {areLinesSimilar, computeInlineDiff} from './inline-diff.js';
+import {areLinesSimlar, computeInlineDiff} from './inline-diff.js';
 
 // ============================================================================
 // computeInlineDiff Tests
@@ -93,73 +93,73 @@ test('computeInlineDiff: preserves whitespace in diff', t => {
 });
 
 // ============================================================================
-// areLinesSimilar Tests
+// areLinesSimlar Tests
 // ============================================================================
 
-test('areLinesSimilar: identical lines are similar', t => {
-	t.true(areLinesSimilar('const x = 1;', 'const x = 1;'));
+test('areLinesSimlar: identical lines are similar', t => {
+	t.true(areLinesSimlar('const x = 1;', 'const x = 1;'));
 });
 
-test('areLinesSimilar: lines with minor changes are similar', t => {
-	t.true(areLinesSimilar('const x = 1;', 'const x = 2;'));
-	t.true(areLinesSimilar('function foo() {}', 'function bar() {}'));
-	t.true(areLinesSimilar('import React from "react";', 'import React from "react";'));
+test('areLinesSimlar: lines with minor changes are similar', t => {
+	t.true(areLinesSimlar('const x = 1;', 'const x = 2;'));
+	t.true(areLinesSimlar('function foo() {}', 'function bar() {}'));
+	t.true(areLinesSimlar('import React from "react";', 'import React from "react";'));
 });
 
-test('areLinesSimilar: lines with same structure are similar', t => {
-	t.true(areLinesSimilar(
+test('areLinesSimlar: lines with same structure are similar', t => {
+	t.true(areLinesSimlar(
 		'MIT License with Attribution',
 		'MIT License',
 	));
 });
 
-test('areLinesSimilar: completely different lines are not similar', t => {
-	t.false(areLinesSimilar(
+test('areLinesSimlar: completely different lines are not similar', t => {
+	t.false(areLinesSimlar(
 		'const x = 1;',
 		'import foo from "bar";',
 	));
-	t.false(areLinesSimilar(
+	t.false(areLinesSimlar(
 		'function test() {',
 		'// This is a comment',
 	));
 });
 
-test('areLinesSimilar: empty lines are similar to each other', t => {
-	t.true(areLinesSimilar('', ''));
-	t.true(areLinesSimilar('   ', '  '));
-	t.true(areLinesSimilar('\t', '  '));
+test('areLinesSimlar: empty lines are similar to each other', t => {
+	t.true(areLinesSimlar('', ''));
+	t.true(areLinesSimlar('   ', '  '));
+	t.true(areLinesSimlar('\t', '  '));
 });
 
-test('areLinesSimilar: empty vs non-empty are not similar', t => {
-	t.false(areLinesSimilar('', 'content'));
-	t.false(areLinesSimilar('content', ''));
-	t.false(areLinesSimilar('   ', 'content'));
+test('areLinesSimlar: empty vs non-empty are not similar', t => {
+	t.false(areLinesSimlar('', 'content'));
+	t.false(areLinesSimlar('content', ''));
+	t.false(areLinesSimlar('   ', 'content'));
 });
 
-test('areLinesSimilar: lines sharing 30%+ words are similar', t => {
+test('areLinesSimlar: lines sharing 30%+ words are similar', t => {
 	// 3 out of 5 words shared = 60%
-	t.true(areLinesSimilar(
+	t.true(areLinesSimlar(
 		'const foo = bar + baz;',
 		'const foo = qux + quux;',
 	));
 
 	// Only 1 out of 5 words shared = 20%
-	t.false(areLinesSimilar(
+	t.false(areLinesSimlar(
 		'const foo = bar + baz;',
 		'let qux = quux * corge;',
 	));
 });
 
-test('areLinesSimilar: handles special characters', t => {
-	t.true(areLinesSimilar(
+test('areLinesSimlar: handles special characters', t => {
+	t.true(areLinesSimlar(
 		'const regex = /test.*pattern/;',
 		'const regex = /new.*pattern/;',
 	));
 });
 
-test('areLinesSimilar: handles long lines', t => {
+test('areLinesSimlar: handles long lines', t => {
 	const longLine1 = 'const result = someFunction(arg1, arg2, arg3, arg4, arg5);';
 	const longLine2 = 'const result = someFunction(arg1, arg2, arg3, arg4, arg6);';
 
-	t.true(areLinesSimilar(longLine1, longLine2));
+	t.true(areLinesSimlar(longLine1, longLine2));
 });

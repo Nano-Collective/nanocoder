@@ -6,18 +6,9 @@ import {
 	artifactManager,
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
-import {
-	loadPreferences,
-	resolveProjectContextPreferences,
-	savePreferences,
-} from '@/config/preferences';
+import {loadPreferences, savePreferences} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
-import {
-	TOOL_APPROVAL_REQUIRED_KIND,
-	TOOL_APPROVAL_REQUIRED_PREFIX,
-} from '@/constants';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
-import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -27,12 +18,6 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
-import {
-	beginSessionStartHooks,
-	runLifecycleHooks,
-	SESSION_END_HOOK_HANDLER,
-	takePendingHookContext,
-} from '@/services/lifecycle-hooks';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -63,7 +48,6 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
-	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
 	artifacts: Pick<
 		ArtifactManager,
 		| 'cleanupStaleEphemeralSessions'
@@ -78,7 +62,6 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
-	appendRelevantProjectContextWithCount,
 	artifacts: artifactManager,
 };
 
@@ -182,73 +165,16 @@ export async function runPlainShell(
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
 		: {};
-	const toolPrompt = appendToolDefinitionsToPrompt(
+	const systemContent = appendToolDefinitionsToPrompt(
 		basePrompt,
 		toolsDisabled,
 		fallbackToolFormat,
 		toolsForPrompt,
 	);
-
-	const projectContext = await deps.appendRelevantProjectContextWithCount(
-		toolPrompt,
-		prompt,
-		new SemanticMemoryManager(),
-		resolveProjectContextPreferences(deps.loadPreferences()),
-	);
-	const systemContent = projectContext.systemPrompt;
-	if (projectContext.memoryCount > 0) {
-		writeStatus(
-			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
-		);
-	}
 	setLastBuiltPrompt(systemContent);
 
 	const systemMessage: Message = {role: 'system', content: systemContent};
-
-	// `run` / --plain is a session too, so it fires the same lifecycle points
-	// as the TUI. session-end goes through the shutdown manager (priority -5)
-	// so it runs on every exit path, including SIGINT.
-	deps.getShutdownManager().register({
-		name: SESSION_END_HOOK_HANDLER,
-		priority: -5,
-		handler: async () => {
-			await runLifecycleHooks('session-end');
-		},
-	});
-
-	await beginSessionStartHooks();
-
-	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
-	if (promptGate.blocked) {
-		const message = promptGate.reason ?? 'Prompt blocked by a hook.';
-		if (isJson) {
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				filesChanged: [],
-				message,
-			});
-		} else {
-			writeError(message);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
-		return;
-	}
-
-	const hookContext = [await takePendingHookContext(), promptGate.output]
-		.filter(Boolean)
-		.join('\n\n');
-	const initialMessages: Message[] = [
-		{
-			role: 'user',
-			content: hookContext
-				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
-				: prompt,
-		},
-	];
+	const initialMessages: Message[] = [{role: 'user', content: prompt}];
 
 	const abortController = new AbortController();
 	const sigint = () => abortController.abort();
@@ -347,7 +273,7 @@ export async function runPlainShell(
 			...(outcome.kind === 'error' && {
 				message: sanitizeOutput(outcome.message),
 			}),
-			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
+			...(outcome.kind === 'tool-approval-required' && {
 				toolNames: outcome.toolNames,
 			}),
 		};
@@ -362,7 +288,7 @@ export async function runPlainShell(
 		case 'success':
 			await shutdown(0, deps);
 			return;
-		case TOOL_APPROVAL_REQUIRED_KIND:
+		case 'tool-approval-required':
 			writeError(
 				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +

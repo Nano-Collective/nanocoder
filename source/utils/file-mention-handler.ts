@@ -4,7 +4,6 @@ import {
 	PlaceholderType,
 } from '../types/hooks.js';
 import {loadFileContent} from './file-content-loader.js';
-import {allocatePlaceholderId} from './placeholders.js';
 
 /**
  * Handle @file mention by creating a placeholder
@@ -27,10 +26,11 @@ export async function handleFileMention(
 		return null;
 	}
 
-	const {id: fileId} = allocatePlaceholderId(
-		currentPlaceholderContent,
-		PlaceholderType.FILE,
-	);
+	// Generate unique ID for this file placeholder
+	const existingFileCount = Object.values(currentPlaceholderContent).filter(
+		content => content.type === PlaceholderType.FILE,
+	).length;
+	const fileId = `file_${existingFileCount + 1}`;
 
 	// Create compact placeholder for display
 	const placeholder = lineRange

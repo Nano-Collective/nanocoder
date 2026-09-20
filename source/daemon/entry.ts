@@ -15,10 +15,7 @@ import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
-import {
-	recordSubagentApiCallForStats,
-	SubagentExecutor,
-} from '@/subagents/subagent-executor';
+import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
@@ -71,7 +68,6 @@ async function main(): Promise<void> {
 			client,
 			projectRoot,
 			mode,
-			recordSubagentApiCallForStats,
 		);
 		return {
 			execute: (task: SubagentTask): Promise<SubagentResult> =>

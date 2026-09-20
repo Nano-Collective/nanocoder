@@ -22,7 +22,6 @@ export interface Command<T = React.ReactElement | void> {
 			developmentMode?: import('@/types/core').DevelopmentMode;
 			lastApiUsage?: ApiUsageSnapshot | null;
 			apiCallHistory?: ApiCallRecord[];
-			sessionId?: string;
 		},
 	) => Promise<T>;
 }

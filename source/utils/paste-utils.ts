@@ -5,29 +5,12 @@ import {
 	PlaceholderContent,
 	PlaceholderType,
 } from '../types/hooks';
-import {allocatePlaceholderId} from './placeholders';
 
 /**
  * Default threshold for single-line paste handling.
  * Pastes <= this character limit are inserted directly without placeholders.
  */
 export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
-
-/** Render the label shown in the input for a paste placeholder. */
-function formatPasteDisplayText(ordinal: number, size: number): string {
-	return `[Paste #${ordinal}: ${size} chars]`;
-}
-
-/**
- * Restate an existing paste label at a new size, keeping its ordinal.
- * Used when a chunked paste grows after its placeholder already exists.
- */
-export function resizePasteDisplayText(
-	displayText: string,
-	size: number,
-): string {
-	return displayText.replace(/: \d+ chars\]$/, `: ${size} chars]`);
-}
 
 function getSingleLinePasteThreshold(): number {
 	const config = getAppConfig();
@@ -40,7 +23,7 @@ export function handlePaste(
 	pastedText: string,
 	currentDisplayValue: string,
 	currentPlaceholderContent: Record<string, PlaceholderContent>,
-	detectionMethod?: 'rate' | 'size' | 'multiline' | 'bracketed',
+	detectionMethod?: 'rate' | 'size' | 'multiline',
 ): InputState | null {
 	if (pastedText.length === 0) {
 		return null;
@@ -54,11 +37,12 @@ export function handlePaste(
 		return null;
 	}
 
-	const {id: pasteId, ordinal} = allocatePlaceholderId(
-		currentPlaceholderContent,
-		PlaceholderType.PASTE,
-	);
-	const placeholder = formatPasteDisplayText(ordinal, pastedText.length);
+	// Generate simple incrementing ID based on existing paste placeholders
+	const existingPasteCount = Object.values(currentPlaceholderContent).filter(
+		content => content.type === PlaceholderType.PASTE,
+	).length;
+	const pasteId = (existingPasteCount + 1).toString();
+	const placeholder = `[Paste #${pasteId}: ${pastedText.length} chars]`;
 
 	const pasteContent: PastePlaceholderContent = {
 		type: PlaceholderType.PASTE,
@@ -75,9 +59,9 @@ export function handlePaste(
 	};
 
 	// For CLI paste detection, we need to replace the pasted text in the display value
-	// Replace every exact occurrence, or append the placeholder if none is present.
+	// If the pasted text is at the end, replace it. Otherwise append the placeholder.
 	const newDisplayValue = currentDisplayValue.includes(pastedText)
-		? currentDisplayValue.replaceAll(pastedText, placeholder)
+		? currentDisplayValue.replace(pastedText, placeholder)
 		: currentDisplayValue + placeholder;
 
 	return {

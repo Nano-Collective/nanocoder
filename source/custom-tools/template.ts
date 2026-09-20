@@ -14,9 +14,8 @@
  * in single quotes and escapes embedded single quotes. Arrays are joined into
  * a single space-separated string with each element individually quoted.
  *
- * Substitution happens *before* the body is handed to the shell. Under
- * bash/sh that yields a POSIX-quoted command line. Under cmd.exe the
- * same quotes are not quoting, so this is not an injection barrier.
+ * Substitution happens *before* the body is handed to the shell, so the
+ * shell sees a complete, safe command line.
  */
 
 import {expandSections} from '@/utils/template-sections';

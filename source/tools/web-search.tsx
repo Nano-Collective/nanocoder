@@ -90,10 +90,7 @@ export const executeWebSearch = async (
 
 		return formattedResults;
 	} catch (error: unknown) {
-		if (
-			error instanceof Error &&
-			(error.name === 'AbortError' || error.name === 'TimeoutError')
-		) {
+		if (error instanceof Error && error.name === 'AbortError') {
 			throw new Error('Search request timeout');
 		}
 

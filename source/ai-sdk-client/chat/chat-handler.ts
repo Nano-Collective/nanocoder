@@ -503,8 +503,7 @@ export async function handleChat(
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,
 					totalTokens: usage.totalTokens,
-					cacheReadTokens:
-						usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+					cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
 					cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
 				},
 			};

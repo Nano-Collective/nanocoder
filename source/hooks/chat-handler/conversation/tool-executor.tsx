@@ -10,7 +10,6 @@ import {
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
-import {buildSubagentFailureMessage} from '@/subagents/failure-message';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
@@ -255,18 +254,6 @@ const groupForParallelExecution = (
 };
 
 /**
- * Renders a failed subagent run for the parent model.
- *
- * The `Error: ` prefix is load-bearing: callers detect a failed agent result
- * by it. The rest is shared with the native agent tool's failure path.
- */
-const buildFailedAgentContent = (agentResult: {
-	content: string;
-	error?: string;
-}): string =>
-	`Error: ${buildSubagentFailureMessage(agentResult.error, agentResult.content)}`;
-
-/**
  * Execute a batch of agent tool calls in parallel.
  * Returns tool results for all agents.
  */
@@ -391,7 +378,7 @@ const executeAgentBatch = async (
 			name: e.toolCall.function.name,
 			content: agentResult.success
 				? agentResult.content
-				: buildFailedAgentContent(agentResult),
+				: `Error: ${agentResult.error || 'Subagent execution failed'}`,
 		};
 
 		results.push({toolCall: e.toolCall, result});

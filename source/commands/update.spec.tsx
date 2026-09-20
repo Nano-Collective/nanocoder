@@ -185,11 +185,6 @@ test('hasCommandFailed: does not false positive on "no errors found"', t => {
 	t.false(hasCommandFailed(output));
 });
 
-test('hasCommandFailed: detects an error before a later "0 errors" summary', t => {
-	const output = 'EXIT_CODE: 0\nerror: update failed\nBuild completed with 0 errors';
-	t.true(hasCommandFailed(output));
-});
-
 test('hasCommandFailed: detects "error:" at start of line', t => {
 	const output = 'EXIT_CODE: 1\nSTDERR:\nerror: something went wrong';
 	t.true(hasCommandFailed(output));

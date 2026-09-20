@@ -7,7 +7,6 @@ import {
 } from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
-import type {ResponseUsage} from '@/types/usage';
 
 export {asSchema, jsonSchema, tool};
 
@@ -48,12 +47,6 @@ export interface Message {
 	 * drops the tool results that answer it.
 	 */
 	displayOnly?: boolean;
-	/**
-	 * Provider-reported usage for the completed ACP prompt that produced this
-	 * assistant message. Persisted so clients can restore the response footer
-	 * when a saved session is replayed. Older sessions omit this field.
-	 */
-	responseUsage?: ResponseUsage;
 }
 
 export interface ToolCall {
@@ -177,9 +170,7 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
-	/** Cached input tokens read from the provider cache. */
 	cacheReadTokens?: number;
-	/** Input tokens written to the provider cache. */
 	cacheWriteTokens?: number;
 }
 
@@ -292,15 +283,4 @@ export interface LSPConnectionStatus {
 	name: string;
 	status: ConnectionStatus;
 	errorMessage?: string;
-}
-
-/** Status-bar summary of the live task list, shown while it is collapsed. */
-export interface TaskIndicatorInfo {
-	totalCount: number;
-	completedCount: number;
-	/** When > 0 the badge prefix '~' is shown (work in flight). */
-	inProgressCount: number;
-	isHidden: boolean;
-	/** The list changed while collapsed - badge renders in the warning colour. */
-	hasUnread: boolean;
 }

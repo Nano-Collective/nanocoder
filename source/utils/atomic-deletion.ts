@@ -1,17 +1,4 @@
-import type {InputState, PlaceholderContent} from '../types/hooks';
-import {findPlaceholderOccurrences} from './placeholders';
-
-/**
- * Returns true when two half-open ranges, [start, end), share any characters.
- */
-function rangesOverlap(
-	firstStart: number,
-	firstEnd: number,
-	secondStart: number,
-	secondEnd: number,
-): boolean {
-	return firstStart < secondEnd && firstEnd > secondStart;
-}
+import type {InputState} from '../types/hooks';
 
 /**
  * Detect if a text change represents a deletion that should be atomic
@@ -45,29 +32,27 @@ export function handleAtomicDeletion(
 		deletionStart = newText.length;
 	}
 
-	const deletionEnd = deletionStart + deletedChars;
-
 	// Check if any placeholder was affected by this deletion
-	const occurrences = findPlaceholderOccurrences(
-		previousText,
-		previousState.placeholderContent,
-	);
-	for (const occurrence of occurrences) {
-		const {start, end} = occurrence;
+	const placeholderRegex = /\[Paste #(\d+): \d+ chars\]/g;
+	let match;
 
-		if (rangesOverlap(deletionStart, deletionEnd, start, end)) {
+	while ((match = placeholderRegex.exec(previousText)) !== null) {
+		const placeholderStart = match.index;
+		const placeholderEnd = placeholderStart + match[0].length;
+		const placeholderId = match[1];
+
+		// Check if deletion overlaps with this placeholder
+		const deletionEnd = deletionStart + deletedChars;
+
+		if (
+			(deletionStart >= placeholderStart && deletionStart < placeholderEnd) ||
+			(deletionEnd > placeholderStart && deletionEnd <= placeholderEnd) ||
+			(deletionStart <= placeholderStart && deletionEnd >= placeholderEnd)
+		) {
 			// Deletion affects this placeholder - remove it atomically
-			const newDisplayValue =
-				previousText.slice(0, start) + previousText.slice(end);
+			const newDisplayValue = previousText.replace(match[0], '');
 			const newPlaceholderContent = {...previousState.placeholderContent};
-			const hasAnotherOccurrence = occurrences.some(
-				candidate =>
-					candidate.id === occurrence.id &&
-					(candidate.start !== start || candidate.end !== end),
-			);
-			if (!hasAnotherOccurrence) {
-				delete newPlaceholderContent[occurrence.id];
-			}
+			delete newPlaceholderContent[placeholderId];
 
 			return {
 				displayValue: newDisplayValue,
@@ -86,14 +71,16 @@ export function handleAtomicDeletion(
 export function findPlaceholderAtPosition(
 	text: string,
 	position: number,
-	placeholderContent: Record<string, PlaceholderContent>,
 ): string | null {
-	for (const {id, start, end} of findPlaceholderOccurrences(
-		text,
-		placeholderContent,
-	)) {
-		if (position > start && position <= end) {
-			return id;
+	const placeholderRegex = /\[Paste #(\d+): \d+ chars\]/g;
+	let match;
+
+	while ((match = placeholderRegex.exec(text)) !== null) {
+		const placeholderStart = match.index;
+		const placeholderEnd = placeholderStart + match[0].length;
+
+		if (position >= placeholderStart && position <= placeholderEnd) {
+			return match[1]; // Return the placeholder ID
 		}
 	}
 
@@ -108,16 +95,28 @@ export function wouldPartiallyDeletePlaceholder(
 	text: string,
 	deletionStart: number,
 	deletionLength: number,
-	placeholderContent: Record<string, PlaceholderContent>,
 ): boolean {
-	const deletionEnd = deletionStart + deletionLength;
+	const placeholderRegex = /\[Paste #(\d+): \d+ chars\]/g;
+	let match;
 
-	for (const {start, end} of findPlaceholderOccurrences(
-		text,
-		placeholderContent,
-	)) {
-		const hasOverlap = rangesOverlap(deletionStart, deletionEnd, start, end);
-		const completeOverlap = deletionStart <= start && deletionEnd >= end;
+	while ((match = placeholderRegex.exec(text)) !== null) {
+		const placeholderStart = match.index;
+		const placeholderEnd = placeholderStart + match[0].length;
+		const deletionEnd = deletionStart + deletionLength;
+
+		// Check for overlap
+		const overlapsStart =
+			deletionStart >= placeholderStart && deletionStart < placeholderEnd;
+		const overlapsEnd =
+			deletionEnd > placeholderStart && deletionEnd <= placeholderEnd;
+		const spansPast =
+			deletionStart < placeholderStart && deletionEnd > placeholderStart;
+		const spansOver =
+			deletionStart < placeholderEnd && deletionEnd > placeholderEnd;
+
+		const hasOverlap = overlapsStart || overlapsEnd || spansPast || spansOver;
+		const completeOverlap =
+			deletionStart <= placeholderStart && deletionEnd >= placeholderEnd;
 
 		if (hasOverlap && !completeOverlap) {
 			return true;

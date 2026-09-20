@@ -38,35 +38,21 @@ const testTitleShapeContext = {
 /**
  * Wrapper component that provides ThemeContext and TitleShapeContext for tests
  */
-function TestThemeProvider({
-	children,
-	withUIState,
-}: {
-	children: React.ReactNode;
-	withUIState: boolean;
-}) {
+function TestThemeProvider({children}: {children: React.ReactNode}) {
 	return (
 		<TitleShapeContext.Provider value={testTitleShapeContext}>
 			<ThemeContext.Provider value={testThemeContext}>
-				{withUIState ? <UIStateProvider>{children}</UIStateProvider> : children}
+				<UIStateProvider>{children}</UIStateProvider>
 			</ThemeContext.Provider>
 		</TitleShapeContext.Provider>
 	);
 }
 
 /**
- * Render a component wrapped with ThemeContext and TitleShapeContext for testing.
- *
- * `withUIState` wraps the subtree in a UIStateProvider, on by default so leaf
- * components can be rendered in isolation. Pass false when the component under
- * test is supposed to provide its own — otherwise the harness supplies a
- * context the real app doesn't, and a missing provider reads as a passing test.
+ * Render a component wrapped with ThemeContext and TitleShapeContext for testing
  */
 export function renderWithTheme(
 	element: React.ReactElement,
-	{withUIState = true}: {withUIState?: boolean} = {},
 ): ReturnType<typeof render> {
-	return render(
-		<TestThemeProvider withUIState={withUIState}>{element}</TestThemeProvider>,
-	);
+	return render(<TestThemeProvider>{element}</TestThemeProvider>);
 }

@@ -328,7 +328,6 @@ function verifyLSPServerWithCommunication(
 			// A clean exit can also indicate success for some servers
 			// However, for LSP servers waiting for input, an immediate exit is often a failure
 			// The 'spawn' event is a more reliable indicator for our purpose
-			resolve(false);
 		});
 	});
 }

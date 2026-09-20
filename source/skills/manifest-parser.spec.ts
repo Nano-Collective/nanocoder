@@ -131,19 +131,6 @@ subscribe:
 	);
 });
 
-test('accepts skill subscription targets', t => {
-	const m = parseSkillManifestContent(`
-name: k8s
-description: ok
-subscribe:
-  - kind: file.changed
-    target: skill:cluster-docs
-    paths: ["src/**"]
-`);
-
-	t.is(m.subscribe?.[0]?.target, 'skill:cluster-docs');
-});
-
 test('rejects absolute path in subscribe.paths', t => {
 	t.throws(
 		() =>

@@ -8,7 +8,6 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validatePath} from '@/utils/path-validators';
 import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
@@ -89,7 +88,7 @@ const executeStringReplace = async (
 		);
 	}
 
-	const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+	const newContent = fileContent.replace(old_str, new_str);
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
@@ -163,7 +162,7 @@ const stringReplaceFormatter = async (
 
 			const occurrences = fileContent.split(old_str).length - 1;
 			if (occurrences === 1) {
-				const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+				const newContent = fileContent.replace(old_str, new_str);
 
 				const changeId = sendFileChangeToVSCode(
 					absPath,

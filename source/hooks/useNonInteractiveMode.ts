@@ -1,8 +1,5 @@
 import React from 'react';
-import {
-	getExitCodeForReason,
-	isNonInteractiveModeComplete,
-} from '@/app/helpers';
+import {isNonInteractiveModeComplete} from '@/app/helpers';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import type {DevelopmentMode, LLMClient} from '@/types';
@@ -127,9 +124,12 @@ export function useNonInteractiveMode({
 					logger.error('Non-interactive mode timed out');
 				} else if (reason === 'error') {
 					logger.error('Non-interactive mode encountered errors');
+				} else if (reason === 'tool-approval') {
+					// Exit with error code when tool approval is required
+					// Error message already printed by useChatHandler
 				}
 				// Wait a bit to ensure all output is flushed
-				const code = getExitCodeForReason(reason);
+				const code = reason === 'error' || reason === 'tool-approval' ? 1 : 0;
 				const timer = setTimeout(() => {
 					void getShutdownManager().gracefulShutdown(code);
 				}, TIMEOUT_OUTPUT_FLUSH_MS);
