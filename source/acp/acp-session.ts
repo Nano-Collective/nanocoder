@@ -49,6 +49,5 @@ export class AcpSession {
 
 	beginTurn(): void {
 		this.abortController = new AbortController();
-		this.turnActive = true;
 	}
 }

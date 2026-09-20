@@ -272,7 +272,7 @@ export const DevelopmentModeIndicator = React.memo(
 			})();
 
 		return (
-			<Box>
+			<Box marginTop={1}>
 				<Text
 					color={
 						developmentMode === 'normal'

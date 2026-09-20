@@ -15,10 +15,7 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
-import {
-	recordSubagentApiCallForStats,
-	SubagentExecutor,
-} from '@/subagents/subagent-executor';
+import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
@@ -96,13 +93,7 @@ export async function initializePlain(
 
 	updateLastUsed(actualProvider, finalModel);
 
-	const subagentExecutor = new SubagentExecutor(
-		toolManager,
-		client,
-		process.cwd(),
-		'normal',
-		recordSubagentApiCallForStats,
-	);
+	const subagentExecutor = new SubagentExecutor(toolManager, client);
 	setAgentToolExecutor(subagentExecutor);
 
 	const subagentLoader = getSubagentLoader();

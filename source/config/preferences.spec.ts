@@ -37,11 +37,8 @@ import {
 	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
-	getMouseReporting,
-	updateMouseReporting,
 	updateShowUsageFooter,
 } from './preferences';
-import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
 
 console.log('\npreferences.spec.ts');
@@ -770,14 +767,12 @@ test.serial('full workflow: update and retrieve nanocoder shape', t => {
 // getPasteThreshold Tests
 // ============================================================================
 
-test.serial('getPasteThreshold returns threshold from nanocoder.paste.singleLineThreshold', t => {
+test.serial('getPasteThreshold returns threshold from paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
 		lastProvider: 'openrouter',
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 1500,
-			},
+		paste: {
+			singleLineThreshold: 1500,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -819,10 +814,8 @@ test.serial('getPasteThreshold returns undefined when file does not exist', t =>
 test.serial('getPasteThreshold returns undefined for non-positive threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: -100,
-			},
+		paste: {
+			singleLineThreshold: -100,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -840,10 +833,8 @@ test.serial('getPasteThreshold returns undefined for non-positive threshold', t 
 test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 0,
-			},
+		paste: {
+			singleLineThreshold: 0,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -861,10 +852,8 @@ test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 1234.7,
-			},
+		paste: {
+			singleLineThreshold: 1234.7,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -882,10 +871,8 @@ test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 test.serial('getPasteThreshold returns undefined for non-number threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 'not-a-number',
-			},
+		paste: {
+			singleLineThreshold: 'not-a-number',
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -904,7 +891,7 @@ test.serial('getPasteThreshold returns undefined for non-number threshold', t =>
 // updatePasteThreshold Tests
 // ============================================================================
 
-test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineThreshold', t => {
+test.serial('updatePasteThreshold saves threshold to paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
 		rmSync(preferencesPath, {force: true});
@@ -918,7 +905,7 @@ test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineT
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 2000);
+		t.is(parsed.paste?.singleLineThreshold, 2000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -944,7 +931,7 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 		t.is(parsed.lastProvider, 'openrouter');
 		t.is(parsed.lastModel, 'claude-3-opus');
 		t.is(parsed.selectedTheme, 'tokyo-night');
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1500);
+		t.is(parsed.paste?.singleLineThreshold, 1500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -955,10 +942,8 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 test.serial('updatePasteThreshold overwrites existing paste threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const existingData: UserPreferences = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 800,
-			},
+		paste: {
+			singleLineThreshold: 800,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
@@ -969,7 +954,7 @@ test.serial('updatePasteThreshold overwrites existing paste threshold', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1000);
+		t.is(parsed.paste?.singleLineThreshold, 1000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -989,7 +974,7 @@ test.serial('updatePasteThreshold rounds non-integer values', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1235);
+		t.is(parsed.paste?.singleLineThreshold, 1235);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1011,7 +996,7 @@ test.serial('updatePasteThreshold creates file if it does not exist', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 500);
+		t.is(parsed.paste?.singleLineThreshold, 500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1059,7 +1044,7 @@ test.serial('updatePasteThreshold does not overwrite other preferences saved via
 
 		t.is(parsed.lastProvider, 'ollama');
 		t.is(parsed.lastModel, 'llama3');
-		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 400);
+		t.is(parsed.paste?.singleLineThreshold, 400);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1597,39 +1582,6 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 });
 
 // ============================================================================
-// Mouse Reporting Tests
-// ============================================================================
-
-test.serial('getMouseReporting returns true by default when not set', t => {
-	const preferencesPath = getTestPreferencesPath();
-	if (existsSync(preferencesPath)) {
-		rmSync(preferencesPath, {force: true});
-	}
-
-	const result = getMouseReporting();
-	t.is(result, true);
-});
-
-test.serial('updateMouseReporting saves and retrieves preference correctly', t => {
-	const preferencesPath = getTestPreferencesPath();
-	if (existsSync(preferencesPath)) {
-		rmSync(preferencesPath, {force: true});
-	}
-
-	try {
-		updateMouseReporting(true);
-		t.is(getMouseReporting(), true);
-
-		updateMouseReporting(false);
-		t.is(getMouseReporting(), false);
-	} finally {
-		if (existsSync(preferencesPath)) {
-			rmSync(preferencesPath, {force: true});
-		}
-	}
-});
-
-// ============================================================================
 // Usage Footer Tests
 // ============================================================================
 
@@ -1649,6 +1601,7 @@ test.serial('getShowUsageFooter defaults to true when not set', t => {
 		}
 	}
 });
+
 test.serial('getShowUsageFooter defaults to true when file does not exist', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
@@ -1772,62 +1725,6 @@ test.serial('updateProfessionalTone preserves other preferences', t => {
 		}
 	}
 });
-
-// Cross-writer non-clobbering: updatePreferencesNestedValue (sessions) and
-// updatePasteThreshold (paste) share the same file but write via different code
-// paths. Verify that writing one does not erase the other.
-
-test.serial(
-	'sessions writer does not clobber paste written by savePreferences',
-	t => {
-		const preferencesPath = getTestPreferencesPath();
-		if (existsSync(preferencesPath)) {
-			rmSync(preferencesPath, {force: true});
-		}
-
-		try {
-			updatePasteThreshold(1500);
-			updatePreferencesNestedValue('sessions', 'maxMessages', 50);
-
-			const content = JSON.parse(
-				readFileSync(preferencesPath, 'utf-8'),
-			) as UserPreferences;
-
-			t.is(content.nanocoder?.paste?.singleLineThreshold, 1500);
-			t.is(content.nanocoder?.sessions?.maxMessages, 50);
-		} finally {
-			if (existsSync(preferencesPath)) {
-				rmSync(preferencesPath, {force: true});
-			}
-		}
-	},
-);
-
-test.serial(
-	'paste writer via savePreferences does not clobber sessions',
-	t => {
-		const preferencesPath = getTestPreferencesPath();
-		if (existsSync(preferencesPath)) {
-			rmSync(preferencesPath, {force: true});
-		}
-
-		try {
-			updatePreferencesNestedValue('sessions', 'retentionDays', 14);
-			updatePasteThreshold(2000);
-
-			const content = JSON.parse(
-				readFileSync(preferencesPath, 'utf-8'),
-			) as UserPreferences;
-
-			t.is(content.nanocoder?.sessions?.retentionDays, 14);
-			t.is(content.nanocoder?.paste?.singleLineThreshold, 2000);
-		} finally {
-			if (existsSync(preferencesPath)) {
-				rmSync(preferencesPath, {force: true});
-			}
-		}
-	},
-);
 
 test.serial('getSemanticMemoryEnabled returns true when not set', t => {
 	const preferencesPath = getTestPreferencesPath();

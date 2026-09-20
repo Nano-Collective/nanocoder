@@ -8,13 +8,10 @@
 	const artifactBar = document.getElementById('artifact-bar');
 	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
-	const contextChipsClearBtn = document.getElementById('context-chips-clear');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
-	// [{path, name, kind: 'file'|'folder', agentEdited?: boolean}]. Entries the
-	// agent contributed are flagged so submitMessage can leave them out.
-	let attachedPaths = [];
+	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -55,64 +52,35 @@
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
-		const formatDropdownLabel = (value, triggerId) => {
-			if (triggerId === 'mode-trigger') {
-				const modeLabels = {
-					normal: 'Normal',
-					'auto-accept': 'Auto-Accept',
-					yolo: 'YOLO',
-					plan: 'Plan',
-				};
-				return modeLabels[value] || value;
-			}
-
-			if (value.includes('/')) {
-				return value.split('/').pop();
-			}
-
-			return value;
-		};
-
 		class CustomDropdown {
 			constructor(triggerId, dropdownId, labelId, onChange) {
-				this.triggerId = triggerId;
 				this.trigger = document.getElementById(triggerId);
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
 
 				if (!this.trigger || !this.dropdown) return;
-				this.trigger.setAttribute('aria-haspopup', 'menu');
-				this.trigger.setAttribute('aria-expanded', 'false');
-				this.trigger.setAttribute('aria-controls', dropdownId);
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger';
+					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
-					this.syncTriggerExpanded();
 				});
 			}
 
-			syncModeTriggerLabel() {
+			syncModeBadge() {
 				if (this.label?.id !== 'mode-trigger-label') return;
-				if (this.trigger && this.label.textContent) {
-					const accessibleLabel = `Mode: ${this.label.textContent}`;
-					this.trigger.title = accessibleLabel;
-					this.trigger.setAttribute('aria-label', accessibleLabel);
+				const badge = document.getElementById('composer-mode-badge');
+				if (badge) badge.textContent = this.label.textContent || '';
+				const settingsTrigger = document.getElementById('composer-settings-trigger');
+				if (settingsTrigger && this.label.textContent) {
+					settingsTrigger.title = `Provider and approval mode (${this.label.textContent})`;
+					settingsTrigger.setAttribute('aria-label', `Composer settings, ${this.label.textContent}`);
 				}
-			}
-
-			syncTriggerExpanded() {
-				if (!this.trigger || !this.dropdown) return;
-				this.trigger.setAttribute(
-					'aria-expanded',
-					this.dropdown.classList.contains('hidden') ? 'false' : 'true',
-				);
 			}
 
 			setOptions(options, selectedValue) {
@@ -122,7 +90,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
-					this.syncModeTriggerLabel();
+					this.syncModeBadge();
 					return;
 				}
 
@@ -135,12 +103,16 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					const displayValue = formatDropdownLabel(opt, this.triggerId);
-					item.textContent = displayValue;
+					item.textContent = opt;
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
+
+						let displayValue = opt;
+						if (displayValue.includes('/')) {
+							displayValue = displayValue.split('/').pop();
+						}
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -151,17 +123,19 @@
 					item.addEventListener('click', () => {
 						this.onChange(opt);
 						this.dropdown.classList.add('hidden');
-						this.syncTriggerExpanded();
 					});
 
 					this.dropdown.appendChild(item);
 				});
 
 				if (!hasSelected && options.length > 0) {
-					const displayValue = formatDropdownLabel(options[0], this.triggerId);
+					let displayValue = options[0];
+					if (displayValue.includes('/')) {
+						displayValue = displayValue.split('/').pop();
+					}
 					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.syncModeTriggerLabel();
+				this.syncModeBadge();
 			}
 		}
 
@@ -208,20 +182,6 @@
 			}
 		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
-		[
-			['provider-trigger', 'provider-dropdown'],
-			['model-trigger', 'model-dropdown'],
-			['mode-trigger', 'mode-dropdown'],
-		].forEach(([triggerId, dropdownId]) => {
-			const trigger = document.getElementById(triggerId);
-			const dropdown = document.getElementById(dropdownId);
-			if (trigger && dropdown) {
-				trigger.setAttribute(
-					'aria-expanded',
-					dropdown.classList.contains('hidden') ? 'false' : 'true',
-				);
-			}
-		});
 		const composerSettings = document.getElementById('composer-settings');
 		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
 		if (composerSettingsTrigger) {
@@ -421,7 +381,10 @@
 		chatInput.style.height = 'auto';
 		chatInput.style.height = chatInput.scrollHeight + 'px';
 
-		attachPath(item);
+		if (!attachedPaths.some(a => a.path === item.path)) {
+			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
+			renderChips();
+		}
 
 		closeMention();
 		chatInput.focus();
@@ -656,10 +619,6 @@
 	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
-	// Absolute paths each tool call touches, kept until the call lands: the
-	// completion update carries a status and nothing else. Same lifetime as
-	// toolKinds, and cleared with it.
-	const toolLocations = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -1339,10 +1298,7 @@
 
 	function submitMessage() {
 		let text = chatInput.value.trim();
-		// Files the agent wrote share the chip row but are a review affordance,
-		// not an attachment - only what the user picked is part of the prompt.
-		const attachments = attachedPaths.filter(a => !a.agentEdited);
-		if (!text && attachments.length === 0 && pendingImages.length === 0) return;
+		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
 
 		// /copy is handled locally, mirroring the terminal slash command:
 		// copy the previous agent output instead of prompting the agent.
@@ -1355,7 +1311,7 @@
 		if (lower === '/copy' || lower === '/copy code') {
 			chatInput.value = '';
 			chatInput.style.height = 'auto';
-			attachedPaths = attachedPaths.filter(a => a.agentEdited);
+			attachedPaths = [];
 			renderChips();
 			pendingImages = [];
 			renderImagePreviews();
@@ -1368,8 +1324,8 @@
 		}
 
 		// Append attached paths as context lines
-		if (attachments.length > 0) {
-			const contextText = attachments
+		if (attachedPaths.length > 0) {
+			const contextText = attachedPaths
 				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
 				.join('\n');
 			text = text ? `${text}\n\n${contextText}` : contextText;
@@ -1385,9 +1341,8 @@
 		pendingImages = [];
 		renderImagePreviews();
 
-		// Clear the user's chips after sending. The agent's stay: they are a
-		// running list of what it changed, not an outbox.
-		attachedPaths = attachedPaths.filter(a => a.agentEdited);
+		// Clear chips after sending
+		attachedPaths = [];
 		renderChips();
 
 		dispatchPrompt(text, imagesToSubmit);
@@ -1460,123 +1415,16 @@
 		return svg;
 	}
 
-	/** Last segment of a path, for either separator. */
-	function basename(filePath) {
-		return String(filePath).trim().split(/[/\\]/).pop();
-	}
-
-	/**
-	 * Identity key for a path, for comparing chips only - never for display or
-	 * for anything sent to the host, which both keep the path as it arrived.
-	 *
-	 * The row is fed by two producers that spell the same file differently: the
-	 * agent's chips come from resolve() in the ACP layer, the user's from
-	 * uri.fsPath in the extension host, and on Windows those disagree about the
-	 * case of the drive letter and about separators. Compared raw, one file
-	 * shows up twice - once solid, once dashed - and attaching it fails to
-	 * promote the agent's chip. Only the drive letter is case-folded: the rest
-	 * is left alone so this stays correct on a case-sensitive filesystem, where
-	 * `/a/B.ts` and `/a/b.ts` really are two files.
-	 */
-	function pathKey(filePath) {
-		return String(filePath)
-			.replace(/\\/g, '/')
-			.replace(/^([A-Za-z]):/, (_match, drive) => `${drive.toLowerCase()}:`);
-	}
-
-	/** Whether two paths name the same file. */
-	function samePath(a, b) {
-		return pathKey(a) === pathKey(b);
-	}
-
-	/**
-	 * Attach a path the user picked. A file the agent already put in the row is
-	 * promoted rather than ignored, so attaching it deliberately still sends it
-	 * with the next message.
-	 */
-	function attachPath(item) {
-		const existing = attachedPaths.find(a => samePath(a.path, item.path));
-		if (existing) {
-			existing.agentEdited = false;
-		} else {
-			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
-		}
-		renderChips();
-	}
-
-	/**
-	 * Surface a file the agent created or edited in the context row, so it can
-	 * be opened and reviewed without hunting for it in the explorer. Flagged
-	 * `agentEdited` so it is left out of the next prompt: the agent just wrote
-	 * the file, and re-inlining it would spend context to say nothing new.
-	 */
-	function addChangedFileChip(filePath) {
-		if (attachedPaths.some(a => samePath(a.path, filePath))) return;
-		attachedPaths.push({
-			path: filePath,
-			name: basename(filePath),
-			kind: 'file',
-			agentEdited: true,
-		});
-		renderChips();
-	}
-
-	/**
-	 * Drop a path from the context row because the file behind it is gone. This
-	 * takes the user's own attachments too: a deleted path would otherwise ride
-	 * along on the next prompt and expand to nothing.
-	 */
-	function dropChip(filePath) {
-		const remaining = attachedPaths.filter(a => !samePath(a.path, filePath));
-		if (remaining.length === attachedPaths.length) return;
-		attachedPaths = remaining;
-		renderChips();
-	}
-
-	// Only the agent's chips go: what the user attached is theirs to remove.
-	if (contextChipsClearBtn) {
-		contextChipsClearBtn.addEventListener('click', () => {
-			attachedPaths = attachedPaths.filter(a => !a.agentEdited);
-			renderChips();
-		});
-	}
-
-	/**
-	 * Label the bulk-dismiss control, or hide it when the row holds nothing the
-	 * agent put there. A refactor turn can add dozens of chips, and dismissing
-	 * them one x at a time is not a realistic ask - the row itself is capped and
-	 * scrolls, so this is the way out of a long one.
-	 */
-	function renderChipsClear() {
-		if (!contextChipsClearBtn) return;
-		const changed = attachedPaths.filter(a => a.agentEdited).length;
-		if (changed === 0) {
-			contextChipsClearBtn.classList.add('hidden');
-			contextChipsClearBtn.textContent = '';
-			return;
-		}
-		contextChipsClearBtn.classList.remove('hidden');
-		contextChipsClearBtn.textContent = `Clear ${changed} changed file${changed === 1 ? '' : 's'}`;
-		contextChipsClearBtn.setAttribute(
-			'title',
-			'Dismiss the files Nanocoder changed. Files you attached stay.',
-		);
-	}
-
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
-			renderChipsClear();
 			return;
 		}
 		contextChipsContainer.classList.remove('hidden');
-		renderChipsClear();
 		for (const item of attachedPaths) {
 			const chip = document.createElement('span');
-			chip.className = item.agentEdited
-				? 'context-chip context-chip-edited'
-				: 'context-chip';
+			chip.className = 'context-chip';
 
 			const iconSpan = document.createElement('span');
 			iconSpan.className = 'chip-icon';
@@ -1587,12 +1435,7 @@
 
 			const nameSpan = document.createElement('span');
 			nameSpan.className = 'chip-name';
-			nameSpan.setAttribute(
-				'title',
-				item.agentEdited
-					? `${item.path}\nChanged by Nanocoder - click to open`
-					: item.path,
-			);
+			nameSpan.setAttribute('title', item.path);
 			nameSpan.textContent = item.name;
 
 			const removeSpan = document.createElement('span');
@@ -1606,7 +1449,7 @@
 			
 			chip.addEventListener('click', e => {
 				if (e.target.classList.contains('chip-remove')) {
-					attachedPaths = attachedPaths.filter(a => !samePath(a.path, item.path));
+					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
 					renderChips();
 					return;
 				}
@@ -1772,7 +1615,7 @@
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
 			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
-				const name = basename(path);
+				const name = path.trim().split(/[/\\]/).pop();
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -1780,7 +1623,7 @@
 			// Handle post-injected format (from history sync)
 			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
 				const kind = type === 'directory' ? 'folder' : 'file';
-				const name = basename(path);
+				const name = path.trim().split(/[/\\]/).pop();
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -2062,8 +1905,6 @@
 
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
-	// showTokenUsage gates the footer; the replayed-history call site passes it
-	// via the update (set by the provider), live turns pass it explicitly.
 	function appendUsageIndicator(usage, cost, showTokenUsage) {
 		if (!usage || !showTokenUsage) return;
 		const total = Number.isFinite(usage.totalTokens)
@@ -2110,7 +1951,10 @@
 			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
-				attachPath({ path, name, kind });
+				if (!attachedPaths.some(a => a.path === path)) {
+					attachedPaths.push({ path, name, kind });
+					renderChips();
+				}
 				break;
 			}
 			case 'appendMessage':
@@ -2133,11 +1977,6 @@
 				removePlanReview();
 				currentTurnFooter = null;
 				toolKinds.clear();
-				toolLocations.clear();
-				// A new or resumed conversation has no relationship to the files
-				// the previous one touched.
-				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
-				renderChips();
 				turnCancelled = false;
 				agentTurnId = 0;
 				turnStartedAt = 0;
@@ -2425,10 +2264,6 @@
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
-			}
-			const replayedUsage = update._meta && update._meta['nanocoder/response-usage'];
-			if (replayedUsage) {
-				appendUsageIndicator(replayedUsage, replayedUsage.cost, update.showTokenUsage);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
@@ -3177,10 +3012,8 @@
 		}
 
 		if (update.kind) toolKinds.set(toolCallId, update.kind);
-		const kind = toolKinds.get(toolCallId);
-		trackFileChanges(toolCallId, kind, update);
 
-		if (kind === 'edit') {
+		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = existingCard;
 			if (!card) {
 				card = createEditCard(toolCallId, update);
@@ -3196,15 +3029,9 @@
 	// Verb per tool for the aggregated tool list. An entry only fires when the
 	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
 	// Two families are deliberately absent: fetch_url / web_search take a
-	// url/query rather than a path, so their title is the bare tool name; and the
-	// file editors (string_replace, write_file, diff_edit) report ACP kind
-	// 'edit', so they render as edit cards and never reach this list.
-	//
-	// file_op is a third case, and an unresolved one: its delete and move do
-	// reach this list, and with no entry here they show their raw ACP title
-	// ("file_op: move /a → /b"). One verb cannot cover four operations sharing
-	// a tool name, so fixing it means humanizing per operation rather than per
-	// tool. Left as it was before the changed-file chips landed.
+	// url/query rather than a path, so their title is the bare tool name; and
+	// string_replace / write_file report ACP kind 'edit', so they render as edit
+	// cards and never reach this list.
 	const TOOL_VERBS = {
 		read_file: 'Reading',
 		list_directory: 'Listing',
@@ -3252,89 +3079,17 @@
 		return last.replace(/['"]+$/g, '').trim();
 	}
 
-	// Path of the diff the extension host would have handed to DiffManager, or
-	// null when this update carries none. Mirrors handleDiffs in
-	// chat-webview-provider.ts so the panel only offers "Open Diff" once the
-	// change is actually registered.
-	function diffPath(update) {
-		if (!update || !Array.isArray(update.content)) return null;
-		const diff = update.content.find(block => !!block && block.type === 'diff' && !!block.path);
-		return diff ? diff.path : null;
-	}
-
+	// True when this update carries a diff the extension host would have handed
+	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
+	// panel only offers "Open Diff" once the change is actually registered.
 	function hasDiffContent(update) {
-		return diffPath(update) !== null;
-	}
-
-	// A path the extension host can actually open: `vscode.Uri.file()` resolves
-	// a relative one against the filesystem root, so a chip built from it would
-	// point at a file that does not exist and reject inside showTextDocument.
-	// Absolute means a POSIX root, a UNC share, or a drive-qualified path.
-	function isAbsolutePath(filePath) {
-		return /^(?:[/\\]|[A-Za-z]:[/\\])/.test(filePath);
-	}
-
-	// Absolute paths an update names, in the order the agent reported them - for
-	// a move that is [source, destination]. `locations` is the ACP field for
-	// them, and the only source on a queued announcement, which withholds its
-	// content until the call is about to run. A tool that reports a relative
-	// location - an MCP or custom tool is under no obligation to resolve one -
-	// contributes nothing rather than an unopenable chip.
-	function updateLocations(update) {
-		const reported =
-			update && Array.isArray(update.locations) ? update.locations : [];
-		const paths = reported
-			.map(location => location && location.path)
-			.filter(path => typeof path === 'string' && isAbsolutePath(path));
-		if (paths.length > 0) return paths;
-
-		const fromDiff = diffPath(update);
-		return fromDiff && isAbsolutePath(fromDiff) ? [fromDiff] : [];
-	}
-
-	/**
-	 * Keep the context row in step with what a finished call did to the
-	 * filesystem: `edit` created or changed a file, `delete` removed one, and
-	 * `move` did both at once, so the chip follows the file to its new path
-	 * rather than being left pointing at one that is no longer there.
-	 *
-	 * Nothing happens until the call completes, so an edit or a delete that was
-	 * denied, cancelled or failed leaves the row exactly as it was. The paths
-	 * are remembered from the announcement because the completion update carries
-	 * a status and nothing else.
-	 */
-	function trackFileChanges(toolCallId, kind, update) {
-		const reported = updateLocations(update);
-		if (reported.length > 0) toolLocations.set(toolCallId, reported);
-
-		// resolveEditCardState is named for the card it was written for, but the
-		// part used here is the status normalisation - 'success' folded into
-		// 'completed', and a denial or a cancel separated back out of 'failed'.
-		// That is the same question for a delete or a move as for an edit.
-		if (resolveEditCardState(update).status !== 'completed') return;
-
-		const paths = toolLocations.get(toolCallId);
-		if (!paths || paths.length === 0) return;
-
-		if (kind === 'edit') {
-			addChangedFileChip(paths[0]);
-		} else if (kind === 'delete') {
-			dropChip(paths[0]);
-		} else if (kind === 'move') {
-			dropChip(paths[0]);
-			// The destination is the half worth keeping. Without one there is
-			// nothing to point at, so the move only takes the old chip away.
-			if (paths.length > 1) addChangedFileChip(paths[paths.length - 1]);
-		}
+		if (!update || !Array.isArray(update.content)) return false;
+		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
 	}
 
 	// Resolve an edit card's label and icon from an update. The agent reports a
 	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
 	// separated back out here rather than all reading as an error.
-	//
-	// The `status` it returns is the general normalisation of an update's
-	// outcome, so trackFileChanges reads it for deletes and moves too - only the
-	// label and icon are specific to an edit card.
 	function resolveEditCardState(update) {
 		let status = (update && update.status) || 'pending';
 		if (status === 'success') status = 'completed';

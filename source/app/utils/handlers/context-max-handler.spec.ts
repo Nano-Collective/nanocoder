@@ -21,7 +21,6 @@ function createOptions(overrides: Partial<MessageSubmissionOptions> = {}): Messa
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: () => {},
 		setLiveComponent: () => {},
-		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],

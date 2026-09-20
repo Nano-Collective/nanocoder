@@ -1,4 +1,4 @@
-import {readFileSync} from 'fs';
+import {readFileSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {
@@ -13,7 +13,6 @@ import {
 import type {TuneConfig} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
-import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
@@ -73,10 +72,7 @@ export function getPreferencesVersion(): number {
 
 export function savePreferences(preferences: UserPreferences): void {
 	try {
-		atomicWriteFileSync(
-			getPreferencesPath(),
-			JSON.stringify(preferences, null, 2),
-		);
+		writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
 		return;
@@ -167,7 +163,7 @@ export function updateNotificationsPreference(
  */
 export function getPasteThreshold(): number | undefined {
 	const preferences = loadPreferences();
-	const threshold = preferences.nanocoder?.paste?.singleLineThreshold;
+	const threshold = preferences.paste?.singleLineThreshold;
 	if (typeof threshold === 'number' && threshold > 0) {
 		return Math.round(threshold);
 	}
@@ -179,13 +175,10 @@ export function getPasteThreshold(): number | undefined {
  */
 export function updatePasteThreshold(threshold: number): void {
 	const preferences = loadPreferences();
-	if (!preferences.nanocoder) {
-		preferences.nanocoder = {};
-	}
-	if (!preferences.nanocoder.paste) {
-		preferences.nanocoder.paste = {singleLineThreshold: Math.round(threshold)};
+	if (!preferences.paste) {
+		preferences.paste = {singleLineThreshold: Math.round(threshold)};
 	} else {
-		preferences.nanocoder.paste.singleLineThreshold = Math.round(threshold);
+		preferences.paste.singleLineThreshold = Math.round(threshold);
 	}
 	savePreferences(preferences);
 }
@@ -347,7 +340,7 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
  */
 export function getAlternateScreen(): boolean {
 	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? true;
+	return preferences.alternateScreen ?? false;
 }
 
 /**
@@ -356,27 +349,6 @@ export function getAlternateScreen(): boolean {
 export function updateAlternateScreen(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.alternateScreen = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the mouse reporting preference. When true (default), the terminal reports
- * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
- * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
- * terminal does not capture the mouse at all, so native text selection
- * (double-click, drag) works directly and the wheel does nothing.
- */
-export function getMouseReporting(): boolean {
-	const preferences = loadPreferences();
-	return preferences.mouseReporting ?? true;
-}
-
-/**
- * Save the mouse reporting preference
- */
-export function updateMouseReporting(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.mouseReporting = value;
 	savePreferences(preferences);
 }
 

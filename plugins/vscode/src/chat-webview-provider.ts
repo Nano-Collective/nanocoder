@@ -549,16 +549,7 @@ export class ChatWebviewProvider
 		}
 
 		this.postMessage({type: 'clear', isLoading: true});
-		const replayShowTokenUsage = vscode.workspace
-			.getConfiguration('nanocoder')
-			.get<boolean>('showTokenUsage', false);
 		for (const update of buffer) {
-			// Gate replayed usage indicators by the same setting as live turns:
-			// the panel hides the footer when showTokenUsage is false.
-			const usage = (update as Record<string, any>)?._meta?.['nanocoder/response-usage'];
-			if (usage) {
-				(update as Record<string, any>).showTokenUsage = replayShowTokenUsage;
-			}
 			this.postMessage({type: 'acpUpdate', update});
 		}
 		this.postMessage({type: 'sessionLoaded'});
@@ -746,7 +737,8 @@ export class ChatWebviewProvider
 				// The webview has already drawn the user bubble and flipped to
 				// the loading state, and no turn is going to start - so end the
 				// turn here or the composer spins until the user hits Escape.
-				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+				const showTokenUsage = vscode.workspace.getConfiguration('nanocoder').get<boolean>('showTokenUsage', false);
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', showTokenUsage}});
 				return;
 			}
 
@@ -772,7 +764,8 @@ export class ChatWebviewProvider
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (!sessionId) {
 				vscode.window.showErrorMessage('Nanocoder: Failed to create ACP session.');
-				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
+				const showTokenUsage = vscode.workspace.getConfiguration('nanocoder').get<boolean>('showTokenUsage', false);
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed', showTokenUsage}});
 				return;
 			}
 			

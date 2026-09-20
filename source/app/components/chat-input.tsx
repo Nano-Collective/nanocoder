@@ -166,8 +166,6 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
-	const footerPadding = fullscreen ? 2 : 0;
-
 	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
 	// object on every keystroke would re-render it for nothing.
 	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
@@ -191,60 +189,44 @@ export function ChatInput({
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
-				<Box paddingLeft={footerPadding}>
-					<LiveCompactCounts counts={compactToolCounts} />
-				</Box>
+				<LiveCompactCounts counts={compactToolCounts} />
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
 			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
-				<Box paddingLeft={footerPadding}>
-					<TaskListDisplay tasks={liveTaskList} title="Tasks" />
-				</Box>
+				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
 			)}
 
-			{isCancelling && (
-				<Box paddingLeft={footerPadding}>
-					<CancellingIndicator />
-				</Box>
-			)}
+			{isCancelling && <CancellingIndicator />}
 
 			{showToolExecutionIndicator && (
-				<Box paddingLeft={footerPadding}>
-					<ToolExecutionIndicator
-						toolName={activeToolCall.function.name}
-						currentIndex={currentToolIndex}
-						totalTools={pendingToolCalls.length}
-					/>
-				</Box>
+				<ToolExecutionIndicator
+					toolName={activeToolCall.function.name}
+					currentIndex={currentToolIndex}
+					totalTools={pendingToolCalls.length}
+				/>
 			)}
 
 			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
 			{pendingSubagentApproval ? (
-				<Box paddingLeft={footerPadding}>
-					<ToolConfirmation
-						toolCall={pendingSubagentApproval.toolCall}
-						onConfirm={onSubagentToolApproval}
-						onCancel={() => onSubagentToolApproval(false)}
-					/>
-				</Box>
+				<ToolConfirmation
+					toolCall={pendingSubagentApproval.toolCall}
+					onConfirm={onSubagentToolApproval}
+					onCancel={() => onSubagentToolApproval(false)}
+				/>
 			) : /* Main agent tool confirmation (unified inline approval gate) */
 			pendingToolConfirmation ? (
-				<Box paddingLeft={footerPadding}>
-					<ToolConfirmation
-						toolCall={pendingToolConfirmation.toolCall}
-						onConfirm={onToolConfirmation}
-						onCancel={() => onToolConfirmation(false)}
-					/>
-				</Box>
+				<ToolConfirmation
+					toolCall={pendingToolConfirmation.toolCall}
+					onConfirm={onToolConfirmation}
+					onCancel={() => onToolConfirmation(false)}
+				/>
 			) : /* Question Prompt (ask_question tool) */
 			isQuestionMode && pendingQuestion ? (
-				<Box paddingLeft={footerPadding}>
-					<QuestionPrompt
-						question={pendingQuestion}
-						onAnswer={onQuestionAnswer}
-					/>
-				</Box>
+				<QuestionPrompt
+					question={pendingQuestion}
+					onAnswer={onQuestionAnswer}
+				/>
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput

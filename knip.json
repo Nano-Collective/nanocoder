@@ -13,8 +13,7 @@
 		"gh",
 		"osascript",
 		"notify-send",
-		"powershell",
-		"taskkill"
+		"powershell"
 	],
 	"ignore": [
 		"source/utils/message-queue.tsx",

@@ -43,6 +43,40 @@ const runTool = (panel: any, toolCallId: string) => {
 // row of them down the transcript.
 // ============================================================================
 
+test('renders token usage when showTokenUsage is true', t => {
+	const panel = createPanel();
+	panel.userMessage('go');
+	panel.text('Here is the answer.');
+
+	// Default (should not render tokens)
+	panel.finish();
+	t.is(panel.usageIndicators().length, 0);
+
+	// With showTokenUsage false
+	panel.userMessage('go 2');
+	panel.text('Here is another answer.');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 100},
+		showTokenUsage: false
+	});
+	t.is(panel.usageIndicators().length, 0);
+
+	// With showTokenUsage true
+	panel.userMessage('go 3');
+	panel.text('Here is a third answer.');
+	panel.update({
+		sessionUpdate: 'prompt_response',
+		outcome: 'completed',
+		usage: {totalTokens: 500},
+		showTokenUsage: true
+	});
+	const indicators = panel.usageIndicators();
+	t.is(indicators.length, 1);
+	t.truthy(indicators[0].textContent.includes('Tokens: 500'));
+});
+
 test('a response split by a tool card keeps one footer', t => {
 	const panel = createPanel();
 	panel.userMessage('go');
@@ -78,28 +112,6 @@ test('each response gets its own footer', t => {
 	panel.text('Response B');
 
 	t.is(agentFooters(panel).length, 2);
-});
-
-test('replayed response usage metadata restores the token and cost line', t => {
-	const panel = createPanel();
-	panel.userMessage('first');
-	panel.update({
-		sessionUpdate: 'agent_message_chunk',
-		content: {type: 'text', text: 'Response A'},
-		_meta: {
-			'nanocoder/response-usage': {
-				inputTokens: 6500,
-				outputTokens: 500,
-				totalTokens: 7000,
-				cost: 0.004,
-			},
-		},
-	});
-
-	const usageLine = panel.container.children.find(
-		(child: StubElement) => child.textContent === 'Tokens: 7k | <$0.01',
-	);
-	t.truthy(usageLine);
 });
 
 // ============================================================================

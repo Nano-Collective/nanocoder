@@ -64,21 +64,13 @@ export const ChatHistory = React.memo(function ChatHistory({
 	const viewportRef = React.useRef(null);
 	const contentRef = React.useRef(null);
 	const [scrollOffset, setScrollOffset] = React.useState(0);
-	const [isOverflowing, setIsOverflowing] = React.useState(false);
 
 	// New content or a vertical resize snaps the view back to the bottom
 	// (sticky scroll) — matching every chat TUI's behavior.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the deps are intentional TRIGGERS (new chat content / resize), not values read inside the effect.
 	React.useEffect(() => {
 		setScrollOffset(0);
-		if (fullscreen && viewportRef.current && contentRef.current) {
-			const vHeight = measureElement(viewportRef.current).height;
-			const cHeight = measureElement(contentRef.current).height;
-			setIsOverflowing(vHeight > 0 && cHeight > vHeight);
-		} else {
-			setIsOverflowing(false);
-		}
-	}, [queuedComponents, liveComponent, terminalRows, fullscreen]);
+	}, [queuedComponents, liveComponent, terminalRows]);
 
 	// Scroll by `delta` rows (positive = towards older content), clamped to
 	// the measured content extent. Shared by PageUp/PageDown and the mouse
@@ -128,35 +120,18 @@ export const ChatHistory = React.memo(function ChatHistory({
 		};
 	}, [fullscreen, scrollActive, scrollBy]);
 
-	// The welcome banner must react to terminal resizes (recentering on every
-	// row), but <Static> content is frozen after first paint. Until the first
-	// message arrives, render the welcome in the live region instead so it
-	// stays responsive; once history exists, it goes through Static as usual.
-	// Only for the real welcome banner (key="welcome") — keep test fixtures
-	// like static-marker inside Static so existing tests stay stable.
-	const hasWelcome = staticComponents.some(
-		c =>
-			c != null &&
-			typeof c === 'object' &&
-			'key' in c &&
-			(c as {key: unknown}).key === 'welcome',
-	);
-	const isWelcomeOnly =
-		queuedComponents.length === 0 && !liveComponent && hasWelcome;
-	const isFreshInline =
-		!fullscreen && queuedComponents.length === 0 && hasWelcome;
+	// Fullscreen: the banner renders in regular flow as the first row of the
+	// scrolling content (it clips away with old history, like OpenClaude).
+	// Inline: the banner stays INSIDE Static so it prints exactly once into
+	// the terminal's native scrollback — rendering it in the live region was
+	// the original "banner disappears" bug: Ink erases and rewrites the
+	// whole non-Static region on every keystroke, and clips its top first
+	// once it outgrows the terminal.
 	const banner = fullscreen ? staticComponents[0] : undefined;
-	const isWelcomeBanner =
-		banner != null &&
-		typeof banner === 'object' &&
-		'key' in banner &&
-		(banner as {key: unknown}).key === 'welcome';
-	const showBanner = isWelcomeBanner ? isWelcomeOnly : true;
-	const frozenComponents = React.useMemo(() => {
-		if (fullscreen) return staticComponents.slice(1);
-		if (isFreshInline) return [];
-		return staticComponents;
-	}, [fullscreen, staticComponents, isFreshInline]);
+	const frozenComponents = React.useMemo(
+		() => (fullscreen ? staticComponents.slice(1) : staticComponents),
+		[fullscreen, staticComponents],
+	);
 
 	const chatQueueProps = React.useMemo(
 		() => ({
@@ -164,7 +139,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			queuedComponents,
 			renderLastQueuedComponentLive,
 			clearKey,
-			disableStatic: fullscreen || isFreshInline,
+			disableStatic: fullscreen,
 		}),
 		[
 			frozenComponents,
@@ -172,22 +147,13 @@ export const ChatHistory = React.memo(function ChatHistory({
 			renderLastQueuedComponentLive,
 			clearKey,
 			fullscreen,
-			isFreshInline,
 		],
 	);
 
 	const content = (
 		<>
-			{startChat && banner && showBanner && (
+			{startChat && banner && (
 				<RenderErrorBoundary label="banner">{banner}</RenderErrorBoundary>
-			)}
-
-			{startChat && isFreshInline && (
-				<Box flexDirection="column">
-					{staticComponents.map((c, i) => (
-						<RenderErrorBoundary key={`fresh-${i}`}>{c}</RenderErrorBoundary>
-					))}
-				</Box>
 			)}
 
 			{startChat && <ChatQueue {...chatQueueProps} />}
@@ -223,7 +189,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 		// after the (flexShrink=0) footer takes its natural height.
 		<Box flexGrow={1} flexBasis={0} flexDirection="column" minHeight={0}>
 			{scrollOffset > 0 && (
-				<Box flexShrink={0} paddingLeft={fullscreen ? 2 : 0}>
+				<Box flexShrink={0}>
 					<Text color={colors.secondary}>
 						{`── ↑ ${scrollOffset} rows · PgUp/PgDn · new output returns to bottom ──`}
 					</Text>
@@ -236,16 +202,13 @@ export const ChatHistory = React.memo(function ChatHistory({
 				flexDirection="column"
 				minHeight={0}
 				overflow="hidden"
-				justifyContent={
-					isWelcomeOnly ? 'center' : isOverflowing ? 'flex-end' : 'flex-start'
-				}
+				justifyContent="flex-end"
 			>
 				<Box
 					ref={contentRef}
 					flexDirection="column"
 					flexShrink={0}
 					marginBottom={-scrollOffset}
-					paddingLeft={fullscreen && !isWelcomeOnly ? 2 : 0}
 				>
 					{content}
 				</Box>

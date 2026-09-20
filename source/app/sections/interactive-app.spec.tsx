@@ -1,7 +1,6 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
-import stripAnsi from 'strip-ansi';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
@@ -17,7 +16,6 @@ interface Overrides {
 	// Cancellation-related knobs
 	isGenerating?: boolean;
 	isToolExecuting?: boolean;
-	liveComponentCapturesInput?: boolean;
 	isToolConfirmationMode?: boolean;
 	isCancelling?: boolean;
 	abortController?: AbortController | null;
@@ -63,7 +61,6 @@ function makeProps(o: Overrides = {}) {
 		isSettingsMode: o.isSettingsMode ?? false,
 		isToolConfirmationMode: o.isToolConfirmationMode ?? false,
 		isToolExecuting: o.isToolExecuting ?? false,
-		liveComponentCapturesInput: o.liveComponentCapturesInput ?? false,
 		isQuestionMode: false,
 		isCancelling: o.isCancelling ?? false,
 		abortController: o.abortController ?? null,
@@ -191,32 +188,6 @@ test('renders FileExplorer in explorer mode', t => {
 	t.true(output.length > 0);
 });
 
-// InteractiveApp is mounted by App.tsx with no UIStateProvider above it, so it
-// has to supply its own. Rendering with the harness's provider hid a crash:
-// FileExplorer calls useUIStateContext, which threw and took the CLI down with
-// exit 1 when the provider only wrapped ChatInput. Render without it.
-test('explorer mode renders without an ambient UIStateProvider', t => {
-	const {lastFrame} = renderWithTheme(
-		<InteractiveApp {...makeProps({isExplorerMode: true})} />,
-		{withUIState: false},
-	);
-	// Ink renders a thrown error into the frame rather than rethrowing, so
-	// assert on the frame — t.notThrows would pass either way.
-	const output = stripAnsi(lastFrame() ?? '');
-	t.notRegex(output, /must be used within a UIStateProvider/);
-	t.true(output.length > 0);
-});
-
-test('chat input renders without an ambient UIStateProvider', t => {
-	const {lastFrame} = renderWithTheme(
-		<InteractiveApp {...makeProps({startChat: true})} />,
-		{withUIState: false},
-	);
-	const output = stripAnsi(lastFrame() ?? '');
-	t.notRegex(output, /must be used within a UIStateProvider/);
-	t.true(output.length > 0);
-});
-
 test('renders without crashing in IDE-selection mode', t => {
 	const {lastFrame} = renderWithTheme(
 		<InteractiveApp {...makeProps({isIdeSelectionMode: true})} />,
@@ -300,43 +271,6 @@ test('Escape cancels while a regular tool runs behind ToolExecutionIndicator', a
 
 	await pressEscape(stdin);
 	t.is(cancelled, 1);
-});
-
-test('Escape does not cancel work while a live component captures input', async t => {
-	let cancelled = 0;
-	const {stdin} = renderWithTheme(
-		<InteractiveApp
-			{...makeProps({
-				startChat: true,
-				isToolExecuting: true,
-				liveComponentCapturesInput: true,
-				handleCancel: () => {
-					cancelled++;
-				},
-			})}
-		/>,
-	);
-
-	await pressEscape(stdin);
-	t.is(cancelled, 0);
-});
-
-test('bash-style live execution keeps the composer mounted', t => {
-	const {lastFrame} = renderWithTheme(
-		<InteractiveApp
-			{...makeProps({
-				startChat: true,
-				client: {},
-				isToolExecuting: true,
-				liveComponentCapturesInput: false,
-			})}
-		/>,
-	);
-
-	// Asserts the composer is on screen via its placeholder. The welcome
-	// redesign replaced "/ commands, ! bash, ↑/↓ history" with "Ask
-	// anything..." and this assertion was left behind.
-	t.regex(stripAnsi(lastFrame() ?? ''), /Ask anything\.\.\./);
 });
 
 test('Escape cancels when only an abort controller is live (state flicker)', async t => {

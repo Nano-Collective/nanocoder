@@ -19,18 +19,46 @@ export const wheelEvents = new EventEmitter();
 
 /** DECSET 1000 (button tracking) + 1006 (SGR encoding). */
 export const MOUSE_REPORTING_ON = '\x1b[?1000h\x1b[?1006h';
-export const MOUSE_REPORTING_OFF = '\x1b[?1006l\x1b[?1000l';
+const MOUSE_REPORTING_OFF = '\x1b[?1006l\x1b[?1000l';
 
 /**
- * DECSET 1007 (alternate scroll). Most terminals turn this on by default:
- * while the alt screen is active and the app is NOT reporting mouse events,
- * they translate wheel ticks into cursor up/down key sequences. Those are
- * indistinguishable from real arrow keys, so they reach the prompt and cycle
- * input history instead of scrolling. Turn it off whenever we run on the alt
- * screen without mouse reporting, and restore it on exit.
+ * Selection mode: mouse reporting turned off on request so the terminal
+ * handles click-drag itself again.
+ *
+ * Button tracking is what lets the fullscreen viewport scroll, but it
+ * also takes click-drag away from the terminal, so text can't be
+ * selected with the mouse. Suspending reporting hands selection back for
+ * as long as the user needs it. Inline mode never enables reporting in
+ * the first place, so the toggle is a no-op there.
  */
-export const ALTERNATE_SCROLL_OFF = '\x1b[?1007l';
-export const ALTERNATE_SCROLL_ON = '\x1b[?1007h';
+let mouseReportingAvailable = false;
+let selectionMode = false;
+
+/** Called by cli.tsx once mouse reporting is actually on. */
+export function markMouseReportingAvailable(): void {
+	mouseReportingAvailable = true;
+}
+
+/** True while mouse reporting is suspended for text selection. */
+export function isSelectionMode(): boolean {
+	return selectionMode;
+}
+
+/**
+ * Flip selection mode. Returns false (and changes nothing) when there is
+ * no mouse reporting to suspend, so callers can let the key fall through
+ * to whatever else might want it.
+ */
+export function toggleSelectionMode(): boolean {
+	if (!mouseReportingAvailable) {
+		return false;
+	}
+	selectionMode = !selectionMode;
+	process.stdout.write(
+		selectionMode ? MOUSE_REPORTING_OFF : MOUSE_REPORTING_ON,
+	);
+	return true;
+}
 
 /**
  * Decode stdin bytes without losing a multibyte character split across

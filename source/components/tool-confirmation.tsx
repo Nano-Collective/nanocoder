@@ -2,7 +2,6 @@ import {Box, Text, useInput} from 'ink';
 import React from 'react';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
@@ -161,14 +160,7 @@ export default function ToolConfirmation({
 	};
 
 	return (
-		<TitledBoxWithPreferences
-			title="Tool Approval"
-			width={boxWidth}
-			borderColor={colors.tool}
-			paddingX={2}
-			paddingY={1}
-			marginBottom={1}
-		>
+		<Box width={boxWidth} marginBottom={1}>
 			<Box flexDirection="column">
 				{/* Formatter preview */}
 				{isLoadingPreview && (
@@ -222,6 +214,6 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 			</Box>
-		</TitledBoxWithPreferences>
+		</Box>
 	);
 }

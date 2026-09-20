@@ -52,32 +52,19 @@ export function formatCost(cost: number): string | null {
  * null when no field is usable.
  */
 export function getTotalTokens(usage: ResponseUsage): number | null {
-	const total =
-		Number.isFinite(usage.totalTokens) && (usage.totalTokens as number) >= 0
-			? (usage.totalTokens as number)
-			: null;
-	if (total !== null && total > 0) return total;
+	if (Number.isFinite(usage.totalTokens)) {
+		return usage.totalTokens as number;
+	}
 	const input = Number.isFinite(usage.inputTokens)
 		? (usage.inputTokens as number)
 		: null;
 	const output = Number.isFinite(usage.outputTokens)
 		? (usage.outputTokens as number)
 		: null;
-	const cache =
-		(Number.isFinite(usage.cacheReadTokens)
-			? (usage.cacheReadTokens as number)
-			: 0) +
-		(Number.isFinite(usage.cacheWriteTokens)
-			? (usage.cacheWriteTokens as number)
-			: 0);
 	if (input == null && output == null) {
-		if (cache > 0) return cache;
-		return total;
+		return null;
 	}
-	// If input is absent, cache details are the missing input component. When
-	// input is present they are already included in the provider input total.
-	const components = (input ?? 0) + (output ?? 0) + (input == null ? cache : 0);
-	return components > 0 || total === null ? components : total;
+	return (input ?? 0) + (output ?? 0);
 }
 
 /**

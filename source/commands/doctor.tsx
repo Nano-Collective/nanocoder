@@ -12,10 +12,8 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
-import {getConfiguredHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
-import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getPackageVersion} from '@/utils/package-version';
@@ -46,12 +44,6 @@ export interface DoctorMcpServer {
 	url?: string;
 }
 
-export interface DoctorHook {
-	event: HookEvent;
-	label: string;
-	matchTools?: string[];
-}
-
 export interface DoctorReport {
 	system: {
 		nodeVersion: string;
@@ -65,7 +57,6 @@ export interface DoctorReport {
 		servers: DoctorLspServer[];
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
-	hooks: Section<DoctorHook[]>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -204,20 +195,6 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 	});
 }
 
-/**
- * Lifecycle hooks are user-supplied shell commands, so /doctor lists what is
- * wired up (never a secret — hook commands are config, not credentials).
- */
-function collectHooks(): DoctorHook[] {
-	return HOOK_EVENTS.flatMap(event =>
-		getConfiguredHooks(event).map(hook => ({
-			event,
-			label: hook.name ?? hook.command,
-			...(hook.matchTools ? {matchTools: hook.matchTools} : {}),
-		})),
-	);
-}
-
 function normalizeDaemon(
 	lock: DaemonLock | null,
 	now: number,
@@ -243,16 +220,13 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, daemonLock] = await Promise.all(
-		[
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => dependencies.getDaemonLock()),
-		],
-	);
+	const [nanocoder, providers, lsp, mcp, daemonLock] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -264,7 +238,6 @@ export async function collectDoctorReport(
 		providers,
 		lsp,
 		mcp,
-		hooks,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -382,20 +355,6 @@ export function Doctor({report}: {report: DoctorReport}) {
 						• {server.name}: {server.transport} • {server.toolCount} tool
 						{server.toolCount === 1 ? '' : 's'}
 						{server.url ? ` • ${server.url}` : ''}
-					</Text>
-				))
-			)}
-
-			<SectionTitle>Hooks</SectionTitle>
-			{report.hooks.status === 'error' ? (
-				<SectionError message={report.hooks.error} />
-			) : report.hooks.data.length === 0 ? (
-				<Text color={colors.secondary}>• No lifecycle hooks configured</Text>
-			) : (
-				report.hooks.data.map(hook => (
-					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
-						• {hook.event}: {hook.label}
-						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
 					</Text>
 				))
 			)}

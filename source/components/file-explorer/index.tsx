@@ -2,15 +2,15 @@ import {readFile} from 'node:fs/promises';
 import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {StyledTitle} from '@/components/ui/styled-title';
 import {getSyntaxTheme} from '@/config/themes';
 import {
 	CHARS_PER_TOKEN_ESTIMATE,
 	FILE_EXPLORER_TOKEN_WARNING_THRESHOLD,
 	FILE_EXPLORER_VISIBLE_ITEMS,
 } from '@/constants';
-import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {useTitleShape} from '@/hooks/useTitleShape';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {FileExplorerProps, ViewMode} from '@/types/file-explorer';
 import {
@@ -29,39 +29,9 @@ import {
 	getLanguageFromPath,
 } from './utils';
 
-/**
- * Rounded, titled frame shared by every explorer view (loading, error, tree,
- * preview) so switching views never changes the chrome. Matches the box the
- * session and IDE selectors use, which is what the rest of the modal surfaces
- * in this UI look like.
- */
-function ExplorerFrame({
-	title,
-	children,
-}: {
-	title: string;
-	children: React.ReactNode;
-}) {
-	const {colors} = useTheme();
-	const boxWidth = useTerminalWidth();
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={boxWidth}
-			borderColor={colors.primary}
-			flexDirection="column"
-			paddingX={2}
-			paddingY={1}
-			marginBottom={1}
-		>
-			{children}
-		</TitledBoxWithPreferences>
-	);
-}
-
 export function FileExplorer({onClose}: FileExplorerProps) {
 	const {colors} = useTheme();
+	const {currentTitleShape} = useTitleShape();
 	const {setPendingFileMentions} = useUIStateContext();
 
 	const [tree, setTree] = useState<FileNode[]>([]);
@@ -366,17 +336,27 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 
 	if (loading) {
 		return (
-			<ExplorerFrame title="/explorer">
+			<Box flexDirection="column" paddingX={1}>
+				<StyledTitle
+					title="/explorer"
+					borderColor={colors.primary}
+					shape={currentTitleShape}
+				/>
 				<Text color={colors.text}>Loading file tree...</Text>
-			</ExplorerFrame>
+			</Box>
 		);
 	}
 
 	if (error) {
 		return (
-			<ExplorerFrame title="/explorer">
+			<Box flexDirection="column" paddingX={1}>
+				<StyledTitle
+					title="/explorer"
+					borderColor={colors.primary}
+					shape={currentTitleShape}
+				/>
 				<Text color={colors.error}>Error: {error}</Text>
-			</ExplorerFrame>
+			</Box>
 		);
 	}
 
@@ -390,9 +370,16 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 		const isSelected = previewPath ? selectedFiles.has(previewPath) : false;
 
 		return (
-			<ExplorerFrame title={`/explorer - ${previewPath}`}>
+			<Box flexDirection="column" paddingX={1}>
+				{/* Title */}
+				<StyledTitle
+					title={`/explorer - ${previewPath}`}
+					borderColor={colors.primary}
+					shape={currentTitleShape}
+				/>
+
 				{/* Selection status */}
-				<Box>
+				<Box marginTop={1}>
 					<Text color={isSelected ? colors.success : colors.secondary}>
 						{isSelected ? '✓ Selected' : '✗ Not selected'}
 					</Text>
@@ -442,16 +429,23 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 						Up/Down: scroll | Space: toggle select | Shift+Tab/Esc: back
 					</Text>
 				</Box>
-			</ExplorerFrame>
+			</Box>
 		);
 	}
 
 	// Tree mode view
 	return (
-		<ExplorerFrame title="/explorer">
+		<Box flexDirection="column" paddingX={1}>
+			{/* Title */}
+			<StyledTitle
+				title="/explorer"
+				borderColor={colors.primary}
+				shape={currentTitleShape}
+			/>
+
 			{/* Search indicator */}
 			{searchMode && (
-				<Box>
+				<Box marginTop={1}>
 					<Text color={colors.primary}>
 						Search: <Text bold>{searchQuery || '_'}</Text>
 					</Text>
@@ -471,13 +465,8 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				</Box>
 			)}
 
-			{/* Tree list. The frame's own padding already spaces the first row,
-			    so only separate from a search / selection header when one is
-			    actually above it. */}
-			<Box
-				flexDirection="column"
-				marginTop={searchMode || selectedFiles.size > 0 ? 1 : 0}
-			>
+			{/* Tree list */}
+			<Box flexDirection="column" marginTop={1}>
 				{visibleItems.length === 0 ? (
 					<Text color={colors.secondary}>
 						{searchQuery ? 'No matches found' : 'Empty directory'}
@@ -522,6 +511,6 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					</Text>
 				</Box>
 			</Box>
-		</ExplorerFrame>
+		</Box>
 	);
 }
