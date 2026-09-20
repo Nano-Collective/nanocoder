@@ -41,6 +41,37 @@ const VERSION = packageJson.version;
 // Narrow Terminal Tests (width < 90 → text logo per mock ladder)
 // ============================================================================
 
+// Serial: swaps the process cwd so the component sees a directory with no repo.
+test.serial('WelcomeMessage shows the path alone outside a git repo', t => {
+	const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'welcome-no-git-'));
+	const originalCwd = process.cwd();
+	const originalColumns = process.stdout.columns;
+	process.chdir(plainDir);
+	process.stdout.columns = 50;
+
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const lines = stripAnsi(lastFrame() ?? '')
+			.split('\n')
+			.map(line => line.trimEnd());
+		unmount();
+
+		t.false(
+			lines.some(line => line.includes('⎇')),
+			'no branch marker without a repo',
+		);
+		for (const line of lines) {
+			t.true(stringWidth(line) <= 50);
+		}
+	} finally {
+		process.chdir(originalCwd);
+		process.stdout.columns = originalColumns;
+		fs.rmSync(plainDir, {recursive: true, force: true});
+	}
+});
+
 // Serial: swaps the process cwd so the component reads a temp repo's branch.
 test.serial('WelcomeMessage keeps a CJK branch row inside the terminal', t => {
 	// getCurrentBranchSync reads .git/HEAD, so a ref file is enough to put a

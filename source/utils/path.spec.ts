@@ -31,6 +31,15 @@ test('homeRelative leaves paths untouched when home is the filesystem root', t =
 	t.is(homeRelative(root, root), root);
 });
 
+test('truncateMiddle degrades to a bare slice when the budget is tiny', t => {
+	// Narrower than the ellipsis itself: there is nothing to signal elision
+	// with, so it keeps whole characters that fit and nothing more.
+	t.is(truncateMiddle('功能功能', 2), '功');
+	t.is(truncateMiddle('功能功能', 1), '', 'a wide glyph does not fit one column');
+	t.is(truncateMiddle('abcdef', 3), 'abc');
+	t.is(truncateMiddle('abcdef', 0), '');
+});
+
 test('truncateMiddle budgets terminal columns, not characters', t => {
 	// A CJK character is one code unit but two columns, so a length-based
 	// budget lets the text run twice as wide as the row it has to fit.
