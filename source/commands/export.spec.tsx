@@ -209,6 +209,34 @@ test('exportCommand formats tool messages correctly', async t => {
 	t.true(content.includes('Tool output'));
 });
 
+test('exportCommand keeps nested code fences intact in tool output', async t => {
+	const messages: Message[] = [
+		{
+			role: 'tool',
+			name: 'read_file',
+			content: '```ts\nconst value = 1;\n```',
+		},
+	];
+	await exportCommand.handler(['test.md'], messages, testMetadata);
+
+	const content = mockWriteFileCalls[0].content;
+	t.true(content.includes('````\n```ts\nconst value = 1;\n```\n````'));
+});
+
+test('exportCommand uses a fence longer than any nested fence', async t => {
+	const messages: Message[] = [
+		{
+			role: 'tool',
+			name: 'search',
+			content: '````\ncontent\n````',
+		},
+	];
+	await exportCommand.handler(['test.md'], messages, testMetadata);
+
+	const content = mockWriteFileCalls[0].content;
+	t.true(content.includes('`````\n````\ncontent\n````\n`````'));
+});
+
 test('exportCommand excludes system messages', async t => {
 	const messages: Message[] = [{role: 'system', content: 'System instruction'}];
 	await exportCommand.handler(['test.md'], messages, testMetadata);
