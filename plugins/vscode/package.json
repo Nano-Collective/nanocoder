@@ -220,7 +220,7 @@
 		"@types/vscode": "^1.125.0",
 		"@types/ws": "^8.5.10",
 		"@vscode/vsce": "^3.9.1",
-		"concurrently": "^8.2.2",
+		"concurrently": "^10.0.5",
 		"esbuild": "^0.28.1",
 		"eslint": "^10.1.0",
 		"tailwindcss": "^4.3.3",

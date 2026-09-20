@@ -16,6 +16,10 @@ import {
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
+	appendPostToolUseOutput,
+	runPreToolUseGate,
+} from '@/services/lifecycle-hooks';
+import {
 	appendSubagentTool,
 	getSubagentProgress,
 	subagentProgress,
@@ -32,6 +36,8 @@ import {resolveToolApproval} from '@/tools/approval-policy';
 import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
+	ApiCallRecord,
+	ApiUsage,
 	DevelopmentMode,
 	LLMClient,
 	Message,
@@ -59,6 +65,40 @@ const MAX_SUBAGENT_DEPTH = 2;
 /** Maximum number of concurrent subagents */
 export const MAX_CONCURRENT_AGENTS = 5;
 
+/** Receives provider-reported usage for one subagent model invocation. */
+export type SubagentApiCallHandler = (
+	call: ApiCallRecord,
+) => void | Promise<void>;
+
+export interface SubagentExecutorOptions {
+	memoryFinder?: MemoryFinder;
+	projectContextOptions?: ProjectContextOptions;
+	onApiCallComplete?: SubagentApiCallHandler;
+}
+
+function hasReportedUsage(usage: ApiUsage | undefined): usage is ApiUsage {
+	return (
+		usage !== undefined &&
+		(Number.isFinite(usage.inputTokens) ||
+			Number.isFinite(usage.outputTokens) ||
+			Number.isFinite(usage.totalTokens) ||
+			Number.isFinite(usage.cacheReadTokens) ||
+			Number.isFinite(usage.cacheWriteTokens))
+	);
+}
+
+/** Stats adapter used by production subagent runtimes. */
+export async function recordSubagentApiCallForStats(
+	call: ApiCallRecord,
+): Promise<void> {
+	try {
+		const {recordApiCallForStats} = await import('@/stats/record');
+		await recordApiCallForStats(call);
+	} catch {
+		// Usage accounting must never affect subagent execution.
+	}
+}
+
 /**
  * Thrown when the conversation loop stops itself (repeated-call cap). Carries
  * the assistant text produced before the stop so the parent still receives the
@@ -83,6 +123,7 @@ export class SubagentExecutor {
 	private parentClient: LLMClient;
 	private projectRoot: string;
 	private parentMode: DevelopmentMode;
+	private onApiCallComplete?: SubagentApiCallHandler;
 	/**
 	 * Live source for the current development mode, read on every tool-approval
 	 * check. When set (the interactive app wires it to the same ref the main
@@ -100,15 +141,17 @@ export class SubagentExecutor {
 		parentClient: LLMClient,
 		projectRoot: string = process.cwd(),
 		parentMode: DevelopmentMode = 'normal',
-		options: {
-			memoryFinder?: MemoryFinder;
-			projectContextOptions?: ProjectContextOptions;
-		} = {},
+		optionsOrHandler: SubagentExecutorOptions | SubagentApiCallHandler = {},
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
 		this.parentMode = parentMode;
+		const options =
+			typeof optionsOrHandler === 'function'
+				? {onApiCallComplete: optionsOrHandler}
+				: optionsOrHandler;
+		this.onApiCallComplete = options.onApiCallComplete;
 		this.memoryFinder =
 			options.memoryFinder ??
 			new SemanticMemoryManager({cwd: this.projectRoot});
@@ -204,6 +247,21 @@ export class SubagentExecutor {
 				config,
 				!!agentId,
 			);
+			const pendingUsageWrites: Promise<void>[] = [];
+			const recordUsage = (call: ApiCallRecord): void => {
+				if (!this.onApiCallComplete) {
+					return;
+				}
+
+				try {
+					const result = this.onApiCallComplete(call);
+					if (result) {
+						pendingUsageWrites.push(Promise.resolve(result).catch(() => {}));
+					}
+				} catch {
+					// Usage accounting must never affect subagent execution.
+				}
+			};
 
 			try {
 				const output = await this.runSubagentConversation(
@@ -214,9 +272,11 @@ export class SubagentExecutor {
 					signal,
 					agentId,
 					executionContext,
+					recordUsage,
 				);
 
-				// Read final token count from the correct progress source
+				// Read the final estimated progress count. Provider-reported usage is
+				// sent through recordUsage and is the source for lifetime accounting.
 				const finalTokenCount = agentId
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
@@ -229,6 +289,7 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
+				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
 				}
@@ -438,6 +499,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		onApiCallComplete?: SubagentApiCallHandler,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -511,6 +573,10 @@ export class SubagentExecutor {
 			emitProgress('running');
 			await new Promise(resolve => setTimeout(resolve, 50));
 
+			// Capture these before the request so a concurrent parent-model change
+			// cannot misattribute the provider's usage to another model.
+			const provider = client.getProviderConfig().name || 'unknown';
+			const model = client.getCurrentModel() || 'unknown';
 			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
 			const systemMessage =
 				messages[0]?.role === 'system' ? messages[0] : undefined;
@@ -568,6 +634,23 @@ export class SubagentExecutor {
 				},
 				signal,
 			);
+
+			if (onApiCallComplete && hasReportedUsage(response.usage)) {
+				onApiCallComplete({
+					provider,
+					model,
+					inputTokens: response.usage.inputTokens,
+					outputTokens: response.usage.outputTokens,
+					totalTokens: response.usage.totalTokens,
+					...(response.usage.cacheReadTokens !== undefined && {
+						cacheReadTokens: response.usage.cacheReadTokens,
+					}),
+					...(response.usage.cacheWriteTokens !== undefined && {
+						cacheWriteTokens: response.usage.cacheWriteTokens,
+					}),
+					timestamp: Date.now(),
+				});
+			}
 
 			const responseContent = response.choices[0]?.message.content || '';
 			if (responseContent.trim()) {
@@ -732,21 +815,35 @@ export class SubagentExecutor {
 			return `Error: Tool '${toolName}' not found`;
 		}
 
+		// One ToolCall object for this call, shared by the approval prompt and
+		// the lifecycle gate so runPreToolUseGate can key its once-per-call
+		// suppression on it.
+		const parsedArgs =
+			parseToolArguments<Record<string, unknown>>(rawArguments);
+		const toolCall: ToolCall = {
+			id: toolCallId,
+			function: {
+				name: toolName,
+				arguments: parsedArgs,
+			},
+		};
+
+		// Subagents run their own loop rather than going through processToolUse,
+		// so the lifecycle gate has to be applied here too — a policy hook must
+		// hold for delegated work as much as for the main conversation. It runs
+		// before the approval prompt so a vetoed tool never asks the user to
+		// approve something that is about to be refused anyway.
+		const gate = await runPreToolUseGate(toolCall, parsedArgs);
+		if (gate.blocked) {
+			return `Error: ${gate.reason}`;
+		}
+
 		// Check if this tool needs user approval
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 		);
 		if (needsApproval) {
-			const parsedArgs = parseToolArguments(rawArguments);
-			const toolCall: ToolCall = {
-				id: toolCallId,
-				function: {
-					name: toolName,
-					arguments: parsedArgs,
-				},
-			};
-
 			const approved = await signalToolApproval({
 				toolCall,
 				subagentName: config.name,
@@ -758,7 +855,6 @@ export class SubagentExecutor {
 		}
 
 		try {
-			const parsedArgs = parseToolArguments(rawArguments);
 			const result = await toolHandler(parsedArgs, {
 				...executionContext,
 				abortSignal: signal,
@@ -769,11 +865,22 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return truncateToolResult(content);
+			return appendPostToolUseOutput(
+				toolName,
+				parsedArgs,
+				truncateToolResult(content),
+			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
-			// validated), formatted with any structured detail.
-			return truncateToolResult(toolErrorToContent(error));
+			// validated), formatted with any structured detail. post-tool-use
+			// still fires: a failed delegated call is exactly what an audit-log
+			// hook needs to see, and dropping it would make this surface disagree
+			// with processToolUse.
+			return appendPostToolUseOutput(
+				toolName,
+				parsedArgs,
+				truncateToolResult(toolErrorToContent(error)),
+			);
 		}
 	}
 }

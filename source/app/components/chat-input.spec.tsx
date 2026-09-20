@@ -119,7 +119,8 @@ test('ChatInput keeps UserInput visible while a tool is executing', t => {
 	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /hat would you like me to help with\?/);
+	// New minimal header removed — input shows short placeholder instead
+	t.regex(output!, /Ask anything\.\.\./);
 	t.regex(output!, /Press Esc to cancel/);
 	unmount();
 });

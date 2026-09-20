@@ -37,12 +37,14 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
-import {isSelectionMode, toggleSelectionMode} from '@/utils/terminal-mouse';
 import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
+
+// Prompt box width floor: keeps narrow terminals legible.
+const PROMPT_WIDTH_MIN = 40;
 
 interface ChatProps {
 	onSubmit?: (
@@ -110,10 +112,14 @@ export default function UserInput({
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
-	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+	// Prompt spans the full terminal width at every size (minus a 4-col
+	// margin so the rounded border never wraps and shatters), floored at 40
+	// cols for legibility on tiny terminals.
+	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
-	const inputWrapWidth = boxWidth - 3;
+	const inputWrapWidth = promptWidth - 4;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
@@ -138,8 +144,6 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-	// True while mouse reporting is suspended so the terminal can select text.
-	const [selectionModeActive, setSelectionModeActive] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
@@ -748,17 +752,6 @@ export default function UserInput({
 			return;
 		}
 
-		// Ctrl+P suspends mouse reporting so the terminal can click-drag
-		// select again, and resumes it on the next press. Only fullscreen
-		// turns reporting on, so toggleSelectionMode reports false in inline
-		// mode and the key falls through unhandled. Sits above the disabled
-		// guard: selecting output while the agent works is exactly when you
-		// want this.
-		if (key.ctrl && inputChar === 'p' && toggleSelectionMode()) {
-			setSelectionModeActive(isSelectionMode());
-			return;
-		}
-
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
 		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
 		// and the input is empty, so normal backspace-to-edit still falls through.
@@ -1017,146 +1010,129 @@ export default function UserInput({
 
 	return (
 		<>
-			{!isBashMode ? (
-				<Box marginTop={1}>
-					<Text color={colors.primary} bold>
-						What would you like me to help with?
-					</Text>
-				</Box>
-			) : (
+			{isBashMode && (
 				<Text color={colors.tool} bold>
 					Bash mode
 				</Text>
 			)}
 
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={isBashMode ? colors.tool : colors.primary}
-			>
-				{/* Input row */}
-				<Box>
-					{input.length === 0 && (
-						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-					)}
-					<TextInput
-						key={textInputKey}
-						value={input}
-						onChange={handleInputChange}
-						onEdgeArrow={handleHistoryNavigation}
-						onSubmit={handleSubmit}
-						onEnter={handleSubmit}
-						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={effectiveFocus}
-						wrapWidth={inputWrapWidth}
-						handleEnter={false}
-					/>
-				</Box>
-
-				{showClearMessage && (
-					<Text color={colors.secondary}>Press escape again to clear</Text>
-				)}
-
-				{selectionModeActive && (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Selection mode: drag to select, wheel scrolling paused. Ctrl+P to
-							resume
-						</Text>
-					</Box>
-				)}
-
-				{showCompletions && completions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Available commands:</Text>
-						{commandCompletionWindow.items.map((completion, index) => {
-							const completionIndex = commandCompletionWindow.start + index;
-							const isSelected = completionIndex === selectedCompletionIndex;
-							return (
-								<Text
-									key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
-									color={
-										isSelected
-											? colors.info
-											: completion.isCustom
-												? colors.info
-												: colors.primary
-									}
-									bold={isSelected}
-								>
-									{isSelected ? '▸ ' : '  '}/{completion.name}
-								</Text>
-							);
-						})}
-						{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
-							<Text color={colors.secondary}>
-								Showing {commandCompletionWindow.start + 1}-
-								{commandCompletionWindow.end} of {completions.length}
-							</Text>
+			<Box width={actualWidth} alignItems="center" flexDirection="column">
+				<Box
+					flexDirection="column"
+					marginTop={1}
+					width={promptWidth}
+					paddingX={1}
+					paddingY={0}
+					borderStyle="round"
+					borderColor={isBashMode ? colors.tool : colors.primary}
+				>
+					{/* Input row */}
+					<Box>
+						{input.length === 0 && (
+							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
 						)}
+						<TextInput
+							key={textInputKey}
+							value={input}
+							onChange={handleInputChange}
+							onEdgeArrow={handleHistoryNavigation}
+							onSubmit={handleSubmit}
+							onEnter={handleSubmit}
+							placeholder="Ask anything..."
+							focus={effectiveFocus}
+							wrapWidth={inputWrapWidth}
+							handleEnter={false}
+						/>
 					</Box>
-				)}
-				{isFileAutocompleteMode && fileCompletions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							File suggestions (↑/↓ to navigate, Tab to select):
-						</Text>
-						{fileCompletions.slice(0, 5).map((file, index) => (
-							<Text
-								key={index}
-								color={
-									index === selectedFileIndex ? colors.info : colors.primary
-								}
-								bold={index === selectedFileIndex}
-							>
-								{index === selectedFileIndex ? '▸ ' : '  '}
-								{file.path}
-							</Text>
-						))}
-					</Box>
-				)}
-				{queuedMessages.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							Queued messages (↑/↓ select, Enter edit, Del remove):
-						</Text>
-						{queuedMessages.map((message, index) => {
-							const isSelected = index === selectedQueuedIndex;
-							return (
-								<Text
-									key={message.id}
-									color={isSelected ? colors.info : colors.primary}
-									bold={isSelected}
-								>
-									{isSelected ? '▸ ' : '  '}
-									{formatQueuedMessage(message)}
-								</Text>
-							);
-						})}
-					</Box>
-				)}
-				{isBusy && (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							<Spinner type="dots" /> Press Esc to cancel
-							{onToggleCompactDisplay && (
-								<Text>
-									{' '}
-									· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-									{isNarrow ? '' : 'tool results'}
+
+					{showClearMessage && (
+						<Text color={colors.secondary}>Press escape again to clear</Text>
+					)}
+
+					{showCompletions && completions.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>Available commands:</Text>
+							{commandCompletionWindow.items.map((completion, index) => {
+								const completionIndex = commandCompletionWindow.start + index;
+								const isSelected = completionIndex === selectedCompletionIndex;
+								return (
+									<Text
+										key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
+										color={
+											isSelected
+												? colors.info
+												: completion.isCustom
+													? colors.info
+													: colors.primary
+										}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}/{completion.name}
+									</Text>
+								);
+							})}
+							{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
+								<Text color={colors.secondary}>
+									Showing {commandCompletionWindow.start + 1}-
+									{commandCompletionWindow.end} of {completions.length}
 								</Text>
 							)}
-						</Text>
-					</Box>
-				)}
+						</Box>
+					)}
+					{isFileAutocompleteMode && fileCompletions.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>
+								File suggestions (↑/↓ to navigate, Tab to select):
+							</Text>
+							{fileCompletions.slice(0, 5).map((file, index) => (
+								<Text
+									key={index}
+									color={
+										index === selectedFileIndex ? colors.info : colors.primary
+									}
+									bold={index === selectedFileIndex}
+								>
+									{index === selectedFileIndex ? '▸ ' : '  '}
+									{file.path}
+								</Text>
+							))}
+						</Box>
+					)}
+					{queuedMessages.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>
+								Queued messages (↑/↓ select, Enter edit, Del remove):
+							</Text>
+							{queuedMessages.map((message, index) => {
+								const isSelected = index === selectedQueuedIndex;
+								return (
+									<Text
+										key={message.id}
+										color={isSelected ? colors.info : colors.primary}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}
+										{formatQueuedMessage(message)}
+									</Text>
+								);
+							})}
+						</Box>
+					)}
+					{isBusy && (
+						<Box marginTop={1}>
+							<Text color={colors.secondary}>
+								<Spinner type="dots" /> Press Esc to cancel
+								{onToggleCompactDisplay && (
+									<Text>
+										{' '}
+										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+										{isNarrow ? '' : 'tool results'}
+									</Text>
+								)}
+							</Text>
+						</Box>
+					)}
+				</Box>
 			</Box>
 
 			{attachments.length > 0 && (
@@ -1169,19 +1145,23 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible */}
-			<DevelopmentModeIndicator
-				developmentMode={developmentMode}
-				colors={colors}
-				contextPercentUsed={contextPercentUsed ?? null}
-				contextSource={contextSource ?? null}
-				sessionName={sessionName}
-				tune={tune}
-				currentModel={currentModel}
-				activeEditor={activeEditor}
-				taskInfo={taskInfo}
-				isSaving={isSaving}
-			/>
+			{/* Development mode indicator - always visible. marginLeft={3} shifts
+			the indicator one step to the right so it aligns cleanly under the
+			input box content. */}
+			<Box marginLeft={3}>
+				<DevelopmentModeIndicator
+					developmentMode={developmentMode}
+					colors={colors}
+					contextPercentUsed={contextPercentUsed ?? null}
+					contextSource={contextSource ?? null}
+					sessionName={sessionName}
+					tune={tune}
+					currentModel={currentModel}
+					activeEditor={activeEditor}
+					taskInfo={taskInfo}
+					isSaving={isSaving}
+				/>
+			</Box>
 		</>
 	);
 }

@@ -879,4 +879,3 @@ test('maybeAutoCompact uses caller-supplied provider and model over the client',
 
 	t.not(result, messages, 'compaction must run on the caller-supplied model');
 });
-
