@@ -1,8 +1,11 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
+import stringWidth from 'string-width';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import WelcomeMessage from './welcome-message';
 
@@ -37,6 +40,52 @@ const VERSION = packageJson.version;
 // ============================================================================
 // Narrow Terminal Tests (width < 90 → text logo per mock ladder)
 // ============================================================================
+
+// Serial: swaps the process cwd so the component reads a temp repo's branch.
+test.serial('WelcomeMessage keeps a CJK branch row inside the terminal', t => {
+	// getCurrentBranchSync reads .git/HEAD, so a ref file is enough to put a
+	// wide-glyph branch on the location line. Counting characters rather than
+	// columns overflowed the row, which broke into a branch line ending in a
+	// dangling separator with the path stranded below it.
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'welcome-branch-'));
+	fs.mkdirSync(path.join(repo, '.git'));
+	fs.writeFileSync(
+		path.join(repo, '.git', 'HEAD'),
+		'ref: refs/heads/\u{1F680}-功能-branch-名前-x\n',
+	);
+
+	const originalCwd = process.cwd();
+	const originalColumns = process.stdout.columns;
+	process.chdir(repo);
+	process.stdout.columns = 50;
+
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const lines = stripAnsi(lastFrame() ?? '')
+			.split('\n')
+			.map(line => line.trimEnd());
+		unmount();
+
+		const branchLine = lines.find(line => line.includes('⎇'));
+		t.truthy(branchLine, 'the location line must render');
+		t.false(
+			branchLine!.endsWith('·'),
+			'a trailing separator means the path was pushed onto its own row',
+		);
+		for (const line of lines) {
+			t.true(
+				stringWidth(line) <= 50,
+				`row is ${stringWidth(line)} columns wide in a 50-column terminal`,
+			);
+		}
+	} finally {
+		process.chdir(originalCwd);
+		process.stdout.columns = originalColumns;
+		fs.rmSync(repo, {recursive: true, force: true});
+	}
+});
 
 test('WelcomeMessage renders compact layout for narrow terminal', t => {
 	const originalColumns = process.stdout.columns;

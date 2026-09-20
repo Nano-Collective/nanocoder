@@ -121,6 +121,9 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
 		const branchPart = `⎇ ${shortBranch} · `;
+		// branchPart already includes the separator, so the trailing 3 is not it:
+		// it is slack, kept from the original budget, for fonts that draw ⎇ and ·
+		// wider than string-width reports.
 		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
