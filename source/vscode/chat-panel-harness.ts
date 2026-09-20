@@ -14,6 +14,13 @@ const PANEL_SOURCE = readFileSync(
 	'utf8',
 );
 
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
 	'attach-btn',
@@ -22,6 +29,7 @@ const SHELL_IDS = [
 	'close-modal-btn',
 	'composer-box',
 	'context-chips',
+	'pending-changes-container',
 	'history-list',
 	'history-view',
 	'icon-send',
@@ -118,7 +126,9 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
-		addEventListener: () => {},
+		addEventListener: (type: string, listener: () => void) => {
+			if (type === 'click') element.onclick = listener;
+		},
 		removeEventListener: () => {},
 		focus: () => {},
 		click: () => {},
@@ -237,6 +247,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	}
 
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
@@ -293,5 +304,9 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				child.className.includes('thought-aggregator'),
 			);
 		},
+		pendingChangesContainer: findById(
+			root,
+			'pending-changes-container',
+		) as StubElement,
 	};
 }

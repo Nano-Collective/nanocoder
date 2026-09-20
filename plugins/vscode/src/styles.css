@@ -137,6 +137,97 @@ select option {
 }
 .context-chip .chip-remove:hover { opacity: 1; }
 
+/* ── Pending Changes ───────────────────────────────── */
+.pending-changes-card {
+  border: 1px solid var(--vscode-dropdown-border, rgba(150, 150, 150, 0.2));
+  background-color: var(--vscode-editorWidget-background);
+  border-radius: 8px;
+  margin: 8px 12px 0;
+  overflow: hidden;
+}
+
+.pending-changes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pending-changes-header:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.pending-changes-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pending-changes-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.pending-changes-content.hidden {
+	display: none;
+}
+
+.pending-change-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.pending-change-row:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+.pending-change-stats {
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pending-change-additions {
+	color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.pending-change-deletions {
+	color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.pending-changes-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  font-size: 1em;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.pending-changes-dismiss:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+}
+
+.pending-change-file {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 /* ── Drop Overlay ───────────────────────────────────── */
 #composer-box.drag-over::after {
   content: 'Drop files or folders';

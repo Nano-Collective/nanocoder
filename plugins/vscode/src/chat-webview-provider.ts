@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import {diffLines} from 'diff';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
@@ -27,6 +28,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private _notifiedPendingChangeIds = new Set<string>();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -77,6 +79,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
+					const originalContent = block.oldText || '';
+					const newContent = block.newText || '';
+
+					const changes = diffLines(originalContent, newContent);
+
+					const additions = changes
+						.filter(change => change.added)
+						.reduce((total, change) => total + (change.count ?? 0), 0);
+
+					const deletions = changes
+						.filter(change => change.removed)
+						.reduce((total, change) => total + (change.count ?? 0), 0);
 					this._diffManager.addPendingChange({
 						type: 'file_change',
 						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
@@ -86,6 +100,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						toolName: update.title || update.name || 'edit',
 						toolArgs: update.rawInput || {}
 					});
+
+					const id = update.toolCallId || payload.toolCallId || block.path;
+					if (!this._notifiedPendingChangeIds.has(id)) {
+						this._notifiedPendingChangeIds.add(id);
+						this.postMessage({
+							type: 'pendingChangeAdded',
+							toolCallId: update.toolCallId || payload.toolCallId || block.path,
+							filePath: block.path,
+							additions,
+							deletions
+						});
+					}
 				}
 			}
 		}

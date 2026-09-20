@@ -6,10 +6,17 @@
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
 	const contextChipsContainer = document.getElementById('context-chips');
+	const pendingChangesContainer = document.getElementById('pending-changes-container');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+	let pendingChanges = [];
+	let pendingChangesDismissed = false;
+	let pendingChangesCollapsed = false;
+	function basename(filePath) {
+		return String(filePath).trim().split(/[/\\]/).pop();
+	}
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -932,6 +939,125 @@
 		}
 	}
 
+	function renderPendingChanges() {
+		pendingChangesContainer.innerHTML = '';
+
+		if (pendingChanges.length === 0 || pendingChangesDismissed) {
+			pendingChangesContainer.classList.add('hidden');
+			return;
+		}
+
+		pendingChangesContainer.classList.remove('hidden');
+
+		const card = document.createElement('div');
+		card.className = 'pending-changes-card';
+
+		pendingChangesContainer.appendChild(card);
+
+		const header = document.createElement('div')
+		header.className = 'pending-changes-header';
+
+		const title = document.createElement('span');
+		title.textContent = 'Pending changes';
+
+		const actions = document.createElement('div');
+		actions.className = 'pending-changes-actions';
+
+		const chevron = document.createElement('span');
+		chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		chevron.style.fontSize = '1.1em';
+
+		const dismissButton = document.createElement('button');
+		dismissButton.className = 'pending-changes-dismiss';
+		dismissButton.textContent = 'X';
+		dismissButton.title = 'Dismiss';
+
+		dismissButton.addEventListener('click', (event) => {
+			event.stopPropagation();
+			pendingChangesDismissed = true;
+			renderPendingChanges();
+		});
+
+		actions.appendChild(chevron);
+		actions.appendChild(dismissButton);
+
+		header.appendChild(title);
+		header.appendChild(actions);
+
+		card.appendChild(header);
+
+		const content = document.createElement('div');
+		content.className = 'pending-changes-content';
+		card.appendChild(content);
+
+		content.classList.toggle('hidden', pendingChangesCollapsed);
+
+		header.addEventListener('click', () => {
+			pendingChangesCollapsed = !pendingChangesCollapsed;
+			content.classList.toggle('hidden', pendingChangesCollapsed);
+			chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		});
+
+		for (const change of pendingChanges) {
+			const row = document.createElement('div');
+			row.className = 'pending-change-row';
+
+			const fileName = document.createElement('span');
+			fileName.className = 'pending-change-file';
+			fileName.textContent = basename(change.filePath);
+
+			const stats = document.createElement('span');
+			stats.className = 'pending-change-stats';
+
+			const additionsSpan = document.createElement('span');
+			additionsSpan.className = 'pending-change-additions';
+			additionsSpan.textContent = `+${change.additions}`;
+
+			const deletionsSpan = document.createElement('span');
+			deletionsSpan.className = 'pending-change-deletions';
+			deletionsSpan.textContent = ` -${change.deletions}`;
+
+			stats.appendChild(additionsSpan);
+			stats.appendChild(deletionsSpan);
+
+			row.appendChild(fileName);
+			row.appendChild(stats);
+
+			row.addEventListener('click', () => {
+				vscode.postMessage({
+					type: 'showDiff',
+					toolCallId: change.toolCallId,
+				});
+			});
+
+			content.appendChild(row);
+			
+		}
+		
+	}
+
+	function removeResolvedPendingChange(update) {
+		const toolCallId = update?.toolCallId || (update?.toolCall && update.toolCall.toolCallId);
+
+		if (!toolCallId) return;
+
+		const state = resolveEditCardState(update);
+
+		if (!isSettled(state.status)) return;
+
+		const hasPendingChange = pendingChanges.some(
+			change => change.toolCallId === toolCallId,
+		);
+
+		if (!hasPendingChange) return;
+
+		pendingChanges = pendingChanges.filter(
+			change => change.toolCallId !== toolCallId,
+		);
+
+		renderPendingChanges();
+	}
+
 	if (composerBox) {
 		const handleDrag = (e) => {
 			e.preventDefault();
@@ -1459,6 +1585,22 @@
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
+				break;
+			case 'pendingChangeAdded':
+				pendingChangesDismissed = false;
+
+				pendingChanges = pendingChanges.filter(
+					change => change.toolCallId !== message.toolCallId && change.filePath !== message.filePath
+				);
+
+				pendingChanges.push({
+					toolCallId: message.toolCallId,
+					filePath: message.filePath,
+					additions: message.additions,
+					deletions: message.deletions,
+				});
+
+				renderPendingChanges();
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
@@ -2020,6 +2162,8 @@
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+
+		removeResolvedPendingChange(update);
 
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh

@@ -147,6 +147,230 @@ test('renders answer text and tool cards after the thought section', t => {
 	t.true(panel.container.children.length > 2);
 });
 
+test('renders a pending change summary', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+
+	t.is(card.children[0].children[0].textContent, 'Pending changes');
+	t.is(card.children[1].children[0].children[0].textContent, 'auth.ts');
+	t.is(card.children[1].children[0].children[1].children[0].textContent, '+12');
+	t.is(card.children[1].children[0].children[1].children[1].textContent, ' -3')
+	t.is(card.children[0].children[1].children[0].textContent, '▾')
+});
+
+test('opens the diff for a pending change when its row is clicked', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const row = card.children[1].children[0];
+
+	row.onclick();
+
+	t.deepEqual(panel.sent.at(-1), {
+		type: 'showDiff',
+		toolCallId: 'change-1',
+	});
+});
+
+test('collapses the pending changes card', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const content = card.children[1];
+	const header = card.children[0];
+
+	t.false(content.classList.contains('hidden'));
+
+	header.onclick();
+
+	t.true(content.classList.contains('hidden'));
+	t.false(panel.pendingChangesContainer.classList.contains('hidden'));
+});
+
+test('dismisses the pending changes card without clearing changes', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const dismissButton = card.children[0].children[1].children[1];
+
+	dismissButton.onclick({
+		stopPropagation() {},
+	});
+
+	t.true(panel.pendingChangesContainer.classList.contains('hidden'));
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-2',
+		filePath: 'server.ts',
+		additions: 5,
+		deletions: 1,
+	});
+
+	t.false(panel.pendingChangesContainer.classList.contains('hidden'));
+});
+
+test('removes a pending change when its tool call is resolved', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-2',
+		filePath: 'server.ts',
+		additions: 5,
+		deletions: 1,
+	});
+
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'change-1',
+		status: 'completed',
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const content = card.children[1];
+
+	t.is(content.children.length, 1);
+	t.is(
+		content.children[0].children[0].textContent,
+		'server.ts',
+	);
+});
+
+test('shows all pending changes again when a new change arrives after dismissal', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 12,
+		deletions: 3,
+	});
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-2',
+		filePath: 'server.ts',
+		additions: 5,
+		deletions: 1,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const dismissButton = card.children[0].children[1].children[1];
+
+	dismissButton.onclick({
+		stopPropagation() {},
+	});
+
+	t.true(panel.pendingChangesContainer.classList.contains('hidden'));
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-3',
+		filePath: 'db.ts',
+		additions: 8,
+		deletions: 2,
+	});
+
+	t.false(panel.pendingChangesContainer.classList.contains('hidden'));
+
+	const visibleCard = panel.pendingChangesContainer.children[0];
+	const content = visibleCard.children[1];
+
+	t.is(content.children.length, 3);
+	t.is(content.children[0].children[0].textContent, 'auth.ts');
+	t.is(content.children[1].children[0].textContent, 'server.ts');
+	t.is(content.children[2].children[0].textContent, 'db.ts');
+});
+
+test('renders a pending change from an ACP diff update', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 1,
+		deletions: 0,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const row = card.children[1].children[0];
+
+	t.is(row.children[0].textContent, 'auth.ts');
+	t.is(row.children[1].children[0].textContent, '+1');
+	t.is(row.children[1].children[1].textContent, ' -0')
+});
+
+test('does not duplicate a pending change for the same file when tool call ids differ', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 1,
+		deletions: 0,
+	});
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-2',
+		filePath: 'auth.ts',
+		additions: 2,
+		deletions: 1,
+	});
+
+	const card = panel.pendingChangesContainer.children[0];
+	const content = card.children[1];
+
+	t.is(content.children.length, 1);
+	t.is(content.children[0].children[1].children[0].textContent, '+2');
+	t.is(content.children[0].children[1].children[1].textContent, ' -1');
+});
+
 test('renders the grouped thoughts as markdown when marked is loaded', t => {
 	const panel = createPanel({marked: true});
 
