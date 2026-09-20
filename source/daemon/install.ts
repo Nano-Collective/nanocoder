@@ -27,6 +27,7 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {promisify} from 'node:util';
+import {isDirectoryTrusted} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
@@ -238,6 +239,12 @@ export async function installAutoStart(
 	const daemonCommand = opts.daemonCommand ?? 'nanocoder';
 	const loadService = opts.loadService ?? true;
 	const hash = projectHash(opts.projectRoot);
+	const isTrusted = isDirectoryTrusted(opts.projectRoot);
+
+	let warningMessage = '';
+	if (!isTrusted) {
+		warningMessage = `\n\nWarning: Auto-start installed, but the directory is untrusted.\nThe daemon will fail to start until you run \`nanocoder\` here once to accept the disclaimer, or pass \`--trust-directory\`.`;
+	}
 
 	if (platform === 'darwin') {
 		const target = launchAgentPath(home, hash);
@@ -265,7 +272,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${warningMessage}`,
 		};
 	}
 
@@ -294,7 +301,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${warningMessage}`,
 		};
 	}
 
@@ -329,7 +336,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${warningMessage}`,
 		};
 	}
 

@@ -105,6 +105,49 @@ test.serial('install is idempotent: running twice keeps a single file', async t 
 	});
 });
 
+test.serial('installAutoStart does not add warning if directory is trusted', async t => {
+	await withTempHome(async (home, project) => {
+		const {resetPreferencesCache, savePreferences} = await import('@/config/preferences');
+		process.env.NANOCODER_CONFIG_DIR = home;
+		resetPreferencesCache();
+
+		const path = await import('node:path');
+		savePreferences({
+			trustedDirectories: [path.resolve(project)],
+		});
+
+		const result = await installAutoStart({
+			projectRoot: project,
+			platform: 'linux',
+			home,
+			loadService: false,
+		});
+		t.notRegex(
+			result.message,
+			/Warning: Auto-start installed, but the directory is untrusted/,
+		);
+	});
+});
+
+test.serial('installAutoStart adds warning if directory is not trusted', async t => {
+	await withTempHome(async (home, project) => {
+		const {resetPreferencesCache} = await import('@/config/preferences');
+		process.env.NANOCODER_CONFIG_DIR = home;
+		resetPreferencesCache();
+
+		const result = await installAutoStart({
+			projectRoot: project,
+			platform: 'linux',
+			home,
+			loadService: false,
+		});
+		t.regex(
+			result.message,
+			/Warning: Auto-start installed, but the directory is untrusted/,
+		);
+	});
+});
+
 test.serial('uninstall removes the file (idempotent if missing)', async t => {
 	await withTempHome(async (home, project) => {
 		await installAutoStart({

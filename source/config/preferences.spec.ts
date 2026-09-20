@@ -2,6 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import path from 'node:path';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -14,6 +15,7 @@ import {
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
+	isDirectoryTrusted,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getProfessionalTone,
@@ -2001,4 +2003,27 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 			rmSync(preferencesPath, {force: true});
 		}
 	}
+});
+
+
+// ========================================================================
+// isDirectoryTrusted
+// ========================================================================
+test.serial('isDirectoryTrusted returns false for untrusted directory', t => {
+	t.false(isDirectoryTrusted('/tmp/untrusted'));
+});
+
+test.serial('isDirectoryTrusted returns true for trusted directory', t => {
+	const testDir = path.resolve('/tmp/trusted');
+	savePreferences({
+		trustedDirectories: [testDir],
+	});
+	t.true(isDirectoryTrusted(testDir));
+});
+
+test.serial('isDirectoryTrusted normalizes paths for comparison', t => {
+	savePreferences({
+		trustedDirectories: ['/tmp/trusted-norm'],
+	});
+	t.true(isDirectoryTrusted('/tmp/trusted-norm/../trusted-norm'));
 });

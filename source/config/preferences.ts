@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
@@ -100,6 +101,18 @@ export function updateLastUsed(provider: string, model: string): void {
 	preferences.providerModels[provider] = model;
 
 	savePreferences(preferences);
+}
+
+/**
+ * Check if a directory is in the trusted directories list.
+ */
+export function isDirectoryTrusted(directory: string): boolean {
+	const preferences = loadPreferences();
+	const trustedDirectories = preferences.trustedDirectories || [];
+	const normalizedDirectory = path.resolve(directory); // nosemgrep
+	return trustedDirectories.some(
+		trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
+	);
 }
 
 export function updateTitleShape(shape: string): void {
