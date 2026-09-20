@@ -1150,3 +1150,69 @@ test('ReadFileFormatter correctly identifies metadata_only results', async t => 
 		rmSync(testDir, { recursive: true, force: true });
 	}
 });
+
+// Regression: metadata_only on a directory must render as metadata, not as
+// "Lines: 1 - 0 / Tokens: ~0" (getCachedFileContent throws EISDIR; the
+// formatter must keep the metadata display computed from args).
+test('ReadFileFormatter shows metadata for directories, not empty content stats', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-dir-fmt-temp');
+	try {
+		mkdirSync(testDir, { recursive: true });
+		mkdirSync(join(testDir, 'subdir'), { recursive: true });
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{ path: join(testDir, 'subdir'), metadata_only: true },
+			`File Information for "test-metadata-dir-fmt-temp/subdir"\n==================================================\n\nType: directory\nSize: 4096 bytes\nLast Modified: 2023-01-01T00:00:00.000Z\nEntries: 0`,
+		);
+		const { lastFrame } = render(
+			<TestThemeProvider>{element}</TestThemeProvider>
+		);
+
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(stripAnsi(output!), /metadata only/);
+		// The bogus "Lines: 1 - 0" / "Tokens: ~0" of the content path must not appear
+		t.notRegex(stripAnsi(output!), /Lines:\s*1\s*-\s*0/);
+	} finally {
+		rmSync(testDir, { recursive: true, force: true });
+	}
+});
+
+// Regression: a plain large-file read (no metadata_only flag) keeps showing
+// the truncation display - the metadata fallback must never trigger from
+// totalLines alone.
+test('ReadFileFormatter keeps truncation display for plain large-file reads', async t => {
+	const testDir = join(process.cwd(), 'test-large-plain-temp');
+	try {
+		mkdirSync(testDir, { recursive: true });
+		const content = Array.from({ length: 1600 }, (_, index) => `line-${index + 1}`).join('\n');
+		writeFileSync(join(testDir, 'large.ts'), content);
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const preview = Array.from({ length: 150 }, (_, index) => `line-${index + 1}`).join('\n');
+		const result = `${preview}\n\n[Truncated at line 150 of 1600. Use read_file with start_line: 151 and end_line to continue.]`;
+		const element = await formatter({ path: join(testDir, 'large.ts') }, result);
+		const { lastFrame } = render(
+			<TestThemeProvider>{element}</TestThemeProvider>
+		);
+
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(stripAnsi(output!), /Truncated at line 150 of 1600/);
+		// Must NOT be misdetected as metadata-only
+		t.notRegex(stripAnsi(output!), /metadata only/);
+	} finally {
+		rmSync(testDir, { recursive: true, force: true });
+	}
+});

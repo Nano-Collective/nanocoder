@@ -307,32 +307,32 @@ const readFileFormatter = async (
 	}
 
 	// Load file info to calculate actual read information
+	// Detect metadata-only responses from args alone, outside the try block:
+	// the content read can legitimately fail (directories throw EISDIR,
+	// unreadable files), and the metadata display must survive that.
+	const pathArg = args.path || args.file_path;
+	const isMetadataOnlyRequest =
+		(args.metadata_only ?? false) &&
+		(result?.startsWith('File Information for') ?? false);
+
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
 		readEndLine: 0,
 		tokens: 0,
 		isPartialRead: false,
-		isMetadataOnly: false,
+		isMetadataOnly: isMetadataOnlyRequest,
 		isTruncated: false,
 	};
 
 	try {
-		const path = args.path || args.file_path;
-		if (path && typeof path === 'string') {
-			const absPath = resolve(getSafeSessionCwd(), path);
+		if (pathArg && typeof pathArg === 'string') {
+			const absPath = resolve(getSafeSessionCwd(), pathArg);
 			const cached = await getCachedFileContent(absPath);
 			const content = cached.content;
 			const lines = cached.lines;
 			const totalLines = lines.length;
 
-			// Detect if this was a metadata-only response
-			const isMetadataOnly =
-				(result?.startsWith('File Information for') ?? false) &&
-				!args.start_line &&
-				!args.end_line &&
-				((args.metadata_only ?? false) ||
-					totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES);
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
@@ -345,7 +345,7 @@ const readFileFormatter = async (
 
 			// Calculate tokens
 			let tokens: number;
-			if (isMetadataOnly) {
+			if (isMetadataOnlyRequest) {
 				// For metadata, show estimated tokens of the FULL FILE
 				tokens = calculateTokens(content);
 			} else {
@@ -359,12 +359,14 @@ const readFileFormatter = async (
 				readEndLine,
 				tokens,
 				isPartialRead,
-				isMetadataOnly,
+				isMetadataOnly: isMetadataOnlyRequest,
 				isTruncated,
 			};
 		}
 	} catch {
-		// File doesn't exist or can't be read - keep default fileInfo
+		// File doesn't exist, is a directory (EISDIR) or can't be read -
+		// keep default fileInfo: metadata-only stays as computed from args,
+		// totals stay at zero instead of rendering bogus "Lines: 1 - 0".
 	}
 
 	return <ReadFileFormatter args={args} fileInfo={fileInfo} />;
