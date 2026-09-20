@@ -61,7 +61,7 @@ export interface SubagentResult {
 	success: boolean;
 	/** Error message if execution failed */
 	error?: string;
-	/** Number of tokens used (if available) */
+	/** Approximate streamed token count for progress display, not billing usage */
 	tokensUsed?: number;
 	/** Execution time in milliseconds */
 	executionTimeMs: number;

@@ -313,8 +313,15 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
-		onApiCallComplete: record =>
-			appState.setApiCallHistory(prev => [...prev, record]),
+		onApiCallComplete: record => {
+			appState.setApiCallHistory(prev => [...prev, record]);
+			// Lifetime /stats: tokens + estimated cost (never blocks UI).
+			void import('@/stats/record')
+				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
+				.catch(() => {
+					/* ignore */
+				});
+		},
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
@@ -510,6 +517,7 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
 		setIsToolExecuting: appState.setIsToolExecuting,
+		setLiveComponentCapturesInput: appState.setLiveComponentCapturesInput,
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
@@ -592,7 +600,7 @@ export default function App({
 	});
 
 	// Setup session autosave
-	useSessionAutosave({
+	const {isSaving} = useSessionAutosave({
 		messages: appState.messages,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
@@ -784,6 +792,7 @@ export default function App({
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}
 							handleIdeSelect={handleIdeSelect}
+							isSaving={isSaving}
 						/>
 					)}
 				</PrivacyContext.Provider>

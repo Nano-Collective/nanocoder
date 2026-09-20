@@ -153,6 +153,34 @@ test('matchesFilter on kind mismatch returns false', t => {
 	t.false(matchesFilter(sub, event));
 });
 
+test('matchGlob: brace alternation', t => {
+	t.true(matchGlob('*.{ts,tsx}', 'app.tsx'));
+	t.true(matchGlob('*.{ts,tsx}', 'app.ts'));
+	t.false(matchGlob('*.{ts,tsx}', 'app.js'));
+
+	t.true(matchGlob('src/**/*.{ts,tsx}', 'src/a/b/app.tsx'));
+	t.false(matchGlob('src/**/*.{ts,tsx}', 'src/a/b/app.css'));
+
+	// A single alternative and more than two both hold.
+	t.true(matchGlob('{docs}/**', 'docs/intro.md'));
+	t.true(matchGlob('*.{js,ts,tsx,mts}', 'a.mts'));
+
+	// `*` still stops at a directory boundary inside an alternative.
+	t.false(matchGlob('*.{ts,tsx}', 'src/app.ts'));
+});
+
+test('matchGlob: unbalanced braces stay literal instead of throwing', t => {
+	t.notThrows(() => matchGlob('docs/{a', 'docs/{a'));
+	t.true(matchGlob('docs/{a', 'docs/{a'));
+	t.false(matchGlob('docs/{a', 'docs/a'));
+	t.true(matchGlob('a}b', 'a}b'));
+});
+
+test('matchGlob: a comma outside braces is literal', t => {
+	t.true(matchGlob('a,b.md', 'a,b.md'));
+	t.false(matchGlob('a,b.md', 'a.md'));
+});
+
 test('matchGlob: basic patterns', t => {
 	t.true(matchGlob('docs/**', 'docs/intro.md'));
 	t.true(matchGlob('docs/**', 'docs/deep/sub/file.md'));
@@ -164,4 +192,34 @@ test('matchGlob: basic patterns', t => {
 	t.false(matchGlob('src/*.ts', 'src/deep/file.ts'));
 	t.true(matchGlob('file.txt', 'file.txt'));
 	t.false(matchGlob('file.txt', 'other.txt'));
+});
+
+// Chokidar reports the platform separator, so on Windows a `/`-authored
+// pattern is asked to match `docs\guide.md`. Both directions matter: a
+// segment pattern must still match, and `*` must not cross a backslash any
+// more than it crosses a slash.
+test('matchGlob: paths using Windows separators', t => {
+	const cases: Array<[pattern: string, path: string, expected: boolean]> = [
+		['docs/**', 'docs\\guide.md', true],
+		['docs/**', 'docs\\api\\ref.md', true],
+		['docs/*.md', 'docs\\guide.md', true],
+		['k8s/**/*.yaml', 'k8s\\deploy.yaml', true],
+		['k8s/**/*.yaml', 'k8s\\prod\\deploy.yaml', true],
+		['src/**/*.ts', 'src\\deep\\file.ts', true],
+		['**/*.md', 'docs\\intro.md', true],
+		['docs/**', 'src\\index.ts', false],
+		// `*` stops at a directory boundary, whichever separator draws it
+		['*.md', 'sub\\a.md', false],
+		['src/*.ts', 'src\\deep\\file.ts', false],
+		['?.md', 'sub\\a.md', false],
+	];
+	for (const [pattern, path, expected] of cases) {
+		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
+	}
+});
+
+test('matchGlob: patterns authored with Windows separators', t => {
+	t.true(matchGlob('docs\\**', 'docs/guide.md'));
+	t.true(matchGlob('docs\\**', 'docs\\guide.md'));
+	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
 });

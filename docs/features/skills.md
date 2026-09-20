@@ -140,6 +140,11 @@ subscribe:
     cron: "0 9 * * MON"
 ```
 
+Accepted manifest target kinds are `command:`, `agent:`, and `tool:`.
+`skill:` is parsed for forward compatibility, but registering it today
+raises a clear "not supported yet" error instead of loading a dead
+subscription.
+
 v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`) and
 `schedule.cron` (filter: `cron`).
 
@@ -202,6 +207,12 @@ Internally, the daemon runs every triggered subagent in **`headless`**
 mode (no foreground prompts, no `ask_user`, no `agent`). The
 `confirm: true` opt-in below switches a specific subscription to plan
 mode instead.
+
+Triggered runs are subagent runs, so the
+[`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap
+applies: a triggered skill whose model gets stuck repeating the same
+tool call stops with an error instead of burning tokens unattended (see
+[Loop Protection](./subagents.md#loop-protection)).
 
 ## Inspecting and creating skills
 

@@ -5,6 +5,7 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
 import {handlePaste} from './paste-utils';
+import {assemblePrompt} from './prompt-processor';
 import {clearAppConfig, reloadAppConfig} from '../config';
 
 // Tests for handlePaste utility function
@@ -99,6 +100,27 @@ test('handlePaste replaces pasted text with placeholder in display value', t => 
 	t.true(result!.displayValue.startsWith('prefix [Paste #'));
 	t.true(result!.displayValue.endsWith('802 chars] suffix'));
 	t.false(result!.displayValue.includes('x'.repeat(10))); // Original text should be gone
+});
+
+test('repeated pasted text survives the complete prompt round trip', t => {
+	const pastedText = 'x'.repeat(802);
+	const currentDisplayValue = `prefix ${pastedText} middle ${pastedText} suffix`;
+	const currentPlaceholderContent: Record<string, PlaceholderContent> = {};
+
+	const result = handlePaste(
+		pastedText,
+		currentDisplayValue,
+		currentPlaceholderContent,
+	);
+
+	t.truthy(result);
+	const placeholder = result!.placeholderContent.paste_1.displayText;
+	t.is(
+		result!.displayValue,
+		`prefix ${placeholder} middle ${placeholder} suffix`,
+	);
+	t.false(result!.displayValue.includes(pastedText));
+	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
 test('handlePaste preserves existing pasted content', t => {
@@ -218,4 +240,75 @@ test('handlePaste respects custom threshold - low threshold creates placeholder'
 		process.chdir(originalCwd);
 		clearAppConfig();
 	}
+});
+
+test('handlePaste namespaces paste ids so file mentions cannot collide', t => {
+	const currentPlaceholderContent: Record<string, PlaceholderContent> = {
+		file_1: {
+			type: PlaceholderType.FILE,
+			displayText: '[@src/app.tsx]',
+			filePath: '/repo/src/app.tsx',
+			content: 'file body',
+		},
+	};
+
+	const result = handlePaste(
+		'c'.repeat(801),
+		'[@src/app.tsx] ',
+		currentPlaceholderContent,
+	);
+
+	t.truthy(result);
+	t.deepEqual(Object.keys(result!.placeholderContent).sort(), [
+		'file_1',
+		'paste_1',
+	]);
+	t.truthy(result!.placeholderContent.file_1, 'the file mention survives');
+});
+
+test('handlePaste does not reuse the id of a deleted paste', t => {
+	const first = handlePaste('a'.repeat(801), '', {})!;
+	const second = handlePaste(
+		'b'.repeat(802),
+		first.displayValue,
+		first.placeholderContent,
+	)!;
+
+	t.deepEqual(Object.keys(second.placeholderContent), ['paste_1', 'paste_2']);
+
+	// The user deletes the first paste, then pastes again.
+	const surviving = {paste_2: second.placeholderContent.paste_2};
+	const third = handlePaste(
+		'c'.repeat(803),
+		second.placeholderContent.paste_2.displayText,
+		surviving,
+	)!;
+
+	t.deepEqual(Object.keys(third.placeholderContent), ['paste_2', 'paste_3']);
+	t.is(
+		(third.placeholderContent.paste_2 as PastePlaceholderContent).content,
+		'b'.repeat(802),
+		'the surviving paste keeps its own content',
+	);
+	t.is(
+		(third.placeholderContent.paste_3 as PastePlaceholderContent).content,
+		'c'.repeat(803),
+	);
+});
+
+test('handlePaste continues numbering past legacy bare-numeric paste ids', t => {
+	// Prompt history persists InputState, so pre-namespacing keys can come back.
+	const legacy: Record<string, PlaceholderContent> = {
+		'2': {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #2: 900 chars]',
+			content: 'x'.repeat(900),
+			originalSize: 900,
+		} as PastePlaceholderContent,
+	};
+
+	const result = handlePaste('d'.repeat(801), '[Paste #2: 900 chars]', legacy)!;
+
+	t.deepEqual(Object.keys(result.placeholderContent).sort(), ['2', 'paste_3']);
+	t.true(result.displayValue.includes('[Paste #3: 801 chars]'));
 });

@@ -58,6 +58,84 @@ test('PasteDetector does not detect manual typing', async t => {
 	t.is(result2.method, 'none');
 });
 
+test('PasteDetector ignores deletions without returning sliced garbage', t => {
+	const detector = new PasteDetector();
+
+	detector.detectPaste('hello world');
+	const result = detector.detectPaste('hello');
+
+	t.false(result.isPaste);
+	t.is(result.method, 'none');
+	t.is(result.addedText, '');
+	t.is(result.details.charsAdded, -6);
+});
+
+test('PasteDetector ignores unchanged input without returning text', t => {
+	const detector = new PasteDetector();
+
+	detector.detectPaste('hello');
+	const result = detector.detectPaste('hello');
+
+	t.false(result.isPaste);
+	t.is(result.addedText, '');
+	t.is(result.details.charsAdded, 0);
+});
+
+test('PasteDetector returns added text after a deletion', t => {
+	const detector = new PasteDetector();
+
+	detector.detectPaste('hello world');
+	detector.detectPaste('hello');
+	const result = detector.detectPaste('hello there!!!!');
+
+	t.is(result.addedText, ' there!!!!');
+	t.is(result.details.charsAdded, 10);
+});
+
+test('PasteDetector returns text inserted before existing input', t => {
+	const detector = new PasteDetector();
+	const pasted = 'pasted text at the front';
+
+	detector.updateState('hello world');
+	const result = detector.detectPaste(`${pasted}hello world`);
+
+	t.true(result.isPaste);
+	t.is(result.addedText, pasted);
+});
+
+test('PasteDetector returns text inserted mid-buffer', t => {
+	const detector = new PasteDetector();
+	const pasted = 'INSERTED IN THE MIDDLE';
+
+	detector.updateState('hello world');
+	const result = detector.detectPaste(`hello ${pasted}world`);
+
+	t.true(result.isPaste);
+	t.is(result.addedText, pasted);
+});
+
+test('PasteDetector returns the replacing text when input is overwritten', t => {
+	const detector = new PasteDetector();
+	const pasted = 'THE QUICK BROWN FOX JUMPED OVER';
+
+	detector.updateState('hello world');
+	const result = detector.detectPaste(pasted);
+
+	t.true(result.isPaste);
+	t.is(result.addedText, pasted);
+});
+
+test('PasteDetector counts lines added by a mid-buffer insert', t => {
+	const detector = new PasteDetector();
+
+	detector.updateState('start end');
+	const result = detector.detectPaste('start \na\nb\nend');
+
+	t.true(result.isPaste);
+	t.is(result.addedText, '\na\nb\n');
+	t.is(result.details.linesAdded, 3);
+});
+
 test('PasteDetector reset clears state', t => {
 	const detector = new PasteDetector();
 

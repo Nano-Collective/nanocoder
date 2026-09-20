@@ -250,3 +250,66 @@ echo`,
 	]);
 	t.false(names.includes('my_custom_thing'));
 });
+
+test.serial('custom tools survive an MCP disconnect', async t => {
+	rmSync(projectToolsDir, {recursive: true, force: true});
+	mkdirSync(projectToolsDir, {recursive: true});
+
+	writeTool(
+		'survivor.md',
+		`---
+name: survives_mcp_disconnect
+description: a thing
+approval: never
+read_only: true
+---
+echo`,
+	);
+
+	const manager = new ToolManager();
+	manager.initializeCustomTools(projectRoot);
+	t.true(manager.isCustomTool('survives_mcp_disconnect'));
+
+	// Stand in for a connected server: a registered tool that the client
+	// reports, so unregisterMany() has a name to remove and the test fails if
+	// that call ever goes away.
+	manager.registerSkillTool({
+		name: 'mcp_reported_tool',
+		tool: {description: 'from mcp', execute: async () => 'ok'} as never,
+		handler: async () => 'ok',
+	});
+	(
+		manager as unknown as {
+			mcpClient: {
+				getNativeToolsRegistry: () => Record<string, unknown>;
+				disconnect: () => Promise<void>;
+			};
+		}
+	).mcpClient = {
+		getNativeToolsRegistry: () => ({mcp_reported_tool: {}}),
+		disconnect: async () => {},
+	};
+	t.true(manager.hasTool('mcp_reported_tool'));
+
+	await manager.disconnectMCP();
+
+	t.is(manager.getMCPClient(), null);
+	t.false(manager.hasTool('mcp_reported_tool'));
+	t.true(manager.hasTool('survives_mcp_disconnect'));
+	t.true(manager.isCustomTool('survives_mcp_disconnect'));
+	t.deepEqual(manager.getCustomToolNames(), ['survives_mcp_disconnect']);
+	t.truthy(manager.getAllTools().survives_mcp_disconnect);
+
+	// The approval and read_only metadata lives in the map that was cleared,
+	// so mode filtering is what actually proves it survived.
+	t.true(
+		manager
+			.getAvailableToolNames(undefined, 'plan')
+			.includes('survives_mcp_disconnect'),
+	);
+	t.true(
+		manager
+			.getAvailableToolNames(undefined, 'headless')
+			.includes('survives_mcp_disconnect'),
+	);
+});

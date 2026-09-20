@@ -44,6 +44,7 @@ export interface MessageSubmissionOptions {
 	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setLiveComponentCapturesInput: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
 	setMessages: (messages: Message[]) => void;
@@ -59,4 +60,5 @@ export interface MessageSubmissionOptions {
 	developmentMode?: DevelopmentMode;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	sessionId?: string;
 }

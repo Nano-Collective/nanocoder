@@ -281,5 +281,3 @@ function detectDeprecations(projectRoot: string): string[] {
 	}
 	return warnings;
 }
-
-export type {SkillCollision};

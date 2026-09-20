@@ -240,6 +240,37 @@ test.serial('saveSession round-trips the displayOnly flag', async t => {
 	t.true(loaded!.messages[1].displayOnly);
 });
 
+test.serial('saveSession round-trips optional response usage', async t => {
+	const session = await manager.createSession({
+		title: 'Usage',
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'hello'},
+			{
+				role: 'assistant',
+				content: 'hi',
+				responseUsage: {
+					inputTokens: 100,
+					outputTokens: 20,
+					totalTokens: 120,
+					cost: 0.002,
+				},
+			},
+		],
+	});
+
+	const loaded = await manager.readSession(session.id);
+	t.deepEqual(loaded!.messages[1].responseUsage, {
+		inputTokens: 100,
+		outputTokens: 20,
+		totalTokens: 120,
+		cost: 0.002,
+	});
+});
+
 test.serial('saveSession rejects invalid session ID', async t => {
 	await t.throwsAsync(
 		() =>

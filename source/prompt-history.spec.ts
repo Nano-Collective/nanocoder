@@ -55,9 +55,16 @@ test.before(() => {
 });
 
 test.after.always(() => {
-	// Clean up test directory
+	// Clean up test directory. addPrompt persists on a debounced timer, so a
+	// write can still land mid-walk and leave rmSync with a non-empty dir --
+	// retries are Node's documented remedy for the ENOTEMPTY that causes.
 	if (existsSync(testDir)) {
-		rmSync(testDir, {recursive: true, force: true});
+		rmSync(testDir, {
+			recursive: true,
+			force: true,
+			maxRetries: 5,
+			retryDelay: 50,
+		});
 	}
 });
 

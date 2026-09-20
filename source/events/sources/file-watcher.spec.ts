@@ -120,9 +120,12 @@ test.serial('paths emitted are relative to the watch root', async t => {
 		const match = events.find(
 			e => e.kind === 'file.changed' && e.payload.file.endsWith('leaf.ts'),
 		);
+		// Separators are normalized at this boundary, so the shape is `/` on
+		// every platform — the router, activity reports and the payload handed
+		// to a triggered agent all read the same path.
 		t.regex(
 			match?.kind === 'file.changed' ? match.payload.file : '',
-			/^src[\\/]inner[\\/]leaf\.ts$/,
+			/^src\/inner\/leaf\.ts$/,
 		);
 	} finally {
 		await source.stop();

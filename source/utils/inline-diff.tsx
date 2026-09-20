@@ -53,7 +53,7 @@ export function computeInlineDiff(
  * Check if two lines are similar enough to show as an inline diff.
  * Returns true if the lines share significant common content.
  */
-export function areLinesSimlar(oldLine: string, newLine: string): boolean {
+export function areLinesSimilar(oldLine: string, newLine: string): boolean {
 	// If either is empty, they're not similar for inline display
 	if (!oldLine.trim() && !newLine.trim()) return true; // Both empty/whitespace
 	if (!oldLine.trim() || !newLine.trim()) return false;

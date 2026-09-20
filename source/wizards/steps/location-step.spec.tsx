@@ -5,6 +5,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {LocationStep} from './location-step.js';
 
 // Mirrors base-config-wizard.tsx's real LocationStep box.

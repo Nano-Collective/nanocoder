@@ -22,10 +22,10 @@ export class CustomCommandExecutor {
 				variables[name] =
 					provided !== undefined && provided !== '' ? provided : defaultValue;
 			});
-
-			// Also provide all args as a single variable
-			variables['args'] = args.join(' ');
 		}
+
+		// Also provide all args as a single variable
+		variables['args'] = args.join(' ');
 
 		// Add some default context variables
 		variables['cwd'] = process.cwd();

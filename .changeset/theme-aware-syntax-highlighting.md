@@ -1,0 +1,5 @@
+---
+"@nanocollective/nanocoder": minor
+---
+
+Syntax highlighting now follows your theme, and takes a `syntaxTheme` preference when you want code to keep a palette of its own. All five highlighting call sites - markdown code blocks, `string_replace` diff context, the `write_file` preview, and the file explorer preview - passed `theme: 'default'`, a string where `cli-highlight` expects a token-to-formatter map, so the option was silently dropped and every theme rendered code identically in the library's own colours. Each one now derives its token map from a theme's palette: keywords take `primary`, built-ins and declarations `tool`, strings `success`, numbers `warning`, comments `secondary`, attributes and variables `info`, and everything else the theme's body `text`. Code follows `selectedTheme` by default; setting `syntaxTheme` in `nanocoder-preferences.json` (e.g. `"syntaxTheme": "dracula"`) points code at any other theme's palette while the rest of the UI stays put, and an unknown name falls back to `selectedTheme` rather than dropping the styling. Closes #935.

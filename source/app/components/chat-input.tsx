@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
-import React from 'react';
+import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
 import QuestionPrompt from '@/components/question-prompt';
 import {TaskListDisplay} from '@/components/task-list-display';
@@ -17,6 +17,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 	ToolCall,
 	TuneConfig,
 } from '@/types';
@@ -74,6 +75,9 @@ export interface ChatInputProps {
 	onToggleCompactDisplay?: () => void;
 	compactToolDisplay?: boolean;
 	liveTaskList?: Task[] | null;
+	showTaskList?: boolean;
+	taskListHasUnread?: boolean;
+	onToggleTaskList?: () => void;
 
 	// Handlers
 	onSubmit: (
@@ -97,6 +101,7 @@ export interface ChatInputProps {
 	 * transcript and isn't clipped by the scroll viewport's overflow="hidden".
 	 */
 	fullscreen?: boolean;
+	isSaving?: boolean;
 }
 
 /**
@@ -140,6 +145,9 @@ export function ChatInput({
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
+	showTaskList = true,
+	taskListHasUnread = false,
+	onToggleTaskList,
 	onSubmit,
 	onToggleMode,
 	onToggleReasoningExpanded,
@@ -148,6 +156,7 @@ export function ChatInput({
 	activeEditor,
 	onDismissActiveEditor,
 	fullscreen = false,
+	isSaving,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -157,48 +166,85 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
+	const footerPadding = fullscreen ? 2 : 0;
+
+	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
+	// object on every keystroke would re-render it for nothing.
+	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
+		if (!liveTaskList || liveTaskList.length === 0) return null;
+		let completedCount = 0;
+		let inProgressCount = 0;
+		for (const task of liveTaskList) {
+			if (task.status === 'completed') completedCount++;
+			else if (task.status === 'in_progress') inProgressCount++;
+		}
+		return {
+			totalCount: liveTaskList.length,
+			completedCount,
+			inProgressCount,
+			isHidden: !showTaskList,
+			hasUnread: taskListHasUnread,
+		};
+	}, [liveTaskList, showTaskList, taskListHasUnread]);
+
 	return (
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
-				<LiveCompactCounts counts={compactToolCounts} />
+				<Box paddingLeft={footerPadding}>
+					<LiveCompactCounts counts={compactToolCounts} />
+				</Box>
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
-			{liveTaskList && liveTaskList.length > 0 && (
-				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
+				<Box paddingLeft={footerPadding}>
+					<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+				</Box>
 			)}
 
-			{isCancelling && <CancellingIndicator />}
+			{isCancelling && (
+				<Box paddingLeft={footerPadding}>
+					<CancellingIndicator />
+				</Box>
+			)}
 
 			{showToolExecutionIndicator && (
-				<ToolExecutionIndicator
-					toolName={activeToolCall.function.name}
-					currentIndex={currentToolIndex}
-					totalTools={pendingToolCalls.length}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolExecutionIndicator
+						toolName={activeToolCall.function.name}
+						currentIndex={currentToolIndex}
+						totalTools={pendingToolCalls.length}
+					/>
+				</Box>
 			)}
 
 			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
 			{pendingSubagentApproval ? (
-				<ToolConfirmation
-					toolCall={pendingSubagentApproval.toolCall}
-					onConfirm={onSubagentToolApproval}
-					onCancel={() => onSubagentToolApproval(false)}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						toolCall={pendingSubagentApproval.toolCall}
+						onConfirm={onSubagentToolApproval}
+						onCancel={() => onSubagentToolApproval(false)}
+					/>
+				</Box>
 			) : /* Main agent tool confirmation (unified inline approval gate) */
 			pendingToolConfirmation ? (
-				<ToolConfirmation
-					toolCall={pendingToolConfirmation.toolCall}
-					onConfirm={onToolConfirmation}
-					onCancel={() => onToolConfirmation(false)}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						toolCall={pendingToolConfirmation.toolCall}
+						onConfirm={onToolConfirmation}
+						onCancel={() => onToolConfirmation(false)}
+					/>
+				</Box>
 			) : /* Question Prompt (ask_question tool) */
 			isQuestionMode && pendingQuestion ? (
-				<QuestionPrompt
-					question={pendingQuestion}
-					onAnswer={onQuestionAnswer}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<QuestionPrompt
+						question={pendingQuestion}
+						onAnswer={onQuestionAnswer}
+					/>
+				</Box>
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
@@ -216,6 +262,8 @@ export function ChatInput({
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
+					onToggleTaskList={onToggleTaskList}
+					taskInfo={taskInfo}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
@@ -225,6 +273,7 @@ export function ChatInput({
 					currentModel={currentModel}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
+					isSaving={isSaving}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

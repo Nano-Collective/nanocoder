@@ -125,7 +125,7 @@ test('AcpSession - cancel leaves the session signal aborted', t => {
 	t.true(session.abortController.signal.aborted);
 });
 
-test('AcpSession - beginTurn creates fresh abort controller', t => {
+test('AcpSession - beginTurn creates a fresh controller and marks the turn active', t => {
 	const session = new AcpSession({
 		sessionId: 'test-id',
 		cwd: '/tmp',
@@ -136,6 +136,7 @@ test('AcpSession - beginTurn creates fresh abort controller', t => {
 	session.beginTurn();
 	t.not(session.abortController, cancelled);
 	t.false(session.abortController.signal.aborted);
+	t.true(session.turnActive);
 });
 
 test('AcpSession - cancel after beginTurn aborts the turn controller', t => {

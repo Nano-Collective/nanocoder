@@ -1,6 +1,7 @@
 import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
@@ -149,6 +150,10 @@ export async function handleCompactCommand(
 			onCommandComplete?.();
 			return true;
 		}
+
+		// Same observe-only pre-compact hook the automatic path fires, so a
+		// manual /compact isn't a blind spot for anything archiving context.
+		await runLifecycleHooks('pre-compact', {messageCount: messages.length});
 
 		const tokenizer = createTokenizer(provider, model);
 		const systemPrompt = getLastBuiltPrompt();

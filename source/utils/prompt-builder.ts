@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
+import {getProfessionalTone} from '@/config/preferences';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -193,6 +194,7 @@ export function buildSystemPrompt(
 	toolsDisabled = false,
 	systemPromptOverride?: SystemPromptConfig,
 	model?: string,
+	professionalTone: boolean = getProfessionalTone(),
 ): string {
 	const overrideContent = systemPromptOverride
 		? resolveSystemPromptOverride(systemPromptOverride)
@@ -317,6 +319,15 @@ export function buildSystemPrompt(
 
 ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
+	}
+
+	// Professional ("boring") tone — user preference, opt-in. Placed last among
+	// the static sections so it overrides the register of anything above it.
+	// Nano gets the shortened variant, like every other section under nano.
+	if (professionalTone) {
+		sections.push(
+			loadSection(nano ? 'professional-tone-nano' : 'professional-tone'),
+		);
 	}
 
 	// System info (dynamic) — slim variant under nano

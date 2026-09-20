@@ -1,37 +1,18 @@
-import {readFile} from 'node:fs/promises';
 import {Box, Text} from 'ink';
-import path from 'path';
 import React from 'react';
-import {fileURLToPath} from 'url';
 import {commandRegistry} from '@/commands';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import {Command} from '@/types/index';
+import {getPackageVersion} from '@/utils/package-version';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 let cachedVersion: string | null = null;
 
-async function getPackageVersion(): Promise<string> {
-	if (cachedVersion) {
-		return cachedVersion;
-	}
-
-	try {
-		const content = await readFile(
-			path.join(__dirname, '../../package.json'),
-			'utf8',
-		);
-		const packageJson = JSON.parse(content) as {version?: string};
-		cachedVersion = packageJson.version ?? '0.0.0';
-		return cachedVersion;
-	} catch (error) {
-		console.warn('Failed to read package version:', error);
-		cachedVersion = '0.0.0';
-		return cachedVersion;
-	}
+function getCachedPackageVersion(): string {
+	cachedVersion ??= getPackageVersion();
+	return cachedVersion;
 }
 
 function Help({
@@ -111,7 +92,7 @@ export const helpCommand: Command = {
 	description: 'Show available commands',
 	handler: async (_args: string[], _messages, _metadata) => {
 		const commands = commandRegistry.getAll();
-		const version = await getPackageVersion();
+		const version = getCachedPackageVersion();
 
 		return React.createElement(Help, {
 			key: generateKey('help'),

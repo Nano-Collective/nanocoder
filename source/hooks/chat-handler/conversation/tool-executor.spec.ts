@@ -907,6 +907,95 @@ test.serial(
 	},
 );
 
+test.serial(
+	'executeToolsDirectly - a failed subagent still hands its partial output to the parent',
+	async t => {
+		// A subagent stopped by the repeated-call cap returns the work it did
+		// before getting stuck. Collapsing that to "Error: ..." would leave the
+		// parent model with nothing to build on.
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		setAgentToolExecutor({
+			execute: async () => ({
+				subagentName: 'fake',
+				output: 'found the config in src/app.ts',
+				success: false,
+				error: 'Subagent repeated the same tool call 3 times in a row',
+				executionTimeMs: 1,
+			}),
+		} as never);
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_agent_3',
+				function: {
+					name: 'agent',
+					arguments: JSON.stringify({
+						subagent_type: 'fake',
+						description: 'test',
+					}),
+				},
+			},
+		];
+
+		const results = await executeToolsDirectly(
+			toolCalls,
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true},
+		);
+
+		t.is(results.length, 1);
+		t.true(
+			results[0].content.startsWith('Error: '),
+			'callers detect a failed agent result by the Error: prefix',
+		);
+		t.true(
+			results[0].content.includes('found the config in src/app.ts'),
+			`expected the partial output to survive, got: ${results[0].content}`,
+		);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - a failed subagent with no output reports only the reason',
+	async t => {
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		setAgentToolExecutor({
+			execute: async () => ({
+				subagentName: 'fake',
+				output: '   ',
+				success: false,
+				error: 'boom',
+				executionTimeMs: 1,
+			}),
+		} as never);
+
+		const results = await executeToolsDirectly(
+			[
+				{
+					id: 'call_agent_4',
+					function: {
+						name: 'agent',
+						arguments: JSON.stringify({
+							subagent_type: 'fake',
+							description: 'test',
+						}),
+					},
+				},
+			],
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true},
+		);
+
+		t.is(results[0].content, 'Error: boom');
+	},
+);
+
 test('executeToolsDirectly - compact mode renders errors instead of counting them', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'failing_tool', arguments: '{}'}},
