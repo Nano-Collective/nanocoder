@@ -37,18 +37,14 @@ try {
 // 1. ## [version] - date (Keep a Changelog format)
 // 2. ## version (simple heading)
 // 3. # version (simple heading with single #)
+
+const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const versionPatterns = [
 	// Pattern 1: ## [version] or ## version
-	new RegExp(
-		`##+ \\[?${version.replace(
-			/\./g,
-			'\\.',
-		)}\\]?.*?\\n([\\s\\S]*?)(?=\\n##+ |$)`,
-	),
+	new RegExp(`##+ \\[?${escapedVersion}\\]?.*?\\n([\\s\\S]*?)(?=\\n##+ |$)`),
 	// Pattern 2: # version
-	new RegExp(
-		`#+ ${version.replace(/\./g, '\\.')}.*?\\n([\\s\\S]*?)(?=\\n#+ |$)`,
-	),
+	new RegExp(`#+ ${escapedVersion}.*?\\n([\\s\\S]*?)(?=\\n#+ |$)`),
 ];
 
 let match = null;
