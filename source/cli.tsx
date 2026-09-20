@@ -247,11 +247,11 @@ async function main(): Promise<void> {
 	if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
 		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
 		const value = args[modelArgIndex + 1];
-		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
+		if (/^[a-zA-Z0-9_/.:@-]+$/.test(value)) {
 			cliModel = value;
 		} else {
 			console.error(
-				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters, hyphens, underscores, dots, and slashes.`,
+				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters, hyphens, underscores, dots, slashes, and at-signs (@).`,
 			);
 			process.exit(1);
 		}

@@ -152,3 +152,8 @@ test.serial('CLI integration: init invalid preset exits with an error', t => {
 		rmSync(projectPath, {recursive: true, force: true});
 	}
 });
+
+test('CLI integration: accepts model names containing @', t => {
+	const output = runCliCommand(['--model', 'valid-model@1.0', '--version']);
+	t.regex(output, /^\d+\.\d+\.\d+$/);
+});
