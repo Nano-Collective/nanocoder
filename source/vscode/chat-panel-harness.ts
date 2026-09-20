@@ -44,6 +44,7 @@ const SHELL_IDS = [
 	'composer-settings-trigger',
 	'context-chips',
 	'context-chips-clear',
+	'pending-changes-container',
 	'history-list',
 	'history-view',
 	'icon-send',
@@ -181,6 +182,7 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
+
 		removeAttribute: (name: string) => {
 			attributes.delete(name);
 		},
@@ -200,6 +202,7 @@ export function createElement(tagName: string): StubElement {
 				fn.call(element, event);
 			}
 		},
+
 		focus: () => {},
 		click: (event: StubElement = {stopPropagation() {}}) => {
 			if (element.disabled) return;
@@ -396,6 +399,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	sandbox.globalThis = sandbox;
 	createContext(sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
+
 	runInContext(URI_UTILS_SOURCE, sandbox);
 	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
@@ -482,6 +486,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				child.className.includes('work-summary'),
 			);
 		},
+
 		/** Every stretch of reasoning, across all summaries. */
 		thoughts(): StubElement[] {
 			return container.querySelectorAll('.work-summary-thought');
@@ -494,5 +499,11 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		footers(): StubElement[] {
 			return container.querySelectorAll('.message-footer');
 		},
+
+		pendingChangesContainer: findById(
+			root,
+			'pending-changes-container',
+		) as StubElement,
+
 	};
 }

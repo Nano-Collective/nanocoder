@@ -9,12 +9,16 @@
 	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const contextChipsClearBtn = document.getElementById('context-chips-clear');
+	const pendingChangesContainer = document.getElementById('pending-changes-container');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
 	// [{path, name, kind: 'file'|'folder', agentEdited?: boolean}]. Entries the
 	// agent contributed are flagged so submitMessage can leave them out.
 	let attachedPaths = [];
+	let pendingChanges = [];
+	let pendingChangesDismissed = false;
+	let pendingChangesCollapsed = false;
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -1754,6 +1758,125 @@
 		syncSendStopButton();
 	}
 
+	function renderPendingChanges() {
+		pendingChangesContainer.innerHTML = '';
+
+		if (pendingChanges.length === 0 || pendingChangesDismissed) {
+			pendingChangesContainer.classList.add('hidden');
+			return;
+		}
+
+		pendingChangesContainer.classList.remove('hidden');
+
+		const card = document.createElement('div');
+		card.className = 'pending-changes-card';
+
+		pendingChangesContainer.appendChild(card);
+
+		const header = document.createElement('div')
+		header.className = 'pending-changes-header';
+
+		const title = document.createElement('span');
+		title.textContent = 'Pending changes';
+
+		const actions = document.createElement('div');
+		actions.className = 'pending-changes-actions';
+
+		const chevron = document.createElement('span');
+		chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		chevron.style.fontSize = '1.1em';
+
+		const dismissButton = document.createElement('button');
+		dismissButton.className = 'pending-changes-dismiss';
+		dismissButton.textContent = 'X';
+		dismissButton.title = 'Dismiss';
+
+		dismissButton.addEventListener('click', (event) => {
+			event.stopPropagation();
+			pendingChangesDismissed = true;
+			renderPendingChanges();
+		});
+
+		actions.appendChild(chevron);
+		actions.appendChild(dismissButton);
+
+		header.appendChild(title);
+		header.appendChild(actions);
+
+		card.appendChild(header);
+
+		const content = document.createElement('div');
+		content.className = 'pending-changes-content';
+		card.appendChild(content);
+
+		content.classList.toggle('hidden', pendingChangesCollapsed);
+
+		header.addEventListener('click', () => {
+			pendingChangesCollapsed = !pendingChangesCollapsed;
+			content.classList.toggle('hidden', pendingChangesCollapsed);
+			chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		});
+
+		for (const change of pendingChanges) {
+			const row = document.createElement('div');
+			row.className = 'pending-change-row';
+
+			const fileName = document.createElement('span');
+			fileName.className = 'pending-change-file';
+			fileName.textContent = basename(change.filePath);
+
+			const stats = document.createElement('span');
+			stats.className = 'pending-change-stats';
+
+			const additionsSpan = document.createElement('span');
+			additionsSpan.className = 'pending-change-additions';
+			additionsSpan.textContent = `+${change.additions}`;
+
+			const deletionsSpan = document.createElement('span');
+			deletionsSpan.className = 'pending-change-deletions';
+			deletionsSpan.textContent = ` -${change.deletions}`;
+
+			stats.appendChild(additionsSpan);
+			stats.appendChild(deletionsSpan);
+
+			row.appendChild(fileName);
+			row.appendChild(stats);
+
+			row.addEventListener('click', () => {
+				vscode.postMessage({
+					type: 'showDiff',
+					toolCallId: change.toolCallId,
+				});
+			});
+
+			content.appendChild(row);
+			
+		}
+		
+	}
+
+	function removeResolvedPendingChange(update) {
+		const toolCallId = update?.toolCallId || (update?.toolCall && update.toolCall.toolCallId);
+
+		if (!toolCallId) return;
+
+		const state = resolveEditCardState(update);
+
+		if (!isSettled(state.status)) return;
+
+		const hasPendingChange = pendingChanges.some(
+			change => change.toolCallId === toolCallId,
+		);
+
+		if (!hasPendingChange) return;
+
+		pendingChanges = pendingChanges.filter(
+			change => change.toolCallId !== toolCallId,
+		);
+
+		renderPendingChanges();
+	}
+
 	if (composerBox) {
 		const handleDrag = (e) => {
 			e.preventDefault();
@@ -2357,6 +2480,22 @@
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
+				break;
+			case 'pendingChangeAdded':
+				pendingChangesDismissed = false;
+
+				pendingChanges = pendingChanges.filter(
+					change => change.toolCallId !== message.toolCallId && change.filePath !== message.filePath
+				);
+
+				pendingChanges.push({
+					toolCallId: message.toolCallId,
+					filePath: message.filePath,
+					additions: message.additions,
+					deletions: message.deletions,
+				});
+
+				renderPendingChanges();
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
@@ -3661,6 +3800,8 @@
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+
+		removeResolvedPendingChange(update);
 
 		const existingCard = document.getElementById(`tool-card-${toolCallId}`);
 		// A card the user can already see keeps taking updates in the turn that

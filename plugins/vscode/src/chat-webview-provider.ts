@@ -1,9 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import {diffLines} from 'diff';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, WebviewMessageAddProvider, ExtensionMessageSettingsData } from './webview-protocol';
-
-
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
@@ -50,8 +49,8 @@ export class ChatWebviewProvider
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly _queue = new PromptQueue();
-
 	private readonly _settingsManager: SettingsManager;
+	private _notifiedPendingChangeIds = new Set<string>();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -117,6 +116,18 @@ export class ChatWebviewProvider
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
+					const originalContent = block.oldText || '';
+					const newContent = block.newText || '';
+
+					const changes = diffLines(originalContent, newContent);
+
+					const additions = changes
+						.filter(change => change.added)
+						.reduce((total, change) => total + (change.count ?? 0), 0);
+
+					const deletions = changes
+						.filter(change => change.removed)
+						.reduce((total, change) => total + (change.count ?? 0), 0);
 					this._diffManager.addPendingChange({
 						type: 'file_change',
 						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
@@ -126,6 +137,18 @@ export class ChatWebviewProvider
 						toolName: update.title || update.name || 'edit',
 						toolArgs: update.rawInput || {}
 					});
+
+					const id = update.toolCallId || payload.toolCallId || block.path;
+					if (!this._notifiedPendingChangeIds.has(id)) {
+						this._notifiedPendingChangeIds.add(id);
+						this.postMessage({
+							type: 'pendingChangeAdded',
+							toolCallId: update.toolCallId || payload.toolCallId || block.path,
+							filePath: block.path,
+							additions,
+							deletions
+						});
+					}
 				}
 			}
 		}
