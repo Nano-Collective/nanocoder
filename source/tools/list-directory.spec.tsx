@@ -403,6 +403,43 @@ test.serial('list_directory respects .gitignore patterns', async t => {
 	}
 });
 
+test.serial('list_directory respects .gitignore trailing slash directory patterns', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+
+	try {
+		const testDir = join(process.cwd(), 'test-listdir-gitignore-dir-temp');
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, '.gitignore'), 'dist/\n.venv/\n');
+
+		mkdirSync(join(testDir, 'dist'), {recursive: true});
+		writeFileSync(join(testDir, 'dist', 'bundle.js'), 'content');
+
+		mkdirSync(join(testDir, '.venv'), {recursive: true});
+		writeFileSync(join(testDir, '.venv', 'bin'), 'content');
+
+		mkdirSync(join(testDir, 'src'), {recursive: true});
+		writeFileSync(join(testDir, 'src', 'index.ts'), 'content');
+
+		process.chdir(testDir);
+
+		const result = await listDirectoryTool.tool.execute!(
+			{recursive: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.true(result.includes('src'));
+		t.true(result.includes('index.ts'));
+		t.false(result.includes('dist'));
+		t.false(result.includes('bundle.js'));
+		t.false(result.includes('.venv'));
+		t.false(result.includes('bin'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(join(originalCwd, 'test-listdir-gitignore-dir-temp'), {recursive: true, force: true});
+	}
+});
+
 test.serial('list_directory ignores node_modules by default', async t => {
 	t.timeout(10000);
 	const originalCwd = process.cwd();

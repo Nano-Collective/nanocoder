@@ -77,9 +77,14 @@ const executeListDirectory = async (
 
 					const fullPath = join(currentPath, item.name);
 
+					const relativePathToRoot = relative(root, fullPath);
+					const matchPath = item.isDirectory()
+						? `${relativePathToRoot}/`
+						: relativePathToRoot;
+
 					// Check if this item should be ignored using gitignore patterns.
 					// Match root-relative so the project-root .gitignore applies.
-					if (ig.ignores(relative(root, fullPath))) {
+					if (ig.ignores(matchPath)) {
 						continue;
 					}
 
