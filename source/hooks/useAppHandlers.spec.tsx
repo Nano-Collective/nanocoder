@@ -230,6 +230,14 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.handleMessageSubmit, 'function');
 });
 
+test('signals slash-command completion so queued work can resume', async t => {
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('/compact');
+
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false], [true]]);
+});
+
 test('handleCancel without an abort controller is a no-op', t => {
 	const { handlers, spies } = setup({ abortController: null });
 
@@ -370,6 +378,15 @@ test.serial(
                                 spies.setArchitectReviewState.calls,
                                 [[null]],
                         );
+                        // Dismissing the gate opens a render where nothing is
+                        // generating and the turn still reads complete. The revise
+                        // turn goes through handleChatMessage, which never resets
+                        // the flag, so without this a queued prompt drains into
+                        // the gap and runs underneath the revision turn.
+                        t.deepEqual(
+                                spies.setIsConversationComplete.calls,
+                                [[false]],
+                        );
                         t.deepEqual(spies.handleChatMessage.calls, [
                                 [
                                         // The prompt must say the changes are gone. The old wording
@@ -391,6 +408,7 @@ test('declining execution keeps Plan Mode active and asks for revisions', t => {
 
 	handlers.handlePlanModify();
 
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false]]);
 	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
 	t.deepEqual(spies.setDevelopmentMode.calls, []);
 	const notice = spies.addToChatQueue.calls.at(-1)?.[0];
@@ -406,6 +424,21 @@ test('declining execution keeps Plan Mode active and asks for revisions', t => {
 				'what to change',
 			),
 	);
+});
+
+test('asking for clarification blocks queued prompts until the turn starts', async t => {
+	const {handlers, spies} = setup({developmentMode: 'plan'});
+
+	await handlers.handlePlanAskMore();
+
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false]]);
+	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
+	t.deepEqual(spies.handleChatMessage.calls, [
+		[
+			'please ask me any additional clarifying questions before proceeding',
+			undefined,
+		],
+	]);
 });
 
 async function withMockConfig(

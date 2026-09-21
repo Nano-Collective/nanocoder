@@ -675,6 +675,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const handlePlanAskMore = React.useCallback(async () => {
 		// Hide the review bar and stay in plan mode; the model asks its questions
 		// and the user answers before a new plan is produced.
+		props.setIsConversationComplete(false);
 		props.setPlanReviewState(null);
 		await props.handleChatMessage(
 			'please ask me any additional clarifying questions before proceeding',
@@ -683,6 +684,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	const handlePlanModify = React.useCallback(() => {
 		// Return to input without changing mode so the user can request revisions.
+		// Keep the queue blocked until that revision turn has completed.
+		props.setIsConversationComplete(false);
 		props.setPlanReviewState(null);
 		props.addToChatQueue(
 			<SuccessMessage
@@ -837,6 +840,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				await manager.restoreFiles(checkpointData);
 
+				// Mark the conversation incomplete before the review bar goes away.
+				// Dismissing the bar leaves a render where nothing is generating and
+				// the turn still reads complete, and the revise turn below starts
+				// through handleChatMessage, which never resets the flag itself. A
+				// queued prompt would otherwise drain into that gap.
+				props.setIsConversationComplete(false);
 				props.setArchitectReviewState(null);
 				await releaseArchitectCheckpoint(reviewState.checkpointName);
 
@@ -860,6 +869,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		[
 			props.architectReviewState,
 			props.setArchitectReviewState,
+			props.setIsConversationComplete,
 			props.addToChatQueue,
 			releaseArchitectCheckpoint,
 			props,
