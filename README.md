@@ -44,7 +44,7 @@ nanocoder --provider ollama --model llama3.1
 # Flags can appear before or after 'run' command
 nanocoder run --provider openrouter "refactor database module"
 
-# Boot directly into a development mode (normal, auto-accept, yolo, plan)
+# Boot directly into a development mode (normal, auto-accept, yolo, plan, architect)
 nanocoder --mode yolo
 nanocoder --mode plan run "audit the auth module"
 

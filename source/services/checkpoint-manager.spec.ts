@@ -897,3 +897,116 @@ test.serial(
 		}
 	},
 );
+
+// Revert has to undo file *creation*, not only file edits. filesChanged only
+// ever holds paths that existed at capture, so a turn that creates a file has
+// nothing to write back — the delete driven by filesMissing is the only thing
+// standing between "revert" and leaving the new file on disk.
+test.serial(
+	'CheckpointManager restore deletes a file that did not exist at capture',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const created = 'created-by-agent.ts';
+
+			t.false(existsSync(path.join(tempDir, created)));
+
+			const metadata = await manager.saveCheckpoint(
+				'arch-create',
+				createMockMessages(2),
+				'test-provider',
+				'test-model',
+				[created],
+			);
+
+			t.deepEqual(metadata.filesChanged, []);
+			t.deepEqual(metadata.filesMissing, [created]);
+
+			// The agent writes the file during the turn.
+			await fs.writeFile(path.join(tempDir, created), 'export const x = 1;\n');
+			t.true(existsSync(path.join(tempDir, created)));
+
+			const data = await manager.loadCheckpoint('arch-create');
+			await manager.restoreFiles(data);
+
+			t.false(
+				existsSync(path.join(tempDir, created)),
+				'revert must remove a file the turn created',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Mixed turn: the delete must not cost the edited file its restore, and the
+// early return on an empty snapshot map must not skip the delete.
+test.serial(
+	'CheckpointManager restore both rewrites an edited file and removes a created one',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const edited = 'edited.ts';
+			const created = 'created.ts';
+
+			await fs.writeFile(path.join(tempDir, edited), 'original\n');
+
+			await manager.saveCheckpoint(
+				'arch-mixed',
+				createMockMessages(2),
+				'test-provider',
+				'test-model',
+				[edited, created],
+			);
+
+			await fs.writeFile(path.join(tempDir, edited), 'clobbered\n');
+			await fs.writeFile(path.join(tempDir, created), 'new\n');
+
+			const data = await manager.loadCheckpoint('arch-mixed');
+			await manager.restoreFiles(data);
+
+			t.is(
+				await fs.readFile(path.join(tempDir, edited), 'utf-8'),
+				'original\n',
+				'edited file restored',
+			);
+			t.false(
+				existsSync(path.join(tempDir, created)),
+				'created file removed',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// A revert that runs twice, or against a file the user already deleted, is not
+// an error — the caller wants the path absent and it is.
+test.serial(
+	'CheckpointManager restore is idempotent when the created file is already gone',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const created = 'never-written.ts';
+
+			await manager.saveCheckpoint(
+				'arch-idem',
+				createMockMessages(2),
+				'test-provider',
+				'test-model',
+				[created],
+			);
+
+			const data = await manager.loadCheckpoint('arch-idem');
+			await manager.restoreFiles(data);
+			await manager.restoreFiles(data);
+
+			t.false(existsSync(path.join(tempDir, created)));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

@@ -353,18 +353,14 @@ export function InteractiveApp({
 						<ArchitectReviewPrompt
 							filesChanged={appState.architectReviewState.filesChanged}
 							filesMissing={appState.architectReviewState.filesMissing}
-							onKeep={() => {
-								appState.setArchitectReviewState(null);
-							}}
+							onKeep={() => void appHandlers.handleArchitectKeep()}
 							onRevert={() => void appHandlers.handleArchitectRevert()}
-							onRevertAndRevise={() =>
-								void appHandlers.handleArchitectRevertAndRevise(
-									'Please review the changes you just made, revise them based on the previous result, and try again.',
-								)
+							// Forward what the user typed. A zero-arg arrow here silently
+							// dropped it and sent a fixed string instead, so the revise
+							// box collected instructions the model never saw.
+							onRevertAndRevise={instructions =>
+								void appHandlers.handleArchitectRevertAndRevise(instructions)
 							}
-							onDismiss={() => {
-								appState.setArchitectReviewState(null);
-							}}
 						/>
 					)}
 
@@ -458,6 +454,11 @@ export function InteractiveApp({
 						appState.activeMode === null &&
 						!appState.isSettingsMode &&
 						!appState.planReviewState?.show &&
+						// The architect gate runs its own useInput. Leaving the composer
+						// mounted alongside it gave every keystroke two live consumers,
+						// and let the user submit a new turn straight past the gate with
+						// the checkpoint still open.
+						!appState.architectReviewState?.show &&
 						// Hide the composer only while a live component explicitly captures input.
 						!appState.liveComponentCapturesInput && (
 							<ChatInput

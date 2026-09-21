@@ -17,6 +17,9 @@ export interface CheckpointMetadata {
 	timestamp: string; // ISO 8601 format
 	messageCount: number;
 	filesChanged: string[]; // Relative file paths
+	// Paths that did not exist when the checkpoint was taken. Restoring means
+	// deleting them, which is how a revert undoes file creation and not only
+	// file edits. Disjoint from filesChanged by construction.
 	filesMissing?: string[];
 	provider: {
 		name: string;
@@ -46,6 +49,8 @@ export interface CheckpointConversation {
 export interface CheckpointData {
 	metadata: CheckpointMetadata;
 	conversation: CheckpointConversation;
+	// Raw bytes, so a checkpoint round-trip preserves binaries as faithfully as
+	// text. Nothing downstream reads a snapshot as a string.
 	fileSnapshots: Map<string, Buffer>;
 }
 

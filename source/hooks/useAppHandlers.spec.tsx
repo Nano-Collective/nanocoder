@@ -109,7 +109,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const enterIdeSelectionMode = spy<[]>();
 	const enterTune = spy<[]>();
 	const enterSchedulerMode = spy<[]>();
-	const handleChatMessage = spy<[string]>();
+	const handleChatMessage = spy<[string, (string | undefined)?]>();
 	const dismissActiveEditor = spy<[]>();
 	const handleModelSelect = spy<[string, string, boolean?]>();
 
@@ -159,8 +159,10 @@ function makeProps(overrides: ProbeOverrides) {
 		enterIdeSelectionMode,
 		enterTune,
 		enterSchedulerMode,
-		handleChatMessage: async (m: string) => {
-			handleChatMessage(m);
+		handleChatMessage: async (m: string, displayValue?: string) => {
+			// Both args: the second is what the transcript shows the user, and
+			// architect's revise path deliberately differs from the first.
+			handleChatMessage(m, displayValue);
 		},
 		dismissActiveEditor: () => dismissActiveEditor(),
 		developmentMode: overrides.developmentMode ?? 'normal',
@@ -370,7 +372,12 @@ test.serial(
                         );
                         t.deepEqual(spies.handleChatMessage.calls, [
                                 [
-                                        `Please review the changes you just made and revise them based on these instructions:\n\n${instructions}`,
+                                        // The prompt must say the changes are gone. The old wording
+					// told the model to "review the changes you just made"
+					// straight after deleting them, pointing it at a disk
+					// state that no longer existed.
+					`Your previous changes were reverted and are no longer on disk. Re-read any file before editing it, then redo the work with these instructions:\n\n${instructions}`,
+					instructions,
                                 ],
                         ]);
                 } finally {
@@ -716,4 +723,153 @@ test.serial('a prompt with no pending context is passed through intact', async t
 
 	t.is(spies.handleChatMessage.calls.length, 1);
 	t.is(spies.handleChatMessage.calls[0]![0], 'what changed?');
+});
+
+// Architect takes a checkpoint per turn. Every exit from the gate has to
+// release it, or /checkpoint list fills with machine-named entries carrying a
+// full file-and-conversation snapshot each.
+test.serial('handleArchitectKeep releases the turn checkpoint', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-keep-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-keep-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		t.true((await manager.listCheckpoints()).some(c => c.name === metadata.name));
+
+		const {handlers, spies} = setup({
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectKeep();
+
+		t.deepEqual(spies.setArchitectReviewState.calls, [[null]]);
+		t.is(
+			await fs.readFile(join(tempDir, 'test.txt'), 'utf-8'),
+			'original',
+			'keep must not touch the files',
+		);
+		t.false(
+			(await manager.listCheckpoints()).some(c => c.name === metadata.name),
+			'keep must release the checkpoint',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('handleArchitectRevert releases the turn checkpoint', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-rel-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-release-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'changed', 'utf-8');
+
+		const {handlers} = setup({
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectRevert();
+
+		t.is(await fs.readFile(join(tempDir, 'test.txt'), 'utf-8'), 'original');
+		t.false(
+			(await manager.listCheckpoints()).some(c => c.name === metadata.name),
+			'revert must release the checkpoint',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+// Without this the conversation still claims every write succeeded while the
+// files have moved back underneath it, and the model's next string_replace
+// matches old_str against a state that no longer exists.
+test.serial('handleArchitectRevert tells the model the changes are gone', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-notice-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-notice-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'changed', 'utf-8');
+
+		const priorMessages: Message[] = [
+			{role: 'user', content: 'edit the file'},
+			{role: 'assistant', content: 'done'},
+		];
+
+		const {handlers, spies} = setup({
+			messages: priorMessages,
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectRevert();
+
+		t.is(spies.updateMessages.calls.length, 1);
+		const appended = spies.updateMessages.calls[0][0];
+		t.is(appended.length, priorMessages.length + 1, 'appends, never replaces');
+
+		const notice = appended[appended.length - 1];
+		t.is(notice.role, 'user');
+		t.true(notice.content.includes('reverted'));
+		t.true(
+			notice.content.includes('test.txt'),
+			'names the files so the model knows what moved',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
 });

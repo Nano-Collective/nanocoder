@@ -66,6 +66,8 @@ export class FileSnapshotService {
 		const skipped: {path: string; reason: string}[] = [];
 
 		for (const filePath of filePaths) {
+			// Normalized up front so a skipped file is keyed the same way a
+			// captured one is; filesChanged and skippedFiles are read side by side.
 			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 			const relativePath = path.relative(this.workspaceRoot, absolutePath);
 			const normalizedPath = relativePath.split(path.sep).join('/');
@@ -87,6 +89,8 @@ export class FileSnapshotService {
 			} catch (error) {
 				const reason = formatError(error);
 
+				// A missing file is deliberately not a skip: it lands in
+				// filesMissing instead, and restoring means deleting it again.
 				if (!isMissingFile(error)) {
 					skipped.push({
 						path: normalizedPath,
@@ -94,6 +98,8 @@ export class FileSnapshotService {
 					});
 				}
 
+				// Logged either way: a deleted file is not a gap, but it is still
+				// worth seeing in the log when a capture comes out short.
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
@@ -135,6 +141,40 @@ export class FileSnapshotService {
 
 		if (errors.length > 0) {
 			throw new Error(`Failed to restore some files:\n${errors.join('\n')}`);
+		}
+	}
+
+	/**
+	 * Delete files that did not exist when the snapshot was taken, so restoring
+	 * to that state also undoes file *creation* rather than only file edits.
+	 *
+	 * A path that is already gone is a success, not an error - the caller wants
+	 * the file absent and it is. Only real failures (permissions, a directory
+	 * in the way) are collected and thrown together, matching `restoreFiles`.
+	 */
+	async removeFiles(relativePaths: string[]): Promise<void> {
+		const errors: string[] = [];
+
+		for (const relativePath of relativePaths) {
+			try {
+				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+				// Same reasoning as restoreFiles, and it matters more here: these
+				// paths drive a delete, so a tampered index must not be able to
+				// reach outside the workspace.
+				if (!this.isInsideWorkspace(absolutePath)) {
+					throw new Error(
+						`Refusing to remove path outside workspace: ${relativePath}`,
+					);
+				}
+
+				await fs.rm(absolutePath, {force: true});
+			} catch (error) {
+				errors.push(`Failed to remove ${relativePath}: ${formatError(error)}`);
+			}
+		}
+
+		if (errors.length > 0) {
+			throw new Error(`Failed to remove some files:\n${errors.join('\n')}`);
 		}
 	}
 

@@ -315,14 +315,8 @@ export class CheckpointManager {
 		// Load file snapshots
 		const fileSnapshots = new Map<string, Buffer>();
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
-		const missingFiles = new Set(metadata.filesMissing ?? []);
 
 		for (const relativePath of metadata.filesChanged) {
-			// The file did not exist when the checkpoint was created.
-			if (missingFiles.has(relativePath)) {
-				continue;
-			}
-
 			if (!existsSync(filesDir)) {
 				continue;
 			}
@@ -504,6 +498,14 @@ export class CheckpointManager {
 		// whose every file was skipped at capture has no snapshots and nothing
 		// but gaps.
 		const gaps = describeCheckpointGaps(checkpointData);
+
+		// Files absent at capture are restored by being absent again. Runs
+		// before the early return below: a turn that only created files has no
+		// snapshots to write back, and skipping the delete there is exactly the
+		// case where revert silently left the new files on disk.
+		await this.fileSnapshotService.removeFiles(
+			checkpointData.metadata.filesMissing ?? [],
+		);
 
 		if (checkpointData.fileSnapshots.size === 0) {
 			return gaps; // No files to restore

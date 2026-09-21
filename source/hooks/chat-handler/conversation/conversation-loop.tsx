@@ -43,13 +43,16 @@ import type {
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
+import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
+import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {calculateTokens} from '@/utils/token-calculator';
+import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	createApprovalUnavailableResults,
@@ -75,39 +78,38 @@ interface ArchitectCheckpointState {
 	name?: string;
 }
 
+/**
+ * Paths an architect turn is about to mutate, so they can be checkpointed
+ * before the tools run.
+ *
+ * Membership comes from `isFileMutationTool`, the same registry that decides
+ * architect waives approval. A hardcoded list here would drift from that one
+ * and leave newly added mutators auto-executing outside the checkpoint.
+ *
+ * `path` and `destination` cover every file tool's argument shape today; a
+ * mutator carrying neither contributes nothing rather than throwing, which
+ * only costs the turn a revert for that one file.
+ */
 function getArchitectMutationPaths(toolCalls: ToolCall[]): string[] {
 	const paths = new Set<string>();
 
 	for (const toolCall of toolCalls) {
+		if (!isFileMutationTool(toolCall.function.name)) {
+			continue;
+		}
+
 		const args = toolCall.function.arguments as {
-			operation?: string;
 			path?: string;
 			destination?: string;
 		};
 
-		switch (toolCall.function.name) {
-			case 'write_file':
-			case 'string_replace':
-			case 'diff_edit':
-				if (args.path) {
-					paths.add(args.path);
-				}
-				break;
+		// Both, not either: a move mutates its source and its destination.
+		if (args.path) {
+			paths.add(args.path);
+		}
 
-			case 'file_op':
-				if (args.operation === 'delete' || args.operation === 'move') {
-					if (args.path) {
-						paths.add(args.path);
-					}
-				}
-
-				if (args.operation === 'move' || args.operation === 'copy') {
-					if (args.destination) {
-						paths.add(args.destination);
-					}
-				}
-
-				break;
+		if (args.destination) {
+			paths.add(args.destination);
 		}
 	}
 
@@ -980,37 +982,46 @@ export const processAssistantResponse = async (
 
 		const turnResults: ToolResult[] = [...blockedResults];
 
-		const architectMutationTools =
+		const inArchitectMode =
 			developmentModeRef?.current === 'architect' ||
-			developmentMode === 'architect'
-				? autoTools.filter(toolCall =>
-						['write_file', 'string_replace', 'diff_edit', 'file_op'].includes(
-							toolCall.function.name,
-						),
-					)
-				: [];
-		if (architectMutationTools.length > 0 && architectCheckpointState) {
-			const mutationPaths = getArchitectMutationPaths(architectMutationTools);
+			developmentMode === 'architect';
+
+		if (inArchitectMode && architectCheckpointState) {
+			const mutationPaths = getArchitectMutationPaths(autoTools);
 
 			if (mutationPaths.length > 0) {
-				const checkpointManager = new CheckpointManager(getProjectRoot());
+				// A failure here must not take the turn down with it: the tools
+				// below have not run yet, so the user would lose the whole turn
+				// over a checkpoint they never asked for. Warn and carry on
+				// unprotected rather than abort - the review gate reads
+				// `created` and simply will not offer revert.
+				try {
+					const checkpointManager = new CheckpointManager(getProjectRoot());
 
-				if (!architectCheckpointState.created) {
-					const checkpointMetadata = await checkpointManager.saveCheckpoint(
-						`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-						messages,
-						currentProvider,
-						currentModel,
-						mutationPaths,
-					);
+					if (!architectCheckpointState.created) {
+						const checkpointMetadata = await checkpointManager.saveCheckpoint(
+							`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+							messages,
+							currentProvider,
+							currentModel,
+							mutationPaths,
+						);
 
-					architectCheckpointState.created = true;
-					architectCheckpointState.name = checkpointMetadata.name;
-				} else if (architectCheckpointState.name) {
-					await checkpointManager.extendCheckpoint(
-						architectCheckpointState.name,
-						mutationPaths,
-					);
+						architectCheckpointState.created = true;
+						architectCheckpointState.name = checkpointMetadata.name;
+					} else if (architectCheckpointState.name) {
+						await checkpointManager.extendCheckpoint(
+							architectCheckpointState.name,
+							mutationPaths,
+						);
+					}
+				} catch (error) {
+					logWarning('Could not checkpoint architect turn', true, {
+						context: {
+							error: formatError(error),
+							paths: mutationPaths.join(', '),
+						},
+					});
 				}
 			}
 		}

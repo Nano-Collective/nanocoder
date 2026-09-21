@@ -208,8 +208,9 @@ Options:
   --provider          Specify AI provider (must be configured in agents.config.json)
   --model             Specify AI model (must be available for the provider)
   --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
-  --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
-                      Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
+  --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
+                      architect). Defaults to "normal" for interactive sessions and
+                      "auto-accept" for run mode.
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.

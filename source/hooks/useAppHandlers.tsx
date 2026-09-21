@@ -178,6 +178,7 @@ export interface AppHandlers {
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
+	handleArchitectKeep: () => Promise<void>;
 	handleArchitectRevert: () => Promise<void>;
 	handleArchitectRevertAndRevise: (instructions: string) => Promise<void>;
 	handlePlanAskMore: () => Promise<void>;
@@ -693,6 +694,81 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.setPlanReviewState, props.addToChatQueue, props]);
 
 	// Architect review action bar handlers
+
+	/**
+	 * Release the turn's checkpoint once the gate has resolved.
+	 *
+	 * Every exit from the bar runs this. Architect takes a checkpoint per turn,
+	 * so leaving them behind fills `/checkpoint list` with machine-named entries
+	 * and a full file-and-conversation snapshot each. Failure is not worth
+	 * surfacing: the gate is already resolved and the user's files are in the
+	 * state they asked for.
+	 */
+	const releaseArchitectCheckpoint = React.useCallback(
+		async (checkpointName: string) => {
+			try {
+				await new CheckpointManager(getProjectRoot()).deleteCheckpoint(
+					checkpointName,
+				);
+			} catch {
+				// Intentionally ignored - see above.
+			}
+		},
+		[],
+	);
+
+	/**
+	 * Tell the model what the gate did to its work.
+	 *
+	 * Without this the conversation still says every write succeeded while the
+	 * files have moved back underneath it, so the next `string_replace` matches
+	 * `old_str` against a state that no longer exists. Appended as a user turn
+	 * so it travels with the next request.
+	 */
+	const appendArchitectRevertNotice = React.useCallback(
+		(filesChanged: string[]) => {
+			const fileList =
+				filesChanged.length > 0
+					? ` The following files were restored to their previous contents: ${filesChanged.join(', ')}.`
+					: '';
+
+			props.updateMessages([
+				...props.messages,
+				{
+					role: 'user',
+					content: `[The changes from your previous turn were reverted and are no longer on disk.${fileList} Re-read any file before editing it - your earlier edits are gone.]`,
+				},
+			]);
+		},
+		[props.messages, props.updateMessages],
+	);
+
+	const handleArchitectKeep = React.useCallback(async () => {
+		const reviewState = props.architectReviewState;
+
+		props.setArchitectReviewState(null);
+
+		if (!reviewState?.checkpointName) {
+			return;
+		}
+
+		await releaseArchitectCheckpoint(reviewState.checkpointName);
+
+		props.addToChatQueue(
+			<SuccessMessage
+				key={generateKey('architect-keep')}
+				message={`✓ Kept ${reviewState.filesChanged.length + reviewState.filesMissing.length} changed file(s)`}
+				hideBox={true}
+			/>,
+		);
+	}, [
+		props.architectReviewState,
+		props.setArchitectReviewState,
+		props.addToChatQueue,
+		releaseArchitectCheckpoint,
+		props,
+	]);
+
 	const handleArchitectRevert = React.useCallback(async () => {
 		const reviewState = props.architectReviewState;
 
@@ -713,6 +789,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await manager.restoreFiles(checkpointData);
 
 			props.setArchitectReviewState(null);
+			appendArchitectRevertNotice(reviewState.filesChanged);
+			await releaseArchitectCheckpoint(reviewState.checkpointName);
 
 			props.addToChatQueue(
 				<SuccessMessage
@@ -734,6 +812,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.architectReviewState,
 		props.setArchitectReviewState,
 		props.addToChatQueue,
+		appendArchitectRevertNotice,
+		releaseArchitectCheckpoint,
 		props,
 	]);
 
@@ -758,9 +838,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				await manager.restoreFiles(checkpointData);
 
 				props.setArchitectReviewState(null);
+				await releaseArchitectCheckpoint(reviewState.checkpointName);
 
+				// Says reverted, not "review the changes you just made" - those
+				// changes are gone, and the old wording pointed the model at a
+				// disk state that no longer existed.
 				await props.handleChatMessage(
-					`Please review the changes you just made and revise them based on these instructions:\n\n${instructions}`,
+					`Your previous changes were reverted and are no longer on disk. Re-read any file before editing it, then redo the work with these instructions:\n\n${instructions}`,
+					instructions,
 				);
 			} catch (error) {
 				props.addToChatQueue(
@@ -776,6 +861,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.architectReviewState,
 			props.setArchitectReviewState,
 			props.addToChatQueue,
+			releaseArchitectCheckpoint,
 			props,
 		],
 	);
@@ -961,6 +1047,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handlePlanProceed,
 		handlePlanAskMore,
 		handlePlanModify,
+		handleArchitectKeep,
 		handleArchitectRevert,
 		handleArchitectRevertAndRevise,
 	};

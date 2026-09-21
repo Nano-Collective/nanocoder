@@ -138,16 +138,15 @@ export class TimelineManager {
 				await this.fileSnapshotService.captureFiles(existing);
 
 			for (const [relative, snapshot] of captured) {
-				const content = snapshot.toString('utf-8');
-
-				if (isProbablyBinary(content)) {
+				// Checked as bytes, before the decode - see isProbablyBinary.
+				if (isProbablyBinary(snapshot)) {
 					logWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
 				}
 
-				result.set(relative, content);
+				result.set(relative, snapshot.toString('utf-8'));
 			}
 		}
 

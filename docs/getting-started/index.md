@@ -54,7 +54,7 @@ nanocoder -h
 | `--json` | |Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run`; incompatible with `--acp` and `--vscode`|
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
-| `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
+| `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
@@ -72,7 +72,7 @@ If an invalid provider or model is specified, nanocoder will show an error messa
 
 **Mode Flag:**
 
-`--mode` sets the starting [development mode](../features/development-modes.md) for both interactive and non-interactive sessions. Accepts `normal`, `auto-accept`, `yolo`, or `plan` (and the fused `--mode=<value>` form). Invalid values exit with an error.
+`--mode` sets the starting [development mode](../features/development-modes.md) for both interactive and non-interactive sessions. Accepts `normal`, `auto-accept`, `yolo`, `plan`, or `architect` (and the fused `--mode=<value>` form). Invalid values exit with an error.
 
 ```bash
 # Interactive, yolo from the start

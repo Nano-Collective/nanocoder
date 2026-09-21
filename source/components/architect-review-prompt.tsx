@@ -12,8 +12,6 @@ export interface ArchitectReviewPromptProps {
 	onRevert: () => void;
 	/** Revert the changes and ask the model to revise them. */
 	onRevertAndRevise: (instructions: string) => void;
-	/** Dismiss the review prompt without taking an action. */
-	onDismiss: () => void;
 	/** Files changed during the Architect turn. */
 	filesChanged: string[];
 	/** Files that did not exist before the Architect turn. */
@@ -50,7 +48,6 @@ export default function ArchitectReviewPrompt({
 	onKeep,
 	onRevert,
 	onRevertAndRevise,
-	onDismiss,
 	filesChanged,
 	filesMissing,
 }: ArchitectReviewPromptProps) {
@@ -60,13 +57,18 @@ export default function ArchitectReviewPrompt({
 	const [isReviseMode, setIsReviseMode] = useState(false);
 	const [reviseInstructions, setReviseInstructions] = useState('');
 
+	// Escape keeps. It is the reflex key for "get me out of this prompt", so it
+	// must resolve to the non-destructive branch - reverting here would discard
+	// a whole turn's work on a keypress people make without reading. Keep is
+	// still an explicit outcome, not a no-op: it clears the gate, reports what
+	// it did, and releases the checkpoint.
 	useInput((_input, key) => {
 		if (key.escape) {
 			if (isReviseMode) {
 				setIsReviseMode(false);
 				setReviseInstructions('');
 			} else {
-				onRevert();
+				onKeep();
 			}
 		}
 	});
@@ -175,7 +177,7 @@ export default function ArchitectReviewPrompt({
 
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>
-					↑/↓ to move · Enter to select · Esc to dismiss
+					↑/↓ to move · Enter to select · Esc to keep
 				</Text>
 			</Box>
 		</Box>
