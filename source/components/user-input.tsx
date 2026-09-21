@@ -1320,6 +1320,9 @@ export default function UserInput({
 			input box content. */}
 			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
+					// Must match the wrapper's marginLeft: the indicator budgets its
+					// segments against the width left after this indent.
+					indentColumns={3}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
