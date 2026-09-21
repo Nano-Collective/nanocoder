@@ -1067,3 +1067,54 @@ test('McpStep without initialEditName still opens the initial menu', t => {
 
 	t.regex(lastFrame()!, /Add MCP servers/);
 });
+
+test('McpStep lets Backspace edit the environment variables field', async t => {
+	let saved: Record<string, {env?: Record<string, string>}> = {};
+	const existingServers = {
+		'my-server': {
+			name: 'my-server',
+			transport: 'stdio' as const,
+			command: 'node',
+			tags: ['custom'],
+		},
+	};
+	const {stdin, lastFrame} = render(
+		<McpStep
+			onComplete={servers => {
+				saved = servers;
+			}}
+			existingServers={existingServers}
+		/>,
+	);
+
+	// Keys sent before a screen has mounted are lost, so press each one only
+	// once the screen it belongs to is showing.
+	const press = async (key: string, until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(lastFrame()!); i++) {
+			stdin.write(key);
+			await new Promise(resolve => setTimeout(resolve, 100));
+		}
+		t.regex(lastFrame()!, until);
+	};
+
+	// Edit existing servers -> my-server -> Edit this server, then accept the
+	// transport, name, URL, command and args fields.
+	await press('\u001B[B', /> Edit existing servers/);
+	await press('\r', /my-server/);
+	await press('\r', /Edit this server/);
+	await press('\r', /Field 1\/6/);
+	await press('\r', /Environment variables/);
+
+	await press('API_KEY=abc123X', /API_KEY=abc123X/);
+	await press('\u007F', /API_KEY=abc123(?!X)/);
+
+	// Esc submits the field; Done & Save (last in the list, so Up wraps to it)
+	// hands back the edited server.
+	await press('\u001B', /Added: my-server/);
+	await press('\u001B[A', /> Done & Save/);
+	stdin.write('\r');
+	for (let i = 0; i < 20 && !saved['my-server']; i++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+	t.deepEqual(saved['my-server']?.env, {API_KEY: 'abc123'});
+});
