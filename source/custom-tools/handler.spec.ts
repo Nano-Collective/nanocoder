@@ -134,6 +134,7 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 });
 
 const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
+/* c8 ignore start -- the callback runs in the dedicated Windows workflow */
 cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 	const probe = join(testDir, 'print-argv.mjs');
 	writeFileSync(
@@ -150,6 +151,7 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 	const result = await handler({node: 'node', probe, value});
 	t.is(result, `EXIT_CODE: 0\n${JSON.stringify([value])}`);
 });
+/* c8 ignore stop */
 
 test('mergeEnv overlays configured vars onto process.env', t => {
 	const env = mergeEnv({CUSTOM_VAR: 'value'});
