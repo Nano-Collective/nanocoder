@@ -187,10 +187,10 @@ directory and records it in your preferences, so later runs and autostart
 boots skip the prompt too.
 
 `daemon install` is not gated: it only writes the auto-start unit, and the
-gate applies when the daemon actually boots. Installing in an untrusted
-directory therefore succeeds and the failure surfaces later, in
-`daemon.log`, where nobody looks — so `install` warns you up front when the
-project root isn't trusted yet.
+gate applies when the daemon actually boots, so trust the directory first.
+Installing in an untrusted directory succeeds, and every autostart boot after
+it is refused — with the reason written to `daemon.log` rather than to a
+terminal you are watching.
 
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at
