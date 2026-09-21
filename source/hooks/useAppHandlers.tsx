@@ -840,6 +840,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				await manager.restoreFiles(checkpointData);
 
+				// Mark the conversation incomplete before the review bar goes away.
+				// Dismissing the bar leaves a render where nothing is generating and
+				// the turn still reads complete, and the revise turn below starts
+				// through handleChatMessage, which never resets the flag itself. A
+				// queued prompt would otherwise drain into that gap.
+				props.setIsConversationComplete(false);
 				props.setArchitectReviewState(null);
 				await releaseArchitectCheckpoint(reviewState.checkpointName);
 
@@ -863,6 +869,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		[
 			props.architectReviewState,
 			props.setArchitectReviewState,
+			props.setIsConversationComplete,
 			props.addToChatQueue,
 			releaseArchitectCheckpoint,
 			props,

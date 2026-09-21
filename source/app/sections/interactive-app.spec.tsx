@@ -38,6 +38,13 @@ interface Overrides {
 	// Plan review knobs
 	planReviewState?: {show: boolean; originalMessage: string} | null;
 	setPlanReviewState?: (v: {show: boolean; originalMessage: string} | null) => void;
+	// Architect review knobs
+	architectReviewState?: {
+		show: boolean;
+		checkpointName: string;
+		filesChanged: string[];
+		filesMissing: string[];
+	} | null;
 	isConversationComplete?: boolean;
 	developmentMode?: string;
 	planTurnCompleted?: boolean;
@@ -85,6 +92,8 @@ function makeProps(o: Overrides = {}) {
 		pendingQuestion: null,
 		planReviewState: o.planReviewState ?? null,
 		setPlanReviewState: o.setPlanReviewState ?? noop,
+		architectReviewState: o.architectReviewState ?? null,
+		setArchitectReviewState: noop,
 		planTurnCompleted: o.planTurnCompleted ?? false,
 		setPlanTurnCompleted: o.setPlanTurnCompleted ?? noop,
 		pendingPlanProceed: o.pendingPlanProceed ?? null,
@@ -142,6 +151,9 @@ function makeProps(o: Overrides = {}) {
 			handleMessageSubmit: o.handleMessageSubmit ?? noopAsync,
 			handlePlanProceed: noop,
 			handlePlanModify: noop,
+			handleArchitectKeep: noopAsync,
+			handleArchitectRevert: noopAsync,
+			handleArchitectRevertAndRevise: noopAsync,
 		},
 		vscodeServer: {
 			activeEditor: null,
@@ -246,6 +258,37 @@ test('does not drain queued prompts while plan review is active', async t => {
 				client: {},
 				toolManager: {},
 				planReviewState: {show: true, originalMessage: 'make a plan'},
+				isConversationComplete: true,
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+			}}
+		/>,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(dispatchAttempts, 0);
+	unmount();
+});
+
+test('does not drain queued prompts while architect review is active', async t => {
+	let dispatchAttempts = 0;
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				developmentMode: 'architect',
+				architectReviewState: {
+					show: true,
+					checkpointName: 'architect-checkpoint',
+					filesChanged: ['source/a.ts'],
+					filesMissing: [],
+				},
+				// The architect gate opens at turn completion, so the turn really is
+				// idle and complete while the keep/revert bar is up. Only the gate
+				// itself can hold the queue back.
 				isConversationComplete: true,
 				handleUserSubmit: async () => {
 					dispatchAttempts++;

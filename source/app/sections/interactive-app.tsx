@@ -201,6 +201,7 @@ export function InteractiveApp({
 		pendingSubagentApproval !== null ||
 		pendingToolConfirmation !== null ||
 		appState.planReviewState?.show === true ||
+		appState.architectReviewState?.show === true ||
 		appState.pendingPlanProceed !== null;
 	const queuedMessageCount = userMessageQueue.queuedMessages.length;
 	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
