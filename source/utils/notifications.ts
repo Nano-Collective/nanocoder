@@ -146,21 +146,62 @@ function sendLinux(title: string, message: string): void {
 	childProcess.execFile('notify-send', args, () => {});
 }
 
-function sendWindows(title: string, message: string): void {
-	const script = `
+const WINDOWS_NOTIFICATION_SCRIPT = `
 Add-Type -AssemblyName System.Windows.Forms
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = [System.Drawing.SystemIcons]::Information
-$notify.BalloonTipTitle = '${title.replace(/'/g, "''")}'
-$notify.BalloonTipText = '${message.replace(/'/g, "''")}'
+$notify.BalloonTipTitle = $env:NANOCODER_NOTIFICATION_TITLE
+$notify.BalloonTipText = $env:NANOCODER_NOTIFICATION_MESSAGE
 $notify.Visible = $true
 $notify.ShowBalloonTip(5000)
 Start-Sleep -Seconds 1
 $notify.Dispose()
-`;
+`.trim();
+
+const WINDOWS_NOTIFICATION_ENCODED_COMMAND = Buffer.from(
+	WINDOWS_NOTIFICATION_SCRIPT,
+	'utf16le',
+).toString('base64');
+
+export function buildWindowsNotificationPayload(
+	title: string,
+	message: string,
+): {
+	command: string;
+	args: string[];
+	options: {
+		windowsHide: boolean;
+		env: NodeJS.ProcessEnv;
+	};
+} {
+	return {
+		command: 'powershell',
+		args: [
+			'-NoProfile',
+			'-NonInteractive',
+			'-EncodedCommand',
+			WINDOWS_NOTIFICATION_ENCODED_COMMAND,
+		],
+		options: {
+			windowsHide: true,
+			// Explicitly spread process.env: passing custom `env` disables implicit
+			// environment inheritance in child_process, and powershell.exe needs
+			// standard system vars like SystemRoot, PATH, and TEMP to run.
+			env: {
+				...process.env,
+				NANOCODER_NOTIFICATION_TITLE: title,
+				NANOCODER_NOTIFICATION_MESSAGE: message,
+			},
+		},
+	};
+}
+
+function sendWindows(title: string, message: string): void {
+	const payload = buildWindowsNotificationPayload(title, message);
 	childProcess.execFile(
-		'powershell',
-		['-NoProfile', '-Command', script],
+		payload.command,
+		payload.args,
+		payload.options,
 		() => {},
 	);
 }

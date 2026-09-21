@@ -3,3 +3,4 @@ dist/
 *.vsix
 .vscode-test/
 media/chat-panel.css
+.nanocoder

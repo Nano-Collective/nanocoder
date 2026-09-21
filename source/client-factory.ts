@@ -209,6 +209,7 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		models: provider.models || [],
 		contextWindow: provider.contextWindow,
 		contextWindows: provider.contextWindows,
+		maxOutputTokens: provider.maxOutputTokens,
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,

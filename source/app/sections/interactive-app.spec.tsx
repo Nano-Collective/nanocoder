@@ -21,6 +21,7 @@ interface Overrides {
 	isToolConfirmationMode?: boolean;
 	isCancelling?: boolean;
 	abortController?: AbortController | null;
+	altScreenActive?: boolean;
 	pendingToolCalls?: Array<{id: string; function: {name: string; arguments: unknown}}>;
 	pendingSubagentApproval?: unknown;
 	handleCancel?: () => void;
@@ -155,6 +156,7 @@ function makeProps(o: Overrides = {}) {
 			drainNextMessage: () => false,
 		},
 		handleIdeSelect: noop,
+		altScreenActive: o.altScreenActive ?? false,
 	} as never;
 }
 
@@ -361,6 +363,7 @@ test('Escape cancels when only an abort controller is live (state flicker)', asy
 test('Escape recalls an in-flight user message before assistant streaming starts', async t => {
 	let cancelled = 0;
 	let latestMessages: Message[] = [];
+	let latestChatComponents: React.ReactNode[] = [];
 	let latestAbortController: AbortController | null = null;
 	let latestIsCancelling = true;
 
@@ -375,6 +378,7 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 		const [isCancelling, setIsCancelling] = React.useState(false);
 
 		latestMessages = messages;
+		latestChatComponents = chatComponents;
 		latestAbortController = abortController;
 		latestIsCancelling = isCancelling;
 
@@ -417,13 +421,89 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 	await waitForCondition(() => latestMessages.length === 1);
 
 	await pressEscape(stdin);
-	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
+	await waitForCondition(() => latestMessages.length === 0);
 
 	t.is(cancelled, 1);
 	t.deepEqual(latestMessages, []);
-	t.notRegex(lastFrame() ?? '', /submitted bubble: fix the typo/);
+	// In inline mode the bubble is committed to Ink's <Static> scrollback and
+	// cannot be un-printed, so the gate in handleRecallSubmittedDraft must
+	// skip the chatComponents pop. Asserting on the array length tests the
+	// gate directly; asserting against the frame log only proves the bubble
+	// was once written, never that it is still present.
+	t.is(latestChatComponents.length, 1);
 	t.is(latestAbortController, null);
 	t.is(latestIsCancelling, false);
+});
+
+// The fullscreen (altScreenActive: true) variant of the recall test below
+// explicitly exercises the altScreenActive branch of the gated chatComponents
+// pop in handleRecallSubmittedDraft. The inline test above exercises the
+// altScreenActive: false branch.
+
+test('Escape recall in fullscreen mode pops the bubble from React (altScreenActive branch)', async t => {
+	let latestChatComponents: React.ReactNode[] = [];
+
+	const RecallHarness = () => {
+		const [isGenerating, setIsGenerating] = React.useState(false);
+		const [messages, setMessages] = React.useState<Message[]>([]);
+		const [chatComponents, setChatComponents] = React.useState<
+			React.ReactNode[]
+		>([]);
+		const [abortController, setAbortController] =
+			React.useState<AbortController | null>(null);
+
+		latestChatComponents = chatComponents;
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					isGenerating,
+					abortController,
+					messages,
+					chatComponents,
+					updateMessages: setMessages,
+					setChatComponents,
+					setAbortController,
+					altScreenActive: true,
+					handleCancel: () => {
+						abortController?.abort();
+						setIsGenerating(false);
+					},
+				})}
+				handleUserSubmit={async message => {
+					const controller = new AbortController();
+					setMessages([{role: 'user', content: message}]);
+					setChatComponents([<Text key="user">submitted bubble: {message}</Text>]);
+					setAbortController(controller);
+					setIsGenerating(true);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(<RecallHarness />);
+
+	// Mount effects on alt-screen layouts land on later ticks; settle the
+	// initial render before sending keystrokes so ChatInput's useInput is
+	// attached and listening.
+	await new Promise(r => setTimeout(r, 50));
+
+	stdin.write('fix the typo');
+	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''), 3000);
+	stdin.write('\r');
+	await waitForCondition(() => latestChatComponents.length === 1, 3000);
+
+	await pressEscape(stdin);
+
+	// Production code pops the chat component when altScreenActive is true
+	// (the bubble lives in React state only, not in Ink's <Static> scrollback,
+	// so it can be removed from the viewport). This is the path the inline
+	// test above intentionally does NOT exercise — it's the altScreenActive
+	// branch of the gated chatComponents pop.
+	await waitForCondition(() => latestChatComponents.length === 0, 3000);
+	t.is(latestChatComponents.length, 0);
 });
 
 test('Escape recall does not remove a non-user chat component', async t => {

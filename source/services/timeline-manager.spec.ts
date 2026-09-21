@@ -243,6 +243,50 @@ test.serial('TimelineManager clear removes the session directory', async t => {
 	}
 });
 
+test.serial('TimelineManager truncateAfter drops checkpoints at or past the message index', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-truncate');
+		await writeFile(tempDir, 'a.ts', 'before');
+		await writeFile(tempDir, 'b.ts', 'before');
+
+		const kept = await manager.capture({
+			toolCallId: 'c-keep',
+			toolName: 'write_file',
+			title: 'keep',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'before']]),
+		});
+		const dropped = await manager.capture({
+			toolCallId: 'c-drop',
+			toolName: 'write_file',
+			title: 'drop',
+			truncateToMessageIndex: 2,
+			files: filesMap([['b.ts', 'before']]),
+		});
+		t.truthy(kept);
+		t.truthy(dropped);
+
+		await manager.truncateAfter(2);
+
+		const remaining = await manager.list();
+		t.is(remaining.length, 1);
+		t.is(remaining[0].id, kept?.id);
+
+		const droppedDir = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-truncate',
+			'entries',
+			dropped?.id ?? '',
+		);
+		t.false(existsSync(droppedDir));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager rejects unsafe session ids', t => {
 	t.throws(() => new TimelineManager('/tmp', '../escape'), {
 		message: /Invalid timeline session id/,

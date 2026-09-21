@@ -46,7 +46,7 @@ The scripts cover the full command-line surface:
 
 - **Subcommands** — `init`, `run`, `daemon`, `config`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `config list|show|diff`, `codex|copilot login`, and the shell names for `completion`).
 - **Flags** — every top-level option, including short forms (`-c`, `-r`, `-h`, `-v`).
-- **Known flag values** — `--mode normal|auto-accept|yolo|plan` and `--output-format text|json` offer their closed sets of values.
+- **Known flag values** — `--mode normal|auto-accept|yolo|plan|architect` and `--output-format text|json` offer their closed sets of values.
 
 In-app slash commands (like `/clear` or `/doctor`) are not part of this — they are typed inside the TUI, which has its own completion, and the shell never sees them.
 

@@ -54,7 +54,7 @@ nanocoder -h
 | `--json` | |Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run`; incompatible with `--acp` and `--vscode`|
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
-| `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
+| `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
@@ -62,6 +62,7 @@ nanocoder -h
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust` |
 | `run` | | Run in non-interactive mode |
+| `review` | | Review a branch or PR diff for bugs, security, and style violations |
 
 **Provider/Model Flags:**
 
@@ -71,7 +72,7 @@ If an invalid provider or model is specified, nanocoder will show an error messa
 
 **Mode Flag:**
 
-`--mode` sets the starting [development mode](../features/development-modes.md) for both interactive and non-interactive sessions. Accepts `normal`, `auto-accept`, `yolo`, or `plan` (and the fused `--mode=<value>` form). Invalid values exit with an error.
+`--mode` sets the starting [development mode](../features/development-modes.md) for both interactive and non-interactive sessions. Accepts `normal`, `auto-accept`, `yolo`, `plan`, or `architect` (and the fused `--mode=<value>` form). Invalid values exit with an error.
 
 ```bash
 # Interactive, yolo from the start
@@ -177,6 +178,23 @@ nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
 ```
+
+## Code Review
+
+Nanocoder provides AI-powered code review for branches and pull requests:
+
+```bash
+# Review a branch
+nanocoder review main
+nanocoder review feature/auth
+
+# Review a PR (requires gh CLI)
+nanocoder review 42
+```
+
+This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI. This is a deliberate v1 — diff-only, one-shot review with no file reads (see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287) for the planned agentic tier).
+
+**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
 
 **Non-interactive mode behavior:**
 

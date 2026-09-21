@@ -259,7 +259,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
-| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |
+| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
