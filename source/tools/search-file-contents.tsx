@@ -2,7 +2,11 @@ import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
-import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
+import {
+	DEFAULT_SEARCH_RESULTS,
+	MAX_SEARCH_RESULTS,
+	TOOL_OUTPUT_DISPLAY_LINES,
+} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {
 	getContainedSessionCwd,
@@ -13,7 +17,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
-import {isValidFilePath} from '@/utils/path-validation';
+import {isPathInside, isValidFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -54,7 +58,7 @@ const executeSearchFileContents = async (
 			return `Error: Invalid path "${args.path}"`;
 		}
 		searchPath = path.resolve(cwd, args.path);
-		if (searchPath !== root && !searchPath.startsWith(root + path.sep)) {
+		if (!isPathInside(searchPath, root)) {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}
@@ -181,15 +185,24 @@ const SearchFileContentsFormatter = React.memo(
 		}
 		const {colors} = themeContext;
 
-		// Parse result to get match count
+		// Parse result: a "Found N matches" header, then a blank line, then the
+		// grep-style hits the model received.
 		let matchCount = 0;
+		let hitLines: string[] = [];
 		if (result && !result.startsWith('Error:')) {
-			const firstLine = result.split('\n')[0];
-			const matchFound = firstLine.match(/Found (\d+)/);
+			const [header, ...body] = result.split('\n\n');
+			const matchFound = header?.match(/Found (\d+)/);
 			if (matchFound) {
 				matchCount = parseInt(matchFound[1], 10);
 			}
+			if (body.length > 0) {
+				hitLines = body.join('\n\n').split('\n');
+			}
 		}
+		const hiddenHitCount = Math.max(
+			0,
+			hitLines.length - TOOL_OUTPUT_DISPLAY_LINES,
+		);
 
 		// Calculate tokens
 		const tokens = result ? calculateTokens(result) : 0;
@@ -248,6 +261,21 @@ const SearchFileContentsFormatter = React.memo(
 					<Text color={colors.secondary}>Matches: </Text>
 					<Text color={colors.text}>{matchCount}</Text>
 				</Box>
+
+				{hitLines.length > 0 && (
+					<Box flexDirection="column">
+						{hitLines.slice(0, TOOL_OUTPUT_DISPLAY_LINES).map((line, index) => (
+							<Text key={index} wrap="truncate-end" color={colors.text}>
+								{line || ' '}
+							</Text>
+						))}
+						{hiddenHitCount > 0 && (
+							<Text color={colors.secondary}>
+								… (+{hiddenHitCount} more lines)
+							</Text>
+						)}
+					</Box>
+				)}
 
 				{tokens > 0 && (
 					<Box>

@@ -8,6 +8,7 @@ import {
 	setToolRegistryGetter,
 } from './message-handler';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
+import {executeBashTool} from '@/tools/execute-bash';
 
 console.log(`\nmessage-handler.spec.ts`);
 
@@ -175,6 +176,64 @@ test('processToolUse - carries structured handler output onto the result', async
 	t.deepEqual(result.structuredContent, {
 		diagnostics: [{file: 'x.ts', severity: 'error'}],
 	});
+});
+
+test('processToolUse - carries a handler-reported failure onto the result', async t => {
+	// Handlers that fail without throwing report it on their output; the
+	// result must carry it, since --json and ACP read isError and nothing else.
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			failing_tool: async () => ({llmContent: 'EXIT_CODE: 7', isError: true}),
+		}),
+	);
+
+	const result = await processToolUse(createMockToolCall('failing_tool', {}));
+
+	t.true(result.isError);
+	t.is(result.content, 'EXIT_CODE: 7');
+	t.is(
+		result.structuredContent,
+		undefined,
+		'text-only output must not grow a structured payload',
+	);
+});
+
+test('processToolUse - leaves isError unset when the handler reports success', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			ok_tool: async () => ({llmContent: 'EXIT_CODE: 0', isError: false}),
+		}),
+	);
+
+	const result = await processToolUse(createMockToolCall('ok_tool', {}));
+
+	t.is(result.isError, undefined);
+});
+
+test('processToolUse - reports a non-zero shell exit as an error', async t => {
+	// The reported repro, through the real execute_bash handler: before the
+	// fix this came back byte-for-byte identical to a clean run.
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			execute_bash: async (args, options) =>
+				executeBashTool.tool.execute!(args as {command: string}, {
+					toolCallId: 'test',
+					messages: [],
+					...options,
+				}),
+		}),
+	);
+
+	const failed = await processToolUse(
+		createMockToolCall('execute_bash', {command: 'exit 7'}),
+	);
+	const clean = await processToolUse(
+		createMockToolCall('execute_bash', {command: 'true'}),
+	);
+
+	t.true(failed.isError);
+	t.true(failed.content.includes('EXIT_CODE: 7'));
+	t.is(clean.isError, undefined);
 });
 
 test('processToolUse - caps oversized LLM content but keeps structured output', async t => {

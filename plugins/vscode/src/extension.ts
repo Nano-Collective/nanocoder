@@ -12,6 +12,7 @@ import {
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
+import {AcpStatusBarController} from './acp-status-bar';
 import {ChatWebviewProvider} from './chat-webview-provider';
 import {
 	NanocoderCodeLensProvider,
@@ -27,6 +28,7 @@ let acpStateManager: AcpStateManager;
 let acpClient: NanocoderAcpClient;
 let acpProcessManager: AcpProcessManager;
 let statusBarItem: vscode.StatusBarItem;
+let acpStatusBar: AcpStatusBarController;
 let outputChannel: vscode.OutputChannel;
 let activeEditorDebounce: NodeJS.Timeout | null = null;
 let lastActiveEditorPayload: string | null = null;
@@ -52,9 +54,12 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.StatusBarAlignment.Right,
 		100,
 	);
-	statusBarItem.command = 'nanocoder.connect';
-	updateStatusBar(false);
 	statusBarItem.show();
+
+	// The status bar's primary job: reflect the ACP (agent) connection state.
+	// Spawning, reconnect attempts and failures now surface instead of a
+	// stale "Connected" while the CLI process is actually dead.
+	acpStatusBar = new AcpStatusBarController(statusBarItem, acpStateManager, outputChannel);
 
 	// Register Webview Provider
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
@@ -77,6 +82,18 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	// Show the active model next to the check mark once the ACP session syncs
+	// its provider/model state (fires on session create, resume and switches).
+	// The chat provider installed its own onStateSync first; chain instead of
+	// overwriting so webview state sync keeps working.
+	const previousOnStateSync = acpClient.onStateSync;
+	acpClient.onStateSync = (state) => {
+		previousOnStateSync?.(state);
+		if (state.model) {
+			acpStatusBar.setModel(state.model);
+		}
+	};
+
 	// Handle messages from CLI
 	wsClient.onMessage((message: ServerMessage) => handleServerMessage(message));
 
@@ -85,6 +102,9 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nanocoder.connect', connect),
 		vscode.commands.registerCommand('nanocoder.disconnect', disconnect),
 		vscode.commands.registerCommand('nanocoder.startCli', startCli),
+		vscode.commands.registerCommand('nanocoder.showOutput', () => {
+			outputChannel.show(true);
+		}),
 		vscode.commands.registerCommand('nanocoder.restartAcp', () => {
 			outputChannel.appendLine('Manually restarting ACP process...');
 			acpProcessManager.dispose();
@@ -109,7 +129,6 @@ export function activate(context: vscode.ExtensionContext) {
 			acpClient.newChat();
 			chatProvider.resetSessionState();
 			chatProvider.postMessage({type: 'clear'});
-			chatProvider.postMessage({type: 'updateTimeline', entries: []});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),
 		vscode.commands.registerCommand('nanocoder.cancel', () => {
@@ -130,6 +149,9 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nanocoder.codeLens')) {
 				codeLensProvider.refresh();
+			}
+			if (event.affectsConfiguration('nanocoder.showTokenUsage')) {
+				chatProvider.refreshSettings();
 			}
 		}),
 		vscode.commands.registerCommand('nanocoder.explainCode', (uri?: vscode.Uri, range?: vscode.Range) =>
@@ -159,10 +181,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		statusBarItem,
+		acpStatusBar,
 		outputChannel,
 		{dispose: () => wsClient.disconnect()},
 		{dispose: () => diffManager.dispose()},
 		{dispose: () => acpProcessManager.dispose()},
+		// Shared singleton (also held by NanocoderAcpClient); no longer
+		// disposed by AcpProcessManager, which is rebuilt on restartAcp.
+		{dispose: () => acpStateManager.dispose()},
 	);
 
 	outputChannel.appendLine('Nanocoder extension activated');
@@ -208,17 +234,25 @@ function disconnect(): void {
 	vscode.window.showInformationMessage('Disconnected from Nanocoder CLI');
 }
 
-// Status bar updates
+// Legacy WebSocket companion status. The ACP agent state owns the status bar
+// (see AcpStatusBarController); these updates only apply while the agent
+// process is healthy — during Starting/Restarting/Failed the agent rendering
+// stays visible so a dead CLI is never masked by companion activity.
 function updateStatusBar(connected: boolean, text?: string): void {
+	const agentActive = acpStateManager.status !== ACPStatus.Disconnected;
+	if (agentActive) {
+		return;
+	}
+
 	if (text) {
 		statusBarItem.text = `$(sync~spin) ${text}`;
 	} else if (connected) {
 		statusBarItem.text = '$(check) Nanocoder';
-		statusBarItem.tooltip = 'Connected to Nanocoder CLI';
+		statusBarItem.tooltip = 'Connected to Nanocoder CLI (companion)';
 		statusBarItem.command = 'nanocoder.disconnect';
 	} else {
 		statusBarItem.text = '$(plug) Nanocoder';
-		statusBarItem.tooltip = 'Click to connect to Nanocoder CLI';
+		statusBarItem.tooltip = 'Click to connect to Nanocoder CLI (companion)';
 		statusBarItem.command = 'nanocoder.connect';
 	}
 }
@@ -236,7 +270,10 @@ function handleServerMessage(message: ServerMessage): void {
 			handleOpenFile(message);
 			break;
 		case 'status':
-			if (message.model) {
+			if (message.model && acpStateManager.status === ACPStatus.Disconnected) {
+				// Companion-only context: the agent isn't running, so let the
+				// legacy model update through. While the agent is Connected the
+				// controller owns the text and gets its model from onStateSync.
 				statusBarItem.text = `$(check) ${message.model}`;
 			}
 			break;

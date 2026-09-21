@@ -14,16 +14,19 @@
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
-			<div id="timeline-strip" class="hidden shrink-0 border-b border-vscode-border px-3 py-2" aria-label="Action timeline">
-				<div class="flex items-center gap-2">
-					<span class="text-[0.65em] uppercase tracking-[0.06em] opacity-50 shrink-0">Timeline</span>
-					<div id="timeline-track" class="flex-1 overflow-x-auto overflow-y-hidden">
-						<div id="timeline-nodes" class="flex items-center min-h-[28px] px-1"></div>
-					</div>
+			<div id="welcome-container" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none z-10 transition-opacity duration-300">
+				<div class="mb-6 w-16 h-16 text-vscode-fg opacity-90 flex items-center justify-center">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-full h-full">
+						<path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" />
+						<path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" />
+					</svg>
 				</div>
-				<div id="timeline-hint" class="mt-1 h-[1.2em] text-[0.7em] opacity-60 truncate" aria-live="polite"></div>
-				<div id="timeline-confirm" class="hidden mt-2 p-2 rounded-md border border-vscode-widget-border bg-vscode-widget-bg text-[0.8em] font-vscode"></div>
+				<h2 class="text-xl font-bold mb-3 tracking-wide">Welcome to Nanocoder</h2>
+				<p class="text-[0.85em] opacity-70 max-w-[280px] font-vscode leading-relaxed">
+					An open coding agent for your editor, built by a community collective.
+				</p>
 			</div>
+
 			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
 			</div>
@@ -70,6 +73,93 @@
 								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
 							</svg>
 							Edit in config file
+						</button>
+					</div>
+
+					<!-- The form container that is toggled -->
+					<div id="add-provider-form-container" class="settings-section hidden border border-vscode-focusBorder rounded-md p-3 mb-4 bg-vscode-editor-background shadow-md">
+						<div class="text-vscode-foreground font-semibold mb-3 flex items-center justify-between">
+							<span>Configure New Provider</span>
+							<button id="close-add-provider-btn" class="text-vscode-descriptionForeground hover:text-vscode-foreground bg-transparent border-none cursor-pointer">
+								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+							</button>
+						</div>
+						<div class="flex flex-col gap-3">
+							<div class="flex flex-col gap-1">
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Provider Name</label>
+								<select id="add-provider-preset-select" class="settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]">
+									<option value="ollama">Ollama</option>
+									<option value="llama-cpp">llama.cpp server</option>
+									<option value="mlx-server">MLX Server</option>
+									<option value="lmstudio">LM Studio</option>
+									<option value="gemini">Google Gemini</option>
+									<option value="openrouter">OpenRouter</option>
+									<option value="requesty">Requesty</option>
+									<option value="orcarouter">OrcaRouter</option>
+									<option value="openai">OpenAI</option>
+									<option value="anthropic">Anthropic Claude</option>
+									<option value="mistral">Mistral AI</option>
+									<option value="groq">Groq</option>
+									<option value="z-ai">Z.ai</option>
+									<option value="z-ai-coding">Z.ai Coding Subscription</option>
+									<option value="github-models">GitHub Models</option>
+									<option value="chatgpt-codex">ChatGPT / Codex</option>
+									<option value="github-copilot">GitHub Copilot</option>
+									<option value="kimi-code">Kimi Code</option>
+									<option value="minimax-coding">MiniMax Coding Plan</option>
+									<option value="thesean">Thesean AI</option>
+									<option value="poe">Poe</option>
+									<option value="atlas-cloud">Atlas Cloud</option>
+									<option value="together">Together AI</option>
+									<option value="custom">Custom...</option>
+								</select>
+								<input type="text" id="add-provider-custom-name" placeholder="Custom Provider Name" class="hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1" />
+							</div>
+
+							<div id="add-provider-sdk-group" class="hidden flex-col gap-1">
+								<label class="text-[0.85em] text-vscode-descriptionForeground">SDK</label>
+								<select id="add-provider-sdk" class="settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]">
+									<option value="openai-compatible">OpenAI (or Compatible)</option>
+									<option value="anthropic">Anthropic</option>
+									<option value="google">Google Gemini</option>
+									<option value="chatgpt-codex">ChatGPT Codex</option>
+									<option value="github-copilot">GitHub Copilot</option>
+								</select>
+							</div>
+							
+							<div id="add-provider-url-group" class="hidden flex-col gap-1">
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Base URL</label>
+								<input type="text" id="add-provider-baseurl" placeholder="https://api.example.com/v1" class="settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]" />
+							</div>
+							
+							<div id="add-provider-apikey-group" class="flex flex-col gap-1">
+								<label class="text-[0.85em] text-vscode-descriptionForeground">API Key</label>
+								<input type="password" id="add-provider-apikey" placeholder="Enter API Key" class="settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em]" />
+							</div>
+							
+							<div class="flex flex-col gap-1">
+								<label class="text-[0.85em] text-vscode-descriptionForeground">Models</label>
+								<div id="add-provider-models-container" class="flex flex-col gap-2">
+									<!-- Model rows will be dynamically populated here -->
+								</div>
+								<button id="add-provider-add-model-btn" class="mt-1 text-vscode-textLink-foreground hover:text-vscode-foreground bg-transparent border border-dashed border-vscode-input-border hover:border-vscode-focusBorder p-1.5 rounded cursor-pointer text-[0.85em] flex items-center justify-center gap-1 transition-colors w-full">
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+									Add another model
+								</button>
+							</div>
+							
+							<button id="add-provider-submit-btn" class="settings-action-btn mt-2 bg-vscode-button-bg text-vscode-button-fg border-none p-2 rounded cursor-pointer hover:bg-vscode-button-hover font-medium w-full flex items-center justify-center gap-2 transition-colors">
+								<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+								Save Provider
+							</button>
+						</div>
+					</div>
+
+					<!-- Big button at the bottom of the Providers list -->
+					<div class="settings-section pt-2 pb-4">
+						<button id="toggle-add-provider-btn" class="w-full py-2.5 px-4 bg-transparent border border-dashed border-vscode-focusBorder text-vscode-descriptionForeground hover:text-vscode-foreground hover:border-vscode-foreground rounded-md cursor-pointer flex items-center justify-center gap-2 transition-colors text-sm">
+							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+							Add New Provider
 						</button>
 					</div>
 
@@ -182,6 +272,19 @@
 							</label>
 						</div>
 					</div>
+
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Token Usage</span>
+								<span class="settings-row-desc">Show token usage and estimated cost below responses</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-showTokenUsage">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+					</div>
 				</div>
 
 				<!-- Advanced Tab -->
@@ -226,11 +329,22 @@
 			</div>
 		</div>
 
-		
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg items-center gap-2">
-				<span class="font-vscode text-[0.78em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
-				<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg flex-col gap-2">
+				<div class="flex items-center justify-between w-full">
+					<span class="font-vscode text-[0.75em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
+					<div class="flex items-center gap-1 opacity-60">
+						<button id="artifact-toggle" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Toggle artifacts">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-200"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+						<button id="artifact-close" class="p-0.5 hover:opacity-100 bg-transparent border-none cursor-pointer text-vscode-fg rounded" title="Close">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+						</button>
+					</div>
+				</div>
+				<div id="artifact-content" class="w-full">
+					<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
+				</div>
 			</div>
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
@@ -250,20 +364,22 @@
 						</button>
 						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
 
-						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover flex-1 min-w-0" disabled>
+						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink min-w-0 max-w-[75%]" disabled>
 							<span id="model-trigger-label" class="truncate">Loading models...</span>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 
-						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink-0 max-w-[40%] min-w-0" title="Mode" aria-label="Mode" aria-haspopup="menu" aria-expanded="false" aria-controls="mode-dropdown" disabled>
-							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
-						</button>
-
-						<button id="composer-settings-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink-0 min-w-0" title="Provider settings" aria-label="Provider settings" aria-haspopup="menu" aria-expanded="false" aria-controls="composer-settings">
+						<button id="composer-settings-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink-0 min-w-0" title="Configuration" aria-label="Configuration" aria-haspopup="menu" aria-expanded="false" aria-controls="composer-settings">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
-								<circle cx="12" cy="12" r="3"></circle>
-								<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+								<line x1="4" y1="21" x2="4" y2="14"></line>
+								<line x1="4" y1="10" x2="4" y2="3"></line>
+								<line x1="12" y1="21" x2="12" y2="12"></line>
+								<line x1="12" y1="8" x2="12" y2="3"></line>
+								<line x1="20" y1="21" x2="20" y2="16"></line>
+								<line x1="20" y1="12" x2="20" y2="3"></line>
+								<line x1="1" y1="14" x2="7" y2="14"></line>
+								<line x1="9" y1="8" x2="15" y2="8"></line>
+								<line x1="17" y1="16" x2="23" y2="16"></line>
 							</svg>
 						</button>
 					</div>
@@ -297,8 +413,15 @@
 					<div class="px-3 py-2 text-[0.85em] opacity-70">Configuration</div>
 					<div class="flex items-center justify-between gap-2 px-3 py-1">
 						<span class="text-[0.85em] opacity-70 shrink-0">Provider</span>
-						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover min-w-0 max-w-[40%]" disabled>
+						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink min-w-0 max-w-[60%]" aria-haspopup="menu" aria-expanded="false" aria-controls="provider-dropdown" disabled>
 							<span id="provider-trigger-label" class="truncate">Provider...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+					</div>
+					<div class="flex items-center justify-between gap-2 px-3 py-1 pb-2">
+						<span class="text-[0.85em] opacity-70 shrink-0">Mode</span>
+						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover shrink min-w-0 max-w-[60%]" aria-haspopup="menu" aria-expanded="false" aria-controls="mode-dropdown" disabled>
+							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 					</div>

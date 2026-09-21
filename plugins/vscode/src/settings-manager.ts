@@ -188,6 +188,39 @@ export class SettingsManager {
 		}
 	}
 
+	/**
+	 * Add a new provider to agents.config.json.
+	 */
+	addProvider(cwd: string, provider: any): { success: boolean; error?: string } {
+		try {
+			const paths = this.getConfigPaths(cwd);
+			let config = this.readJsonSafe(paths.agentsConfig);
+			if (config === null) throw new Error(`Config file ${paths.agentsConfig} contains invalid JSON. Cannot update.`);
+			
+			config = config || {};
+			if (!config.nanocoder || typeof config.nanocoder !== 'object') {
+				config.nanocoder = {};
+			}
+			if (!Array.isArray(config.nanocoder.providers)) {
+				config.nanocoder.providers = [];
+			}
+			
+			// Check if provider already exists by name
+			const exists = config.nanocoder.providers.some((p: any) => p.name === provider.name);
+			if (exists) {
+				return { success: false, error: `A provider named '${provider.name}' already exists.` };
+			}
+			
+			config.nanocoder.providers.push(provider);
+			this.atomicWrite(paths.agentsConfig, config);
+			return { success: true };
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			this.outputChannel.appendLine(`[Settings] Failed to add provider: ${msg}`);
+			return { success: false, error: msg };
+		}
+	}
+
 	// ----- Private helpers -----
 
 	/**

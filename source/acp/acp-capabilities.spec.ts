@@ -30,9 +30,9 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 // getAvailableModes
 // ============================================================================
 
-test('getAvailableModes - returns all four modes in order', t => {
+test('getAvailableModes - returns all five modes in order', t => {
 	const modes = getAvailableModes();
-	t.deepEqual(modes, ['normal', 'auto-accept', 'yolo', 'plan']);
+	t.deepEqual(modes, ['normal', 'auto-accept', 'yolo', 'plan', 'architect']);
 });
 
 // ============================================================================

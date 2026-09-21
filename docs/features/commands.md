@@ -30,8 +30,10 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/context-max` | Set maximum context length for the current session, or inspect the resolved context source. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export current session to markdown file |
-| `/copy` | Copy the last assistant response to the system clipboard |
+| `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
+| `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
+| `/review` | Review a branch or PR diff for bugs, security issues, and style violations. Usage: `/review <branch-or-pr-number>` (e.g. `/review main`, `/review 42`) |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |

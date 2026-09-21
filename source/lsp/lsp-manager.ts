@@ -343,6 +343,15 @@ export class LSPManager extends EventEmitter {
 	}
 
 	/**
+	 * Whether the language server for this file advertises document formatting.
+	 */
+	supportsDocumentFormatting(filePath: string): boolean {
+		const client = this.getClientForFile(filePath);
+		if (!client || !client.isReady()) return false;
+		return Boolean(client.getCapabilities()?.documentFormattingProvider);
+	}
+
+	/**
 	 * Check if LSP is available for a file type
 	 */
 	hasLanguageSupport(filePath: string): boolean {
