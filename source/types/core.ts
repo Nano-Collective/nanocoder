@@ -96,7 +96,13 @@ export interface Tool {
 
 export interface StructuredToolOutput {
 	llmContent: string;
-	structured: JSONValue;
+	structured?: JSONValue;
+	/**
+	 * Set by a handler whose run failed without throwing - a shell command that
+	 * exited non-zero, say - so the result carries the failure instead of every
+	 * caller re-deriving it from the text.
+	 */
+	isError?: boolean;
 }
 
 export type ToolExecuteResult = string | StructuredToolOutput;
