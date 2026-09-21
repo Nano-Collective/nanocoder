@@ -1096,6 +1096,12 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 		}
 		t.regex(lastFrame()!, until);
 	};
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(lastFrame()!); i++) {
+			await new Promise(resolve => setTimeout(resolve, 100));
+		}
+		t.regex(lastFrame()!, until);
+	};
 
 	// Edit existing servers -> my-server -> Edit this server, then accept the
 	// transport, name, URL, command and args fields.
@@ -1105,11 +1111,22 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 	await press('\r', /Field 1\/6/);
 	await press('\r', /Environment variables/);
 
-	await press('API_KEY=abc123X', /API_KEY=abc123X/);
-	await press('\u007F', /API_KEY=abc123(?!X)/);
+	// One key per write, as a person types. Keys this close together reach
+	// the handler before a re-render, so each edit must build on the last.
+	const type = async (keys: string[]) => {
+		for (const key of keys) {
+			stdin.write(key);
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+	};
+	await type([...'API_KEY=abc123XY']);
+	await waitFor(/API_KEY=abc123XY/);
+	await type(['\u007F', '\u007F']);
+	await waitFor(/API_KEY=abc123(?!X)/);
 
-	// Esc submits the field; Done & Save (last in the list, so Up wraps to it)
-	// hands back the edited server.
+	// Esc submits the field. Done & Save is last in the list, and Up from the
+	// first item wraps to the last in ink-select-input; the frame check
+	// confirms it is selected before Enter.
 	await press('\u001B', /Added: my-server/);
 	await press('\u001B[A', /> Done & Save/);
 	stdin.write('\r');
