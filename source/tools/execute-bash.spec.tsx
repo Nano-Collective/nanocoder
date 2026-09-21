@@ -80,6 +80,48 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.regex(output!, /ls/);
 });
 
+test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const element = formatter({command});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('dolt version;')));
+	t.true(lines.some(line => line.includes('echo "===";')));
+	t.true(lines.some(line => line.includes('ls -la /usr/local/bin/dolt')));
+	// The whole point: no single rendered line carries two segments
+	t.false(
+		lines.some(
+			line => line.includes('dolt version;') && line.includes('ls -la'),
+		),
+		'Compound segments must not share a line',
+	);
+});
+
+test('ExecuteBashFormatter keeps a quoted semicolon on one line', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({command: 'echo "hello; world"'});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('echo "hello; world"')));
+});
+
 test('ExecuteBashFormatter handles complex commands', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {

@@ -14,11 +14,15 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
-	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
 import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
 import {
 	getProjectRoot,
@@ -168,23 +172,27 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		let outputBytes = 0;
-		let outputTruncated = false;
+		const stdoutCollector = makeStreamCollector(text => {
+			state.fullOutput += text;
+		}, STDOUT_TRUNCATION_NOTICE);
+		const stderrCollector = makeStreamCollector(text => {
+			state.stderr += text;
+		}, STDERR_TRUNCATION_NOTICE);
+
+		// Both streams are finished by the time `close`/`error` runs, so release
+		// whatever the decoders were holding back mid-character. `cancel()`
+		// resolves and unregisters the execution before either handler gets
+		// here, so a cancelled run never flushes: its pending partial character
+		// is dropped along with the rest of the output it never produced.
+		const flushStreams = () => {
+			stdoutCollector.flush();
+			stderrCollector.flush();
+			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
+		};
 
 		// Collect output
 		proc.stdout?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.fullOutput += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.fullOutput +=
-						'\n... [Output truncated to prevent memory exhaustion]';
-				}
-			}
+			stdoutCollector.collect(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
@@ -192,18 +200,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr?.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.stderr += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.stderr +=
-						'\n... [Stderr truncated to prevent memory exhaustion]';
-				}
-			}
+			stderrCollector.collect(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});
@@ -259,6 +256,8 @@ export class BashExecutor extends EventEmitter {
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
+				flushStreams();
+
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
 				clearInterval(intervalId);
@@ -277,6 +276,8 @@ export class BashExecutor extends EventEmitter {
 
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
+
+				flushStreams();
 
 				applyCapturedCwd();
 				clearInterval(intervalId);

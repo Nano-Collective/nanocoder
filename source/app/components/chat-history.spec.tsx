@@ -1,4 +1,5 @@
 import test from 'ava';
+import {Text} from 'ink';
 import React from 'react';
 import {wheelEvents} from '@/utils/terminal-mouse';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
@@ -245,3 +246,70 @@ test('fullscreen mode hides welcome banner while liveComponent is active', t => 
 	unmount();
 });
 
+// ============================================================================
+// Regression: inline-mode prompt duplication (#1174, fixed in chat-history.tsx
+// by gating renderLastQueuedComponentLive to fullscreen-only). Ink <Static>
+// appends a trailing newline after each item; the live flow region does not.
+// When renderLastQueuedComponentLive was honoured in inline mode, the last
+// queued component sat in the live flow (no trailing newline), then moved
+// into <Static> as soon as streaming began — Ink wrote it to stdout twice
+// and the user saw the prompt duplicated in scrollback. The gate forces the
+// last queued component through <Static> from the start, so it carries the
+// Static trailing-newline marker in the initial frame and the rendered
+// output is identical regardless of the prop value.
+// ============================================================================
+
+test('inline mode keeps queued components in static queue even if renderLastQueuedComponentLive is passed', t => {
+	const props = createDefaultProps({
+		fullscreen: false,
+		queuedComponents: [
+			<Text key="msg1">Message 1</Text>,
+			<Text key="msg2">Message 2</Text>,
+		],
+		renderLastQueuedComponentLive: true,
+	});
+	const {frames, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	// Assert against the accumulated stdout frames log rather than lastFrame():
+	// the duplication is a scrollback artifact, which lastFrame() structurally
+	// cannot observe. <Static> output carries a trailing newline; live flow
+	// output does not. With the gate active, Message 2 must be rendered via
+	// <Static> in inline mode even when the prop is true, so the initial
+	// frame contains "Message 2\n" rather than "Message 2".
+	t.regex(frames[0] ?? '', /Message 2\n/);
+	unmount();
+});
+
+test('inline mode renders renderLastQueuedComponentLive=true and =false identically to prevent the live->static reprint', t => {
+	const queuedComponents = [
+		<Text key="msg1">Message 1</Text>,
+		<Text key="msg2">Message 2</Text>,
+	];
+	const live = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: true,
+			})}
+		/>,
+	);
+	const staticRender = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: false,
+			})}
+		/>,
+	);
+	// Two separate mounts exercise the live -> static transition that
+	// triggers the regression: in pre-fix code, mounting one tree with the
+	// prop true and another with the prop false produced different first
+	// frames because the last queued component moved between the flow
+	// region and <Static>; with the gate active chatQueueProps is identical
+	// for both props in inline mode, so Ink writes the same bytes to stdout.
+	t.is(live.frames[0], staticRender.frames[0]);
+	t.regex(live.frames[0] ?? '', /Message 2\n/);
+	live.unmount();
+	staticRender.unmount();
+});

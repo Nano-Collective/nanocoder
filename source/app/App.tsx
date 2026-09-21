@@ -42,6 +42,8 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
 import type {ThemePreset} from '@/types/ui';
@@ -267,6 +269,31 @@ export default function App({
 		onPlanTurnComplete: () => {
 			appState.setPlanTurnCompleted(true);
 		},
+		onArchitectTurnComplete: async checkpointName => {
+			// Nothing awaits this callback, so an unhandled rejection here would
+			// surface as a process-level warning and the gate would simply never
+			// appear - the turn's changes silently unreviewed. Fall back to
+			// showing the bar with the name we already have.
+			try {
+				const checkpointManager = new CheckpointManager(getProjectRoot());
+				const metadata =
+					await checkpointManager.getCheckpointMetadata(checkpointName);
+
+				appState.setArchitectReviewState({
+					show: true,
+					checkpointName: metadata.name,
+					filesChanged: metadata.filesChanged,
+					filesMissing: metadata.filesMissing ?? [],
+				});
+			} catch {
+				appState.setArchitectReviewState({
+					show: true,
+					checkpointName,
+					filesChanged: [],
+					filesMissing: [],
+				});
+			}
+		},
 		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
@@ -368,6 +395,10 @@ export default function App({
 		cliModel,
 		nonInteractiveMode,
 		developmentModeRef: appState.developmentModeRef,
+		// Nothing initializes until the trust disclaimer is accepted: the
+		// conditional `<SecurityDisclaimer />` return below runs after every
+		// hook, so it cannot gate this on its own.
+		isTrusted: isEffectivelyTrusted,
 	});
 
 	// Setup mode handlers
@@ -488,6 +519,8 @@ export default function App({
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
+		setArchitectReviewState: appState.setArchitectReviewState,
+		architectReviewState: appState.architectReviewState,
 		setPendingPlanProceed: appState.setPendingPlanProceed,
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,

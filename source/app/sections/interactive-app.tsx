@@ -5,6 +5,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
@@ -318,7 +319,12 @@ export function InteractiveApp({
 		if (appState.messages[appState.messages.length - 1]?.role === 'user') {
 			appState.updateMessages(appState.messages.slice(0, -1));
 
-			if (appState.chatComponents.length > 0) {
+			// In fullscreen (alt-screen) mode, the prompt bubble lives in React
+			// state only — pop it so it disappears from the viewport.  In inline
+			// mode the bubble has already been committed to Ink's <Static>
+			// scrollback and cannot be un-printed, so popping the React element
+			// would just create a mismatch; leave it in place.
+			if (altScreenActive && appState.chatComponents.length > 0) {
 				appState.setChatComponents(appState.chatComponents.slice(0, -1));
 			}
 		}
@@ -336,6 +342,7 @@ export function InteractiveApp({
 		setSubmittedDraft(null);
 	}, [
 		appHandlers,
+		altScreenActive,
 		appState.messages,
 		appState.updateMessages,
 		appState.chatComponents,
@@ -438,6 +445,21 @@ export function InteractiveApp({
 						</Box>
 					)}
 
+					{appState.architectReviewState?.show && (
+						<ArchitectReviewPrompt
+							filesChanged={appState.architectReviewState.filesChanged}
+							filesMissing={appState.architectReviewState.filesMissing}
+							onKeep={() => void appHandlers.handleArchitectKeep()}
+							onRevert={() => void appHandlers.handleArchitectRevert()}
+							// Forward what the user typed. A zero-arg arrow here silently
+							// dropped it and sent a fixed string instead, so the revise
+							// box collected instructions the model never saw.
+							onRevertAndRevise={instructions =>
+								void appHandlers.handleArchitectRevertAndRevise(instructions)
+							}
+						/>
+					)}
+
 					{appState.isExplorerMode && (
 						<Box
 							marginLeft={fullscreen ? 0 : -1}
@@ -528,6 +550,11 @@ export function InteractiveApp({
 						appState.activeMode === null &&
 						!appState.isSettingsMode &&
 						!appState.planReviewState?.show &&
+						// The architect gate runs its own useInput. Leaving the composer
+						// mounted alongside it gave every keystroke two live consumers,
+						// and let the user submit a new turn straight past the gate with
+						// the checkpoint still open.
+						!appState.architectReviewState?.show &&
 						// Hide the composer only while a live component explicitly captures input.
 						!appState.liveComponentCapturesInput && (
 							<ChatInput

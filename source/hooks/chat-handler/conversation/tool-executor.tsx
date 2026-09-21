@@ -3,6 +3,7 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import {getShowAgentBashOutput} from '@/config/preferences';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -27,6 +28,7 @@ import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
 	LIVE_TASK_TOOLS,
+	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
 
 /**
@@ -125,10 +127,19 @@ export const displayExecutedTool = async (
 ): Promise<void> => {
 	const {toolCall, result, bashState} = execution;
 
+	// Show the full bash card (command + status + output) instead of folding it
+	// into the compact tally. Needs a completed execution, so validation
+	// failures with no bashState still condense.
+	const showBashCard =
+		getShowAgentBashOutput() &&
+		result.name === 'execute_bash' &&
+		bashState !== undefined;
+
 	conversationStateManager.current.updateAfterToolExecution(
 		toolCall,
 		result.content,
 	);
+	const expandId = recordExpandableToolResult(toolCall, result, bashState);
 
 	if (
 		LIVE_TASK_TOOLS.has(result.name) &&
@@ -144,7 +155,8 @@ export const displayExecutedTool = async (
 		options?.onLiveTaskUpdate?.(tasks);
 	} else if (
 		options?.compactDisplay &&
-		!ALWAYS_EXPANDED_TOOLS.has(result.name)
+		!ALWAYS_EXPANDED_TOOLS.has(result.name) &&
+		!showBashCard
 	) {
 		// In compact mode, signal the count callback for live display
 		// (skip for tools that should always show expanded output).
@@ -190,11 +202,19 @@ export const displayExecutedTool = async (
 				executionId={bashState.executionId}
 				command={bashState.command}
 				completedState={bashState}
+				showOutput={showBashCard}
 			/>,
 		);
 	} else {
 		// Full display mode
-		await displayToolResult(toolCall, result, toolManager, addToChatQueue);
+		await displayToolResult(
+			toolCall,
+			result,
+			toolManager,
+			addToChatQueue,
+			false,
+			expandId,
+		);
 	}
 };
 
@@ -395,6 +415,7 @@ const executeAgentBatch = async (
 		};
 
 		results.push({toolCall: e.toolCall, result});
+		recordExpandableToolResult(e.toolCall, result);
 
 		// Compact: feed into the shared count accumulator so delegated-task
 		// summaries group with other tool counts. Errors are still shown in
