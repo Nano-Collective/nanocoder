@@ -84,7 +84,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `delete_file`, etc.), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
+The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`, `delete_file`, etc.), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
 
 MCP tools follow the same rule. An MCP tool is available in plan mode only when its server annotates it read-only (`readOnlyHint` in the tool's MCP annotations); anything unannotated is treated as a possible mutation and hidden. A server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools) list does not override this — it applies in normal mode only.
 

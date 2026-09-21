@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import React, {useEffect, useState} from 'react';
-import {StyledSelectInput} from '@/components/ui/styled-select-input';
+import {FilterableSelectList} from '@/components/filterable-select-list';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	useResponsiveTerminal,
@@ -85,11 +85,17 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		loadSessions();
 	}, [showAll]);
 
-	useInput((_input, key) => {
-		if (key.escape && !loading) {
-			onCancel();
-		}
-	});
+	// Escape is ignored while loading, and once sessions are listed
+	// FilterableSelectList owns it (Ink useInput is broadcast, so a second
+	// active handler would fire onCancel twice). Only the empty state needs this.
+	useInput(
+		(_input, key) => {
+			if (key.escape) {
+				onCancel();
+			}
+		},
+		{isActive: !loading && sessions.length === 0},
+	);
 
 	if (loading) {
 		return (
@@ -150,11 +156,13 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		return {
 			label: `${prefix}${truncatedTitle}${suffix}`,
 			value: session.id,
+			// Filter on the title alone: the count/age suffix would match most queries.
+			searchText: session.title,
 		};
 	});
 
-	const handleSelect = (item: {value: string}) => {
-		const selectedSession = sessions.find(s => s.id === item.value);
+	const handleSelect = (value: string) => {
+		const selectedSession = sessions.find(s => s.id === value);
 		if (selectedSession) {
 			onSelect(selectedSession);
 		} else {
@@ -172,14 +180,15 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 			marginBottom={1}
 		>
 			<Box flexDirection="column">
-				<StyledSelectInput
+				<FilterableSelectList
 					items={items}
 					onSelect={handleSelect}
-					limit={Math.min(items.length, 10)}
+					onCancel={onCancel}
+					visibleCount={10}
 				/>
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
-						↑/↓ to navigate • Enter to select • Esc to cancel
+						Type to filter • ↑/↓ to navigate • Enter to select • Esc to cancel
 					</Text>
 				</Box>
 			</Box>

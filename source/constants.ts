@@ -95,6 +95,7 @@ export const TIPS = [
 	'Press Ctrl+J to add a new line without sending your prompt.',
 	'Press Shift+Tab to cycle between development modes.',
 	'Press Ctrl+O to toggle compact tool output.',
+	'Run /expand to see one tool result in full.',
 	'Press Ctrl+R to toggle expanded reasoning traces.',
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
@@ -130,6 +131,8 @@ export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // reads and search results remain useful while unbounded tools stay bounded.
 export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
+// Rows of tool output shown in the transcript; `/expand <n>` prints the rest.
+export const TOOL_OUTPUT_DISPLAY_LINES = 20;
 
 // === DELAYS ===
 export const DELAY_COMMAND_COMPLETE_MS = 100;
@@ -137,7 +140,6 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
-export const BASH_OUTPUT_DISPLAY_LINES = 20;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
@@ -189,6 +191,14 @@ export const MAX_MALFORMED_RETRIES = 2;
 // or allow another window; non-interactive and headless runs, which have nobody
 // to ask, stop with an actionable error.
 export const MAX_REPEATED_TOOL_CALLS = 3;
+// Default for `nanocoder.retries.maxTruncatedTurns` (see
+// source/config/index.ts): how many consecutive content-only turns cut off at
+// the provider's output-token limit we'll ask the model to continue through
+// before giving up. A truncated turn carries no tool calls, so without this the
+// headless loop reads it as "the model finished talking" and returns success
+// with whatever fragment arrived — the failure mode that silently produced no
+// output at all in runs whose entire deliverable was a tool call.
+export const MAX_TRUNCATED_TURNS = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

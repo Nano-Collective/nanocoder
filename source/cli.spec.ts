@@ -1,41 +1,18 @@
 import test from 'ava';
+import {readFileSync} from 'node:fs';
+import {
+	KNOWN_RUN_FLAGS,
+	parseRunPrompt,
+	RUN_FLAGS_STANDALONE,
+	RUN_FLAGS_WITH_VALUES,
+} from './run-prompt-args.js';
 
 // Test CLI argument parsing for non-interactive mode
 // These tests verify that the CLI correctly parses the 'run' command
 
-// Helper function to parse prompt from args (mimics the logic in cli.tsx)
-function parsePrompt(args: string[]): string | undefined {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		const afterRunArgs = args.slice(runCommandIndex + 1);
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		return promptArgs.join(' ');
-	}
-	return undefined;
-}
+// The real parser, not a copy of it. A hand-written mirror used to live here
+// and had fallen six flags behind cli.tsx — see run-prompt-args.ts.
+const parsePrompt = parseRunPrompt;
 
 test('CLI parsing: detects run command with single word prompt', t => {
 	const args = ['run', 'help'];
@@ -582,4 +559,63 @@ test('resume flags: --resume combined with `run` is an error', t => {
 test('resume flags: --continue without `run` is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue']);
 	t.false(nonInteractiveError);
+});
+
+
+test('--prompt-file and its value do not leak into the prompt', t => {
+	// The prompt itself comes from the file; anything left in argv would be
+	// prepended to it as stray text.
+	t.is(parsePrompt(['run', '--prompt-file', '/tmp/p.txt']), '');
+	t.is(parsePrompt(['run', '--prompt-file=/tmp/p.txt']), '');
+	t.is(
+		parsePrompt(['run', '--prompt-file', '/tmp/p.txt', '--mode', 'yolo']),
+		'',
+	);
+});
+
+test('a positional prompt alongside --prompt-file still parses from argv', t => {
+	// The file wins at the call site; this only asserts the flag is stripped
+	// rather than swallowing the word after it.
+	t.is(parsePrompt(['run', 'hello', '--prompt-file', '/tmp/p.txt']), 'hello');
+});
+
+
+test('every flag the parser knows is stripped from the prompt', t => {
+	// Derived from the parser's own list rather than a list written here, so a
+	// flag added to the parser is covered the moment it is added. The previous
+	// version of this test enumerated six flags by hand and would have gone
+	// quiet on the seventh — which is the failure it was written to prevent.
+	for (const flag of RUN_FLAGS_WITH_VALUES) {
+		t.is(parsePrompt(['run', 'x', flag, 'value']), 'x', `${flag} <value>`);
+		t.is(parsePrompt(['run', 'x', `${flag}=value`]), 'x', `${flag}=value`);
+	}
+	for (const flag of RUN_FLAGS_STANDALONE) {
+		t.is(parsePrompt(['run', 'x', flag]), 'x', flag);
+	}
+});
+
+test('KNOWN_RUN_FLAGS covers every long flag the CLI documents', t => {
+	// The other direction: a flag added to --help but not to the parser would
+	// otherwise be silently swallowed into the prompt.
+	const help = readFileSync('source/cli.tsx', 'utf8');
+	const documented = new Set(
+		[...help.matchAll(/^\s{2}(--[a-z][a-z-]+)/gm)].map(m => m[1]),
+	);
+	const unhandled = [...documented].filter(
+		flag =>
+			!KNOWN_RUN_FLAGS.includes(flag) &&
+			// Flags that legitimately never appear after `run`.
+			![
+				// Never valid after `run`.
+				'--version',
+				'--help',
+				'--acp',
+				'--continue',
+				'--resume',
+				// `nanocoder init` flags.
+				'--preset',
+				'--lean',
+			].includes(flag),
+	);
+	t.deepEqual(unhandled, [], `documented but not stripped: ${unhandled}`);
 });

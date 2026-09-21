@@ -30,6 +30,29 @@ export const COMPRESSION_CONSTANTS = {
 	CONSERVATIVE_TRUNCATION_LIMIT: 500,
 } as const;
 
+/**
+ * Clamp an auto-compact threshold percentage into the supported range.
+ * Every entry point that accepts a threshold (config file, `/compact --threshold`,
+ * the settings screen) must go through this so the bounds cannot drift.
+ * @param value - Raw threshold percentage
+ * @returns The value clamped to MIN_THRESHOLD_PERCENT..MAX_THRESHOLD_PERCENT
+ */
+export function clampThreshold(value: number): number {
+	return Math.max(
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+		Math.min(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT, value),
+	);
+}
+
+/**
+ * Whether a threshold percentage falls inside the supported range.
+ * @param value - Raw threshold percentage
+ * @returns True when the value needs no clamping
+ */
+export function isThresholdInRange(value: number): boolean {
+	return value === clampThreshold(value);
+}
+
 export interface CompressionResult {
 	compressedMessages: Message[];
 	originalTokenCount: number;

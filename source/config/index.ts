@@ -17,6 +17,7 @@ import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
+	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
 import type {
@@ -37,6 +38,7 @@ import type {
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
+import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
@@ -230,10 +232,10 @@ function loadTuneConfig(): Partial<TuneConfig> | undefined {
 	);
 }
 
-// Validate and clamp threshold to valid range (50-95)
+// Validate and clamp threshold to the configured range
 function validateThreshold(threshold: unknown): number {
 	const num = typeof threshold === 'number' ? threshold : 60;
-	return Math.max(50, Math.min(95, Math.round(num)));
+	return clampThreshold(Math.round(num));
 }
 
 // Validate compression mode
@@ -378,6 +380,7 @@ export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
 	maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
 	maxEmptyTurns: MAX_EMPTY_TURNS,
 	maxMalformedRetries: MAX_MALFORMED_RETRIES,
+	maxTruncatedTurns: MAX_TRUNCATED_TURNS,
 };
 
 function loadRetryLimitsConfig(): RetryLimitsConfig {
@@ -421,6 +424,11 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 						retries.maxMalformedRetries,
 						0,
 						defaults.maxMalformedRetries,
+					),
+					maxTruncatedTurns: normalizeLimit(
+						retries.maxTruncatedTurns,
+						0,
+						defaults.maxTruncatedTurns,
 					),
 				};
 			}
@@ -567,6 +575,14 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 			(item: unknown): item is string => typeof item === 'string',
 		);
 		if (matchTools.length > 0) definition.matchTools = matchTools;
+	}
+
+	if (Array.isArray(entry.matchPaths)) {
+		const matchPaths = entry.matchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) definition.matchPaths = matchPaths;
 	}
 
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
@@ -832,6 +848,7 @@ export function getRetryLimits(): RetryLimitsConfig {
 			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
 		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
 		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+		maxTruncatedTurns: retries?.maxTruncatedTurns ?? MAX_TRUNCATED_TURNS,
 	};
 }
 

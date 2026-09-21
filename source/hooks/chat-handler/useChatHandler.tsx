@@ -348,6 +348,7 @@ export function useChatHandler({
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		historyMessages?: Message[],
 	) => {
 		if (!client || !toolManager) return;
 		const sessionId = ensureCurrentSessionId?.();
@@ -382,8 +383,15 @@ export function useChatHandler({
 			/>,
 		);
 
-		// Add user message to conversation history (single addition)
+		// Add user message to conversation history (single addition). Any
+		// caller-supplied historyMessages (e.g. the preceding turns of a
+		// multi-message MCP prompt) are spliced in first, preserving their
+		// original roles, so a few-shot prompt keeps its turn structure
+		// instead of being flattened into this one user message.
 		const builder = new MessageBuilder(messages);
+		for (const historyMessage of historyMessages ?? []) {
+			builder.addMessage(historyMessage);
+		}
 		builder.addUserMessage(message, images);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);

@@ -4,7 +4,7 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {handlePaste} from './paste-utils';
+import {handlePaste, resizePasteDisplayText} from './paste-utils';
 import {assemblePrompt} from './prompt-processor';
 import {clearAppConfig, reloadAppConfig} from '../config';
 
@@ -311,4 +311,43 @@ test('handlePaste continues numbering past legacy bare-numeric paste ids', t => 
 
 	t.deepEqual(Object.keys(result.placeholderContent).sort(), ['2', 'paste_3']);
 	t.true(result.displayValue.includes('[Paste #3: 801 chars]'));
+});
+
+test('handlePaste labels a multi-line paste with its line count', t => {
+	const pastedText = Array.from({length: 7}, (_, i) => `line ${i + 1}`).join(
+		'\n',
+	);
+
+	const result = handlePaste(pastedText, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 7 lines]');
+});
+
+test('handlePaste does not count a trailing line break as a line', t => {
+	const result = handlePaste('first\nsecond\n', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 2 lines]');
+});
+
+test('handlePaste counts CRLF line breaks', t => {
+	const result = handlePaste('a\r\nb\r\nc', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 3 lines]');
+});
+
+test('handlePaste keeps the char count for one long line ending in a line break', t => {
+	const result = handlePaste(`${'a'.repeat(801)}\n`, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 802 chars]');
+});
+
+test('resizePasteDisplayText switches to lines once a chunked paste spans lines', t => {
+	t.is(
+		resizePasteDisplayText('[Paste #4: 900 chars]', `${'a'.repeat(900)}\nmore`),
+		'[Paste #4: 2 lines]',
+	);
+	t.is(
+		resizePasteDisplayText('[Paste #4: 2 lines]', 'one\ntwo\nthree'),
+		'[Paste #4: 3 lines]',
+	);
 });
