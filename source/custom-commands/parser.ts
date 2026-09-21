@@ -289,8 +289,29 @@ export function parseCommandParameterSpec(spec: string): {
 	return {name: spec.slice(0, eq).trim(), defaultValue: spec.slice(eq + 1)};
 }
 
+/** Escape a string so it matches literally inside a RegExp. */
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * Replace template variables in command content
+ * Replace template variables in command content.
+ *
+ * Two things here are deliberate and easy to undo by accident.
+ *
+ * The replacement is passed as a FUNCTION, not a string. `String.prototype
+ * .replace` treats a string replacement as a substitution template, so `$&`
+ * would expand to the matched `{{arg}}`, `` $` `` and `$'` would splice a
+ * whole half of the template into the middle of the prompt, and `$$` would
+ * collapse to one `$`. Those are ordinary characters in a shell snippet, a
+ * regex, or a price, and the user never sees what was actually sent. Same
+ * class of bug as #1057 in `string_replace`; `custom-tools/template.ts`
+ * already uses a replacer function for the identical reason.
+ *
+ * The key is escaped before it goes into the pattern. A parameter name is
+ * author-supplied frontmatter, so it can contain a regex metacharacter -
+ * `a(b` used to throw `Invalid regular expression` and take the command
+ * down with it.
  */
 export function substituteTemplateVariables(
 	content: string,
@@ -300,8 +321,8 @@ export function substituteTemplateVariables(
 
 	// Replace {{variable}} patterns
 	for (const [key, value] of Object.entries(variables)) {
-		const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
-		result = result.replace(pattern, value);
+		const pattern = new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, 'g');
+		result = result.replace(pattern, () => value);
 	}
 
 	return result;
