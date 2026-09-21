@@ -160,6 +160,13 @@ export default function ToolConfirmation({
 		onConfirm(item.value);
 	};
 
+	if (hasValidationError) {
+		// When there's a validation error, we auto-confirm (so the model receives
+		// the error in the execution phase) and we render nothing. The flash
+		// of the box is avoided here.
+		return null;
+	}
+
 	return (
 		<TitledBoxWithPreferences
 			title="Tool Approval"
