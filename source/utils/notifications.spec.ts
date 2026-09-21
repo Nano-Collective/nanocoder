@@ -1,10 +1,12 @@
 import childProcess from 'child_process';
 import test from 'ava';
 import {
+	buildDarwinNotificationArgs,
 	buildWindowsNotificationPayload,
 	getNotificationsConfig,
 	sendNotification,
 	setNotificationsConfig,
+	setTerminalNotifierPathForTests,
 } from './notifications';
 import type {NotificationsConfig} from '@/types/config';
 
@@ -108,6 +110,194 @@ test.serial('sendNotification handles undefined events gracefully', (t) => {
 	});
 	t.notThrows(() => sendNotification('toolConfirmation'));
 });
+
+// ============================================================================
+// macOS / Darwin Notification Tests
+// ============================================================================
+
+test.serial(
+	'buildDarwinNotificationArgs generates static script and out-of-band arguments',
+	(t) => {
+		const title = 'Test Title with "quotes" & \\backslashes';
+		const message = 'Line 1\nLine 2 with special $chars and `backticks` 🚀';
+
+		const args = buildDarwinNotificationArgs(title, message, false);
+
+		t.is(args[0], '-e');
+		t.true(args[1].includes('on run argv'));
+		t.true(
+			args[1].includes(
+				'display notification (item 2 of argv) with title (item 1 of argv)',
+			),
+		);
+		t.false(args[1].includes('sound name'));
+		t.is(args[2], title);
+		t.is(args[3], message);
+	},
+);
+
+test.serial(
+	'buildDarwinNotificationArgs includes sound name clause when sound is true',
+	(t) => {
+		const args = buildDarwinNotificationArgs('Title', 'Message', true);
+		t.true(args[1].includes('sound name "default"'));
+	},
+);
+
+test.serial(
+	'buildDarwinNotificationArgs safely preserves newlines, quotes, backslashes and unicode',
+	(t) => {
+		const testCases = [
+			{
+				title: 'Title with\nmultiple\nnewlines',
+				message: 'Message with\r\nnewlines and \ttabs',
+			},
+			{
+				title: 'Title with "double" and \'single\' quotes and `backticks`',
+				message: 'Message with "double" and \'single\' quotes and `backticks`',
+			},
+			{
+				title: 'Title with \\ backslashes \\\\ and $variables',
+				message: 'Message with \\ backslashes \\\\ and $variables',
+			},
+			{
+				title: '🚀 Emoji and Unicode 你好世界',
+				message: 'Message with 🌟 emoji and Special Unicode: äöüß',
+			},
+		];
+
+		for (const tc of testCases) {
+			const args = buildDarwinNotificationArgs(tc.title, tc.message);
+			t.is(args[2], tc.title);
+			t.is(args[3], tc.message);
+		}
+	},
+);
+
+test.serial(
+	'sendNotification on darwin invokes osascript with positional arguments when terminal-notifier is absent',
+	(t) => {
+		const originalPlatform = process.platform;
+		const originalExecFile = childProcess.execFile;
+		let executedCommand = '';
+		let executedArgs: string[] = [];
+
+		// Spy on childProcess.execFile
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		(childProcess.execFile as any) = (
+			command: string,
+			args: string[],
+			optionsOrCallback: any,
+			callback?: any,
+		) => {
+			executedCommand = command;
+			executedArgs = args;
+			const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+			if (typeof cb === 'function') {
+				cb(null, '', '');
+			}
+		};
+
+		Object.defineProperty(process, 'platform', {
+			value: 'darwin',
+			configurable: true,
+		});
+		setTerminalNotifierPathForTests(null);
+
+		try {
+			setNotificationsConfig({
+				enabled: true,
+				sound: true,
+				events: {generationComplete: true},
+				customMessages: {
+					generationComplete: {
+						title: 'Darwin Title with\nnewlines & "quotes"',
+						message: 'Darwin Message with\nnewlines & "quotes" 🚀',
+					},
+				},
+			});
+
+			t.notThrows(() => sendNotification('generationComplete'));
+
+			t.is(executedCommand, 'osascript');
+			t.is(executedArgs[0], '-e');
+			t.true(executedArgs[1].includes('on run argv'));
+			t.true(executedArgs[1].includes('sound name "default"'));
+			t.is(executedArgs[2], 'Darwin Title with\nnewlines & "quotes"');
+			t.is(executedArgs[3], 'Darwin Message with\nnewlines & "quotes" 🚀');
+		} finally {
+			setTerminalNotifierPathForTests(undefined);
+			childProcess.execFile = originalExecFile;
+			Object.defineProperty(process, 'platform', {
+				value: originalPlatform,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test.serial(
+	'sendNotification on darwin invokes terminal-notifier when available',
+	(t) => {
+		const originalPlatform = process.platform;
+		const originalExecFile = childProcess.execFile;
+		let executedCommand = '';
+		let executedArgs: string[] = [];
+
+		// Spy on childProcess.execFile
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		(childProcess.execFile as any) = (
+			command: string,
+			args: string[],
+			optionsOrCallback: any,
+			callback?: any,
+		) => {
+			executedCommand = command;
+			executedArgs = args;
+			const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+			if (typeof cb === 'function') {
+				cb(null, '', '');
+			}
+		};
+
+		Object.defineProperty(process, 'platform', {
+			value: 'darwin',
+			configurable: true,
+		});
+		setTerminalNotifierPathForTests('/opt/homebrew/bin/terminal-notifier');
+
+		try {
+			setNotificationsConfig({
+				enabled: true,
+				sound: true,
+				events: {generationComplete: true},
+				customMessages: {
+					generationComplete: {
+						title: 'Darwin Title with\nnewlines & "quotes"',
+						message: 'Darwin Message with\nnewlines & "quotes" 🚀',
+					},
+				},
+			});
+
+			t.notThrows(() => sendNotification('generationComplete'));
+
+			t.is(executedCommand, '/opt/homebrew/bin/terminal-notifier');
+			t.true(executedArgs.includes('-title'));
+			t.true(executedArgs.includes('Darwin Title with\nnewlines & "quotes"'));
+			t.true(executedArgs.includes('-message'));
+			t.true(executedArgs.includes('Darwin Message with\nnewlines & "quotes" 🚀'));
+			t.true(executedArgs.includes('-sound'));
+			t.true(executedArgs.includes('default'));
+		} finally {
+			setTerminalNotifierPathForTests(undefined);
+			childProcess.execFile = originalExecFile;
+			Object.defineProperty(process, 'platform', {
+				value: originalPlatform,
+				configurable: true,
+			});
+		}
+	},
+);
 
 // ============================================================================
 // Windows Notification Tests & Security Verification
@@ -306,6 +496,80 @@ test.serial('sendNotification does not ring the bell when stdout is not a TTY', 
 		false,
 	);
 	t.false(written.includes(BELL));
+});
+
+// ============================================================================
+// Linux & Daemon Notification Tests
+// ============================================================================
+
+test.serial('sendNotification on linux invokes notify-send', (t) => {
+	const originalPlatform = process.platform;
+	const originalExecFile = childProcess.execFile;
+	let executedCommand = '';
+	let executedArgs: string[] = [];
+
+	// biome-ignore lint/suspicious/noExplicitAny: test stub
+	(childProcess.execFile as any) = (
+		command: string,
+		args: string[],
+		optionsOrCallback: any,
+		callback?: any,
+	) => {
+		executedCommand = command;
+		executedArgs = args;
+		const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+		if (typeof cb === 'function') {
+			cb(null, '', '');
+		}
+	};
+
+	Object.defineProperty(process, 'platform', {
+		value: 'linux',
+		configurable: true,
+	});
+
+	try {
+		setNotificationsConfig({
+			enabled: true,
+			events: {triggeredRunComplete: true},
+		});
+
+		t.notThrows(() => sendNotification('triggeredRunComplete'));
+		t.is(executedCommand, 'notify-send');
+		t.true(executedArgs.length >= 2);
+	} finally {
+		childProcess.execFile = originalExecFile;
+		Object.defineProperty(process, 'platform', {
+			value: originalPlatform,
+			configurable: true,
+		});
+	}
+});
+
+test.serial('sendNotification logs to console when NANOCODER_DAEMON_PROCESS is set', (t) => {
+	const prevEnv = process.env.NANOCODER_DAEMON_PROCESS;
+	process.env.NANOCODER_DAEMON_PROCESS = 'true';
+	const originalLog = console.log;
+	let logged = '';
+	console.log = (...args: unknown[]) => {
+		logged += args.join(' ');
+	};
+
+	try {
+		setNotificationsConfig({
+			enabled: true,
+			events: {generationComplete: true},
+		});
+		sendNotification('generationComplete');
+		t.true(logged.includes('Notification fired: event=generationComplete'));
+	} finally {
+		console.log = originalLog;
+		if (prevEnv === undefined) {
+			delete process.env.NANOCODER_DAEMON_PROCESS;
+		} else {
+			process.env.NANOCODER_DAEMON_PROCESS = prevEnv;
+		}
+	}
 });
 
 // Reset config after all tests

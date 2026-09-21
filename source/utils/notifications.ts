@@ -74,6 +74,13 @@ function getIconPath(): string | null {
 let _terminalNotifierPath: string | null | undefined;
 let _terminalNotifierHinted = false;
 
+/** @internal Test helper to override or reset the cached terminal-notifier path */
+export function setTerminalNotifierPathForTests(
+	path: string | null | undefined,
+): void {
+	_terminalNotifierPath = path;
+}
+
 function getTerminalNotifierPath(): string | null {
 	if (_terminalNotifierPath !== undefined) {
 		return _terminalNotifierPath;
@@ -90,8 +97,14 @@ function getTerminalNotifierPath(): string | null {
 	return _terminalNotifierPath;
 }
 
-function escapeAppleScript(str: string): string {
-	return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+export function buildDarwinNotificationArgs(
+	title: string,
+	message: string,
+	sound = false,
+): string[] {
+	const soundClause = sound ? ' sound name "default"' : '';
+	const script = `on run argv\n  display notification (item 2 of argv) with title (item 1 of argv)${soundClause}\nend run`;
+	return ['-e', script, title, message];
 }
 
 function sendDarwin(title: string, message: string): void {
@@ -118,12 +131,9 @@ function sendDarwin(title: string, message: string): void {
 		);
 	}
 
-	// Fallback to osascript
-	const escapedTitle = escapeAppleScript(title);
-	const escapedMessage = escapeAppleScript(message);
-	const sound = _config.sound ? ' sound name "default"' : '';
-	const script = `display notification "${escapedMessage}" with title "${escapedTitle}"${sound}`;
-	childProcess.execFile('osascript', ['-e', script], () => {});
+	// Fallback to osascript with out-of-band arguments
+	const args = buildDarwinNotificationArgs(title, message, _config.sound);
+	childProcess.execFile('osascript', args, () => {});
 }
 
 function sendLinux(title: string, message: string): void {
