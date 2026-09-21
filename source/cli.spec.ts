@@ -1,5 +1,6 @@
 import test from 'ava';
 import {readFileSync} from 'node:fs';
+import {parseReviewCliArgs} from './commands/review-cli.js';
 import {
 	KNOWN_RUN_FLAGS,
 	parseRunPrompt,
@@ -213,7 +214,7 @@ function resolvePlainMode(opts: {
 	env: NodeJS.ProcessEnv;
 }): {plainMode: boolean; vscodeMode: boolean} {
 	const {args, stdoutIsTTY, env} = opts;
-	const nonInteractiveMode = args.includes('run');
+	const nonInteractiveMode = args.findIndex(arg => arg === 'run') !== -1;
 	const vscodeMode = args.includes('--vscode');
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
@@ -439,8 +440,7 @@ function resolveResumeFlags(args: string[]): {
 	mutuallyExclusiveError: boolean;
 	nonInteractiveError: boolean;
 } {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const nonInteractiveMode = runCommandIndex !== -1;
+	const nonInteractiveMode = args.findIndex(arg => arg === 'run') !== -1;
 
 	const continueRequested =
 		args.includes('--continue') || args.includes('-c');
@@ -561,7 +561,6 @@ test('resume flags: --continue without `run` is not a non-interactive error', t 
 	t.false(nonInteractiveError);
 });
 
-
 test('--prompt-file and its value do not leak into the prompt', t => {
 	// The prompt itself comes from the file; anything left in argv would be
 	// prepended to it as stray text.
@@ -618,4 +617,128 @@ test('KNOWN_RUN_FLAGS covers every long flag the CLI documents', t => {
 			].includes(flag),
 	);
 	t.deepEqual(unhandled, [], `documented but not stripped: ${unhandled}`);
+});
+
+// Run command with flags before 'run'
+test('CLI parsing: handles flags before run command', t => {
+	const args = ['--plain', 'run', 'say', 'hi'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'say hi');
+});
+
+test('CLI parsing: handles --provider before run command', t => {
+	const args = ['--provider', 'ollama', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: handles --mode before run command', t => {
+	const args = ['--mode', 'plan', 'run', 'audit', 'module'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'audit module');
+});
+
+// Review guard tests — mirrors the guards in cli.tsx
+function resolveReviewGuards(opts: {
+	args: string[];
+	stdoutIsTTY: boolean;
+	outputFormat: string;
+}): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
+	const {args, stdoutIsTTY, outputFormat} = opts;
+	const isRunCommand = args.indexOf('run') !== -1;
+	const isReviewCommand = args[0] === 'review';
+	const ttyError = isReviewCommand && !stdoutIsTTY;
+	const jsonError = isReviewCommand && outputFormat === 'json';
+	const collisionError = isRunCommand && isReviewCommand;
+	return {ttyError, jsonError, collisionError};
+}
+
+test('review guard: errors when stdout is not a TTY', t => {
+	const {ttyError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: false,
+		outputFormat: 'text',
+	});
+	t.true(ttyError);
+});
+
+test('review guard: passes on a TTY', t => {
+	const {ttyError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(ttyError);
+});
+
+test('review guard: --json is rejected with review', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'json',
+	});
+	t.true(jsonError);
+});
+
+test('review guard: --json is not rejected with run', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['run', 'hello'],
+		stdoutIsTTY: true,
+		outputFormat: 'json',
+	});
+	t.false(jsonError);
+});
+
+test('review guard: run and review collision is detected', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['review', 'run'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.true(collisionError);
+});
+
+test('review guard: review alone has no collision', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(collisionError);
+});
+
+test('review guard: run alone has no collision', t => {
+	const {collisionError} = resolveReviewGuards({
+		args: ['run', 'hello'],
+		stdoutIsTTY: true,
+		outputFormat: 'text',
+	});
+	t.false(collisionError);
+});
+
+test('every flag the parser knows is stripped from the review target', t => {
+	// `review` shares the `run` flag list rather than keeping its own copy. A
+	// hand-maintained second list had already drifted: it did not know
+	// --mouse/--no-mouse, so `nanocoder review --mouse main` reported the
+	// branch name as an extra argument. Derived from the parser's own lists so
+	// the next flag added is covered the moment it is added.
+	for (const flag of RUN_FLAGS_WITH_VALUES) {
+		t.deepEqual(
+			parseReviewCliArgs(['review', flag, 'value', 'main']).prompt,
+			'/review main',
+			`${flag} <value>`,
+		);
+		t.deepEqual(
+			parseReviewCliArgs(['review', `${flag}=value`, 'main']).prompt,
+			'/review main',
+			`${flag}=value`,
+		);
+	}
+	for (const flag of RUN_FLAGS_STANDALONE) {
+		t.deepEqual(
+			parseReviewCliArgs(['review', flag, 'main']).prompt,
+			'/review main',
+			flag,
+		);
+	}
 });
