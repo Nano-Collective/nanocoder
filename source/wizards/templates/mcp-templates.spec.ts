@@ -1,6 +1,6 @@
 import test from 'ava';
 import {MCP_TEMPLATES, resolveMcpTemplateId} from './mcp-templates.js';
-import type {McpTransportType} from './mcp-templates.js';
+import type {McpTemplate, McpTransportType} from './mcp-templates.js';
 
 test('filesystem template: single directory', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'filesystem');
@@ -437,15 +437,79 @@ test('resolveMcpTemplateId: tag fallback respects transport (github-remote)', t 
 		}),
 		undefined,
 	);
-	// The stdio counterpart keeps resolving by tag.
+	// The stdio counterpart is transport-compatible, but `github` hardcodes
+	// `name: 'github'` in buildConfig, so resolving to it would rename the
+	// server on save. It stays with the `custom` fallback instead.
 	t.is(
 		resolveMcpTemplateId({
 			name: 'gh-local',
 			transport: 'stdio',
 			tags: ['github'],
 		}),
-		'github',
+		undefined,
 	);
+});
+
+test('resolveMcpTemplateId: tag fallback skips templates that hardcode the name', t => {
+	// A hand-renamed filesystem server keeps its tags. Before the serverName
+	// guard this resolved to `filesystem`, whose buildConfig returns
+	// `name: 'filesystem'` — saving the edit silently renamed the server and
+	// replaced its args. `custom` round-trips name, command and args intact.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'docs-fs',
+			transport: 'stdio',
+			tags: ['filesystem', 'local'],
+		}),
+		undefined,
+	);
+	// Zero-field templates are the same story via `simpleStdioTemplate`.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'notes',
+			transport: 'stdio',
+			tags: ['memory', 'storage', 'stdio'],
+		}),
+		undefined,
+	);
+});
+
+test('resolveMcpTemplateId: never resolves a renamed server to a template that would rename it', t => {
+	// Property guard for the whole registry: whatever a template's tags are,
+	// a custom-named instance may only resolve to a template that can carry
+	// the custom name back through buildConfig.
+	const answersFor = (template: McpTemplate, customName: string) => {
+		const answers: Record<string, string> = {};
+		for (const field of template.fields) {
+			answers[field.name] = field.default ?? 'placeholder';
+		}
+		answers.serverName = customName;
+		return answers;
+	};
+
+	for (const template of MCP_TEMPLATES) {
+		if (template.id === 'custom') continue;
+
+		const customName = `${template.id}-renamed`;
+		const built = template.buildConfig(answersFor(template, customName));
+		const resolvedId = resolveMcpTemplateId({
+			name: customName,
+			transport: template.transportType,
+			tags: built.tags,
+		});
+		if (!resolvedId) continue;
+
+		const resolved = MCP_TEMPLATES.find(t => t.id === resolvedId);
+		if (!resolved) {
+			t.fail(`${template.id} resolved to unknown id ${resolvedId}`);
+			continue;
+		}
+		t.is(
+			resolved.buildConfig(answersFor(resolved, customName)).name,
+			customName,
+			`${template.id} resolves to ${resolvedId}, which would rename the server`,
+		);
+	}
 });
 
 test('resolveMcpTemplateId: falls back to the server name for default names', t => {

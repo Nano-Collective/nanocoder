@@ -554,12 +554,25 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  *    since name-based matching misses and would fall through to `custom`,
  *    whose buildConfig never writes headers — silently dropping the bearer
  *    token.
- * 2. `tags` — hand-edited files that kept them. A tag matches only if it
- *    equals a real template id AND the template's transport agrees with the
- *    saved server's; `github-remote` carries a `github` tag, but that id is
- *    the stdio GitHub server, and resolving an http server to it would
- *    rebuild the config with the wrong transport.
- * 3. Server name equal to a template id — covers default names.
+ * 2. `tags` — configs written before the stamp existed, or hand-edited ones
+ *    that kept their tags. Three conditions, all necessary:
+ *    - the tag equals a real template id;
+ *    - the template's transport agrees with the saved server's, since
+ *      `github-remote` carries a `github` tag but that id is the stdio
+ *      GitHub server, and resolving an http server to it would rebuild the
+ *      config with the wrong transport;
+ *    - the template has a `serverName` field. Templates without one hardcode
+ *      the name in `buildConfig` (`simpleStdioTemplate` and friends return
+ *      `name: opts.id`), so resolving a renamed server to them would rename
+ *      it back on save and replace its command/args with template defaults.
+ *      The `custom` fallback round-trips those servers intact.
+ *    Note that `deepwiki` / `context7` / `github-remote` / `brave-search` do
+ *    not carry their own id as a tag, so a renamed instance of those still
+ *    falls through to `custom` — pre-existing, and for `github-remote` that
+ *    still drops the bearer header on re-save. Tracked separately.
+ * 3. Server name equal to a template id — covers default names. No
+ *    `serverName` check here: rebuilding under a name that already equals
+ *    the template id cannot rename anything.
  *
  * Returns undefined when nothing matches, so callers can fall back to the
  * `custom` template.
@@ -569,25 +582,29 @@ export function resolveMcpTemplateId(
 		templateId?: string;
 	},
 ): string | undefined {
-	const matches = (id: string) => {
+	const knownTemplate = (id: string) => {
 		const template = MCP_TEMPLATES.find(t => t.id === id);
-		return Boolean(template && template.id !== 'custom');
+		return template && template.id !== 'custom' ? template : undefined;
 	};
-	const transportCompatible = (id: string) => {
-		const template = MCP_TEMPLATES.find(t => t.id === id);
-		return Boolean(template && template.transportType === config.transport);
-	};
-	if (config.templateId && matches(config.templateId)) {
+	const transportAgrees = (template: McpTemplate) =>
+		template.transportType === config.transport;
+	const keepsCustomName = (template: McpTemplate) =>
+		template.fields.some(field => field.name === 'serverName');
+
+	if (config.templateId && knownTemplate(config.templateId)) {
 		return config.templateId;
 	}
 	if (config.tags?.length) {
-		const tag = config.tags.find(
-			tag => matches(tag) && transportCompatible(tag),
-		);
-		if (tag) return tag;
+		for (const tag of config.tags) {
+			const template = knownTemplate(tag);
+			if (template && transportAgrees(template) && keepsCustomName(template)) {
+				return template.id;
+			}
+		}
 	}
-	if (matches(config.name) && transportCompatible(config.name)) {
-		return config.name;
+	const namedTemplate = knownTemplate(config.name);
+	if (namedTemplate && transportAgrees(namedTemplate)) {
+		return namedTemplate.id;
 	}
 	return undefined;
 }
