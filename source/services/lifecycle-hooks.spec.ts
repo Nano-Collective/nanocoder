@@ -859,3 +859,54 @@ test.serial(
 		t.true(gate.reason?.includes('ok ✅') ?? false);
 	},
 );
+
+// SIGTERM is a request. A hook that traps it survived its own timeout: the
+// group was signalled once and never escalated, leaving the runaway process
+// tree the detached spawn exists to prevent. POSIX only - on Windows the
+// reap is `taskkill /F`, which is already unconditional.
+const posixTest = process.platform === 'win32' ? test.skip : test;
+
+posixTest.serial(
+	'a hook that ignores SIGTERM is escalated to SIGKILL',
+	async t => {
+		const pidFile = join(testDir, `sigterm-trap-${Date.now()}.pid`);
+		withHooks({
+			'pre-tool-use': [
+				{
+					name: 'stubborn',
+					timeout: 200,
+					command: node(
+						// Trap SIGTERM, publish our pid, then stay alive well past
+						// both the hook timeout and the escalation grace period.
+						"process.on('SIGTERM',()=>{});" +
+							`require('fs').writeFileSync(${JSON.stringify(
+								JSON.stringify(pidFile),
+							)},String(process.pid));` +
+							'setTimeout(()=>{},10000)',
+					),
+				},
+			],
+		});
+
+		const gate = await runPreToolUseGate(writeFileCall('src/app.ts'), {
+			path: 'src/app.ts',
+		});
+		// A timeout is not a veto: a broken hook must not wedge the session.
+		t.false(gate.blocked);
+
+		const pid = Number(readFileSync(pidFile, 'utf-8'));
+		t.true(Number.isInteger(pid) && pid > 0);
+
+		// Timeout (200ms) + SIGKILL grace (1s) + slack.
+		await new Promise(resolve => setTimeout(resolve, 2_000));
+
+		let alive: boolean;
+		try {
+			process.kill(pid, 0);
+			alive = true;
+		} catch {
+			alive = false;
+		}
+		t.false(alive, `hook pid ${pid} outlived its timeout`);
+	},
+);
