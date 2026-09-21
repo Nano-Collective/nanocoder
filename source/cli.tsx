@@ -12,6 +12,7 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import {parseRunPrompt} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -414,67 +415,11 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Check for non-interactive mode (run command)
-	let nonInteractivePrompt: string | undefined;
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const afterRunArgs =
-		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--vscode-port=')) {
-				continue; // skip fused form
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--provider=')) {
-				continue; // skip fused form
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--model=')) {
-				continue; // skip fused form
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--context-max=')) {
-				continue; // skip fused form
-			} else if (arg === '--mode') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--mode=')) {
-				continue; // skip fused form
-			} else if (arg === '--json') {
-				continue; // skip this flag
-			} else if (arg === '--output-format') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--output-format=')) {
-				continue; // skip fused form
-			} else if (arg === '--prompt-file') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--prompt-file=')) {
-				continue; // skip fused form
-			} else if (arg === '--trust-directory') {
-				continue; // skip this flag
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		nonInteractivePrompt = promptArgs.join(' ');
-	}
+	// Check for non-interactive mode (run command). The filtering lives in
+	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
+	// in cli.spec.ts had drifted six flags behind this.
+	const runCommandIndex = args.indexOf('run');
+	let nonInteractivePrompt = parseRunPrompt(args);
 
 	// --prompt-file: read the prompt from a file rather than argv.
 	//
