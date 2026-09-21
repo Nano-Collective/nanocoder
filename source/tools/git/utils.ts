@@ -258,10 +258,22 @@ export function formatGitStatusSummary(status: GitStatusSummary): {
 // Git Command Execution
 // ============================================================================
 
+const GIT_TIMEOUT_MS = 60_000;
+
+/**
+ * Terminal prompts are disabled so a credential request fails with an error
+ * instead of waiting on input nobody can provide (#1344).
+ */
+const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
+
 /**
  * Spawn a command, collect stdout, and resolve with the trimmed output.
  * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
  * the human-readable command name used in error messages (e.g. 'Git', 'gh').
+ *
+ * stdin is closed so nothing the child runs can block on it, and the whole
+ * call is bounded by a timeout as a backstop for prompts that bypass stdin
+ * (ssh passphrases and gpg pinentry read the tty directly).
  */
 function execProcess(
 	command: string,
@@ -269,9 +281,36 @@ function execProcess(
 	label: string,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn(command, args);
+		const proc = spawn(command, args, {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: GIT_ENV,
+		});
 		let stdout = '';
 		let stderr = '';
+		let settled = false;
+
+		// Settle here rather than on `close`: a helper the child spawned (ssh,
+		// gpg, credential manager) inherits the stderr pipe, and `close` does
+		// not fire until every holder of that pipe has exited.
+		const timer = setTimeout(() => {
+			proc.stdout.destroy();
+			proc.stderr.destroy();
+			proc.kill();
+			settle(() =>
+				reject(
+					new Error(
+						`${label} command timed out after ${GIT_TIMEOUT_MS / 1000}s`,
+					),
+				),
+			);
+		}, GIT_TIMEOUT_MS);
+
+		const settle = (finish: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			finish();
+		};
 
 		proc.stdout.on('data', (data: Buffer) => {
 			stdout += data.toString();
@@ -282,17 +321,21 @@ function execProcess(
 		});
 
 		proc.on('close', (code: number | null) => {
-			if (code === 0) {
-				resolve(stdout.trimEnd());
-			} else {
-				const errorMessage =
-					stderr.trim() || `${label} command failed with exit code ${code}`;
-				reject(new Error(errorMessage));
-			}
+			settle(() => {
+				if (code === 0) {
+					resolve(stdout.trimEnd());
+				} else {
+					const errorMessage =
+						stderr.trim() || `${label} command failed with exit code ${code}`;
+					reject(new Error(errorMessage));
+				}
+			});
 		});
 
 		proc.on('error', error => {
-			reject(new Error(`Failed to execute ${command}: ${error.message}`));
+			settle(() =>
+				reject(new Error(`Failed to execute ${command}: ${error.message}`)),
+			);
 		});
 	});
 }
