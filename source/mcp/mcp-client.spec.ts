@@ -70,7 +70,7 @@ console.log(`\nmcp-client.spec.ts`);
 // CI would couple our pipeline to those services' uptime. Run them locally to
 // verify HTTP transport against live servers.
 const isCI = process.env.CI === 'true' || process.env.CI === '1';
-const testOrSkip = isCI ? test.skip : test;
+const testOrSkip = (isCI || process.env.RUN_INTEGRATION_TESTS !== 'true') ? test.skip : test;
 
 // ============================================================================
 // Tests for MCPClient - Transport Support
