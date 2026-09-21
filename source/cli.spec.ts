@@ -1,22 +1,19 @@
 import test from 'ava';
-import {filterCliFlags} from '@/utils/cli-flags';
+import {readFileSync} from 'node:fs';
+import {parseReviewCliArgs} from './commands/review-cli.js';
+import {
+	KNOWN_RUN_FLAGS,
+	parseRunPrompt,
+	RUN_FLAGS_STANDALONE,
+	RUN_FLAGS_WITH_VALUES,
+} from './run-prompt-args.js';
 
 // Test CLI argument parsing for non-interactive mode
 // These tests verify that the CLI correctly parses the 'run' command
 
-// Helper function to parse prompt from args (mimics the logic in cli.tsx)
-function parsePrompt(args: string[]): string | undefined {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	if (runCommandIndex === -1) {
-		return undefined;
-	}
-	const afterRunArgs = args.slice(runCommandIndex + 1);
-	if (afterRunArgs.length === 0) {
-		return undefined;
-	}
-	const positionals = filterCliFlags(afterRunArgs);
-	return positionals.length > 0 ? positionals.join(' ') : undefined;
-}
+// The real parser, not a copy of it. A hand-written mirror used to live here
+// and had fallen six flags behind cli.tsx — see run-prompt-args.ts.
+const parsePrompt = parseRunPrompt;
 
 test('CLI parsing: detects run command with single word prompt', t => {
 	const args = ['run', 'help'];
@@ -564,7 +561,65 @@ test('resume flags: --continue without `run` is not a non-interactive error', t 
 	t.false(nonInteractiveError);
 });
 
-// Run command with flags before 'run' (the blocker fix)
+test('--prompt-file and its value do not leak into the prompt', t => {
+	// The prompt itself comes from the file; anything left in argv would be
+	// prepended to it as stray text.
+	t.is(parsePrompt(['run', '--prompt-file', '/tmp/p.txt']), '');
+	t.is(parsePrompt(['run', '--prompt-file=/tmp/p.txt']), '');
+	t.is(
+		parsePrompt(['run', '--prompt-file', '/tmp/p.txt', '--mode', 'yolo']),
+		'',
+	);
+});
+
+test('a positional prompt alongside --prompt-file still parses from argv', t => {
+	// The file wins at the call site; this only asserts the flag is stripped
+	// rather than swallowing the word after it.
+	t.is(parsePrompt(['run', 'hello', '--prompt-file', '/tmp/p.txt']), 'hello');
+});
+
+
+test('every flag the parser knows is stripped from the prompt', t => {
+	// Derived from the parser's own list rather than a list written here, so a
+	// flag added to the parser is covered the moment it is added. The previous
+	// version of this test enumerated six flags by hand and would have gone
+	// quiet on the seventh — which is the failure it was written to prevent.
+	for (const flag of RUN_FLAGS_WITH_VALUES) {
+		t.is(parsePrompt(['run', 'x', flag, 'value']), 'x', `${flag} <value>`);
+		t.is(parsePrompt(['run', 'x', `${flag}=value`]), 'x', `${flag}=value`);
+	}
+	for (const flag of RUN_FLAGS_STANDALONE) {
+		t.is(parsePrompt(['run', 'x', flag]), 'x', flag);
+	}
+});
+
+test('KNOWN_RUN_FLAGS covers every long flag the CLI documents', t => {
+	// The other direction: a flag added to --help but not to the parser would
+	// otherwise be silently swallowed into the prompt.
+	const help = readFileSync('source/cli.tsx', 'utf8');
+	const documented = new Set(
+		[...help.matchAll(/^\s{2}(--[a-z][a-z-]+)/gm)].map(m => m[1]),
+	);
+	const unhandled = [...documented].filter(
+		flag =>
+			!KNOWN_RUN_FLAGS.includes(flag) &&
+			// Flags that legitimately never appear after `run`.
+			![
+				// Never valid after `run`.
+				'--version',
+				'--help',
+				'--acp',
+				'--continue',
+				'--resume',
+				// `nanocoder init` flags.
+				'--preset',
+				'--lean',
+			].includes(flag),
+	);
+	t.deepEqual(unhandled, [], `documented but not stripped: ${unhandled}`);
+});
+
+// Run command with flags before 'run'
 test('CLI parsing: handles flags before run command', t => {
 	const args = ['--plain', 'run', 'say', 'hi'];
 	const prompt = parsePrompt(args);
@@ -590,7 +645,7 @@ function resolveReviewGuards(opts: {
 	outputFormat: string;
 }): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
 	const {args, stdoutIsTTY, outputFormat} = opts;
-	const isRunCommand = args.findIndex(arg => arg === 'run') !== -1;
+	const isRunCommand = args.indexOf('run') !== -1;
 	const isReviewCommand = args[0] === 'review';
 	const ttyError = isReviewCommand && !stdoutIsTTY;
 	const jsonError = isReviewCommand && outputFormat === 'json';
@@ -661,41 +716,29 @@ test('review guard: run alone has no collision', t => {
 	t.false(collisionError);
 });
 
-// filterCliFlags: shared flag filter produces single source of truth
-test('filterCliFlags: filters all known flags', t => {
-	const result = filterCliFlags([
-		'--vscode',
-		'--json',
-		'--trust-directory',
-		'--plain',
-		'--no-plain',
-		'--no-alt-screen',
-		'--alt-screen',
-		'--vscode-port',
-		'3000',
-		'--provider',
-		'ollama',
-		'--model',
-		'llama3',
-		'--context-max',
-		'128k',
-		'--output-format',
-		'json',
-		'--output-format=json',
-		'--mode',
-		'plan',
-		'--mode=plan',
-		'my-prompt',
-	]);
-	t.deepEqual(result, ['my-prompt']);
-});
-
-test('filterCliFlags: returns all args when no flags present', t => {
-	const result = filterCliFlags(['hello', 'world']);
-	t.deepEqual(result, ['hello', 'world']);
-});
-
-test('filterCliFlags: returns empty array for empty input', t => {
-	const result = filterCliFlags([]);
-	t.deepEqual(result, []);
+test('every flag the parser knows is stripped from the review target', t => {
+	// `review` shares the `run` flag list rather than keeping its own copy. A
+	// hand-maintained second list had already drifted: it did not know
+	// --mouse/--no-mouse, so `nanocoder review --mouse main` reported the
+	// branch name as an extra argument. Derived from the parser's own lists so
+	// the next flag added is covered the moment it is added.
+	for (const flag of RUN_FLAGS_WITH_VALUES) {
+		t.deepEqual(
+			parseReviewCliArgs(['review', flag, 'value', 'main']).prompt,
+			'/review main',
+			`${flag} <value>`,
+		);
+		t.deepEqual(
+			parseReviewCliArgs(['review', `${flag}=value`, 'main']).prompt,
+			'/review main',
+			`${flag}=value`,
+		);
+	}
+	for (const flag of RUN_FLAGS_STANDALONE) {
+		t.deepEqual(
+			parseReviewCliArgs(['review', flag, 'main']).prompt,
+			'/review main',
+			flag,
+		);
+	}
 });

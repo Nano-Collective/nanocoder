@@ -10,7 +10,9 @@
 // (~thousand+ modules via Ink + es-toolkit alone) into the fast path,
 // defeating the purpose. Heavy imports live inside `main()` below and are
 // pulled in via dynamic `await import()` only when the app actually boots.
+import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import {parseRunPrompt} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -208,6 +210,9 @@ Options:
   --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
                       Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
+  --prompt-file       Read the run prompt from a file instead of the command
+                      line. Necessary for large prompts: Linux caps a single
+                      argument at 128 KiB and execve fails with E2BIG.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with the "run" command and "daemon start". Does not modify
                       the preferences file.
@@ -414,14 +419,48 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Check for non-interactive mode (run command)
-	let nonInteractivePrompt: string | undefined;
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
+	// Check for non-interactive mode (run command). The filtering lives in
+	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
+	// in cli.spec.ts had drifted six flags behind this.
+	const runCommandIndex = args.indexOf('run');
 	const isRunCommand = runCommandIndex !== -1;
-	const afterRunArgs = isRunCommand ? args.slice(runCommandIndex + 1) : [];
-	if (isRunCommand && afterRunArgs.length > 0) {
-		const {filterCliFlags} = await import('@/utils/cli-flags');
-		nonInteractivePrompt = filterCliFlags(afterRunArgs).join(' ');
+	let nonInteractivePrompt = parseRunPrompt(args);
+
+	// --prompt-file: read the prompt from a file rather than argv.
+	//
+	// Linux caps a *single* argv entry at MAX_ARG_STRLEN (32 pages = 131072
+	// bytes), independently of the much larger ARG_MAX total, and execve fails
+	// with E2BIG before the process starts. macOS has no equivalent per-argument
+	// cap, so a caller that assembles a large prompt — anything that embeds file
+	// contents — works in local testing and then cannot spawn at all on a Linux
+	// CI runner. A file has no such ceiling.
+	//
+	// Takes precedence over a positional prompt: passing both is a caller bug,
+	// and the file is the one that was asked for explicitly.
+	const promptFileIndex = args.findIndex(
+		arg => arg === '--prompt-file' || arg.startsWith('--prompt-file='),
+	);
+	const promptFile =
+		promptFileIndex === -1
+			? undefined
+			: args[promptFileIndex].startsWith('--prompt-file=')
+				? args[promptFileIndex].slice('--prompt-file='.length)
+				: args[promptFileIndex + 1];
+	if (promptFile !== undefined) {
+		if (runCommandIndex === -1) {
+			console.error('--prompt-file only applies to `nanocoder run`.');
+			process.exit(1);
+		}
+		try {
+			nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+		} catch (error) {
+			console.error(
+				`Could not read --prompt-file "${promptFile}": ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			process.exit(1);
+		}
 	}
 
 	let nonInteractiveMode = isRunCommand;

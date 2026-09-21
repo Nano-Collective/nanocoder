@@ -66,6 +66,16 @@
 				"category": "Nanocoder"
 			},
 			{
+				"command": "nanocoder.restartAcp",
+				"title": "Restart Nanocoder Agent Process",
+				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.showOutput",
+				"title": "Show Output Logs",
+				"category": "Nanocoder"
+			},
+			{
 				"command": "nanocoder.toggleHistory",
 				"title": "View Session History",
 				"category": "Nanocoder",
@@ -136,6 +146,10 @@
 				}
 			],
 			"commandPalette": [
+				{
+					"command": "nanocoder.showOutput",
+					"when": "false"
+				},
 				{
 					"command": "nanocoder.explainCode",
 					"when": "false"
