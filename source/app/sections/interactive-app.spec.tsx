@@ -282,6 +282,14 @@ test('does not drain queued prompts while plan proceed is pending', async t => {
 
 test('does not immediately retry a failed queued dispatch', async t => {
 	let dispatchAttempts = 0;
+	let releaseFailure = () => {};
+	const failure = new Promise<void>(resolve => {
+		releaseFailure = () => resolve();
+	});
+	let signalFirstDispatch = () => {};
+	const firstDispatchStarted = new Promise<void>(resolve => {
+		signalFirstDispatch = () => resolve();
+	});
 	const {unmount} = renderWithTheme(
 		<QueuedPromptHarness
 			overrides={{
@@ -291,16 +299,22 @@ test('does not immediately retry a failed queued dispatch', async t => {
 				isConversationComplete: true,
 				handleUserSubmit: async () => {
 					dispatchAttempts++;
-					await new Promise(resolve => setTimeout(resolve, 5));
+					signalFirstDispatch();
+					await failure;
 					throw new Error('dispatch failed');
 				},
 			}}
 		/>,
 	);
 
-	await new Promise(resolve => setTimeout(resolve, 50));
+	t.teardown(unmount);
+	await firstDispatchStarted;
+	// Let the queue removal commit before the failed dispatch is released. This
+	// is the render boundary that a synchronous throw would collapse away.
+	await new Promise(resolve => setTimeout(resolve, 0));
+	releaseFailure();
+	await new Promise(resolve => setTimeout(resolve, 25));
 	t.is(dispatchAttempts, 1);
-	unmount();
 });
 
 test('does not drain queued prompts while conversation is incomplete', async t => {
