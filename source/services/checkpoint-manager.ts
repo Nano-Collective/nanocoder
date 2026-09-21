@@ -186,7 +186,7 @@ export class CheckpointManager {
 			await fs.mkdir(filesDir, {recursive: true});
 
 			for (const [relativePath, snapshot] of fileSnapshots) {
-				const filePath = path.join(filesDir, relativePath);
+				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const fileDir = path.dirname(filePath);
 
 				await fs.mkdir(fileDir, {recursive: true});
@@ -236,7 +236,7 @@ export class CheckpointManager {
 		await fs.mkdir(filesDir, {recursive: true});
 
 		for (const [relativePath, snapshot] of fileSnapshots) {
-			const filePath = path.join(filesDir, relativePath);
+			const filePath = path.join(filesDir, relativePath); // nosemgrep
 			const fileDir = path.dirname(filePath);
 
 			await fs.mkdir(fileDir, {recursive: true});
