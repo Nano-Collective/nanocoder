@@ -26,6 +26,27 @@ function parsePrompt(args: string[]): string | undefined {
 			} else if (arg === '--context-max') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg === '--mode') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--mode=')) {
+				continue; // skip fused form
+			} else if (arg === '--output-format') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--output-format=')) {
+				continue; // skip fused form
+			} else if (arg === '--json') {
+				continue; // skip this flag
+			} else if (arg === '--trust-directory') {
+				continue; // skip this flag
+			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
+				continue; // skip this flag
+			} else if (arg === '--prompt-file') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--prompt-file=')) {
+				continue; // skip fused form
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
 			} else {
@@ -582,4 +603,40 @@ test('resume flags: --resume combined with `run` is an error', t => {
 test('resume flags: --continue without `run` is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue']);
 	t.false(nonInteractiveError);
+});
+
+
+test('--prompt-file and its value do not leak into the prompt', t => {
+	// The prompt itself comes from the file; anything left in argv would be
+	// prepended to it as stray text.
+	t.is(parsePrompt(['run', '--prompt-file', '/tmp/p.txt']), '');
+	t.is(parsePrompt(['run', '--prompt-file=/tmp/p.txt']), '');
+	t.is(
+		parsePrompt(['run', '--prompt-file', '/tmp/p.txt', '--mode', 'yolo']),
+		'',
+	);
+});
+
+test('a positional prompt alongside --prompt-file still parses from argv', t => {
+	// The file wins at the call site; this only asserts the flag is stripped
+	// rather than swallowing the word after it.
+	t.is(parsePrompt(['run', 'hello', '--prompt-file', '/tmp/p.txt']), 'hello');
+});
+
+
+test('the mirror above strips every flag the real parser strips', t => {
+	// This helper duplicates cli.tsx by hand, and had silently fallen six flags
+	// behind it — `--mode`, `--json`, `--output-format`, `--trust-directory`
+	// and the alt-screen pair all leaked into the prompt here while the real
+	// parser removed them, so the tests were passing on a parser nobody ships.
+	for (const argv of [
+		['run', 'x', '--mode', 'yolo'],
+		['run', 'x', '--output-format', 'json'],
+		['run', 'x', '--json'],
+		['run', 'x', '--trust-directory'],
+		['run', 'x', '--alt-screen'],
+		['run', 'x', '--no-alt-screen'],
+	]) {
+		t.is(parsePrompt(argv), 'x', argv.join(' '));
+	}
 });
