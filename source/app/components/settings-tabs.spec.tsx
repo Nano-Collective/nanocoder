@@ -598,13 +598,12 @@ test('Enter on the Theme managed row opens the sub-panel, Esc returns to the lis
 	unmount();
 });
 
-// On this branch the Appearance tab (the tab with the most rows) has exactly
-// MAX_VISIBLE_ROWS (4) entries — Status Line lives on a separate, not-yet-
-// upstream fork feature and is out of scope for this branch, so no tab
-// currently overflows the visible window and the indicator can't be
-// organically triggered here. Skipped rather than deleted: restore once any
-// tab exceeds 4 rows (e.g. when Status Line lands on main).
-test.skip('scroll indicator appears when items exceed the visible window', async t => {
+// This was skipped on the grounds that no tab exceeded MAX_VISIBLE_ROWS (4),
+// so the indicator could not be triggered organically. That is no longer
+// true: Appearance gained Alternate Screen and Mouse Wheel Reporting with the
+// fullscreen TUI and now has 5 rows, and Behavior and Advanced have 6 each.
+// Appearance is the default tab, so the indicator renders on the first frame.
+test('scroll indicator appears when items exceed the visible window', async t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);
@@ -612,7 +611,10 @@ test.skip('scroll indicator appears when items exceed the visible window', async
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.truthy(output!.includes('more below'));
+	t.regex(output!, /more below/);
+	// The count, not just the label: a window showing 4 of 5 rows has exactly
+	// one hidden below it, so an off-by-one in the arithmetic still fails.
+	t.regex(output!, /1 more below/);
 
 	unmount();
 });
