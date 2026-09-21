@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	ensureDirectoryTrust,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
@@ -294,6 +295,88 @@ test.serial(
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// `daemon install` is deliberately not gated — it only writes the unit, and the
+// gate fires when the daemon boots. That makes an untrusted install look fine
+// now and fail later, in daemon.log. Both directions are asserted so the
+// warning cannot quietly become unconditional.
+test.serial(
+	'install warns when the project root is not trusted yet',
+	async t => {
+		const root = await tempProject();
+		try {
+			await withIsolatedPreferences(async () => {
+				const result = await runDaemonCli('install', {
+					projectRoot: root,
+					loadService: false,
+				});
+				t.regex(result.output, /Auto-start installed/);
+				t.regex(result.output, /is not trusted yet/);
+				t.regex(result.output, /every auto-start boot will be refused/);
+			});
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('install stays quiet when the project root is already trusted', async t => {
+	const root = await tempProject();
+	try {
+		await withIsolatedPreferences(async () => {
+			savePreferences({trustedDirectories: [root]});
+			const result = await runDaemonCli('install', {
+				projectRoot: root,
+				loadService: false,
+			});
+			t.regex(result.output, /Auto-start installed/);
+			t.false(
+				result.output.includes('is not trusted yet'),
+				'a trusted install must not warn',
+			);
+		});
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+// `savePreferences` swallows write errors, so `persisted: true` used to be a
+// claim the code could not back: `start` printed "Marked ... as trusted" even
+// when nothing reached disk, and the very next boot refused a directory the
+// user had just been told was trusted.
+test.serial(
+	'ensureDirectoryTrust does not claim a persisted entry when the write fails',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const result = ensureDirectoryTrust('/tmp/untrusted-project', false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: () => false,
+			});
+			t.true(result.trusted, 'the env var still bypasses the gate');
+			t.false(result.persisted, 'a failed write must not report a persisted trust');
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust still reports a persisted entry when the write succeeds',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const result = ensureDirectoryTrust('/tmp/untrusted-project', false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: () => true,
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
 	},
 );

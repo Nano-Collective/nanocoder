@@ -74,6 +74,11 @@ Then start the daemon so subscriptions fire:
 nanocoder daemon start
 ```
 
+`daemon start` refuses to run in a directory you haven't trusted yet. Run
+`nanocoder` interactively there once to accept the disclaimer, or pass
+`--trust-directory` to skip the check for that run. See
+**[Skills](./skills.md#the-daemon)** for the trust options in full.
+
 If `.nanocoder/schedules.json` is still present when Nanocoder boots, a
 loud deprecation warning points at this page. The file itself is no
 longer read.

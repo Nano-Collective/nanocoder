@@ -87,7 +87,13 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	};
 }
 
-export function savePreferences(preferences: UserPreferences): void {
+/**
+ * Writes the preferences file. Returns `false` when the write failed — the
+ * error is logged here rather than thrown, so callers that must know whether
+ * the value actually reached disk (the trust gate, whose message claims a
+ * persisted entry) have a signal to branch on.
+ */
+export function savePreferences(preferences: UserPreferences): boolean {
 	try {
 		atomicWriteFileSync(
 			getPreferencesPath(),
@@ -95,13 +101,14 @@ export function savePreferences(preferences: UserPreferences): void {
 		);
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
-		return;
+		return false;
 	}
 
 	preferencesVersion++;
 	for (const listener of preferencesListeners) {
 		listener();
 	}
+	return true;
 }
 
 /**
@@ -122,13 +129,18 @@ export function isDirectoryTrusted(
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
-	/** True if this call persisted a new trust entry (env-var bypass only). */
+	/**
+	 * True if this call persisted a new trust entry (env-var bypass only).
+	 * Stays false when the write failed, so callers never announce a trust
+	 * the next boot would not see.
+	 */
 	persisted: boolean;
 }
 
 export interface DirectoryTrustDeps {
 	loadPreferences: typeof loadPreferences;
-	savePreferences: typeof savePreferences;
+	/** Savers may report failure (`false`); anything else counts as written. */
+	savePreferences: (preferences: UserPreferences) => boolean | void;
 }
 
 /**
@@ -157,11 +169,17 @@ export function ensureDirectoryTrust(
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
 		const resolved = path.resolve(directory); // nosemgrep
-		deps.savePreferences({
+		// `savePreferences` swallows write errors and reports them as `false`.
+		// Propagate that instead of unconditionally claiming a persisted trust:
+		// the callers print "Marked ... as trusted" on `persisted`, and on a
+		// failed write the daemon's own gate would then refuse a directory the
+		// user was just told was trusted. Savers that report nothing (test
+		// doubles, older injections) keep the previous behaviour.
+		const saved = deps.savePreferences({
 			...preferences,
 			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
 		});
-		return {trusted: true, persisted: true};
+		return {trusted: true, persisted: saved !== false};
 	}
 
 	return {trusted: false, persisted: false};

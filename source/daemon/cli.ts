@@ -21,7 +21,11 @@ import {
 } from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ensureDirectoryTrust} from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	isDirectoryTrusted,
+	loadPreferences,
+} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
@@ -63,6 +67,12 @@ export interface DaemonCliOptions {
 	 * subcommand.
 	 */
 	trustDirectory?: boolean;
+	/**
+	 * Whether `install` / `uninstall` may shell out to `launchctl` /
+	 * `systemctl` / `schtasks`. Defaults to true. Tests pass false so the
+	 * suite verifies the generated unit without registering a real service.
+	 */
+	loadService?: boolean;
 }
 
 /**
@@ -116,10 +126,24 @@ async function installCommand(
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
 	const {installAutoStart} = await import('./install');
-	const result = await installAutoStart({projectRoot: opts.projectRoot});
+	const result = await installAutoStart({
+		projectRoot: opts.projectRoot,
+		loadService: opts.loadService,
+	});
+
+	// Auto-start is the one boot that runs with nobody watching: the unit
+	// invokes `daemon start` from launchd / systemd / Task Scheduler, its
+	// output goes to daemon.log, and a refused boot leaves only a restart
+	// loop there. Installing before the directory is trusted sets the user up
+	// for exactly that, so say so now rather than let them find it later.
+	const trusted = isDirectoryTrusted(opts.projectRoot, loadPreferences());
+	const warning = trusted
+		? ''
+		: `\nWarning: ${resolve(opts.projectRoot)} is not trusted yet, so every auto-start boot will be refused and the reason will only appear in ${getLogPath(opts.projectRoot)}. Run \`nanocoder\` interactively in this directory once, or re-run \`nanocoder daemon install\` with NANOCODER_TRUST_DIRECTORY=1, to trust it.`;
+
 	return {
 		exitCode: result.platform === 'unsupported' ? 1 : 0,
-		output: result.message,
+		output: `${result.message}${warning}`,
 	};
 }
 
@@ -127,7 +151,10 @@ async function uninstallCommand(
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
 	const {uninstallAutoStart} = await import('./install');
-	const result = await uninstallAutoStart({projectRoot: opts.projectRoot});
+	const result = await uninstallAutoStart({
+		projectRoot: opts.projectRoot,
+		loadService: opts.loadService,
+	});
 	return {exitCode: 0, output: result.message};
 }
 
