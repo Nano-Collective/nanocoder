@@ -1,6 +1,5 @@
 ---
 "@nanocollective/nanocoder": patch
-"nanocoder-vscode": patch
 ---
 
 This release introduces a suite of UI improvements to the VS Code chat panel and robust session state recovery:
