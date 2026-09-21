@@ -1,41 +1,18 @@
 import test from 'ava';
+import {readFileSync} from 'node:fs';
+import {
+	KNOWN_RUN_FLAGS,
+	parseRunPrompt,
+	RUN_FLAGS_STANDALONE,
+	RUN_FLAGS_WITH_VALUES,
+} from './run-prompt-args.js';
 
 // Test CLI argument parsing for non-interactive mode
 // These tests verify that the CLI correctly parses the 'run' command
 
-// Helper function to parse prompt from args (mimics the logic in cli.tsx)
-function parsePrompt(args: string[]): string | undefined {
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		const afterRunArgs = args.slice(runCommandIndex + 1);
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
-		}
-		return promptArgs.join(' ');
-	}
-	return undefined;
-}
+// The real parser, not a copy of it. A hand-written mirror used to live here
+// and had fallen six flags behind cli.tsx — see run-prompt-args.ts.
+const parsePrompt = parseRunPrompt;
 
 test('CLI parsing: detects run command with single word prompt', t => {
 	const args = ['run', 'help'];
@@ -327,45 +304,46 @@ test('plain mode: --vscode suppresses auto-detection', t => {
 });
 
 // --alt-screen / --no-alt-screen flag tests. The resolution rule mirrors
-// the logic in cli.tsx: --no-alt-screen always wins (forces inline), then
-// --alt-screen or the "alternateScreen" preference opt in, and the whole
-// thing is gated on being an interactive TTY session (never in
+// the logic in cli.tsx: fullscreen (alt screen) is enabled by default in
+// interactive TTY sessions. --no-alt-screen or "alternateScreen": false in
+// preferences forces inline mode. --alt-screen explicitly enables it, and
+// the whole thing is gated on being an interactive TTY session (never in
 // nonInteractiveMode, e.g. `run`, and never off a real TTY).
 function resolveAltScreenMode(opts: {
 	args: string[];
 	stdoutIsTTY: boolean;
 	nonInteractiveMode: boolean;
-	preferenceAlternateScreen: boolean;
+	preferenceAlternateScreen?: boolean;
 }): boolean {
 	const {args, stdoutIsTTY, nonInteractiveMode, preferenceAlternateScreen} =
 		opts;
+	const pref = preferenceAlternateScreen ?? true;
 	const altScreenAllowed =
 		!args.includes('--no-alt-screen') &&
-		(args.includes('--alt-screen') || preferenceAlternateScreen === true);
+		(args.includes('--alt-screen') || pref === true);
 	return stdoutIsTTY && !nonInteractiveMode && altScreenAllowed;
 }
 
-test('alt-screen: off by default (no flag, no preference)', t => {
+test('alt-screen: on by default (no flag, no preference)', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: [],
 		stdoutIsTTY: true,
 		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
-	});
-	t.false(useAltScreen);
-});
-
-test('alt-screen: --alt-screen flag turns it on over a TTY', t => {
-	const useAltScreen = resolveAltScreenMode({
-		args: ['--alt-screen'],
-		stdoutIsTTY: true,
-		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
 	});
 	t.true(useAltScreen);
 });
 
-test('alt-screen: "alternateScreen" preference turns it on without the flag', t => {
+test('alt-screen: --alt-screen flag explicitly keeps it on over a TTY', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: true,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: "alternateScreen": true preference keeps it on without the flag', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: [],
 		stdoutIsTTY: true,
@@ -375,12 +353,20 @@ test('alt-screen: "alternateScreen" preference turns it on without the flag', t 
 	t.true(useAltScreen);
 });
 
-test('alt-screen: --no-alt-screen overrides the flag', t => {
+test('alt-screen: --no-alt-screen turns it off', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--no-alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: --no-alt-screen overrides the --alt-screen flag', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: ['--alt-screen', '--no-alt-screen'],
 		stdoutIsTTY: true,
 		nonInteractiveMode: false,
-		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
@@ -395,22 +381,40 @@ test('alt-screen: --no-alt-screen overrides the persisted preference', t => {
 	t.false(useAltScreen);
 });
 
-test('alt-screen: never enabled off a non-TTY, even with the flag', t => {
+test('alt-screen: "alternateScreen": false preference turns it off without the flag', t => {
 	const useAltScreen = resolveAltScreenMode({
-		args: ['--alt-screen'],
-		stdoutIsTTY: false,
+		args: [],
+		stdoutIsTTY: true,
 		nonInteractiveMode: false,
 		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
 
-test('alt-screen: never enabled for non-interactive `run` mode, even with the flag', t => {
+test('alt-screen: --alt-screen overrides "alternateScreen": false preference', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: true,
+		nonInteractiveMode: false,
+		preferenceAlternateScreen: false,
+	});
+	t.true(useAltScreen);
+});
+
+test('alt-screen: never enabled off a non-TTY, even with the flag or default', t => {
+	const useAltScreen = resolveAltScreenMode({
+		args: ['--alt-screen'],
+		stdoutIsTTY: false,
+		nonInteractiveMode: false,
+	});
+	t.false(useAltScreen);
+});
+
+test('alt-screen: never enabled for non-interactive `run` mode, even with the flag or default', t => {
 	const useAltScreen = resolveAltScreenMode({
 		args: ['--alt-screen'],
 		stdoutIsTTY: true,
 		nonInteractiveMode: true,
-		preferenceAlternateScreen: false,
 	});
 	t.false(useAltScreen);
 });
@@ -555,4 +559,63 @@ test('resume flags: --resume combined with `run` is an error', t => {
 test('resume flags: --continue without `run` is not a non-interactive error', t => {
 	const {nonInteractiveError} = resolveResumeFlags(['--continue']);
 	t.false(nonInteractiveError);
+});
+
+
+test('--prompt-file and its value do not leak into the prompt', t => {
+	// The prompt itself comes from the file; anything left in argv would be
+	// prepended to it as stray text.
+	t.is(parsePrompt(['run', '--prompt-file', '/tmp/p.txt']), '');
+	t.is(parsePrompt(['run', '--prompt-file=/tmp/p.txt']), '');
+	t.is(
+		parsePrompt(['run', '--prompt-file', '/tmp/p.txt', '--mode', 'yolo']),
+		'',
+	);
+});
+
+test('a positional prompt alongside --prompt-file still parses from argv', t => {
+	// The file wins at the call site; this only asserts the flag is stripped
+	// rather than swallowing the word after it.
+	t.is(parsePrompt(['run', 'hello', '--prompt-file', '/tmp/p.txt']), 'hello');
+});
+
+
+test('every flag the parser knows is stripped from the prompt', t => {
+	// Derived from the parser's own list rather than a list written here, so a
+	// flag added to the parser is covered the moment it is added. The previous
+	// version of this test enumerated six flags by hand and would have gone
+	// quiet on the seventh — which is the failure it was written to prevent.
+	for (const flag of RUN_FLAGS_WITH_VALUES) {
+		t.is(parsePrompt(['run', 'x', flag, 'value']), 'x', `${flag} <value>`);
+		t.is(parsePrompt(['run', 'x', `${flag}=value`]), 'x', `${flag}=value`);
+	}
+	for (const flag of RUN_FLAGS_STANDALONE) {
+		t.is(parsePrompt(['run', 'x', flag]), 'x', flag);
+	}
+});
+
+test('KNOWN_RUN_FLAGS covers every long flag the CLI documents', t => {
+	// The other direction: a flag added to --help but not to the parser would
+	// otherwise be silently swallowed into the prompt.
+	const help = readFileSync('source/cli.tsx', 'utf8');
+	const documented = new Set(
+		[...help.matchAll(/^\s{2}(--[a-z][a-z-]+)/gm)].map(m => m[1]),
+	);
+	const unhandled = [...documented].filter(
+		flag =>
+			!KNOWN_RUN_FLAGS.includes(flag) &&
+			// Flags that legitimately never appear after `run`.
+			![
+				// Never valid after `run`.
+				'--version',
+				'--help',
+				'--acp',
+				'--continue',
+				'--resume',
+				// `nanocoder init` flags.
+				'--preset',
+				'--lean',
+			].includes(flag),
+	);
+	t.deepEqual(unhandled, [], `documented but not stripped: ${unhandled}`);
 });

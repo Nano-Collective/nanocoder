@@ -2,6 +2,7 @@
  * Type-safe protocol for postMessage communication between the extension host
  * and the Sidebar Webview UI.
  */
+import type {SettingsData} from './settings-manager';
 
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
@@ -95,21 +96,6 @@ export interface ExtensionMessageCopyResult {
 	error?: string;
 }
 
-export interface TimelineCheckpoint {
-	id: string;
-	seq: number;
-	toolCallId: string;
-	toolName: string;
-	title: string;
-	timestamp: string;
-	filesChanged: string[];
-}
-
-export interface ExtensionMessageUpdateTimeline {
-	type: 'updateTimeline';
-	entries: TimelineCheckpoint[];
-}
-
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
@@ -122,15 +108,18 @@ export interface ExtensionMessageUpdateSessions {
 
 export interface ExtensionMessageSettingsData {
 	type: 'settingsData';
-	settings: {
-		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
-		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
-		alwaysAllow: string[];
-		defaultMode: string | null;
-		autoCompact: { enabled: boolean; threshold: number; mode: string };
-		reasoningTraces: boolean;
-		sessions: { autoSave: boolean };
-		webSearch: { configured: boolean };
+	settings: SettingsData & {
+		showTokenUsage: boolean;
+		providerTemplates: Record<
+			string,
+			{
+				name: string;
+				sdk: string;
+				url: string;
+				requiresKey: boolean;
+				models: string[];
+			}
+		>;
 	};
 }
 
@@ -139,6 +128,17 @@ export interface ExtensionMessageSettingsUpdated {
 	key: string;
 	success: boolean;
 	error?: string;
+}
+
+export interface ExtensionMessageProviderResult {
+	type: 'addProviderResult';
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageTokenUsageVisibility {
+	type: 'tokenUsageVisibility';
+	showTokenUsage: boolean;
 }
 
 export interface ExtensionMessageToggleSettings {
@@ -208,11 +208,13 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessagePermissionsCancelled
+	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageTokenUsageVisibility
 	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessagePlanReviewRequested
@@ -221,9 +223,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
 	| ExtensionMessageRunPrompt
-	| ExtensionMessageMentionCompletions
-	| ExtensionMessageUpdateTimeline;
-
+	| ExtensionMessageMentionCompletions;
 
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
@@ -235,6 +235,12 @@ export interface WebviewMessageReady {
 
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
+	text: string;
+	images?: { data: string; mimeType: string }[];
+}
+
+export interface WebviewMessageRetryMessage {
+	type: 'retryMessage';
 	text: string;
 	images?: { data: string; mimeType: string }[];
 }
@@ -339,6 +345,17 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageAddProvider {
+	type: 'addProvider';
+	provider: {
+		name: string;
+		sdkProvider: string;
+		baseUrl?: string;
+		apiKey?: string;
+		models?: string[];
+	};
+}
+
 export interface WebviewMessageApprovePlan {
 	type: 'approvePlan';
 }
@@ -366,18 +383,10 @@ export interface WebviewMessageRequestMentionCompletions {
 	requestId: number;
 }
 
-export interface WebviewMessageRequestTimeline {
-	type: 'requestTimeline';
-}
-
-export interface WebviewMessageRevertToCheckpoint {
-	type: 'revertToCheckpoint';
-	checkpointId: string;
-}
-
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
+	| WebviewMessageRetryMessage
 	| WebviewMessageCancel
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
@@ -398,9 +407,8 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageAddProvider
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions
-	| WebviewMessageRequestTimeline
-	| WebviewMessageRevertToCheckpoint;
+	| WebviewMessageRequestMentionCompletions;

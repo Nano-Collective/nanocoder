@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
-import type {TimelineCheckpoint} from './webview-protocol';
 import {PromptAttempt} from './prompt-attempt';
 
 // We expect at least the version of the CLI where ACP was introduced
@@ -28,6 +27,8 @@ export class NanocoderAcpClient {
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
+	/** Fires when a background title update is received. */
+	public onSessionTitleChanged?: () => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -88,6 +89,13 @@ export class NanocoderAcpClient {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._clearPendingPermissions();
+	}
+
+	/** Handle custom notifications from the agent. */
+	async handleExtNotification(method: string, _params: unknown): Promise<void> {
+		if (method === '_nanocoder/sessionTitleChanged') {
+			this.onSessionTitleChanged?.();
+		}
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {
@@ -449,40 +457,21 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async listTimeline(): Promise<TimelineCheckpoint[]> {
-		if (!this.connection || !this._sessionId) return [];
-		try {
-			const result = await this.connection.extMethod('timeline/list', {
-				sessionId: this._sessionId,
-			});
-			const entries = (result as {entries?: unknown}).entries;
-			return Array.isArray(entries) ? entries : [];
-		} catch (error) {
-			this.outputChannel.appendLine(`listTimeline failed: ${error}`);
-			return [];
-		}
-	}
-
 	/**
-	 * Throws on every failure path, including "not connected": the caller
-	 * tears down and rebuilds the chat view on success, so it has to be able
-	 * to tell a real revert from a no-op.
+	 * Erases the retried turn from session history before resending the prompt,
+	 * preventing duplicate user bubbles and stale assistant responses in history.
 	 */
-	async revertTimeline(checkpointId: string): Promise<void> {
+	async retryTurn(promptText?: string): Promise<void> {
 		if (!this.connection || !this._sessionId) {
-			const message = 'Not connected to a nanocoder session';
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${message}`);
-			throw new Error(message);
+			return;
 		}
 		try {
-			await this.connection.extMethod('timeline/revert', {
+			await this.connection.extMethod('retryTurn', {
 				sessionId: this._sessionId,
-				checkpointId,
+				promptText,
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`revertTimeline failed: ${error}`);
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${error}`);
-			throw error;
+			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}
 	}
 

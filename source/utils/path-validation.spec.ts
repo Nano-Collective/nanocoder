@@ -6,7 +6,7 @@ import {
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, parse as parsePath} from 'node:path';
 import test from 'ava';
 import {
 	isPathInside,
@@ -317,6 +317,16 @@ test('isPathInside: rejects siblings, ancestors, and shared prefixes', t => {
 test('isPathInside: resolves ../ traversal before comparing', t => {
 	t.false(isPathInside('/proj/../etc', '/proj'));
 	t.true(isPathInside('/proj/src/../lib', '/proj'));
+});
+
+test('isPathInside: filesystem root contains descendants without a doubled separator', t => {
+	// POSIX `/` and Windows `C:\` both already end with a separator. Appending
+	// path.sep would produce `//` or `C:\\`, which no real path starts with.
+	const root = parsePath(process.cwd()).root;
+	const child = join(root, 'home', 'user', 'project');
+	t.true(isPathInside(root, root));
+	t.true(isPathInside(child, root));
+	t.true(isValidFilePath(child, root));
 });
 
 test('isPathInside: is lexical, so an escaping symlink still passes', t => {

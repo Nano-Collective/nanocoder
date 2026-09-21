@@ -419,7 +419,7 @@ test('retries rejects unknown key', t => {
 	});
 });
 
-test('RetryLimitsConfig requires no fields and exposes all three retry caps', t => {
+test('RetryLimitsConfig requires no fields and exposes every retry cap', t => {
 	const def = schema.definitions.RetryLimitsConfig;
 	t.deepEqual(def.required, undefined);
 	t.false(Object.values(def.properties).some((p: {required?: string[]}) => p.required));
@@ -427,6 +427,7 @@ test('RetryLimitsConfig requires no fields and exposes all three retry caps', t 
 		'maxEmptyTurns',
 		'maxMalformedRetries',
 		'maxRepeatedToolCalls',
+		'maxTruncatedTurns',
 	]);
 });
 

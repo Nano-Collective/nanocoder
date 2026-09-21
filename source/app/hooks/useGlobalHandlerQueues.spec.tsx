@@ -9,6 +9,7 @@ import {
 	type PendingToolApproval,
 	signalToolApproval,
 } from '@/utils/tool-approval-queue';
+import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {useGlobalHandlerQueues} from './useGlobalHandlerQueues';
 
 console.log('\nuseGlobalHandlerQueues.spec.tsx');
@@ -138,4 +139,148 @@ test('handleSubagentToolApproval with no pending approval is a no-op', t => {
 	const {hook} = setup();
 
 	t.notThrows(() => hook.handleSubagentToolApproval(true));
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency: tool-executor starts up to MAX_CONCURRENT_AGENTS subagents in a
+// single turn, so several callers can be waiting on one slot at once. Each must
+// settle with its own answer — a caller that never settles hangs the turn,
+// because the batch is awaited with Promise.allSettled.
+// ---------------------------------------------------------------------------
+
+function approvalFrom(subagentName: string): PendingToolApproval {
+	return {
+		toolCall: {id: subagentName, function: {name: 'write_file', arguments: {}}},
+		subagentName,
+	} as unknown as PendingToolApproval;
+}
+
+function question(text: string): PendingQuestion {
+	return {question: text, options: [], allowFreeform: true};
+}
+
+// Real useState updates need a tick to flush through the Probe's re-render
+// before `captured` reflects them — the other tests above only ever check
+// spy props (set synchronously inside the promise executor), so they don't
+// need this.
+const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+test('concurrent subagent approvals each settle with their own answer', async t => {
+	setup();
+
+	const a = signalToolApproval(approvalFrom('agent-A'));
+	const b = signalToolApproval(approvalFrom('agent-B'));
+	const c = signalToolApproval(approvalFrom('agent-C'));
+
+	captured!.handleSubagentToolApproval(true);
+	captured!.handleSubagentToolApproval(false);
+	captured!.handleSubagentToolApproval(true);
+
+	t.deepEqual(await Promise.all([a, b, c]), [true, false, true]);
+});
+
+test('a queued request is presented only once the one before it is answered', async t => {
+	const {setPendingQuestion, setIsQuestionMode} = setup();
+
+	const first = question('first?');
+	const second = question('second?');
+	const firstAnswer = signalQuestion(first);
+	const secondAnswer = signalQuestion(second);
+
+	// Only the head is on screen; the second waits its turn.
+	t.deepEqual(setPendingQuestion.calls, [[first]]);
+
+	captured!.handleQuestionAnswer('a');
+	t.deepEqual(setPendingQuestion.calls.at(-1), [second]);
+
+	captured!.handleQuestionAnswer('b');
+	t.deepEqual(setPendingQuestion.calls.at(-1), [null]);
+
+	// Question mode stays on while the queue drains, and clears once it empties.
+	t.deepEqual(setIsQuestionMode.calls, [[true], [true], [false]]);
+	t.deepEqual(await Promise.all([firstAnswer, secondAnswer]), ['a', 'b']);
+});
+
+test('concurrent main-agent tool confirmations settle in arrival order', async t => {
+	setup();
+
+	const first = signalToolConfirm({
+		toolCall: {id: '1', function: {name: 'write_file', arguments: {}}},
+	} as unknown as Parameters<typeof signalToolConfirm>[0]);
+	const second = signalToolConfirm({
+		toolCall: {id: '2', function: {name: 'execute_bash', arguments: {}}},
+	} as unknown as Parameters<typeof signalToolConfirm>[0]);
+
+	captured!.handleToolConfirmation(false);
+	captured!.handleToolConfirmation(true);
+
+	t.deepEqual(await Promise.all([first, second]), [false, true]);
+});
+
+test('pendingSubagentApproval (real state) advances from A to B when A is answered', async t => {
+	setup();
+
+	const a = signalToolApproval(approvalFrom('agent-A'));
+	const b = signalToolApproval(approvalFrom('agent-B'));
+	await tick();
+
+	// This is the real useState the UI renders from — chat-input.tsx keys
+	// ToolConfirmation off pendingSubagentApproval.toolCall.id, so B must
+	// actually replace A here, not just in an internal queue array.
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-A');
+
+	captured!.handleSubagentToolApproval(true);
+	await tick();
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-B');
+
+	captured!.handleSubagentToolApproval(false);
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+
+	t.deepEqual(await Promise.all([a, b]), [true, false]);
+});
+
+test('a request arriving after the queue has fully drained is presented (the length === 1 gate)', async t => {
+	setup();
+
+	const a = signalToolApproval(approvalFrom('agent-A'));
+	await tick();
+	captured!.handleSubagentToolApproval(true);
+	await a;
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+
+	// The queue is empty again here, so this arrival must retrigger the
+	// `queueRef.current.length === 1` present() call rather than assuming
+	// something is already on screen.
+	const b = signalToolApproval(approvalFrom('agent-B'));
+	await tick();
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-B');
+
+	captured!.handleSubagentToolApproval(false);
+	t.false(await b);
+});
+
+test('the subagent-approval and main-agent-confirmation slots stay independent when both are pending', async t => {
+	setup();
+
+	const approval = signalToolApproval(approvalFrom('agent-A'));
+	const confirmation = signalToolConfirm({
+		toolCall: {id: 'main-1', function: {name: 'write_file', arguments: {}}},
+	} as unknown as Parameters<typeof signalToolConfirm>[0]);
+	await tick();
+
+	// These are separate queues specifically so a subagent's tool can need
+	// approval while the parent agent is mid-turn — both must be visible.
+	t.is(captured!.pendingSubagentApproval?.toolCall.id, 'agent-A');
+	t.is(captured!.pendingToolConfirmation?.toolCall.id, 'main-1');
+
+	captured!.handleSubagentToolApproval(true);
+	await tick();
+	t.is(captured!.pendingSubagentApproval, null);
+	// Answering the subagent slot must not touch the confirmation slot.
+	t.is(captured!.pendingToolConfirmation?.toolCall.id, 'main-1');
+
+	captured!.handleToolConfirmation(false);
+	t.deepEqual(await Promise.all([approval, confirmation]), [true, false]);
 });

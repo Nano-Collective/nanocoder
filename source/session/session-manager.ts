@@ -24,6 +24,9 @@ export interface Session {
 	/** True once a user has explicitly renamed this session, so autosave's
 	 * auto-derived title (from the latest message) stops overwriting it. */
 	titleManuallySet?: boolean;
+	/** True once the background titler has named this session, so the
+	 * heuristic title stops overwriting it and we never re-generate. */
+	titleGenerated?: boolean;
 }
 
 export interface SessionMetadata {
@@ -36,6 +39,7 @@ export interface SessionMetadata {
 	model: string;
 	workingDirectory: string;
 	titleManuallySet?: boolean;
+	titleGenerated?: boolean;
 }
 
 function isRecord(obj: unknown): obj is Record<string, unknown> {
@@ -225,6 +229,7 @@ export class SessionManager {
 				model: session.model,
 				workingDirectory: session.workingDirectory,
 				titleManuallySet: session.titleManuallySet,
+				titleGenerated: session.titleGenerated,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -287,6 +292,7 @@ export class SessionManager {
 							model: parsed.model,
 							workingDirectory: parsed.workingDirectory,
 							titleManuallySet: parsed.titleManuallySet,
+							titleGenerated: parsed.titleGenerated,
 						});
 					}
 				} catch (_fileError) {

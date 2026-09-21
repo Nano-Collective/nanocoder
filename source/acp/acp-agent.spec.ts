@@ -964,6 +964,103 @@ test.serial(
 	},
 );
 
+// ============================================================================
+// background session titling
+// ============================================================================
+
+test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		// Calls 1 and 2 are conversation turns; call 3 is the titler.
+		return chatCalls < 3
+			? {choices: [{message: {content: 'Done.'}}]}
+			: {choices: [{message: {content: 'Fix Login Redirect'}}]};
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+
+	await agent['pendingTitleGeneration'];
+	const beforeContext = await sessionManager.readSession(session.sessionId);
+	t.not(beforeContext?.titleGenerated, true);
+	t.is(chatCalls, 1);
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'summarize the README'}],
+	});
+
+	await agent['pendingTitleGeneration'];
+	const titled = await sessionManager.readSession(session.sessionId);
+	t.true(titled?.titleGenerated, 'expected a generated title to be persisted');
+	t.is(titled?.title, 'Fix Login Redirect');
+	// A generated title must never masquerade as a user rename.
+	t.not(titled?.titleManuallySet, true);
+
+	// A third turn must not re-title: titleGenerated short-circuits it.
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'and now this'}],
+	});
+	await agent['pendingTitleGeneration'];
+
+	const after = await sessionManager.readSession(session.sessionId);
+	t.is(after!.title, 'Fix Login Redirect');
+	// Exactly one more chat call, the conversation turn, and no second titler.
+	t.is(chatCalls, 4);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+	await agent['pendingTitleGeneration'];
+
+	// The cancel path early-returns from inside catch, which still runs the
+	// finally. Reaching the finally must not be mistaken for a clean turn.
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+	);
+	await agent['pendingTitleGeneration'];
+
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});
 /** Throwaway workspace for the timeline tests, removed by the caller. */
 const createTimelineWorkspace = (label: string): string => {
 	const cwd = join(
@@ -1143,3 +1240,114 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
 	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
 });
+
+test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'first prompt'},
+		{role: 'assistant', content: 'first response'},
+		{role: 'user', content: 'second prompt'},
+		{role: 'assistant', content: 'second response'},
+	];
+
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'second prompt',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[0].content, 'first prompt');
+	t.is(session.messages[1].content, 'first response');
+
+	// Also verify retrying the first turn truncates all messages and saves to disk
+	const resultFirst = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+	t.true(resultFirst.ok);
+	t.is(session.messages.length, 0);
+
+	const stored = await sessionManager.loadSession(created.sessionId);
+	t.is(stored?.messageCount, 0);
+	t.deepEqual(stored?.messages, []);
+});
+
+test('AcpAgent.extMethod - retryTurn uses an exact prompt match and never picks a substring', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'foo'},
+		{role: 'assistant', content: 'r1'},
+		{role: 'user', content: 'foo bar'},
+		{role: 'assistant', content: 'r2'},
+	];
+
+	// Retrying the literal "foo bar" must truncate at the second user turn,
+	// not the earlier "foo" turn, even though "foo bar" contains "foo".
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'foo bar',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[1].content, 'r1');
+});
+
+test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried turn', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('retry');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'first prompt'},
+			{role: 'assistant', content: 'first response'},
+			{role: 'user', content: 'second prompt'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+
+		// A checkpoint captured during the first turn (kept across retry).
+		await session.timeline.capture({
+			toolCallId: 'call-0',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (first turn)',
+			truncateToMessageIndex: 0,
+			files: new Map([['a.ts', 'before']]),
+		});
+		// A checkpoint captured during the second turn (must be dropped).
+		const dropped = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (second turn)',
+			truncateToMessageIndex: 2,
+			files: new Map([['a.ts', 'before']]),
+		});
+		t.truthy(dropped);
+
+		await agent.extMethod('retryTurn', {
+			sessionId: created.sessionId,
+			promptText: 'second prompt',
+		});
+
+		const entries = (await session.timeline.list()) as Array<{
+			id: string;
+		}>;
+		t.is(entries.length, 1);
+		t.not(entries[0].id, dropped?.id);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
