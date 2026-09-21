@@ -1,5 +1,6 @@
 import {homedir} from 'node:os';
 import {resolve, sep} from 'node:path';
+import stringWidth from 'string-width';
 
 export function homeRelative(path: string, home: string = homedir()): string {
 	const resolved = resolve(path);
@@ -20,19 +21,47 @@ export function homeRelative(path: string, home: string = homedir()): string {
 	return resolved;
 }
 
+/**
+ * Leading (or, from the end, trailing) characters of `str` that together
+ * occupy at most `width` terminal columns. Code units are the wrong unit
+ * here: one CJK character or emoji is a single unit but two columns.
+ */
+function sliceToWidth(str: string, width: number, fromEnd = false): string {
+	if (width <= 0) return '';
+	const characters = [...str];
+	if (fromEnd) characters.reverse();
+
+	const kept: string[] = [];
+	let used = 0;
+	for (const character of characters) {
+		const columns = stringWidth(character);
+		if (used + columns > width) break;
+		used += columns;
+		kept.push(character);
+	}
+
+	if (fromEnd) kept.reverse();
+	return kept.join('');
+}
+
 // Keeps root and leaf visible; truncatePath (useTerminalWidth.tsx) only keeps the tail.
+// `maxLength` is terminal columns, not characters: every caller is budgeting a
+// row of the UI, and a wide glyph counted as one column overflows the row.
 export function truncateMiddle(str: string, maxLength: number): string {
-	if (str.length <= maxLength) {
+	if (stringWidth(str) <= maxLength) {
 		return str;
 	}
 
 	const ellipsis = '...';
 	if (maxLength <= ellipsis.length) {
-		return str.slice(0, Math.max(0, maxLength));
+		return sliceToWidth(str, Math.max(0, maxLength));
 	}
 
-	const keepStart = Math.ceil((maxLength - ellipsis.length) / 2);
-	const keepEnd = Math.floor((maxLength - ellipsis.length) / 2);
+	const budget = maxLength - ellipsis.length;
+	const keepStart = Math.ceil(budget / 2);
+	const keepEnd = Math.floor(budget / 2);
 
-	return str.slice(0, keepStart) + ellipsis + str.slice(str.length - keepEnd);
+	return (
+		sliceToWidth(str, keepStart) + ellipsis + sliceToWidth(str, keepEnd, true)
+	);
 }

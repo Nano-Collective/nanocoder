@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {memo, useState} from 'react';
+import stringWidth from 'string-width';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
@@ -120,7 +121,10 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
 		const branchPart = `⎇ ${shortBranch} · `;
-		const cwdBudget = Math.max(10, termW - branchPart.length - 3);
+		// branchPart already includes the separator, so the trailing 3 is not it:
+		// it is slack, kept from the original budget, for fonts that draw ⎇ and ·
+		// wider than string-width reports.
+		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
 
