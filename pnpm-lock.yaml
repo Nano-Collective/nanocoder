@@ -77,22 +77,22 @@ importers:
         version: 7.0.9
       ink:
         specifier: ^6.3.1
-        version: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
+        version: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
       ink-big-text:
         specifier: ^2.0.0
-        version: 2.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 2.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       ink-gradient:
         specifier: ^4.0.0
-        version: 4.0.1(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 4.0.1(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       ink-select-input:
         specifier: ^6.2.0
-        version: 6.2.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 6.2.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       ink-spinner:
         specifier: ^5.0.0
-        version: 5.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 5.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       ink-tab:
         specifier: ^5.2.0
-        version: 5.2.0(@types/react@19.2.17)(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 5.2.0(@types/react@19.3.0)(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       llama-tokenizer-js:
         specifier: ^1.2.2
         version: 1.2.2
@@ -110,7 +110,7 @@ importers:
         version: 4.0.0
       react:
         specifier: ^19.0.0
-        version: 19.2.7
+        version: 19.3.0
       sonic-boom:
         specifier: ^5.0.0
         version: 5.0.0
@@ -147,7 +147,7 @@ importers:
         version: 26.2.0
       '@types/react':
         specifier: ^19.0.0
-        version: 19.2.17
+        version: 19.3.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -165,7 +165,7 @@ importers:
         version: 9.1.7
       ink-testing-library:
         specifier: ^4.0.0
-        version: 4.0.0(@types/react@19.2.17)
+        version: 4.0.0(@types/react@19.3.0)
       knip:
         specifier: ^6.0.0
         version: 6.34.0
@@ -1633,8 +1633,8 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
-  '@types/react@19.2.17':
-    resolution: {integrity: sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==}
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
 
   '@types/sarif@2.1.7':
     resolution: {integrity: sha512-kRz0VEkJqWLf1LLVN4pT1cg1Z9wAuvI6L97V3m2f5B76Tg8d413ddvLBPTEHAZJlnn4XSvu0FkZtViCQGVyrXQ==}
@@ -3806,8 +3806,8 @@ packages:
     peerDependencies:
       react: ^19.2.0
 
-  react@19.2.7:
-    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+  react@19.3.0:
+    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
 
   read-pkg@9.0.1:
@@ -5751,7 +5751,7 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
-  '@types/react@19.2.17':
+  '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
 
@@ -7132,46 +7132,46 @@ snapshots:
   ini@1.3.8:
     optional: true
 
-  ink-big-text@2.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+  ink-big-text@2.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       cfonts: 3.3.1
-      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
       prop-types: 15.8.1
-      react: 19.2.7
+      react: 19.3.0
 
-  ink-gradient@4.0.1(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+  ink-gradient@4.0.1(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       '@types/gradient-string': 1.1.6
       gradient-string: 3.0.0
-      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
-      react: 19.2.7
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
+      react: 19.3.0
       strip-ansi: 7.2.0
 
-  ink-select-input@6.2.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+  ink-select-input@6.2.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       figures: 6.1.0
-      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
-      react: 19.2.7
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
+      react: 19.3.0
       to-rotated: 1.0.0
 
-  ink-spinner@5.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+  ink-spinner@5.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       cli-spinners: 2.9.2
-      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
-      react: 19.2.7
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
+      react: 19.3.0
 
-  ink-tab@5.2.0(@types/react@19.2.17)(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+  ink-tab@5.2.0(@types/react@19.3.0)(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
-      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
-      react: 19.2.7
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0)
+      react: 19.3.0
     optionalDependencies:
-      '@types/react': 19.2.17
+      '@types/react': 19.3.0
 
-  ink-testing-library@4.0.0(@types/react@19.2.17):
+  ink-testing-library@4.0.0(@types/react@19.3.0):
     optionalDependencies:
-      '@types/react': 19.2.17
+      '@types/react': 19.3.0
 
-  ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7):
+  ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.3.0)(react@19.3.0):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.2.5
       ansi-escapes: 7.3.0
@@ -7186,8 +7186,8 @@ snapshots:
       indent-string: 5.0.0
       is-in-ci: 2.0.0
       patch-console: 2.0.0
-      react: 19.2.7
-      react-reconciler: 0.33.0(react@19.2.7)
+      react: 19.3.0
+      react-reconciler: 0.33.0(react@19.3.0)
       scheduler: 0.27.0
       signal-exit: 3.0.7
       slice-ansi: 8.0.0
@@ -7200,7 +7200,7 @@ snapshots:
       ws: 8.21.1
       yoga-layout: 3.2.1
     optionalDependencies:
-      '@types/react': 19.2.17
+      '@types/react': 19.3.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -7990,12 +7990,12 @@ snapshots:
 
   react-is@16.13.1: {}
 
-  react-reconciler@0.33.0(react@19.2.7):
+  react-reconciler@0.33.0(react@19.3.0):
     dependencies:
-      react: 19.2.7
+      react: 19.3.0
       scheduler: 0.27.0
 
-  react@19.2.7: {}
+  react@19.3.0: {}
 
   read-pkg@9.0.1:
     dependencies:
