@@ -15,6 +15,8 @@ export function createFileToolApproval(
 ): (args: unknown, mode: DevelopmentMode) => boolean {
 	return (_args, mode) => {
 		if (isNanocoderToolAlwaysAllowed(toolName)) return false;
-		return mode !== 'auto-accept' && mode !== 'headless';
+		return (
+			mode !== 'auto-accept' && mode !== 'headless' && mode !== 'architect'
+		);
 	};
 }

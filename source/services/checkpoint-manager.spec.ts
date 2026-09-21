@@ -418,9 +418,9 @@ test.serial(
 	async t => {
 		const tempDir = await createTempDir();
 		try {
-			const manager = new CheckpointManager(tempDir);
+		const manager = new CheckpointManager(tempDir);
 
-			t.false(manager.checkpointExists('does-not-exist'));
+		t.false(manager.checkpointExists('does-not-exist'));
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -583,6 +583,77 @@ test.serial('CheckpointManager list includes size information', async t => {
 	}
 });
 
+test.serial(
+	'CheckpointManager extends checkpoint with new file snapshots',
+	async t => {
+		const tempDir = await createTempDir();
+
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const messages = createMockMessages(2);
+
+			await fs.writeFile(
+				path.join(tempDir, 'first.ts'),
+				'first original',
+				'utf-8',
+			);
+
+			await manager.saveCheckpoint(
+				'extend-test',
+				messages,
+				'Provider',
+				'model',
+				['first.ts'],
+			);
+
+			await fs.writeFile(
+				path.join(tempDir, 'first.ts'),
+				'first changed',
+				'utf-8',
+			);
+
+			await fs.writeFile(
+				path.join(tempDir, 'second.ts'),
+				'second original',
+				'utf-8',
+			);
+
+			await manager.extendCheckpoint(
+				'extend-test',
+				['first.ts', 'second.ts'],
+			);
+
+			const firstSnapshot = await fs.readFile(
+				path.join(
+					tempDir,
+					'.nanocoder',
+					'checkpoints',
+					'extend-test',
+					'files',
+					'first.ts',
+				),
+				'utf-8',
+			);
+
+			const secondSnapshot = await fs.readFile(
+				path.join(
+					tempDir,
+					'.nanocoder',
+					'checkpoints',
+					'extend-test',
+					'files',
+					'second.ts',
+				),
+				'utf-8',
+			);
+
+			    t.is(firstSnapshot, 'first original');
+			    t.is(secondSnapshot, 'second original');
+      } finally {
+        await cleanupTempDir(tempDir);
+      }
+	},
+);
 // The copy written under files/ is where the bytes were previously destroyed:
 // once it is corrupt at rest, the original cannot be recovered from the
 // checkpoint at all, whatever restore later does. This pins that copy as well

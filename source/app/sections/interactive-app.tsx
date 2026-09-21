@@ -5,6 +5,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
@@ -346,6 +347,25 @@ export function InteractiveApp({
 								onDismiss={appHandlers.handlePlanModify}
 							/>
 						</Box>
+					)}
+
+					{appState.architectReviewState?.show && (
+						<ArchitectReviewPrompt
+							filesChanged={appState.architectReviewState.filesChanged}
+							filesMissing={appState.architectReviewState.filesMissing}
+							onKeep={() => {
+								appState.setArchitectReviewState(null);
+							}}
+							onRevert={() => void appHandlers.handleArchitectRevert()}
+							onRevertAndRevise={() =>
+								void appHandlers.handleArchitectRevertAndRevise(
+									'Please review the changes you just made, revise them based on the previous result, and try again.',
+								)
+							}
+							onDismiss={() => {
+								appState.setArchitectReviewState(null);
+							}}
+						/>
 					)}
 
 					{appState.isExplorerMode && (
