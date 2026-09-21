@@ -311,7 +311,7 @@ export function InteractiveApp({
 					staticComponents={staticComponents}
 					queuedComponents={appState.chatComponents}
 					liveComponent={liveComponent}
-					renderLastQueuedComponentLive={fullscreen && recallableSubmittedDraft}
+					renderLastQueuedComponentLive={recallableSubmittedDraft}
 					clearKey={clearKey}
 					fullscreen={fullscreen}
 					scrollActive={

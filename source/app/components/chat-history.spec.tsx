@@ -302,11 +302,12 @@ test('inline mode renders renderLastQueuedComponentLive=true and =false identica
 			})}
 		/>,
 	);
-	// Two separate mounts simulate the live -> static transition that
-	// triggers the regression: in pre-fix code the two frames differed
-	// because Message 2 moved between the flow region and <Static>; with
-	// the gate active chatQueueProps is identical across both renders, so
-	// React.memo bails out and Ink writes the same bytes to stdout.
+	// Two separate mounts exercise the live -> static transition that
+	// triggers the regression: in pre-fix code, mounting one tree with the
+	// prop true and another with the prop false produced different first
+	// frames because the last queued component moved between the flow
+	// region and <Static>; with the gate active chatQueueProps is identical
+	// for both props in inline mode, so Ink writes the same bytes to stdout.
 	t.is(live.frames[0], staticRender.frames[0]);
 	t.regex(live.frames[0] ?? '', /Message 2\n/);
 	live.unmount();
