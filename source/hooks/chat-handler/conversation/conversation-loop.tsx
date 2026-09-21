@@ -769,12 +769,18 @@ export const processAssistantResponse = async (
 		setIsGenerating(false);
 		const stopOption = 'Stop and return to prompt';
 		const continueOption = `Continue (check again after ${maxRepeatedToolCalls} more)`;
-		const answer = await signalQuestion({
-			question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
-			options: [stopOption, continueOption],
-			allowFreeform: false,
-			questionType: 'confirmation',
-		});
+		// Aborting settles this with the slot's error string, which is not
+		// `continueOption`, so a cancelled turn stops rather than hanging on a
+		// question nobody is left to answer.
+		const answer = await signalQuestion(
+			{
+				question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+				options: [stopOption, continueOption],
+				allowFreeform: false,
+				questionType: 'confirmation',
+			},
+			controller.signal,
+		);
 		if (answer !== continueOption) {
 			return false;
 		}
@@ -1101,7 +1107,11 @@ export const processAssistantResponse = async (
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
-				const approved = await signalToolConfirm({toolCall});
+				// Escape answers the prompt directly, but a turn aborted any
+				// other way must also release it - otherwise the loop stays
+				// parked here and the confirmation for a dead turn stays on
+				// screen. An abort settles this as "declined".
+				const approved = await signalToolConfirm({toolCall}, controller.signal);
 
 				if (!approved) {
 					// Close any VS Code diff previews the formatter opened for the
