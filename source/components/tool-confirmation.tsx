@@ -192,7 +192,7 @@ export default function ToolConfirmation({
 				)}
 
 				{/* Only show approval prompt if there's no error */}
-				{!hasFormatterError && !hasValidationError && (
+				{!hasFormatterError && !hasValidationError && !isLoadingPreview && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
