@@ -205,8 +205,20 @@ test('exportCommand formats tool messages correctly', async t => {
 
 	const content = mockWriteFileCalls[0].content;
 	t.true(content.includes('## Tool Output: my_tool'));
-	t.true(content.includes('```'));
-	t.true(content.includes('Tool output'));
+	t.true(content.includes('```\nTool output\n```'));
+});
+
+test('exportCommand formats tool messages containing code fences correctly', async t => {
+	const messages: Message[] = [{
+		role: 'tool',
+		name: 'read_file',
+		content: 'File content:\n```javascript\nconsole.log("hello");\n```'
+	}];
+	await exportCommand.handler(['test.md'], messages, testMetadata);
+
+	const content = mockWriteFileCalls[0].content;
+	t.true(content.includes('## Tool Output: read_file'));
+	t.true(content.includes('````\nFile content:\n```javascript\nconsole.log("hello");\n```\n````'));
 });
 
 test('exportCommand excludes system messages', async t => {
