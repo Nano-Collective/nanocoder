@@ -139,7 +139,7 @@ The body is a shell script with two placeholder forms:
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes and embedded quotes are doubled; delayed expansion is disabled. Because cmd.exe has no reliable command-line escape for percent expansion or embedded command separators, values containing percent signs, newlines, null bytes, or carriage returns are rejected instead of being executed. The cmd.exe path has focused regression coverage, but its full Windows CI job must pass before treating this as a broadly verified compatibility guarantee.
+Substituted values are wrapped in POSIX single quotes under bash/sh. Under cmd.exe they are wrapped in double quotes and embedded quotes are doubled; delayed expansion is disabled. Because cmd.exe has no reliable command-line escape for percent expansion or embedded command separators, values containing percent signs, newlines, null bytes, or carriage returns are rejected instead of being executed.
 
 On POSIX shells, this blocks shell injection through parameter values:
 
