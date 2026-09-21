@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
@@ -6,6 +6,11 @@ import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
@@ -54,76 +59,130 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
+		// On Unix the child leads its own process group (detached) so the whole
+		// subtree can be signalled together; a tool that backgrounds a long-lived
+		// child must not be able to outlive the shell's timeout.
 		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			detached: process.platform !== 'win32',
 		});
 
 		let stdout = '';
 		let stderr = '';
-		let timedOut = false;
-		let killTimer: NodeJS.Timeout | undefined;
+		let settled = false;
 
 		const timer = setTimeout(() => {
-			timedOut = true;
-			child.kill('SIGTERM');
-			// Force-kill if the process refuses to exit within a grace window.
-			// No `child.killed` check here: Node sets that flag as soon as a
-			// signal is delivered, so the SIGTERM above already made it true.
-			// `clearTimers` cancels this on exit, so if it fires the child is
-			// still alive by construction.
-			killTimer = setTimeout(() => {
-				child.kill('SIGKILL');
-			}, 1_000);
-			killTimer.unref();
-		}, options.timeoutMs);
-
-		const clearTimers = () => {
-			clearTimeout(timer);
-			if (killTimer) clearTimeout(killTimer);
-		};
-
-		child.stdout?.on('data', chunk => {
-			stdout += chunk.toString();
-		});
-		child.stderr?.on('data', chunk => {
-			stderr += chunk.toString();
-		});
-
-		child.on('error', err => {
-			clearTimers();
-			rejectPromise(new Error(`Custom tool failed to start: ${err.message}`));
-		});
-
-		// Settle the timeout path here, not on 'close'. 'close' additionally
-		// waits for the stdio pipes to drain, and SIGKILL only reaches the
-		// shell - a grandchild that inherited stdout (a background job, a dev
-		// server, a wrapper script) holds those pipes open long after the
-		// shell is gone, so 'close' can land far past the timeout. The
-		// captured output is discarded on this path anyway. Destroying the
-		// streams drops our end of the pipe so an orphan cannot keep them
-		// readable, mirroring what BashExecutor does when it cancels.
-		child.on('exit', () => {
-			clearTimers();
-			if (!timedOut) return;
+			// Drop our end of the pipes first so a detached grandchild that
+			// inherited them cannot keep them readable, then signal the whole
+			// process group.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
-			rejectPromise(
-				new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
+			killProcessTree(child);
+
+			// Force-kill the group if it refuses to die within a grace window.
+			// No `!child.killed` guard: Node sets that flag the moment a signal
+			// is delivered, so it is already true here and the escalation would
+			// never run (see #1141). Nothing cancels this timer either -- unlike
+			// the single-process case, the shell exiting does not mean its group
+			// is empty, and reaping a descendant that ignored SIGTERM is the
+			// whole point. Firing against an already-dead group is harmless:
+			// killProcessTree swallows the ESRCH, and it is unref'd so it never
+			// holds the process open.
+			setTimeout(() => {
+				killProcessTree(child, 'SIGKILL');
+			}, 1_000).unref();
+
+			// Settle now rather than waiting for `exit`/`close`: neither is
+			// guaranteed to be prompt while a descendant holds an inherited
+			// pipe, and the captured output is discarded on this path anyway.
+			settle(() =>
+				rejectPromise(
+					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
+				),
+			);
+		}, options.timeoutMs);
+
+		// Guard every completion path: an `error`/`close` arriving after the
+		// timeout already settled must not settle the promise a second time.
+		const settle = (finish: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			finish();
+		};
+
+		// Per-stream byte budgets, shared with the built-in bash executor.
+		const stdoutCollector = makeStreamCollector(text => {
+			stdout += text;
+		}, STDOUT_TRUNCATION_NOTICE);
+		const stderrCollector = makeStreamCollector(text => {
+			stderr += text;
+		}, STDERR_TRUNCATION_NOTICE);
+		child.stdout?.on('data', stdoutCollector.collect);
+		child.stderr?.on('data', stderrCollector.collect);
+
+		child.on('error', err => {
+			settle(() =>
+				rejectPromise(new Error(`Custom tool failed to start: ${err.message}`)),
 			);
 		});
 
 		child.on('close', code => {
-			clearTimers();
-			resolvePromise(
-				truncateToolResult(
-					formatScriptOutput(code, stdout, stderr),
-					TRUNCATION_OUTPUT_LIMIT,
-				),
-			);
+			settle(() => {
+				// Release any multi-byte character the decoders were holding
+				// across a chunk boundary before the output is formatted.
+				stdoutCollector.flush();
+				stderrCollector.flush();
+				resolvePromise(
+					truncateToolResult(
+						formatScriptOutput(code, stdout, stderr),
+						TRUNCATION_OUTPUT_LIMIT,
+					),
+				);
+			});
 		});
 	});
+}
+
+/**
+ * Terminate the spawned shell and its descendants.
+ *
+ * The child is spawned `detached` on Unix, making it the leader of its own
+ * process group; signalling the negative PID kills the whole tree, so work the
+ * tool backgrounded cannot survive the shell's timeout. Windows has no process
+ * groups here, so we fall back to the single process: a descendant the tool
+ * backgrounded keeps running to completion (the promise already settled, so
+ * this leaks a stray process rather than hanging the call — documented
+ * limitation; a Job Object / `taskkill /T` could close it).
+ */
+function killProcessTree(
+	child: ChildProcess,
+	signal: NodeJS.Signals = 'SIGTERM',
+): void {
+	const pid = child.pid;
+	if (pid === undefined) return;
+
+	if (process.platform === 'win32') {
+		try {
+			child.kill(signal);
+		} catch {
+			// Process already exited; nothing to terminate.
+		}
+		return;
+	}
+
+	try {
+		process.kill(-pid, signal);
+	} catch {
+		// Group already gone (or never formed) — fall back to the lone process.
+		try {
+			child.kill(signal);
+		} catch {
+			// Process already exited; nothing to terminate.
+		}
+	}
 }
 
 /**
@@ -138,6 +197,8 @@ function formatScriptOutput(
 	stderr: string,
 ): string {
 	const exitCode = code ?? 0;
+	// Any cap notice is already inline at the end of its own stream (see
+	// makeStreamCollector), so it survives the tail-keeping truncation below.
 	const out = stdout.trimEnd();
 	const err = stderr.trimEnd();
 	const prefix = `EXIT_CODE: ${exitCode}\n`;

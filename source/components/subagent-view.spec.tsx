@@ -21,6 +21,7 @@ const themeValue = {
 const titleShapeValue = {
 	currentTitleShape: 'pill' as const,
 	setCurrentTitleShape: () => {},
+	commitTitleShape: () => {},
 };
 
 const wrap = (element: React.ReactElement) => (

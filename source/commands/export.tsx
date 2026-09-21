@@ -24,13 +24,20 @@ const formatMessageContent = (message: Message) => {
 					.join(', ')}]`;
 			}
 			break;
-		case 'tool':
+		case 'tool': {
+			const text = message.content || '';
+			const ticks = text.match(/`{3,}/g) || [];
+			const maxTicks =
+				ticks.length > 0 ? Math.max(...ticks.map(m => m.length)) : 0;
+			const len = Math.max(3, maxTicks + 1);
+			const fence = '`'.repeat(len);
 			content +=
 				`## Tool Output: ${message.name}\n` +
-				'```\n' +
-				`${message.content}\n` +
-				'```\n';
+				`${fence}\n` +
+				`${text}\n` +
+				`${fence}\n`;
 			break;
+		}
 		case 'system':
 			// For now, we don't include system messages in the export
 			return '';

@@ -1,4 +1,12 @@
-import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test, {type ExecutionContext} from 'ava';
@@ -13,6 +21,21 @@ import {
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
+
+// A real POSIX shell for the two new robustness cases. We can't just use
+// `bash` by name on Windows: it can resolve to the WSL launcher
+// (`System32\bash.exe`), which prints an error and exits instead of running
+// anything. Prefer a Git Bash binary; if none is installed the cases are
+// skipped, matching how this suite already gates the symlink cases.
+const WINDOWS_BASH_CANDIDATES = [
+	'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+	'C:\\Program Files\\Git\\bin\\bash.exe',
+];
+const testShell =
+	process.platform === 'win32'
+		? (WINDOWS_BASH_CANDIDATES.find(path => existsSync(path)) ?? null)
+		: '/bin/sh';
+const shellCase = testShell === null ? test.skip : test;
 
 let testDir: string;
 let prevLcAll: string | undefined;
@@ -250,46 +273,256 @@ test('runScript: timeout kills long-running script', async t => {
 	);
 });
 
+shellCase(
+	'runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker',
+	async t => {
+		// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB),
+		// so the streaming cap must trip. The notice is written at the end of the
+		// capped stdout section and survives the final truncation (which keeps the
+		// tail) — asserting it there proves the cap engaged rather than merely that
+		// the result was trimmed to the 2000-character limit.
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		const marker = '... [Output truncated to prevent memory exhaustion]';
+		t.true(
+			result.endsWith(marker),
+			'cap marker must survive truncation at the tail of the result',
+		);
+		const matches = result.split(marker).length - 1;
+		t.is(matches, 1, 'truncation marker must appear exactly once');
+	},
+);
+
+shellCase(
+	'runScript: timeout settles promptly and, on Unix, reaps descendant processes',
+	async t => {
+		const pidFile = join(testDir, `orphan-${Date.now()}.pid`).replaceAll(
+			'\\',
+			'/',
+		);
+		// Shell backgrounds a long-lived child that inherits the stdout pipe,
+		// then blocks. On the old behavior, killing only the shell leaves the
+		// child holding the pipe open, so `close` never fires and the promise
+		// never settles — the call hangs well past the timeout.
+		const script = `sleep 60 & echo $! > '${pidFile}'; sleep 30`;
+		let grandchildPid: number | undefined;
+
+		const result = await Promise.race([
+			runScript(script, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 500,
+			}).then(value => ({value}), (error: Error) => ({error})),
+			(async () => {
+				for (let i = 0; i < 20 && !existsSync(pidFile); i++) {
+					await new Promise(resolve => setTimeout(resolve, 25));
+				}
+				const raw = existsSync(pidFile) ? readFileSync(pidFile, 'utf8') : '';
+				const match = raw.match(/\d+/);
+				if (match) grandchildPid = Number(match[0]);
+				return new Promise<{hang: true}>(resolve =>
+					setTimeout(() => resolve({hang: true}), 3_000),
+				);
+			})(),
+		]);
+
+		if ('hang' in result) {
+			t.fail('tool call must settle after the timeout instead of hanging');
+			return;
+		}
+		t.true('error' in result, 'timed-out tool call must reject');
+		t.regex((result as {error: Error}).error.message, /timed out/);
+
+		// Windows has no process-group signal here, so descendant-reaping can
+		// only be asserted on Unix (CI is Linux; the settle assertion above runs
+		// everywhere).
+		if (process.platform === 'win32') return;
+
+		// Give the OS a moment to reap the group (mirrors bash-executor.spec.ts).
+		await new Promise(resolve => setTimeout(resolve, 300));
+
+		if (grandchildPid !== undefined) {
+			t.throws(
+				() => process.kill(grandchildPid, 0),
+				undefined,
+				'background child must be reaped by the process-group kill',
+			);
+		}
+	},
+);
+
+shellCase(
+	'runScript: caps stderr-only output and appends the per-stream stderr notice exactly once',
+	async t => {
+		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
+		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
+
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000 >&2`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.true(
+			result.includes(stderrMarker),
+			'the stderr notice must appear when only stderr hits the cap',
+		);
+		t.is(
+			result.split(stderrMarker).length - 1,
+			1,
+			'the stderr notice must appear exactly once',
+		);
+		t.false(
+			result.includes(stdoutMarker),
+			'the stdout notice must not appear when stdout was not capped',
+		);
+		t.regex(
+			result,
+			/^EXIT_CODE: 0\nSTDERR:/,
+			'the stderr section must be labelled',
+		);
+	},
+);
+
+shellCase(
+	'runScript: per-stream notices stay with their own stream when only stdout is capped',
+	async t => {
+		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
+		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
+
+		const result = await runScript(
+			`echo 'small stderr line' >&2; yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.true(
+			result.includes(stdoutMarker),
+			'the stdout notice must appear when stdout hits the cap',
+		);
+		t.false(
+			result.includes(stderrMarker),
+			'the stderr notice must not appear when stderr fits the budget',
+		);
+		t.regex(
+			result,
+			/small stderr line/,
+			'stderr sent before the flood must be preserved uncapped',
+		);
+	},
+);
+
+shellCase(
+	'runScript: a stdout flood does not swallow stderr written after it',
+	async t => {
+		// Regression: with a single shared byte budget, stdout exhausting it
+		// first made the stderr listener a no-op — the line explaining why the
+		// tool failed was dropped with no notice that anything was missing.
+		// Per-stream budgets keep stderr intact and independently capped.
+		const result = await runScript(
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000; echo 'CRITICAL_ERROR_LINE' >&2`,
+			{
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 30_000,
+			},
+		);
+
+		t.regex(
+			result,
+			/CRITICAL_ERROR_LINE/,
+			'stderr written after a stdout flood must survive',
+		);
+		t.true(
+			result.includes('... [Output truncated to prevent memory exhaustion]'),
+			'the stdout notice must still mark the capped stream',
+		);
+		t.false(
+			result.includes('... [Stderr truncated to prevent memory exhaustion]'),
+			'stderr fit its own budget, so it must not be marked truncated',
+		);
+	},
+);
+
+shellCase(
+	'runScript: partial output is discarded when the tool times out instead of resolving half a result',
+	async t => {
+		await t.throwsAsync(
+			runScript(`echo 'started before timeout' ; sleep 30`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 250,
+			}),
+			{message: /timed out/},
+		);
+	},
+);
+
 // A script that traps SIGTERM must still be force-killed. Guarding the
 // escalation on `child.killed` never fired (Node sets that flag the moment
 // SIGTERM is delivered), so the force-kill never ran. The redirect keeps
 // this case about escalation alone - pipe drain is pinned separately below.
-test('runScript: escalates to SIGKILL when the script ignores SIGTERM', async t => {
-	const started = Date.now();
-	await t.throwsAsync(
-		runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
-			cwd: testDir,
-			env: process.env,
-			shell: '/bin/sh',
-			timeoutMs: 100,
-		}),
-		{message: /timed out/},
-	);
-	// SIGTERM at 100ms + a 1s grace window. Without escalation this only
-	// settles once `sleep 5` finishes.
-	t.true(Date.now() - started < 3_000);
-});
+shellCase(
+	'runScript: escalates to SIGKILL when the script ignores SIGTERM',
+	async t => {
+		const started = Date.now();
+		await t.throwsAsync(
+			runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 100,
+			}),
+			{message: /timed out/},
+		);
+		// SIGTERM at 100ms + a 1s grace window. Without escalation this only
+		// settles once `sleep 5` finishes.
+		t.true(Date.now() - started < 3_000);
+	},
+);
 
-// The timeout must settle even when a grandchild outlives the shell. SIGKILL
-// only reaches the shell; the backgrounded `sleep` inherits stdout/stderr and
-// holds those pipes open, so 'close' does not fire until it finishes. Settling
-// on 'exit' is what keeps this bounded. `& wait` rather than a bare `sleep`
-// because shells exec-optimise a trailing command, which would leave no
-// grandchild to hold the pipes at all.
-test('runScript: timeout settles without waiting on an orphaned grandchild', async t => {
-	const started = Date.now();
-	await t.throwsAsync(
-		runScript(`trap '' TERM; sleep 5 & wait`, {
-			cwd: testDir,
-			env: process.env,
-			shell: '/bin/sh',
-			timeoutMs: 100,
-		}),
-		{message: /timed out/},
-	);
-	// Without this the promise waits out the full `sleep 5`.
-	t.true(Date.now() - started < 3_000);
-});
+// The timeout must settle even when a grandchild outlives the shell. The
+// backgrounded `sleep` inherits stdout/stderr and holds those pipes open, so
+// neither 'close' nor (with a trapped SIGTERM) 'exit' is prompt; settling
+// inside the timeout handler itself is what keeps this bounded. `& wait`
+// rather than a bare `sleep` because shells exec-optimise a trailing command,
+// which would leave no grandchild to hold the pipes at all.
+shellCase(
+	'runScript: timeout settles without waiting on an orphaned grandchild',
+	async t => {
+		const started = Date.now();
+		await t.throwsAsync(
+			runScript(`trap '' TERM; sleep 5 & wait`, {
+				cwd: testDir,
+				env: process.env,
+				shell: testShell!,
+				timeoutMs: 100,
+			}),
+			{message: /timed out/},
+		);
+		// Without this the promise waits out the full `sleep 5`.
+		t.true(Date.now() - started < 3_000);
+	},
+);
 
 test('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);

@@ -7,7 +7,7 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
-import type {NanocoderToolExport} from '@/types/core';
+import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -27,6 +27,16 @@ export function executeBashCommand(
 	promise: Promise<BashExecutionState>;
 } {
 	return bashExecutor.execute(command, options);
+}
+
+/**
+ * Whether a run failed: the command could not be spawned at all, or it exited
+ * non-zero. The formatted output carries no `Error: ` prefix for a non-zero
+ * exit - it is ordinary stdout/stderr - so this is what callers set
+ * `ToolResult.isError` from, rather than sniffing the content.
+ */
+export function bashRunFailed(result: BashExecutionState): boolean {
+	return result.error !== null || (result.exitCode ?? 0) !== 0;
 }
 
 /**
@@ -62,12 +72,17 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
 const executeExecuteBash = async (
 	args: {command: string},
 	options?: {abortSignal?: AbortSignal},
-): Promise<string> => {
+): Promise<StructuredToolOutput> => {
 	const {promise} = bashExecutor.execute(args.command, {
 		signal: options?.abortSignal,
 	});
 	const result = await promise;
-	return formatBashResultForLLM(result);
+	// The model still gets plain text; isError carries the exit status to
+	// processToolUse, which is how --json and ACP learn the command failed.
+	return {
+		llmContent: formatBashResultForLLM(result),
+		isError: bashRunFailed(result),
+	};
 };
 
 const executeBashCoreTool = tool({

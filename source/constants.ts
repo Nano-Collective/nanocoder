@@ -191,6 +191,14 @@ export const MAX_MALFORMED_RETRIES = 2;
 // or allow another window; non-interactive and headless runs, which have nobody
 // to ask, stop with an actionable error.
 export const MAX_REPEATED_TOOL_CALLS = 3;
+// Default for `nanocoder.retries.maxTruncatedTurns` (see
+// source/config/index.ts): how many consecutive content-only turns cut off at
+// the provider's output-token limit we'll ask the model to continue through
+// before giving up. A truncated turn carries no tool calls, so without this the
+// headless loop reads it as "the model finished talking" and returns success
+// with whatever fragment arrived — the failure mode that silently produced no
+// output at all in runs whose entire deliverable was a tool call.
+export const MAX_TRUNCATED_TURNS = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

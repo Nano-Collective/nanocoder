@@ -36,7 +36,7 @@ export class AcpProcessManager {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.outputChannel.appendLine(`Failed to start ACP process: ${message}`);
-			this.stateManager.setStatus(ACPStatus.Disconnected);
+			this.stateManager.setStatus(ACPStatus.Failed, {reason: message});
 			vscode.window.showErrorMessage(
 				`Could not start the Nanocoder CLI: ${message}. See the Nanocoder output channel for details.`
 			);
@@ -44,7 +44,7 @@ export class AcpProcessManager {
 	}
 
 	private async launch(): Promise<void> {
-		this.stateManager.setStatus(ACPStatus.Connecting);
+		this.stateManager.setStatus(ACPStatus.Starting);
 
 		const config = vscode.workspace.getConfiguration('nanocoder');
 		const configuredCliPath = config.get<string>('cliPath');
@@ -63,7 +63,9 @@ export class AcpProcessManager {
 		}
 
 		if (!cliPath) {
-			this.stateManager.setStatus(ACPStatus.CliMissing);
+			this.stateManager.setStatus(ACPStatus.CliMissing, {
+				reason: 'nanocoder CLI was not found on PATH',
+			});
 			this.outputChannel.appendLine('Nanocoder CLI not found in PATH.');
 			await promptInstallCli();
 			return;
@@ -101,7 +103,9 @@ export class AcpProcessManager {
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {
 			this.outputChannel.appendLine('Failed to attach to child process stdio.');
-			this.stateManager.setStatus(ACPStatus.Disconnected);
+			this.stateManager.setStatus(ACPStatus.Failed, {
+				reason: 'could not attach to the CLI process stdio',
+			});
 			return;
 		}
 
@@ -185,16 +189,21 @@ export class AcpProcessManager {
 		if (this.retryCount < this.maxRetries) {
 			const delay = this.retryCount === 0 ? 0 : Math.min(1000 * Math.pow(2, this.retryCount - 1), 10000); // Immediate first retry, then backoff
 			this.retryCount++;
-			this.stateManager.setStatus(ACPStatus.Restarting);
+			this.stateManager.setStatus(ACPStatus.Restarting, {
+				attempt: this.retryCount,
+				totalAttempts: this.maxRetries,
+			});
 			this.outputChannel.appendLine(`ACP process crashed. Restarting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
 			
 			setTimeout(() => {
 				this.start();
 			}, delay);
 		} else {
-			this.stateManager.setStatus(ACPStatus.Disconnected);
-			this.outputChannel.appendLine('Max retries reached. ACP process will not restart automatically.');
 			const lastError = this.lastStderr.trim().split('\n').pop();
+			this.stateManager.setStatus(ACPStatus.Failed, {
+				reason: lastError || 'repeated crashes',
+			});
+			this.outputChannel.appendLine('Max retries reached. ACP process will not restart automatically.');
 			vscode.window.showErrorMessage(
 				`Nanocoder CLI crashed repeatedly and could not be restarted.${lastError ? ` Last error: ${lastError}` : ''} See the Nanocoder output channel for details.`
 			);
@@ -207,6 +216,9 @@ export class AcpProcessManager {
 			this.childProcess.kill();
 			this.childProcess = null;
 		}
-		this.stateManager.dispose();
+		// Deliberately does NOT dispose this.stateManager: it is shared with
+		// NanocoderAcpClient and survives `nanocoder.restartAcp`, which rebuilds
+		// this manager. Disposing it here would kill the status-bar subscription
+		// and every other listener after a manual restart.
 	}
 }

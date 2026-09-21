@@ -27,3 +27,26 @@ test('uses an empty result for a non-positive cap', t => {
 	t.is(truncateToolResult('content', 0), '');
 	t.is(truncateToolResult('content', -1), '');
 });
+
+test('never splits a placeholder token at the truncation boundary', t => {
+	const maxLength = 240;
+	// Placeholder tokens packed edge-to-edge with no gaps, so both the head
+	// and tail cut points are guaranteed to land inside one somewhere in the
+	// string unless the boundary is placeholder-aware.
+	let content = '';
+	let i = 0;
+	while (content.length < 2000) {
+		content += `«Email_${i}»`;
+		i++;
+	}
+
+	const result = truncateToolResult(content, maxLength);
+
+	t.true(result.length <= maxLength);
+	// Every opening guillemet in the result belongs to a whole, well-formed
+	// token — never left dangling by a cut through its middle.
+	t.is(
+		(result.match(/«/g) ?? []).length,
+		(result.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
