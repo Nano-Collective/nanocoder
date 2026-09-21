@@ -146,7 +146,7 @@ test('WelcomeMessage shows welcome message for normal terminal', t => {
 	// Tagline matches the GitHub repo description, wrapped across rows.
 	t.regex(output!, /An open coding agent for your terminal/);
 	t.regex(output!, /owe nothing to anyone\./);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -164,7 +164,7 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 	t.regex(output!, /Quit/);
 	// New design footer has mode + version
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -261,7 +261,7 @@ test('WelcomeMessage shows centered footer for wide terminal', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
