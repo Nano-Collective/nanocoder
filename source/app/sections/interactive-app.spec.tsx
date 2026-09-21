@@ -363,6 +363,7 @@ test('Escape cancels when only an abort controller is live (state flicker)', asy
 test('Escape recalls an in-flight user message before assistant streaming starts', async t => {
 	let cancelled = 0;
 	let latestMessages: Message[] = [];
+	let latestChatComponents: React.ReactNode[] = [];
 	let latestAbortController: AbortController | null = null;
 	let latestIsCancelling = true;
 
@@ -377,6 +378,7 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 		const [isCancelling, setIsCancelling] = React.useState(false);
 
 		latestMessages = messages;
+		latestChatComponents = chatComponents;
 		latestAbortController = abortController;
 		latestIsCancelling = isCancelling;
 
@@ -411,7 +413,7 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 		);
 	};
 
-	const {stdin, lastFrame, frames} = renderWithTheme(<RecallHarness />);
+	const {stdin, lastFrame} = renderWithTheme(<RecallHarness />);
 
 	stdin.write('fix the typo');
 	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
@@ -424,11 +426,11 @@ test('Escape recalls an in-flight user message before assistant streaming starts
 	t.is(cancelled, 1);
 	t.deepEqual(latestMessages, []);
 	// In inline mode the bubble is committed to Ink's <Static> scrollback and
-	// cannot be un-printed.  lastFrame() only reflects the current dynamic
-	// frame, so we read the accumulated stdout.frames log to confirm the
-	// bubble persists in the scrollback history.
-	const allOutput = frames.join('\n');
-	t.regex(allOutput, /submitted bubble: fix the typo/);
+	// cannot be un-printed, so the gate in handleRecallSubmittedDraft must
+	// skip the chatComponents pop. Asserting on the array length tests the
+	// gate directly; asserting against the frame log only proves the bubble
+	// was once written, never that it is still present.
+	t.is(latestChatComponents.length, 1);
 	t.is(latestAbortController, null);
 	t.is(latestIsCancelling, false);
 });
