@@ -22,6 +22,11 @@ export interface McpServerConfig {
 	description?: string;
 	tags?: string[];
 	enabled?: boolean;
+	// Wizard bookkeeping: id of the template that built this server. Not
+	// consumed at runtime — it lets the edit flow resolve a server back to
+	// its template when the user renamed it via the serverName field, where
+	// name-based matching no longer works.
+	templateId?: string;
 }
 
 export interface McpTemplate {
@@ -301,6 +306,50 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
+		id: 'you',
+		name: 'You.com',
+		description:
+			'You.com web search, URL reading, and research MCP server (leave the API key empty to use the keyless free profile)',
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: 'you',
+			},
+			{
+				name: 'apiKey',
+				prompt:
+					'You.com API key (optional — leave empty for the keyless free profile)',
+				required: false,
+				sensitive: true,
+			},
+		],
+		buildConfig: answers => {
+			const apiKey = answers.apiKey?.trim();
+			const config: McpServerConfig = {
+				name: answers.serverName || 'you',
+				transport: 'http' as McpTransportType,
+				url: apiKey
+					? 'https://api.you.com/mcp'
+					: 'https://api.you.com/mcp?profile=free',
+				description: 'You.com web search, URL reading, and research MCP server',
+				tags: ['you', 'search', 'web', 'research', 'http'],
+				timeout: TIMEOUT_MCP_DEFAULT_MS,
+				// Stamp the origin template so the edit flow can resolve this
+				// server back to the `you` template even under a custom name.
+				templateId: 'you',
+			};
+			if (apiKey) {
+				config.headers = {Authorization: `Bearer ${apiKey}`};
+			}
+			return config;
+		},
+		category: 'remote',
+		transportType: 'http',
+	},
+	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',
@@ -495,3 +544,67 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'stdio', // Default to stdio, but can be http/websocket based on transport
 	},
 ];
+
+/**
+ * Resolve which wizard template a saved server came from, for the edit flow.
+ *
+ * Resolution order:
+ * 1. `templateId` — stamped by the wizard when the config is built. This is
+ *    the only signal that survives a custom `serverName` (e.g. `you-paid`),
+ *    since name-based matching misses and would fall through to `custom`,
+ *    whose buildConfig never writes headers — silently dropping the bearer
+ *    token.
+ * 2. `tags` — configs written before the stamp existed, or hand-edited ones
+ *    that kept their tags. Three conditions, all necessary:
+ *    - the tag equals a real template id;
+ *    - the template's transport agrees with the saved server's, since
+ *      `github-remote` carries a `github` tag but that id is the stdio
+ *      GitHub server, and resolving an http server to it would rebuild the
+ *      config with the wrong transport;
+ *    - the template has a `serverName` field. Templates without one hardcode
+ *      the name in `buildConfig` (`simpleStdioTemplate` and friends return
+ *      `name: opts.id`), so resolving a renamed server to them would rename
+ *      it back on save and replace its command/args with template defaults.
+ *      The `custom` fallback round-trips those servers intact.
+ *    Note that `deepwiki` / `context7` / `github-remote` / `brave-search` do
+ *    not carry their own id as a tag, so a renamed instance of those still
+ *    falls through to `custom` — pre-existing, and for `github-remote` that
+ *    still drops the bearer header on re-save. Tracked separately.
+ * 3. Server name equal to a template id — covers default names. No
+ *    `serverName` check here: rebuilding under a name that already equals
+ *    the template id cannot rename anything.
+ *
+ * Returns undefined when nothing matches, so callers can fall back to the
+ * `custom` template.
+ */
+export function resolveMcpTemplateId(
+	config: Pick<McpServerConfig, 'name' | 'tags' | 'transport'> & {
+		templateId?: string;
+	},
+): string | undefined {
+	const knownTemplate = (id: string) => {
+		const template = MCP_TEMPLATES.find(t => t.id === id);
+		return template && template.id !== 'custom' ? template : undefined;
+	};
+	const transportAgrees = (template: McpTemplate) =>
+		template.transportType === config.transport;
+	const keepsCustomName = (template: McpTemplate) =>
+		template.fields.some(field => field.name === 'serverName');
+
+	if (config.templateId && knownTemplate(config.templateId)) {
+		return config.templateId;
+	}
+	if (config.tags?.length) {
+		for (const tag of config.tags) {
+			const template = knownTemplate(tag);
+			if (template && transportAgrees(template) && keepsCustomName(template)) {
+				return template.id;
+			}
+		}
+	}
+	const namedTemplate = knownTemplate(config.name);
+	if (namedTemplate && transportAgrees(namedTemplate)) {
+		return namedTemplate.id;
+	}
+	return undefined;
+}
