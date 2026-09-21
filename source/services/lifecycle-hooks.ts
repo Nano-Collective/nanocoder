@@ -1,5 +1,6 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {isAbsolute, relative} from 'node:path';
+import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
 import {matchGlob} from '@/events/event-router';
@@ -374,6 +375,52 @@ function killHookTree(proc: ChildProcess): void {
 }
 
 /**
+ * Slice to at most `max` UTF-16 code units without splitting a surrogate
+ * pair, which would leave a lone half that renders as a replacement
+ * character.
+ */
+function sliceWholeCharacters(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const cut = text.slice(0, max);
+	const last = cut.charCodeAt(cut.length - 1);
+	// A high surrogate at the end has lost its pair to the cut.
+	return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
+ * Accumulate one stream's text, bounded by `MAX_HOOK_OUTPUT_CHARS`.
+ *
+ * Chunks arrive split wherever the pipe happened to break, which can be
+ * mid-character; decoding each one on its own turns both halves of a
+ * multi-byte sequence into U+FFFD. A `StringDecoder` holds an incomplete
+ * tail back until the rest arrives. This matters because hook output is not
+ * cosmetic: `pre-tool-use` and `user-prompt-submit` stdout goes back to the
+ * model as the reason an action was denied, and `post-tool-use` output is
+ * folded into the tool result.
+ *
+ * Deliberately not `utils/stream-collector.ts`, which the bash executor and
+ * custom tools share: that one budgets in bytes and appends a truncation
+ * marker, where a hook budgets in characters (the cap exists to protect the
+ * context window) and truncates silently. Sharing it would change both of
+ * those user-visible behaviours to fix a decoding bug.
+ */
+function makeHookCapture(): {
+	write: (current: string, chunk: Buffer) => string;
+	end: (current: string) => string;
+} {
+	const decoder = new StringDecoder('utf8');
+	const append = (current: string, text: string): string => {
+		const remaining = MAX_HOOK_OUTPUT_CHARS - current.length;
+		if (remaining <= 0 || !text) return current;
+		return current + sliceWholeCharacters(text, remaining);
+	};
+	return {
+		write: (current, chunk) => append(current, decoder.write(chunk)),
+		end: current => append(current, decoder.end()),
+	};
+}
+
+/**
  * Run one hook command to completion. Never rejects: a spawn failure or a
  * timeout resolves with `failure` set and no exit code, which callers treat as
  * "did not veto" so a broken script can't wedge the session.
@@ -395,12 +442,8 @@ function runHookCommand(
 
 		let stdout = '';
 		let stderr = '';
-		const capture = (current: string, chunk: Buffer): string => {
-			const remaining = MAX_HOOK_OUTPUT_CHARS - current.length;
-			return remaining <= 0
-				? current
-				: current + chunk.toString().slice(0, remaining);
-		};
+		const stdoutCapture = makeHookCapture();
+		const stderrCapture = makeHookCapture();
 
 		// `shell: true` runs the command through `sh -c` / `cmd.exe /d /s /c`
 		// with the platform's own quoting rules, so a hook body with quotes in
@@ -446,16 +489,21 @@ function runHookCommand(
 		timer.unref();
 
 		proc.stdout?.on('data', (chunk: Buffer) => {
-			stdout = capture(stdout, chunk);
+			stdout = stdoutCapture.write(stdout, chunk);
 		});
 		proc.stderr?.on('data', (chunk: Buffer) => {
-			stderr = capture(stderr, chunk);
+			stderr = stderrCapture.write(stderr, chunk);
 		});
 
 		proc.on('error', (error: Error) => {
 			finish({exitCode: null, stdout, stderr, failure: error.message});
 		});
 		proc.on('close', (code: number | null) => {
+			// Release whatever the decoders are still holding back. Without this
+			// a stream ending on an incomplete sequence silently drops its last
+			// character.
+			stdout = stdoutCapture.end(stdout);
+			stderr = stderrCapture.end(stderr);
 			finish({exitCode: code, stdout, stderr});
 		});
 	});
