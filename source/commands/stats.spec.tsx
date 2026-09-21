@@ -93,7 +93,7 @@ test('StatsDisplay renders range tabs, chart, and top providers', t => {
 	t.true(ledger.daily[0]?.byPair[makePairKey('OpenRouter', 'gpt-5')] != null);
 });
 
-test.skip('StatsDisplay changes range with arrow keys and closes on Escape', async t => {
+test('StatsDisplay changes range with arrow keys and closes on Escape', async t => {
 	const ledger = createEmptyLedger(Date.now());
 	const {lastFrame, stdin, unmount} = renderWithTheme(
 		<StatsDisplay ledger={ledger} initialRange="7d" interactive />,

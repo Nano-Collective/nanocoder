@@ -43,7 +43,7 @@ async function waitFor(
 	throw new Error(`waitFor timed out after ${timeoutMs}ms`);
 }
 
-test.serial.skip('emits add / change / unlink events', async t => {
+test.serial('emits add / change / unlink events', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'fw-spec-'));
 	const {router, events} = captureRouter();
 	router.subscribe(fileSub('s1'));
@@ -53,6 +53,8 @@ test.serial.skip('emits add / change / unlink events', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		const file = join(dir, 'thing.txt');
@@ -93,7 +95,7 @@ test.serial.skip('emits add / change / unlink events', async t => {
 	}
 });
 
-test.serial.skip('paths emitted are relative to the watch root', async t => {
+test.serial('paths emitted are relative to the watch root', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'fw-spec-rel-'));
 	const sub = join(dir, 'src', 'inner');
 	await mkdir(sub, {recursive: true});
@@ -106,6 +108,8 @@ test.serial.skip('paths emitted are relative to the watch root', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		await writeFile(join(sub, 'leaf.ts'), 'x');
@@ -133,7 +137,7 @@ test.serial.skip('paths emitted are relative to the watch root', async t => {
 	}
 });
 
-test.serial.skip('subscriptions with paths filter narrow down events', async t => {
+test.serial('subscriptions with paths filter narrow down events', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'fw-spec-paths-'));
 	const {router, events} = captureRouter();
 	router.subscribe(fileSub('s1', ['docs/**']));
@@ -143,6 +147,8 @@ test.serial.skip('subscriptions with paths filter narrow down events', async t =
 		pollingInterval: 50,
 	});
 	await source.start();
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		await mkdir(join(dir, 'docs'));
