@@ -37,6 +37,7 @@ import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useNotifications} from '@/hooks/useNotifications';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
+import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
@@ -53,6 +54,11 @@ import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
+
+// Rows the interactive frame keeps for itself in fullscreen: the root box's
+// top and bottom padding, plus the input footer below the chat viewport
+// (input box, its border and the mode indicator).
+const FULLSCREEN_CHROME_ROWS = 7;
 
 export default function App({
 	vscodeMode = false,
@@ -645,6 +651,14 @@ export default function App({
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
 	// indicator.
+	// Fullscreen clips the banner at the chat viewport, which is the terminal
+	// minus the interactive frame: the root box's padding rows plus the input
+	// footer beneath it. Inline mode prints into scrollback and clips nothing.
+	const terminalRows = useTerminalRows();
+	const welcomeRows = altScreenActive
+		? Math.max(0, terminalRows - FULLSCREEN_CHROME_ROWS)
+		: terminalRows;
+
 	const initialProvider = React.useRef(appState.currentProvider);
 	const initialModel = React.useRef(appState.currentModel);
 	const staticComponents = React.useMemo(() => {
@@ -654,8 +668,9 @@ export default function App({
 			currentModel: initialModel.current,
 			nonInteractiveMode,
 			developmentMode: initialDevelopmentMode,
+			availableRows: welcomeRows,
 		});
-	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode]);
+	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode, welcomeRows]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
