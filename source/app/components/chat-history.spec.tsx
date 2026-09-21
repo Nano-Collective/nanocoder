@@ -245,3 +245,63 @@ test('fullscreen mode hides welcome banner while liveComponent is active', t => 
 	unmount();
 });
 
+// ============================================================================
+// Fullscreen tail cap: ChatHistory derives ChatQueue's mounted-tail cap from
+// terminal height (computeFullscreenTailCap) instead of a flat 60, so Yoga
+// layout cost stops scaling with total session length (#1274).
+// ============================================================================
+
+test('fullscreen mode mounts fewer than the flat 60-item tail on a short terminal', t => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = 24; // computeFullscreenTailCap(24) === 12
+
+	try {
+		const components = Array.from({length: 30}, (_, i) => (
+			<div key={`turn-${i}`}>{`turn-${i}`}</div>
+		));
+		const props = createDefaultProps({
+			fullscreen: true,
+			staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+			queuedComponents: components,
+		});
+		const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+		const output = lastFrame() ?? '';
+
+		// Only the last 12 turns (18..29) should be mounted; the flat-60 cap
+		// this replaces would have kept all 30.
+		t.notRegex(output, /\bturn-17\b/);
+		t.regex(output, /\bturn-18\b/);
+		t.regex(output, /\bturn-29\b/);
+		unmount();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
+});
+
+test('inline mode is unaffected by terminal height - still keeps the flat 60-item tail', t => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = 24;
+
+	try {
+		// isFreshInline (disableStatic without fullscreen) keeps ChatQueue's own
+		// default cap rather than the terminal-derived one - only fullscreen
+		// mode has the render-cost problem #1274 reports.
+		const components = Array.from({length: 30}, (_, i) => (
+			<div key={`turn-${i}`}>{`turn-${i}`}</div>
+		));
+		const props = createDefaultProps({
+			fullscreen: false,
+			staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+			queuedComponents: components,
+		});
+		const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+		const output = lastFrame() ?? '';
+
+		t.regex(output, /\bturn-0\b/);
+		t.regex(output, /\bturn-29\b/);
+		unmount();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
+});
+
