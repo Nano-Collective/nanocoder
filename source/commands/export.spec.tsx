@@ -1,6 +1,7 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
 import {exportCommand} from './export';
+import {lazyCommands} from './lazy-registry';
 import {promises as fs} from 'fs';
 import path from 'path';
 import React from 'react';
@@ -60,7 +61,15 @@ const testMetadata = {
 
 test('exportCommand has correct name and description', t => {
 	t.is(exportCommand.name, 'export');
-	t.is(exportCommand.description, 'Export the chat history to a markdown file');
+	t.is(
+		exportCommand.description,
+		'Export the chat history to a markdown or JSON file',
+	);
+});
+
+test('lazy registry keeps the export description in sync', t => {
+	const entry = lazyCommands.find(command => command.name === 'export');
+	t.is(entry?.description, exportCommand.description);
 });
 
 test('exportCommand handler returns React element', async t => {
@@ -83,6 +92,111 @@ test('exportCommand keeps overwrite semantics for a user-provided filename', asy
 	t.is(mockWriteFileCalls.length, 1);
 	t.true(mockWriteFileCalls[0].path.endsWith('fixed-name.md'));
 	t.false(mockWriteFileCalls[0].path.includes('fixed-name-2'));
+});
+
+test('exportCommand writes complete transcript metadata for --json', async t => {
+	fs.writeFile = originalWriteFile;
+	const before = new Set(
+		(await fs.readdir(process.cwd())).filter(filename => filename.endsWith('.json')),
+	);
+	t.teardown(async () => {
+		const files = (await fs.readdir(process.cwd())).filter(
+			filename => filename.endsWith('.json') && !before.has(filename),
+		);
+		await Promise.all(files.map(filename => fs.rm(path.join(process.cwd(), filename))));
+	});
+
+	const messages: Message[] = [
+		{
+			role: 'system',
+			content: 'System instruction',
+		},
+		{
+			role: 'assistant',
+			content: 'I will inspect the file.',
+			reasoning: 'The request needs a file inspection.',
+			structuredContent: {kind: 'plan', steps: ['inspect']},
+			images: [{data: 'base64-image', mediaType: 'image/png'}],
+			responseUsage: {
+				inputTokens: 12,
+				outputTokens: 5,
+				totalTokens: 17,
+			},
+		},
+		{
+			role: 'tool',
+			name: 'read_file',
+			content: 'file contents',
+			tool_call_id: 'call-1',
+		},
+	];
+
+	await exportCommand.handler(['--json'], messages, testMetadata);
+
+	const jsonFiles = (await fs.readdir(process.cwd())).filter(
+		filename => filename.endsWith('.json') && !before.has(filename),
+	);
+	t.is(jsonFiles.length, 1);
+	const exported = JSON.parse(
+		await fs.readFile(path.join(process.cwd(), jsonFiles[0]!), 'utf8'),
+	) as {
+		sessionDate: string;
+		provider: string;
+		model: string;
+		totalTokens: number;
+		sessionCwd: string;
+		messages: Message[];
+	};
+	t.regex(exported.sessionDate, /T/);
+	t.is(exported.provider, 'test-provider');
+	t.is(exported.model, 'test-model');
+	t.is(exported.totalTokens, 100);
+	t.is(exported.sessionCwd, process.cwd());
+	t.deepEqual(exported.messages, messages);
+});
+
+test('exportCommand uses an explicit JSON filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-export-${process.pid}.json`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler([filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	t.deepEqual(
+		JSON.parse(await fs.readFile(filepath, 'utf8')).messages,
+		JSON.parse(JSON.stringify(testMessages)),
+	);
+});
+
+test('exportCommand uses a JSON filename supplied after --json', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.json`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	t.deepEqual(
+		JSON.parse(await fs.readFile(filepath, 'utf8')).messages,
+		JSON.parse(JSON.stringify(testMessages)),
+	);
+});
+
+test('exportCommand treats --json as JSON even with a non-JSON filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.md`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	const content = await fs.readFile(filepath, 'utf8');
+	t.deepEqual(JSON.parse(content).messages, JSON.parse(JSON.stringify(testMessages)));
+	t.false(content.includes('# Nanocoder Chat Export'));
 });
 
 test('exportCommand writes a generated filename that is free', async t => {

@@ -40,6 +40,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
+import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {handleResourceMention} from '@/utils/resource-mention-handler';
 import {pasteEvents} from '@/utils/terminal-paste';
@@ -110,7 +111,7 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 // in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
 const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
-	['Ctrl+J', 'New line'],
+	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
 	['Tab', 'Accept suggestion / insert suggested command'],
 	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
@@ -1033,19 +1034,12 @@ export default function UserInput({
 			focus('user-input');
 		}
 
-		// Handle return keys for multiline input
-		// Ctrl+J is the official newline shortcut and reliably sends a literal LF
-		if (
-			(key.ctrl && inputChar === 'j') ||
-			(inputChar === '\n' && !key.return)
-		) {
-			updateInput(input + '\n');
-			return;
-		}
-
-		// Support Shift+Enter if the terminal sends it properly
-		if (key.return && key.shift) {
-			updateInput(input + '\n');
+		// Newline keys must not submit, select a completion, or recall a queued
+		// message. The insertion itself is TextInput's job — it knows the cursor
+		// offset, so the newline lands where the caret is. Bail out here before
+		// any of the Enter handling below, since ESC+CR and the kitty CSI-u
+		// encoding of Shift+Enter both arrive with `key.return` set.
+		if (isNewlineKey(inputChar, key)) {
 			return;
 		}
 

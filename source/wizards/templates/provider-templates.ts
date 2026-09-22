@@ -427,6 +427,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://www.orcarouter.ai/console)',
 		modelDefault: 'openai/gpt-5.5',
 	}),
+	apiKeyTemplate({
+		id: 'cheaper-inference',
+		name: 'Cheaper Inference',
+		baseUrl: 'https://api.cheaperinference.com/v1',
+		modelDefault: 'claude-sonnet-5',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
