@@ -268,7 +268,9 @@ export function InteractiveApp({
 					},
 					() => {
 						drainInProgressRef.current = false;
-						lastFailedDrainIdRef.current = drainedMessageId;
+						// Keep the captured queue head blocked even if the drain rejects
+						// before its dispatch callback receives the message.
+						lastFailedDrainIdRef.current = drainedMessageId ?? queuedMessageId;
 						reportFailedDrain();
 					},
 				);

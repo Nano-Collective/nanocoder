@@ -184,7 +184,10 @@ function makeProps(o: Overrides = {}) {
 }
 
 function QueuedPromptHarness({overrides}: {overrides: Overrides}) {
-	const userMessageQueue = useUserMessageQueue();
+	const queue = useUserMessageQueue();
+	const userMessageQueue = overrides.drainNextMessage
+		? {...queue, drainNextMessage: overrides.drainNextMessage}
+		: queue;
 
 	React.useEffect(() => {
 		userMessageQueue.enqueueMessage({
@@ -372,6 +375,43 @@ test('does not immediately retry a failed queued dispatch', async t => {
 		String((notice as React.ReactElement<{message: string}>).props.message),
 		/Queued prompt failed.*Enter to edit/,
 	);
+});
+
+test('reports and blocks a queued prompt when draining rejects before dispatch starts', async t => {
+	let drainAttempts = 0;
+	const notices: React.ReactNode[] = [];
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isConversationComplete: true,
+				addToChatQueue: notice => {
+					notices.push(notice);
+				},
+				drainNextMessage: async () => {
+					drainAttempts++;
+					throw new Error('drain failed before dispatch');
+				},
+			}}
+		/>,
+	);
+
+	t.teardown(unmount);
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(drainAttempts, 1);
+	t.is(notices.length, 1);
+	const notice = notices[0];
+	t.true(React.isValidElement(notice));
+	t.regex(
+		String((notice as React.ReactElement<{message: string}>).props.message),
+		/Queued prompt failed.*Enter to edit/,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(drainAttempts, 1);
+	t.is(notices.length, 1);
 });
 
 test('does not drain queued prompts while conversation is incomplete', async t => {
