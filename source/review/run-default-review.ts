@@ -32,10 +32,14 @@ import {
 	registerReviewAgents,
 } from './review-agents.js';
 
-/** Tool calls the finder may attempt. The spike used under five per run. */
-const DEFAULT_FINDER_MAX_TOOL_CALLS = 10;
+/**
+ * Tool calls the finder may attempt. Real-world diffs need several reads
+ * (each changed file, plus surrounding callers); reasoning models also
+ * spend turns thinking before their first tool call.
+ */
+const DEFAULT_FINDER_MAX_TOOL_CALLS = 24;
 /** Model turns for the finder, including its tool-loop turns. */
-const DEFAULT_FINDER_MAX_TURNS = 8;
+const DEFAULT_FINDER_MAX_TURNS = 16;
 /** Tool calls a single verifier run may attempt. One file read usually suffices. */
 const DEFAULT_VERIFIER_MAX_TOOL_CALLS = 4;
 /** Model turns for a single verifier run. */
@@ -130,6 +134,14 @@ export async function runDefaultReview(
 			subagent_type: REVIEW_FINDER_AGENT,
 			description: `Review changes for ${options.targetDescription}`,
 			prompt: [
+				// Reasoning models (nemotron-ultra et al.) will otherwise
+				// investigate forever: stating the budget in the prompt makes
+				// them converge to a final FINDING/no-issues answer.
+				'IMPORTANT: You have a hard budget of at most 24 tool calls.',
+				'Once you have enough evidence — or reach the budget — stop',
+				'investigating and output your FINDING blocks as your final',
+				'message. A reasoned "no issues" answer is acceptable.',
+				'',
 				'Review the following diff. Investigate the real code with your',
 				'tools before reporting. Output FINDING blocks only, no commentary.',
 				'',
@@ -393,6 +405,13 @@ export async function runDeepReview(
 				description: `Review ${options.targetDescription} (${lens.label})`,
 				prompt: [
 					`Review focus: ${lens.lens}`,
+					'',
+					// Same convergence instruction as the default tier's finder:
+					// reasoning models otherwise never stop investigating.
+					'IMPORTANT: You have a hard budget of at most 24 tool calls.',
+					'Once you have enough evidence — or reach the budget — stop',
+					'investigating and output your FINDING blocks as your final',
+					'message. A reasoned "no issues" answer is acceptable.',
 					'',
 					'Review the following diff. Investigate the real code with your',
 					'tools before reporting. Output FINDING blocks only, no commentary.',
