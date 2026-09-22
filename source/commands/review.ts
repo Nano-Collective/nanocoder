@@ -1,7 +1,7 @@
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {renderReviewReport} from '@/review/review-report.js';
-import {runDefaultReview} from '@/review/run-default-review.js';
+import {runDeepReview, runDefaultReview} from '@/review/run-default-review.js';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {getAgentToolExecutor} from '@/tools/agent-tool';
@@ -251,13 +251,22 @@ export function createReviewCommand(
 							typeof getAgentToolExecutor
 						>) ?? getAgentToolExecutor();
 					if (executor) {
-						const result = await runDefaultReview(executor, {
-							diff,
-							targetDescription,
-							projectRoot: getProjectRoot(),
-							signal: undefined,
-							loader: getSubagentLoader(),
-						});
+						const result =
+							tier === 'deep'
+								? await runDeepReview(executor, {
+										diff,
+										targetDescription,
+										projectRoot: getProjectRoot(),
+										signal: undefined,
+										loader: getSubagentLoader(),
+									})
+								: await runDefaultReview(executor, {
+										diff,
+										targetDescription,
+										projectRoot: getProjectRoot(),
+										signal: undefined,
+										loader: getSubagentLoader(),
+									});
 						return successMsg(
 							renderReviewReport(result, targetDescription),
 							'review',
