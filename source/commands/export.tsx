@@ -133,7 +133,7 @@ export const exportCommand: Command = {
 		}
 
 		const sessionDate = new Date().toISOString();
-		const content = isJsonExport(requestedFilename)
+		const content = jsonRequested
 			? `${JSON.stringify(
 					{
 						sessionDate,

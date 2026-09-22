@@ -185,6 +185,20 @@ test('exportCommand uses a JSON filename supplied after --json', async t => {
 	);
 });
 
+test('exportCommand treats --json as JSON even with a non-JSON filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.md`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	const content = await fs.readFile(filepath, 'utf8');
+	t.deepEqual(JSON.parse(content).messages, JSON.parse(JSON.stringify(testMessages)));
+	t.false(content.includes('# Nanocoder Chat Export'));
+});
+
 test('exportCommand writes a generated filename that is free', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
 
