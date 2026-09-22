@@ -77,6 +77,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `models` | Available model list for `/model` command |
 | `contextWindow` | Default context window in tokens for all models on this provider (optional) |
 | `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |
+| `maxOutputTokens` | Cap on tokens the model may generate in one response, for all models on this provider (optional, see [Output Token Ceiling](#output-token-ceiling)) |
 | `sdkProvider` | AI SDK provider to use (see below, defaults to `openai-compatible`) |
 | `organizationId` | Organization ID for OpenAI (optional) |
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
@@ -86,6 +87,33 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
+
+### Output Token Ceiling
+
+`maxOutputTokens` caps how many tokens the model may generate in a single response. Leave it unset and the limit is whatever the AI SDK provider infers, which is not always what you want.
+
+The case that bites: `@ai-sdk/anthropic` derives the ceiling from the model id and **falls back to 4096 for anything it does not recognise as a Claude model**. So pointing `sdkProvider: "anthropic"` at an Anthropic-compatible endpoint serving some other model caps every reply at 4096 tokens. Long replies are truncated mid-sentence, with no error - the response simply stops.
+
+```json
+{
+  "nanocoder": {
+    "providers": [
+      {
+        "name": "MiniMax Coding",
+        "sdkProvider": "anthropic",
+        "baseUrl": "https://api.minimax.io/anthropic/v1",
+        "apiKey": "${MINIMAX_API_KEY}",
+        "models": ["minimax-m3"],
+        "maxOutputTokens": 32000
+      }
+    ]
+  }
+}
+```
+
+Set it below whatever the endpoint actually permits - an oversized value is rejected by some providers rather than clamped. It applies to every model in the entry; use separate entries for models with different ceilings.
+
+A `/tune` max-tokens value, where one is set, takes priority. Headless runs (`nanocoder run "..."`) never carry `/tune` parameters, so on those this provider setting is the only way to raise the ceiling.
 
 ### Context Window Overrides
 

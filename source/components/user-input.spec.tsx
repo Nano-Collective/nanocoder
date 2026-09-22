@@ -4,6 +4,7 @@ import React from 'react';
 import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
@@ -19,7 +20,14 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 	};
 
 	return (
-		<ThemeContext.Provider value={mockTheme}>{children}</ThemeContext.Provider>
+		<ThemeContext.Provider value={mockTheme}>
+			{/* The `?` shortcuts overlay renders a titled box, which reads this. */}
+			<TitleShapeContext.Provider
+				value={{currentTitleShape: 'pill', setCurrentTitleShape: () => {}}}
+			>
+				{children}
+			</TitleShapeContext.Provider>
+		</ThemeContext.Provider>
 	);
 };
 
@@ -119,6 +127,61 @@ test('UserInput renders with disabled state', t => {
 	unmount();
 });
 
+test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	t.regex(lastFrame()!, /Shift\+Tab/);
+	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
+
+	// Keys are swallowed while the overlay is open, so the prompt stays empty
+	// (the placeholder only renders for an empty value).
+	stdin.write('x');
+	stdin.write('\x1B');
+	await waitForCondition(() => !/Keyboard Shortcuts/.test(lastFrame() ?? ''));
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	unmount();
+});
+
+test('UserInput closes the shortcuts overlay on a second ?', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	stdin.write('?');
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
+	unmount();
+});
+
+test('UserInput types ? literally when the prompt is not empty', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('why');
+	await waitForFrame(lastFrame, /why/);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /why\?/);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
+	unmount();
+});
+
 test('UserInput renders development mode indicator', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
@@ -131,6 +194,50 @@ test('UserInput renders development mode indicator', t => {
 	t.regex(output!, /normal mode on/); // Development mode indicator
 	unmount();
 });
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+test.serial(
+	'UserInput aligns the mode indicator with the input box left border',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 100,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const lines = output.split('\n');
+
+			const borderLine = lines.find(line => line.includes('╭'));
+			const modeLine = lines.find(line => line.includes('normal mode on'));
+			t.truthy(borderLine, 'Should find the input box top border');
+			t.truthy(modeLine, 'Should find the mode indicator line');
+
+			const borderIndent = borderLine!.indexOf('╭');
+			const modeIndent = modeLine!.search(/\S/);
+			t.is(
+				modeIndent,
+				borderIndent + 1,
+				'Mode indicator text should start one step to the right of the input box border',
+			);
+
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
 
 test('UserInput renders auto-accept mode indicator', t => {
 	const {lastFrame, unmount} = render(
@@ -420,7 +527,37 @@ test('UserInput navigates queued messages while busy with empty input', async t 
 	unmount();
 });
 
-test('UserInput loads selected queued message for editing', async t => {
+test('UserInput loads selected queued message for editing while idle', async t => {
+	let removedId = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\r');
+	await wait(50);
+
+	t.is(removedId, 'queued-2');
+	t.regex(lastFrame()!, /second queued/);
+	unmount();
+});
+
+test('UserInput loads selected queued message for editing while busy', async t => {
 	let removedId = '';
 
 	const {stdin, lastFrame, unmount} = render(
@@ -558,7 +695,9 @@ test('UserInput renders help text when not disabled', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /What would you like me to help with\?/);
+	// New design: heading removed, shorter placeholder inside rounded border
+	t.regex(output!, /Ask anything\.\.\./);
+	t.notRegex(output!, /What would you like me to help with\?/);
 	unmount();
 });
 
@@ -572,6 +711,7 @@ test('UserInput hides help text when disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /What would you like me to help with\?/);
+	t.notRegex(output!, /Ask anything\.\.\./);
 	unmount();
 });
 
@@ -861,6 +1001,71 @@ test('UserInput does not insert a literal character when ctrl+t is pressed', asy
 });
 
 // ============================================================================
+// Undo / Redo (Ctrl+Z / Ctrl+Y) Tests
+// ============================================================================
+
+test('UserInput undoes the last edit with ctrl+z', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Ctrl+Z (0x1A) should revert the last edit. Watch for a frame WITHOUT the
+	// full value: the value must shrink (how far depends on paste detection,
+	// which may collapse a rapid keystroke run into one edit).
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /abcde/);
+	unmount();
+});
+
+test('UserInput redoes an undone edit with ctrl+y', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Undo with Ctrl+Z, settle so the redo stack commits, then redo with Ctrl+Y.
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await wait(100);
+	await waitForCondition(() => /abcde/.test(lastFrame() ?? ''));
+
+	t.regex(lastFrame()!, /abcde/);
+	unmount();
+});
+
+test('UserInput ctrl+z does not insert a literal character', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('ab');
+	await waitForFrame(lastFrame, /ab/);
+	stdin.write('\u001a');
+	await wait(50);
+
+	// Undo should remove "b", not append a control character.
+	t.notRegex(lastFrame()!, /ab/);
+	unmount();
+});
+
+// ============================================================================
 // Command Completion Navigation Tests
 // ============================================================================
 
@@ -1127,7 +1332,7 @@ test.serial(
 
 		await wait(50);
 		pasteEvents.emit('paste', 'line one\nline two\nline three');
-		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]/);
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
 
 		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
 		unmount();
@@ -1163,4 +1368,3 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
-

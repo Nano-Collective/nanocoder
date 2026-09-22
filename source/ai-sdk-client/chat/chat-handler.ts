@@ -11,6 +11,7 @@ import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	LLMChatResponse,
+	LLMFinishReason,
 	Message,
 	ModeOverrides,
 	StreamCallbacks,
@@ -36,6 +37,7 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
 	buildProviderOptions,
 	isPromptCachingEnabled,
@@ -163,32 +165,15 @@ export async function handleChat(
 			let finalSystemContent = systemContent;
 			let finalNonSystemMessages = nonSystemMessages;
 			if (privacyEnabled && privacySessionMapRef) {
-				const {scrub} = await import('@nanocollective/prompt-scrub');
-
-				const prevCount = Object.keys(privacySessionMapRef.current).length;
-
-				finalSystemContent = scrub({
-					content: systemContent,
-					sessionMap: privacySessionMapRef.current,
-					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-				}).scrubbedContent as string;
-
-				finalNonSystemMessages = nonSystemMessages.map(m => {
-					if (m.role === 'tool') return m;
-					return {
-						...m,
-						content: scrub({
-							content: m.content,
-							sessionMap: privacySessionMapRef.current,
-							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-						}).scrubbedContent as string,
-					};
-				});
-
-				const newCount = Object.keys(privacySessionMapRef.current).length;
-				const delta = newCount - prevCount;
-				if (delta > 0 && onPrivacyEvent) {
-					onPrivacyEvent(delta);
+				const scrubbed = await scrubOutgoing(
+					systemContent,
+					nonSystemMessages,
+					privacySessionMapRef.current,
+				);
+				finalSystemContent = scrubbed.systemContent;
+				finalNonSystemMessages = scrubbed.messages;
+				if (scrubbed.newPlaceholders > 0 && onPrivacyEvent) {
+					onPrivacyEvent(scrubbed.newPlaceholders);
 				}
 			}
 
@@ -220,6 +205,20 @@ export async function handleChat(
 				systemContent,
 				modeOverrides?.modelParameters,
 			);
+
+			// Resolved out here, not inside the `modelParameters` spread below,
+			// because that spread is skipped entirely when nothing has been tuned
+			// — which is every headless and CI run, exactly the ones that need a
+			// working ceiling. `/tune` wins when set; the provider entry is the
+			// baseline.
+			//
+			// ModelParameters keeps the user-facing name `maxTokens`: it is
+			// persisted in tune preferences, so renaming it would silently drop
+			// what existing users have configured. The AI SDK name is applied at
+			// this boundary instead.
+			const resolvedMaxOutputTokens =
+				modeOverrides?.modelParameters?.maxTokens ??
+				providerConfig.maxOutputTokens;
 
 			const result = streamText({
 				model,
@@ -263,12 +262,21 @@ export async function handleChat(
 				// buildProviderOptions are all JSON-serialisable, but TypeScript
 				// can't infer that through our looser internal shape.
 				providerOptions: providerOptions as SDKProviderOptions,
+				// The AI SDK calls this `maxOutputTokens`. It was previously sent
+				// as `maxTokens`, the v4 name, which v5+ does not read — and
+				// because object spreads bypass excess-property checking it was
+				// dropped silently rather than failing to compile, so every run
+				// fell back to whatever ceiling the provider inferred from the
+				// model id. Keep the key spelled the way the installed SDK spells
+				// it.
+				...(resolvedMaxOutputTokens != null && {
+					maxOutputTokens: resolvedMaxOutputTokens,
+				}),
 				// Model parameters from /tune — passed directly to AI SDK
 				...(modeOverrides?.modelParameters && {
 					temperature: modeOverrides.modelParameters.temperature,
 					topP: modeOverrides.modelParameters.topP,
 					topK: modeOverrides.modelParameters.topK,
-					maxTokens: modeOverrides.modelParameters.maxTokens,
 					frequencyPenalty: modeOverrides.modelParameters.frequencyPenalty,
 					presencePenalty: modeOverrides.modelParameters.presencePenalty,
 					...(modeOverrides.modelParameters.stop && {
@@ -408,64 +416,17 @@ export async function handleChat(
 			let finalToolCalls = toolCalls;
 
 			if (privacyEnabled && privacySessionMapRef) {
-				const {rehydrate} = await import('@nanocollective/prompt-scrub');
-
-				if (finalContent) {
-					const result = rehydrate({
+				const rehydrated = await rehydrateResponse(
+					{
 						content: finalContent,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalContent = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (content)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalReasoning) {
-					const result = rehydrate({
-						content: finalReasoning,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalReasoning = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalToolCalls.length > 0) {
-					finalToolCalls = finalToolCalls.map(tc => {
-						try {
-							const argsStr = JSON.stringify(tc.function.arguments);
-							const result = rehydrate({
-								content: argsStr,
-								sessionMap: privacySessionMapRef.current,
-							});
-							if (result.warnings && result.warnings.length > 0) {
-								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
-									toolName: tc.function.name,
-									warnings: result.warnings,
-								});
-							}
-							return {
-								...tc,
-								function: {
-									...tc.function,
-									arguments: JSON.parse(result.content as string),
-								},
-							};
-						} catch (e) {
-							logger.error('Failed to rehydrate tool call', {
-								toolName: tc.function.name,
-								error: e,
-							});
-							return tc;
-						}
-					});
-				}
+						reasoning: finalReasoning,
+						toolCalls: finalToolCalls,
+					},
+					privacySessionMapRef.current,
+				);
+				finalContent = rehydrated.content;
+				finalReasoning = rehydrated.reasoning;
+				finalToolCalls = rehydrated.toolCalls;
 			}
 
 			// Calculate performance metrics
@@ -499,6 +460,11 @@ export async function handleChat(
 					},
 				],
 				toolsDisabled: shouldDisableTools,
+				// Carried out of the client, not just logged: a `length` finish with
+				// no tool calls is a response truncated at the output-token limit,
+				// and the conversation loop cannot tell that from a model that
+				// finished talking unless it can see this.
+				finishReason: finishReason as LLMFinishReason,
 				usage: {
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,

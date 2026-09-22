@@ -1,6 +1,8 @@
+import {Box} from 'ink';
 import {render} from 'ink-testing-library';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {DevelopmentModeIndicator} from './development-mode-indicator';
 
 void React; // JSX runtime requires React in scope
@@ -432,6 +434,31 @@ function renderWithWidth(
 		process.stdout.columns = originalColumns;
 	}
 }
+
+test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t => {
+	// user-input renders this row inside <Box marginLeft={3}>. Budgeting
+	// against the full terminal width overflowed by exactly those columns, and
+	// the terminal then cut the row mid-word rather than dropping a segment.
+	const output = renderWithWidth(
+		<Box marginLeft={3}>
+			<DevelopmentModeIndicator
+				developmentMode="auto-accept"
+				colors={mockColors}
+				contextPercentUsed={42}
+				sessionName={'s'.repeat(45)}
+				indentColumns={3}
+			/>
+		</Box>,
+		80,
+	);
+
+	for (const line of stripAnsi(output).split('\n')) {
+		t.true(
+			line.length <= 80,
+			`row is ${line.length} columns wide in an 80-column terminal`,
+		);
+	}
+});
 
 test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
 	const output = renderWithWidth(

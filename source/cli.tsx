@@ -10,7 +10,9 @@
 // (~thousand+ modules via Ink + es-toolkit alone) into the fast path,
 // defeating the purpose. Heavy imports live inside `main()` below and are
 // pulled in via dynamic `await import()` only when the app actually boots.
+import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import {parseRunPrompt} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -67,8 +69,28 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		trustDirectory: args.includes('--trust-directory'),
 	});
 	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder skills <sub>` — fast path, only loads the skill
+// installer (no Ink, no providers, no tool registry).
+if (args[0] === 'skills') {
+	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
+	if (args[1] !== 'add') {
+		console.error(SKILLS_CLI_USAGE);
+		process.exit(args[1] ? 1 : 0);
+	}
+	const result = await runSkillsCli({
+		projectRoot: process.cwd(),
+		args: args.slice(2),
+	});
+	if (result.output) {
+		if (result.exitCode === 0) console.log(result.output);
+		else console.error(result.output);
+	}
 	process.exit(result.exitCode);
 }
 
@@ -138,6 +160,23 @@ Examples:
 	}
 }
 
+// Handle `nanocoder completion <shell>` — fast path, prints a static
+// completion script and exits without loading any app code. The shell
+// argument is required so a missing argument fails loudly with usage
+// instead of silently installing the wrong script.
+if (args[0] === 'completion') {
+	const {runCompletionCli} = await import('@/cli-completions/cli');
+	const result = runCompletionCli(args.slice(1));
+	if (result.output) {
+		if (result.stream === 'stderr') {
+			console.error(result.output);
+		} else {
+			console.log(result.output);
+		}
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -147,10 +186,19 @@ Commands:
   init [options]                  Analyze the project and create AGENTS.md.
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
+  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start refuses to run in an untrusted directory; pass
+                                  --trust-directory to bypass the check for this run only.
+  skills add <target>             Install a skill bundle from a git repository.
+                                  <target> is an index name, owner/repo, a git URL, or a local path.
+                                  Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  completion <shell>              Generate a shell completion script (bash, zsh, or fish).
+                                  Example: eval "$(nanocoder completion zsh)"
 
 Options:
   -v, --version       Show version number
@@ -160,18 +208,26 @@ Options:
   --provider          Specify AI provider (must be configured in agents.config.json)
   --model             Specify AI model (must be available for the provider)
   --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
-  --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
-                      Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
+  --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
+                      architect). Defaults to "normal" for interactive sessions and
+                      "auto-accept" for run mode.
+  --prompt-file       Read the run prompt from a file instead of the command
+                      line. Necessary for large prompts: Linux caps a single
+                      argument at 128 KiB and execve fails with E2BIG.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Only valid with the "run" command. Does not modify the preferences file.
+                      Valid with the "run" command and "daemon start". Does not modify
+                      the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
   --alt-screen        Fullscreen TUI on the alternate screen buffer with in-app
-                      scrolling (mouse wheel / PgUp / PgDn). Persistent version:
-                      "alternateScreen": true in preferences.json.
-  --no-alt-screen     Force the default inline mode (main screen, chat history in
-                      the terminal's native scrollback), overriding the preference.
+                      scrolling (mouse wheel / PgUp / PgDn). Enabled by default.
+  --no-alt-screen     Disable fullscreen TUI and force inline mode (main screen,
+                      chat history in the terminal's native scrollback).
+  --mouse             Mouse wheel scrolls the chat viewport in fullscreen mode, with
+                      Shift+drag (Option+drag in iTerm2) to select text. Enabled by default.
+  --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
+                      works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -186,6 +242,8 @@ Options:
 
 Examples:
   nanocoder init --preset nextjs
+  nanocoder skills add pr-reviewer
+  nanocoder skills add Nano-Collective/nanocoder-skills --subdir skills/pr-reviewer
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
@@ -193,6 +251,9 @@ Examples:
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
+  nanocoder review main
+  nanocoder review feature/auth
+  nanocoder review 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -214,9 +275,17 @@ async function main(): Promise<void> {
 
 	// Extract VS Code port if specified
 	let vscodePort: number | undefined;
-	const portArgIndex = args.findIndex(arg => arg === '--vscode-port');
-	if (portArgIndex !== -1 && args[portArgIndex + 1]) {
-		const port = parseInt(args[portArgIndex + 1], 10);
+	const portArgIndex = args.findIndex(
+		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
+	);
+	const portValue =
+		portArgIndex === -1
+			? undefined
+			: args[portArgIndex].startsWith('--vscode-port=')
+				? args[portArgIndex].slice('--vscode-port='.length)
+				: args[portArgIndex + 1];
+	if (portValue) {
+		const port = parseInt(portValue, 10);
 		if (!isNaN(port) && port > 0 && port < 65536) {
 			vscodePort = port;
 		}
@@ -224,10 +293,18 @@ async function main(): Promise<void> {
 
 	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
-	const providerArgIndex = args.findIndex(arg => arg === '--provider');
-	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
+	const providerArgIndex = args.findIndex(
+		arg => arg === '--provider' || arg.startsWith('--provider='),
+	);
+	const providerValue =
+		providerArgIndex === -1
+			? undefined
+			: args[providerArgIndex].startsWith('--provider=')
+				? args[providerArgIndex].slice('--provider='.length)
+				: args[providerArgIndex + 1];
+	if (providerValue) {
 		// Allow alphanumeric, hyphen, underscore only to prevent injection
-		const value = args[providerArgIndex + 1];
+		const value = providerValue;
 		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
 			cliProvider = value;
 		} else {
@@ -240,10 +317,18 @@ async function main(): Promise<void> {
 
 	// Extract --model if specified — validate against allowlist pattern
 	let cliModel: string | undefined;
-	const modelArgIndex = args.findIndex(arg => arg === '--model');
-	if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
+	const modelArgIndex = args.findIndex(
+		arg => arg === '--model' || arg.startsWith('--model='),
+	);
+	const modelValue =
+		modelArgIndex === -1
+			? undefined
+			: args[modelArgIndex].startsWith('--model=')
+				? args[modelArgIndex].slice('--model='.length)
+				: args[modelArgIndex + 1];
+	if (modelValue) {
 		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
-		const value = args[modelArgIndex + 1];
+		const value = modelValue;
 		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
 			cliModel = value;
 		} else {
@@ -255,18 +340,26 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --context-max if specified (framework-free parser — no React/Ink)
-	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
-	if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
+	const contextMaxArgIndex = args.findIndex(
+		arg => arg === '--context-max' || arg.startsWith('--context-max='),
+	);
+	const contextMaxValue =
+		contextMaxArgIndex === -1
+			? undefined
+			: args[contextMaxArgIndex].startsWith('--context-max=')
+				? args[contextMaxArgIndex].slice('--context-max='.length)
+				: args[contextMaxArgIndex + 1];
+	if (contextMaxValue) {
 		const [{parseContextLimit}, {setSessionContextLimit}] = await Promise.all([
 			import('@/utils/parse-context-limit'),
 			import('@/models/index'),
 		]);
-		const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
+		const limit = parseContextLimit(contextMaxValue);
 		if (limit !== null) {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${args[contextMaxArgIndex + 1]}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
 			);
 			process.exit(1);
 		}
@@ -327,56 +420,78 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Check for non-interactive mode (run command)
-	let nonInteractivePrompt: string | undefined;
-	const runCommandIndex = args.findIndex(arg => arg === 'run');
-	const afterRunArgs =
-		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
-	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-		// Filter out known flags after 'run' when constructing the prompt
-		const promptArgs: string[] = [];
-		for (let i = 0; i < afterRunArgs.length; i++) {
-			const arg = afterRunArgs[i];
-			if (arg === '--vscode') {
-				continue; // skip this flag
-			} else if (arg === '--vscode-port') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--provider') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--model') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--context-max') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg === '--mode') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--mode=')) {
-				continue; // skip fused form
-			} else if (arg === '--json') {
-				continue; // skip this flag
-			} else if (arg === '--output-format') {
-				i++; // skip this flag and its value
-				continue;
-			} else if (arg.startsWith('--output-format=')) {
-				continue; // skip fused form
-			} else if (arg === '--trust-directory') {
-				continue; // skip this flag
-			} else if (arg === '--plain' || arg === '--no-plain') {
-				continue; // skip this flag
-			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-				continue; // skip this flag
-			} else {
-				promptArgs.push(arg);
-			}
+	// Check for non-interactive mode (run command). The filtering lives in
+	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
+	// in cli.spec.ts had drifted six flags behind this.
+	const runCommandIndex = args.indexOf('run');
+	const isRunCommand = runCommandIndex !== -1;
+	let nonInteractivePrompt = parseRunPrompt(args);
+
+	// --prompt-file: read the prompt from a file rather than argv.
+	//
+	// Linux caps a *single* argv entry at MAX_ARG_STRLEN (32 pages = 131072
+	// bytes), independently of the much larger ARG_MAX total, and execve fails
+	// with E2BIG before the process starts. macOS has no equivalent per-argument
+	// cap, so a caller that assembles a large prompt — anything that embeds file
+	// contents — works in local testing and then cannot spawn at all on a Linux
+	// CI runner. A file has no such ceiling.
+	//
+	// Takes precedence over a positional prompt: passing both is a caller bug,
+	// and the file is the one that was asked for explicitly.
+	const promptFileIndex = args.findIndex(
+		arg => arg === '--prompt-file' || arg.startsWith('--prompt-file='),
+	);
+	const promptFile =
+		promptFileIndex === -1
+			? undefined
+			: args[promptFileIndex].startsWith('--prompt-file=')
+				? args[promptFileIndex].slice('--prompt-file='.length)
+				: args[promptFileIndex + 1];
+	if (promptFile !== undefined) {
+		if (runCommandIndex === -1) {
+			console.error('--prompt-file only applies to `nanocoder run`.');
+			process.exit(1);
 		}
-		nonInteractivePrompt = promptArgs.join(' ');
+		try {
+			nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+		} catch (error) {
+			console.error(
+				`Could not read --prompt-file "${promptFile}": ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			process.exit(1);
+		}
 	}
 
-	const nonInteractiveMode = runCommandIndex !== -1;
+	let nonInteractiveMode = isRunCommand;
+
+	// Check for `nanocoder review <target>` — syntactic sugar for
+	// `nanocoder run /review <target>`. The target is the branch or PR number
+	// to review. Flags between `review` and the target are filtered the same
+	// way as `run`. Lazy-loaded to keep it off the lightweight path.
+	let isReviewCommand = false;
+	let reviewPrompt: string | undefined;
+	if (args[0] === 'review') {
+		const {parseReviewCliArgs} = await import('./commands/review-cli');
+		const result = parseReviewCliArgs(args);
+		isReviewCommand = result.isReviewCommand;
+		reviewPrompt = result.prompt;
+		if (result.error) {
+			console.error(`Error: ${result.error}`);
+			process.exit(1);
+		}
+	}
+
+	if (isRunCommand && isReviewCommand) {
+		console.error('Cannot use both `run` and `review` in the same invocation.');
+		process.exit(1);
+	}
+
+	if (isReviewCommand) {
+		nonInteractivePrompt = reviewPrompt;
+		nonInteractiveMode = true;
+	}
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
@@ -415,14 +530,15 @@ async function main(): Promise<void> {
 	}
 
 	// --trust-directory is only respected with `run`. Surface a warning
-	// (rather than silently dropping) if the user passes it interactively.
+	// (rather than silently dropping) if the user passes it interactively
+	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !nonInteractiveMode) {
+	if (trustDirectoryRequested && !isRunCommand) {
 		console.error(
 			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
 		);
 	}
-	const trustDirectory = trustDirectoryRequested && nonInteractiveMode;
+	const trustDirectory = trustDirectoryRequested && isRunCommand;
 
 	// --plain: lightweight, Ink-free runtime. Only valid with `run` in v1.
 	// Auto-detect: enable when stdout isn't a TTY or the env looks like CI,
@@ -433,7 +549,7 @@ async function main(): Promise<void> {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
 	}
-	if (plainRequested && !nonInteractiveMode) {
+	if (plainRequested && !isRunCommand) {
 		console.error(
 			'--plain requires the `run` subcommand in this version. Try: nanocoder --plain run "..."',
 		);
@@ -450,6 +566,13 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	if (outputFormat === 'json' && isReviewCommand) {
+		console.error(
+			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
+		);
+		process.exit(1);
+	}
+
 	const ciDetected =
 		process.env.CI === 'true' ||
 		Boolean(
@@ -460,11 +583,21 @@ async function main(): Promise<void> {
 				process.env.JENKINS_URL,
 		);
 	const plainAuto =
-		nonInteractiveMode &&
+		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
+
+	// Hard-error when `review` lands in a non-interactive context (piped
+	// stdout, CI). The plain shell has no slash-command dispatch, so
+	// `/review <target>` would be sent verbatim to the model as chat.
+	if (isReviewCommand && !process.stdout.isTTY) {
+		console.error(
+			'Error: `nanocoder review` requires an interactive terminal (TTY).',
+		);
+		process.exit(1);
+	}
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
@@ -594,18 +727,21 @@ async function main(): Promise<void> {
 		// interactive TUI only. Run mode (`nanocoder run …`) prints a
 		// transcript the user needs to keep after exit — the alt screen
 		// would discard it when restoring the original buffer.
-		// Screen mode: inline (main screen + native scrollback) by DEFAULT —
-		// the terminal's own scrollbar, wheel, and search work there.
-		// Fullscreen (alt screen + in-app scroll) is opt-in via --alt-screen
-		// or the alternateScreen:true preference; --no-alt-screen forces
-		// inline regardless of the preference.
-		const {loadPreferences} = await import('@/config/preferences');
+		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
+		// Passing --no-alt-screen or setting alternateScreen:false in preferences
+		// forces inline mode (main screen + native scrollback).
+		const {getAlternateScreen, getMouseReporting} = await import(
+			'@/config/preferences'
+		);
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
-			(args.includes('--alt-screen') ||
-				loadPreferences().alternateScreen === true);
+			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
 			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		const mouseReportingAllowed =
+			!args.includes('--no-mouse') &&
+			(args.includes('--mouse') || getMouseReporting());
+		const useMouseReporting = useAltScreen && mouseReportingAllowed;
 		// The stdin proxy below is needed in BOTH screen modes, because
 		// bracketed paste applies to both — only mouse reporting is
 		// fullscreen-only.
@@ -627,8 +763,10 @@ async function main(): Promise<void> {
 		}
 		if (interactiveTty) {
 			const {
+				ALTERNATE_SCROLL_OFF,
+				ALTERNATE_SCROLL_ON,
 				createUtf8InputDecoder,
-				markMouseReportingAvailable,
+				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
@@ -648,17 +786,27 @@ async function main(): Promise<void> {
 			// receive paste markers as literal text.
 			restoreInputModes = () => {
 				process.stdout.write(DISABLE_BRACKETED_PASTE);
+				if (useAltScreen) {
+					process.stdout.write(
+						useMouseReporting ? MOUSE_REPORTING_OFF : ALTERNATE_SCROLL_ON,
+					);
+				}
 			};
 
 			if (useAltScreen) {
-				// SGR mouse reporting so wheel scrolling reaches the app. The
-				// alt screen has no native scrollback, so the terminal's own
-				// wheel / scrollbar can't work — the app must receive wheel
-				// events itself. This is also what takes click-drag selection
-				// away from the terminal, so UserInput offers a toggle that
-				// suspends it (see toggleSelectionMode).
-				process.stdout.write(MOUSE_REPORTING_ON);
-				markMouseReportingAvailable();
+				if (useMouseReporting) {
+					// SGR mouse reporting so wheel scrolling reaches the app. The
+					// alt screen has no native scrollback, so the terminal's own
+					// wheel / scrollbar can't work — the app must receive wheel
+					// events itself. Text selection then needs Shift+drag
+					// (Option+drag in iTerm2).
+					process.stdout.write(MOUSE_REPORTING_ON);
+				} else {
+					// Native text selection is opted into, so nothing consumes
+					// wheel ticks — stop the terminal turning them into arrow
+					// keys that would cycle prompt history.
+					process.stdout.write(ALTERNATE_SCROLL_OFF);
+				}
 			}
 
 			// Ink must never see the raw escape sequences (its keypress
@@ -735,8 +883,12 @@ async function main(): Promise<void> {
 			stopInputForwarding?.();
 			restoreInputModes?.();
 			if (useAltScreen) {
-				// Mouse reporting off, then back to the main screen buffer.
-				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');
+				if (useMouseReporting) {
+					// Mouse reporting off
+					process.stdout.write('\x1B[?1006l\x1B[?1000l');
+				}
+				// Back to the main screen buffer
+				process.stdout.write('\x1B[?1049l');
 			}
 		};
 

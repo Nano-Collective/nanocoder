@@ -68,11 +68,24 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'expand',
+		description:
+			'Show one tool result in full (/expand <n>); run without a number to list recent results',
+		load: () => import('@/commands/expand').then(m => m.expandCommand),
+	},
+	{
 		name: 'commit',
 		description:
 			'Generate a conventional commit message from staged changes (--copy)',
 		progressLabel: 'Generating commit message',
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
+	},
+	{
+		name: 'review',
+		description:
+			'Review a branch or PR diff for bugs, security issues, and style violations',
+		progressLabel: 'Reviewing code',
+		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
 	{
 		name: 'doctor',

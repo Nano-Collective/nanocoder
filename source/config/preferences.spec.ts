@@ -11,6 +11,7 @@ import {
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
 import {
+	ensureDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -20,10 +21,12 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
+	isDirectoryTrusted,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	resetPreferencesCache,
 	savePreferences,
+	getShowAgentBashOutput,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateLastUsed,
@@ -37,6 +40,9 @@ import {
 	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
+	getMouseReporting,
+	updateMouseReporting,
+	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
@@ -1595,6 +1601,39 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 });
 
 // ============================================================================
+// Mouse Reporting Tests
+// ============================================================================
+
+test.serial('getMouseReporting returns true by default when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getMouseReporting();
+	t.is(result, true);
+});
+
+test.serial('updateMouseReporting saves and retrieves preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateMouseReporting(true);
+		t.is(getMouseReporting(), true);
+
+		updateMouseReporting(false);
+		t.is(getMouseReporting(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
 // Usage Footer Tests
 // ============================================================================
 
@@ -1614,7 +1653,6 @@ test.serial('getShowUsageFooter defaults to true when not set', t => {
 		}
 	}
 });
-
 test.serial('getShowUsageFooter defaults to true when file does not exist', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
@@ -1674,6 +1712,96 @@ test.serial('full workflow: toggle usage footer off and back on', t => {
 
 		updateShowUsageFooter(true);
 		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// showAgentBashOutput Tests
+// ============================================================================
+
+test.serial('getShowAgentBashOutput defaults to false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput defaults to false when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	t.is(getShowAgentBashOutput(), false);
+});
+
+test.serial('updateShowAgentBashOutput round-trips and preserves others', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'ollama'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+		t.is(loadPreferences().lastProvider, 'ollama');
+
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput reflects a write, not a stale cached value', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		// Self-priming, so the result does not depend on what earlier serial
+		// tests left in the cache. Without version-based invalidation the final
+		// read would still serve the primed `false`.
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput serves the cached value without re-reading', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+
+		// Remove the file behind the cache's back. A getter that re-read per call
+		// would fall back to the default (false); the cached one keeps serving
+		// true, which is what keeps a bash card render off the disk.
+		rmSync(preferencesPath, {force: true});
+		t.is(getShowAgentBashOutput(), true);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1968,3 +2096,112 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 		}
 	}
 });
+
+// ============================================================================
+// Directory Trust Tests — shared by the interactive TUI, --plain, and the
+// daemon boot path (see source/daemon/cli.ts's `start`).
+// ============================================================================
+
+test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
+	t.false(isDirectoryTrusted('/some/project', {}));
+});
+
+test('isDirectoryTrusted matches an exact entry', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted resolves relative entries before comparing', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+});
+
+test('isDirectoryTrusted does not match an unrelated directory', t => {
+	t.false(
+		isDirectoryTrusted(process.cwd(), {
+			trustedDirectories: ['/some/other/project'],
+		}),
+	);
+});
+
+test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
+	let saveCalled = false;
+	const result = ensureDirectoryTrust('/untrusted/project', true, {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
+	const dir = process.cwd();
+	let saveCalled = false;
+	const result = ensureDirectoryTrust(dir, false, {
+		loadPreferences: () => ({trustedDirectories: [dir]}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test.serial(
+	'ensureDirectoryTrust refuses an unrecorded directory when NANOCODER_TRUST_DIRECTORY is unset',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const result = ensureDirectoryTrust('/untrusted/project', false, {
+			loadPreferences: () => ({trustedDirectories: []}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const target = join(tmpdir(), 'nanocoder-untrusted-project');
+			const result = ensureDirectoryTrust(target, false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 does not duplicate an already-trusted directory',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const dir = process.cwd();
+			let saveCalled = false;
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: () => {
+					saveCalled = true;
+				},
+			});
+			t.deepEqual(result, {trusted: true, persisted: false});
+			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);

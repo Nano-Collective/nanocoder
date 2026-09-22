@@ -32,6 +32,13 @@ interface DevelopmentModeIndicatorProps {
 	activeEditor?: ActiveEditorState | null;
 	taskInfo?: TaskIndicatorInfo | null;
 	isSaving?: boolean;
+	/**
+	 * Columns the caller's own wrapper indents this row by. The width budget
+	 * below must exclude them: budgeting against the full terminal width
+	 * overflows by exactly this much, and Ink then cuts the row mid-word
+	 * instead of dropping an optional segment.
+	 */
+	indentColumns?: number;
 }
 
 function getContextColor(
@@ -60,8 +67,10 @@ export const DevelopmentModeIndicator = React.memo(
 		activeEditor,
 		taskInfo,
 		isSaving,
+		indentColumns = 0,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+		const budgetWidth = Math.max(0, actualWidth - indentColumns);
 		const modeLabel = isNarrow
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
@@ -174,7 +183,7 @@ export const DevelopmentModeIndicator = React.memo(
 
 				// Decide which optional segments fit. Drop the Ctrl-t hint first,
 				// then the saving indicator, then the suffix, then the shift hint,
-				// until the row fits within actualWidth.
+				// until the row fits within budgetWidth.
 				let editorSuffix = editorSuffixFull;
 				let shiftHint = shiftHintFull;
 				let taskHintExtra = taskHintExtraFull;
@@ -186,7 +195,7 @@ export const DevelopmentModeIndicator = React.memo(
 						editorSuffix.length +
 						shiftHint.length +
 						1 >
-					actualWidth
+					budgetWidth
 				) {
 					taskHintExtra = 0;
 					if (
@@ -195,15 +204,15 @@ export const DevelopmentModeIndicator = React.memo(
 							editorSuffix.length +
 							shiftHint.length +
 							1 >
-						actualWidth
+						budgetWidth
 					) {
 						savingExtra = 0;
 						if (
 							requiredWidth + editorSuffix.length + shiftHint.length + 1 >
-							actualWidth
+							budgetWidth
 						) {
 							editorSuffix = '';
-							if (requiredWidth + shiftHint.length + 1 > actualWidth) {
+							if (requiredWidth + shiftHint.length + 1 > budgetWidth) {
 								shiftHint = '';
 							}
 						}
@@ -223,7 +232,7 @@ export const DevelopmentModeIndicator = React.memo(
 					editorPrefix.length +
 					editorSuffix.length;
 
-				const remaining = Math.max(0, actualWidth - fixedWidth - 1);
+				const remaining = Math.max(0, budgetWidth - fixedWidth - 1);
 
 				let sessionMax = 0;
 				let filenameMax = 0;
@@ -272,7 +281,7 @@ export const DevelopmentModeIndicator = React.memo(
 			})();
 
 		return (
-			<Box marginTop={1}>
+			<Box>
 				<Text
 					color={
 						developmentMode === 'normal'

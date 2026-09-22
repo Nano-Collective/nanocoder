@@ -13,6 +13,7 @@ import {
 	getPrivacyPreference,
 	getProjectContextPreferences,
 	getReasoningExpanded,
+	getShowAgentBashOutput,
 	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
@@ -24,6 +25,7 @@ import {
 	updateSemanticMemoryEnabled,
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
+	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
@@ -309,11 +311,16 @@ export function SettingsTitleShapePanel({
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
-	const {currentTitleShape, setCurrentTitleShape} = useTitleShape();
+	const {currentTitleShape, setCurrentTitleShape, commitTitleShape} =
+		useTitleShape();
 	const [originalShape] = useState<TitleShape>(currentTitleShape);
 
 	useInput((_, key) => {
 		if (key.escape) {
+			// Esc/Shift+Tab = cancel. Navigation only previews via
+			// setCurrentTitleShape (in-memory, never persisted), so revert the
+			// in-memory preview back to the shape the panel was opened with
+			// before navigating away. Nothing is written to disk on cancel.
 			setCurrentTitleShape(originalShape);
 			onCancel();
 		}
@@ -413,11 +420,14 @@ export function SettingsTitleShapePanel({
 	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: TitleShape}) => {
-		setCurrentTitleShape(item.value);
+		// Only commit (persist to disk) on an explicit Enter.
+		commitTitleShape(item.value);
 		onBack();
 	};
 
 	const handleHighlight = (item: {label: string; value: TitleShape}) => {
+		// Preview only — updates the in-memory app title live but does NOT
+		// persist. Canceling (Esc/Shift+Tab) reverts this with no disk write.
 		setCurrentTitleShape(item.value);
 	};
 
@@ -440,7 +450,9 @@ export function SettingsTitleShapePanel({
 					onHighlight={handleHighlight}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to apply · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -457,7 +469,7 @@ export function SettingsTitleShapePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to go back
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 
@@ -556,7 +568,9 @@ export function SettingsNanocoderShapePanel({
 						onHighlight={handleHighlight}
 					/>
 					<Box marginBottom={1}></Box>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</TitledBoxWithPreferences>
 			</>
 		);
@@ -581,7 +595,7 @@ export function SettingsNanocoderShapePanel({
 			>
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Enter to apply, Shift+Tab to go back, Esc to go back
+						Enter to apply · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 
@@ -685,9 +699,7 @@ export function SettingsPasteThresholdPanel({
 			/>
 			<Box marginTop={isNarrow ? 0 : 1}>
 				<Text color={colors.secondary}>
-					{isNarrow
-						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to go back'}
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
@@ -805,14 +817,16 @@ export function SettingsNotificationsPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -832,6 +846,7 @@ export function SettingsDisplayPanel({
 
 	const currentReasoningExpanded = getReasoningExpanded();
 	const currentCompactToolDisplay = getCompactToolDisplay();
+	const currentShowAgentBashOutput = getShowAgentBashOutput();
 	const currentShowUsageFooter = getShowUsageFooter();
 
 	useInput((_, key) => {
@@ -846,6 +861,7 @@ export function SettingsDisplayPanel({
 	type ToggleKey =
 		| 'reasoningExpanded'
 		| 'compactToolDisplay'
+		| 'showAgentBashOutput'
 		| 'showUsageFooter';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
@@ -862,6 +878,12 @@ export function SettingsDisplayPanel({
 				value: 'compactToolDisplay' as ToggleKey,
 			},
 			{
+				// Show the command output on bash tool cards the agent runs,
+				// compact or not.
+				label: `Agent Bash Output: ${isOn(currentShowAgentBashOutput)}`,
+				value: 'showAgentBashOutput' as ToggleKey,
+			},
+			{
 				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
 				value: 'showUsageFooter' as ToggleKey,
 			},
@@ -869,6 +891,7 @@ export function SettingsDisplayPanel({
 	}, [
 		currentReasoningExpanded,
 		currentCompactToolDisplay,
+		currentShowAgentBashOutput,
 		currentShowUsageFooter,
 	]);
 
@@ -879,6 +902,10 @@ export function SettingsDisplayPanel({
 		} else if (item.value === 'compactToolDisplay') {
 			const newValue = !currentCompactToolDisplay;
 			updateCompactToolDisplay(newValue);
+		} else if (item.value === 'showAgentBashOutput') {
+			// Applies to the next bash card, no restart needed - read from
+			// preferences when the card renders.
+			updateShowAgentBashOutput(!currentShowAgentBashOutput);
 		} else if (item.value === 'showUsageFooter') {
 			// Applies to the next response, no restart needed - the footer is
 			// read from preferences per message.
@@ -902,14 +929,16 @@ export function SettingsDisplayPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -968,7 +997,7 @@ export function SettingsPrivacyPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
@@ -984,7 +1013,7 @@ export function SettingsPrivacyPanel({
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
@@ -1088,7 +1117,7 @@ export function SettingsSemanticMemoryPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
@@ -1105,7 +1134,7 @@ export function SettingsSemanticMemoryPanel({
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);

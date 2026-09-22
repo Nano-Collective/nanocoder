@@ -1,6 +1,9 @@
 import {type ChildProcess, spawn} from 'node:child_process';
+import {isAbsolute, relative} from 'node:path';
+import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
+import {matchGlob} from '@/events/event-router';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -208,13 +211,57 @@ function hookLabel(hook: HookDefinition): string {
 }
 
 /**
+ * Whether a hook is in scope for the moment that fired.
+ *
  * A tool-scoped hook with no `matchTools` applies to every tool; otherwise the
- * tool name must be listed. Non-tool events ignore `matchTools` entirely.
+ * tool name must be listed. `matchPaths` then narrows by the file the tool
+ * acted on. Non-tool events have neither a tool nor a file, so both filters are
+ * ignored there — matching how `matchTools` has always behaved.
+ *
+ * The asymmetry between the two is deliberate: a missing `matchTools` widens
+ * to every tool, but a `matchPaths` that cannot be evaluated *excludes*. A hook
+ * scoped to `**\/*.ts` is asking a question about files, so firing it for
+ * `execute_bash` — which has no file — would be the wrong answer, not a
+ * permissive one.
  */
-function appliesTo(hook: HookDefinition, toolName?: string): boolean {
-	if (!hook.matchTools) return true;
-	if (!toolName) return true;
-	return hook.matchTools.includes(toolName);
+function appliesTo(hook: HookDefinition, context: HookContext): boolean {
+	const {toolName} = context;
+	if (hook.matchTools && toolName && !hook.matchTools.includes(toolName)) {
+		return false;
+	}
+
+	// Non-tool event: no file exists to match, so path scoping does not apply.
+	if (!hook.matchPaths || !toolName) return true;
+
+	const filePath = resolveFilePath(context.toolArgs);
+	if (!filePath) return false;
+
+	return matchesAnyPath(hook.matchPaths, filePath);
+}
+
+/**
+ * Match a tool's file argument against a hook's globs.
+ *
+ * The model supplies the path and may write it either way, so an absolute path
+ * is also tried relative to the project root. Without that, a root-anchored
+ * pattern like `src/**` would fire or not depending on whether the model
+ * happened to emit `src/a.ts` or `/home/me/proj/src/a.ts` — the same edit
+ * either way. Patterns that lead with `**\/` already match both forms.
+ */
+function matchesAnyPath(patterns: string[], filePath: string): boolean {
+	const candidates = [filePath];
+	if (isAbsolute(filePath)) {
+		const relativePath = relative(getProjectRoot(), filePath);
+		// Skip a path that escapes the root: `../` segments cannot usefully be
+		// matched against project-relative globs.
+		if (relativePath && !relativePath.startsWith('..')) {
+			candidates.push(relativePath);
+		}
+	}
+
+	return patterns.some(pattern =>
+		candidates.some(candidate => matchGlob(pattern, candidate)),
+	);
 }
 
 /**
@@ -282,6 +329,9 @@ interface HookRun {
 	failure?: string;
 }
 
+/** Grace period between a hook's SIGTERM and the SIGKILL that follows it. */
+const HOOK_SIGKILL_GRACE_MS = 1_000;
+
 /**
  * Kill a timed-out hook and anything it started.
  *
@@ -292,15 +342,20 @@ interface HookRun {
  * signals the whole group. Windows has no equivalent, so `taskkill /T` walks
  * the tree instead.
  */
-function killHookTree(proc: ChildProcess): void {
+function signalHookTree(
+	proc: ChildProcess,
+	signal: NodeJS.Signals = 'SIGTERM',
+): void {
 	const pid = proc.pid;
 	if (pid === undefined) return;
 
-	try {
-		if (process.platform === 'win32') {
-			// /T kills the tree, /F forces it. Detached and unref'd so a slow
-			// taskkill can't itself hold the session open. Fixed argv, no shell,
-			// and the only interpolated value is a pid we minted ourselves.
+	if (process.platform === 'win32') {
+		// /T kills the tree, /F forces it. Detached and unref'd so a slow
+		// taskkill can't itself hold the session open. Fixed argv, no shell,
+		// and the only interpolated value is a pid we minted ourselves.
+		// taskkill /F is already unconditional, so there is nothing to
+		// escalate to on this platform.
+		try {
 			// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 			const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
 				stdio: 'ignore',
@@ -308,23 +363,112 @@ function killHookTree(proc: ChildProcess): void {
 			});
 			killer.on('error', () => {
 				// taskkill missing (a stripped image): fall back to the shell alone.
-				proc.kill('SIGKILL');
+				try {
+					proc.kill('SIGKILL');
+				} catch {
+					// Nothing left to kill.
+				}
 			});
 			killer.unref();
-			return;
+		} catch {
+			try {
+				proc.kill('SIGKILL');
+			} catch {
+				// Nothing left to kill.
+			}
 		}
+		return;
+	}
+
+	try {
 		// Negative pid = "the whole process group", which the detached spawn
 		// above made this process the leader of.
-		process.kill(-pid, 'SIGTERM');
+		process.kill(-pid, signal);
 	} catch {
-		// The group is already gone, or we lost the race with a normal exit.
-		// Either way there is nothing left to reap.
+		// The group is already gone (or never formed) — fall back to the lone
+		// shell, which may still be there even when the group is not.
 		try {
-			proc.kill('SIGKILL');
+			proc.kill(signal);
 		} catch {
 			// Nothing left to kill.
 		}
 	}
+}
+
+/**
+ * Terminate a timed-out hook, escalating if it refuses to go.
+ *
+ * SIGTERM alone is a request. A hook that traps it, or that blocks in an
+ * uninterruptible call, simply survives its own timeout — which is exactly
+ * what the detached spawn above exists to prevent. Mirrors the escalation
+ * `custom-tools/handler.ts` added in #1141.
+ *
+ * The escalation timer is deliberately never cancelled: unlike a single
+ * process, the shell exiting does not mean its group is empty, and reaping a
+ * descendant that ignored SIGTERM is the whole point. Firing against a group
+ * that has already gone is harmless — `signalHookTree` swallows the ESRCH —
+ * and it is unref'd so it can never hold the process open.
+ */
+function killHookTree(proc: ChildProcess): void {
+	if (proc.pid === undefined) return;
+
+	// Drop our end of the pipes first so a detached grandchild that inherited
+	// them cannot keep them readable.
+	proc.stdout?.destroy();
+	proc.stderr?.destroy();
+
+	signalHookTree(proc, 'SIGTERM');
+
+	if (process.platform === 'win32') return;
+	setTimeout(() => {
+		signalHookTree(proc, 'SIGKILL');
+	}, HOOK_SIGKILL_GRACE_MS).unref();
+}
+
+/**
+ * Slice to at most `max` UTF-16 code units without splitting a surrogate
+ * pair, which would leave a lone half that renders as a replacement
+ * character.
+ */
+function sliceWholeCharacters(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const cut = text.slice(0, max);
+	const last = cut.charCodeAt(cut.length - 1);
+	// A high surrogate at the end has lost its pair to the cut.
+	return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
+ * Accumulate one stream's text, bounded by `MAX_HOOK_OUTPUT_CHARS`.
+ *
+ * Chunks arrive split wherever the pipe happened to break, which can be
+ * mid-character; decoding each one on its own turns both halves of a
+ * multi-byte sequence into U+FFFD. A `StringDecoder` holds an incomplete
+ * tail back until the rest arrives. This matters because hook output is not
+ * cosmetic: `pre-tool-use` and `user-prompt-submit` stdout goes back to the
+ * model as the reason an action was denied, and `post-tool-use` output is
+ * folded into the tool result.
+ *
+ * Deliberately not `utils/stream-collector.ts`, which the bash executor and
+ * custom tools share: that one budgets in bytes and appends a truncation
+ * marker, where a hook budgets in characters (the cap exists to protect the
+ * context window) and truncates silently. Sharing it would change both of
+ * those user-visible behaviours to fix a decoding bug.
+ */
+function makeHookCapture(): {
+	write: (current: string, chunk: Buffer) => string;
+	end: (current: string) => string;
+} {
+	const decoder = new StringDecoder('utf8');
+	const append = (current: string, text: string): string => {
+		const remaining = MAX_HOOK_OUTPUT_CHARS - current.length;
+		if (remaining <= 0 || !text) return current;
+		return current + sliceWholeCharacters(text, remaining);
+	};
+	return {
+		write: (current, chunk) => append(current, decoder.write(chunk)),
+		end: current => append(current, decoder.end()),
+	};
 }
 
 /**
@@ -349,12 +493,8 @@ function runHookCommand(
 
 		let stdout = '';
 		let stderr = '';
-		const capture = (current: string, chunk: Buffer): string => {
-			const remaining = MAX_HOOK_OUTPUT_CHARS - current.length;
-			return remaining <= 0
-				? current
-				: current + chunk.toString().slice(0, remaining);
-		};
+		const stdoutCapture = makeHookCapture();
+		const stderrCapture = makeHookCapture();
 
 		// `shell: true` runs the command through `sh -c` / `cmd.exe /d /s /c`
 		// with the platform's own quoting rules, so a hook body with quotes in
@@ -400,16 +540,21 @@ function runHookCommand(
 		timer.unref();
 
 		proc.stdout?.on('data', (chunk: Buffer) => {
-			stdout = capture(stdout, chunk);
+			stdout = stdoutCapture.write(stdout, chunk);
 		});
 		proc.stderr?.on('data', (chunk: Buffer) => {
-			stderr = capture(stderr, chunk);
+			stderr = stderrCapture.write(stderr, chunk);
 		});
 
 		proc.on('error', (error: Error) => {
 			finish({exitCode: null, stdout, stderr, failure: error.message});
 		});
 		proc.on('close', (code: number | null) => {
+			// Release whatever the decoders are still holding back. Without this
+			// a stream ending on an incomplete sequence silently drops its last
+			// character.
+			stdout = stdoutCapture.end(stdout);
+			stderr = stderrCapture.end(stderr);
 			finish({exitCode: code, stdout, stderr});
 		});
 	});
@@ -434,7 +579,7 @@ export async function runLifecycleHooks(
 	context: HookContext = {},
 ): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
-		appliesTo(hook, context.toolName),
+		appliesTo(hook, context),
 	);
 	if (hooks.length === 0) return {blocked: false, output: ''};
 

@@ -8,6 +8,7 @@ import {renderWithTheme} from '../../test-utils/render-with-theme';
 import {
 	createStaticComponents,
 	formatBootSummaryGitLabel,
+	formatBootSummaryProjectLabel,
 } from './app-container';
 import type {AppContainerProps} from './app-container';
 
@@ -19,9 +20,8 @@ test('createStaticComponents includes welcome message when shouldShowWelcome is 
 	};
 
 	const components = createStaticComponents(props);
-	t.is(components.length, 2); // Welcome + BootSummary
+	t.is(components.length, 1); // Only welcome — boot summary is suppressed when welcome is shown
 	t.is((components[0] as React.ReactElement).key, 'welcome');
-	t.is((components[1] as React.ReactElement).key, 'boot-summary');
 
 	// Render and verify the components display correctly
 	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
@@ -29,6 +29,29 @@ test('createStaticComponents includes welcome message when shouldShowWelcome is 
 	t.truthy(output);
 	t.regex(output!, /Nanocoder/); // Welcome message should contain "Nanocoder"
 	unmount();
+});
+
+test('createStaticComponents passes the row budget to the welcome banner', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	// Fullscreen clips at the chat viewport, so the banner is handed the rows
+	// left after the input footer - not the terminal height.
+	const components = createStaticComponents({
+		shouldShowWelcome: true,
+		currentProvider: 'test-provider',
+		currentModel: 'test-model',
+		availableRows: 17,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /Resume session/, 'the full menu must survive the budget');
+	t.regex(output, /Tip:/, 'the tip must survive the budget');
+	t.notRegex(output, /█/, 'the block wordmark does not fit 17 rows');
+	unmount();
+
+	process.stdout.columns = originalColumns;
 });
 
 test('createStaticComponents excludes welcome message when shouldShowWelcome is false', t => {
@@ -129,8 +152,48 @@ test('createStaticComponents omits mode label when interactive', t => {
 });
 
 // ============================================================================
-// Boot Summary — Git Branch Display
+// Boot Summary — Project and Git Branch Display
 // ============================================================================
+
+test('formatBootSummaryProjectLabel renders workspace without git status', t => {
+	t.is(formatBootSummaryProjectLabel('/work/example', null), '/work/example');
+});
+
+test('formatBootSummaryProjectLabel appends feature branch', t => {
+	t.is(
+		formatBootSummaryProjectLabel('/work/example', {
+			branch: 'fix/read-file-empty',
+			isDefault: false,
+			detached: false,
+		}),
+		'/work/example · fix/read-file-empty',
+	);
+});
+
+test('formatBootSummaryProjectLabel marks the default branch', t => {
+	t.is(
+		formatBootSummaryProjectLabel('/work/example', {
+			branch: 'main',
+			isDefault: true,
+			detached: false,
+		}),
+		'/work/example · main (default)',
+	);
+});
+
+test('formatBootSummaryProjectLabel marks detached HEAD', t => {
+	t.is(
+		formatBootSummaryProjectLabel('/work/example', {
+			branch: 'abc1234',
+			isDefault: false,
+			detached: true,
+		}),
+		'/work/example · abc1234 (detached)',
+	);
+});
+
+// Keep legacy formatter coverage because /status and external callers share
+// the branch marker semantics.
 
 test('formatBootSummaryGitLabel renders feature branch with ⎇ prefix', t => {
 	t.is(
@@ -180,7 +243,7 @@ test.serial(
 		const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 		const output = lastFrame();
 		t.truthy(output);
-		t.regex(output!, /⎇\s+\S+/);
+		t.regex(output!, /[^\n]+\s+·\s+\S+/);
 		unmount();
 	},
 );
@@ -202,6 +265,7 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
+			t.regex(output!, new RegExp(stripAnsi(process.cwd()).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 			t.notRegex(output!, /⎇/);
 			unmount();
 		} finally {
@@ -226,7 +290,7 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
-			t.regex(output!, /⎇/);
+			t.regex(output!, /\S+\s+·\s+\S+/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;
@@ -252,7 +316,7 @@ test.serial(
 			// Branch label sits on a line by itself, separated from the
 			// provider/model line by a newline. Strip ANSI so color codes
 			// (present when CI forces color) don't break the adjacency match.
-			t.regex(stripAnsi(output!), /test-model[^\n]*\n⎇\s+\S+/);
+			t.regex(stripAnsi(output!), /test-model[^\n]*\n\S+.*\s+·\s+\S+/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;

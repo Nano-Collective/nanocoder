@@ -5,6 +5,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
@@ -101,6 +102,9 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+	const drainInProgressRef = React.useRef(false);
+	const lastFailedDrainIdRef = React.useRef<string | null>(null);
+	const [drainAttempt, setDrainAttempt] = React.useState(0);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -183,6 +187,100 @@ export function InteractiveApp({
 			appState.abortController !== null) &&
 		!appState.liveComponentCapturesInput;
 
+	// Drain queued prompts only after the previous turn is fully idle and all
+	// modal modes have closed. Command handlers and conversation completion can
+	// both signal completion, so keeping the drain here makes it idempotent and
+	// prevents nested or duplicate turns.
+	const queueDrainBlocked =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null ||
+		appState.isToolConfirmationMode ||
+		appState.isQuestionMode ||
+		pendingSubagentApproval !== null ||
+		pendingToolConfirmation !== null ||
+		appState.planReviewState?.show === true ||
+		appState.architectReviewState?.show === true ||
+		appState.pendingPlanProceed !== null;
+	const queuedMessageCount = userMessageQueue.queuedMessages.length;
+	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
+
+	React.useEffect(() => {
+		// Re-run after a successful dispatch settles, once its queue update has
+		// rendered and the next item can be considered.
+		void drainAttempt;
+		if (
+			queueDrainBlocked ||
+			appState.activeMode !== null ||
+			appState.isSettingsMode ||
+			!appState.client ||
+			!appState.toolManager ||
+			!appState.isConversationComplete ||
+			queuedMessageCount === 0 ||
+			lastFailedDrainIdRef.current === queuedMessageId ||
+			drainInProgressRef.current
+		) {
+			return;
+		}
+
+		drainInProgressRef.current = true;
+		let started = false;
+		const timeout = setTimeout(() => {
+			started = true;
+			let drainedMessageId = queuedMessageId ?? null;
+			void Promise.resolve()
+				.then(() =>
+					userMessageQueue.drainNextMessage(async message => {
+						drainedMessageId = message.id;
+						await handleUserSubmit(
+							message.message,
+							message.displayValue,
+							message.images,
+						);
+						return true;
+					}),
+				)
+				.then(
+					dispatched => {
+						drainInProgressRef.current = false;
+						if (!dispatched) {
+							// Keep a failed head queued, but do not immediately re-enter
+							// the effect while it still has the same identity.
+							lastFailedDrainIdRef.current = drainedMessageId;
+							return;
+						}
+						lastFailedDrainIdRef.current = null;
+						// The queue state update happens before the dispatch resolves. A
+						// separate render is needed to notice and drain the next item after
+						// the dispatched turn returns to idle.
+						setDrainAttempt(attempt => attempt + 1);
+					},
+					() => {
+						drainInProgressRef.current = false;
+						lastFailedDrainIdRef.current = drainedMessageId;
+					},
+				);
+		}, 0);
+
+		return () => {
+			clearTimeout(timeout);
+			if (!started) drainInProgressRef.current = false;
+		};
+	}, [
+		appState.activeMode,
+		appState.client,
+		appState.isConversationComplete,
+		appState.isSettingsMode,
+		appState.toolManager,
+		queueDrainBlocked,
+		handleUserSubmit,
+		userMessageQueue.drainNextMessage,
+		queuedMessageCount,
+		queuedMessageId,
+		drainAttempt,
+	]);
+
 	const recallableSubmittedDraft =
 		cancellable &&
 		chatHandler.isGenerating &&
@@ -222,7 +320,12 @@ export function InteractiveApp({
 		if (appState.messages[appState.messages.length - 1]?.role === 'user') {
 			appState.updateMessages(appState.messages.slice(0, -1));
 
-			if (appState.chatComponents.length > 0) {
+			// In fullscreen (alt-screen) mode, the prompt bubble lives in React
+			// state only — pop it so it disappears from the viewport.  In inline
+			// mode the bubble has already been committed to Ink's <Static>
+			// scrollback and cannot be un-printed, so popping the React element
+			// would just create a mismatch; leave it in place.
+			if (altScreenActive && appState.chatComponents.length > 0) {
 				appState.setChatComponents(appState.chatComponents.slice(0, -1));
 			}
 		}
@@ -240,6 +343,7 @@ export function InteractiveApp({
 		setSubmittedDraft(null);
 	}, [
 		appHandlers,
+		altScreenActive,
 		appState.messages,
 		appState.updateMessages,
 		appState.chatComponents,
@@ -280,135 +384,180 @@ export function InteractiveApp({
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
 
 	return (
-		// Fullscreen layout on the alternate screen buffer: the root Box is
-		// pinned to the exact terminal height so the frame can never exceed
-		// the viewport. The chat area (ChatHistory) flexes and clips at the
-		// top; everything below it (modals, status line, input) keeps its
-		// natural height, so Yoga shrinks the chat area to make room — the
-		// input can never be pushed off-screen.
-		<Box
-			flexDirection="column"
-			padding={1}
-			width="100%"
-			height={fullscreen ? terminalRows : undefined}
-		>
-			{/* Chat area — fullscreen bottom-anchored viewport */}
-			<ChatHistory
-				startChat={appState.startChat}
-				staticComponents={staticComponents}
-				queuedComponents={appState.chatComponents}
-				liveComponent={liveComponent}
-				renderLastQueuedComponentLive={recallableSubmittedDraft}
-				clearKey={clearKey}
-				fullscreen={fullscreen}
-				scrollActive={
-					!showModalSelectors &&
-					!appState.isExplorerMode &&
-					!appState.isIdeSelectionMode
-				}
-			/>
+		// One provider for the whole interactive tree, not just the composer.
+		// FileExplorer reads the same context to hand its selection over as
+		// pending file mentions, and it renders while ChatInput is unmounted
+		// (explorer mode sets activeMode) — a provider scoped to the composer
+		// would both throw for the explorer and lose the handoff on the way
+		// back.
+		<UIStateProvider>
+			{/* Fullscreen layout on the alternate screen buffer: the root Box is
+			    pinned to the exact terminal height so the frame can never exceed
+			    the viewport. The chat area (ChatHistory) flexes and clips at the
+			    top; everything below it (modals, status line, input) keeps its
+			    natural height, so Yoga shrinks the chat area to make room — the
+			    input can never be pushed off-screen. */}
+			<Box
+				flexDirection="column"
+				padding={1}
+				width="100%"
+				height={fullscreen ? terminalRows : undefined}
+			>
+				{/* Chat area — fullscreen bottom-anchored viewport */}
+				<ChatHistory
+					startChat={appState.startChat}
+					staticComponents={staticComponents}
+					queuedComponents={appState.chatComponents}
+					liveComponent={liveComponent}
+					renderLastQueuedComponentLive={recallableSubmittedDraft}
+					clearKey={clearKey}
+					fullscreen={fullscreen}
+					scrollActive={
+						!showModalSelectors &&
+						!appState.isExplorerMode &&
+						!appState.isIdeSelectionMode
+					}
+				/>
 
-			{/* Footer: modals, input. flexShrink=0 so the chat viewport above
+				{/* Footer: modals, input. flexShrink=0 so the chat viewport above
 			    absorbs ALL vertical shrink — without it Yoga crushes the
 			    input box when the transcript is tall. */}
-			<Box flexDirection="column" flexShrink={0}>
-				{appState.planReviewState?.show && (
-					<PlanReviewPrompt
-						artifactPath={
-							appState.currentSessionId
-								? artifactManager.tryGetArtifactPath(
-										appState.currentSessionId,
-										'implementation_plan',
-									)
-								: undefined
-						}
-						onProceed={appHandlers.handlePlanProceed}
-						onAskMore={() => void appHandlers.handlePlanAskMore()}
-						onModify={appHandlers.handlePlanModify}
-					/>
-				)}
+				<Box flexDirection="column" flexShrink={0}>
+					{appState.planReviewState?.show && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<PlanReviewPrompt
+								artifactPath={
+									appState.currentSessionId
+										? artifactManager.tryGetArtifactPath(
+												appState.currentSessionId,
+												'implementation_plan',
+											)
+										: undefined
+								}
+								onProceed={appHandlers.handlePlanProceed}
+								onAskMore={() => void appHandlers.handlePlanAskMore()}
+								onModify={appHandlers.handlePlanModify}
+								onDismiss={appHandlers.handlePlanModify}
+							/>
+						</Box>
+					)}
 
-				{appState.isExplorerMode && (
-					<Box marginLeft={-1} flexDirection="column">
-						<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
-					</Box>
-				)}
-
-				{appState.isIdeSelectionMode && (
-					<Box marginLeft={-1} flexDirection="column">
-						<IdeSelector
-							onSelect={ide => {
-								// Completing lands in chat so the result is visible.
-								launchedFromSettingsRef.current = false;
-								handleIdeSelect(ide);
-							}}
-							onCancel={returnFromLaunchedWizard(
-								modeHandlers.handleIdeSelectionCancel,
-							)}
-						/>
-					</Box>
-				)}
-
-				{showModalSelectors && (
-					<Box marginLeft={-1} flexDirection="column">
-						<ModalSelectors
-							activeMode={appState.activeMode}
-							isSettingsMode={appState.isSettingsMode}
-							settingsInitialTab={appState.settingsActiveTab}
-							onSettingsTabChange={appState.setSettingsActiveTab}
-							showAllSessions={appState.showAllSessions}
-							currentModel={appState.currentModel}
-							currentProvider={appState.currentProvider}
-							checkpointLoadData={appState.checkpointLoadData}
-							onModelSelect={modeHandlers.handleModelSelect}
-							onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-							onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
-							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
-							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-							onSettingsCancel={modeHandlers.handleSettingsCancel}
-							onProvidersChanged={modeHandlers.reloadProviders}
-							onMcpChanged={modeHandlers.reloadMcpServers}
-							onLaunchTune={() => {
-								// Capture the current tab before closing settings.
-								launchedFromTabRef.current = appState.settingsActiveTab;
-								launchedFromSettingsRef.current = true;
-								modeHandlers.handleSettingsCancel();
-								modeHandlers.enterTune();
-							}}
-							onLaunchIde={() => {
-								// Capture the current tab before closing settings.
-								launchedFromTabRef.current = appState.settingsActiveTab;
-								launchedFromSettingsRef.current = true;
-								modeHandlers.handleSettingsCancel();
-								modeHandlers.enterIdeSelectionMode();
-							}}
-							tuneConfig={appState.tune}
-							onTuneSelect={config => {
-								// Tune clears the conversation and prints a summary — land in
-								// chat so that output isn't hidden behind the settings panel.
-								launchedFromSettingsRef.current = false;
-								return modeHandlers.handleTuneSelect(config);
-							}}
-							onTuneCancel={returnFromLaunchedWizard(
-								modeHandlers.handleTuneCancel,
-							)}
-							onCheckpointSelect={appHandlers.handleCheckpointSelect}
-							onCheckpointCancel={appHandlers.handleCheckpointCancel}
-							onSessionSelect={sessionId =>
-								void appHandlers.handleSessionSelect(sessionId)
+					{appState.architectReviewState?.show && (
+						<ArchitectReviewPrompt
+							filesChanged={appState.architectReviewState.filesChanged}
+							filesMissing={appState.architectReviewState.filesMissing}
+							onKeep={() => void appHandlers.handleArchitectKeep()}
+							onRevert={() => void appHandlers.handleArchitectRevert()}
+							// Forward what the user typed. A zero-arg arrow here silently
+							// dropped it and sent a fixed string instead, so the revise
+							// box collected instructions the model never saw.
+							onRevertAndRevise={instructions =>
+								void appHandlers.handleArchitectRevertAndRevise(instructions)
 							}
-							onSessionCancel={appHandlers.handleSessionCancel}
 						/>
-					</Box>
-				)}
+					)}
 
-				{appState.startChat &&
-					appState.activeMode === null &&
-					!appState.isSettingsMode &&
-					!appState.planReviewState?.show &&
-					// Hide the composer only while a live component explicitly captures input.
-					!appState.liveComponentCapturesInput && (
-						<UIStateProvider>
+					{appState.isExplorerMode && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
+						</Box>
+					)}
+
+					{appState.isIdeSelectionMode && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<IdeSelector
+								onSelect={ide => {
+									// Completing lands in chat so the result is visible.
+									launchedFromSettingsRef.current = false;
+									handleIdeSelect(ide);
+								}}
+								onCancel={returnFromLaunchedWizard(
+									modeHandlers.handleIdeSelectionCancel,
+								)}
+							/>
+						</Box>
+					)}
+
+					{showModalSelectors && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<ModalSelectors
+								activeMode={appState.activeMode}
+								isSettingsMode={appState.isSettingsMode}
+								settingsInitialTab={appState.settingsActiveTab}
+								onSettingsTabChange={appState.setSettingsActiveTab}
+								showAllSessions={appState.showAllSessions}
+								currentModel={appState.currentModel}
+								currentProvider={appState.currentProvider}
+								checkpointLoadData={appState.checkpointLoadData}
+								onModelSelect={modeHandlers.handleModelSelect}
+								onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
+								onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
+								onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
+								onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+								onSettingsCancel={modeHandlers.handleSettingsCancel}
+								onProvidersChanged={modeHandlers.reloadProviders}
+								onMcpChanged={modeHandlers.reloadMcpServers}
+								onLaunchTune={() => {
+									// Capture the current tab before closing settings.
+									launchedFromTabRef.current = appState.settingsActiveTab;
+									launchedFromSettingsRef.current = true;
+									modeHandlers.handleSettingsCancel();
+									modeHandlers.enterTune();
+								}}
+								onLaunchIde={() => {
+									// Capture the current tab before closing settings.
+									launchedFromTabRef.current = appState.settingsActiveTab;
+									launchedFromSettingsRef.current = true;
+									modeHandlers.handleSettingsCancel();
+									modeHandlers.enterIdeSelectionMode();
+								}}
+								tuneConfig={appState.tune}
+								onTuneSelect={config => {
+									// Tune clears the conversation and prints a summary — land in
+									// chat so that output isn't hidden behind the settings panel.
+									launchedFromSettingsRef.current = false;
+									return modeHandlers.handleTuneSelect(config);
+								}}
+								onTuneCancel={returnFromLaunchedWizard(
+									modeHandlers.handleTuneCancel,
+								)}
+								onCheckpointSelect={appHandlers.handleCheckpointSelect}
+								onCheckpointCancel={appHandlers.handleCheckpointCancel}
+								onSessionSelect={sessionId =>
+									void appHandlers.handleSessionSelect(sessionId)
+								}
+								onSessionCancel={appHandlers.handleSessionCancel}
+							/>
+						</Box>
+					)}
+
+					{appState.startChat &&
+						appState.activeMode === null &&
+						!appState.isSettingsMode &&
+						!appState.planReviewState?.show &&
+						// The architect gate runs its own useInput. Leaving the composer
+						// mounted alongside it gave every keystroke two live consumers,
+						// and let the user submit a new turn straight past the gate with
+						// the checkpoint still open.
+						!appState.architectReviewState?.show &&
+						// Hide the composer only while a live component explicitly captures input.
+						!appState.liveComponentCapturesInput && (
 							<ChatInput
 								isCancelling={appState.isCancelling}
 								isToolExecuting={appState.isToolExecuting}
@@ -452,20 +601,20 @@ export function InteractiveApp({
 								fullscreen={fullscreen}
 								isSaving={isSaving}
 							/>
-						</UIStateProvider>
-					)}
+						)}
 
-				{/* Artifact shortcuts sit below the input alongside the mode
+					{/* Artifact shortcuts sit below the input alongside the mode
 				    indicator — everything ambient lives under the composer. The
 				    marginLeft mirrors ChatInput's own offset so the row lines up
 				    with the mode line rather than sitting one column in. */}
-				<Box marginLeft={fullscreen ? 0 : -1}>
-					<SessionArtifactLinks
-						sessionId={appState.currentSessionId}
-						refreshKey={artifactRefreshKey}
-					/>
+					<Box marginLeft={fullscreen ? 0 : -1}>
+						<SessionArtifactLinks
+							sessionId={appState.currentSessionId}
+							refreshKey={artifactRefreshKey}
+						/>
+					</Box>
 				</Box>
 			</Box>
-		</Box>
+		</UIStateProvider>
 	);
 }
