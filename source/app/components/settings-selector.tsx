@@ -33,7 +33,11 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import type {NotificationsConfig} from '@/types/config';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import {
+	DEFAULT_NANOCODER_SHAPE,
+	type NanocoderShape,
+	type ThemePreset,
+} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import type {SettingsTabId} from './settings-constants';
@@ -495,7 +499,7 @@ export function SettingsNanocoderShapePanel({
 	const {colors} = useTheme();
 
 	const savedShape = getNanocoderShape();
-	const initialShape: NanocoderShape = savedShape ?? 'tiny';
+	const initialShape: NanocoderShape = savedShape ?? DEFAULT_NANOCODER_SHAPE;
 	const [originalShape] = useState<NanocoderShape>(initialShape);
 	const [previewShape, setPreviewShape] =
 		useState<NanocoderShape>(initialShape);
@@ -511,8 +515,8 @@ export function SettingsNanocoderShapePanel({
 
 	const shapeOptions: {label: string; value: NanocoderShape}[] = useMemo(
 		() => [
-			{label: 'Tiny (default)', value: 'tiny'},
-			{label: 'Block', value: 'block'},
+			{label: 'Block (default)', value: 'block'},
+			{label: 'Tiny', value: 'tiny'},
 			{label: 'Simple', value: 'simple'},
 			{label: 'Simple Block', value: 'simpleBlock'},
 			{label: 'Slick', value: 'slick'},

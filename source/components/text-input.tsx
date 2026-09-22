@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
 import {useEffect, useRef, useState} from 'react';
+import {isNewlineKey} from '@/utils/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
@@ -148,6 +149,27 @@ function TextInput({
 					cursorOffsetRef.current = next;
 					setState(s => ({...s, cursorOffset: next}));
 				}
+				return;
+			}
+
+			// Newline keys insert a \n at the cursor. TextInput owns the insertion
+			// because it is the only side that knows the cursor offset: UserInput
+			// used to append '\n' to the end of the value, which put the newline in
+			// the wrong place when the cursor was mid-text and left the cursor
+			// stranded in front of it. Checked before `key.return` because several
+			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
+			if (isNewlineKey(input, key)) {
+				const currentValue = originalValueRef.current;
+				const offset = cursorOffsetRef.current;
+				const withNewline =
+					currentValue.slice(0, offset) + '\n' + currentValue.slice(offset);
+
+				// Mirror the refs before returning so a second newline arriving in
+				// the same stdin read block inserts after the first, not over it.
+				cursorOffsetRef.current = offset + 1;
+				originalValueRef.current = withNewline;
+				setState({cursorOffset: offset + 1, cursorWidth: 0});
+				onChange(withNewline);
 				return;
 			}
 
