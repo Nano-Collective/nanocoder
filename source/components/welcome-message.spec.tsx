@@ -1,11 +1,26 @@
 import fs from 'fs';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
-import {renderWithTheme} from '../test-utils/render-with-theme.js';
-import WelcomeMessage from './welcome-message';
+
+// CRITICAL: redirect preference reads to a temp dir BEFORE the banner (and its
+// @/config/preferences import chain) loads. The wordmark font is a preference,
+// so without this the developer's own Nanocoder Shape decides which glyphs the
+// assertions below see.
+process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
+	path.join(tmpdir(), 'nanocoder-welcome-spec-'),
+);
+const {resetPreferencesCache, savePreferences} = await import(
+	'@/config/preferences'
+);
+resetPreferencesCache();
+
+const {renderWithTheme} = await import('../test-utils/render-with-theme.js');
+const WelcomeMessage = (await import('./welcome-message')).default;
 
 console.log('\nwelcome-message.spec.tsx');
 
@@ -436,4 +451,138 @@ test('WelcomeMessage handles very wide terminal', t => {
 	t.regex(output!, /[_█]/);
 
 	process.stdout.columns = originalColumns;
+});
+
+// ============================================================================
+// Nanocoder Shape — the wordmark font is a user preference
+// ============================================================================
+
+/**
+ * Width of the rendered wordmark, found by measuring the widest line built
+ * from `font`'s own glyph characters. Distinguishes the full "NANOCODER" from
+ * the "NC" monogram without depending on cfonts' exact glyph layout.
+ */
+function logoWidth(frame: string, glyphs: RegExp): number {
+	const widths = stripAnsi(frame)
+		.split('\n')
+		.filter(line => glyphs.test(line))
+		// trim both ends: the banner centres the wordmark, so the leading pad
+		// would otherwise count as glyph width.
+		.map(line => line.trim().length);
+
+	return widths.length > 0 ? Math.max(...widths) : 0;
+}
+
+// Every font that draws with full blocks uses █, so identify the block font by
+// a run only its 6-row glyphs produce - tiny's 2-row glyphs never reach three.
+const BLOCK_GLYPHS = /███/;
+const TINY_NA = /█▄ █ ▄▀█/;
+const CHROME_N = /╔╗╔/;
+const CHROME_GLYPHS = /[╔╗╝╚╠╦╩═║╩╬]/;
+// The 3d font draws in runs of backslashes; nothing else in the banner does.
+const THREE_D_GLYPHS = /\\{3}/;
+
+test('WelcomeMessage renders the wordmark in the configured Nanocoder Shape', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: 'tiny'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.regex(output, TINY_NA, 'wordmark must use the configured font');
+	t.notRegex(output, BLOCK_GLYPHS, 'block font must not survive the preference');
+});
+
+test('WelcomeMessage repaints the wordmark when the shape preference changes', async t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	t.regex(stripAnsi(lastFrame() ?? ''), BLOCK_GLYPHS, 'block is the default');
+
+	// The settings panel writes straight to disk, so the banner only follows
+	// along if it subscribed to preference writes — the bug this covers is the
+	// shape changing and nothing on screen moving.
+	savePreferences({nanocoderShape: 'chrome'});
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	const after = stripAnsi(lastFrame() ?? '');
+	t.regex(after, CHROME_N, 'wordmark must follow the new shape');
+	t.notRegex(after, BLOCK_GLYPHS);
+});
+
+test('WelcomeMessage sizes the width threshold to the chosen font', t => {
+	const originalColumns = process.stdout.columns;
+	// 50 cols is below block's 90-col threshold, so block would fall back to
+	// the monogram here. chrome's "NANOCODER" is only 36 cols, so it fits.
+	process.stdout.columns = 50;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: 'chrome'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.true(
+		logoWidth(output, CHROME_GLYPHS) > 30,
+		'the full wordmark must render when the font is narrow enough for it',
+	);
+});
+
+test('WelcomeMessage drops the wordmark when the font is wider than the terminal', t => {
+	const originalColumns = process.stdout.columns;
+	// 3d's monogram alone is 35 cols wide.
+	process.stdout.columns = 30;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: '3d'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.notRegex(output, THREE_D_GLYPHS, 'a wordmark that cannot fit must be dropped');
+	t.notRegex(output, BLOCK_GLYPHS, 'and no other font stands in for it');
+	t.regex(output, /Welcome to Nanocoder/, 'the rest of the banner stays');
+});
+
+test('WelcomeMessage sizes the row budget to the chosen font', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	// 22 rows is the four-item menu (16) plus tiny's 6-row wordmark, but six
+	// short of what the block wordmark needs.
+	savePreferences({nanocoderShape: 'tiny'});
+	const withTiny = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
+	);
+	t.regex(withTiny, TINY_NA, 'a short font still fits in 22 rows');
+
+	savePreferences({});
+	const withBlock = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
+	);
+	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
 });
