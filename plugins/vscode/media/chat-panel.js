@@ -443,163 +443,6 @@
 	const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit', 'file_op']);
 	const EXECUTE_TOOLS = new Set(['execute_bash']);
 
-	function timelineKind(toolName) {
-		if (EDIT_TOOLS.has(toolName)) return 'edit';
-		if (EXECUTE_TOOLS.has(toolName)) return 'execute';
-		return 'other';
-	}
-
-	function timelineRelativeTime(timestamp) {
-		const diffMs = Date.now() - new Date(timestamp).getTime();
-		const minutes = Math.floor(diffMs / 60000);
-		if (minutes < 1) return 'just now';
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		if (hours < 24) return `${hours}h ago`;
-		return `${Math.floor(hours / 24)}d ago`;
-	}
-
-	const timelineStrip = (function createTimelineStrip() {
-		const root = document.getElementById('timeline-strip');
-		const nodesEl = document.getElementById('timeline-nodes');
-		const trackEl = document.getElementById('timeline-track');
-		const hintEl = document.getElementById('timeline-hint');
-		const confirmEl = document.getElementById('timeline-confirm');
-		if (!root || !nodesEl || !confirmEl) {
-			return {
-				setEntries() {},
-				setDisabled() {},
-				clear() {},
-			};
-		}
-
-		let entries = [];
-
-		function setHint(text) {
-			if (hintEl) hintEl.textContent = text || '';
-		}
-
-		function hideConfirm() {
-			confirmEl.classList.add('hidden');
-			confirmEl.innerHTML = '';
-		}
-
-		function showConfirm(entry) {
-			const files = (entry.filesChanged || []).slice(0, 3).join(', ');
-			const extra = (entry.filesChanged || []).length > 3 ? '…' : '';
-			confirmEl.innerHTML = '';
-
-			const text = document.createElement('div');
-			text.textContent =
-				`Revert workspace and conversation to before step ${entry.seq} (${entry.title || entry.toolName})? ` +
-				`This deletes later chat messages and undoes later file changes.` +
-				(files ? ` Files: ${files}${extra}` : '');
-			confirmEl.appendChild(text);
-
-			const actions = document.createElement('div');
-			actions.className = 'timeline-confirm-actions';
-
-			const revertBtn = document.createElement('button');
-			revertBtn.textContent = 'Revert';
-			revertBtn.style.background = 'var(--vscode-button-background)';
-			revertBtn.style.color = 'var(--vscode-button-foreground)';
-			revertBtn.addEventListener('click', () => {
-				vscode.postMessage({ type: 'revertToCheckpoint', checkpointId: entry.id });
-				hideConfirm();
-			});
-
-			const cancelBtn = document.createElement('button');
-			cancelBtn.textContent = 'Cancel';
-			cancelBtn.style.background = 'var(--vscode-button-secondaryBackground)';
-			cancelBtn.style.color = 'var(--vscode-button-secondaryForeground, inherit)';
-			cancelBtn.addEventListener('click', hideConfirm);
-
-			actions.appendChild(revertBtn);
-			actions.appendChild(cancelBtn);
-			confirmEl.appendChild(actions);
-			confirmEl.classList.remove('hidden');
-		}
-
-		// The label goes in a dedicated line under the strip rather than an
-		// absolutely-positioned bubble: the track has to clip horizontally to
-		// scroll, and a clipping box clips both axes, so a bubble above the dot
-		// would be cut off. A static line also reads on focus, not just hover.
-		function bindHint(el, text) {
-			el.addEventListener('mouseenter', () => setHint(text));
-			el.addEventListener('focus', () => setHint(text));
-			el.addEventListener('mouseleave', () => setHint(''));
-			el.addEventListener('blur', () => setHint(''));
-		}
-
-		function render() {
-			nodesEl.innerHTML = '';
-			setHint('');
-			if (entries.length === 0) {
-				root.classList.add('hidden');
-				hideConfirm();
-				return;
-			}
-			root.classList.remove('hidden');
-
-			const line = document.createElement('div');
-			line.className = 'timeline-line';
-			nodesEl.appendChild(line);
-
-			for (const entry of entries) {
-				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
-				const label = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
-					(files ? ` · ${files}` : '') +
-					` · ${timelineRelativeTime(entry.timestamp)}`;
-
-				const btn = document.createElement('button');
-				btn.type = 'button';
-				btn.className = 'timeline-node';
-				btn.dataset.kind = timelineKind(entry.toolName);
-				btn.dataset.id = entry.id;
-				btn.setAttribute('aria-label', label);
-				btn.title = label;
-
-				const dot = document.createElement('span');
-				dot.className = 'timeline-dot';
-				btn.appendChild(dot);
-
-				bindHint(btn, label);
-				btn.addEventListener('click', () => showConfirm(entry));
-				nodesEl.appendChild(btn);
-			}
-
-			const nowBtn = document.createElement('button');
-			nowBtn.type = 'button';
-			nowBtn.className = 'timeline-node is-selected';
-			nowBtn.dataset.kind = 'now';
-			nowBtn.setAttribute('aria-label', 'Current state');
-			nowBtn.title = 'Current state';
-			const nowDot = document.createElement('span');
-			nowDot.className = 'timeline-dot';
-			nowBtn.appendChild(nowDot);
-			bindHint(nowBtn, 'Now');
-			nowBtn.addEventListener('click', hideConfirm);
-			nodesEl.appendChild(nowBtn);
-
-			// The scroller is the track, not the flex row inside it.
-			if (trackEl) trackEl.scrollLeft = trackEl.scrollWidth;
-		}
-
-		return {
-			setEntries(next) {
-				entries = Array.isArray(next) ? next : [];
-				hideConfirm();
-				render();
-			},
-			setDisabled(disabled) {
-				root.classList.toggle('timeline-disabled', Boolean(disabled));
-			},
-			clear() {
-				this.setEntries([]);
-			},
-		};
-	})();
-
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -737,9 +580,10 @@
 		retryBtn.title = 'Retry';
 		retryBtn.setAttribute('aria-label', 'Retry response');
 		retryBtn.innerHTML = ICONS.refresh;
+
 		if (isProcessing) {
-			retryBtn.disabled = true;
-			retryBtn.classList.add('opacity-30', 'cursor-not-allowed');
+			footer.style.display = 'none';
+			footer.classList.add('agent-footer-processing');
 		}
 
 		retryBtn.addEventListener('click', () => {
@@ -792,7 +636,6 @@
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
-		timelineStrip.setDisabled(active);
 		if (!active) {
 			// Globally settle any stuck spinners across all tool cards, in case
 			// several tool groups were created in the same session.
@@ -806,17 +649,18 @@
 			});
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
+			
+			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
+			hiddenFooters.forEach(f => {
+				f.style.display = '';
+				f.classList.remove('agent-footer-processing');
+			});
+			scrollToBottom(true);
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
-		const allRetryBtns = document.querySelectorAll('.retry-btn');
-		allRetryBtns.forEach(btn => {
-			btn.disabled = active;
-			btn.classList.toggle('opacity-30', active);
-			btn.classList.toggle('cursor-not-allowed', active);
-		});
 	}
 
 	function setPlanReviewActive(active) {
@@ -834,9 +678,39 @@
 		if (existing) existing.remove();
 		setPlanReviewActive(false);
 	}
+	let previousArtifactCount = 0;
+	let userClosedArtifacts = false;
+	let isArtifactsCollapsed = false;
+
+	const artifactToggle = document.getElementById('artifact-toggle');
+	const artifactClose = document.getElementById('artifact-close');
+	const artifactContent = document.getElementById('artifact-content');
+
+	if (artifactToggle && artifactContent) {
+		artifactToggle.addEventListener('click', () => {
+			isArtifactsCollapsed = !isArtifactsCollapsed;
+			artifactContent.classList.toggle('hidden', isArtifactsCollapsed);
+			artifactToggle.querySelector('svg').style.transform = isArtifactsCollapsed ? 'rotate(-90deg)' : '';
+		});
+	}
+
+	if (artifactClose) {
+		artifactClose.addEventListener('click', () => {
+			userClosedArtifacts = true;
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		});
+	}
 
 	function renderArtifacts(artifacts) {
 		if (!artifactBar || !artifactLinks) return;
+
+		const currentCount = Array.isArray(artifacts) ? artifacts.length : 0;
+		if (currentCount > previousArtifactCount) {
+			userClosedArtifacts = false;
+		}
+		previousArtifactCount = currentCount;
+
 		artifactLinks.innerHTML = '';
 		const labels = {
 			implementation_plan: 'Plan',
@@ -856,8 +730,13 @@
 			artifactLinks.appendChild(button);
 		}
 		const hasArtifacts = artifactLinks.childElementCount > 0;
-		artifactBar.classList.toggle('hidden', !hasArtifacts);
-		artifactBar.classList.toggle('flex', hasArtifacts);
+		if (hasArtifacts && !userClosedArtifacts) {
+			artifactBar.classList.remove('hidden');
+			artifactBar.classList.add('flex');
+		} else {
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		}
 	}
 
 	function renderPlanReview(artifactPath) {
@@ -928,7 +807,7 @@
 		card.appendChild(body);
 		messagesContainer.appendChild(card);
 		setPlanReviewActive(true);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Shared by the Stop button and Escape so the two can't drift apart.
@@ -1821,15 +1700,15 @@
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
-			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full w-full');
+			(role === 'user' ? 'self-end items-end max-w-[90%]' : 'self-start items-start max-w-full w-full');
 		wrapper.dataset.role = role;
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// No max-w here: the wrapper already caps the turn at 90%. A second
 				// percentage would resolve against the wrapper's shrink-to-fit width,
-				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				// squeezing the bubble to 90% of its own content and wrapping mid-word.
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
@@ -1943,7 +1822,11 @@
 		));
 
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		if (role === 'user') {
+			scrollToBottom(true);
+		} else {
+			scrollToBottomIfFollowing();
+		}
 
 		if (role === 'agent') {
 			// This opens a fresh container, so whatever block was open is done.
@@ -1967,14 +1850,14 @@
 
 		visualLoader = wrapper;
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function keepVisualLoaderAtBottom() {
 		if (visualLoader && visualLoader.parentElement) {
 			messagesContainer.appendChild(visualLoader);
 		}
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function stopVisualLoader() {
@@ -2031,7 +1914,7 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
@@ -2047,22 +1930,34 @@
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
 						renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
 			} else {
 				currentTextEl.textContent += textChunk; // Fallback
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
 		if (typeof marked === 'undefined') {
-			scrollToBottom();
+			scrollToBottomIfFollowing();
+		}
+	}
+	let userHasScrolledUp = false;
+	messagesContainer.addEventListener('scroll', () => {
+		const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 50;
+		userHasScrolledUp = !isAtBottom;
+	});
+
+	function scrollToBottom(force = false) {
+		if (force || !userHasScrolledUp) {
+			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			userHasScrolledUp = false;
 		}
 	}
 
-	function scrollToBottom() {
-		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	function scrollToBottomIfFollowing() {
+		scrollToBottom(false);
 	}
 
 	// --- Copy last code block ---
@@ -2178,7 +2073,7 @@
 		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Handle messages from extension.
@@ -2249,17 +2144,14 @@
 				discardCurrentWorkSummary();
 				workSummaryByToolCallId.clear();
 				workSummaryByPlanId.clear();
-				if (!message.isLoading) {
-					timelineStrip.clear();
-				}
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
-				finishCurrentWorkSummary('completed');
+				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
 				pendingUserMessageText = null;
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
-				scrollToBottom();
+				scrollToBottom(true);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -2301,15 +2193,17 @@
 					console.error('Failed to update setting:', message.error);
 				}
 				break;
+			case 'addProviderResult':
+				if (window._handleAddProviderResult) {
+					window._handleAddProviderResult(message);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
-				break;
-			case 'updateTimeline':
-				timelineStrip.setEntries(message.entries || []);
 				break;
 			case 'runPrompt':
 				if (isHistoryView) showChatView();
@@ -2533,6 +2427,15 @@
 			if (replayedUsage) {
 				appendUsageIndicator(replayedUsage, replayedUsage.cost);
 			}
+			const durationMs = update._meta && update._meta['nanocoder/durationMs'];
+			if (durationMs !== undefined && currentWorkSummary) {
+				currentWorkSummary._overrideDuration = durationMs;
+				currentWorkSummary.updateTimer();
+			}
+			const outcome = update._meta && update._meta['nanocoder/outcome'];
+			if (outcome && currentWorkSummary) {
+				currentWorkSummary._overrideOutcome = outcome;
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
 			// Whitespace-only reasoning is not worth a section of its own: it
@@ -2673,6 +2576,254 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
 			});
 		}
+
+		// Add Provider logic
+		const toggleAddProviderBtn = document.getElementById('toggle-add-provider-btn');
+		const closeAddProviderBtn = document.getElementById('close-add-provider-btn');
+		const addProviderFormContainer = document.getElementById('add-provider-form-container');
+		const addProviderSubmit = document.getElementById('add-provider-submit-btn');
+
+		const presetSelect = document.getElementById('add-provider-preset-select');
+		const customNameInput = document.getElementById('add-provider-custom-name');
+		const sdkGroup = document.getElementById('add-provider-sdk-group');
+		const sdkSelect = document.getElementById('add-provider-sdk');
+		const urlGroup = document.getElementById('add-provider-url-group');
+		const baseUrlInput = document.getElementById('add-provider-baseurl');
+		const apiKeyGroup = document.getElementById('add-provider-apikey-group');
+		const apiKeyInput = document.getElementById('add-provider-apikey');
+		const modelsContainer = document.getElementById('add-provider-models-container');
+		const addModelBtn = document.getElementById('add-provider-add-model-btn');
+
+		let providerPresets = {}; // Will be populated from settingsData
+		
+		// Expose a function to update presets from settingsData
+		window._updateProviderPresets = (templates) => {
+			if (templates) {
+				providerPresets = templates;
+				
+				// Keep 'custom' at the end or if not present, add it
+				if (!providerPresets['custom']) {
+					providerPresets['custom'] = { name: "Custom...", sdk: "openai-compatible", url: "", requiresKey: false, models: [] };
+				}
+				
+				// Re-populate the preset select dropdown if it exists
+				if (presetSelect && presetSelect.options.length <= 1) { // Only if empty or has just default
+					presetSelect.innerHTML = '';
+					for (const [key, preset] of Object.entries(providerPresets)) {
+						const option = document.createElement('option');
+						option.value = key;
+						option.textContent = preset.name || 'Custom...';
+						presetSelect.appendChild(option);
+					}
+				}
+			}
+		};
+
+		function createModelRow(presetModels) {
+			const row = document.createElement('div');
+			row.className = 'flex gap-2 items-start model-row';
+
+			const inputContainer = document.createElement('div');
+			inputContainer.className = 'flex-grow flex flex-col gap-1';
+
+			const select = document.createElement('select');
+			select.className = 'settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] model-select';
+			
+			presetModels.forEach(model => {
+				const option = document.createElement('option');
+				option.value = option.textContent = model;
+				select.appendChild(option);
+			});
+			const customOption = document.createElement('option');
+			customOption.value = 'custom';
+			customOption.textContent = 'Custom...';
+			select.appendChild(customOption);
+
+			const customInput = document.createElement('input');
+			customInput.type = 'text';
+			customInput.placeholder = 'Model name (e.g. my-model)';
+			customInput.className = 'hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1 custom-model-input';
+
+			select.addEventListener('change', () => {
+				if (select.value === 'custom') {
+					customInput.classList.remove('hidden');
+				} else {
+					customInput.classList.add('hidden');
+				}
+			});
+
+			inputContainer.appendChild(select);
+			inputContainer.appendChild(customInput);
+
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'text-vscode-descriptionForeground hover:text-vscode-error bg-transparent border-none cursor-pointer p-1.5';
+			removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			
+			removeBtn.addEventListener('click', () => {
+				if (modelsContainer.children.length > 1) {
+					row.remove();
+					updateRemoveButtons();
+				}
+			});
+
+			row.appendChild(inputContainer);
+			row.appendChild(removeBtn);
+
+			modelsContainer.appendChild(row);
+
+			// Hide remove button if it's the only row
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			const rows = modelsContainer.querySelectorAll('.model-row');
+			rows.forEach((row, index) => {
+				const removeBtn = row.querySelector('button');
+				removeBtn.style.visibility = '';
+				
+				// Either it's the only row, or we can just always disable the first one
+				// "disable for only for the first model box"
+				if (index === 0) {
+					removeBtn.disabled = true;
+					removeBtn.classList.add('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.remove('hover:text-vscode-error', 'cursor-pointer');
+				} else {
+					removeBtn.disabled = false;
+					removeBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.add('hover:text-vscode-error', 'cursor-pointer');
+				}
+			});
+		}
+
+		function updateProviderForm() {
+			const presetKey = presetSelect.value;
+			const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+			if (presetKey === 'custom') {
+				customNameInput.classList.remove('hidden');
+				sdkGroup.classList.remove('hidden');
+				urlGroup.classList.remove('hidden');
+				apiKeyGroup.classList.remove('hidden');
+			} else {
+				customNameInput.classList.add('hidden');
+				sdkGroup.classList.add('hidden');
+				urlGroup.classList.add('hidden');
+				apiKeyGroup.classList.toggle('hidden', !preset.requiresKey);
+				
+				sdkSelect.value = preset.sdk;
+				baseUrlInput.value = preset.url;
+			}
+
+			// Reset models to single row
+			modelsContainer.innerHTML = '';
+			createModelRow(preset.models);
+		}
+
+		if (addModelBtn) {
+			addModelBtn.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+				createModelRow(preset.models);
+			});
+		}
+
+		if (toggleAddProviderBtn && closeAddProviderBtn && addProviderFormContainer) {
+			toggleAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.remove('hidden');
+				toggleAddProviderBtn.parentElement.classList.add('hidden');
+				updateProviderForm();
+			});
+
+			closeAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.add('hidden');
+				toggleAddProviderBtn.parentElement.classList.remove('hidden');
+			});
+		}
+
+		if (presetSelect) presetSelect.addEventListener('change', updateProviderForm);
+
+		if (addProviderSubmit) {
+			addProviderSubmit.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+				const name = presetKey === 'custom' ? customNameInput.value.trim() : preset.name;
+				const sdkProvider = sdkSelect.value;
+				const baseUrl = baseUrlInput.value.trim();
+				const apiKey = apiKeyInput.value.trim();
+				
+				const models = [];
+				const modelRows = modelsContainer.querySelectorAll('.model-row');
+				modelRows.forEach(row => {
+					const select = row.querySelector('.model-select');
+					const customInput = row.querySelector('.custom-model-input');
+					
+					let modelStr = '';
+					if (select.value === 'custom') {
+						modelStr = customInput.value.trim();
+					} else {
+						modelStr = select.value;
+					}
+
+					// Split in case user pasted comma separated in custom
+					const parsedModels = modelStr ? modelStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+					models.push(...parsedModels);
+				});
+
+				// deduplicate models and check if empty
+				const uniqueModels = [...new Set(models)];
+
+				if (!name) {
+					vscode.postMessage({ type: 'showError', message: 'Provider name is required.' });
+					return;
+				}
+				if (uniqueModels.length === 0) {
+					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
+					return;
+				}
+				if (models.some((m, i) => models.indexOf(m) !== i)) {
+					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
+					return;
+				}
+
+				const provider = {
+					name,
+					sdkProvider,
+					...(baseUrl ? { baseUrl } : {}),
+					...(apiKey ? { apiKey } : {}),
+					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
+				};
+
+				// Disable the submit button and show a spinner or "Saving..." state
+				const originalText = addProviderSubmit.innerHTML;
+				addProviderSubmit.innerHTML = '<span class="codicon codicon-loading codicon-modifier-spin"></span> Saving...';
+				addProviderSubmit.disabled = true;
+
+				vscode.postMessage({ type: 'addProvider', provider });
+
+				// We will wait for 'addProviderResult' message to reset and hide the form, or show an error
+				window._handleAddProviderResult = (msg) => {
+					addProviderSubmit.innerHTML = originalText;
+					addProviderSubmit.disabled = false;
+					
+					if (msg.success) {
+						presetSelect.value = 'custom';
+						presetSelect.dispatchEvent(new Event('change'));
+						customNameInput.value = '';
+						baseUrlInput.value = '';
+						apiKeyInput.value = '';
+						
+						if (addProviderFormContainer) {
+							addProviderFormContainer.classList.add('hidden');
+							toggleAddProviderBtn.parentElement.classList.remove('hidden');
+						}
+					}
+					// On error, we leave the form open so the user can fix it.
+					// The host will show the error via showErrorMessage.
+					window._handleAddProviderResult = null;
+				};
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2680,6 +2831,10 @@
 	 * Populate the settings UI with data received from the extension host.
 	 */
 	function renderSettingsData(settings) {
+		if (settings.providerTemplates && window._updateProviderPresets) {
+			window._updateProviderPresets(settings.providerTemplates);
+		}
+		
 		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {
@@ -2909,6 +3064,7 @@
 		}
 
 		elapsedMs() {
+			if (this._overrideDuration !== undefined) return this._overrideDuration;
 			return Date.now() - this.startedAt;
 		}
 
@@ -2930,7 +3086,7 @@
 			// opens on 'Working for 0s' reads worse than one that opens on a
 			// label and grows a duration a second later.
 			this.body.appendChild(element);
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 
 		removeActivity(element) {
@@ -3084,12 +3240,12 @@
 					this.renderTimeout = setTimeout(() => {
 						this.render();
 						this.renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50);
 				}
 			} else {
 				this.render();
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
@@ -3199,7 +3355,7 @@
 				}
 			}
 
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 	}
 

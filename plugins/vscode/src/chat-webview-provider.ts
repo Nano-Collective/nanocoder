@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, WebviewMessageAddProvider, ExtensionMessageSettingsData } from './webview-protocol';
 
 
 
@@ -12,6 +12,7 @@ import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
+import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
 
 /**
  * Excluded from `@` search regardless of user settings — never useful context.
@@ -41,9 +42,6 @@ export class ChatWebviewProvider
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
-	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
-	/** Non-null while a timeline revert is in flight. See `_handleRevert`. */
-	private _revertReplayBuffer: any[] | null = null;
 	private readonly _planReview = new PlanReviewController();
 	private readonly _artifacts = new ArtifactController();
 	/** Code lens prompt waiting on the webview shell and the ACP session. */
@@ -66,23 +64,10 @@ export class ChatWebviewProvider
 				this.postArtifacts();
 			}
 			this.handleDiffs(update);
-			// A revert replays the whole truncated thread from inside the
-			// timeline/revert call, so those updates arrive before the call
-			// resolves. Hold them until we know the revert succeeded, then
-			// clear and flush; a refused revert drops them and leaves the
-			// existing thread on screen.
-			if (this._revertReplayBuffer) {
-				this._revertReplayBuffer.push(update);
-				return;
-			}
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			});
-			const kind = update?.update?.sessionUpdate ?? update?.sessionUpdate;
-			if (kind === 'tool_call' || kind === 'tool_call_update') {
-				this.scheduleTimelineRefresh();
-			}
 		};
 
 		this._acpClient.onSessionArtifacts = (meta: unknown) => {
@@ -193,10 +178,6 @@ export class ChatWebviewProvider
 	 */
 	public dispose() {
 		this._clearPendingPrompt();
-		if (this._timelineRefreshTimer) {
-			clearTimeout(this._timelineRefreshTimer);
-			this._timelineRefreshTimer = undefined;
-		}
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -380,7 +361,6 @@ export class ChatWebviewProvider
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
-							this._broadcastTimeline();
 						});
 						break;
 					case 'deleteSession':
@@ -471,11 +451,9 @@ export class ChatWebviewProvider
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
 						break;
-					case 'requestTimeline':
-						this._broadcastTimeline();
-						break;
-					case 'revertToCheckpoint':
-						this._handleRevert(message.checkpointId);
+					case 'addProvider':
+						this._outputChannel.appendLine(`[Webview] Add provider requested: ${message.provider.name}`);
+						void this._handleAddProvider(message.provider);
 						break;
 				}
 			}
@@ -504,7 +482,6 @@ export class ChatWebviewProvider
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
-				await this._broadcastTimeline();
 				this._flushPendingPrompt();
 			}
 		} catch (error) {
@@ -527,48 +504,6 @@ export class ChatWebviewProvider
 	private async _broadcastSessions() {
 		const sessions = await this._acpClient.listSessions();
 		this.postMessage({type: 'updateSessions', sessions});
-	}
-
-	private scheduleTimelineRefresh() {
-		if (this._timelineRefreshTimer) {
-			clearTimeout(this._timelineRefreshTimer);
-		}
-		this._timelineRefreshTimer = setTimeout(() => {
-			this._broadcastTimeline();
-		}, 150);
-	}
-
-	private async _broadcastTimeline() {
-		const entries = await this._acpClient.listTimeline();
-		this.postMessage({type: 'updateTimeline', entries});
-	}
-
-	/**
-	 * Clearing the panel before the revert resolves would leave it blank with
-	 * nothing to replay into it whenever the revert is refused (an in-flight
-	 * turn, a dropped connection). So buffer the agent's replay instead, and
-	 * only clear once the revert has actually happened.
-	 */
-	private async _handleRevert(checkpointId: string) {
-		this._outputChannel.appendLine(`[Webview] User reverted timeline to ${checkpointId}`);
-		const buffer: any[] = [];
-		this._revertReplayBuffer = buffer;
-		try {
-			await this._acpClient.revertTimeline(checkpointId);
-		} catch {
-			// Error toast is raised by the ACP client. The thread is untouched,
-			// so drop whatever was buffered and leave the panel as it was.
-			return;
-		} finally {
-			this._revertReplayBuffer = null;
-		}
-
-		this.postMessage({type: 'clear', isLoading: true});
-		for (const update of buffer) {
-			this.postMessage({type: 'acpUpdate', update});
-		}
-		this.postMessage({type: 'sessionLoaded'});
-		await this._broadcastTimeline();
 	}
 
 	private _handleRequestSettings() {
@@ -618,10 +553,53 @@ export class ChatWebviewProvider
 		}
 	}
 
-	private _readWebviewSettings(cwd: string): SettingsData & {showTokenUsage: boolean} {
+	private async _handleAddProvider(provider: WebviewMessageAddProvider['provider']): Promise<void> {
+		try {
+			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const result = this._settingsManager.addProvider(cwd, provider);
+
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+				this.postMessage({type: 'addProviderResult', success: true});
+				
+				try {
+					await vscode.commands.executeCommand('nanocoder.restartAcp');
+				} catch (cmdError) {
+					this._outputChannel.appendLine(`[Settings] nanocoder.restartAcp command failed: ${cmdError}`);
+				}
+			} else {
+				this.postMessage({type: 'addProviderResult', success: false, error: result.error});
+				vscode.window.showErrorMessage(`Failed to add provider '${provider.name}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to add provider: ${message}`);
+			this.postMessage({type: 'addProviderResult', success: false, error: message});
+			vscode.window.showErrorMessage(`Failed to add provider: ${message}`);
+		}
+	}
+
+	private _readWebviewSettings(cwd: string): ExtensionMessageSettingsData['settings'] {
+		const providerTemplates: Record<string, {name: string, sdk: string, url: string, requiresKey: boolean, models: string[]}> = {};
+		for (const t of PROVIDER_TEMPLATES) {
+			const dummyConfig = t.buildConfig({});
+			const modelField = t.fields.find((f: TemplateField) => f.name === 'model');
+			const requiresKey = t.fields.some((f: TemplateField) => f.name === 'apiKey' && f.required);
+			
+			providerTemplates[t.id] = {
+				name: t.name,
+				sdk: dummyConfig.sdkProvider || 'openai-compatible',
+				url: dummyConfig.baseUrl || '',
+				requiresKey: !!requiresKey,
+				models: modelField?.default ? modelField.default.split(',').map((m: string) => m.trim()) : []
+			};
+		}
+
 		return {
 			...this._settingsManager.readSettings(cwd),
 			showTokenUsage: this._readShowTokenUsage(),
+			providerTemplates
 		};
 	}
 
@@ -816,7 +794,6 @@ export class ChatWebviewProvider
 			if (text.trim() === '/clear') {
 				this._planReview.reset();
 				this.postMessage({type: 'clear'});
-				this.postMessage({type: 'updateTimeline', entries: []});
 			}
 
 			// Expand any @[file] / @[folder] attachments into their contents

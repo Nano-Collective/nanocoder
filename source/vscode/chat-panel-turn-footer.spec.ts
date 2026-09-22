@@ -512,4 +512,22 @@ test('clicking Retry on an image-only turn resubmits the images, not nothing', t
 	t.deepEqual(retryMsgs.at(-1).images, images);
 });
 
+test('footer is hidden while processing and revealed when finished', t => {
+	const panel = createPanel();
+	
+	// startTurn simulates the real extension flow which triggers setProcessing(true)
+	panel.startTurn('hello');
+	
+	// Stream the first chunk of the response
+	panel.text('chunk 1');
+	
+	const [footer] = agentFooters(panel);
+	t.is(footer.style.display, 'none', 'footer should be hidden while processing');
+	t.true(footer.classList.contains('agent-footer-processing'), 'should have processing class');
 
+	// Finish the turn
+	panel.finish();
+	
+	t.is(footer.style.display, '', 'footer should be revealed after processing');
+	t.false(footer.classList.contains('agent-footer-processing'), 'processing class should be removed');
+});

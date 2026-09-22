@@ -661,6 +661,95 @@ test.serial(
 	},
 );
 
+test.serial(
+	'stageSkillInstall - a ref that git would read as an option cannot run a command',
+	async t => {
+		await ensureFixtures();
+		// `git clone --branch <ref>` consumes the ref as the branch value and
+		// fails, which drops into the init+fetch+checkout fallback. There the
+		// ref is a positional, and git keeps parsing options after positionals,
+		// so `--upload-pack=<command>` used to make git run <command>.
+		const sentinel = join(dir, 'ref-injection-sentinel');
+		const result = await stageSkillInstall(refRepo, {
+			projectRoot: projectRoot(),
+			ref: `--upload-pack=sh -c 'echo pwned > ${sentinel}'`,
+		});
+
+		t.false(result.ok);
+		if (!result.ok) t.regex(result.error, /ref cannot start with "-"/);
+		// The assertion that matters: the payload never ran. A rejected install
+		// that still executed the command would fail the first check and pass
+		// nothing else.
+		t.false(await pathExists(sentinel));
+	},
+);
+
+test.serial(
+	'stageSkillInstall - an index entry cannot smuggle a ref that git reads as an option',
+	async t => {
+		await ensureFixtures();
+		// The index is remote JSON fetched before the trust prompt, so an
+		// entry's `ref` reaches git without the user ever seeing it. Same
+		// payload as above, delivered through the channel that makes it a
+		// supply-chain problem rather than a self-inflicted one.
+		const sentinel = join(dir, 'index-ref-injection-sentinel');
+		const result = await stageSkillInstall('demo', {
+			projectRoot: projectRoot(),
+			indexUrl: await writeIndex([
+				{
+					name: 'demo',
+					repo: refRepo,
+					ref: `--upload-pack=sh -c 'echo pwned > ${sentinel}'`,
+				},
+			]),
+		});
+
+		t.false(result.ok);
+		if (!result.ok) t.regex(result.error, /ref cannot start with "-"/);
+		t.false(await pathExists(sentinel));
+	},
+);
+
+test.serial(
+	'stageSkillInstall - an index entry cannot select a git remote-helper transport',
+	async t => {
+		// `ext::<command>` is a URL, not an option, so `clone -- <repo>` does
+		// not stop it: git runs the command through a shell. Stock git blocks
+		// it via protocol.ext.allow=never, but that is git's default doing the
+		// work, not ours, and it is one `git config` away from being untrue.
+		const sentinel = join(dir, 'ext-transport-sentinel');
+		const result = await stageSkillInstall('demo', {
+			projectRoot: projectRoot(),
+			indexUrl: await writeIndex([
+				{
+					name: 'demo',
+					repo: `ext::sh -c 'echo pwned > ${sentinel}'`,
+				},
+			]),
+		});
+
+		t.false(result.ok);
+		if (!result.ok) t.regex(result.error, /remote-helper transports/);
+		t.false(await pathExists(sentinel));
+	},
+);
+
+test.serial(
+	'stageSkillInstall - an index entry cannot point at an unknown URL scheme',
+	async t => {
+		const result = await stageSkillInstall('demo', {
+			projectRoot: projectRoot(),
+			indexUrl: await writeIndex([
+				{name: 'demo', repo: 'gopher://example.com/x.git'},
+			]),
+		});
+		t.false(result.ok);
+		if (!result.ok) {
+			t.regex(result.error, /expected an https\/ssh\/git\/file URL/);
+		}
+	},
+);
+
 // --- CLI -------------------------------------------------------------------
 
 test.serial(

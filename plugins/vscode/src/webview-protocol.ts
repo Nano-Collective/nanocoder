@@ -96,21 +96,6 @@ export interface ExtensionMessageCopyResult {
 	error?: string;
 }
 
-export interface TimelineCheckpoint {
-	id: string;
-	seq: number;
-	toolCallId: string;
-	toolName: string;
-	title: string;
-	timestamp: string;
-	filesChanged: string[];
-}
-
-export interface ExtensionMessageUpdateTimeline {
-	type: 'updateTimeline';
-	entries: TimelineCheckpoint[];
-}
-
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
@@ -123,12 +108,30 @@ export interface ExtensionMessageUpdateSessions {
 
 export interface ExtensionMessageSettingsData {
 	type: 'settingsData';
-	settings: SettingsData & {showTokenUsage: boolean};
+	settings: SettingsData & {
+		showTokenUsage: boolean;
+		providerTemplates: Record<
+			string,
+			{
+				name: string;
+				sdk: string;
+				url: string;
+				requiresKey: boolean;
+				models: string[];
+			}
+		>;
+	};
 }
 
 export interface ExtensionMessageSettingsUpdated {
 	type: 'settingsUpdated';
 	key: string;
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageProviderResult {
+	type: 'addProviderResult';
 	success: boolean;
 	error?: string;
 }
@@ -205,6 +208,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessagePermissionsCancelled
+	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
@@ -219,9 +223,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
 	| ExtensionMessageRunPrompt
-	| ExtensionMessageMentionCompletions
-	| ExtensionMessageUpdateTimeline;
-
+	| ExtensionMessageMentionCompletions;
 
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
@@ -343,6 +345,17 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageAddProvider {
+	type: 'addProvider';
+	provider: {
+		name: string;
+		sdkProvider: string;
+		baseUrl?: string;
+		apiKey?: string;
+		models?: string[];
+	};
+}
+
 export interface WebviewMessageApprovePlan {
 	type: 'approvePlan';
 }
@@ -370,15 +383,6 @@ export interface WebviewMessageRequestMentionCompletions {
 	requestId: number;
 }
 
-export interface WebviewMessageRequestTimeline {
-	type: 'requestTimeline';
-}
-
-export interface WebviewMessageRevertToCheckpoint {
-	type: 'revertToCheckpoint';
-	checkpointId: string;
-}
-
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -403,9 +407,8 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageAddProvider
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions
-	| WebviewMessageRequestTimeline
-	| WebviewMessageRevertToCheckpoint;
+	| WebviewMessageRequestMentionCompletions;

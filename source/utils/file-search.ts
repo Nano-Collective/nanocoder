@@ -56,6 +56,19 @@ function normalizePathForMatch(filePath: string): string {
 	return filePath.replace(/\\/g, '/');
 }
 
+// Project entries are relative paths without a "./" prefix, so a pattern that
+// carries one ("./src/**/*.ts") would never match. Strip it before matching.
+function stripRelativePrefix(pattern: string): string {
+	let stripped = pattern;
+	while (stripped.startsWith('./')) {
+		stripped = stripped.slice(2);
+	}
+	// A bare "./" strips to nothing, and an empty pattern tokenizes to zero
+	// tokens, which the token cache's size calculation rejects. Keep the
+	// original so it simply matches nothing, as it did before.
+	return stripped === '' ? pattern : stripped;
+}
+
 const MAX_BRACE_EXPANSIONS = 64;
 
 function expandBraces(pattern: string): string[] {
@@ -214,7 +227,7 @@ function tokenizeExpandedPattern(pattern: string): GlobToken[][] {
 		);
 	}
 
-	const normalizedPattern = normalizePathForMatch(pattern);
+	const normalizedPattern = stripRelativePrefix(normalizePathForMatch(pattern));
 	const tokenized = expandBraces(normalizedPattern).map(tokenizeGlob);
 
 	globTokenCache.set(pattern, tokenized);
@@ -933,7 +946,11 @@ export async function findMatchingPaths(
 		return {files: [], truncated: false};
 	}
 
-	const hasSlash = normalizePathForMatch(pattern).includes('/');
+	// "./" is stripped before matching, so "./*.tsx" falls back to basename
+	// matching exactly like "*.tsx" does.
+	const hasSlash = stripRelativePrefix(normalizePathForMatch(pattern)).includes(
+		'/',
+	);
 	const files: string[] = [];
 	let truncated = false;
 

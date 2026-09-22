@@ -97,7 +97,10 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		name: 'mode',
 		takesValue: true,
 		valueName: 'mode',
-		values: ['normal', 'auto-accept', 'yolo', 'plan'],
+		// Keep in step with VALID_MODES in @/app/types. Imported types cannot
+		// reach this spec (it is consumed by the completion generators), so a
+		// new mode has to be added here by hand or it never tab-completes.
+		values: ['normal', 'auto-accept', 'yolo', 'plan', 'architect'],
 		description: 'Start in a specific development mode',
 	},
 	{

@@ -57,6 +57,52 @@ test('matchesGlob handles glob edge cases found during the regex-to-DP rewrite',
 	t.true(matchesGlob('ab/', 'a*/**'));
 });
 
+test('matchesGlob accepts patterns written with a leading "./"', t => {
+	t.true(matchesGlob('src/index.ts', './src/**/*.ts'));
+	t.true(matchesGlob('src/components/Button.tsx', './src/**/*.tsx'));
+	t.true(matchesGlob('package.json', './package.json'));
+	t.true(matchesGlob('src\\index.ts', '.\\src\\**\\*.ts'));
+	t.false(matchesGlob('src/index.js', './src/**/*.ts'));
+	// Only the leading "./" is stripped; "../" is left alone.
+	t.false(matchesGlob('src/index.ts', '../src/**/*.ts'));
+	// A pattern that is nothing but "./" matches nothing instead of throwing.
+	t.notThrows(() => matchesGlob('src/index.ts', './'));
+	t.false(matchesGlob('src/index.ts', './'));
+	t.false(matchesGlob('src/index.ts', '././'));
+});
+
+test.serial('findMatchingPaths matches patterns written with a leading "./"', async t => {
+	const testDir = createTempDir('test-file-search-dot-slash');
+
+	try {
+		mkdirSync(join(testDir, 'src', 'components'), {recursive: true});
+		writeFileSync(join(testDir, 'src', 'index.ts'), 'export const index = true;');
+		writeFileSync(
+			join(testDir, 'src', 'components', 'Button.tsx'),
+			'export const Button = () => null;',
+		);
+		writeFileSync(join(testDir, 'package.json'), '{}');
+		writeFileSync(join(testDir, 'src', 'package.json'), '{}');
+
+		const recursiveMatches = await findMatchingPaths('./src/**/*.ts*', testDir, 50);
+		t.true(recursiveMatches.files.includes('src/index.ts'));
+		t.true(recursiveMatches.files.includes('src/components/Button.tsx'));
+
+		// A pathless "./package.json" matches on basename, exactly as the
+		// equivalent "package.json" already does, so nested copies match too.
+		const exactMatches = await findMatchingPaths('./package.json', testDir, 50);
+		t.deepEqual(exactMatches.files.sort(), ['package.json', 'src/package.json']);
+		const withoutPrefix = await findMatchingPaths('package.json', testDir, 50);
+		t.deepEqual(exactMatches.files.sort(), withoutPrefix.files.sort());
+
+		// "./*.tsx" keeps the basename behaviour that "*.tsx" already has.
+		const basenameMatches = await findMatchingPaths('./*.tsx', testDir, 50);
+		t.true(basenameMatches.files.includes('src/components/Button.tsx'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test('matchesGlob stays fast on a pattern shape that hangs a naive regex engine', t => {
 	// This shape hung for 20+ seconds against the old regex-based implementation.
 	const pathologicalPattern = `${'*a'.repeat(25)}b`;
