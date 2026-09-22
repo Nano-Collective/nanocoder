@@ -793,3 +793,120 @@ test.serial(
 		);
 	},
 );
+
+test.serial(
+	'hook output survives a multi-byte character split across a chunk boundary',
+	async t => {
+		// Writes the three bytes of U+2705 in two pipe writes, so the `data`
+		// events split mid-character. Decoding each chunk on its own turns both
+		// halves into U+FFFD; a StringDecoder holds the incomplete tail back.
+		// This is not cosmetic - a pre-tool-use hook's stdout is the reason the
+		// model is given for the denial.
+		withHooks({
+			'pre-tool-use': [
+				{
+					name: 'unicode',
+					command: node(
+						'process.stdout.write(Buffer.from([0xe2]));' +
+							'setTimeout(()=>{process.stdout.write(Buffer.from([0x9c,0x85]));' +
+							'process.exit(1);},60)',
+					),
+				},
+			],
+		});
+
+		const gate = await runPreToolUseGate(writeFileCall('src/app.ts'), {
+			path: 'src/app.ts',
+		});
+
+		t.true(gate.blocked);
+		t.true(
+			gate.reason?.includes('✅') ?? false,
+			`expected the reason to carry U+2705, got ${JSON.stringify(gate.reason)}`,
+		);
+		t.false(
+			gate.reason?.includes('�') ?? true,
+			'no replacement characters may appear in the reason',
+		);
+	},
+);
+
+test.serial(
+	'hook output ending on an incomplete sequence is flushed at close',
+	async t => {
+		// The decoder holds back a trailing partial sequence. Without a flush on
+		// `close`, a stream whose final character straddles the last chunk loses
+		// it entirely - a silent truncation rather than a visible mojibake.
+		withHooks({
+			'pre-tool-use': [
+				{
+					name: 'trailing',
+					command: node(
+						"process.stdout.write('ok ');" +
+							'process.stdout.write(Buffer.from([0xe2]));' +
+							'setTimeout(()=>{process.stdout.write(Buffer.from([0x9c,0x85]));' +
+							'process.exit(1);},60)',
+					),
+				},
+			],
+		});
+
+		const gate = await runPreToolUseGate(writeFileCall('src/app.ts'), {
+			path: 'src/app.ts',
+		});
+
+		t.true(gate.blocked);
+		t.true(gate.reason?.includes('ok ✅') ?? false);
+	},
+);
+
+// SIGTERM is a request. A hook that traps it survived its own timeout: the
+// group was signalled once and never escalated, leaving the runaway process
+// tree the detached spawn exists to prevent. POSIX only - on Windows the
+// reap is `taskkill /F`, which is already unconditional.
+const posixTest = process.platform === 'win32' ? test.skip : test;
+
+posixTest.serial(
+	'a hook that ignores SIGTERM is escalated to SIGKILL',
+	async t => {
+		const pidFile = join(testDir, `sigterm-trap-${Date.now()}.pid`);
+		withHooks({
+			'pre-tool-use': [
+				{
+					name: 'stubborn',
+					timeout: 200,
+					command: node(
+						// Trap SIGTERM, publish our pid, then stay alive well past
+						// both the hook timeout and the escalation grace period.
+						"process.on('SIGTERM',()=>{});" +
+							`require('fs').writeFileSync(${JSON.stringify(
+								JSON.stringify(pidFile),
+							)},String(process.pid));` +
+							'setTimeout(()=>{},10000)',
+					),
+				},
+			],
+		});
+
+		const gate = await runPreToolUseGate(writeFileCall('src/app.ts'), {
+			path: 'src/app.ts',
+		});
+		// A timeout is not a veto: a broken hook must not wedge the session.
+		t.false(gate.blocked);
+
+		const pid = Number(readFileSync(pidFile, 'utf-8'));
+		t.true(Number.isInteger(pid) && pid > 0);
+
+		// Timeout (200ms) + SIGKILL grace (1s) + slack.
+		await new Promise(resolve => setTimeout(resolve, 2_000));
+
+		let alive: boolean;
+		try {
+			process.kill(pid, 0);
+			alive = true;
+		} catch {
+			alive = false;
+		}
+		t.false(alive, `hook pid ${pid} outlived its timeout`);
+	},
+);

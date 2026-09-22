@@ -3,6 +3,7 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import WelcomeMessage from './welcome-message';
 
@@ -102,7 +103,7 @@ test('WelcomeMessage has no hero box in narrow layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -123,7 +124,7 @@ test('WelcomeMessage renders NC monogram at widths below 82', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -145,7 +146,7 @@ test('WelcomeMessage shows welcome message for normal terminal', t => {
 	// Tagline matches the GitHub repo description, wrapped across rows.
 	t.regex(output!, /An open coding agent for your terminal/);
 	t.regex(output!, /owe nothing to anyone\./);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -163,7 +164,7 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 	t.regex(output!, /Quit/);
 	// New design footer has mode + version
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -240,7 +241,7 @@ test('WelcomeMessage renders full art logo for wide terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -260,7 +261,7 @@ test('WelcomeMessage shows centered footer for wide terminal', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /nanocoder/);
-	t.regex(output!, new RegExp(VERSION.replace(/\./g, '\\.')));
+	t.regex(output!, new RegExp(VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
 	process.stdout.columns = originalColumns;
 });
@@ -314,7 +315,7 @@ test('WelcomeMessage handles boundary at width 80', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -328,7 +329,7 @@ test('WelcomeMessage handles boundary at width 90', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 90;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -338,14 +339,33 @@ test('WelcomeMessage handles boundary at width 90', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage trims menu when rows < 24', t => {
+test('WelcomeMessage fits the viewport of a standard 80x24 terminal', t => {
 	const originalColumns = process.stdout.columns;
-	const originalRows = process.stdout.rows;
-	process.stdout.columns = 100;
-	// @ts-ignore mock rows
-	process.stdout.rows = 23;
+	process.stdout.columns = 80;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	// 80x24 is the default size of most terminal emulators. Fullscreen hands
+	// the banner the terminal minus the input footer and the frame padding, so
+	// it must fit in ~17 rows: the menu and the tip matter more than the logo.
+	const {lastFrame} = renderWithTheme(
+		<WelcomeMessage tip="Short pinned tip." availableRows={17} />,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.split('\n').length <= 17, 'banner must fit the viewport');
+	t.regex(output, /Resume session/);
+	t.regex(output, /\/exit/);
+	t.regex(output, /Tip: Short pinned tip\./);
+	t.notRegex(output, /█/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage trims the menu when the banner has under 16 rows', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+
+	// 15 rows fits the two-item menu (14) but not the four-item one (16).
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={15} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -355,17 +375,14 @@ test('WelcomeMessage trims menu when rows < 24', t => {
 	t.regex(output!, /Quit/);
 
 	process.stdout.columns = originalColumns;
-	process.stdout.rows = originalRows;
 });
 
-test('WelcomeMessage hides menu when rows < 15', t => {
+test('WelcomeMessage hides the menu when the banner has under 14 rows', t => {
 	const originalColumns = process.stdout.columns;
-	const originalRows = process.stdout.rows;
 	process.stdout.columns = 100;
-	// @ts-ignore
-	process.stdout.rows = 14;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	// Below the two-item menu's own height, only the header block is offered.
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={13} />);
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -374,7 +391,6 @@ test('WelcomeMessage hides menu when rows < 15', t => {
 	t.regex(output!, /Welcome to Nanocoder/);
 
 	process.stdout.columns = originalColumns;
-	process.stdout.rows = originalRows;
 });
 
 test('WelcomeMessage hides logo when rows < 16', t => {
@@ -413,7 +429,7 @@ test('WelcomeMessage handles very wide terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 200;
 
-	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
 
 	const output = lastFrame();
 	t.truthy(output);
