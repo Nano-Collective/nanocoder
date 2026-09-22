@@ -208,6 +208,7 @@ export class AcpAgent implements Agent {
 		// the finally, so a clean turn has to be tracked explicitly rather than
 		// inferred from getting there.
 		let turnSucceeded = false;
+		const turnStart = Date.now();
 
 		try {
 			const {text: userText, images} = await acpContentToUserMessage(
@@ -387,7 +388,13 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
-			this.attachResponseUsage(session, response, previousAssistant);
+			const turnDurationMs = Date.now() - turnStart;
+			this.attachResponseUsage(
+				session,
+				response,
+				previousAssistant,
+				turnDurationMs,
+			);
 			turnSucceeded = true;
 			return response;
 		} catch (error) {
@@ -410,6 +417,8 @@ export class AcpAgent implements Agent {
 					role: 'assistant',
 					content: cancelNotice,
 					displayOnly: true,
+					durationMs: Date.now() - turnStart,
+					outcome: 'cancelled',
 				});
 				return {stopReason: 'cancelled'};
 			}
@@ -431,6 +440,8 @@ export class AcpAgent implements Agent {
 				role: 'assistant',
 				content: formattedError,
 				displayOnly: true,
+				durationMs: Date.now() - turnStart,
+				outcome: 'failed',
 			});
 
 			throw error;
@@ -865,14 +876,22 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
-				if (message.responseUsage) {
+				if (message.responseUsage || message.durationMs || message.outcome) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
 							sessionUpdate: 'agent_message_chunk',
 							content: {type: 'text', text: ''},
 							_meta: {
-								'nanocoder/response-usage': message.responseUsage,
+								...(message.responseUsage
+									? {'nanocoder/response-usage': message.responseUsage}
+									: {}),
+								...(message.durationMs
+									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
+								...(message.outcome
+									? {'nanocoder/outcome': message.outcome}
+									: {}),
 							},
 						},
 					});
@@ -885,11 +904,17 @@ export class AcpAgent implements Agent {
 		session: AcpSession,
 		response: PromptResponse,
 		previousAssistant?: (typeof session.messages)[number],
+		turnDurationMs?: number,
 	): void {
-		if (!response.usage) return;
-
 		const assistant = findLastAssistantMessage(session);
 		if (!assistant || assistant === previousAssistant) return;
+
+		if (turnDurationMs !== undefined) {
+			assistant.durationMs = turnDurationMs;
+			assistant.outcome = 'completed';
+		}
+
+		if (!response.usage) return;
 
 		const cost = (
 			response._meta as

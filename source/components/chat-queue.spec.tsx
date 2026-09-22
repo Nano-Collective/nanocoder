@@ -2,7 +2,7 @@ import test from 'ava';
 import {Box, Text} from 'ink';
 import {render} from 'ink-testing-library';
 import React from 'react';
-import ChatQueue from './chat-queue';
+import ChatQueue, {computeFullscreenTailCap} from './chat-queue';
 
 test('ChatQueue renders without components', t => {
 	t.notThrows(() => {
@@ -171,6 +171,48 @@ test('disableStatic caps the rendered tail at FULLSCREEN_TAIL_CAP (60) component
 	t.notRegex(output, /\bitem-9\b/);
 	t.regex(output, /\bitem-10\b/);
 	t.regex(output, /\bitem-69\b/);
+});
+
+test('disableStatic honors a custom fullscreenTailCap instead of the flat 60 default', t => {
+	// 20 numbered items with a cap of 8: only the last 8 (indices 12..19) survive.
+	const components = Array.from({length: 20}, (_, i) => (
+		<Box key={`cap-${i}`}>{`cap-${i}`}</Box>
+	));
+
+	const {lastFrame} = render(
+		<ChatQueue
+			staticComponents={components}
+			queuedComponents={[]}
+			disableStatic
+			fullscreenTailCap={8}
+		/>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.notRegex(output, /\bcap-11\b/);
+	t.regex(output, /\bcap-12\b/);
+	t.regex(output, /\bcap-19\b/);
+});
+
+// ============================================================================
+// computeFullscreenTailCap — scales the fullscreen tail to terminal height
+// (source/app/components/chat-history.tsx wires this from useTerminalRows)
+// instead of paying Yoga layout cost for a flat worst-case constant.
+// ============================================================================
+
+test('computeFullscreenTailCap floors at 10 for very short terminals', t => {
+	t.is(computeFullscreenTailCap(1), 10);
+	t.is(computeFullscreenTailCap(10), 10);
+});
+
+test('computeFullscreenTailCap scales roughly to half the terminal height', t => {
+	t.is(computeFullscreenTailCap(24), 12);
+	t.is(computeFullscreenTailCap(40), 20);
+});
+
+test('computeFullscreenTailCap caps at 60 for very tall terminals', t => {
+	t.is(computeFullscreenTailCap(200), 60);
+	t.is(computeFullscreenTailCap(120), 60);
 });
 
 test('disableStatic with fewer than 60 components renders all of them untouched', t => {

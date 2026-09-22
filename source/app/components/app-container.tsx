@@ -58,6 +58,12 @@ export interface AppContainerProps {
 	 * `nonInteractiveMode` is true (interactive mode has a live status bar).
 	 */
 	developmentMode?: DevelopmentMode;
+	/**
+	 * Rows the welcome banner has before the viewport clips it. Fullscreen
+	 * passes the terminal height minus the input footer; inline callers leave
+	 * it unset, since scrollback clips nothing.
+	 */
+	availableRows?: number;
 }
 
 /**
@@ -148,11 +154,14 @@ export function createStaticComponents({
 	currentModel,
 	nonInteractiveMode = false,
 	developmentMode,
+	availableRows,
 }: AppContainerProps): React.ReactNode[] {
 	const components: React.ReactNode[] = [];
 
 	if (shouldShowWelcome) {
-		components.push(<WelcomeMessage key="welcome" />);
+		components.push(
+			<WelcomeMessage key="welcome" availableRows={availableRows} />,
+		);
 	}
 
 	// Boot summary header: only in non-interactive / run mode. The welcome

@@ -177,12 +177,13 @@ test('AcpAgent.newSession - returns auto-accept as current mode', async t => {
 test('AcpAgent.newSession - returns all available modes', async t => {
 	const {agent} = createAgent();
 	const result = await agent.newSession({cwd: '/tmp'});
-	t.is(result.modes.availableModes.length, 4);
+	t.is(result.modes.availableModes.length, 5);
 	const modeIds = result.modes.availableModes.map((m: any) => m.id);
 	t.true(modeIds.includes('normal'));
 	t.true(modeIds.includes('auto-accept'));
 	t.true(modeIds.includes('yolo'));
 	t.true(modeIds.includes('plan'));
+	t.true(modeIds.includes('architect'));
 });
 
 test('AcpAgent.newSession - exposes available models and current model', async t => {

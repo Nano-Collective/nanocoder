@@ -456,6 +456,11 @@ export interface MCPServerConfig {
 	enabled?: boolean;
 	// Optional source information for display purposes
 	source?: 'project' | 'global' | 'env';
+	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
+	// references are expanded before runtime use, so the scanner must read
+	// these raw copies or every $API_KEY looks hardcoded.
+	rawEnv?: Record<string, string>;
+	rawHeaders?: Record<string, string>;
 }
 
 // Tune configuration for runtime model tuning via /tune command.

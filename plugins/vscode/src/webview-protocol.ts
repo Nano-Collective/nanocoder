@@ -96,21 +96,6 @@ export interface ExtensionMessageCopyResult {
 	error?: string;
 }
 
-export interface TimelineCheckpoint {
-	id: string;
-	seq: number;
-	toolCallId: string;
-	toolName: string;
-	title: string;
-	timestamp: string;
-	filesChanged: string[];
-}
-
-export interface ExtensionMessageUpdateTimeline {
-	type: 'updateTimeline';
-	entries: TimelineCheckpoint[];
-}
-
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
@@ -238,9 +223,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
 	| ExtensionMessageRunPrompt
-	| ExtensionMessageMentionCompletions
-	| ExtensionMessageUpdateTimeline;
-
+	| ExtensionMessageMentionCompletions;
 
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
@@ -400,15 +383,6 @@ export interface WebviewMessageRequestMentionCompletions {
 	requestId: number;
 }
 
-export interface WebviewMessageRequestTimeline {
-	type: 'requestTimeline';
-}
-
-export interface WebviewMessageRevertToCheckpoint {
-	type: 'revertToCheckpoint';
-	checkpointId: string;
-}
-
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -437,6 +411,4 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions
-	| WebviewMessageRequestTimeline
-	| WebviewMessageRevertToCheckpoint;
+	| WebviewMessageRequestMentionCompletions;
