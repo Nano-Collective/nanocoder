@@ -23,6 +23,7 @@ import {
 interface DiffEditArgs {
 	path: string;
 	diff: string;
+	description?: string;
 }
 
 export interface DiffEditBlock {
@@ -288,6 +289,11 @@ const diffEditCoreTool = tool({
 				description:
 					'One or more SEARCH/REPLACE blocks using <<<<<<< SEARCH, =======, and >>>>>>> REPLACE markers. Do not wrap the diff in markdown code fences or backticks.',
 			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this edit.',
+			},
 		},
 		required: ['path', 'diff'],
 	}),
@@ -323,6 +329,12 @@ function DiffEditPreview({
 	const messageContent = (
 		<Box flexDirection="column">
 			<Text color={colors.tool}>diff_edit</Text>
+			{args.description && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Description:</Text>
+					<Text color={colors.text}> {args.description}</Text>
+				</Box>
+			)}
 			<Box>
 				<Text color={colors.secondary}>Path: </Text>
 				<Text color={colors.text}>{args.path}</Text>
