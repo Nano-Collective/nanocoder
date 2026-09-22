@@ -876,15 +876,20 @@ export default function UserInput({
 		) {
 			const selected = completions[selectedCompletionIndex];
 			const completedText = `/${selected.name}`;
-			completionJustSelectedRef.current = true;
-			setInputState({
-				displayValue: completedText,
-				placeholderContent: {},
-			});
-			setShowCompletions(false);
-			setSelectedCompletionIndex(-1);
-			setTextInputKey(prev => prev + 1);
-			return;
+
+			// Only select if the text would actually change.
+			// If it's already an exact match, fall through to submit.
+			if (input !== completedText) {
+				completionJustSelectedRef.current = true;
+				setInputState({
+					displayValue: completedText,
+					placeholderContent: {},
+				});
+				setShowCompletions(false);
+				setSelectedCompletionIndex(-1);
+				setTextInputKey(prev => prev + 1);
+				return;
+			}
 		}
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)

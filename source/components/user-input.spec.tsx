@@ -939,6 +939,56 @@ test('arrow key navigation updates the selected completion', async t => {
 	unmount();
 });
 
+test('Enter submits the command directly if it is an exact, unambiguous match', async t => {
+	let submitted = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={() => submitted++}
+			/>
+		</TestWrapper>,
+	);
+
+	// Type exact command '/test-exit'
+	stdin.write('/');
+	await wait();
+	stdin.write('t');
+	await wait();
+	stdin.write('e');
+	await wait();
+	stdin.write('s');
+	await wait();
+	stdin.write('t');
+	await wait();
+	stdin.write('-');
+	await wait();
+	stdin.write('e');
+	await wait();
+	stdin.write('x');
+	await wait();
+	stdin.write('i');
+	await wait();
+	stdin.write('t');
+	await wait();
+	await wait();
+
+	// Menu is open with a single match
+	t.regex(lastFrame()!, /Available commands:/);
+
+	// Press Enter
+	stdin.write('\r');
+	await wait();
+
+	// Menu is closed and the command is submitted immediately
+	const afterEnter = lastFrame()!;
+	t.notRegex(afterEnter, /Available commands:/);
+	t.is(submitted, 1);
+
+	unmount();
+});
+
 test('Enter selects the highlighted completion and populates the input', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
