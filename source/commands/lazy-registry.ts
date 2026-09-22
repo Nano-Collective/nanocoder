@@ -132,7 +132,7 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'export',
-		description: 'Export the chat history to a markdown file',
+		description: 'Export the chat history to a markdown or JSON file',
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{

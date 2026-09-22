@@ -139,6 +139,7 @@ test.serial("plain shell creates a session for artifact tools", async (t) => {
 						kind: "success",
 						finalText: "done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					};
 				},
@@ -172,6 +173,7 @@ test.serial("plain shell marks and cleans its ephemeral artifact session", async
 						kind: "success",
 						finalText: "done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					};
 				},
@@ -257,6 +259,7 @@ test.serial(
 						finalText: "all done",
 						reasoning: null,
 						toolCalls: [],
+						steps: 3,
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
 				}),
@@ -270,6 +273,7 @@ test.serial(
 		t.is(report.exitCode, 0);
 		t.is(report.finalText, "all done");
 		t.deepEqual(report.toolCalls, []);
+		t.is(report.steps, 3);
 		t.deepEqual(report.filesChanged, []);
 		t.is(report.usage, undefined);
 		t.is(shutdown.code, 0);
@@ -293,6 +297,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 						usage: {
 							inputTokens: 500,
@@ -337,6 +342,7 @@ test.serial(
 						message: "model exploded",
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -372,6 +378,7 @@ test.serial(
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -406,6 +413,7 @@ test.serial(
 						kind: "success",
 						finalText: "edited",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [
 							{
 								name: "write_file",
@@ -500,6 +508,7 @@ test.serial(
 		t.is(report.kind, "error");
 		t.is(report.exitCode, 1);
 		t.regex(report.message, /not trusted/i);
+		t.is(report.steps, 0);
 		t.is(shutdown.code, 1);
 		t.false(
 			initCalled,
@@ -527,6 +536,7 @@ test.serial(
 						kind: "success",
 						finalText: "trusted via preferences",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -565,6 +575,7 @@ test.serial(
 						kind: "success",
 						finalText: "trusted via env var",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -644,6 +655,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -684,6 +696,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -726,6 +739,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -764,6 +778,7 @@ test.serial(
 						message: "model exploded",
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -798,6 +813,7 @@ test.serial(
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -931,6 +947,7 @@ test.serial(
 							kind: "success",
 							finalText: "done",
 							reasoning: null,
+							steps: 1,
 							toolCalls: [],
 						};
 					},
@@ -998,6 +1015,7 @@ test.serial(
 							kind: "success",
 							finalText: "done",
 							reasoning: null,
+							steps: 1,
 							toolCalls: [],
 						};
 					},
@@ -1042,6 +1060,7 @@ test.serial("plain shell registers a session-end hook handler", async (t) => {
 					kind: "success",
 					finalText: "done",
 					reasoning: null,
+					steps: 1,
 					toolCalls: [],
 				}),
 				getShutdownManager: () =>

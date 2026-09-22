@@ -16,7 +16,7 @@ Here's what you need to know right away:
 
 ### Talking to the AI
 
-Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** to add a new line — it's the official supported newline shortcut.
+Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** or **Option/Alt+Enter** to add a new line. Shift+Enter works too, but only in terminals that encode it distinctly from Enter — see [Keyboard Shortcuts](keyboard-shortcuts.md) if yours submits instead.
 
 Each response ends with a small grey footer showing what that turn cost:
 
@@ -62,7 +62,7 @@ These are the shortcuts you'll use constantly:
 | Action | Shortcut |
 |--------|----------|
 | Submit prompt | Enter |
-| New line | Ctrl+J |
+| New line | Ctrl+J or Option/Alt+Enter |
 | Toggle development mode | Shift+Tab |
 | Cancel AI response | Esc |
 | Clear input | Esc (twice) |

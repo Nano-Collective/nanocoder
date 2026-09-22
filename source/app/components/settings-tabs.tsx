@@ -21,6 +21,7 @@ import {
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
@@ -146,7 +147,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'nanocoder-shape',
 					label: 'Nanocoder Shape',
-					value: getNanocoderShape() ?? 'tiny',
+					value: getNanocoderShape() ?? DEFAULT_NANOCODER_SHAPE,
 					panel: 'nanocoder-shape',
 				},
 				{

@@ -15,10 +15,24 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 | Action | Shortcut | Notes |
 |--------|----------|-------|
 | Submit prompt | Enter | |
-| New line | Ctrl+J | Official supported shortcut |
-| New line fallback | Shift+Enter | Terminal-dependent fallback only |
+| New line | Ctrl+J | Works in every terminal |
+| New line | Option+Enter (macOS) / Alt+Enter | Sends ESC+CR, which most terminals emit natively |
+| New line | Shift+Enter | Only in terminals that encode it distinctly; see below |
 
-> **Note on multi-line input**: Ctrl+J is the only officially supported newline shortcut. Some terminals also send Shift+Enter as a newline, but that behavior is terminal-dependent and should be treated as a fallback only.
+**Why Shift+Enter is terminal-dependent.** Most terminals send Shift+Enter as a bare carriage return, byte-identical to plain Enter, so no application can tell the two apart. Nanocoder recognises every encoding that *is* distinguishable: a literal line feed (Ctrl+J), ESC+CR (Option/Alt+Enter), the kitty keyboard protocol's `CSI 13;2u`, and xterm's modifyOtherKeys form `CSI 27;2;13~`, which the VS Code integrated terminal can be configured to send.
+
+If Shift+Enter submits instead of adding a line, bind it in your terminal to send a line feed. In VS Code, add this to `keybindings.json`:
+
+```json
+{
+  "key": "shift+enter",
+  "command": "workbench.action.terminal.sendSequence",
+  "args": { "text": "\n" },
+  "when": "terminalFocus"
+}
+```
+
+Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal backslash followed by the newline, leaving a stray `\` in the prompt on every press.
 
 ## Cursor Movement
 
