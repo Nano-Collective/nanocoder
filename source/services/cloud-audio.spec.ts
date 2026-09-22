@@ -45,6 +45,22 @@ test('supportsCloudAudio only detects verified OpenAI providers and fails closed
 	};
 	t.deepEqual(supportsCloudAudio(openrouterConfig), { stt: false, tts: false });
 
+	const deceptiveHostConfig: AIProviderConfig = {
+		name: 'openai',
+		sdkProvider: 'openai',
+		models: ['gpt-4o'],
+		config: { baseURL: 'https://evil.example/api.openai.com/v1', apiKey: 'sk-test' },
+	};
+	t.deepEqual(supportsCloudAudio(deceptiveHostConfig), { stt: false, tts: false });
+
+	const insecureOpenAIConfig: AIProviderConfig = {
+		name: 'openai',
+		sdkProvider: 'openai',
+		models: ['gpt-4o'],
+		config: { baseURL: 'http://api.openai.com/v1', apiKey: 'sk-test' },
+	};
+	t.deepEqual(supportsCloudAudio(insecureOpenAIConfig), { stt: false, tts: false });
+
 	const anthropicConfig: AIProviderConfig = {
 		name: 'anthropic',
 		sdkProvider: 'anthropic',

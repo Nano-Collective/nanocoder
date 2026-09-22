@@ -32,14 +32,22 @@ export function supportsCloudAudio(providerConfig?: AIProviderConfig | null): {
 
 	const sdk = (providerConfig.sdkProvider || '').toLowerCase();
 	const name = (providerConfig.name || '').toLowerCase();
-	const baseURL = (providerConfig.config?.baseURL || '').toLowerCase();
+	const baseURL = providerConfig.config?.baseURL || '';
+	const isVerifiedOpenAIBaseUrl = (() => {
+		if (!baseURL) return true;
+		try {
+			const url = new URL(baseURL);
+			return url.protocol === 'https:' && url.hostname === 'api.openai.com';
+		} catch {
+			return false;
+		}
+	})();
 
 	// Explicit allowlist: Only genuine OpenAI is confirmed to support /v1/audio/* endpoints.
 	// Fail closed for generic 'openai-compatible' providers (Ollama, LM Studio, llama.cpp, OpenRouter)
 	// that do not implement audio transcription / speech endpoints.
 	const isRealOpenAI =
-		(name === 'openai' || sdk === 'openai') &&
-		(!baseURL || baseURL.includes('api.openai.com'));
+		(name === 'openai' || sdk === 'openai') && isVerifiedOpenAIBaseUrl;
 
 	return {
 		stt: Boolean(isRealOpenAI),

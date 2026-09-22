@@ -3,7 +3,15 @@ import {mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-process.env.NANOCODER_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'nanocoder-voice-deps-'));
+const testConfigDir = mkdtempSync(join(tmpdir(), 'nanocoder-voice-deps-'));
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+test.before(() => {
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+test.after.always(() => {
+	if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+	else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+});
 import {
 	checkDependenciesInstalled,
 	installDependencies,

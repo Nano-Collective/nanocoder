@@ -11,7 +11,14 @@ import type { LLMClient } from '@/types/core';
 import { setDeclinedVoiceInstallForSession } from '@/utils/voice-install-queue';
 
 const testConfigDir = mkdtempSync(join(tmpdir(), 'nanocoder-voice-test-'));
-process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+test.before(() => {
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+test.after.always(() => {
+	if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+	else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+});
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 
 function VoiceHarness(
