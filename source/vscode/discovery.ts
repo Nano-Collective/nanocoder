@@ -215,9 +215,31 @@ export async function readDiscoveryFile(
 		return null;
 	}
 
+	// Refuse a file from a schema we do not understand. `version` was read
+	// but never checked, so the "bump on breaking changes" this constant
+	// promises would have done nothing: a newer CLI's v2 file would have been
+	// consumed as if it were v1, and the mismatch would surface as a failed
+	// handshake or, worse, a misread field. An older file is still readable -
+	// only a *newer* one is refused, which is the direction that matters when
+	// the extension and the CLI are updated separately.
+	if (
+		typeof parsed.version === 'number' &&
+		parsed.version > VSCODE_DISCOVERY_VERSION
+	) {
+		return null;
+	}
+
 	// Stale detection: if the PID is no longer alive, the CLI that wrote
 	// this file is gone. Treat the entry as missing so a crashed CLI cannot
 	// hold the port hostage - the next start() overwrites it.
+	//
+	// Residual, deliberately not "fixed" with an age cutoff: PIDs are reused,
+	// so a file left by a crashed CLI whose pid has been recycled reads as
+	// live. The cost is one failed connection - the recycled process is not
+	// listening on the recorded port, and if something is, it does not hold
+	// the bearer token - and the next `start()` rewrites the file. An age
+	// bound would trade that self-healing transient for a worse failure: a
+	// genuinely long-lived session being declared stale and disconnected.
 	if (!isProcessAlive(parsed.pid)) {
 		return null;
 	}

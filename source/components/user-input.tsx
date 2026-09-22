@@ -268,6 +268,8 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		undo,
+		redo,
 		insertPaste,
 	} = inputState;
 
@@ -787,7 +789,7 @@ export default function UserInput({
 
 	const handleQueueNavigation = useCallback(
 		(direction: 'up' | 'down') => {
-			if (!isBusy || input.length > 0 || queuedMessages.length === 0) {
+			if (input.length > 0 || queuedMessages.length === 0) {
 				return false;
 			}
 
@@ -810,12 +812,11 @@ export default function UserInput({
 			setSelectedQueuedIndex(selectedQueuedIndex + 1);
 			return true;
 		},
-		[isBusy, input.length, queuedMessages.length, selectedQueuedIndex],
+		[input.length, queuedMessages.length, selectedQueuedIndex],
 	);
 
 	const loadSelectedQueuedMessage = useCallback(() => {
 		if (
-			!isBusy ||
 			input.length > 0 ||
 			selectedQueuedIndex < 0 ||
 			selectedQueuedIndex >= queuedMessages.length
@@ -836,7 +837,6 @@ export default function UserInput({
 		setTextInputKey(prev => prev + 1);
 		return true;
 	}, [
-		isBusy,
 		input.length,
 		selectedQueuedIndex,
 		queuedMessages,
@@ -846,7 +846,6 @@ export default function UserInput({
 
 	const removeSelectedQueuedMessage = useCallback(() => {
 		if (
-			!isBusy ||
 			input.length > 0 ||
 			selectedQueuedIndex < 0 ||
 			selectedQueuedIndex >= queuedMessages.length
@@ -860,7 +859,6 @@ export default function UserInput({
 		);
 		return true;
 	}, [
-		isBusy,
 		input.length,
 		selectedQueuedIndex,
 		queuedMessages,
@@ -945,6 +943,24 @@ export default function UserInput({
 		// Ctrl+X: drop the most recently added image attachment.
 		if (key.ctrl && inputChar === 'x') {
 			setAttachments(prev => prev.slice(0, -1));
+			return;
+		}
+
+		// Ctrl+Z / Ctrl+Y: undo / redo the last input edit. State lives in
+		// useInputState's undo/redo stacks, which are unused by any key binding,
+		// so we surface them here. Both are no-ops on an empty stack.
+		//
+		// NB: we deliberately do NOT bump textInputKey here. Bumping it remounts
+		// <TextInput>, which resets its internal cursor to end-of-value and tears
+		// down the whole subtree on every undo/redo. TextInput's own value-sync
+		// effect already clamps the cursor to a valid offset when the value
+		// changes, so undoing keeps the caret roughly where it was.
+		if (key.ctrl && inputChar === 'z') {
+			undo();
+			return;
+		}
+		if (key.ctrl && inputChar === 'y') {
+			redo();
 			return;
 		}
 
@@ -1352,6 +1368,9 @@ export default function UserInput({
 			input box content. */}
 			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
+					// Must match the wrapper's marginLeft: the indicator budgets its
+					// segments against the width left after this indent.
+					indentColumns={3}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
