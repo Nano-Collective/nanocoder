@@ -60,6 +60,11 @@ function taskNotFoundError(taskNumber: number, taskCount: number) {
 	});
 }
 
+function parseTaskNumber(value: string): number | null {
+	const taskNumber = Number(value.trim());
+	return Number.isInteger(taskNumber) && taskNumber >= 1 ? taskNumber : null;
+}
+
 export const tasksCommand: Command = {
 	name: 'tasks',
 	description: 'Manage your task list',
@@ -109,8 +114,8 @@ export const tasksCommand: Command = {
 		if (subcommand === 'remove' || subcommand === 'rm') {
 			if (!rest.trim()) return taskNumberError('remove');
 
-			const taskNumber = Number(rest.trim());
-			if (!Number.isInteger(taskNumber) || taskNumber < 1) {
+			const taskNumber = parseTaskNumber(rest);
+			if (taskNumber === null) {
 				return invalidTaskNumberError('remove');
 			}
 
@@ -139,8 +144,8 @@ export const tasksCommand: Command = {
 		) {
 			if (!rest.trim()) return taskNumberError(subcommand);
 
-			const taskNumber = Number(rest.trim());
-			if (!Number.isInteger(taskNumber) || taskNumber < 1) {
+			const taskNumber = parseTaskNumber(rest);
+			if (taskNumber === null) {
 				return invalidTaskNumberError(subcommand);
 			}
 

@@ -62,6 +62,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-1',
 			title: 'First Task',
+			description: 'First task description',
 			status: 'pending',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-01T00:00:00.000Z',
@@ -76,6 +77,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-3',
 			title: 'Third Task',
+			description: 'Third task description',
 			status: 'completed',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-03T00:00:00.000Z',
@@ -112,9 +114,10 @@ test('handler - lists tasks when no args provided', async t => {
 
 		const result = await tasksCommand.handler([]);
 
-		t.truthy(result);
-		// Result should be a React element
-		t.is(typeof result, 'object');
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
 	} finally {
 		env.restore();
 	}
@@ -336,6 +339,7 @@ test('handler - completes a task with "done" subcommand', async t => {
 		t.is(tasks.length, 3);
 		t.is(tasks[0]?.id, 'task-1');
 		t.is(tasks[0]?.title, 'First Task');
+		t.is(tasks[0]?.description, 'First task description');
 		t.is(tasks[0]?.status, 'completed');
 		t.truthy(tasks[0]?.completedAt);
 		t.truthy(tasks[0]?.updatedAt);
@@ -354,6 +358,7 @@ test('handler - supports complete alias and clears completedAt when starting', a
 		let tasks = await loadTasks();
 		t.is(tasks[2]?.id, 'task-3');
 		t.is(tasks[2]?.title, 'Third Task');
+		t.is(tasks[2]?.description, 'Third task description');
 		t.is(tasks[2]?.status, 'in_progress');
 		t.falsy(tasks[2]?.completedAt);
 
@@ -425,6 +430,7 @@ test('handler - returns error for unknown subcommand without adding a task', asy
 		t.true(React.isValidElement(result));
 		if (React.isValidElement(result) && typeof result.type === 'function') {
 			t.is(result.type.name, 'TaskMessage');
+			t.true(result.props.message.includes('Unknown subcommand'));
 		}
 		const tasks = await loadTasks();
 		t.is(tasks.length, 0);
