@@ -110,6 +110,53 @@ test.serial(
 	},
 );
 
+test.serial('renders short tool messages without trailing ellipsis', async t => {
+	initSubagentSession('agent-a', 'explorer', [
+		{role: 'tool', content: 'OK', name: 'list_directory'},
+	]);
+
+	const {frames, unmount} = render(
+		wrap(
+			<SubagentView
+				agentId="agent-a"
+				onDetach={() => {}}
+				reasoningExpanded={false}
+			/>,
+		),
+	);
+	await tick();
+
+	const output = allOutput(frames);
+	t.regex(output, /list_directory: OK/);
+	t.notRegex(output, /list_directory: OK\.\.\./);
+	unmount();
+});
+
+test.serial('truncates long tool messages with trailing ellipsis', async t => {
+	const longContent = 'A'.repeat(150);
+	initSubagentSession('agent-a', 'explorer', [
+		{role: 'tool', content: longContent, name: 'list_directory'},
+	]);
+
+	const {frames, unmount} = render(
+		wrap(
+			<SubagentView
+				agentId="agent-a"
+				onDetach={() => {}}
+				reasoningExpanded={false}
+			/>,
+		),
+	);
+	await tick();
+
+	const output = allOutput(frames);
+	// Ink wraps the text, so the output string contains line breaks. We can remove newlines for testing.
+	const singleLineOutput = output.replace(/\n/g, '');
+	const expected = 'A'.repeat(100) + '...';
+	t.regex(singleLineOutput, new RegExp(`list_directory: ${expected}`));
+	unmount();
+});
+
 test.serial('detaches when the session no longer exists', async t => {
 	let detached = false;
 
