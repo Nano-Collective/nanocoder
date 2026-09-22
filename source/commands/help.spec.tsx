@@ -76,6 +76,22 @@ test('helpCommand resolves aliases from lazy commands', async t => {
 	t.is(selectedCommand?.description, resume.description);
 });
 
+test('helpCommand lists lazy commands in their categories', async t => {
+	const commit = command('commit');
+	commandRegistry.registerLazy({
+		name: commit.name,
+		description: commit.description,
+		load: async () => commit,
+	});
+
+	const result = await helpCommand.handler([], messages, metadata);
+	const output = renderWithTheme(result as React.ReactElement).lastFrame();
+
+	t.truthy(output);
+	t.regex(output!, /Coding & Agent Tools:/);
+	t.regex(output!, /\/commit - Description for commit/);
+});
+
 test('helpCommand renders categorized command list', async t => {
 	commandRegistry.register([
 		command('commit'),

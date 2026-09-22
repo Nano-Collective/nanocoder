@@ -237,13 +237,20 @@ const CATEGORY_BY_COMMAND = new Map<string, HelpCategory>(
 export function getCommandHelpDetails(command: Command): CommandHelpDetails {
 	const overrides = COMMAND_HELP_OVERRIDES[command.name];
 	return {
-		category:
-			overrides?.category ?? CATEGORY_BY_COMMAND.get(command.name) ?? 'Other',
+		category: getCommandHelpCategory(command.name),
 		usage: overrides?.usage ?? `/${command.name}`,
 		...(overrides?.aliases ? {aliases: overrides.aliases} : {}),
 		...(overrides?.options ? {options: overrides.options} : {}),
 		...(overrides?.examples ? {examples: overrides.examples} : {}),
 	};
+}
+
+function getCommandHelpCategory(commandName: string): HelpCategory {
+	return (
+		COMMAND_HELP_OVERRIDES[commandName]?.category ??
+		CATEGORY_BY_COMMAND.get(commandName) ??
+		'Other'
+	);
 }
 
 export function findHelpCommand(
@@ -256,7 +263,7 @@ export function findHelpCommand(
 	return commands.find(command => {
 		if (command.name.toLowerCase() === normalizedName) return true;
 		return (
-			getCommandHelpDetails(command).aliases?.some(
+			COMMAND_HELP_OVERRIDES[command.name]?.aliases?.some(
 				alias => alias.toLowerCase() === normalizedName,
 			) ?? false
 		);
@@ -274,7 +281,7 @@ export function groupHelpCommands(
 	const grouped = new Map<HelpCategory, Command[]>();
 
 	for (const command of commands) {
-		const category = getCommandHelpDetails(command).category;
+		const category = getCommandHelpCategory(command.name);
 		const categoryCommands = grouped.get(category) ?? [];
 		categoryCommands.push(command);
 		grouped.set(category, categoryCommands);
