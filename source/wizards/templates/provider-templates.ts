@@ -428,6 +428,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'openai/gpt-5.5',
 	}),
 	apiKeyTemplate({
+		id: 'opper',
+		name: 'Opper',
+		baseUrl: 'https://api.opper.ai/v3/compat',
+		apiKeyPrompt: 'API Key (from https://platform.opper.ai)',
+		modelDefault: 'claude-sonnet-4-6',
+	}),
+	apiKeyTemplate({
 		id: 'cheaper-inference',
 		name: 'Cheaper Inference',
 		baseUrl: 'https://api.cheaperinference.com/v1',

@@ -85,6 +85,24 @@ test('createProvider adds OrcaRouter headers for orcarouter provider', async t =
 	t.is(provider.kind, 'openai-compatible');
 });
 
+test('createProvider adds Opper trace header for opper provider', async t => {
+	const config: AIProviderConfig = {
+		name: 'Opper',
+		type: 'openai',
+		models: ['claude-sonnet-4-6'],
+		config: {
+			baseURL: 'https://api.opper.ai/v3/compat',
+			apiKey: 'test-key',
+		},
+	};
+
+	const agent = new Agent();
+	const provider = await createProvider(config, agent);
+
+	t.truthy(provider);
+	t.is(provider.kind, 'openai-compatible');
+});
+
 test('createProvider handles provider with no API key', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
