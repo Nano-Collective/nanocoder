@@ -93,10 +93,15 @@ export default memo(function WelcomeMessage({
 		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
 	}
 
+	// Each menu row is a single line this wide: label, gap, key. A menu is only
+	// offered when that line fits the width too, or its rows wrap apart.
+	const menuWidth = (items: Array<[string, string]>) =>
+		Math.max(...items.map(([l, k]) => l.length + k.length)) + 4;
+
 	let menu: Array<[string, string]> = [];
-	if (budget >= MENU_FULL_ROWS) {
+	if (budget >= MENU_FULL_ROWS && menuWidth(MENU_FULL) <= actualWidth) {
 		menu = MENU_FULL;
-	} else if (budget >= MENU_MIN_ROWS) {
+	} else if (budget >= MENU_MIN_ROWS && menuWidth(MENU_MIN) <= actualWidth) {
 		menu = MENU_MIN;
 	}
 
@@ -106,10 +111,7 @@ export default memo(function WelcomeMessage({
 		return marker ? `${branch} (${marker})` : branch;
 	})();
 
-	const colW =
-		menu.length > 0
-			? Math.max(...menu.map(([l, k]) => l.length + k.length)) + 4
-			: 0;
+	const colW = menu.length > 0 ? menuWidth(menu) : 0;
 
 	// Full terminal width for every row so the wordmark and the text below it
 	// share one center axis — a capped box would sit left of the centered

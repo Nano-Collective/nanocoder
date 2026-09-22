@@ -169,6 +169,34 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
+// Each menu row is one line, label then key. Where the full menu no longer
+// fits across, the short one takes over, and below that the menu is left out,
+// rather than any row wrapping its key onto a line of its own.
+test('WelcomeMessage steps the menu down to fit narrow terminals', t => {
+	const originalColumns = process.stdout.columns;
+	const menuAt = (columns: number) => {
+		process.stdout.columns = columns;
+		return stripAnsi(
+			renderWithTheme(<WelcomeMessage availableRows={40} tip="x" />).lastFrame()!,
+		);
+	};
+
+	try {
+		const full = menuAt(25);
+		t.regex(full, /Resume session +\/resume/);
+
+		const short = menuAt(20);
+		t.notRegex(short, /Resume session/);
+		t.regex(short, /Help +\/help/);
+		t.regex(short, /Quit +\/exit/);
+
+		const none = menuAt(12);
+		t.notRegex(none, /\/help|\/exit/);
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+});
+
 test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
