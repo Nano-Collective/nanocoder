@@ -211,9 +211,17 @@ async function runQuickReview(
 		{role: 'user', content: parts.join('\n')},
 	];
 
+	// The callbacks argument must exist: the client dereferences
+	// callbacks.onPrivacyEvent unconditionally.
 	const response = await (
-		client as {chat: (messages: Message[]) => Promise<unknown>}
-	).chat(messages);
+		client as {
+			chat: (
+				messages: Message[],
+				tools: Record<string, never>,
+				callbacks: Record<string, never>,
+			) => Promise<unknown>;
+		}
+	).chat(messages, {}, {});
 	const review = (
 		response as {
 			choices?: Array<{message?: {content?: string}}>;

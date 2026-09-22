@@ -192,3 +192,25 @@ test('parseReviewCliArgs: flags between target and extra positionals still error
 	t.truthy(result.error);
 	t.true(result.error!.includes('extra'));
 });
+
+test('tier word before the target is consumed, not treated as a target', t => {
+	const result = parseReviewCliArgs(['review', 'deep', 'feature']);
+	t.is(result.prompt, '/review deep feature');
+	t.is(result.error, undefined);
+});
+
+test('tier word alone runs that tier on the current branch', t => {
+	const result = parseReviewCliArgs(['review', 'quick']);
+	t.is(result.prompt, '/review quick');
+	t.is(result.error, undefined);
+});
+
+test('plain target still works without a tier word', t => {
+	const result = parseReviewCliArgs(['review', '42']);
+	t.is(result.prompt, '/review 42');
+});
+
+test('a branch literally named quick still parses (tier wins, documented)', t => {
+	const result = parseReviewCliArgs(['review', 'quick', 'main']);
+	t.is(result.prompt, '/review quick main');
+});

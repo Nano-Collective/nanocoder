@@ -47,8 +47,20 @@ export function parseReviewCliArgs(args: string[]): ReviewCliResult {
 
 	const positionals = positionalArgs(args.slice(1));
 
+	// The tier word (quick | deep | default) is optional and always first
+	// when present; it is not a target.
+	const TIER_WORDS = ['quick', 'deep', 'default'];
+	const tier =
+		positionals.length > 0 && TIER_WORDS.includes(positionals[0] ?? '')
+			? (positionals.shift() as string)
+			: undefined;
+
 	if (positionals.length === 0) {
-		return {isReviewCommand: true, prompt: '/review', error: undefined};
+		return {
+			isReviewCommand: true,
+			prompt: tier ? `/review ${tier}` : '/review',
+			error: undefined,
+		};
 	}
 
 	if (positionals.length > 1) {
@@ -62,7 +74,9 @@ export function parseReviewCliArgs(args: string[]): ReviewCliResult {
 
 	return {
 		isReviewCommand: true,
-		prompt: `/review ${positionals[0]}`,
+		prompt: tier
+			? `/review ${tier} ${positionals[0]}`
+			: `/review ${positionals[0]}`,
 		error: undefined,
 	};
 }

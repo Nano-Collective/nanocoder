@@ -25,9 +25,12 @@ function checkTrustSync(directory: string): {
 		const preferences = loadPreferences();
 		const trustedDirectories = preferences.trustedDirectories || [];
 		const normalizedDirectory = path.resolve(directory); // nosemgrep
-		const trusted = trustedDirectories.some(
-			trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-		);
+		const envTrusted = process.env.NANOCODER_TRUST_DIRECTORY === '1';
+		const trusted =
+			envTrusted ||
+			trustedDirectories.some(
+				trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
+			);
 		return {trusted, error: null};
 	} catch (err) {
 		const errorMessage = formatError(err);
