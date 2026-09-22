@@ -535,11 +535,12 @@ export default function UserInput({
 			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
-		} else {
+		} else if (input.length > 0 || attachments.length > 0) {
 			setShowClearMessage(true);
 		}
 	}, [
 		input,
+		attachments.length,
 		showCompletions,
 		isFileAutocompleteMode,
 		showClearMessage,

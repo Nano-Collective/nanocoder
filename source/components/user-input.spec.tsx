@@ -79,6 +79,23 @@ test('UserInput renders without crashing', t => {
 	unmount();
 });
 
+test('UserInput does not show clear message on Escape when empty', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+
+	stdin.write('\u001B'); // Escape
+	await wait();
+
+	t.notRegex(lastFrame()!.replace(/\n/g, ''), /Press escape again to clear/);
+
+	unmount();
+});
+
 test('UserInput renders with placeholder text', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
