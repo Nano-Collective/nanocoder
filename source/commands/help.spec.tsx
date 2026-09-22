@@ -25,9 +25,11 @@ test.beforeEach(() => {
 	const registry = commandRegistry as unknown as {
 		commands: Map<string, Command>;
 		lazyEntries: Map<string, unknown>;
+		lazyProxies: Map<string, Command>;
 	};
 	registry.commands.clear();
 	registry.lazyEntries.clear();
+	registry.lazyProxies.clear();
 });
 
 test('helpCommand renders the requested command details', async t => {
@@ -78,10 +80,16 @@ test('helpCommand resolves aliases from lazy commands', async t => {
 
 test('helpCommand lists lazy commands in their categories', async t => {
 	const commit = command('commit');
+	const review = command('review');
 	commandRegistry.registerLazy({
 		name: commit.name,
 		description: commit.description,
 		load: async () => commit,
+	});
+	commandRegistry.registerLazy({
+		name: review.name,
+		description: review.description,
+		load: async () => review,
 	});
 
 	const result = await helpCommand.handler([], messages, metadata);
@@ -90,6 +98,7 @@ test('helpCommand lists lazy commands in their categories', async t => {
 	t.truthy(output);
 	t.regex(output!, /Coding & Agent Tools:/);
 	t.regex(output!, /\/commit - Description for commit/);
+	t.regex(output!, /\/review - Description for review/);
 });
 
 test('helpCommand renders categorized command list', async t => {

@@ -59,6 +59,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'memory',
 		'remember',
 		'repomap',
+		'review',
 		'skills',
 		'tools',
 	],
