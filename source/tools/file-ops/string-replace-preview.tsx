@@ -18,6 +18,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 /** Truncate a plain line to fit terminal width */
@@ -366,6 +367,12 @@ export async function formatStringReplacePreview(
 				message={
 					<Box flexDirection="column">
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						{args.description && (
+							<Box flexDirection="column">
+								<Text color={themeColors.secondary}>Description:</Text>
+								<Text color={themeColors.text}> {args.description}</Text>
+							</Box>
+						)}
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
