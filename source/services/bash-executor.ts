@@ -377,6 +377,11 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
+		let exited = false;
+		proc.once('exit', () => {
+			exited = true;
+		});
+
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
 
@@ -386,7 +391,7 @@ export class BashExecutor extends EventEmitter {
 		// above), so gating on !proc.killed would prevent SIGKILL from ever
 		// firing when the group-kill threw and we fell back to proc.kill().
 		const sigkillTimer = setTimeout(() => {
-			if (proc.exitCode === null) {
+			if (!exited) {
 				sendKillSignal('SIGKILL');
 			}
 		}, 2000);
@@ -395,7 +400,7 @@ export class BashExecutor extends EventEmitter {
 		const cleanupTimer = () => {
 			clearTimeout(sigkillTimer);
 		};
-		proc.once('close', cleanupTimer);
+		// The exit event is sufficient and avoids stacking two cleanup listeners on repeated cancellation.
 		proc.once('exit', cleanupTimer);
 	}
 

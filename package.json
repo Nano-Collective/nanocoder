@@ -111,10 +111,8 @@
 		"xdg-basedir": "^5.1.0",
 		"yaml": "^2.8.3"
 	},
-	"optionalDependencies": {
-		"@nanocollective/nanocoder-voice": "workspace:*"
-	},
 	"devDependencies": {
+		"@nanocollective/nanocoder-voice": "workspace:*",
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
 		"@changesets/cli": "^3.0.0",

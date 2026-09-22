@@ -1,15 +1,19 @@
 import cp from 'node:child_process';
-import { platform } from 'node:process';
+import {platform} from 'node:process';
 
 /**
  * Plays an audio file through the default system speakers.
  * Uses native OS tools where available (afplay on macOS, sox's play on Linux/WSL, sox on Windows).
- * 
+ *
  * @param filePath The path to the audio file to play.
  * @param timeoutMs Maximum time to wait in milliseconds.
  * @param signal Optional AbortSignal to cancel playback.
  */
-export async function playAudio(filePath: string, timeoutMs?: number, signal?: AbortSignal): Promise<void> {
+export async function playAudio(
+	filePath: string,
+	timeoutMs?: number,
+	signal?: AbortSignal,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
 			return reject(new Error('AbortError: Playback aborted'));
@@ -29,7 +33,7 @@ export async function playAudio(filePath: string, timeoutMs?: number, signal?: A
 			args.push('-d'); // route to default device
 		}
 
-		const proc = cp.spawn(command, args, { stdio: 'ignore' });
+		const proc = cp.spawn(command, args, {stdio: 'ignore'});
 
 		let timeoutId: NodeJS.Timeout | undefined;
 		if (timeoutMs && timeoutMs > 0) {
@@ -48,7 +52,7 @@ export async function playAudio(filePath: string, timeoutMs?: number, signal?: A
 			signal.addEventListener('abort', abortHandler);
 		}
 
-		proc.on('close', (code) => {
+		proc.on('close', code => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0) {
@@ -58,10 +62,14 @@ export async function playAudio(filePath: string, timeoutMs?: number, signal?: A
 			}
 		});
 
-		proc.on('error', (err) => {
+		proc.on('error', err => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
-			reject(new Error(`Failed to start audio playback process (${command}): ${err.message}`));
+			reject(
+				new Error(
+					`Failed to start audio playback process (${command}): ${err.message}`,
+				),
+			);
 		});
 	});
 }

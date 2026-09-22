@@ -1,14 +1,14 @@
-import { parentPort, workerData } from 'node:worker_threads';
 import cp from 'node:child_process';
-import { platform } from 'node:process';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {platform} from 'node:process';
+import {parentPort, workerData} from 'node:worker_threads';
 
 /**
  * Worker thread for Voice Activity Detection (VAD).
- * 
+ *
  * NOTE ON VAD ARCHITECTURE:
  * This uses a frame-based RMS energy detection algorithm over raw PCM 16kHz 16-bit audio.
  * It is a simpler, zero-native-dependency approach compared to Silero VAD or WebRTC VAD.
@@ -26,13 +26,44 @@ let isSpeech = false;
 let silenceStart = 0;
 let speechStartTime = 0;
 let audioChunks: Buffer[] = [];
+const preRollChunks: Buffer[] = [];
+const preRollFrameLimit = 5;
 
 const recCmd = process.env.REC_CMD || (platform === 'win32' ? 'sox' : 'rec');
-const recArgs = platform === 'win32' 
-	? ['-q', '-d', '-t', 'raw', '-r', '16000', '-b', '16', '-c', '1', '-e', 'signed-integer', '-']
-	: ['-q', '-t', 'raw', '-r', '16000', '-b', '16', '-c', '1', '-e', 'signed-integer', '-'];
+const recArgs =
+	platform === 'win32'
+		? [
+				'-q',
+				'-d',
+				'-t',
+				'raw',
+				'-r',
+				'16000',
+				'-b',
+				'16',
+				'-c',
+				'1',
+				'-e',
+				'signed-integer',
+				'-',
+			]
+		: [
+				'-q',
+				'-t',
+				'raw',
+				'-r',
+				'16000',
+				'-b',
+				'16',
+				'-c',
+				'1',
+				'-e',
+				'signed-integer',
+				'-',
+			];
 
-const proc = cp.spawn(recCmd, recArgs, { stdio: ['ignore', 'pipe', 'ignore'] });
+const proc = cp.spawn(recCmd, recArgs, {stdio: ['ignore', 'pipe', 'ignore']});
+let stopping = false;
 
 function calculateRms(buffer: Buffer): number {
 	let sum = 0;
@@ -61,7 +92,8 @@ proc.stdout.on('data', (chunk: Buffer) => {
 			if (!isSpeech) {
 				isSpeech = true;
 				speechStartTime = Date.now();
-				parentPort?.postMessage({ type: 'speech_start' });
+				audioChunks.push(...preRollChunks.splice(0));
+				parentPort?.postMessage({type: 'speech_start'});
 			}
 			audioChunks.push(Buffer.from(frame));
 			silenceStart = 0;
@@ -78,7 +110,10 @@ proc.stdout.on('data', (chunk: Buffer) => {
 				const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
 				const wavBuffer = Buffer.concat([wavHeader, pcmData]);
 
-				const tempFile = join(tmpdir(), 'nanocoder-vad-' + randomUUID() + '.wav');
+				const tempFile = join(
+					tmpdir(),
+					'nanocoder-vad-' + randomUUID() + '.wav',
+				);
 				writeFileSync(tempFile, wavBuffer);
 
 				parentPort?.postMessage({
@@ -102,7 +137,10 @@ proc.stdout.on('data', (chunk: Buffer) => {
 				const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
 				const wavBuffer = Buffer.concat([wavHeader, pcmData]);
 
-				const tempFile = join(tmpdir(), 'nanocoder-vad-' + randomUUID() + '.wav');
+				const tempFile = join(
+					tmpdir(),
+					'nanocoder-vad-' + randomUUID() + '.wav',
+				);
 				writeFileSync(tempFile, wavBuffer);
 
 				parentPort?.postMessage({
@@ -123,7 +161,10 @@ proc.stdout.on('data', (chunk: Buffer) => {
 					const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
 					const wavBuffer = Buffer.concat([wavHeader, pcmData]);
 
-					const tempFile = join(tmpdir(), 'nanocoder-vad-' + randomUUID() + '.wav');
+					const tempFile = join(
+						tmpdir(),
+						'nanocoder-vad-' + randomUUID() + '.wav',
+					);
 					writeFileSync(tempFile, wavBuffer);
 
 					parentPort?.postMessage({
@@ -134,20 +175,33 @@ proc.stdout.on('data', (chunk: Buffer) => {
 			} else {
 				silenceStart = 0;
 			}
+		} else {
+			preRollChunks.push(Buffer.from(frame));
+			if (preRollChunks.length > preRollFrameLimit) preRollChunks.shift();
 		}
 	}
 
 	remainder = data.subarray(offset);
 });
 
-proc.on('error', (err) => {
-	parentPort?.postMessage({ type: 'error', error: err.message });
+proc.on('error', err => {
+	parentPort?.postMessage({type: 'error', error: err.message});
 });
 
-parentPort?.on('message', (msg) => {
+proc.on('close', code => {
+	if (!stopping && code !== 0) {
+		parentPort?.postMessage({
+			type: 'error',
+			error: `Recording process exited with code ${code}`,
+		});
+	}
+});
+
+parentPort?.on('message', msg => {
 	if (msg === 'stop') {
+		stopping = true;
 		try {
-			proc.kill('SIGTERM');
+			proc.kill('SIGINT');
 		} catch {}
 
 		const forceKillTimer = setTimeout(() => {
@@ -155,7 +209,7 @@ parentPort?.on('message', (msg) => {
 				proc.kill('SIGKILL');
 			} catch {}
 			try {
-				parentPort?.postMessage({ type: 'stopped' });
+				parentPort?.postMessage({type: 'stopped'});
 			} catch {}
 			process.exit(0);
 		}, 600);
@@ -163,14 +217,19 @@ parentPort?.on('message', (msg) => {
 		proc.once('close', () => {
 			clearTimeout(forceKillTimer);
 			try {
-				parentPort?.postMessage({ type: 'stopped' });
+				parentPort?.postMessage({type: 'stopped'});
 			} catch {}
 			process.exit(0);
 		});
 	}
 });
 
-function createWavHeader(dataLength: number, sampleRate: number, numChannels: number, bitsPerSample: number): Buffer {
+function createWavHeader(
+	dataLength: number,
+	sampleRate: number,
+	numChannels: number,
+	bitsPerSample: number,
+): Buffer {
 	const header = Buffer.alloc(44);
 	header.write('RIFF', 0);
 	header.writeUInt32LE(36 + dataLength, 4);

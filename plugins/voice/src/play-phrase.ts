@@ -1,15 +1,14 @@
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { unlinkSync, existsSync } from 'node:fs';
-
-import { synthesizeSpeech } from './tts.js';
-import { playAudio } from './speaker.js';
+import {randomUUID} from 'node:crypto';
+import {existsSync, unlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {playAudio} from './speaker.js';
+import {synthesizeSpeech} from './tts.js';
 
 /**
  * Generates and plays back a spoken phrase using local TTS.
  * This is a generic utility for audio confirmations (e.g., "Voice mode activated").
- * 
+ *
  * @param text The phrase to speak
  */
 export async function playPhrase(text: string): Promise<void> {

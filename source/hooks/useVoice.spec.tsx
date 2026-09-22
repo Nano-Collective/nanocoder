@@ -1,4 +1,7 @@
 import test from 'ava';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { useVoice, UseVoiceProps, VoicePlugin } from './useVoice.js';
@@ -7,6 +10,8 @@ import { getVoicePreference, updateVoicePreference } from '@/config/preferences'
 import type { LLMClient } from '@/types/core';
 import { setDeclinedVoiceInstallForSession } from '@/utils/voice-install-queue';
 
+const testConfigDir = mkdtempSync(join(tmpdir(), 'nanocoder-voice-test-'));
+process.env.NANOCODER_CONFIG_DIR = testConfigDir;
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 
 function VoiceHarness(
@@ -16,7 +21,7 @@ function VoiceHarness(
 		stateRef?: React.MutableRefObject<VoiceState | null>;
 	},
 ) {
-	const { state, startStopRecording } = useVoice(props);
+	const { state, startStopRecording } = useVoice({ ...props, voicePreference: props.voicePreference ?? { enabled: true, activationMode: 'push-to-talk' } });
 
 	React.useEffect(() => {
 		props.onStateChange?.(state);
@@ -386,6 +391,7 @@ test.serial('hands-free VAD speech_start barge-in during processing state', asyn
 				messages={[]}
 				addToChatQueue={() => {}}
 				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'hands-free' }}
 				handleCancel={() => {
 					cancelCalled = true;
 				}}
@@ -462,6 +468,7 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 				messages={[]}
 				addToChatQueue={() => {}}
 				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'hands-free' }}
 				handleCancel={() => {
 					cancelCalled = true;
 				}}
@@ -482,6 +489,7 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 				messages={[{ role: 'assistant', content: 'Speaking assistant response' }]}
 				addToChatQueue={() => {}}
 				loadPlugin={async () => mockPlugin}
+				voicePreference={{ enabled: true, activationMode: 'hands-free' }}
 				handleCancel={() => {
 					cancelCalled = true;
 				}}

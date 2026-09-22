@@ -102,8 +102,9 @@ export async function transcribeCloudAudio(
 	const abortController = new AbortController();
 	const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
+	const abortHandler = () => abortController.abort();
 	if (signal) {
-		signal.addEventListener('abort', () => abortController.abort());
+		signal.addEventListener('abort', abortHandler);
 	}
 
 	try {
@@ -137,6 +138,7 @@ export async function transcribeCloudAudio(
 		);
 	} finally {
 		clearTimeout(timer);
+		if (signal) signal.removeEventListener('abort', abortHandler);
 	}
 }
 
@@ -179,8 +181,9 @@ export async function synthesizeCloudSpeech(
 	const abortController = new AbortController();
 	const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
+	const abortHandler = () => abortController.abort();
 	if (signal) {
-		signal.addEventListener('abort', () => abortController.abort());
+		signal.addEventListener('abort', abortHandler);
 	}
 
 	try {
@@ -219,5 +222,6 @@ export async function synthesizeCloudSpeech(
 		);
 	} finally {
 		clearTimeout(timer);
+		if (signal) signal.removeEventListener('abort', abortHandler);
 	}
 }

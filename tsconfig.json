@@ -18,7 +18,9 @@
 		"types": ["node"],
 		"paths": {
 			"@/*": ["./source/*"],
-			"@nanocollective/nanocoder-voice": ["./plugins/voice/dist/index.d.ts"],
+			"@nanocollective/nanocoder-voice": [
+				"./source/types/nanocoder-voice.d.ts"
+			],
 			// The real `vscode` module only exists inside the extension host, so
 			// AVA (which loads specs through tsx, and tsx honours these paths)
 			// resolves it to a stub. Test-only: the extension is bundled from

@@ -47,7 +47,6 @@ export interface VoicePlugin {
 	) => Promise<{installed: boolean; missing: ('sox' | 'whisper' | 'piper')[]}>;
 	installDependencies?: (options?: {
 		onProgress?: (step: string, percent: number) => void;
-		installRunner?: (command: string, args: string[]) => Promise<void>;
 	}) => Promise<void>;
 	createVadEngine?: (options?: unknown) => unknown;
 }
@@ -71,6 +70,8 @@ export interface UseVoiceProps {
 	client?: LLMClient | null;
 	currentProvider?: string;
 	currentModel?: string;
+	developmentMode?: string;
+	isConversationComplete?: boolean;
 }
 
 export interface UseVoiceReturn {
@@ -111,6 +112,8 @@ export function useVoice({
 	client,
 	currentProvider: _currentProvider,
 	currentModel: _currentModel,
+	developmentMode,
+	isConversationComplete = true,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -151,7 +154,6 @@ export function useVoice({
 
 	const abortControllerRef = React.useRef<AbortController | null>(null);
 	const ttsAbortControllerRef = React.useRef<AbortController | null>(null);
-	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
 
 	// Separate recording and TTS active file slots to avoid shared mutation bugs
 	const recordingFileRef = React.useRef<string | null>(null);
@@ -512,7 +514,8 @@ export function useVoice({
 
 	// TTS response playback effect
 	React.useEffect(() => {
-		if (!pendingTTSRef.current || !pluginRef.current) return;
+		if (!isConversationComplete || !pendingTTSRef.current || !pluginRef.current)
+			return;
 
 		const lastMsg = messages[messages.length - 1];
 		if (!lastMsg || lastMsg.role !== 'assistant') return;
@@ -603,7 +606,7 @@ export function useVoice({
 					setState('idle');
 				}
 			});
-	}, [messages, cleanupTtsFile]);
+	}, [messages, isConversationComplete, cleanupTtsFile]);
 
 	// Push-to-talk recording trigger callback
 	const startStopRecording = React.useCallback(async () => {
@@ -664,7 +667,6 @@ export function useVoice({
 				undefined,
 				abortController.signal,
 			);
-			recordingAudioPromiseRef.current = audioPromise;
 
 			try {
 				await audioPromise;
@@ -673,8 +675,6 @@ export function useVoice({
 					throw err;
 				}
 			}
-
-			recordingAudioPromiseRef.current = null;
 
 			// If state was changed away from listening (e.g. interrupted), cancel submission
 			if (stateRef.current !== 'listening') {
@@ -740,7 +740,6 @@ export function useVoice({
 			pendingTTSRef.current = false;
 			pluginRef.current = null;
 			setState('idle');
-			recordingAudioPromiseRef.current = null;
 			abortControllerRef.current = null;
 			cleanupRecordingFile();
 

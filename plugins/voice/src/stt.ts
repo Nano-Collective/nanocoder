@@ -1,12 +1,13 @@
 import cp from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { platform } from 'node:process';
-import { getVoiceBinDir } from './dependencies.js';
+import {existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {platform} from 'node:process';
+import {getVoiceBinDir} from './dependencies.js';
 
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB limit for safety
 
-const SILENCE_MARKER_REGEX = /^\s*(\[BLANK_AUDIO\]|\[silence\]|\(silence\)|\(_BEG_\)|\(_END_\))\s*$/i;
+const SILENCE_MARKER_REGEX =
+	/^\s*(\[BLANK_AUDIO\]|\[silence\]|\(silence\)|\(_BEG_\)|\(_END_\))\s*$/i;
 
 export function filterSilenceMarkers(text: string): string {
 	const trimmed = text.trim();
@@ -36,13 +37,17 @@ function resolveWhisperModel(): string {
 
 /**
  * Transcribes audio from a .wav file to text using local whisper.cpp.
- * 
+ *
  * @param filePath Path to the .wav audio file
  * @param timeoutMs Maximum time to wait in milliseconds (defaults to 60000)
  * @param signal AbortSignal to cancel transcription
  * @returns The transcribed text (or empty string if silence)
  */
-export async function transcribeAudio(filePath: string, timeoutMs = 60000, signal?: AbortSignal): Promise<string> {
+export async function transcribeAudio(
+	filePath: string,
+	timeoutMs = 60000,
+	signal?: AbortSignal,
+): Promise<string> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
 			return reject(new Error('AbortError: Transcription aborted'));
@@ -50,11 +55,11 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000, signa
 
 		const command = resolveWhisperCommand();
 		const modelPath = resolveWhisperModel();
-		
+
 		const args = ['-m', modelPath, '-f', filePath, '-nt']; // -nt disables timestamps
 
-		const proc = cp.spawn(command, args, { 
-			stdio: ['ignore', 'pipe', 'ignore'] 
+		const proc = cp.spawn(command, args, {
+			stdio: ['ignore', 'pipe', 'ignore'],
 		});
 
 		let timeoutId: NodeJS.Timeout | undefined;
@@ -92,7 +97,7 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000, signa
 			}
 		});
 
-		proc.on('close', (code) => {
+		proc.on('close', code => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0) {
@@ -102,10 +107,14 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000, signa
 			}
 		});
 
-		proc.on('error', (err) => {
+		proc.on('error', err => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
-			reject(new Error(`Failed to start Whisper STT process (${command}): ${err.message}`));
+			reject(
+				new Error(
+					`Failed to start Whisper STT process (${command}): ${err.message}`,
+				),
+			);
 		});
 	});
 }

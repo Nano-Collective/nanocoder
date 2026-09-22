@@ -1,8 +1,8 @@
 import cp from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { platform } from 'node:process';
-import { getVoiceBinDir } from './dependencies.js';
+import {existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {platform} from 'node:process';
+import {getVoiceBinDir} from './dependencies.js';
 
 function resolvePiperCommand(): string {
 	if (process.env.PIPER_CMD) return process.env.PIPER_CMD;
@@ -23,13 +23,18 @@ function resolvePiperModel(): string {
 
 /**
  * Synthesizes speech from text using local piper TTS.
- * 
+ *
  * @param text The text to synthesize
  * @param outputPath The path where the generated .wav file should be saved
  * @param timeoutMs Maximum time to wait in milliseconds (defaults to 30000)
  * @param signal AbortSignal to cancel synthesis
  */
-export async function synthesizeSpeech(text: string, outputPath: string, timeoutMs = 30000, signal?: AbortSignal): Promise<void> {
+export async function synthesizeSpeech(
+	text: string,
+	outputPath: string,
+	timeoutMs = 30000,
+	signal?: AbortSignal,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
 			return reject(new Error('AbortError: Synthesis aborted'));
@@ -39,9 +44,9 @@ export async function synthesizeSpeech(text: string, outputPath: string, timeout
 		const modelPath = resolvePiperModel();
 
 		const args = ['--model', modelPath, '--output_file', outputPath];
-		
-		const proc = cp.spawn(command, args, { 
-			stdio: ['pipe', 'ignore', 'ignore'] 
+
+		const proc = cp.spawn(command, args, {
+			stdio: ['pipe', 'ignore', 'ignore'],
 		});
 
 		let timeoutId: NodeJS.Timeout | undefined;
@@ -61,7 +66,7 @@ export async function synthesizeSpeech(text: string, outputPath: string, timeout
 			signal.addEventListener('abort', abortHandler);
 		}
 
-		proc.stdin.on('error', (err: any) => {
+		proc.stdin.on('error', (err: NodeJS.ErrnoException) => {
 			if (err.code !== 'EPIPE') {
 				reject(new Error(`Failed to write to Piper TTS: ${err.message}`));
 			}
@@ -69,7 +74,7 @@ export async function synthesizeSpeech(text: string, outputPath: string, timeout
 		proc.stdin.write(text);
 		proc.stdin.end();
 
-		proc.on('close', (code) => {
+		proc.on('close', code => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0) {
@@ -79,10 +84,12 @@ export async function synthesizeSpeech(text: string, outputPath: string, timeout
 			}
 		});
 
-		proc.on('error', (err) => {
+		proc.on('error', err => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
-			reject(new Error(`Failed to start Piper TTS (${command}): ${err.message}`));
+			reject(
+				new Error(`Failed to start Piper TTS (${command}): ${err.message}`),
+			);
 		});
 	});
 }

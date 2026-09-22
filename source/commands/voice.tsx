@@ -29,7 +29,10 @@ export const voiceCommand: Command = {
 		} else if (subArg === 'stt') {
 			if (param === 'cloud' || param === 'local') {
 				updatedConfig.sttBackend = param;
-				messageText = `Voice STT backend set to: ${param}.`;
+				messageText =
+					param === 'cloud'
+						? 'Voice STT backend set to: cloud. Microphone audio will be sent to OpenAI for transcription.'
+						: 'Voice STT backend set to: local.';
 			} else {
 				messageText = `Current STT backend: ${updatedConfig.sttBackend || 'local'}. Use '/voice stt local' or '/voice stt cloud'.`;
 			}

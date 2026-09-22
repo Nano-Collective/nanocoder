@@ -2,12 +2,16 @@ import cp from 'node:child_process';
 
 /**
  * Records audio from the default system microphone.
- * 
+ *
  * @param filePath The path where the .wav file should be saved.
  * @param durationMs Optional duration to record for, in milliseconds. If omitted, records until the process is killed.
  * @param signal Optional AbortSignal to cancel recording.
  */
-export async function recordAudio(filePath: string, durationMs?: number, signal?: AbortSignal): Promise<void> {
+export async function recordAudio(
+	filePath: string,
+	durationMs?: number,
+	signal?: AbortSignal,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
 			return reject(new Error('AbortError: Recording aborted'));
@@ -30,19 +34,19 @@ export async function recordAudio(filePath: string, durationMs?: number, signal?
 			args.push('trim', '0', (durationMs / 1000).toString());
 		}
 
-		const proc = cp.spawn(command, args, { stdio: 'ignore' });
+		const proc = cp.spawn(command, args, {stdio: 'ignore'});
 
 		let timeoutId: NodeJS.Timeout | undefined;
 		if (durationMs) {
 			// Fallback timeout to kill the process if it doesn't stop on its own
 			timeoutId = setTimeout(() => {
-				proc.kill('SIGTERM');
+				proc.kill('SIGINT');
 				reject(new Error(`Recording timed out after ${durationMs + 1000}ms`));
 			}, durationMs + 1000);
 		}
 
 		const abortHandler = () => {
-			proc.kill('SIGTERM');
+			proc.kill('SIGINT');
 			reject(new Error('AbortError: Recording aborted'));
 		};
 
@@ -50,20 +54,28 @@ export async function recordAudio(filePath: string, durationMs?: number, signal?
 			signal.addEventListener('abort', abortHandler);
 		}
 
-		proc.on('close', (code) => {
+		proc.on('close', code => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0) {
 				resolve();
 			} else {
-				reject(new Error(`Microphone recording failed with exit code ${code}. Please ensure 'sox' is installed.`));
+				reject(
+					new Error(
+						`Microphone recording failed with exit code ${code}. Please ensure 'sox' is installed.`,
+					),
+				);
 			}
 		});
 
-		proc.on('error', (err) => {
+		proc.on('error', err => {
 			if (timeoutId) clearTimeout(timeoutId);
 			if (signal) signal.removeEventListener('abort', abortHandler);
-			reject(new Error(`Failed to start microphone recording process: ${err.message}. Please install 'sox'.`));
+			reject(
+				new Error(
+					`Failed to start microphone recording process: ${err.message}. Please install 'sox'.`,
+				),
+			);
 		});
 	});
 }

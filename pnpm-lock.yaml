@@ -142,6 +142,9 @@ importers:
       '@changesets/cli':
         specifier: ^3.0.0
         version: 3.0.2
+      '@nanocollective/nanocoder-voice':
+        specifier: workspace:*
+        version: link:plugins/voice
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
@@ -187,13 +190,8 @@ importers:
       typescript-json-schema:
         specifier: ^0.68.0
         version: 0.68.0
-    optionalDependencies:
-      '@nanocollective/nanocoder-voice':
-        specifier: workspace:*
-        version: link:plugins/voice
 
   plugins/voice: {}
-
 
   plugins/vscode:
     dependencies:

@@ -132,6 +132,8 @@ export function InteractiveApp({
 		voicePreference: voicePref,
 		handleCancel: appHandlers.handleCancel,
 		client: appState.client,
+		isConversationComplete: appState.isConversationComplete,
+		developmentMode: appState.developmentMode,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
 	});
@@ -383,6 +385,8 @@ export function InteractiveApp({
 		submittedDraft,
 	]);
 
+	const {currentTheme} = useTheme();
+
 	// Single, always-mounted authority for Escape -> cancel. Because this lives
 	// at the section level (never swapped out like the ChatInput children), it
 	// fires on the FIRST press no matter what is running: an LLM message, a
@@ -430,8 +434,6 @@ export function InteractiveApp({
 	const artifactRefreshKey = `${appState.isConversationComplete}:${
 		appState.planReviewState?.show ?? false
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
-	const {currentTheme} = useTheme();
-
 	return (
 		// One provider for the whole interactive tree, not just the composer.
 		// FileExplorer reads the same context to hand its selection over as

@@ -1,4 +1,9 @@
 import test from 'ava';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+process.env.NANOCODER_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'nanocoder-voice-deps-'));
 import {
 	checkDependenciesInstalled,
 	installDependencies,
@@ -102,7 +107,7 @@ test('installDependencies exercises real URL construction and SHA256 verificatio
 });
 
 test('installDependencies handles non-root sudo error gracefully on Linux', async (t) => {
-	if (process.platform !== 'linux') {
+	if (process.platform !== 'linux' || process.getuid?.() === 0) {
 		t.pass();
 		return;
 	}
