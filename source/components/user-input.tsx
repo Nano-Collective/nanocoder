@@ -161,6 +161,7 @@ export default function UserInput({
 		resetInput,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
+		currentStateRef,
 		setInputState,
 		undo,
 		redo,
@@ -452,9 +453,12 @@ export default function UserInput({
 	const handleSubmit = useCallback(() => {
 		if (!onSubmit && !onQueueMessage) return;
 
+		// The ref, not the render-time currentState: Enter can arrive in the
+		// same stdin batch as a paste, before this component re-renders with it.
+		const latestState = currentStateRef.current;
 		let images = attachments;
-		let assembled = assemblePrompt(currentState);
-		let display = currentState.displayValue;
+		let assembled = assemblePrompt(latestState);
+		let display = latestState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
 		// (often quoted, mixed in with prose) become attachments; the literal
@@ -479,8 +483,8 @@ export default function UserInput({
 		if (!assembled.trim() && images.length === 0) return;
 
 		const inputStateForHistory: InputState = {
-			displayValue: currentState.displayValue,
-			placeholderContent: {...currentState.placeholderContent},
+			displayValue: latestState.displayValue,
+			placeholderContent: {...latestState.placeholderContent},
 		};
 
 		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
@@ -519,7 +523,7 @@ export default function UserInput({
 		onQueueMessage,
 		resetInput,
 		resetUIState,
-		currentState,
+		currentStateRef,
 		isBusy,
 		onSubmittedDraft,
 	]);
