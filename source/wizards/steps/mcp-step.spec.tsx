@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {McpStep} from './mcp-step.js';
 
 // ============================================================================
@@ -1091,12 +1092,14 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 	);
 
 	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	// CI renders with colour on; match against the text, not its escape codes.
+	const frame = () => stripAnsi(lastFrame() ?? '');
 	// Generous: a loaded CI runner can take well over a second to render.
 	const waitFor = async (until: RegExp) => {
-		for (let i = 0; i < 50 && !until.test(lastFrame()!); i++) {
+		for (let i = 0; i < 50 && !until.test(frame()); i++) {
 			await sleep(100);
 		}
-		t.regex(lastFrame()!, until);
+		t.regex(frame(), until);
 	};
 	// A key sent before its screen has mounted is lost, so Enter is re-sent
 	// until the target shows. That is only safe for Enter here: a surplus one
@@ -1104,11 +1107,11 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 	// Keys that would overshoot (arrows, Esc) are sent once, after their
 	// screen shows, and then waited on.
 	const pressEnterUntil = async (until: RegExp) => {
-		for (let i = 0; i < 20 && !until.test(lastFrame()!); i++) {
+		for (let i = 0; i < 20 && !until.test(frame()); i++) {
 			stdin.write('\r');
 			await sleep(250);
 		}
-		t.regex(lastFrame()!, until);
+		t.regex(frame(), until);
 	};
 	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
 		await waitFor(screen);
