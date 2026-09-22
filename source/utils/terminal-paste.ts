@@ -60,6 +60,35 @@ function partialMarkerLength(text: string, marker: string): number {
 	return 0;
 }
 
+/**
+ * Index of the paste's real end marker in `text`, or -1 when this chunk
+ * holds none.
+ *
+ * DECSET 2004 has no escape for its own markers, so a payload can carry
+ * the end marker's bytes and a plain search stops the paste there. What
+ * the chunk holds still settles most of it: a further end marker with no
+ * start marker before it means the earlier one was payload, since a
+ * second paste has to open with the start marker. An embedded marker
+ * that lands at the very end of a chunk is the case that cannot be told
+ * apart, and still ends the paste early.
+ */
+function endMarkerIndex(text: string): number {
+	let index = text.indexOf(PASTE_END);
+	while (index !== -1) {
+		const after = index + PASTE_END.length;
+		const nextEnd = text.indexOf(PASTE_END, after);
+		if (nextEnd === -1) {
+			return index;
+		}
+		const nextStart = text.indexOf(PASTE_START, after);
+		if (nextStart !== -1 && nextStart < nextEnd) {
+			return index;
+		}
+		index = nextEnd;
+	}
+	return index;
+}
+
 export interface PasteSplit {
 	/** Input with every bracketed paste (markers and payload) removed. */
 	clean: string;
@@ -85,7 +114,7 @@ export function createPasteExtractor(): (chunk: string) => PasteSplit {
 
 		while (rest.length > 0) {
 			if (inPaste) {
-				const end = rest.indexOf(PASTE_END);
+				const end = endMarkerIndex(rest);
 				if (end === -1) {
 					// No terminator yet. Buffer everything except a trailing
 					// fragment that could be the start of the end marker.
