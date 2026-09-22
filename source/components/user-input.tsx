@@ -471,9 +471,13 @@ export default function UserInput({
 
 	// Update UI state for command completions
 	useEffect(() => {
+		// This run can still carry the pre-selection input: selecting sets
+		// `input` and closes the menu together, and the run that the close
+		// schedules gets here first. `dismissedForInputRef` is set at the
+		// selection itself for that reason - reading `input` here would record
+		// the fragment and let the menu re-open on the completed command.
 		if (completionJustSelectedRef.current) {
 			completionJustSelectedRef.current = false;
-			dismissedForInputRef.current = input;
 			return;
 		}
 		if (commandCompletions.length > 0) {
@@ -976,6 +980,7 @@ export default function UserInput({
 						];
 					const completedText = `/${selected.name}`;
 					completionJustSelectedRef.current = true;
+					dismissedForInputRef.current = completedText;
 					setInputState({
 						displayValue: completedText,
 						placeholderContent: {},
@@ -1044,6 +1049,7 @@ export default function UserInput({
 				];
 			const completedText = `/${selected.name}`;
 			completionJustSelectedRef.current = true;
+			dismissedForInputRef.current = completedText;
 			setInputState({
 				displayValue: completedText,
 				placeholderContent: {},
