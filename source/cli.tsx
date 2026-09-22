@@ -529,13 +529,14 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// --trust-directory is only respected with `run`. Surface a warning
-	// (rather than silently dropping) if the user passes it interactively
-	// or with `review` (review is TTY-only but sets nonInteractiveMode).
+	// --trust-directory is only respected with `run` and `daemon start`.
+	// Surface a warning (rather than silently dropping) if the user passes
+	// it interactively or with `review` (review is TTY-only but sets
+	// nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
 	if (trustDirectoryRequested && !isRunCommand) {
 		console.error(
-			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
+			'--trust-directory only applies to non-interactive mode (`nanocoder run ...` or `nanocoder daemon start`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && isRunCommand;

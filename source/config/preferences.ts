@@ -114,6 +114,12 @@ export function isDirectoryTrusted(
 	directory: string,
 	preferences: UserPreferences,
 ): boolean {
+	// The env bypass is part of the shared rule, not a caller detail: any
+	// trust-gated entry point (TUI, plain shell, daemon) must honor it, and
+	// it never persists (issue #1339).
+	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
+		return true;
+	}
 	const resolved = path.resolve(directory); // nosemgrep
 	return (preferences.trustedDirectories ?? []).some(
 		dir => path.resolve(dir) === resolved, // nosemgrep
@@ -150,18 +156,33 @@ export function ensureDirectoryTrust(
 ): DirectoryTrustResult {
 	if (bypass) return {trusted: true, persisted: false};
 
-	const preferences = deps.loadPreferences();
-	if (isDirectoryTrusted(directory, preferences)) {
+	// The env bypass is checked before the shared rule: this entry point
+	// additionally persists the directory so later runs don't need the env
+	// var again. The already-recorded comparison here must be the raw one —
+	// isDirectoryTrusted honors the env bypass, which would short-circuit
+	// before persistence could happen.
+	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
+		const preferences = deps.loadPreferences();
+		const resolved = path.resolve(directory); // nosemgrep
+		const alreadyRecorded = (preferences.trustedDirectories ?? []).some(
+			dir => path.resolve(dir) === resolved, // nosemgrep
+		);
+		if (!alreadyRecorded) {
+			deps.savePreferences({
+				...preferences,
+				trustedDirectories: [
+					...(preferences.trustedDirectories ?? []),
+					resolved,
+				],
+			});
+			return {trusted: true, persisted: true};
+		}
 		return {trusted: true, persisted: false};
 	}
 
-	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const resolved = path.resolve(directory); // nosemgrep
-		deps.savePreferences({
-			...preferences,
-			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
-		});
-		return {trusted: true, persisted: true};
+	const preferences = deps.loadPreferences();
+	if (isDirectoryTrusted(directory, preferences)) {
+		return {trusted: true, persisted: false};
 	}
 
 	return {trusted: false, persisted: false};

@@ -1,6 +1,10 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
-import {loadPreferences, savePreferences} from '@/config/preferences';
+import {
+	isDirectoryTrusted,
+	loadPreferences,
+	savePreferences,
+} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 
@@ -23,14 +27,9 @@ function checkTrustSync(directory: string): {
 } {
 	try {
 		const preferences = loadPreferences();
-		const trustedDirectories = preferences.trustedDirectories || [];
-		const normalizedDirectory = path.resolve(directory); // nosemgrep
-		const envTrusted = process.env.NANOCODER_TRUST_DIRECTORY === '1';
-		const trusted =
-			envTrusted ||
-			trustedDirectories.some(
-				trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-			);
+		// Resolve through the shared helper so the TUI can never drift from
+		// the rule --plain and the daemon apply (issue #1339).
+		const trusted = isDirectoryTrusted(directory, preferences);
 		return {trusted, error: null};
 	} catch (err) {
 		const errorMessage = formatError(err);
@@ -68,15 +67,12 @@ export function useDirectoryTrust(
 			const preferences = loadPreferences();
 			const trustedDirectories = preferences.trustedDirectories || [];
 
-			// Normalize the directory path before storing and checking
+			// Normalize here for the write side (persistence) only; the check
+			// goes through the shared helper like every other entry point.
 			const normalizedDirectory = path.resolve(directory); // nosemgrep
 
 			// Only add if not already trusted (check using normalized paths)
-			if (
-				!trustedDirectories.some(
-					trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-				)
-			) {
+			if (!isDirectoryTrusted(directory, preferences)) {
 				trustedDirectories.push(normalizedDirectory);
 				preferences.trustedDirectories = trustedDirectories;
 				savePreferences(preferences);

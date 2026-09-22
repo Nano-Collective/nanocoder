@@ -1,7 +1,7 @@
 import type {ChildProcess} from 'node:child_process';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import test from 'ava';
 import {
 	loadPreferences,
@@ -260,7 +260,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.false(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					(loadPreferences().trustedDirectories ?? []).includes(resolve(root)),
 					'--trust-directory is a one-shot bypass and must not persist',
 				);
 			});
@@ -288,7 +288,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.true(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					(loadPreferences().trustedDirectories ?? []).includes(resolve(root)),
 				);
 			});
 		} finally {
