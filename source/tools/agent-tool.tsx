@@ -32,6 +32,16 @@ export function setAgentToolExecutor(executor: SubagentExecutor): void {
 }
 
 /**
+ * The executor set at app initialization, or null before that. Commands that
+ * want to delegate work (the agentic review pipeline) use this instead of
+ * constructing their own executor, so they share the app's client, tool
+ * manager, and mode resolver.
+ */
+export function getAgentToolExecutor(): SubagentExecutor | null {
+	return executorInstance;
+}
+
+/**
  * Cached list of available agent names for the tool description.
  */
 let availableAgentNames = 'explore (codebase exploration and research)';
