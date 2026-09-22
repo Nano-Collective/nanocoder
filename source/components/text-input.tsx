@@ -50,13 +50,34 @@ function TextInput({
 	cursorOffsetRef.current = cursorOffset;
 	originalValueRef.current = originalValue;
 
-	useEffect(() => {
-		setState(previousState => {
-			if (!focus || !showCursor) {
-				return previousState;
-			}
+	// The last value this component emitted via onChange. Anything arriving in
+	// `value` that we did not emit is an external replacement (undo/redo, draft
+	// restore, a programmatic clear) rather than one of our own edits.
+	const lastEmittedValueRef = useRef(originalValue);
 
-			const newValue = originalValue || '';
+	useEffect(() => {
+		if (!focus || !showCursor) {
+			return;
+		}
+
+		const newValue = originalValue || '';
+		const isExternalChange = newValue !== (lastEmittedValueRef.current || '');
+		lastEmittedValueRef.current = originalValue;
+
+		setState(previousState => {
+			// An external replacement carries no cursor of its own, so the caret
+			// left over from the previous value is meaningless against the new one.
+			// Park it at the end, the way a fresh mount does. Clamping alone is not
+			// enough: it only pulls the caret back when the value SHRINKS, so a
+			// redo that restores a longer value would strand the caret at the
+			// offset the undo clamped it to (0 for an undo back to empty) and the
+			// next keystroke would insert at the start.
+			if (isExternalChange) {
+				return {
+					cursorOffset: newValue.length,
+					cursorWidth: 0,
+				};
+			}
 
 			if (previousState.cursorOffset > newValue.length - 1) {
 				return {
@@ -168,6 +189,7 @@ function TextInput({
 				// the same stdin read block inserts after the first, not over it.
 				cursorOffsetRef.current = offset + 1;
 				originalValueRef.current = withNewline;
+				lastEmittedValueRef.current = withNewline;
 				setState({cursorOffset: offset + 1, cursorWidth: 0});
 				onChange(withNewline);
 				return;
@@ -377,6 +399,7 @@ function TextInput({
 
 			if (nextValue !== originalValueRef.current) {
 				originalValueRef.current = nextValue;
+				lastEmittedValueRef.current = nextValue;
 				onChange(nextValue);
 			}
 		},
