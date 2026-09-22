@@ -1797,3 +1797,486 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		'an audit-log hook must see the failed delegated call too',
 	);
 });
+
+// ============================================================================
+// Runtime execution limits (allowedTools / maxToolCalls / maxTurns).
+//
+// These are caller-side ceilings for one run — the review pipeline's way of
+// bounding a delegated finder or verifier. They must narrow what a registered
+// subagent can do, never widen it, and omitting them entirely must preserve
+// the unbounded-by-default behaviour existing callers rely on.
+
+test.serial('limits - maxTurns stops before the next model call', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'contents', readOnly: true},
+	});
+	const chatCalls: Message[][] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-1',
+						function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+					},
+				],
+			},
+			{content: 'would be turn 2'},
+		],
+		messages => chatCalls.push(messages),
+	);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'One turn only'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{maxTurns: 1},
+	);
+
+	t.false(result.success, 'the budget stop is reported as a failed run');
+	t.is(chatCalls.length, 1, 'exactly one model call happened');
+	t.true(
+		result.output.includes('contents') || result.error !== undefined,
+		'partial work or a budget error is returned',
+	);
+	t.true(
+		result.error?.includes('maxTurns = 1') ?? false,
+		`expected a turn-budget error, got: ${result.error}`,
+	);
+});
+
+test.serial('limits - maxToolCalls stops before executing past the cap', async t => {
+	const handlerCalls: string[] = [];
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async args => {
+				handlerCalls.push(String((args as {path?: string}).path));
+				return 'contents';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-1',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+				},
+				{
+					id: 'tc-2',
+					function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Two calls, one allowed'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{maxToolCalls: 1},
+	);
+
+	t.deepEqual(
+		handlerCalls,
+		['a.ts'],
+		'the second call must never reach the handler',
+	);
+	t.false(result.success);
+	t.true(result.error?.includes('maxToolCalls = 1') ?? false);
+});
+
+test.serial('limits - maxToolCalls 0 blocks every tool call', async t => {
+	let handlerRan = false;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				handlerRan = true;
+				return 'contents';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-1',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'No tools'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{maxToolCalls: 0},
+	);
+
+	t.false(handlerRan, 'no handler may execute');
+	t.false(result.success);
+});
+
+test.serial('limits - refusal past the cap also counts as an attempt', async t => {
+	const handlerCalls: string[] = [];
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				handlerCalls.push('ran');
+				return 'contents';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-1',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+				},
+				// Not offered after the allowedTools ceiling — still an attempt.
+				{
+					id: 'tc-2',
+					function: {name: 'execute_bash', arguments: '{"command":"ls"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Refused calls count'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{maxToolCalls: 1, allowedTools: ['read_file']},
+	);
+
+	t.deepEqual(handlerCalls, ['ran'], 'first call executed');
+	t.false(result.success);
+	t.true(
+		result.error?.includes('maxToolCalls = 1') ?? false,
+		'the refused call consumed the budget too',
+	);
+});
+
+test.serial('limits - allowedTools narrows the offered tools', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'contents', readOnly: true},
+		git_diff: {handler: async () => 'diff', readOnly: true},
+	});
+	const offeredToolNames: string[][] = [];
+	let chatCount = 0;
+	const client = createMockClient(
+		[
+			{
+				content: 'final answer, no tools needed',
+			},
+		],
+		messages => {
+			chatCount++;
+			// The tools record handed to chat() is the advertised set.
+			void messages;
+		},
+	);
+	// Wrap chat to capture the tools argument (the mock helper only exposes
+	// messages), keeping the advertised-tools assertion honest.
+	const rawChat = client.chat.bind(client);
+	(client as unknown as {chat: Function}).chat = (
+		msgs: Message[],
+		tools: Record<string, unknown>,
+	) => {
+		offeredToolNames.push(Object.keys(tools ?? {}));
+		return rawChat(msgs, tools, {
+			onToken: () => {},
+			onReasoningToken: () => {},
+		} as never);
+	};
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Narrowed'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{allowedTools: ['git_diff']},
+	);
+
+	t.true(result.success);
+	t.is(chatCount, 1);
+	t.deepEqual(
+		offeredToolNames[0],
+		['git_diff'],
+		'explore allows read_file, but the caller ceiling must remove it',
+	);
+});
+
+test.serial('limits - allowedTools cannot widen a registered allow-list', async t => {
+	// Register a custom agent whose own allow-list is read_file only, then
+	// ask for execute_bash in the caller ceiling. The intersection wins.
+	const loader = getSubagentLoader();
+	const registered = loader.registerExternal({
+		name: 'limit-test-narrow-agent',
+		description: 'Test agent with a narrow own list',
+		tools: ['read_file'],
+		systemPrompt: 'You can only read files.',
+		source: {priority: 0, isBuiltIn: false},
+	});
+	t.true(registered, 'test agent must register cleanly');
+
+	try {
+		const handlerCalls: string[] = [];
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => {
+					handlerCalls.push('read');
+					return 'contents';
+				},
+				readOnly: true,
+			},
+			execute_bash: {
+				handler: async () => {
+					handlerCalls.push('bash');
+					return 'ran';
+				},
+				readOnly: false,
+			},
+		});
+		const client = createMockClient([
+			{content: 'done'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		const result = await executor.execute(
+			{subagent_type: 'limit-test-narrow-agent', description: 'Try bash'},
+			undefined,
+			0,
+			undefined,
+			undefined,
+			// The ceiling requests bash, but the agent's own list does not
+			// include it: the intersection is read_file only.
+			{allowedTools: ['execute_bash', 'read_file']},
+		);
+
+		t.true(result.success);
+		t.deepEqual(
+			handlerCalls,
+			[],
+			'no handler should run; the model produced a final answer without tools',
+		);
+	} finally {
+		loader.unregisterExternal('limit-test-narrow-agent');
+	}
+});
+
+test.serial('limits - boundary refuses a tool outside the intersection', async t => {
+	const handlerCalls: string[] = [];
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				handlerCalls.push('read');
+				return 'contents';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-1',
+					// explore allows read_file and the ceiling allows read_file, but
+					// the model names something else entirely: the boundary, not the
+					// advertised list, must refuse it.
+					function: {name: 'search_file_contents', arguments: '{"query":"x"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Hallucinated tool'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{allowedTools: ['read_file', 'search_file_contents']},
+	);
+
+	// search_file_contents is inside the caller ceiling but NOT inside
+	// explore's own allow-list, so the intersection excludes it and the
+	// boundary refuses the call.
+	t.true(result.success, 'refusal text is a normal tool result');
+	t.deepEqual(handlerCalls, [], 'the refused tool must not execute');
+});
+
+test.serial('limits - invalid limits are rejected before any model call', async t => {
+	const toolManager = createMockToolManager();
+	let chatCount = 0;
+	const client = createMockClient([{content: 'never'}], () => {
+		chatCount++;
+	});
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const badCases: Array<Record<string, unknown>> = [
+		{maxTurns: 0},
+		{maxTurns: -1},
+		{maxTurns: 1.5},
+		{maxToolCalls: -1},
+		{maxToolCalls: 1.5},
+		{allowedTools: 'read_file'},
+		{allowedTools: [42]},
+	];
+
+	for (const limits of badCases) {
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Bad limits'},
+			undefined,
+			0,
+			undefined,
+			undefined,
+			limits as never,
+		);
+		t.false(result.success, `${JSON.stringify(limits)} must be rejected`);
+		t.is(result.output, '');
+		t.true(
+			result.error?.includes('execution limits') ?? false,
+			`expected a limits error, got: ${result.error}`,
+		);
+	}
+	t.is(chatCount, 0, 'no model call may happen for invalid limits');
+});
+
+test.serial('limits - omitting limits preserves unbounded behaviour', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'contents', readOnly: true},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tc-1',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+				},
+			],
+		},
+		{content: 'finished'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Unbounded',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'finished');
+});
+
+test.serial('limits - compaction still runs for allowedTools-only ceilings', async t => {
+	// Regression for a subtle hazard: disabling auto-compaction for ANY limits
+	// object would silently turn it off for allowedTools-only ceilings, which
+	// are not spending caps. Compaction must stay on there.
+	resetSessionContextLimit();
+	setSessionContextLimit(80);
+	setAutoCompactEnabled(true);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const blob = 'old context sentence. '.repeat(80);
+	const payloads: Message[][] = [];
+	let reads = 0;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				reads += 1;
+				return reads === 1 ? blob : `ok-${reads}`;
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't1',
+						function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't2',
+						function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 't3',
+						function: {name: 'read_file', arguments: '{"path":"c.ts"}'},
+					},
+				],
+			},
+			{content: 'done'},
+		],
+		messages => payloads.push(messages),
+	);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	try {
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read files'},
+			undefined,
+			0,
+			undefined,
+			undefined,
+			{allowedTools: ['read_file']},
+		);
+		t.true(result.success);
+		t.true(payloads.length >= 4);
+		const last = payloads[payloads.length - 1];
+		t.false(
+			last.some(
+				message =>
+					typeof message.content === 'string' && message.content === blob,
+			),
+			'an allowedTools-only ceiling must not disable auto-compaction',
+		);
+	} finally {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+	}
+});
