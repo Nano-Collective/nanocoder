@@ -65,13 +65,18 @@ const waitForCondition = async (
 	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
 };
 
+// Frames are matched with ANSI stripped. Under a colour-capable stdout (CI sets
+// FORCE_COLOR) the caret renders as an inverse-video run, so the escape codes
+// land INSIDE the text: "abcde" with the caret on "a" is "\x1b[7ma\x1b[27mbcde",
+// which /abcde/ does not match. Stripping keeps assertions about visible text
+// independent of where the caret happens to sit.
 const waitForFrame = async (
 	lastFrame: () => string | undefined,
 	pattern: RegExp,
 	timeoutMs = 3000,
 ) => {
 	await waitForCondition(
-		() => pattern.test(lastFrame() ?? ''),
+		() => pattern.test(stripAnsi(lastFrame() ?? '')),
 		timeoutMs,
 	);
 };
@@ -1041,14 +1046,43 @@ test('UserInput redoes an undone edit with ctrl+y', async t => {
 
 	// Undo with Ctrl+Z, settle so the redo stack commits, then redo with Ctrl+Y.
 	stdin.write('\u001a');
-	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
 	await wait(100);
 
 	stdin.write('\u0019');
 	await wait(100);
-	await waitForCondition(() => /abcde/.test(lastFrame() ?? ''));
+	await waitForCondition(() => /abcde/.test(stripAnsi(lastFrame() ?? '')));
 
-	t.regex(lastFrame()!, /abcde/);
+	t.regex(stripAnsi(lastFrame()!), /abcde/);
+	unmount();
+});
+
+test('UserInput puts the caret at the end of a redone edit', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await waitForFrame(lastFrame, /abcde/);
+	await wait(100);
+
+	// Undo/redo restore a whole value and carry no caret of their own, so the
+	// caret must land at the end. It used to keep the offset the undo clamped it
+	// to (0), which sent the next keystroke to the front: "Xabcde".
+	stdin.write('X');
+	await waitForFrame(lastFrame, /abcdeX/);
+
+	t.regex(stripAnsi(lastFrame()!), /abcdeX/);
+	t.notRegex(stripAnsi(lastFrame()!), /Xabcde/);
 	unmount();
 });
 

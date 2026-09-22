@@ -566,6 +566,39 @@ test('orcarouter template: uses default provider name and model default', t => {
 	t.is(config.name, 'OrcaRouter');
 });
 
+test('cheaper-inference template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Cheaper Inference',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-5, deepseek-v4.1-flash',
+	});
+
+	t.is(config.name, 'Cheaper Inference');
+	t.is(config.baseUrl, 'https://api.cheaperinference.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['claude-sonnet-5', 'deepseek-v4.1-flash']);
+});
+
+test('cheaper-inference template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'claude-sonnet-5');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-5',
+	});
+
+	t.is(config.name, 'Cheaper Inference');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
