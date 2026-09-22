@@ -19,8 +19,9 @@ import {
 	openSync,
 	statSync,
 } from 'node:fs';
-import {dirname, join} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {ensureDirectoryTrust} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
@@ -54,6 +55,14 @@ export interface DaemonCliOptions {
 	 * `defaultLaunchDaemon`.
 	 */
 	launchDaemon?: (projectRoot: string) => ChildProcess | null;
+	/**
+	 * One-shot override for `start`'s directory-trust gate (`--trust-directory`
+	 * on `nanocoder daemon start`), mirroring the `run` command's flag of the
+	 * same name. Never persisted — set `NANOCODER_TRUST_DIRECTORY=1` instead
+	 * to trust the directory for future runs too. Ignored by every other
+	 * subcommand.
+	 */
+	trustDirectory?: boolean;
 }
 
 /**
@@ -128,6 +137,32 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		return {
 			exitCode: 0,
 			output: `Daemon already running (pid ${live.pid}).`,
+		};
+	}
+
+	// The daemon loads every .nanocoder/agents|commands|tools/*.md and
+	// skills/<name>/skill.yaml in the project and runs triggered skills in
+	// headless mode - no confirmation prompts, including for execute_bash.
+	// It must never boot in a directory the user hasn't trusted.
+	const trust = ensureDirectoryTrust(
+		opts.projectRoot,
+		opts.trustDirectory ?? false,
+	);
+	if (trust.persisted) {
+		console.log(
+			`Marked ${resolve(opts.projectRoot)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
+		);
+	}
+	if (!trust.trusted) {
+		return {
+			exitCode: 1,
+			output:
+				`Directory ${resolve(opts.projectRoot)} is not trusted. The daemon runs ` +
+				`triggered skills unattended with no confirmation prompts, so it refuses ` +
+				`to start here. Run \`nanocoder\` interactively in this directory once to ` +
+				`accept the trust disclaimer, then re-run \`nanocoder daemon start\` - or ` +
+				`pass --trust-directory to bypass it for this run only (set ` +
+				`NANOCODER_TRUST_DIRECTORY=1 to persist it instead).`,
 		};
 	}
 

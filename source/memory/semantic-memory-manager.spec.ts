@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
-import {SemanticMemoryManager} from './semantic-memory-manager.js';
+import {
+	isLockAbandoned,
+	SemanticMemoryManager,
+} from './semantic-memory-manager.js';
 
 async function createTempDir(): Promise<string> {
 	return fs.mkdtemp(path.join(os.tmpdir(), 'nanocoder-memory-'));
@@ -271,4 +274,80 @@ test('SemanticMemoryManager rewrites a corrupt store on the next write', async t
 
 	const repaired = await manager.addMemory({content: 'Use adapters.'});
 	t.deepEqual(await manager.listMemories(), [repaired]);
+});
+
+// --- lock reclaim ----------------------------------------------------------
+// The lock used to be judged on elapsed time alone: its mtime was stamped at
+// acquisition and never refreshed, so "held longer than the stale window" and
+// "abandoned" were the same test. Any operation that legitimately ran longer
+// had its lock deleted by a waiter in another process, both then ran the
+// critical section at once, and the loser's writes were dropped by the final
+// atomicWriteFile. Ownership is now decided by the holder's liveness, with the
+// heartbeat as the tiebreak.
+
+/** A pid that is definitely not running: spawn a process and wait for it. */
+async function deadPid(): Promise<number> {
+	const {spawn} = await import('node:child_process');
+	const child = spawn(process.execPath, ['-e', '']);
+	const pid = child.pid;
+	if (pid === undefined) throw new Error('could not spawn a probe process');
+	await new Promise(resolve => child.on('exit', resolve));
+	return pid;
+}
+
+test('isLockAbandoned reclaims a lock whose owner is gone, however fresh it looks', async t => {
+	const dir = await createTempDir();
+	const lockPath = path.join(dir, 'probe.lock');
+	await fs.writeFile(lockPath, String(await deadPid()), 'utf8');
+
+	// Written this instant, so the old elapsed-time test would have said
+	// "still held" and waited out the full stale window for nobody.
+	t.true(await isLockAbandoned(lockPath));
+});
+
+test('isLockAbandoned leaves a live owner alone while its heartbeat is fresh', async t => {
+	const dir = await createTempDir();
+	const lockPath = path.join(dir, 'probe.lock');
+	await fs.writeFile(lockPath, String(process.pid), 'utf8');
+
+	t.false(await isLockAbandoned(lockPath));
+});
+
+test('isLockAbandoned reclaims a live owner that stopped heartbeating', async t => {
+	const dir = await createTempDir();
+	const lockPath = path.join(dir, 'probe.lock');
+	// Our own pid, so the liveness probe passes - but the mtime is far older
+	// than the stale window, which a heartbeating holder could never produce.
+	// This is the escape hatch for a wedged holder, and for a recorded pid
+	// that has been recycled by an unrelated process.
+	await fs.writeFile(lockPath, String(process.pid), 'utf8');
+	const old = new Date(Date.now() - 60_000);
+	await fs.utimes(lockPath, old, old);
+
+	t.true(await isLockAbandoned(lockPath));
+});
+
+test('a lock left behind by a crashed process does not stall the next write', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	// One write to create the store, so its lock path is known.
+	await manager.addMemory({content: 'First memory.'});
+	const store = (await fs.readdir(dir)).find(name => name.endsWith('.json'));
+	t.truthy(store);
+
+	// Simulate the crash: a lock file with a fresh mtime naming a pid that is
+	// no longer running.
+	const lockPath = path.join(dir, `${store}.lock`);
+	await fs.writeFile(lockPath, String(await deadPid()), 'utf8');
+
+	const started = Date.now();
+	await manager.addMemory({content: 'Second memory.'});
+	const elapsed = Date.now() - started;
+
+	t.is((await manager.listMemories()).length, 2);
+	// The old code waited out the full 10s stale window before reclaiming.
+	t.true(elapsed < 3_000, `reclaim took ${elapsed}ms`);
 });

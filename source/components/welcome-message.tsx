@@ -45,6 +45,14 @@ const MENU_MIN: Array<[string, string]> = [
 	['Quit', '/exit'],
 ];
 
+// Rows the banner occupies at its three sizes, measured at 80 columns: the
+// header, tagline and location block come to 11, a two-item menu brings that
+// to 14, the full four-item menu to 16, and the block wordmark adds 10 more.
+// Thresholds are these heights, so each rung is only offered when it fits.
+const MENU_MIN_ROWS = 14;
+const MENU_FULL_ROWS = 16;
+const LOGO_ROWS = 26;
+
 type WelcomeMessageProps = {
 	/**
 	 * Pin the tip shown under the banner. Defaults to a random one held for
@@ -52,9 +60,19 @@ type WelcomeMessageProps = {
 	 * exact text instead of scanning the catalogue.
 	 */
 	tip?: string;
+	/**
+	 * Rows the banner actually has. Fullscreen mode clips at the viewport,
+	 * which is the terminal minus the input footer, so budgeting against the
+	 * raw terminal height silently cut the menu and tip on an 80x24 screen.
+	 * Defaults to the terminal height for callers that are not clipped.
+	 */
+	availableRows?: number;
 };
 
-export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
+export default memo(function WelcomeMessage({
+	tip,
+	availableRows,
+}: WelcomeMessageProps = {}) {
 	const {actualWidth} = useResponsiveTerminal();
 	const rows = useTerminalRows();
 	const {colors} = useTheme();
@@ -65,17 +83,21 @@ export default memo(function WelcomeMessage({tip}: WelcomeMessageProps = {}) {
 	const cwd = homeRelative(process.cwd());
 	const gitStatus = getGitStatusSummarySync();
 
-	// Block wordmark in every screen — full NANOCODER on wide terminals, NC
-	// monogram on narrow (same block font, just shorter string). Short
-	// terminals (rows < 16) skip it to protect the menu rows.
+	const budget = availableRows ?? rows;
+
+	// Block wordmark — full NANOCODER on wide terminals, NC monogram on narrow
+	// (same block font, just a shorter string). It is the first thing dropped
+	// when rows are tight: the menu and tip are what a new user needs.
 	let logoText: string | null = null;
-	if (rows >= 16) {
+	if (budget >= LOGO_ROWS) {
 		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
 	}
 
 	let menu: Array<[string, string]> = [];
-	if (rows >= 15) {
-		menu = rows < 24 ? MENU_MIN : MENU_FULL;
+	if (budget >= MENU_FULL_ROWS) {
+		menu = MENU_FULL;
+	} else if (budget >= MENU_MIN_ROWS) {
+		menu = MENU_MIN;
 	}
 
 	const branchLabel = (() => {

@@ -1,6 +1,7 @@
 import test from 'ava';
+import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
-import {streamText} from 'ai';
+import {jsonSchema, streamText, tool} from 'ai';
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
@@ -10,6 +11,7 @@ import type {
 import type {LanguageModel} from 'ai';
 import {handleChat} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
+import {rehydrateResponse} from './privacy.js';
 
 // Note: This file contains basic structure tests
 // Full integration tests would require mocking the AI SDK's streamText function
@@ -362,6 +364,344 @@ test('privacy: scrubs outgoing prompts and rehydrates the response at the histor
 	t.false(content.includes('«'));
 });
 
+// Tool results are the largest and least-reviewed body of text leaving the
+// machine, so they go through the same detectors as everything else.
+async function scrubbedPayload(
+	messages: Message[],
+): Promise<{payload: string; sessionMap: Record<string, string>}> {
+	const captured: {prompt?: unknown} = {};
+	const sessionMap: Record<string, string> = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages,
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: sessionMap},
+	});
+	return {payload: JSON.stringify(captured.prompt), sessionMap};
+}
+
+test('privacy: scrubs tool result content', async t => {
+	const {payload, sessionMap} = await scrubbedPayload([
+		{role: 'user', content: 'who owns this?'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'read_file', arguments: {path: '.env'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'read_file',
+			content: 'OWNER=ops@example.com',
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	t.regex(payload, /«Email_\d+»/);
+	t.true(Object.values(sessionMap).includes('ops@example.com'));
+	// Paths stay in the clear — the agent has to be able to act on them.
+	t.true(payload.includes('.env'));
+});
+
+test('privacy: scrubs the string leaves of structured tool output', async t => {
+	const structuredContent = {
+		matches: [{line: 'contact ops@example.com', count: 3}],
+		truncated: false,
+	};
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'search'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'grep', arguments: {pattern: 'contact'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'grep',
+			content: 'contact ops@example.com',
+			structuredContent,
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	// Walking leaves rather than the serialised JSON leaves the shape intact.
+	t.regex(payload, /"count":3/);
+	t.regex(payload, /"truncated":false/);
+	// The caller's message is untouched, so committed history keeps the real value.
+	t.is(structuredContent.matches[0]?.line, 'contact ops@example.com');
+});
+
+test('privacy: scrubs assistant tool-call arguments replayed from history', async t => {
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'save it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {
+						name: 'write_file',
+						arguments: {path: 'notes.md', content: 'ping ops@example.com'},
+					},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'write_file',
+			content: 'written',
+		},
+	]);
+
+	t.false(payload.includes('ops@example.com'));
+	t.regex(payload, /«Email_\d+»/);
+	t.true(payload.includes('notes.md'));
+});
+
+test('privacy: truncates a tool result before scrubbing it', async t => {
+	// truncateToolResult keeps a head and a tail around an elision marker.
+	// Scrubbing the truncated text means the cut can never land mid-placeholder
+	// — and the elided middle is never fed to the detectors at all.
+	const filler = 'x'.repeat(30_000);
+	const {payload, sessionMap} = await scrubbedPayload([
+		{role: 'user', content: 'cat the log'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'bash', arguments: {command: 'cat log'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'bash',
+			content: `head head@example.com ${filler} middle middle@example.com ${filler} tail tail@example.com`,
+		},
+	]);
+
+	const captured = Object.values(sessionMap);
+	t.true(captured.includes('head@example.com'));
+	t.true(captured.includes('tail@example.com'));
+	t.false(captured.includes('middle@example.com'));
+	// Every placeholder that reaches the provider is whole: no opener in the
+	// payload is left without the rest of its placeholder behind it.
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: keeps placeholders whole when scrubbing expands a result past the cap', async t => {
+	// Short, dense, distinct emails: each «Email_N» placeholder (9+ chars) is
+	// longer than the "aN@b.co " it replaces (7-8 chars for most N in this
+	// range), so scrubbing grows the text past MAX_TOOL_RESULT_CHARS even
+	// though the raw content started under it — the cap is only breached
+	// AFTER scrubbing, exercising the boundary the converter's own
+	// re-truncation (message-converter.ts) has to respect.
+	let content = '';
+	let i = 0;
+	while (content.length < 19_500) {
+		content += `a${i}@b.co `;
+		i++;
+	}
+
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'cat the log'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'bash', arguments: {command: 'cat log'}}},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'bash',
+			content,
+		},
+	]);
+
+	// Confirms the scrub-then-retruncate path actually fired, rather than the
+	// assertion below passing vacuously because nothing was cut.
+	t.regex(payload, /Output truncated/);
+	// Every placeholder that reaches the provider is whole: the converter's
+	// re-truncation of the scrub-expanded text never lands mid-token.
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: pre-truncates an over-cap structured tool result before scrubbing it', async t => {
+	// lsp_get_diagnostics on a large repo is a realistic producer of a
+	// structuredContent payload that's already over MAX_TOOL_RESULT_CHARS
+	// before scrubbing even runs — leaf-scrubbing the whole thing would be
+	// wasted work, since the converter would truncate-and-downgrade it to
+	// text regardless.
+	const diagnostics = Array.from({length: 2000}, (_, i) => ({
+		file: `file${i}.ts`,
+		message: `contact user${i}@example.com`,
+	}));
+
+	const {payload} = await scrubbedPayload([
+		{role: 'user', content: 'check the repo'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {name: 'lsp_get_diagnostics', arguments: {path: '.'}},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'call_1',
+			name: 'lsp_get_diagnostics',
+			content: `${diagnostics.length} diagnostics found`,
+			structuredContent: {diagnostics},
+		},
+	]);
+
+	// The full ~130k-char diagnostics list never reaches the payload —
+	// it was downgraded to bounded text before scrubbing ran.
+	t.true(payload.length < 100_000);
+	t.regex(payload, /Output truncated/);
+	// The kept portion is still scrubbed, and every placeholder in it whole.
+	t.regex(payload, /«Email_\d+»/);
+	t.is(
+		(payload.match(/«/g) ?? []).length,
+		(payload.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
+	);
+});
+
+test('privacy: isolates one tool call rehydration failure from the rest', async t => {
+	// mapStringLeaves walks arguments with Object.entries, which invokes
+	// getters — a poisoned argument makes that throw, standing in for any
+	// unexpected rehydration failure the old try/catch used to contain.
+	const poisoned: Record<string, unknown> = {};
+	Object.defineProperty(poisoned, 'secret', {
+		enumerable: true,
+		get(): never {
+			throw new Error('boom');
+		},
+	});
+
+	const toolCalls = [
+		{
+			id: 'call_1',
+			function: {name: 'broken_tool', arguments: {nested: poisoned}},
+		},
+		{
+			id: 'call_2',
+			function: {
+				name: 'write_file',
+				arguments: {content: 'ping «Email_1»'},
+			},
+		},
+	];
+
+	const response = await rehydrateResponse(
+		{content: '', toolCalls},
+		{'«Email_1»': 'real@example.com'},
+	);
+
+	// The tool call whose arguments can't be walked falls back to its
+	// original, unmodified value instead of throwing out of
+	// rehydrateResponse — where chat-handler.ts's outer catch would
+	// misread it as an API error or trigger the skipTools retry.
+	t.is(response.toolCalls[0], toolCalls[0]);
+	// A second tool call in the same response still rehydrates normally.
+	t.deepEqual(response.toolCalls[1]?.function.arguments, {
+		content: 'ping real@example.com',
+	});
+});
+
+test('privacy: rehydrates tool-call arguments before the harness executes them', async t => {
+	const model = {
+		specificationVersion: 'v3',
+		provider: 'test-provider',
+		modelId: 'test-model',
+		doStream: async (options: {prompt: unknown}) => {
+			const sent = JSON.stringify(options.prompt);
+			const placeholder = (sent.match(/«[^»]+»/) ?? ['«Email_1»'])[0];
+			return {
+				stream: new ReadableStream({
+					start(controller) {
+						controller.enqueue({
+							type: 'tool-call',
+							toolCallId: 'call_1',
+							toolName: 'write_file',
+							input: JSON.stringify({
+								path: 'notes.md',
+								content: `ping ${placeholder}`,
+							}),
+						});
+						controller.enqueue({
+							type: 'finish',
+							finishReason: 'tool-calls',
+							usage: {inputTokens: 1, outputTokens: 1, totalTokens: 2},
+						});
+						controller.close();
+					},
+				}),
+			};
+		},
+	} as unknown as LanguageModel;
+
+	const result = await handleChat({
+		model,
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [{role: 'user', content: 'ping ops@example.com'}],
+		tools: {
+			write_file: tool({
+				description: 'write a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}, content: {type: 'string'}},
+				}),
+			}),
+		},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: {}},
+	});
+
+	// The tool the harness is about to run receives the real value, not the
+	// placeholder the model was shown.
+	t.deepEqual(result.choices[0]?.message.tool_calls?.[0]?.function.arguments, {
+		path: 'notes.md',
+		content: 'ping ops@example.com',
+	});
+});
+
 function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
 	return {
 		specificationVersion: 'v3',
@@ -636,4 +976,78 @@ test('handleChat keeps the system string for non-anthropic providers', async t =
 	t.is(prompt[0]?.role, 'system');
 	t.is(prompt[0]?.providerOptions, undefined);
 	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
+});
+
+// --- Output-token ceiling ---
+//
+// @ai-sdk/anthropic derives max_tokens from the model id and falls back to
+// 4096 for anything it does not recognise as a Claude model. An
+// Anthropic-compatible endpoint serving some other model therefore truncates
+// every reply at 4096 unless the ceiling is set explicitly — and nanocoder was
+// setting it under the v4 name `maxTokens`, which v5+ ignores. Object spreads
+// skip excess-property checking, so that was dropped silently rather than
+// failing to compile.
+//
+// These pin the SDK contract the fix depends on: assert what reaches the wire,
+// since typechecking demonstrably cannot catch this class of mistake.
+
+async function captureAnthropicRequestBody(
+	settings: {maxOutputTokens?: number},
+	modelId: string,
+): Promise<Record<string, unknown>> {
+	let captured: Record<string, unknown> = {};
+	const provider = createAnthropic({
+		apiKey: 'test-key',
+		fetch: async (_url, init) => {
+			captured = JSON.parse(String(init?.body));
+			return new Response(
+				[
+					'event: message_start\ndata: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+					'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+				].join(''),
+				{status: 200, headers: {'content-type': 'text/event-stream'}},
+			);
+		},
+	});
+
+	const result = streamText({
+		model: provider(modelId),
+		prompt: 'test',
+		...settings,
+	});
+	for await (const _chunk of result.fullStream) {
+		// Drain so the request is actually issued.
+	}
+	return captured;
+}
+
+test('an unrecognised model id falls back to a 4096 output ceiling', async t => {
+	const body = await captureAnthropicRequestBody({}, 'minimax-m3');
+	t.is(
+		body.max_tokens,
+		4096,
+		'this default is the reason provider entries need an explicit ceiling',
+	);
+});
+
+test('maxOutputTokens raises the ceiling that reaches the provider', async t => {
+	const body = await captureAnthropicRequestBody(
+		{maxOutputTokens: 32_000},
+		'minimax-m3',
+	);
+	t.is(body.max_tokens, 32_000);
+});
+
+test('the v4 spelling maxTokens does not reach the provider', async t => {
+	// Regression guard: if this ever starts passing, the SDK has renamed the
+	// setting back and the mapping in chat-handler needs revisiting.
+	const body = await captureAnthropicRequestBody(
+		{maxTokens: 32_000} as {maxOutputTokens?: number},
+		'minimax-m3',
+	);
+	t.is(
+		body.max_tokens,
+		4096,
+		'maxTokens is silently ignored — the bug this fix exists for',
+	);
 });

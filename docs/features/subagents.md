@@ -150,7 +150,7 @@ A subagent that re-issues the identical tool call(s) on consecutive turns is sto
 
 Whatever the subagent produced before it got stuck is still handed to the main agent under a `Partial output produced before stopping:` heading, so useful work isn't discarded along with the failure.
 
-The other two retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), and they don't use text-parsed tool calls (so `maxMalformedRetries` is too). There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
+The other retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), they don't use text-parsed tool calls (so `maxMalformedRetries` is too), and `maxTruncatedTurns` is specific to the `--plain` loop. There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
 
 ## Development Modes and Tune Profiles
 

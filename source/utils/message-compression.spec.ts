@@ -1,7 +1,12 @@
 import test from 'ava';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
-import {COMPRESSION_CONSTANTS, compressMessages} from './message-compression.js';
+import {
+	clampThreshold,
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from './message-compression.js';
 
 // Mock tokenizer that counts characters as tokens (1 char = 1 token)
 function createMockTokenizer(): Tokenizer {
@@ -510,4 +515,91 @@ test('COMPRESSION_CONSTANTS exports expected values', t => {
 	t.is(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT, 95);
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_USER_MESSAGE_THRESHOLD, 1000);
 	t.is(COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT, 500);
+});
+
+// ==================== Threshold clamp tests ====================
+
+const {MIN_THRESHOLD_PERCENT: MIN, MAX_THRESHOLD_PERCENT: MAX} =
+	COMPRESSION_CONSTANTS;
+
+test('clampThreshold pulls out-of-range values to the nearest bound', t => {
+	t.is(clampThreshold(MIN - 20), MIN);
+	t.is(clampThreshold(MAX + 20), MAX);
+	t.is(clampThreshold(Number.NEGATIVE_INFINITY), MIN);
+	t.is(clampThreshold(Number.POSITIVE_INFINITY), MAX);
+});
+
+test('clampThreshold leaves in-range values untouched', t => {
+	t.is(clampThreshold(MIN), MIN);
+	t.is(clampThreshold(MAX), MAX);
+	t.is(clampThreshold(60), 60);
+	t.is(clampThreshold(72.5), 72.5);
+});
+
+test('isThresholdInRange agrees with clampThreshold at the bounds', t => {
+	t.false(isThresholdInRange(MIN - 1));
+	t.true(isThresholdInRange(MIN));
+	t.true(isThresholdInRange(MAX));
+	t.false(isThresholdInRange(MAX + 1));
+});
+
+test('compressMessages preserves display-only messages in output but excludes them from token counts and recent window', t => {
+	const tokenizer = createMockTokenizer();
+	const oldBanner = 'Notice: Old cancellation banner '.repeat(30);
+	const recentBanner = 'Error: Recent notification banner '.repeat(20);
+
+	const messages: Message[] = [
+		createUserMessage('Old user message that is compressible'),
+		createAssistantMessage('Old assistant response'),
+		{
+			role: 'assistant' as const,
+			content: oldBanner,
+			displayOnly: true,
+		},
+		createUserMessage('Recent user turn'),
+		createAssistantMessage('Recent assistant turn'),
+		{
+			role: 'assistant' as const,
+			content: recentBanner,
+			displayOnly: true,
+		},
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	// Both display-only messages must be preserved verbatim in output to maintain scrollback
+	t.true(result.compressedMessages.some(msg => msg.content === oldBanner));
+	t.true(result.compressedMessages.some(msg => msg.content === recentBanner));
+	t.is(result.compressedMessages.length, messages.length);
+
+	// The recent window must not be consumed by the trailing display-only banner:
+	// exactly 2 model-facing messages ('Recent user turn' and 'Recent assistant turn') are preserved
+	t.is(result.preservedInfo.recentMessages, 2);
+
+	// Both recent turns must be uncompressed (verbatim) in the recent tail
+	const recentTail = result.compressedMessages.slice(-3);
+	t.is(recentTail[0]?.content, 'Recent user turn');
+	t.is(recentTail[1]?.content, 'Recent assistant turn');
+	t.is(recentTail[2]?.content, recentBanner);
+
+	// Original token count must strictly match only the model-facing messages
+	const modelFacingOriginal = messages.filter(m => !m.displayOnly);
+	const expectedOriginalTokens = modelFacingOriginal.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.originalTokenCount, expectedOriginalTokens);
+
+	// Compressed token count must also strictly exclude the display-only banners
+	const modelFacingCompressed = result.compressedMessages.filter(
+		m => !m.displayOnly,
+	);
+	const expectedCompressedTokens = modelFacingCompressed.reduce(
+		(sum, m) => sum + tokenizer.countTokens(m),
+		0,
+	);
+	t.is(result.compressedTokenCount, expectedCompressedTokens);
 });

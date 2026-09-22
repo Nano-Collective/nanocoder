@@ -30,7 +30,7 @@ With ACP the **client is the UI**: the agent runs headless and everything (strea
 - **Streaming responses** including reasoning/thinking, rendered in the editor's agent panel.
 - **Tool calls with rich cards** — file tools report their kind and the files they touch, and edits (`string_replace`, `write_file`) include a **before/after diff** the editor can preview.
 - **Permission prompts** — tools that need approval surface as the editor's own allow/deny prompt, respecting the current [development mode](development-modes.md).
-- **Development modes** — `normal`, `auto-accept`, `yolo`, and `plan` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
+- **Development modes** — `normal`, `auto-accept`, `yolo`, `plan`, and `architect` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
 - **Model display and switching** — the editor shows the current model and lets you switch between the models configured for your active provider.
 - **`ask_user`** — when the agent asks a clarifying question, the options appear as selectable buttons in the editor. (Selection only; a free-form typed answer is not available over ACP.)
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.

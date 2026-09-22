@@ -16,7 +16,9 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {CheckpointManager} from '@/services/checkpoint-manager';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -41,13 +43,16 @@ import type {
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
+import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
+import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {calculateTokens} from '@/utils/token-calculator';
+import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	createApprovalUnavailableResults,
@@ -68,6 +73,49 @@ import {
 	executeToolsDirectly,
 } from './tool-executor';
 
+interface ArchitectCheckpointState {
+	created: boolean;
+	name?: string;
+}
+
+/**
+ * Paths an architect turn is about to mutate, so they can be checkpointed
+ * before the tools run.
+ *
+ * Membership comes from `isFileMutationTool`, the same registry that decides
+ * architect waives approval. A hardcoded list here would drift from that one
+ * and leave newly added mutators auto-executing outside the checkpoint.
+ *
+ * `path` and `destination` cover every file tool's argument shape today; a
+ * mutator carrying neither contributes nothing rather than throwing, which
+ * only costs the turn a revert for that one file.
+ */
+function getArchitectMutationPaths(toolCalls: ToolCall[]): string[] {
+	const paths = new Set<string>();
+
+	for (const toolCall of toolCalls) {
+		if (!isFileMutationTool(toolCall.function.name)) {
+			continue;
+		}
+
+		const args = toolCall.function.arguments as {
+			path?: string;
+			destination?: string;
+		};
+
+		// Both, not either: a move mutates its source and its destination.
+		if (args.path) {
+			paths.add(args.path);
+		}
+
+		if (args.destination) {
+			paths.add(args.destination);
+		}
+	}
+
+	return [...paths];
+}
+
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
 	messages: Message[];
@@ -83,16 +131,23 @@ interface ProcessAssistantResponseParams {
 	addToChatQueue: (component: React.ReactNode) => void;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	developmentMode:
+		| 'normal'
+		| 'auto-accept'
+		| 'yolo'
+		| 'plan'
+		| 'architect'
+		| 'headless';
 	// Live mode ref, read per tool call so a mid-turn mode switch (e.g. flipping
 	// to yolo while tools execute) is honored immediately. Falls back to the
 	// snapshot `developmentMode` for callers that don't supply a ref (subagents,
 	// plain shell).
 	developmentModeRef?: React.RefObject<
-		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect' | 'headless'
 	>;
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
+	architectCheckpointState?: ArchitectCheckpointState;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
 	reasoningExpandedRef?: React.RefObject<boolean>;
@@ -193,6 +248,7 @@ export const processAssistantResponse = async (
 		currentModel,
 		nonInteractiveMode,
 		conversationStateManager,
+		architectCheckpointState,
 		onConversationComplete,
 		conversationStartTime,
 		reasoningExpandedRef,
@@ -713,12 +769,18 @@ export const processAssistantResponse = async (
 		setIsGenerating(false);
 		const stopOption = 'Stop and return to prompt';
 		const continueOption = `Continue (check again after ${maxRepeatedToolCalls} more)`;
-		const answer = await signalQuestion({
-			question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
-			options: [stopOption, continueOption],
-			allowFreeform: false,
-			questionType: 'confirmation',
-		});
+		// Aborting settles this with the slot's error string, which is not
+		// `continueOption`, so a cancelled turn stops rather than hanging on a
+		// question nobody is left to answer.
+		const answer = await signalQuestion(
+			{
+				question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+				options: [stopOption, continueOption],
+				allowFreeform: false,
+				questionType: 'confirmation',
+			},
+			controller.signal,
+		);
 		if (answer !== continueOption) {
 			return false;
 		}
@@ -926,6 +988,50 @@ export const processAssistantResponse = async (
 
 		const turnResults: ToolResult[] = [...blockedResults];
 
+		const inArchitectMode =
+			developmentModeRef?.current === 'architect' ||
+			developmentMode === 'architect';
+
+		if (inArchitectMode && architectCheckpointState) {
+			const mutationPaths = getArchitectMutationPaths(autoTools);
+
+			if (mutationPaths.length > 0) {
+				// A failure here must not take the turn down with it: the tools
+				// below have not run yet, so the user would lose the whole turn
+				// over a checkpoint they never asked for. Warn and carry on
+				// unprotected rather than abort - the review gate reads
+				// `created` and simply will not offer revert.
+				try {
+					const checkpointManager = new CheckpointManager(getProjectRoot());
+
+					if (!architectCheckpointState.created) {
+						const checkpointMetadata = await checkpointManager.saveCheckpoint(
+							`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+							messages,
+							currentProvider,
+							currentModel,
+							mutationPaths,
+						);
+
+						architectCheckpointState.created = true;
+						architectCheckpointState.name = checkpointMetadata.name;
+					} else if (architectCheckpointState.name) {
+						await checkpointManager.extendCheckpoint(
+							architectCheckpointState.name,
+							mutationPaths,
+						);
+					}
+				} catch (error) {
+					logWarning('Could not checkpoint architect turn', true, {
+						context: {
+							error: formatError(error),
+							paths: mutationPaths.join(', '),
+						},
+					});
+				}
+			}
+		}
+
 		// 1) Auto-approved tools execute as a batch (parallelizes consecutive
 		//    read-only / agent runs).
 		if (autoTools.length > 0) {
@@ -1001,7 +1107,11 @@ export const processAssistantResponse = async (
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
-				const approved = await signalToolConfirm({toolCall});
+				// Escape answers the prompt directly, but a turn aborted any
+				// other way must also release it - otherwise the loop stays
+				// parked here and the confirmation for a dead turn stays on
+				// screen. An abort settles this as "declined".
+				const approved = await signalToolConfirm({toolCall}, controller.signal);
 
 				if (!approved) {
 					// Close any VS Code diff previews the formatter opened for the

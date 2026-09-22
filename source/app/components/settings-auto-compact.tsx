@@ -8,6 +8,10 @@ import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {AutoCompactConfig, CompressionMode} from '@/types/config';
+import {
+	COMPRESSION_CONSTANTS,
+	isThresholdInRange,
+} from '@/utils/message-compression';
 
 const MODE_OPTIONS: CompressionMode[] = [
 	'default',
@@ -95,7 +99,10 @@ export function SettingsAutoCompactPanel({
 	const submitThreshold = (value: string) => {
 		const num = Number.parseInt(value.trim(), 10);
 		if (Number.isNaN(num)) return setError('Must be a number');
-		if (num < 50 || num > 95) return setError('Must be between 50 and 95');
+		if (!isThresholdInRange(num))
+			return setError(
+				`Must be between ${COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT} and ${COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT}`,
+			);
 		persist('threshold', num);
 		setEditing(false);
 	};
@@ -113,7 +120,9 @@ export function SettingsAutoCompactPanel({
 			{editing ? (
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>
-						Threshold % (50–95). Current: {config.threshold}%
+						Threshold % ({COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT}–
+						{COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT}). Current:{' '}
+						{config.threshold}%
 					</Text>
 					<Box marginY={1} borderStyle="round" borderColor={colors.secondary}>
 						<TextInput

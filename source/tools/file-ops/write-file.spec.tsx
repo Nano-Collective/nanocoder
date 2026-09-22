@@ -804,6 +804,47 @@ test('write_file formatter: normalizes tabs to 2 spaces', async t => {
 	t.regex(output!, /4 lines/); // Trailing newline creates 4 lines
 });
 
+// ============================================================================
+// Derived-content Guard Tests (PDF/DOCX)
+// ============================================================================
+
+test('write_file: refuses a .pdf and leaves the document untouched', async t => {
+	const pdfBytes = '%PDF-1.4 fake document bytes';
+	const filePath = await createTestFile('doc.pdf', pdfBytes);
+	markFileSeen(filePath);
+
+	await t.throwsAsync(
+		executeWriteFile({path: filePath, content: 'plain transcript text'}),
+		{message: /markdown transcript/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), pdfBytes);
+});
+
+test('write_file validator: refuses a .docx path even when the file is new', async t => {
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+
+		const result = await writeFileTool.validator({
+			path: 'report.docx',
+			content: 'plain transcript text',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /markdown transcript/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
 test('write_file formatter: handles JSX with normalized indentation', async t => {
 	const formatter = writeFileTool.formatter;
 	if (!formatter) {
