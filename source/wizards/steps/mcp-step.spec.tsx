@@ -1078,45 +1078,56 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 			tags: ['custom'],
 		},
 	};
+	// Open straight on "Edit this server", so no arrow key is needed to get
+	// to the form.
 	const {stdin, lastFrame} = render(
 		<McpStep
 			onComplete={servers => {
 				saved = servers;
 			}}
 			existingServers={existingServers}
+			initialEditName="my-server"
 		/>,
 	);
 
-	// Keys sent before a screen has mounted are lost, so press each one only
-	// once the screen it belongs to is showing.
-	const press = async (key: string, until: RegExp) => {
-		for (let i = 0; i < 20 && !until.test(lastFrame()!); i++) {
-			stdin.write(key);
-			await new Promise(resolve => setTimeout(resolve, 100));
+	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	// Generous: a loaded CI runner can take well over a second to render.
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 50 && !until.test(lastFrame()!); i++) {
+			await sleep(100);
 		}
 		t.regex(lastFrame()!, until);
 	};
-	const waitFor = async (until: RegExp) => {
+	// A key sent before its screen has mounted is lost, so Enter is re-sent
+	// until the target shows. That is only safe for Enter here: a surplus one
+	// skips an optional field or adds a blank env line, which is ignored.
+	// Keys that would overshoot (arrows, Esc) are sent once, after their
+	// screen shows, and then waited on.
+	const pressEnterUntil = async (until: RegExp) => {
 		for (let i = 0; i < 20 && !until.test(lastFrame()!); i++) {
-			await new Promise(resolve => setTimeout(resolve, 100));
+			stdin.write('\r');
+			await sleep(250);
 		}
 		t.regex(lastFrame()!, until);
+	};
+	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
+		await waitFor(screen);
+		await sleep(100);
+		stdin.write(key);
+		await waitFor(until);
 	};
 
-	// Edit existing servers -> my-server -> Edit this server, then accept the
-	// transport, name, URL, command and args fields.
-	await press('\u001B[B', /> Edit existing servers/);
-	await press('\r', /my-server/);
-	await press('\r', /Edit this server/);
-	await press('\r', /Field 1\/6/);
-	await press('\r', /Environment variables/);
+	// Edit this server, then accept the transport, name, URL, command and
+	// args fields.
+	await waitFor(/Edit this server/);
+	await pressEnterUntil(/Environment variables/);
 
 	// One key per write, as a person types. Keys this close together reach
 	// the handler before a re-render, so each edit must build on the last.
 	const type = async (keys: string[]) => {
 		for (const key of keys) {
 			stdin.write(key);
-			await new Promise(resolve => setTimeout(resolve, 20));
+			await sleep(20);
 		}
 	};
 	await type([...'API_KEY=abc123XY']);
@@ -1125,13 +1136,12 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 	await waitFor(/API_KEY=abc123(?!X)/);
 
 	// Esc submits the field. Done & Save is last in the list, and Up from the
-	// first item wraps to the last in ink-select-input; the frame check
-	// confirms it is selected before Enter.
-	await press('\u001B', /Added: my-server/);
-	await press('\u001B[A', /> Done & Save/);
+	// first item wraps to the last in ink-select-input.
+	await pressOnce('\u001B', /API_KEY=abc123(?!X)/, /Added: my-server/);
+	await pressOnce('\u001B[A', /Added: my-server/, /> Done & Save/);
 	stdin.write('\r');
-	for (let i = 0; i < 20 && !saved['my-server']; i++) {
-		await new Promise(resolve => setTimeout(resolve, 100));
+	for (let i = 0; i < 50 && !saved['my-server']; i++) {
+		await sleep(100);
 	}
 	t.deepEqual(saved['my-server']?.env, {API_KEY: 'abc123'});
 });
