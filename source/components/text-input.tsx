@@ -37,36 +37,47 @@ function TextInput({
 	onEdgeArrow,
 }: Props) {
 	const [state, setState] = useState({
+		internalValue: originalValue || '',
 		cursorOffset: (originalValue || '').length,
 		cursorWidth: 0,
 	});
 
-	const {cursorOffset, cursorWidth} = state;
+	const {internalValue, cursorOffset, cursorWidth} = state;
 
 	// Refs so useInput handlers always read the latest values (avoids stale closures)
 	const cursorOffsetRef = useRef(cursorOffset);
-	const originalValueRef = useRef(originalValue);
+	const internalValueRef = useRef(internalValue);
+	const pendingSentRef = useRef<string[]>([]);
+
 	cursorOffsetRef.current = cursorOffset;
-	originalValueRef.current = originalValue;
+	internalValueRef.current = internalValue;
 
 	useEffect(() => {
-		setState(previousState => {
-			if (!focus || !showCursor) {
-				return previousState;
-			}
+		if (!focus) {
+			return;
+		}
 
-			const newValue = originalValue || '';
+		const newValue = originalValue || '';
 
-			if (previousState.cursorOffset > newValue.length - 1) {
-				return {
-					cursorOffset: newValue.length,
-					cursorWidth: 0,
-				};
-			}
+		// Check if this new value from props is one we recently sent via onChange
+		const pendingIndex = pendingSentRef.current.indexOf(newValue);
 
-			return previousState;
-		});
-	}, [originalValue, focus, showCursor]);
+		if (pendingIndex !== -1) {
+			// It's an echo from the parent. Remove it and all older echoes from the queue.
+			// We do NOT update our internal state, because we are ahead of the parent.
+			pendingSentRef.current.splice(0, pendingIndex + 1);
+		} else if (newValue !== internalValueRef.current) {
+			// Parent programmatically changed the value (e.g. cleared it or loaded history)!
+			// We must accept this new value and clamp our cursor to it.
+			setState(s => ({
+				...s,
+				internalValue: newValue,
+				cursorOffset: newValue.length,
+				cursorWidth: 0,
+			}));
+			pendingSentRef.current = [];
+		}
+	}, [originalValue, focus]);
 
 	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
@@ -87,7 +98,7 @@ function TextInput({
 	}
 
 	const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
-	const value = mask ? mask.repeat(originalValue.length) : originalValue;
+	const value = mask ? mask.repeat(internalValue.length) : internalValue;
 	let renderedValue = value;
 	let renderedPlaceholder = placeholder ? chalk.grey(placeholder) : undefined;
 
@@ -127,7 +138,7 @@ function TextInput({
 			// Visual lines include soft-wrapped rows — a single long line with no
 			// \n that wraps at wrapWidth is still multiline for navigation.
 			if (key.upArrow || key.downArrow) {
-				const val = originalValueRef.current;
+				const val = internalValueRef.current;
 				const cur = cursorOffsetRef.current;
 				if (!showCursor) {
 					return;
@@ -153,18 +164,18 @@ function TextInput({
 
 			if (key.return) {
 				if (handleEnter && onEnter) {
-					onEnter(originalValueRef.current);
+					onEnter(internalValueRef.current);
 					return;
 				}
 				if (handleEnter && onSubmit) {
-					onSubmit(originalValueRef.current);
+					onSubmit(internalValueRef.current);
 					return;
 				}
 				return;
 			}
 
 			let nextCursorOffset = cursorOffsetRef.current;
-			let nextValue = originalValueRef.current;
+			let nextValue = internalValueRef.current;
 			let nextCursorWidth = 0;
 
 			if (key.home) {
@@ -173,14 +184,14 @@ function TextInput({
 				}
 			} else if (key.end) {
 				if (showCursor) {
-					nextCursorOffset = originalValueRef.current.length;
+					nextCursorOffset = internalValueRef.current.length;
 				}
 			} else if (key.ctrl) {
 				if (key.leftArrow) {
 					// Ctrl+Left: jump to start of previous word
 					if (showCursor) {
 						nextCursorOffset = moveToPrevWord(
-							originalValueRef.current,
+							internalValueRef.current,
 							cursorOffsetRef.current,
 						);
 					}
@@ -188,7 +199,7 @@ function TextInput({
 					// Ctrl+Right: jump to end of next word
 					if (showCursor) {
 						nextCursorOffset = moveToNextWord(
-							originalValueRef.current,
+							internalValueRef.current,
 							cursorOffsetRef.current,
 						);
 					}
@@ -206,7 +217,7 @@ function TextInput({
 						case 'e': {
 							// Move cursor to end of line
 							if (showCursor) {
-								nextCursorOffset = originalValueRef.current.length;
+								nextCursorOffset = internalValueRef.current.length;
 							}
 							break;
 						}
@@ -235,19 +246,19 @@ function TextInput({
 								let i = cursorOffsetRef.current;
 								while (
 									i > 0 &&
-									(originalValueRef.current[i - 1] === ' ' ||
-										originalValueRef.current[i - 1] === '\n')
+									(internalValueRef.current[i - 1] === ' ' ||
+										internalValueRef.current[i - 1] === '\n')
 								)
 									i--;
 								while (
 									i > 0 &&
-									originalValueRef.current[i - 1] !== ' ' &&
-									originalValueRef.current[i - 1] !== '\n'
+									internalValueRef.current[i - 1] !== ' ' &&
+									internalValueRef.current[i - 1] !== '\n'
 								)
 									i--;
 								nextValue =
-									originalValueRef.current.slice(0, i) +
-									originalValueRef.current.slice(cursorOffsetRef.current);
+									internalValueRef.current.slice(0, i) +
+									internalValueRef.current.slice(cursorOffsetRef.current);
 								nextCursorOffset = i;
 							}
 
@@ -256,7 +267,7 @@ function TextInput({
 
 						case 'u': {
 							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(
+							nextValue = internalValueRef.current.slice(
 								cursorOffsetRef.current,
 							);
 							nextCursorOffset = 0;
@@ -265,7 +276,7 @@ function TextInput({
 
 						case 'k': {
 							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(
+							nextValue = internalValueRef.current.slice(
 								0,
 								cursorOffsetRef.current,
 							);
@@ -290,45 +301,33 @@ function TextInput({
 				(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
 			) {
 				// Backspace deletes the character before the cursor.
-				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
-				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence: '\x7f' and the Option/Alt+Backspace variant '\x1b\x7f'
-				// (macOS/Linux terminals) are backward deletes, while '\x1b[3~'
-				// is the forward Delete key. Kitty keyboard protocol encodes
-				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
-				// it is dormant here because nanocoder does not enable
-				// kittyKeyboard — if that changes, this guard needs the
-				// corresponding handling.
 				if (cursorOffsetRef.current > 0) {
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
-						originalValueRef.current.slice(
+						internalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
+						internalValueRef.current.slice(
 							cursorOffsetRef.current,
-							originalValueRef.current.length,
+							internalValueRef.current.length,
 						);
 					nextCursorOffset--;
 				}
 			} else if (key.delete) {
 				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
-				if (cursorOffsetRef.current < originalValueRef.current.length) {
+				if (cursorOffsetRef.current < internalValueRef.current.length) {
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current) +
-						originalValueRef.current.slice(
+						internalValueRef.current.slice(0, cursorOffsetRef.current) +
+						internalValueRef.current.slice(
 							cursorOffsetRef.current + 1,
-							originalValueRef.current.length,
+							internalValueRef.current.length,
 						);
 					// Cursor stays in place — forward delete doesn't move it.
 				}
 			} else {
 				nextValue =
-					originalValueRef.current.slice(0, cursorOffsetRef.current) +
+					internalValueRef.current.slice(0, cursorOffsetRef.current) +
 					input +
-					originalValueRef.current.slice(
+					internalValueRef.current.slice(
 						cursorOffsetRef.current,
-						originalValueRef.current.length,
+						internalValueRef.current.length,
 					);
 				nextCursorOffset += input.length;
 
@@ -348,13 +347,20 @@ function TextInput({
 			// Update refs immediately so the next event in the same stdin.read()
 			// block sees the correct values (Ink doesn't re-render between events)
 			cursorOffsetRef.current = nextCursorOffset;
+			internalValueRef.current = nextValue;
+
 			setState({
+				internalValue: nextValue,
 				cursorOffset: nextCursorOffset,
 				cursorWidth: nextCursorWidth,
 			});
 
-			if (nextValue !== originalValueRef.current) {
-				originalValueRef.current = nextValue;
+			if (nextValue !== internalValue) {
+				pendingSentRef.current.push(nextValue);
+				// To prevent memory leak in case the parent never echoes, keep the queue bounded
+				if (pendingSentRef.current.length > 200) {
+					pendingSentRef.current.shift();
+				}
 				onChange(nextValue);
 			}
 		},
