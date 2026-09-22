@@ -566,12 +566,8 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	if (outputFormat === 'json' && isReviewCommand) {
-		console.error(
-			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
-		);
-		process.exit(1);
-	}
+	// --output-format json IS allowed with review: the headless runner emits
+	// the machine-readable report for piped/CI use.
 
 	const ciDetected =
 		process.env.CI === 'true' ||
@@ -589,15 +585,10 @@ async function main(): Promise<void> {
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
 
-	// Hard-error when `review` lands in a non-interactive context (piped
-	// stdout, CI). The plain shell has no slash-command dispatch, so
-	// `/review <target>` would be sent verbatim to the model as chat.
-	if (isReviewCommand && !process.stdout.isTTY) {
-		console.error(
-			'Error: `nanocoder review` requires an interactive terminal (TTY).',
-		);
-		process.exit(1);
-	}
+	// `review` in a non-interactive context (piped stdout, CI) runs through
+	// the dedicated headless runner below instead of the TUI. The plain shell
+	// has no slash-command dispatch, so the prompt would otherwise reach the
+	// model verbatim as chat.
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
@@ -661,6 +652,96 @@ async function main(): Promise<void> {
 	} else if (acpMode) {
 		const {runAcpServer} = await import('@/acp/acp-server');
 		await runAcpServer({cliProvider, cliModel, appVersion: version});
+	} else if (isReviewCommand && nonInteractivePrompt) {
+		// Headless review: piped/redirected stdout or CI. Runs the same tiers
+		// as the interactive command without Ink; report or JSON goes to
+		// stdout, status to stderr. Default tier targets the current branch
+		// against the default branch when no target is given.
+		const {initializePlain} = await import('@/plain/initialize');
+		const {runHeadlessReview} = await import('@/review/headless-review');
+		const {execGit, getCurrentBranch, getDefaultBranch, isGhAvailable, execGh} =
+			await import('@/tools/git/utils');
+
+		const init = await initializePlain({cliProvider, cliModel});
+
+		const reviewArgs = nonInteractivePrompt.startsWith('/review')
+			? nonInteractivePrompt
+					.slice('/review'.length)
+					.trim()
+					.split(/\s+/)
+					.filter(Boolean)
+			: [];
+
+		const resolveDiff = async () => {
+			const defaultBranch = await getDefaultBranch();
+			const currentBranch = await getCurrentBranch();
+			let target: string | undefined = reviewArgs[reviewArgs.length - 1];
+			// Drop a tier word if the caller passed one; the runner re-parses.
+			if (target === 'quick' || target === 'deep' || target === 'default') {
+				target = undefined;
+			}
+			if (!target) {
+				const diff = await execGit([
+					'diff',
+					'--no-ext-diff',
+					'--no-color',
+					`${defaultBranch}...${currentBranch}`,
+				]);
+				return {
+					ok: true,
+					diff,
+					targetDescription: `current branch "${currentBranch}" against "${defaultBranch}"`,
+				};
+			}
+			if (/^\d+$/.test(target)) {
+				const ghAvailable = isGhAvailable();
+				if (ghAvailable) {
+					const remote = await execGit(['remote', 'get-url', 'origin']);
+					const match = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
+					if (!match?.[1]) {
+						return {
+							ok: false,
+							error: 'Cannot determine GitHub repository slug from remote URL.',
+						};
+					}
+					const diff = await execGh(['pr', 'diff', target, '--repo', match[1]]);
+					return {ok: true, diff, targetDescription: `PR #${target}`};
+				}
+				return {
+					ok: false,
+					error:
+						'PR review requires the gh CLI. Install it from https://cli.github.com or use a branch name instead.',
+				};
+			}
+			const branch = target === defaultBranch ? currentBranch : target;
+			const diff = await execGit([
+				'diff',
+				'--no-ext-diff',
+				'--no-color',
+				`${defaultBranch}...${branch}`,
+			]);
+			return {
+				ok: true,
+				diff,
+				targetDescription:
+					target === defaultBranch
+						? `current branch "${currentBranch}" against "${defaultBranch}"`
+						: `branch "${target}" against "${defaultBranch}"`,
+			};
+		};
+
+		const outcome = await runHeadlessReview(
+			{args: reviewArgs, client: init.client, resolveDiff},
+			outputFormat,
+		);
+		if (outcome.stdout) {
+			process.stdout.write(outcome.stdout);
+			if (outputFormat !== 'json') {
+				process.stdout.write('\n');
+			}
+		}
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(outcome.exitCode);
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.
