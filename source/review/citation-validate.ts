@@ -17,14 +17,6 @@ export interface ChangedLines {
 	files: Map<string, Set<number>>;
 }
 
-export interface CitationCheck {
-	file: string;
-	line: number;
-	exists: boolean;
-	lineInRange: boolean;
-	inChangedHunk: boolean | null;
-}
-
 export interface CitationValidationResult {
 	valid: Array<{file: string; line: number}>;
 	invalid: Array<{file: string; line: number; reason: string}>;

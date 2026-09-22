@@ -290,13 +290,3 @@ export function formatFinding(finding: ReviewFinding): string {
 		`EVIDENCE: ${finding.evidence}`,
 	].join('\n');
 }
-
-/** Render one verdict the way the report shows dropped findings. */
-export function formatVerdict(
-	finding: ReviewFinding,
-	verdict: ReviewVerdict | 'UNVERIFIED',
-	reason: string,
-): string {
-	const verdictLabel = verdict === 'UNVERIFIED' ? 'UNVERIFIED' : verdict;
-	return `${verdictLabel} ${finding.file}:${finding.line} — ${reason}`;
-}
