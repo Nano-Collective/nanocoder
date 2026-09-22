@@ -32,6 +32,7 @@ interface Overrides {
 	updateMessages?: (messages: Message[]) => void;
 	chatComponents?: React.ReactNode[];
 	setChatComponents?: (components: React.ReactNode[]) => void;
+	addToChatQueue?: (component: React.ReactNode) => void;
 	setIsCancelling?: (value: boolean) => void;
 	setAbortController?: (controller: AbortController | null) => void;
 	client?: unknown;
@@ -116,7 +117,7 @@ function makeProps(o: Overrides = {}) {
 		setCompactToolDisplay: noop,
 		setCompactToolCounts: noop,
 		setReasoningExpanded: noop,
-		addToChatQueue: noop,
+		addToChatQueue: o.addToChatQueue ?? noop,
 		updateMessages: o.updateMessages ?? noop,
 		setChatComponents: o.setChatComponents ?? noop,
 		setIsCancelling: o.setIsCancelling ?? noop,
@@ -327,6 +328,7 @@ test('does not drain queued prompts while plan proceed is pending', async t => {
 
 test('does not immediately retry a failed queued dispatch', async t => {
 	let dispatchAttempts = 0;
+	const notices: React.ReactNode[] = [];
 	let releaseFailure = () => {};
 	const failure = new Promise<void>(resolve => {
 		releaseFailure = () => resolve();
@@ -342,6 +344,9 @@ test('does not immediately retry a failed queued dispatch', async t => {
 				client: {},
 				toolManager: {},
 				isConversationComplete: true,
+				addToChatQueue: notice => {
+					notices.push(notice);
+				},
 				handleUserSubmit: async () => {
 					dispatchAttempts++;
 					signalFirstDispatch();
@@ -360,6 +365,13 @@ test('does not immediately retry a failed queued dispatch', async t => {
 	releaseFailure();
 	await new Promise(resolve => setTimeout(resolve, 25));
 	t.is(dispatchAttempts, 1);
+	t.is(notices.length, 1);
+	const notice = notices[0];
+	t.true(React.isValidElement(notice));
+	t.regex(
+		String((notice as React.ReactElement<{message: string}>).props.message),
+		/Queued prompt failed.*Enter to edit/,
+	);
 });
 
 test('does not drain queued prompts while conversation is incomplete', async t => {
