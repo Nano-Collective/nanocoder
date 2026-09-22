@@ -1,9 +1,9 @@
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
-import {AgentsTemplateGenerator} from '@/init/agents-template-generator';
-import {ExistingRulesExtractor} from '@/init/existing-rules-extractor';
-import {applyPresetToAnalysis, resolvePreset} from '@/init/preset-registry';
-import {type ProjectAnalysis, ProjectAnalyzer} from '@/init/project-analyzer';
+import {AgentsTemplateGenerator} from './agents-template-generator';
+import {ExistingRulesExtractor} from './existing-rules-extractor';
+import {applyPresetToAnalysis, resolvePreset} from './preset-registry';
+import {type ProjectAnalysis, ProjectAnalyzer} from './project-analyzer';
 
 export interface InitializeProjectOptions {
 	projectPath: string;

@@ -1,4 +1,4 @@
-import type {PresetDefinition} from '@/init/presets';
+import type {PresetDefinition} from '../presets';
 
 export const nextjsPreset = {
 	name: 'nextjs',

@@ -1,6 +1,6 @@
-import {THRESHOLD_LARGE_CODEBASE_FILES} from '@/constants';
-import type {ExistingRules} from '@/init/existing-rules-extractor';
-import type {ProjectAnalysis} from '@/init/project-analyzer';
+import {THRESHOLD_LARGE_CODEBASE_FILES} from '../constants';
+import type {ExistingRules} from './existing-rules-extractor';
+import type {ProjectAnalysis} from './project-analyzer';
 import test from 'ava';
 import {AgentsTemplateGenerator} from './agents-template-generator';
 

@@ -4,8 +4,8 @@ import {
 	resolvePreset,
 	supportedPresetNames,
 	UnknownPresetError,
-} from '@/init/preset-registry';
-import type {ProjectAnalysis} from '@/init/project-analyzer';
+} from './preset-registry';
+import type {ProjectAnalysis} from './project-analyzer';
 
 test('preset registry exposes the supported preset names', t => {
 	t.deepEqual(supportedPresetNames, ['react', 'nextjs', 'rust']);

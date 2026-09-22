@@ -1,5 +1,5 @@
 import {basename, extname} from 'path';
-import {MAX_SECONDARY_LANGUAGES, MIN_LANGUAGE_PERCENTAGE} from '@/constants';
+import {MAX_SECONDARY_LANGUAGES, MIN_LANGUAGE_PERCENTAGE} from '../constants';
 
 interface LanguageInfo {
 	name: string;

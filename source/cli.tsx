@@ -109,8 +109,8 @@ Examples:
 	}
 
 	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
+		import('./init/init-args'),
+		import('./init/initializer'),
 	]);
 	try {
 		const options = parseInitArguments(args.slice(1));

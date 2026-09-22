@@ -1,8 +1,8 @@
-import type {PresetDefinition, PresetName} from '@/init/presets';
-import type {ProjectAnalysis} from '@/init/project-analyzer';
-import {nextjsPreset} from '@/init/templates/preset-nextjs';
-import {reactPreset} from '@/init/templates/preset-react';
-import {rustPreset} from '@/init/templates/preset-rust';
+import type {PresetDefinition, PresetName} from './presets';
+import type {ProjectAnalysis} from './project-analyzer';
+import {nextjsPreset} from './templates/preset-nextjs';
+import {reactPreset} from './templates/preset-react';
+import {rustPreset} from './templates/preset-rust';
 
 const presets: Record<PresetName, PresetDefinition> = {
 	react: reactPreset,

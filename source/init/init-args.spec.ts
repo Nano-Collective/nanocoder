@@ -1,5 +1,5 @@
 import test from 'ava';
-import {InitArgumentError, parseInitArguments} from '@/init/init-args';
+import {InitArgumentError, parseInitArguments} from './init-args';
 
 test('parseInitArguments parses --preset for the init command', t => {
 	t.deepEqual(parseInitArguments(['--preset', 'react']), {

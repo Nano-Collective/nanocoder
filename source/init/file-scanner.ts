@@ -1,7 +1,7 @@
 import {readdirSync, statSync} from 'fs';
 import {basename, join, relative} from 'path';
-import {MAX_DIRECTORY_DEPTH, MAX_FILES_TO_SCAN} from '@/constants';
-import {loadGitignore} from '@/utils/gitignore-loader';
+import {MAX_DIRECTORY_DEPTH, MAX_FILES_TO_SCAN} from '../constants';
+import {loadGitignore} from '../utils/gitignore-loader';
 
 interface ScanResult {
 	files: string[];

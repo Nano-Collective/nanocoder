@@ -9,12 +9,12 @@ import {
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {parseCommandFile} from '@/custom-commands/parser';
+import {parseCommandFile} from '../custom-commands/parser';
 import {
 	initializeProject,
 	ProjectAlreadyInitializedError,
-} from '@/init/initializer';
-import {UnknownPresetError} from '@/init/preset-registry';
+} from './initializer';
+import {UnknownPresetError} from './preset-registry';
 
 function createTestProject(): string {
 	return mkdtempSync(join(tmpdir(), 'nanocoder-preset-'));

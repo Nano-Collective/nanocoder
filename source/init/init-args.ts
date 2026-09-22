@@ -1,4 +1,4 @@
-import {supportedPresetNames} from '@/init/preset-registry';
+import {supportedPresetNames} from './preset-registry';
 
 export interface ParsedInitArguments {
 	forceRegenerate: boolean;

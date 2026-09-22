@@ -1,4 +1,4 @@
-import type {ProjectAnalysis} from '@/init/project-analyzer';
+import type {ProjectAnalysis} from './project-analyzer';
 
 export type PresetName = 'react' | 'nextjs' | 'rust';
 

@@ -1,11 +1,8 @@
 import {existsSync, readFileSync} from 'fs';
 import {basename, join} from 'path';
-import {FileScanner} from '@/init/file-scanner';
-import {
-	FrameworkDetector,
-	ProjectDependencies,
-} from '@/init/framework-detector';
-import {DetectedLanguages, LanguageDetector} from '@/init/language-detector';
+import {FileScanner} from './file-scanner';
+import {FrameworkDetector, ProjectDependencies} from './framework-detector';
+import {DetectedLanguages, LanguageDetector} from './language-detector';
 
 export interface ProjectAnalysis {
 	projectPath: string;
