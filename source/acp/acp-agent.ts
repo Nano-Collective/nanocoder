@@ -194,15 +194,18 @@ export class AcpAgent implements Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
-		// ACP clients drive one turn per session at a time; reject overlap rather
-		// than letting two turns interleave mutations of session.messages.
-		if (session.turnActive) {
-			throw new Error(
-				`Prompt already in progress for session: ${params.sessionId}`,
-			);
+		// Wait for any in-flight turn. Rejecting overlap made the VS Code
+		// webview toast `RequestError: Internal error` whenever a follow-up
+		// was submitted mid-turn. Acquire before the first await so two
+		// concurrent calls cannot both pass an idle check.
+		const ticket = session.acquireTurn();
+		if (ticket.immediate) {
+			session.beginTurn();
 		}
-
-		session.beginTurn();
+		await ticket.ready;
+		if (!ticket.immediate) {
+			session.beginTurn();
+		}
 
 		// Both the cancel early-return below and the rethrow after it still run
 		// the finally, so a clean turn has to be tracked explicitly rather than
@@ -239,7 +242,7 @@ export class AcpAgent implements Agent {
 						this.initContext.customCommandLoader?.getCommand(commandName);
 
 					if (command) {
-						// Custom user-defined command ‚Äî expand its instructions into the prompt
+						// Custom user-defined command ù expand its instructions into the prompt
 						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
 						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
 					} else {
@@ -287,17 +290,17 @@ export class AcpAgent implements Agent {
 									? customCmds
 											.map(
 												c =>
-													`- \`/${c.fullName}\` ‚Äî ${c.metadata.description || 'custom command'}`,
+													`- \`/${c.fullName}\` ù ${c.metadata.description || 'custom command'}`,
 											)
 											.join('\n')
 									: '';
 							const msg = [
 								'**Available slash commands in VS Code GUI:**',
 								'',
-								'- `/clear` ‚Äî Clear the current conversation',
-								'- `/copy` ‚Äî Copy the last assistant response',
-								'- `/copy code` ‚Äî Copy the last code block from the last response',
-								'- `/help` ‚Äî Show this help message',
+								'- `/clear` ù Clear the current conversation',
+								'- `/copy` ù Copy the last assistant response',
+								'- `/copy code` ù Copy the last code block from the last response',
+								'- `/help` ù Show this help message',
 								'',
 								'**Not available in VS Code GUI** (CLI-only):',
 								'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
@@ -446,7 +449,6 @@ export class AcpAgent implements Agent {
 
 			throw error;
 		} finally {
-			session.turnActive = false;
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
@@ -474,6 +476,7 @@ export class AcpAgent implements Agent {
 					},
 				}).catch(() => {});
 			}
+			session.releaseTurn();
 		}
 	}
 
@@ -841,7 +844,7 @@ export class AcpAgent implements Agent {
 				}
 			} else if (message.role === 'assistant') {
 				// runAcpConversation no longer stores whitespace-only reasoning, so
-				// this guard is for sessions written before that ‚Äî replaying one
+				// this guard is for sessions written before that ù replaying one
 				// would otherwise open a thought section that renders to nothing.
 				if (message.reasoning && message.reasoning.trim().length > 0) {
 					await this.conn.sessionUpdate({
@@ -1056,7 +1059,7 @@ export class AcpAgent implements Agent {
 			}
 
 			// Simple title generation if it's new. A user-renamed title is never
-			// auto-derived over ‚Äî the flag below is what tells the CLI's autosave
+			// auto-derived over ù the flag below is what tells the CLI's autosave
 			// the same thing, so it has to be carried forward on every save.
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {

@@ -37,6 +37,17 @@ export class NanocoderAcpClient {
 	public currentProvider?: string;
 	public availableProviders: string[] = [];
 
+	/**
+	 * True only after `initialize()` has succeeded on the current connection.
+	 * `connection` is set earlier, when stdio is wired — using that as a ready
+	 * signal lets `newSession` race the handshake and fail silently.
+	 */
+	private _handshakeComplete = false;
+
+	get isHandshakeComplete(): boolean {
+		return this._handshakeComplete && this.connection != null;
+	}
+
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
 	private activePrompt?: PromptAttempt;
 
@@ -89,6 +100,7 @@ export class NanocoderAcpClient {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._clearPendingPermissions();
+		this._handshakeComplete = false;
 	}
 
 	/** Handle custom notifications from the agent. */
@@ -171,6 +183,7 @@ export class NanocoderAcpClient {
 			}
 
 			// Complete handshake
+			this._handshakeComplete = true;
 			this.stateManager.setStatus(ACPStatus.Connected);
 			if (this.onConnectionReady) {
 				this.onConnectionReady();
@@ -227,7 +240,7 @@ export class NanocoderAcpClient {
 	}
 
 	notifyStateSync() {
-		if (this.onStateSync && (this.currentMode || this.currentModel || this.currentProvider)) {
+		if (this.onStateSync) {
 			this.onStateSync({
 				mode: this.currentMode,
 				availableModes: this.availableModes,

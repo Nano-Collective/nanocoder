@@ -22,6 +22,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
 - **Agent Action List**: Tool calls are announced before the batch runs, so you can see queued work rather than only what has finished.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
+- **Queued Follow-ups**: Type a follow-up while a turn is still running and it waits in line instead of being rejected. Queued messages show a Queued badge and run in order as the agent frees up.
 - **Cancellation**: The Stop button or the Escape key ends the whole turn - the current tool is aborted and any queued tools are skipped.
 - **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json`.
 - **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
@@ -74,7 +75,9 @@ nanocoder --vscode
 
 4. **Approvals**: In modes that require confirmation, tool cards show Approve / Deny buttons inline. When the AI asks you a question (the `ask_user` tool), the full question is shown with one button per answer.
 
-5. **Stop**: The send button becomes a stop button while a turn is running. Pressing it - or pressing **Escape** anywhere in the chat panel - cancels the current tool, skips any queued tools, and ends the turn. No further requests are made until you send another message.
+5. **Queue a follow-up**: You do not have to wait for a turn to finish. Type your next instruction and press Enter - it appears in the transcript with a Queued badge and is sent as soon as the current turn ends. Queued messages run in the order you submitted them, and the `×` next to the badge removes one before it starts.
+
+6. **Stop**: While a turn is running and the composer is empty, the send button is a stop button. Pressing it - or pressing **Escape** anywhere in the chat panel - cancels the current tool, skips any queued tools, discards any queued follow-ups, and ends the turn. No further requests are made until you send another message. As soon as you type a follow-up the button turns back into Send so clicking it queues rather than cancels.
 
 ### Provider, Model, and Mode
 
