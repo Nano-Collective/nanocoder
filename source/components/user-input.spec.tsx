@@ -1402,3 +1402,76 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
+
+// Shift+Enter used to be appended to the END of the value by UserInput while
+// the caret stayed put, so each following word was spliced in at the stale
+// offset: `one`, `two`, `three` submitted as `onetwothree\n\n`. The insert
+// now happens at the caret, inside TextInput, which owns it.
+test('Shift+Enter inserts a line break instead of scrambling the message', async t => {
+	// CSI-u encoding, which is what kitty/WezTerm/Ghostty/iTerm2 actually send.
+	const SHIFT_ENTER = '\u001b[13;2u';
+	let submittedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	// Each key gets its own settle: a word (or the submit) arriving in the same
+	// stdin batch as the break before it would be applied to the pre-break
+	// value, which is a race in the test, not the behaviour under test.
+	stdin.write('one');
+	await waitForFrame(lastFrame, /one/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('two');
+	await waitForFrame(lastFrame, /two/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('three');
+	await waitForFrame(lastFrame, /three/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage !== '');
+
+	t.is(submittedMessage, 'one\ntwo\nthree');
+});
+
+test('Ctrl+J still inserts a line break in both encodings', async t => {
+	// Most terminals send a literal LF for Ctrl+J; under the kitty keyboard
+	// protocol it arrives as CSI-u instead, which used to be dropped entirely.
+	for (const CTRL_J of ['\n', '\u001b[106;5u']) {
+		let submittedMessage = '';
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={message => {
+						submittedMessage = message;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		stdin.write('one');
+		await waitForFrame(lastFrame, /one/);
+		stdin.write(CTRL_J);
+		await wait(50);
+		stdin.write('two');
+		await waitForFrame(lastFrame, /two/);
+		await wait(50);
+		stdin.write('\r');
+		await waitForCondition(() => submittedMessage !== '');
+
+		t.is(submittedMessage, 'one\ntwo');
+		unmount();
+	}
+});
