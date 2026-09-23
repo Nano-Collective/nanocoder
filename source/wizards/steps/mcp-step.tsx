@@ -268,12 +268,12 @@ export function McpStep({
 								.join('\n');
 						} else if (field.name === 'apiKey') {
 							// Try to find the API key from env vars first, then
-							// fall back to a bearer Authorization header. Only
-							// templates whose credential field is literally
-							// named `apiKey` and stored in headers take this
-							// path (today just `you`); `github-remote` uses a
-							// `githubToken` field, so it never hits this
-							// branch.
+							// fall back to a bearer Authorization header or an
+							// X-API-Key header. Only templates whose credential
+							// field is literally named `apiKey` and stored in
+							// headers take this path (today `you` and `serply`);
+							// `github-remote` uses a `githubToken` field, so it
+							// never hits this branch.
 							const apiKeyEntry = server.env
 								? Object.entries(server.env).find(
 										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
@@ -285,6 +285,8 @@ export function McpStep({
 								answers.apiKey = server.headers.Authorization.slice(
 									'Bearer '.length,
 								);
+							} else if (server.headers?.['X-API-Key']) {
+								answers.apiKey = server.headers['X-API-Key'];
 							}
 						}
 					}
