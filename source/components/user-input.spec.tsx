@@ -1433,7 +1433,11 @@ test.serial(
 		stdin.write('Z');
 		await waitForFrame(lastFrame, /aXYZbc/);
 
-		t.regex(lastFrame()!, /aXYZbc/);
+		// Match against the stripped frame: inverse ANSI on the cursor
+		// character interleaves with the surrounding text in the raw output,
+		// which makes a contiguous /aXYZbc/ regex miss. waitForFrame strips
+		// before matching for the same reason.
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
 		unmount();
 	},
 );
