@@ -111,6 +111,15 @@ export function useAppState(
 		show: boolean;
 		originalMessage: string;
 	} | null>(null);
+
+	// Architect review state (post-turn aggregate file review)
+	const [architectReviewState, setArchitectReviewState] = useState<{
+		show: boolean;
+		checkpointName: string;
+		filesChanged: string[];
+		filesMissing: string[];
+	} | null>(null);
+
 	// One-shot signal: set true by the chat handler when a turn that started in
 	// plan mode completes uninterrupted. The interactive UI consumes it to show
 	// the plan review bar (reading the latest messages), then resets it.
@@ -398,6 +407,7 @@ export function useAppState(
 		isSettingsMode,
 		settingsActiveTab,
 		planReviewState,
+		architectReviewState,
 		planTurnCompleted,
 		pendingPlanProceed,
 		abortController,
@@ -469,6 +479,7 @@ export function useAppState(
 		setIsSettingsMode,
 		setSettingsActiveTab,
 		setPlanReviewState,
+		setArchitectReviewState,
 		setPlanTurnCompleted,
 		setPendingPlanProceed,
 		setAbortController,

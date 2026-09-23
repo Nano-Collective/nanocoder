@@ -40,6 +40,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
+import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {handleResourceMention} from '@/utils/resource-mention-handler';
 import {pasteEvents} from '@/utils/terminal-paste';
@@ -110,7 +111,7 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 // in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
 const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
-	['Ctrl+J', 'New line'],
+	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
 	['Tab', 'Accept file / command suggestion'],
 	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
@@ -247,6 +248,8 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
+		undo,
+		redo,
 		insertPaste,
 	} = inputState;
 
@@ -766,7 +769,7 @@ export default function UserInput({
 
 	const handleQueueNavigation = useCallback(
 		(direction: 'up' | 'down') => {
-			if (!isBusy || input.length > 0 || queuedMessages.length === 0) {
+			if (input.length > 0 || queuedMessages.length === 0) {
 				return false;
 			}
 
@@ -789,12 +792,11 @@ export default function UserInput({
 			setSelectedQueuedIndex(selectedQueuedIndex + 1);
 			return true;
 		},
-		[isBusy, input.length, queuedMessages.length, selectedQueuedIndex],
+		[input.length, queuedMessages.length, selectedQueuedIndex],
 	);
 
 	const loadSelectedQueuedMessage = useCallback(() => {
 		if (
-			!isBusy ||
 			input.length > 0 ||
 			selectedQueuedIndex < 0 ||
 			selectedQueuedIndex >= queuedMessages.length
@@ -815,7 +817,6 @@ export default function UserInput({
 		setTextInputKey(prev => prev + 1);
 		return true;
 	}, [
-		isBusy,
 		input.length,
 		selectedQueuedIndex,
 		queuedMessages,
@@ -825,7 +826,6 @@ export default function UserInput({
 
 	const removeSelectedQueuedMessage = useCallback(() => {
 		if (
-			!isBusy ||
 			input.length > 0 ||
 			selectedQueuedIndex < 0 ||
 			selectedQueuedIndex >= queuedMessages.length
@@ -839,7 +839,6 @@ export default function UserInput({
 		);
 		return true;
 	}, [
-		isBusy,
 		input.length,
 		selectedQueuedIndex,
 		queuedMessages,
@@ -927,6 +926,24 @@ export default function UserInput({
 			return;
 		}
 
+		// Ctrl+Z / Ctrl+Y: undo / redo the last input edit. State lives in
+		// useInputState's undo/redo stacks, which are unused by any key binding,
+		// so we surface them here. Both are no-ops on an empty stack.
+		//
+		// NB: we deliberately do NOT bump textInputKey here. Bumping it remounts
+		// <TextInput>, which resets its internal cursor to end-of-value and tears
+		// down the whole subtree on every undo/redo. TextInput's own value-sync
+		// effect already clamps the cursor to a valid offset when the value
+		// changes, so undoing keeps the caret roughly where it was.
+		if (key.ctrl && inputChar === 'z') {
+			undo();
+			return;
+		}
+		if (key.ctrl && inputChar === 'y') {
+			redo();
+			return;
+		}
+
 		// Handle special keys
 		if (key.escape) {
 			handleEscape();
@@ -994,9 +1011,14 @@ export default function UserInput({
 			focus('user-input');
 		}
 
-		// Multiline input (Ctrl+J and Shift+Enter) is inserted by TextInput, which
-		// owns the cursor. Appending the newline here instead left the caret behind
-		// and spliced every later keystroke in at the stale offset.
+		// Newline keys must not submit, select a completion, or recall a queued
+		// message. The insertion itself is TextInput's job — it knows the cursor
+		// offset, so the newline lands where the caret is. Bail out here before
+		// any of the Enter handling below, since ESC+CR and the kitty CSI-u
+		// encoding of Shift+Enter both arrive with `key.return` set.
+		if (isNewlineKey(inputChar, key)) {
+			return;
+		}
 
 		// Handle Enter to select completion
 		if (
@@ -1308,6 +1330,9 @@ export default function UserInput({
 			input box content. */}
 			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
+					// Must match the wrapper's marginLeft: the indicator budgets its
+					// segments against the width left after this indent.
+					indentColumns={3}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}

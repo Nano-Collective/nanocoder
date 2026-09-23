@@ -1397,6 +1397,7 @@ test.serial(
 							contextWindows: {
 								model1: 65536,
 							},
+							maxOutputTokens: 32000,
 						},
 					],
 				},
@@ -1417,6 +1418,10 @@ test.serial(
 		t.truthy(providerConfig);
 		t.is(providerConfig?.contextWindow, 32768);
 		t.deepEqual(providerConfig?.contextWindows, {model1: 65536});
+		// Without this the provider entry cannot raise the output ceiling, and
+		// headless runs — which never carry /tune parameters — are stuck with
+		// whatever the SDK infers from the model id.
+		t.is(providerConfig?.maxOutputTokens, 32000);
 	},
 );
 

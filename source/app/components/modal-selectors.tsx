@@ -124,7 +124,13 @@ export function ModalSelectors({
 	}
 
 	if (activeMode === 'modelDatabase') {
-		return <ModelDatabaseDisplay onCancel={onModelDatabaseCancel} />;
+		return (
+			<ModelDatabaseDisplay
+				onCancel={onModelDatabaseCancel}
+				currentProvider={currentProvider}
+				onModelSelect={onModelSelect}
+			/>
+		);
 	}
 
 	if (activeMode === 'configWizard') {

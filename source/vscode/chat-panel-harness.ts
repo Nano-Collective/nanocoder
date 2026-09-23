@@ -30,6 +30,11 @@ const SHELL_IDS = [
 	'add-image-btn',
 	'add-menu-btn',
 	'add-menu-dropdown',
+	'artifact-bar',
+	'artifact-close',
+	'artifact-content',
+	'artifact-links',
+	'artifact-toggle',
 	'attach-btn',
 	'chat-input',
 	'chat-view',
@@ -115,6 +120,9 @@ export function createElement(tagName: string): StubElement {
 		style: {},
 		dataset: {},
 		children: [] as StubElement[],
+		get childElementCount() {
+			return element.children.length;
+		},
 		parentElement: null as StubElement | null,
 		classList: {
 			add: (...names: string[]) => names.forEach(name => classes.add(name)),
@@ -202,7 +210,17 @@ export function createElement(tagName: string): StubElement {
 		},
 	});
 	Object.defineProperty(element, 'textContent', {
-		get: () => text,
+		get: () => {
+			if (text) return text;
+			if (element.children.length > 0) {
+				return element.children.map((c: StubElement) => c.textContent).join('');
+			}
+			if (html) {
+				// Strip all HTML tags, including unclosed ones to satisfy CodeQL
+				return html.replace(/<[\s\S]*?(?:>|$)/g, '');
+			}
+			return '';
+		},
 		set: (value: string) => {
 			text = String(value);
 		},
@@ -251,6 +269,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	// never renders a chip looks the same here as it does on load.
 	const hiddenOnLoad = new Set([
 		'add-menu-dropdown',
+		'artifact-bar',
 		'composer-settings',
 		'context-chips',
 		'context-chips-clear',

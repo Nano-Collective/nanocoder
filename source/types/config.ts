@@ -17,6 +17,10 @@ export interface AIProviderConfig {
 	models: string[];
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
+	// Cap on tokens the model may generate in one response. Applies to every
+	// model in this entry; split the entry if they differ. See the note on
+	// ProviderConfig.maxOutputTokens for why this is worth setting.
+	maxOutputTokens?: number;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
@@ -58,6 +62,16 @@ export interface ProviderConfig {
 	models: string[];
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
+	// Cap on tokens the model may generate in one response, applied to every
+	// model in this entry (split the entry if they differ).
+	//
+	// Worth setting explicitly on any provider the AI SDK does not recognise.
+	// @ai-sdk/anthropic, for instance, derives the ceiling from the model id
+	// and falls back to 4096 for anything that is not a known Claude model —
+	// so an Anthropic-compatible endpoint serving some other model is capped
+	// at 4096 unless this says otherwise, and long replies are silently
+	// truncated mid-sentence.
+	maxOutputTokens?: number;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
@@ -442,6 +456,11 @@ export interface MCPServerConfig {
 	enabled?: boolean;
 	// Optional source information for display purposes
 	source?: 'project' | 'global' | 'env';
+	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
+	// references are expanded before runtime use, so the scanner must read
+	// these raw copies or every $API_KEY looks hardcoded.
+	rawEnv?: Record<string, string>;
+	rawHeaders?: Record<string, string>;
 }
 
 // Tune configuration for runtime model tuning via /tune command.

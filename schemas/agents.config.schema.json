@@ -214,6 +214,12 @@
 				"name": {
 					"type": "string"
 				},
+				"rawEnv": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"rawHeaders": {
+					"$ref": "#/definitions/RecordStringString"
+				},
 				"source": {
 					"enum": ["env", "global", "project"],
 					"type": "string"
@@ -655,6 +661,9 @@
 				},
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
+				},
+				"maxOutputTokens": {
+					"type": "number"
 				},
 				"maxRetries": {
 					"type": "number"

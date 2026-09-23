@@ -137,21 +137,3 @@ export function moveCursorToVisualLine(
 	const target = segments[targetRow];
 	return target.start + Math.min(col, target.length);
 }
-
-/**
- * Insert text at the cursor and report where the caret lands. Every path that
- * adds characters goes through this — a typed character and both newline
- * shortcuts — so the caret always ends up after what was inserted. Appending
- * to the end of the value instead leaves the caret behind, and everything
- * typed next is spliced in at the stale offset.
- */
-export function insertAtCursor(
-	value: string,
-	cursorOffset: number,
-	text: string,
-): {value: string; cursorOffset: number} {
-	return {
-		value: value.slice(0, cursorOffset) + text + value.slice(cursorOffset),
-		cursorOffset: cursorOffset + text.length,
-	};
-}

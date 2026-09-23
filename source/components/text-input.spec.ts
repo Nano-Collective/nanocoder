@@ -1,7 +1,6 @@
 import test from 'ava';
 import {
 	getVisualLineSegments,
-	insertAtCursor,
 	moveCursorToVisualLine,
 } from '../utils/text-wrapping';
 
@@ -101,6 +100,16 @@ function backspace(state: TextInputState): TextInputState {
 	return {
 		value: value.slice(0, cursorOffset - 1) + value.slice(cursorOffset),
 		cursorOffset: cursorOffset - 1,
+	};
+}
+
+// Simulate Delete (forward delete: removes character AFTER cursor)
+function forwardDelete(state: TextInputState): TextInputState {
+	const {value, cursorOffset} = state;
+	if (cursorOffset >= value.length) return state;
+	return {
+		value: value.slice(0, cursorOffset) + value.slice(cursorOffset + 1),
+		cursorOffset: cursorOffset, // cursor stays in place
 	};
 }
 
@@ -277,6 +286,44 @@ test('backspace deletes character before cursor', (t) => {
 test('backspace at start does nothing', (t) => {
 	const result = backspace({value: 'hello', cursorOffset: 0});
 	t.is(result.value, 'hello');
+	t.is(result.cursorOffset, 0);
+});
+
+// --- Delete (forward delete) ---
+
+test('Delete removes character after cursor', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 2});
+	t.is(result.value, 'helo');
+	t.is(result.cursorOffset, 2);
+});
+
+test('Delete at end does nothing', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 5});
+	t.is(result.value, 'hello');
+	t.is(result.cursorOffset, 5);
+});
+
+test('Delete from start removes first character', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 0});
+	t.is(result.value, 'ello');
+	t.is(result.cursorOffset, 0);
+});
+
+test('Delete on single character leaves empty string', (t) => {
+	const result = forwardDelete({value: 'a', cursorOffset: 0});
+	t.is(result.value, '');
+	t.is(result.cursorOffset, 0);
+});
+
+test('Delete does not move cursor when removing character', (t) => {
+	const result = forwardDelete({value: 'abcde', cursorOffset: 3});
+	t.is(result.value, 'abce');
+	t.is(result.cursorOffset, 3);
+});
+
+test('Delete on empty string does nothing', (t) => {
+	const result = forwardDelete({value: '', cursorOffset: 0});
+	t.is(result.value, '');
 	t.is(result.cursorOffset, 0);
 });
 
@@ -528,56 +575,4 @@ test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
 	t.true(called);
 });
 
-// The real insertion used by every path that adds characters: a typed
-// character, Ctrl+J and Shift+Enter. Shift+Enter used to bypass it entirely —
-// the parent appended the newline to the END of the value and left the caret
-// where it was, so the next word was spliced in at the stale offset and a
-// three-line message arrived as `onetwothree\n\n`.
-test('insertAtCursor puts the text at the caret and moves the caret past it', (t) => {
-	t.deepEqual(insertAtCursor('onethree', 3, 'two'), {
-		value: 'onetwothree',
-		cursorOffset: 6,
-	});
-});
 
-test('insertAtCursor at the end appends and still advances the caret', (t) => {
-	t.deepEqual(insertAtCursor('one', 3, '\n'), {
-		value: 'one\n',
-		cursorOffset: 4,
-	});
-});
-
-test('insertAtCursor at the start leaves the rest intact', (t) => {
-	t.deepEqual(insertAtCursor('two', 0, 'one\n'), {
-		value: 'one\ntwo',
-		cursorOffset: 4,
-	});
-});
-
-test('repeated newline inserts build a real multi-line message', (t) => {
-	// The exact sequence from the bug report: one, Shift+Enter, two,
-	// Shift+Enter, three — each insert landing at the caret the previous one
-	// left behind.
-	let state = {value: '', cursorOffset: 0};
-	const type = (text: string) => {
-		state = insertAtCursor(state.value, state.cursorOffset, text);
-	};
-
-	type('one');
-	type('\n');
-	type('two');
-	type('\n');
-	type('three');
-
-	t.is(state.value, 'one\ntwo\nthree');
-	t.is(state.cursorOffset, state.value.length);
-});
-
-test('a newline inserted mid-message splits it rather than trailing off the end', (t) => {
-	// Caret parked between the two words: the break belongs there, not appended.
-	const state = insertAtCursor('onetwo', 3, '\n');
-	t.is(state.value, 'one\ntwo');
-	t.is(state.cursorOffset, 4);
-	// Typing continues on the new line, not at the old offset.
-	t.is(insertAtCursor(state.value, state.cursorOffset, 'X').value, 'one\nXtwo');
-});

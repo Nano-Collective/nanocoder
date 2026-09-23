@@ -16,40 +16,34 @@ import {readFileTool} from './read-file.js';
 // Bash Execute Function
 // ============================================================================
 
+// execute_bash returns {llmContent, isError}, not a bare string. These tests
+// assert on the text the model receives, so they read llmContent. Deliberately
+// untyped-cast-free: an `as string` here is what let the return-shape change in
+// #1417 land green under tsc and only fail at assert time.
+async function runBash(command: string, toolCallId: string): Promise<string> {
+	const result = await executeBashTool.tool.execute!(
+		{command},
+		{toolCallId, messages: []},
+	);
+	return result.llmContent;
+}
+
 test('execute_bash tool works correctly', async t => {
-	const result = (await executeBashTool.tool.execute!(
-		{command: 'echo "test"'},
-		{
-			toolCallId: 'test-1',
-			messages: [],
-		},
-	)) as string;
+	const result = await runBash('echo "test"', 'test-1');
 
 	t.truthy(result);
 	t.regex(result, /test/);
 });
 
 test('execute_bash includes exit code', async t => {
-	const result = (await executeBashTool.tool.execute!(
-		{command: 'echo "success"'},
-		{
-			toolCallId: 'test-2',
-			messages: [],
-		},
-	)) as string;
+	const result = await runBash('echo "success"', 'test-2');
 
 	t.truthy(result);
 	t.regex(result, /EXIT_CODE: 0/);
 });
 
 test('execute_bash captures stderr', async t => {
-	const result = (await executeBashTool.tool.execute!(
-		{command: 'echo "error" >&2'},
-		{
-			toolCallId: 'test-3',
-			messages: [],
-		},
-	)) as string;
+	const result = await runBash('echo "error" >&2', 'test-3');
 
 	t.truthy(result);
 	t.regex(result, /STDERR:/);
@@ -69,13 +63,13 @@ test('read_file reads existing file', async t => {
 	await writeFile(testFile, 'test content', 'utf-8');
 
 	try {
-		const result = (await readFileTool.tool.execute!(
+		const result = await readFileTool.tool.execute!(
 			{path: testFile},
 			{
 				toolCallId: 'test-4',
 				messages: [],
 			},
-		)) as string;
+		);
 
 		t.truthy(result);
 		t.regex(result, /test content/);
@@ -106,13 +100,13 @@ test('read_file reads with line ranges', async t => {
 	await writeFile(testFile, 'line1\nline2\nline3\nline4\nline5', 'utf-8');
 
 	try {
-		const result = (await readFileTool.tool.execute!(
+		const result = await readFileTool.tool.execute!(
 			{path: testFile, start_line: 2, end_line: 4},
 			{
 				toolCallId: 'test-6',
 				messages: [],
 			},
-		)) as string;
+		);
 
 		t.truthy(result);
 		t.regex(result, /line2/);

@@ -844,10 +844,18 @@ export class SubagentExecutor {
 			rawArguments,
 		);
 		if (needsApproval) {
-			const approved = await signalToolApproval({
-				toolCall,
-				subagentName: config.name,
-			});
+			// Pass the turn's signal: without it this await is the one place a
+			// subagent cannot be cancelled. `tool-executor` starts a batch of
+			// them and joins with `Promise.allSettled`, so one subagent parked
+			// on an unanswerable approval kept the whole turn open. On abort
+			// the queue settles this with a denial.
+			const approved = await signalToolApproval(
+				{
+					toolCall,
+					subagentName: config.name,
+				},
+				signal,
+			);
 
 			if (!approved) {
 				return 'Tool execution was denied by the user.';
