@@ -572,6 +572,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from api.together.ai/settings/api-keys)',
 		modelDefault: 'deepseek-ai/DeepSeek-V4-Pro',
 	}),
+	apiKeyTemplate({
+		id: 'yolo-auto',
+		name: 'Yolo-Auto',
+		baseUrl: 'https://yolo-auto.com/v1',
+		apiKeyPrompt: 'API Key (from https://yolo-auto.com/app)',
+		modelDefault: 'yolo,yolo-small',
+	}),
 	{
 		id: 'custom',
 		name: 'Custom Provider',
