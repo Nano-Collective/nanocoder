@@ -68,12 +68,15 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		() => ({
 			getCursorOffset: () => cursorOffsetRef.current,
 			setCursorOffset: (offset: number) => {
-				const clamped = Math.max(
-					0,
-					Math.min(offset, originalValueRef.current.length),
-				);
-				cursorOffsetRef.current = clamped;
-				setState({cursorOffset: clamped, cursorWidth: 0});
+				// Don't clamp against originalValueRef.current here: the parent
+				// typically calls this in the same tick it schedules the new
+				// `value`, so the ref is stale. The next render's effect clamps
+				// the offset against the real newValue.length. We trust the
+				// caller to pass a sane offset; out-of-bounds requests are
+				// still corrected, just one render later.
+				cursorOffsetRef.current = offset;
+				skipNextCursorResetRef.current = true;
+				setState({cursorOffset: offset, cursorWidth: 0});
 			},
 		}),
 		[],
@@ -90,6 +93,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// restore, a programmatic clear) rather than one of our own edits.
 	const lastEmittedValueRef = useRef(originalValue);
 
+	// When the imperative handle moves the caret, the upcoming value change
+	// (already in flight from the parent) would otherwise be misread by the
+	// effect as "external replacement, park at end" and clobber the caret.
+	// Setting this flag tells the effect to respect whatever offset is now in
+	// state — and only clamp it against the new value's bounds.
+	const skipNextCursorResetRef = useRef(false);
+
 	useEffect(() => {
 		if (!focus || !showCursor) {
 			return;
@@ -97,9 +107,22 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 		const newValue = originalValue || '';
 		const isExternalChange = newValue !== (lastEmittedValueRef.current || '');
+		const skipReset = skipNextCursorResetRef.current;
+		skipNextCursorResetRef.current = false;
 		lastEmittedValueRef.current = originalValue;
 
 		setState(previousState => {
+			// Programmatic cursor move paired with the value change: trust the
+			// offset the parent requested, just clamp it into the new value's
+			// bounds so we never render an out-of-range caret.
+			if (skipReset) {
+				const clamped = Math.max(
+					0,
+					Math.min(previousState.cursorOffset, newValue.length),
+				);
+				return {cursorOffset: clamped, cursorWidth: 0};
+			}
+
 			// An external replacement carries no cursor of its own, so the caret
 			// left over from the previous value is meaningless against the new one.
 			// Park it at the end, the way a fresh mount does. Clamping alone is not

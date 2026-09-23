@@ -1402,3 +1402,67 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
+
+// Regression for the cursor-mid-paste bug: a terminal paste used to leave the
+// caret at end-of-value regardless of where it started, so any keystroke after
+// the paste landed at the end instead of next to the inserted text. The
+// post-paste caret position is the bug; ink-testing-library strips inverse
+// styling from the frame, so we verify by typing one more character and
+// checking where it lands.
+test.serial(
+	'UserInput parks the caret after the splice when pasting mid-string',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+
+		// Move caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+
+		pasteEvents.emit('paste', 'XY');
+		await waitForFrame(lastFrame, /aXYbc/);
+
+		// One more keystroke lands immediately after the splice, not at the end.
+		stdin.write('Z');
+		await waitForFrame(lastFrame, /aXYZbc/);
+
+		t.regex(lastFrame()!, /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput parks the caret after a multi-line placeholder splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('hello world');
+		await waitForFrame(lastFrame, /hello world/);
+
+		// Move caret to offset 5 (between 'hello' and ' world').
+		for (let i = 0; i < 6; i++) {
+			stdin.write('\x1B[D');
+		}
+
+		pasteEvents.emit('paste', 'line1\nline2\nline3');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
+
+		// Next keystroke lands immediately after the placeholder, before ' world'.
+		stdin.write('!');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]! world/);
+		t.notRegex(lastFrame()!, /!\[Paste/);
+		unmount();
+	},
+);
