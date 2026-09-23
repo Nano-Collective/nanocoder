@@ -14,7 +14,7 @@ import {
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEFAULT_NANOCODER_SHAPE, type NanocoderShape} from '@/types/ui';
-import {getPackageVersion} from '@/utils/package-version';
+import {getPackageVersion, UNKNOWN_VERSION} from '@/utils/package-version';
 import {homeRelative, truncateMiddle} from '@/utils/path';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {getRandomTip} from '@/utils/tips';
@@ -224,7 +224,11 @@ export default memo(function WelcomeMessage({
 					<Text color={colors.text} bold>
 						nanocoder
 					</Text>
-					<Text color={colors.secondary}> v{version}</Text>
+					<Text color={colors.secondary}>
+						{version === UNKNOWN_VERSION
+							? ' (version unknown)'
+							: ` v${version}`}
+					</Text>
 				</Text>
 			</Box>
 			<Box justifyContent={justify} width={termW} marginTop={1}>

@@ -184,6 +184,12 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	/**
+	 * Fullscreen keeps the root box's left padding (inline pulls the composer
+	 * back over it), so the status row sits one column further right and has
+	 * one column less to fill.
+	 */
+	fullscreen?: boolean;
 }
 
 export default function UserInput({
@@ -213,6 +219,7 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	fullscreen = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -1376,9 +1383,11 @@ export default function UserInput({
 			input box content. */}
 			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
-					// Must match the wrapper's marginLeft: the indicator budgets its
-					// segments against the width left after this indent.
-					indentColumns={3}
+					// Must match the wrapper's marginLeft plus, in fullscreen, the
+					// root box's padding: the indicator budgets its segments against
+					// the width left after this indent, and overflowing it lets Ink
+					// cut the row mid-word.
+					indentColumns={fullscreen ? 4 : 3}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}

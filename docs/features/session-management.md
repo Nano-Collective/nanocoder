@@ -104,3 +104,6 @@ Customize session behaviour in your `nanocoder-preferences.json` (not `agents.co
 | `maxMessages` | `1000` | Maximum messages sent to the model (context window capping) — on-disk history is NOT truncated (minimum 1) |
 | `retentionDays` | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | (platform default) | Custom storage directory |
+| `smartTitles` | `true` | Generate a descriptive title once when the opening prompt is too thin to name the session (ACP clients such as the VS Code extension; the CLI keeps its heuristic title). Manual renames are never overwritten |
+| `titleModel` | (session's model) | Model used for title generation |
+| `titleProvider` | (session's provider) | Provider used for title generation |

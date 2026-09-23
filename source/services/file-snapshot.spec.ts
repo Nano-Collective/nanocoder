@@ -960,3 +960,29 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'getModifiedFiles skips nanocoder runtime state but keeps .nanocoder user content',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			execFileSync('git', ['init', '-q'], {cwd: tempDir});
+			await createTestFile(tempDir, 'src/app.ts', 'code');
+			await createTestFile(
+				tempDir,
+				'.nanocoder/checkpoints/old/metadata.json',
+				'{}',
+			);
+			await createTestFile(tempDir, '.nanocoder/timeline/index.json', '{}');
+			await createTestFile(tempDir, '.nanocoder/daemon.log', 'log');
+			await createTestFile(tempDir, '.nanocoder/commands/check.md', 'cmd');
+
+			const files = new FileSnapshotService(tempDir).getModifiedFiles().sort();
+
+			// Earlier checkpoints must not be snapshotted into the next one.
+			t.deepEqual(files, ['.nanocoder/commands/check.md', 'src/app.ts']);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

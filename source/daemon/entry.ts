@@ -13,6 +13,7 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {validateProjectConfigSecurity} from '@/config/validation';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
@@ -106,7 +107,29 @@ async function main(): Promise<void> {
 		projectRoot,
 		buildExecutor,
 		checkpointer,
+		// Shared with buildExecutor: the skill pipeline fills this registry,
+		// and triggered runs have to see what it registered.
+		toolManager,
 	});
+
+	// Connect the project's MCP servers so triggered runs can use MCP tools,
+	// as the TUI and --plain do. A server that fails to connect is logged and
+	// skipped rather than taking the daemon down.
+	const {mcpServers} = getAppConfig();
+	if (mcpServers && mcpServers.length > 0) {
+		validateProjectConfigSecurity(mcpServers);
+		try {
+			await toolManager.initializeMCP(mcpServers, result => {
+				if (!result.success) {
+					console.error(
+						`MCP server failed: ${result.serverName} (${result.error})`,
+					);
+				}
+			});
+		} catch (err) {
+			console.error(`MCP initialization error: ${formatError(err)}`);
+		}
+	}
 
 	// Wire shutdown through the existing ShutdownManager rather than
 	// registering our own signal handler. Otherwise the SM's default
