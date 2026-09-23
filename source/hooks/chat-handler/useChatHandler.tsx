@@ -88,6 +88,7 @@ export function useChatHandler({
 	nonInteractiveMode = false,
 	onConversationComplete,
 	onPlanTurnComplete,
+	onArchitectTurnComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
@@ -249,6 +250,10 @@ export function useChatHandler({
 			sessionId?: string,
 			onToolExecuted?: (toolName: string) => void,
 			onFinalAssistantText?: (content: string) => void,
+			architectCheckpointState?: {
+				created: boolean;
+				name?: string;
+			},
 		) => {
 			if (!client) return;
 
@@ -272,6 +277,7 @@ export function useChatHandler({
 					developmentModeRef,
 					nonInteractiveMode,
 					conversationStateManager,
+					architectCheckpointState,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
 					reasoningExpandedRef,
@@ -344,7 +350,13 @@ export function useChatHandler({
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
 	) => {
-		if (!client || !toolManager) return;
+		if (!client || !toolManager) {
+			// handleMessageSubmit marks a turn as incomplete before reaching this
+			// hook. Signal completion here as well so an unavailable setup cannot
+			// leave the queue blocked forever.
+			onConversationComplete?.();
+			return;
+		}
 		const sessionId = ensureCurrentSessionId?.();
 		let wrotePlan = false;
 		let finalAssistantText = '';
@@ -398,6 +410,14 @@ export function useChatHandler({
 		// Create abort controller for cancellation
 		const controller = new AbortController();
 		setAbortController(controller);
+
+		// Keep Architect checkpoint state for the entire user turn.
+		const architectCheckpointState: {
+			created: boolean;
+			name?: string;
+		} = {
+			created: false,
+		};
 
 		try {
 			let systemPrompt = getBaseSystemPrompt(
@@ -453,6 +473,7 @@ export function useChatHandler({
 				content => {
 					finalAssistantText = content;
 				},
+				architectCheckpointState,
 			);
 
 			if (
@@ -494,6 +515,15 @@ export function useChatHandler({
 				!controller.signal.aborted
 			) {
 				onPlanTurnComplete?.();
+			}
+
+			if (
+				developmentMode === 'architect' &&
+				architectCheckpointState.created &&
+				architectCheckpointState.name &&
+				!controller.signal.aborted
+			) {
+				onArchitectTurnComplete?.(architectCheckpointState.name);
 			}
 		} catch (error) {
 			displayError(error, 'chat-error');

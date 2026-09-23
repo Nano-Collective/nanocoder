@@ -284,3 +284,94 @@ test('the subagent-approval and main-agent-confirmation slots stay independent w
 	captured!.handleToolConfirmation(false);
 	t.deepEqual(await Promise.all([approval, confirmation]), [true, false]);
 });
+
+// --- cancellation ----------------------------------------------------------
+// The queue only advances when a human answers, so a caller whose turn died
+// while it sat here waited forever. `tool-executor` joins a batch of
+// subagents with Promise.allSettled, so one such caller kept the whole turn
+// open with no way back short of killing the process.
+
+test('an aborted request settles as denied and leaves the queue', async t => {
+	setup();
+
+	const controller = new AbortController();
+	const approval = signalToolApproval(approvalFrom('agent-A'), controller.signal);
+
+	controller.abort();
+
+	t.false(await approval, 'an abandoned approval must deny, never approve');
+});
+
+test('aborting the head presents the next request', async t => {
+	const {setPendingQuestion} = setup();
+
+	const first = question('first?');
+	const second = question('second?');
+	const controller = new AbortController();
+	const firstAnswer = signalQuestion(first, controller.signal);
+	const secondAnswer = signalQuestion(second);
+
+	t.deepEqual(setPendingQuestion.calls, [[first]]);
+
+	controller.abort();
+	// The head left the queue, so the one behind it takes the screen rather
+	// than staying invisible behind a prompt for a turn that is over.
+	t.deepEqual(setPendingQuestion.calls.at(-1), [second]);
+	t.regex(await firstAnswer, /cancelled/);
+
+	captured!.handleQuestionAnswer('b');
+	t.is(await secondAnswer, 'b');
+});
+
+test('aborting a queued request does not disturb the one on screen', async t => {
+	const {setPendingQuestion} = setup();
+
+	const first = question('first?');
+	const second = question('second?');
+	const third = question('third?');
+	const controller = new AbortController();
+	const firstAnswer = signalQuestion(first);
+	const secondAnswer = signalQuestion(second, controller.signal);
+	const thirdAnswer = signalQuestion(third);
+
+	t.deepEqual(setPendingQuestion.calls, [[first]]);
+
+	// Removing a request from the middle must not change what is rendered.
+	controller.abort();
+	t.deepEqual(setPendingQuestion.calls.at(-1), [first]);
+	t.regex(await secondAnswer, /cancelled/);
+
+	// ...and the queue must close over the gap rather than keep a hole.
+	captured!.handleQuestionAnswer('a');
+	t.deepEqual(setPendingQuestion.calls.at(-1), [third]);
+	captured!.handleQuestionAnswer('c');
+
+	t.is(await firstAnswer, 'a');
+	t.is(await thirdAnswer, 'c');
+});
+
+test('an answered request is unaffected by a later abort', async t => {
+	setup();
+
+	const controller = new AbortController();
+	const approval = signalToolApproval(approvalFrom('agent-A'), controller.signal);
+
+	captured!.handleSubagentToolApproval(true);
+	// The answer is the user's; a subsequent abort must not overwrite it, nor
+	// consume the next queued request the way a double answer would.
+	controller.abort();
+
+	t.true(await approval);
+});
+
+test('a signal already aborted never reaches the screen', async t => {
+	const {setPendingQuestion} = setup();
+
+	const approval = signalToolApproval(
+		approvalFrom('agent-A'),
+		AbortSignal.abort(),
+	);
+
+	t.false(await approval);
+	t.deepEqual(setPendingQuestion.calls, [], 'nothing was presented');
+});

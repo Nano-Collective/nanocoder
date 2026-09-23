@@ -16,7 +16,7 @@ Here's what you need to know right away:
 
 ### Talking to the AI
 
-Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** to add a new line — it's the official supported newline shortcut.
+Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** or **Option/Alt+Enter** to add a new line. Shift+Enter works too, but only in terminals that encode it distinctly from Enter — see [Keyboard Shortcuts](keyboard-shortcuts.md) if yours submits instead.
 
 Each response ends with a small grey footer showing what that turn cost:
 
@@ -62,7 +62,7 @@ These are the shortcuts you'll use constantly:
 | Action | Shortcut |
 |--------|----------|
 | Submit prompt | Enter |
-| New line | Ctrl+J |
+| New line | Ctrl+J or Option/Alt+Enter |
 | Toggle development mode | Shift+Tab |
 | Cancel AI response | Esc |
 | Clear input | Esc (twice) |
@@ -259,7 +259,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
-| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |
+| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |

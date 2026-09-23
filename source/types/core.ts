@@ -96,7 +96,13 @@ export interface Tool {
 
 export interface StructuredToolOutput {
 	llmContent: string;
-	structured: JSONValue;
+	structured?: JSONValue;
+	/**
+	 * Set by a handler whose run failed without throwing - a shell command that
+	 * exited non-zero, say - so the result carries the failure instead of every
+	 * caller re-deriving it from the text.
+	 */
+	isError?: boolean;
 }
 
 export type ToolExecuteResult = string | StructuredToolOutput;
@@ -285,6 +291,7 @@ export type DevelopmentMode =
 	| 'auto-accept'
 	| 'yolo'
 	| 'plan'
+	| 'architect'
 	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
@@ -292,6 +299,7 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
+	architect: '◈ architect mode on',
 	headless: '⏵⏵ headless mode on',
 };
 
@@ -300,6 +308,7 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto',
 	yolo: '⏵⏵⏵ yolo',
 	plan: '⏸ plan',
+	architect: '◈ architect',
 	headless: '⏵⏵ headless',
 };
 

@@ -992,6 +992,62 @@ test('McpStep with initialEditName opens that server edit/delete choice', t => {
 	);
 });
 
+// Regression: a custom-named instance of a template (e.g. `you-paid`) must
+// resolve back to its template when edited. Before templateId was stamped
+// onto the built config, the name lookup missed and the edit flow fell
+// through to `custom`, whose buildConfig never writes headers — silently
+// dropping the saved bearer token on re-save.
+test('McpStep editing a custom-named template instance resolves its template', async t => {
+	const customNamedServers: Record<
+		string,
+		{
+			name: string;
+			transport: 'http';
+			url: string;
+			headers: {Authorization: string};
+			templateId: string;
+			tags: string[];
+		}
+	> = {
+		'you-paid': {
+			name: 'you-paid',
+			transport: 'http',
+			url: 'https://api.you.com/mcp',
+			headers: {Authorization: 'Bearer ydc_test_key_123'},
+			templateId: 'you',
+			tags: ['you', 'search', 'web', 'research', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={customNamedServers}
+			initialEditName="you-paid"
+		/>,
+	);
+
+	await waitTick();
+	t.regex(lastFrame()!, /you-paid - What would you like to do\?/);
+
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(
+		output,
+		/You\.com Configuration/,
+		'should open the You.com template, not Custom MCP Server',
+	);
+	t.notRegex(output, /Custom MCP Server Configuration/);
+	// The label shows the template default `[you]`; the prefilled value sits
+	// in the input box.
+	t.regex(output, /you-paid/, 'server name should be prefilled in the input');
+
+	unmount();
+});
+
 test('McpStep falls back to the menu when initialEditName is unknown', t => {
 	const {lastFrame} = render(
 		<McpStep

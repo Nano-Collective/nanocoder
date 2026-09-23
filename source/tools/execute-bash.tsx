@@ -7,7 +7,7 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
-import type {NanocoderToolExport} from '@/types/core';
+import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -69,26 +69,41 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
  * Note: For streaming tools, the tool handler will use executeBashCommand directly
  * and this function serves as a fallback/compatibility layer
  */
+interface ExecuteBashArgs {
+	command: string;
+	description?: string;
+}
+
 const executeExecuteBash = async (
 	args: {command: string},
 	options?: {abortSignal?: AbortSignal},
-): Promise<string> => {
+): Promise<StructuredToolOutput> => {
 	const {promise} = bashExecutor.execute(args.command, {
 		signal: options?.abortSignal,
 	});
 	const result = await promise;
-	return formatBashResultForLLM(result);
+	// The model still gets plain text; isError carries the exit status to
+	// processToolUse, which is how --json and ACP learn the command failed.
+	return {
+		llmContent: formatBashResultForLLM(result),
+		isError: bashRunFailed(result),
+	};
 };
 
 const executeBashCoreTool = tool({
 	description:
 		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
-	inputSchema: jsonSchema<{command: string}>({
+	inputSchema: jsonSchema<ExecuteBashArgs>({
 		type: 'object',
 		properties: {
 			command: {
 				type: 'string',
 				description: 'The bash command to execute.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this command.',
 			},
 		},
 		required: ['command'],
@@ -103,8 +118,10 @@ const executeBashCoreTool = tool({
  */
 function ExecuteBashFormatterComponent({
 	command,
+	description,
 }: {
 	command: string;
+	description?: string;
 }): React.ReactElement {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -112,6 +129,12 @@ function ExecuteBashFormatterComponent({
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
+			{description && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Description:</Text>
+					<Text color={colors.text}> {description}</Text>
+				</Box>
+			)}
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
 				{splitCommandForDisplay(command).map((segment, i) => (
@@ -128,8 +151,13 @@ function ExecuteBashFormatterComponent({
  * Regular formatter - called for tool confirmation preview
  * Shows the command that will be executed
  */
-const executeBashFormatter = (args: {command: string}): React.ReactElement => {
-	return <ExecuteBashFormatterComponent command={args.command} />;
+const executeBashFormatter = (args: ExecuteBashArgs): React.ReactElement => {
+	return (
+		<ExecuteBashFormatterComponent
+			command={args.command}
+			description={args.description}
+		/>
+	);
 };
 
 /**

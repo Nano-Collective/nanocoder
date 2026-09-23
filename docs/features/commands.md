@@ -33,6 +33,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
+| `/review` | Review a branch or PR diff for bugs, security issues, and style violations. Usage: `/review <branch-or-pr-number>` (e.g. `/review main`, `/review 42`) |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
@@ -148,6 +149,7 @@ The emitted object looks like:
       "error": null
     }
   ],
+  "steps": 2,
   "filesChanged": ["src/api.ts"],
   "usage": {
     "inputTokens": 4520,
@@ -162,6 +164,7 @@ The emitted object looks like:
 - `finalText` — the model's final response text
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
+- `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
 - `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 

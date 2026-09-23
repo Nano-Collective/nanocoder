@@ -1,6 +1,13 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
-import {useEffect, useRef, useState} from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
+import {isNewlineKey} from '@/utils/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
@@ -22,20 +29,33 @@ export type Props = {
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
 };
 
-function TextInput({
-	value: originalValue,
-	placeholder = '',
-	focus = true,
-	mask,
-	highlightPastedText = false,
-	showCursor = true,
-	onChange,
-	onSubmit,
-	onEnter,
-	wrapWidth,
-	handleEnter = true,
-	onEdgeArrow,
-}: Props) {
+/**
+ * Imperative handle for TextInput. Exposed so the parent can read the caret
+ * position before a programmatic insert (terminal paste) and restore it after,
+ * without lifting cursor state up the tree.
+ */
+export type TextInputHandle = {
+	getCursorOffset: () => number;
+	setCursorOffset: (offset: number) => void;
+};
+
+const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
+	{
+		value: originalValue,
+		placeholder = '',
+		focus = true,
+		mask,
+		highlightPastedText = false,
+		showCursor = true,
+		onChange,
+		onSubmit,
+		onEnter,
+		wrapWidth,
+		handleEnter = true,
+		onEdgeArrow,
+	}: Props,
+	ref,
+) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
 		cursorWidth: 0,
@@ -43,19 +63,79 @@ function TextInput({
 
 	const {cursorOffset, cursorWidth} = state;
 
+	useImperativeHandle(
+		ref,
+		() => ({
+			getCursorOffset: () => cursorOffsetRef.current,
+			setCursorOffset: (offset: number) => {
+				// Don't clamp against originalValueRef.current here: the parent
+				// typically calls this in the same tick it schedules the new
+				// `value`, so the ref is stale. The next render's effect clamps
+				// the offset against the real newValue.length. We trust the
+				// caller to pass a sane offset; out-of-bounds requests are
+				// still corrected, just one render later.
+				cursorOffsetRef.current = offset;
+				skipNextCursorResetRef.current = true;
+				setState({cursorOffset: offset, cursorWidth: 0});
+			},
+		}),
+		[],
+	);
+
 	// Refs so useInput handlers always read the latest values (avoids stale closures)
 	const cursorOffsetRef = useRef(cursorOffset);
 	const originalValueRef = useRef(originalValue);
 	cursorOffsetRef.current = cursorOffset;
 	originalValueRef.current = originalValue;
 
+	// The last value this component emitted via onChange. Anything arriving in
+	// `value` that we did not emit is an external replacement (undo/redo, draft
+	// restore, a programmatic clear) rather than one of our own edits.
+	const lastEmittedValueRef = useRef(originalValue);
+
+	// When the imperative handle moves the caret, the upcoming value change
+	// (already in flight from the parent) would otherwise be misread by the
+	// effect as "external replacement, park at end" and clobber the caret.
+	// Setting this flag tells the effect to respect whatever offset is now in
+	// state — and only clamp it against the new value's bounds.
+	const skipNextCursorResetRef = useRef(false);
+
 	useEffect(() => {
+		if (!focus || !showCursor) {
+			return;
+		}
+
+		const newValue = originalValue || '';
+		const isExternalChange = newValue !== (lastEmittedValueRef.current || '');
+		const skipReset = skipNextCursorResetRef.current;
+		skipNextCursorResetRef.current = false;
+		lastEmittedValueRef.current = originalValue;
+
 		setState(previousState => {
-			if (!focus || !showCursor) {
-				return previousState;
+			// Programmatic cursor move paired with the value change: trust the
+			// offset the parent requested, just clamp it into the new value's
+			// bounds so we never render an out-of-range caret.
+			if (skipReset) {
+				const clamped = Math.max(
+					0,
+					Math.min(previousState.cursorOffset, newValue.length),
+				);
+				return {cursorOffset: clamped, cursorWidth: 0};
 			}
 
-			const newValue = originalValue || '';
+			// An external replacement carries no cursor of its own, so the caret
+			// left over from the previous value is meaningless against the new one.
+			// Park it at the end, the way a fresh mount does. Clamping alone is not
+			// enough: it only pulls the caret back when the value SHRINKS, so a
+			// redo that restores a longer value would strand the caret at the
+			// offset the undo clamped it to (0 for an undo back to empty) and the
+			// next keystroke would insert at the start.
+			if (isExternalChange) {
+				return {
+					cursorOffset: newValue.length,
+					cursorWidth: 0,
+				};
+			}
 
 			if (previousState.cursorOffset > newValue.length - 1) {
 				return {
@@ -151,6 +231,28 @@ function TextInput({
 				return;
 			}
 
+			// Newline keys insert a \n at the cursor. TextInput owns the insertion
+			// because it is the only side that knows the cursor offset: UserInput
+			// used to append '\n' to the end of the value, which put the newline in
+			// the wrong place when the cursor was mid-text and left the cursor
+			// stranded in front of it. Checked before `key.return` because several
+			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
+			if (isNewlineKey(input, key)) {
+				const currentValue = originalValueRef.current;
+				const offset = cursorOffsetRef.current;
+				const withNewline =
+					currentValue.slice(0, offset) + '\n' + currentValue.slice(offset);
+
+				// Mirror the refs before returning so a second newline arriving in
+				// the same stdin read block inserts after the first, not over it.
+				cursorOffsetRef.current = offset + 1;
+				originalValueRef.current = withNewline;
+				lastEmittedValueRef.current = withNewline;
+				setState({cursorOffset: offset + 1, cursorWidth: 0});
+				onChange(withNewline);
+				return;
+			}
+
 			if (key.return) {
 				if (handleEnter && onEnter) {
 					onEnter(originalValueRef.current);
@@ -167,7 +269,15 @@ function TextInput({
 			let nextValue = originalValueRef.current;
 			let nextCursorWidth = 0;
 
-			if (key.ctrl) {
+			if (key.home) {
+				if (showCursor) {
+					nextCursorOffset = 0;
+				}
+			} else if (key.end) {
+				if (showCursor) {
+					nextCursorOffset = originalValueRef.current.length;
+				}
+			} else if (key.ctrl) {
 				if (key.leftArrow) {
 					// Ctrl+Left: jump to start of previous word
 					if (showCursor) {
@@ -189,13 +299,17 @@ function TextInput({
 					switch (input) {
 						case 'a': {
 							// Move cursor to start of line
-							nextCursorOffset = 0;
+							if (showCursor) {
+								nextCursorOffset = 0;
+							}
 							break;
 						}
 
 						case 'e': {
 							// Move cursor to end of line
-							nextCursorOffset = originalValueRef.current.length;
+							if (showCursor) {
+								nextCursorOffset = originalValueRef.current.length;
+							}
 							break;
 						}
 
@@ -219,8 +333,8 @@ function TextInput({
 
 						case 'w': {
 							// Delete previous word (backward-kill-word, newline-aware)
-							if (cursorOffset > 0) {
-								let i = cursorOffset;
+							if (cursorOffsetRef.current > 0) {
+								let i = cursorOffsetRef.current;
 								while (
 									i > 0 &&
 									(originalValueRef.current[i - 1] === ' ' ||
@@ -235,7 +349,7 @@ function TextInput({
 									i--;
 								nextValue =
 									originalValueRef.current.slice(0, i) +
-									originalValueRef.current.slice(cursorOffset);
+									originalValueRef.current.slice(cursorOffsetRef.current);
 								nextCursorOffset = i;
 							}
 
@@ -244,14 +358,19 @@ function TextInput({
 
 						case 'u': {
 							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								cursorOffsetRef.current,
+							);
 							nextCursorOffset = 0;
 							break;
 						}
 
 						case 'k': {
 							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(0, cursorOffset);
+							nextValue = originalValueRef.current.slice(
+								0,
+								cursorOffsetRef.current,
+							);
 							break;
 						}
 
@@ -268,22 +387,49 @@ function TextInput({
 				if (showCursor) {
 					nextCursorOffset++;
 				}
-			} else if (key.backspace || key.delete) {
-				if (cursorOffset > 0) {
+			} else if (
+				key.backspace ||
+				(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
+			) {
+				// Backspace deletes the character before the cursor.
+				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
+				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
+				// sequence: '\x7f' and the Option/Alt+Backspace variant '\x1b\x7f'
+				// (macOS/Linux terminals) are backward deletes, while '\x1b[3~'
+				// is the forward Delete key. Kitty keyboard protocol encodes
+				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
+				// it is dormant here because nanocoder does not enable
+				// kittyKeyboard — if that changes, this guard needs the
+				// corresponding handling.
+				if (cursorOffsetRef.current > 0) {
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
 						originalValueRef.current.slice(
-							cursorOffset,
+							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
 					nextCursorOffset--;
 				}
+			} else if (key.delete) {
+				// Delete removes the character after the cursor (forward delete).
+				// Only reached for the forward Delete key (\x1b[3~); the
+				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
+				// are handled in the branch above.
+				if (cursorOffsetRef.current < originalValueRef.current.length) {
+					nextValue =
+						originalValueRef.current.slice(0, cursorOffsetRef.current) +
+						originalValueRef.current.slice(
+							cursorOffsetRef.current + 1,
+							originalValueRef.current.length,
+						);
+					// Cursor stays in place — forward delete doesn't move it.
+				}
 			} else {
 				nextValue =
-					originalValueRef.current.slice(0, cursorOffset) +
+					originalValueRef.current.slice(0, cursorOffsetRef.current) +
 					input +
 					originalValueRef.current.slice(
-						cursorOffset,
+						cursorOffsetRef.current,
 						originalValueRef.current.length,
 					);
 				nextCursorOffset += input.length;
@@ -311,6 +457,7 @@ function TextInput({
 
 			if (nextValue !== originalValueRef.current) {
 				originalValueRef.current = nextValue;
+				lastEmittedValueRef.current = nextValue;
 				onChange(nextValue);
 			}
 		},
@@ -329,6 +476,6 @@ function TextInput({
 			: finalValue;
 
 	return <Text>{displayValue}</Text>;
-}
+});
 
 export default TextInput;

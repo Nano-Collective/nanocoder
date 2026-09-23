@@ -86,7 +86,11 @@ const executeWriteFile = async (args: {
 const writeFileCoreTool = tool({
 	description:
 		'Write content to a file (creates new file or overwrites existing file). Use this for complete file rewrites, generated code, or when most of the file needs to change. For small targeted edits, use string_replace instead.',
-	inputSchema: jsonSchema<{path: string; content: unknown}>({
+	inputSchema: jsonSchema<{
+		path: string;
+		content: unknown;
+		description?: string;
+	}>({
 		// Note: change to unknown
 		type: 'object',
 		properties: {
@@ -97,6 +101,11 @@ const writeFileCoreTool = tool({
 			content: {
 				type: 'string', // Guide LLM to send strings
 				description: 'The complete content to write to the file.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this file write.',
 			},
 		},
 		required: ['path', 'content'],
@@ -110,6 +119,7 @@ interface WriteFileArgs {
 	path?: string;
 	file_path?: string;
 	content?: string;
+	description?: string;
 }
 
 /** Truncate a plain (non-highlighted) line to fit terminal width */
@@ -304,6 +314,13 @@ const WriteFileFormatter = React.memo(
 		const messageContent = (
 			<Box flexDirection="column">
 				<Text color={colors.tool}>⚒ write_file</Text>
+
+				{args.description && (
+					<Box flexDirection="column">
+						<Text color={colors.secondary}>Description:</Text>
+						<Text color={colors.text}> {args.description}</Text>
+					</Box>
+				)}
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>

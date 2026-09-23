@@ -31,6 +31,29 @@ test('createStaticComponents includes welcome message when shouldShowWelcome is 
 	unmount();
 });
 
+test('createStaticComponents passes the row budget to the welcome banner', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	// Fullscreen clips at the chat viewport, so the banner is handed the rows
+	// left after the input footer - not the terminal height.
+	const components = createStaticComponents({
+		shouldShowWelcome: true,
+		currentProvider: 'test-provider',
+		currentModel: 'test-model',
+		availableRows: 17,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /Resume session/, 'the full menu must survive the budget');
+	t.regex(output, /Tip:/, 'the tip must survive the budget');
+	t.notRegex(output, /█/, 'the block wordmark does not fit 17 rows');
+	unmount();
+
+	process.stdout.columns = originalColumns;
+});
+
 test('createStaticComponents excludes welcome message when shouldShowWelcome is false', t => {
 	const props: AppContainerProps = {
 		shouldShowWelcome: false,
@@ -204,6 +227,26 @@ test('formatBootSummaryGitLabel marks detached HEAD', t => {
 		'⎇ abc1234 (detached)',
 	);
 });
+
+test.serial(
+	'createStaticComponents boot summary includes working directory (cwd) rather than config dir',
+	t => {
+		const originalCwd = process.cwd;
+		try {
+			process.cwd = () => '/mock/working/dir';
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'mock-provider',
+				currentModel: 'mock-model',
+			};
+			const components = createStaticComponents(props);
+			const output = stripAnsi(renderWithTheme(<>{components}</>).lastFrame() ?? '');
+			t.regex(output, /\/mock\/working\/dir/);
+		} finally {
+			process.cwd = originalCwd;
+		}
+	},
+);
 
 test.serial(
 	'createStaticComponents boot summary includes git branch when inside a repo',
