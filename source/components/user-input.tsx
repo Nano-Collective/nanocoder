@@ -48,6 +48,27 @@ import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
+const MAX_FILE_COMPLETION_ROWS = 5;
+
+// The rows of a completion list to render: all of them when they fit,
+// otherwise a window kept around the selected row so it never scrolls
+// out of view.
+function completionWindow<T>(
+	items: T[],
+	selectedIndex: number,
+	maxRows: number,
+): {start: number; end: number; items: T[]} {
+	if (items.length <= maxRows) {
+		return {start: 0, end: items.length, items};
+	}
+
+	const centeredStart =
+		(selectedIndex >= 0 ? selectedIndex : 0) - Math.floor(maxRows / 2);
+	const start = Math.min(Math.max(centeredStart, 0), items.length - maxRows);
+	const end = start + maxRows;
+
+	return {start, end, items: items.slice(start, end)};
+}
 
 // An MCP resource shares the file-mention `@` trigger and completion list,
 // distinguished from a filesystem path by this prefix so `handleFileSelection`
@@ -1129,21 +1150,24 @@ export default function UserInput({
 		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
 	};
-	const commandCompletionWindow = useMemo(() => {
-		if (completions.length <= MAX_COMMAND_COMPLETION_ROWS) {
-			return {start: 0, end: completions.length, items: completions};
-		}
-
-		const selectedIndex =
-			selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0;
-		const centeredStart =
-			selectedIndex - Math.floor(MAX_COMMAND_COMPLETION_ROWS / 2);
-		const maxStart = completions.length - MAX_COMMAND_COMPLETION_ROWS;
-		const start = Math.min(Math.max(centeredStart, 0), maxStart);
-		const end = start + MAX_COMMAND_COMPLETION_ROWS;
-
-		return {start, end, items: completions.slice(start, end)};
-	}, [completions, selectedCompletionIndex]);
+	const commandCompletionWindow = useMemo(
+		() =>
+			completionWindow(
+				completions,
+				selectedCompletionIndex,
+				MAX_COMMAND_COMPLETION_ROWS,
+			),
+		[completions, selectedCompletionIndex],
+	);
+	const fileCompletionWindow = useMemo(
+		() =>
+			completionWindow(
+				fileCompletions,
+				selectedFileIndex,
+				MAX_FILE_COMPLETION_ROWS,
+			),
+		[fileCompletions, selectedFileIndex],
+	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -1275,20 +1299,28 @@ export default function UserInput({
 							<Text color={colors.secondary}>
 								File suggestions (↑/↓ to navigate, Tab to select):
 							</Text>
-							{fileCompletions.slice(0, 5).map((file, index) => (
-								<Text
-									key={index}
-									color={
-										index === selectedFileIndex ? colors.info : colors.primary
-									}
-									bold={index === selectedFileIndex}
-								>
-									{index === selectedFileIndex ? '▸ ' : '  '}
-									{decodeMCPResourcePath(file.path)
-										? file.displayPath
-										: file.path}
+							{fileCompletionWindow.items.map((file, index) => {
+								const isSelected =
+									fileCompletionWindow.start + index === selectedFileIndex;
+								return (
+									<Text
+										key={file.path}
+										color={isSelected ? colors.info : colors.primary}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}
+										{decodeMCPResourcePath(file.path)
+											? file.displayPath
+											: file.path}
+									</Text>
+								);
+							})}
+							{fileCompletions.length > MAX_FILE_COMPLETION_ROWS && (
+								<Text color={colors.secondary}>
+									Showing {fileCompletionWindow.start + 1}-
+									{fileCompletionWindow.end} of {fileCompletions.length}
 								</Text>
-							))}
+							)}
 						</Box>
 					)}
 					{queuedMessages.length > 0 && (
