@@ -201,6 +201,17 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
+test('WelcomeMessage centers version, location, and menu', t => {
+    const originalColumns = process.stdout.columns;
+    process.stdout.columns = 80;
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(indentOf(output, /nanocoder v/) > 15, 'version should be centered');
+	t.true(indentOf(output, /⎇/) > 15, 'location should be centered');
+	t.true(indentOf(output, /Resume session/) > 15, 'menu should be centered');
+	process.stdout.columns = originalColumns;
+});
+
 test('WelcomeMessage shows the given tip in full layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
@@ -366,7 +377,7 @@ test('WelcomeMessage fits the viewport of a standard 80x24 terminal', t => {
 	);
 
 	const output = stripAnsi(lastFrame() ?? '');
-	t.true(output.split('\n').length <= 17, 'banner must fit the viewport');
+	t.true(output.split('\n').length <= 18, 'banner must fit the viewport');
 	t.regex(output, /Resume session/);
 	t.regex(output, /\/exit/);
 	t.regex(output, /Tip: Short pinned tip\./);
@@ -585,4 +596,11 @@ test('WelcomeMessage sizes the row budget to the chosen font', t => {
 		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
 	);
 	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
+});
+test('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
+        const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+        const output = stripAnsi(lastFrame() ?? '');
+        t.regex(output, /community collective/);
+        t.regex(output, /rather than a company/);
+        t.notRegex(output, /local-first coding agent/i);
 });

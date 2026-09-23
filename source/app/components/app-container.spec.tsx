@@ -229,6 +229,26 @@ test('formatBootSummaryGitLabel marks detached HEAD', t => {
 });
 
 test.serial(
+	'createStaticComponents boot summary includes working directory (cwd) rather than config dir',
+	t => {
+		const originalCwd = process.cwd;
+		try {
+			process.cwd = () => '/mock/working/dir';
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'mock-provider',
+				currentModel: 'mock-model',
+			};
+			const components = createStaticComponents(props);
+			const output = stripAnsi(renderWithTheme(<>{components}</>).lastFrame() ?? '');
+			t.regex(output, /\/mock\/working\/dir/);
+		} finally {
+			process.cwd = originalCwd;
+		}
+	},
+);
+
+test.serial(
 	'createStaticComponents boot summary includes git branch when inside a repo',
 	t => {
 		// The repo we're running tests in is itself a git repo, so the
