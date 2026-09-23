@@ -207,7 +207,7 @@ export default memo(function WelcomeMessage({
 		<Box
 			flexDirection="column"
 			width={termW}
-			height={budget}
+			height={Math.max(0, budget - 1)}
 			justifyContent="center"
 			marginBottom={1}
 		>
