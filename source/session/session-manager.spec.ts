@@ -1,4 +1,5 @@
 import {
+	mkdir,
 	mkdtemp,
 	readFile,
 	readdir,
@@ -10,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
+import {reloadAppConfig} from '@/config/index';
 import {SessionManager} from './session-manager.js';
 
 let testDir: string;
@@ -703,32 +705,85 @@ test.serial(
 // --- enforceSessionLimits ---
 
 test.serial(
-	'enforceSessionLimits deletes oldest sessions when over limit',
+	'enforceSessionLimits deletes oldest sessions and their artifacts when over limit',
 	async t => {
-		// Use a separate manager with overrideDir to avoid config interference
-		const limitDir = join(testDir, 'limit-test');
-		const limitManager = new SessionManager(limitDir);
-		await limitManager.initialize();
+		const prevConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const customConfigDir = join(testDir, 'config');
+		await mkdir(customConfigDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = customConfigDir;
 
-		// Create 5 sessions with staggered timestamps
-		const ids: string[] = [];
-		for (let i = 0; i < 5; i++) {
-			const session = await limitManager.createSession({
-				title: `Session ${i}`,
-				messageCount: 0,
-				provider: 'test',
-				model: 'test',
-				workingDirectory: '/tmp',
-				messages: [],
-			});
-			ids.push(session.id);
-			// Small delay for distinct timestamps
-			await new Promise(r => setTimeout(r, 5));
+		try {
+			await writeFile(
+				join(customConfigDir, 'nanocoder-preferences.json'),
+				JSON.stringify({
+					nanocoder: {
+						sessions: {
+							maxSessions: 2,
+						},
+					},
+				}),
+				'utf-8',
+			);
+			reloadAppConfig();
+
+			const limitDir = join(testDir, 'limit-test');
+			const artifacts = new ArtifactManager(join(testDir, 'limit-artifacts'));
+			const limitManager = new SessionManager(limitDir, artifacts);
+			await limitManager.initialize();
+
+			// Create 3 sessions with staggered timestamps and write artifacts for each
+			const ids: string[] = [];
+			for (let i = 0; i < 3; i++) {
+				const session = await limitManager.createSession({
+					title: `Session ${i}`,
+					messageCount: 0,
+					provider: 'test',
+					model: 'test',
+					workingDirectory: '/tmp',
+					messages: [],
+				});
+				ids.push(session.id);
+				await artifacts.writeArtifact(
+					session.id,
+					'implementation_plan',
+					`# Plan for session ${i}\n`,
+				);
+				// Small delay for distinct timestamps
+				await new Promise(r => setTimeout(r, 10));
+			}
+
+			// Since maxSessions is 2, creating the 3rd session triggers enforceSessionLimits
+			// and trims the oldest session (ids[0])
+			const sessions = await limitManager.listSessions();
+			t.is(sessions.length, 2);
+			t.false(sessions.some(s => s.id === ids[0]));
+			t.true(sessions.some(s => s.id === ids[1]));
+			t.true(sessions.some(s => s.id === ids[2]));
+
+			// Oldest session's JSON file should be unlinked
+			const oldestFile = await limitManager.readSession(ids[0]);
+			t.is(oldestFile, null);
+
+			// Oldest session's artifact directory should be deleted
+			const oldestArtifact = await artifacts.readArtifact(
+				ids[0],
+				'implementation_plan',
+			);
+			t.is(oldestArtifact, null);
+
+			// Remaining sessions' files and artifacts should remain intact
+			t.truthy(await limitManager.readSession(ids[1]));
+			t.truthy(await limitManager.readSession(ids[2]));
+			t.truthy(await artifacts.readArtifact(ids[1], 'implementation_plan'));
+			t.truthy(await artifacts.readArtifact(ids[2], 'implementation_plan'));
+		} finally {
+			if (prevConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = prevConfigDir;
+			}
+			reloadAppConfig();
 		}
-
-		// Default maxSessions is 100, so all 5 should be present
-		const sessions = await limitManager.listSessions();
-		t.is(sessions.length, 5);
 	},
 );
 
