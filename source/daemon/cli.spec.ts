@@ -10,7 +10,7 @@ import {
 	savePreferences,
 } from '@/config/preferences';
 import {runDaemonCli} from './cli';
-import {writeLockfile} from './lockfile';
+import {getLockfilePath, writeLockfile} from './lockfile';
 
 console.log(`\ncli.spec.ts`);
 
@@ -318,11 +318,11 @@ test.serial('status reports not running when there is no lockfile', async t => {
 test.serial('status cleans a stale lockfile and reports the previous pid', async t => {
 	const root = await tempProject();
 	try {
-		// process.pid is alive; use a pid that almost certainly isn't so the
-		// staleness check fires. Bumping past 2^22 keeps us well clear of any
-		// live process on macOS/Linux without risking pid wrap.
+		// Pick a pid unambiguously past any pid_max (Linux/macOS cap at
+		// 2^22 = 4_194_304; 99_999_999 is what the sibling lockfile test
+		// uses for the same reason).
 		await writeLockfile({
-			pid: 4_000_000,
+			pid: 99_999_999,
 			socketPath: '/tmp/stale.sock',
 			startedAt: Date.now(),
 			projectRoot: root,
@@ -331,9 +331,12 @@ test.serial('status cleans a stale lockfile and reports the previous pid', async
 		const result = await runDaemonCli('status', {projectRoot: root});
 
 		t.is(result.exitCode, 0);
-		t.regex(result.output, /Stale lockfile cleaned \(was pid 4000000\)/);
-		// Side effect: stale lockfile must be gone after status runs.
-		t.false(existsSync(join(root, '.nanocoder', 'daemon.lock')));
+		t.regex(result.output, /Stale lockfile cleaned \(was pid 99999999\)/);
+		// Side effect: stale lockfile must be gone after status runs. Use
+		// getLockfilePath so the test stays in sync with future renames —
+		// the previous hardcoded `daemon.lock` filename never existed on
+		// disk and made the assertion vacuous.
+		t.false(existsSync(getLockfilePath(root)));
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
