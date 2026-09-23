@@ -408,6 +408,64 @@ test('you template: stamps templateId so edits resolve under a custom name', t =
 	t.is(resolveMcpTemplateId(config), 'you');
 });
 
+test('serply template: builds HTTP config with X-API-Key header', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'serply',
+		apiKey: 'serply_test_key_123',
+	});
+
+	t.is(config.name, 'serply');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.serply.io/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
+	t.deepEqual(config.tags, ['serply', 'search', 'web', 'scrape', 'http']);
+});
+
+test('serply template: requires the API key field', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.truthy(apiKeyField);
+	t.true(apiKeyField!.required);
+	t.true(apiKeyField!.sensitive);
+});
+
+test('serply template: defaults server name to serply when unset', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({apiKey: 'serply_test_key_123'});
+
+	t.is(config.name, 'serply');
+});
+
+test('serply template: trims whitespace from API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({apiKey: '  serply_test_key_123  '});
+
+	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
+});
+
+test('serply template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'serply-work',
+		apiKey: 'serply_test_key_123',
+	});
+
+	t.is(config.templateId, 'serply');
+	t.is(resolveMcpTemplateId(config), 'serply');
+});
+
 test('resolveMcpTemplateId: prefers templateId over tags and name', t => {
 	t.is(
 		resolveMcpTemplateId({
