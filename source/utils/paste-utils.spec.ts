@@ -123,6 +123,52 @@ test('repeated pasted text survives the complete prompt round trip', t => {
 	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
+test('back-to-back pastes stay separated in the assembled prompt', t => {
+	// The composer shows two tidy placeholders, but with nothing between them
+	// they expanded flush against each other at submit, so the last line of the
+	// first paste fused with the first line of the second.
+	const first = 'first line\nAAA';
+	const second = 'BBB\nsecond line';
+
+	const afterFirst = handlePaste(first, '', {});
+	t.truthy(afterFirst);
+	t.false(
+		afterFirst!.displayValue.startsWith('\n'),
+		'an empty composer must not gain a leading newline',
+	);
+
+	const afterSecond = handlePaste(
+		second,
+		afterFirst!.displayValue,
+		afterFirst!.placeholderContent,
+	);
+	t.truthy(afterSecond);
+
+	const assembled = assemblePrompt(afterSecond!);
+	t.false(assembled.includes('AAABBB'), 'the paste boundary must survive');
+	t.true(assembled.includes('AAA\nBBB'));
+});
+
+test('a composer already ending in whitespace gains no extra separator', t => {
+	// The separator exists to keep blocks apart, so whitespace the user typed
+	// is left as it is rather than doubled.
+	const pastedText = 'BBB\nsecond line';
+
+	const afterSpace = handlePaste(pastedText, 'look at this: ', {});
+	t.truthy(afterSpace);
+	t.true(
+		assemblePrompt(afterSpace!).startsWith('look at this: BBB'),
+		'a trailing space must carry the paste on the same line',
+	);
+
+	const afterNewline = handlePaste(pastedText, 'look at this:\n', {});
+	t.truthy(afterNewline);
+	t.true(
+		assemblePrompt(afterNewline!).startsWith('look at this:\nBBB'),
+		'a trailing newline must not be doubled',
+	);
+});
+
 test('handlePaste preserves existing pasted content', t => {
 	const existingPlaceholderContent: Record<string, PlaceholderContent> = {
 		'123': {

@@ -93,9 +93,18 @@ export function handlePaste(
 
 	// For CLI paste detection, we need to replace the pasted text in the display value
 	// Replace every exact occurrence, or append the placeholder if none is present.
+	//
+	// Appending needs a separator: two placeholders sitting flush against each
+	// other look tidy in the composer but expand back to back at submit, fusing
+	// the last line of one paste to the first line of the next (...AAABBB...).
+	// A newline only when something precedes it and it does not already end in
+	// whitespace, so an empty composer and a deliberate trailing space or
+	// newline are all left exactly as the user left them.
+	const separator =
+		currentDisplayValue === '' || /\s$/.test(currentDisplayValue) ? '' : '\n';
 	const newDisplayValue = currentDisplayValue.includes(pastedText)
 		? currentDisplayValue.replaceAll(pastedText, placeholder)
-		: currentDisplayValue + placeholder;
+		: currentDisplayValue + separator + placeholder;
 
 	return {
 		displayValue: newDisplayValue,
