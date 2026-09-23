@@ -219,6 +219,16 @@ function getToolErrorMessage(result: ToolResult): string | undefined {
 	return undefined;
 }
 
+/**
+ * Whether a tool call failed. `isError` is authoritative: the bash paths set it
+ * on a non-zero exit, where the content is the command's own output and has no
+ * prefix to sniff for. The prefixes still cover tools that report failure only
+ * through their content.
+ */
+export function isToolResultError(result: ToolResult): boolean {
+	return result.isError === true || getToolErrorMessage(result) !== undefined;
+}
+
 /** The tool's formatter output, or its raw content when there is none. */
 async function renderToolOutput(
 	toolCall: ToolCall,
@@ -274,21 +284,25 @@ export async function displayToolResult(
 ): Promise<void> {
 	const errorMessage = getToolErrorMessage(result);
 
-	if (errorMessage !== undefined) {
-		// Compact mode: condense failures to a short red one-liner
-		// ("⚒ write_file ") instead of the full error output.
-		// The model still receives the full error in conversation history,
-		// so this only trims the user-facing display.
-		if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
-			addToChatQueue(
-				<CompactToolError
-					key={generateKey(`tool-error-compact-${result.tool_call_id}`)}
-					toolName={result.name}
-				/>,
-			);
-			return;
-		}
+	// Compact mode: condense failures to a short red one-liner
+	// ("⚒ write_file failed") instead of the full error output.
+	// The model still receives the full error in conversation history,
+	// so this only trims the user-facing display.
+	if (
+		isToolResultError(result) &&
+		compact &&
+		!ALWAYS_EXPANDED_TOOLS.has(result.name)
+	) {
+		addToChatQueue(
+			<CompactToolError
+				key={generateKey(`tool-error-compact-${result.tool_call_id}`)}
+				toolName={result.name}
+			/>,
+		);
+		return;
+	}
 
+	if (errorMessage !== undefined) {
 		// Display as error message - shown in full
 		addToChatQueue(
 			<ErrorMessage
