@@ -329,7 +329,7 @@ async function main(): Promise<void> {
 	if (modelValue) {
 		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
 		const value = modelValue;
-		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
+		if (/^[a-zA-Z0-9_/.:@-]+$/.test(value)) {
 			cliModel = value;
 		} else {
 			console.error(
