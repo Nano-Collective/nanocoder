@@ -677,3 +677,35 @@ test('saving indicator renders when there is sufficient width', t => {
 	t.regex(output, /saving/);
 	t.regex(output, /ctx: 40%/);
 });
+
+// ============================================================================
+// Mode cycling hint tests (Issue #1453)
+// ============================================================================
+
+test('DevelopmentModeIndicator shows (Shift+Tab to cycle) hint on wide terminals', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+		/>,
+		100,
+	);
+	t.regex(output, /Shift\+Tab/);
+});
+
+test('DevelopmentModeIndicator drops (Shift+Tab to cycle) hint under width pressure', t => {
+	const fullSession = 'feature-authentication-token';
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={40}
+			contextSource="api"
+			sessionName={fullSession}
+		/>,
+		42,
+	);
+	// At this narrow width, with the session name and context, the shift hint should be dropped
+	t.notRegex(output, /Shift\+Tab/);
+});

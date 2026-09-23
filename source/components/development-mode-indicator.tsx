@@ -134,9 +134,7 @@ export const DevelopmentModeIndicator = React.memo(
 						: '';
 
 				const shiftHintFull =
-					isNarrow && developmentMode !== 'headless'
-						? ' (Shift+Tab to cycle)'
-						: '';
+					developmentMode !== 'headless' ? ' (Shift+Tab to cycle)' : '';
 				const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
 				const taskBaseSegment = taskLabelBase ? ` · ${taskLabelBase}` : '';
 				const taskHintSegment = taskLabelWithHint
