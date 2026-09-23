@@ -1,14 +1,20 @@
 /**
- * Transport parity: bytes on disk must match what the user approved,
- * whether the call originates in the TUI conversation loop or in the
- * ACP server.
+ * Determinism of `processToolUse` for the file tools.
  *
- * Both transports converge on `processToolUse` (TUI via
- * `hooks/chat-handler/conversation/tool-executor.tsx`, ACP via
- * `acp/acp-conversation.ts`), so a single test against the real
- * `processToolUse` proves both paths: if either transport had a
- * divergent code path that mutated arguments, this test would catch
- * it.
+ * Every transport that executes file tools — the TUI conversation
+ * loop, the ACP server, subagents — reaches the tool handler through
+ * the same `processToolUse` function (see
+ * `hooks/chat-handler/conversation/tool-executor.tsx`,
+ * `acp/acp-conversation.ts`, and `subagents/subagent-executor.ts`).
+ * This spec asserts that the bytes on disk are a pure function of the
+ * tool call: two `processToolUse` invocations with the same input
+ * produce identical output bytes, surviving the validator, argument
+ * parser, pre-tool-use gate, and post-tool-use wrapper.
+ *
+ * The `$`-token literal test guards against a regression that swaps
+ * `replaceFirstLiteral` for `String.prototype.replace` — that would
+ * silently interpret `$&`, `` $` ``, `$'`, `$$` and rewrite the
+ * written bytes in a way that bypasses review.
  */
 
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
@@ -30,7 +36,7 @@ import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import {markFileSeen} from '@/utils/read-tracker';
 
-console.log(`\nfile-ops transport parity spec`);
+console.log(`\nfile-ops processToolUse determinism spec`);
 
 const testDir = mkdtempSync(join(tmpdir(), 'file-ops-parity-'));
 
