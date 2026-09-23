@@ -204,7 +204,13 @@ export default memo(function WelcomeMessage({
 	})();
 
 	return (
-		<Box flexDirection="column" width={termW} marginBottom={1}>
+		<Box
+			flexDirection="column"
+			width={termW}
+			height={Math.max(0, budget - 1)}
+			justifyContent="center"
+			marginBottom={1}
+		>
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
 					<Gradient colors={[colors.primary, colors.tool]}>
