@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -6,6 +9,7 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
@@ -1274,6 +1278,43 @@ test('UserInput windows long slash completion lists', async t => {
 	t.notRegex(laterFrame, /\/zz-window-00/);
 	t.regex(laterFrame, /▸ \/zz-window-11/);
 	t.regex(laterFrame, /Showing 5-14 of 14/);
+
+	unmount();
+});
+
+test('UserInput windows long file mention lists', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
+	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('@zzfile');
+	// The file walk is async; wait for the list rather than a fixed delay.
+	for (let i = 0; i < 40 && !/Showing/.test(lastFrame()!); i++) {
+		await wait(50);
+	}
+	t.regex(lastFrame()!, /Showing 1-5 of 8/);
+
+	// Moving past the fifth row scrolls the list, so the highlight stays on a
+	// drawn file instead of moving onto ones that are not shown.
+	for (let i = 0; i < 7; i++) {
+		stdin.write('\u001B[B');
+		await wait(50);
+		t.regex(lastFrame()!, /▸ zzfile\d\.txt/);
+	}
+	t.notRegex(lastFrame()!, /Showing 1-5 of 8/);
 
 	unmount();
 });
