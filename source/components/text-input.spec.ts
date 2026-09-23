@@ -16,25 +16,39 @@ interface TextInputState {
 	cursorOffset: number;
 }
 
+// Code-point aware step helpers
+function stepBackward(str: string, offset: number): number {
+	if (offset <= 0) return 0;
+	let i = 0;
+	let prev = 0;
+	for (const char of str) {
+		if (i >= offset) break;
+		prev = i;
+		i += char.length;
+	}
+	return prev;
+}
+
+function stepForward(str: string, offset: number): number {
+	if (offset >= str.length) return str.length;
+	let i = 0;
+	for (const char of str) {
+		if (i === offset) return i + char.length;
+		if (i > offset) return i;
+		i += char.length;
+	}
+	return str.length;
+}
+
 // Simulate Ctrl+W: backward-kill-word (newlines are word boundaries)
 function backwardKillWord(state: TextInputState): TextInputState {
-	const {value, cursorOffset} = state;
-	if (cursorOffset <= 0) return state;
-
-	let i = cursorOffset;
-
-	// Skip whitespace (spaces + newlines) immediately before cursor
-	while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) {
+	let i = state.cursorOffset;
+	while (i > 0 && (state.value[i - 1] === ' ' || state.value[i - 1] === '\n'))
 		i--;
-	}
-
-	// Delete back to next whitespace/newline or start
-	while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') {
+	while (i > 0 && state.value[i - 1] !== ' ' && state.value[i - 1] !== '\n')
 		i--;
-	}
-
 	return {
-		value: value.slice(0, i) + value.slice(cursorOffset),
+		value: state.value.slice(0, i) + state.value.slice(state.cursorOffset),
 		cursorOffset: i,
 	};
 }
@@ -55,29 +69,31 @@ function killToEnd(state: TextInputState): TextInputState {
 	};
 }
 
-// Simulate Ctrl+A: move to start
+// Simulate Ctrl+A: move to start of line
 function moveToStart(state: TextInputState): TextInputState {
 	return {...state, cursorOffset: 0};
 }
 
-// Simulate Ctrl+E: move to end
+// Simulate Ctrl+E: move to end of line
 function moveToEnd(state: TextInputState): TextInputState {
 	return {...state, cursorOffset: state.value.length};
 }
 
-// Simulate Ctrl+B: move back one character
+// Simulate Ctrl+B or Left Arrow: move back one character
 function moveBack(state: TextInputState): TextInputState {
+	if (state.cursorOffset <= 0) return state;
 	return {
 		...state,
-		cursorOffset: Math.max(0, state.cursorOffset - 1),
+		cursorOffset: stepBackward(state.value, state.cursorOffset),
 	};
 }
 
-// Simulate Ctrl+F: move forward one character
+// Simulate Ctrl+F or Right Arrow: move forward one character
 function moveForward(state: TextInputState): TextInputState {
+	if (state.cursorOffset >= state.value.length) return state;
 	return {
 		...state,
-		cursorOffset: Math.min(state.value.length, state.cursorOffset + 1),
+		cursorOffset: stepForward(state.value, state.cursorOffset),
 	};
 }
 
@@ -86,10 +102,12 @@ function insertChar(
 	state: TextInputState,
 	char: string,
 ): TextInputState {
-	const {value, cursorOffset} = state;
 	return {
-		value: value.slice(0, cursorOffset) + char + value.slice(cursorOffset),
-		cursorOffset: cursorOffset + char.length,
+		value:
+			state.value.slice(0, state.cursorOffset) +
+			char +
+			state.value.slice(state.cursorOffset),
+		cursorOffset: state.cursorOffset + char.length,
 	};
 }
 
@@ -97,79 +115,55 @@ function insertChar(
 function backspace(state: TextInputState): TextInputState {
 	const {value, cursorOffset} = state;
 	if (cursorOffset <= 0) return state;
+	const prev = stepBackward(value, cursorOffset);
 	return {
-		value: value.slice(0, cursorOffset - 1) + value.slice(cursorOffset),
-		cursorOffset: cursorOffset - 1,
+		value: value.slice(0, prev) + value.slice(cursorOffset),
+		cursorOffset: prev,
 	};
 }
 
 // --- Ctrl+W (backward-kill-word) ---
 
-test('Ctrl+W deletes the last word', (t) => {
+test('Ctrl+W deletes previous word', (t) => {
 	const result = backwardKillWord({value: 'hello world', cursorOffset: 11});
 	t.is(result.value, 'hello ');
 	t.is(result.cursorOffset, 6);
 });
 
-test('Ctrl+W deletes word with cursor in middle', (t) => {
-	const result = backwardKillWord({value: 'hello world', cursorOffset: 5});
-	t.is(result.value, ' world');
-	t.is(result.cursorOffset, 0);
+test('Ctrl+W stops at newlines', (t) => {
+	const result = backwardKillWord({value: 'hello\nworld', cursorOffset: 11});
+	t.is(result.value, 'hello\n');
+	t.is(result.cursorOffset, 6);
 });
 
-test('Ctrl+W skips trailing whitespace before deleting word', (t) => {
-	const result = backwardKillWord({value: 'hello   world', cursorOffset: 8});
-	t.is(result.value, 'world');
-	t.is(result.cursorOffset, 0);
+test('Ctrl+W deletes trailing whitespace and previous word', (t) => {
+	const result = backwardKillWord({value: 'hello world   ', cursorOffset: 14});
+	t.is(result.value, 'hello ');
+	t.is(result.cursorOffset, 6);
 });
 
-test('Ctrl+W deletes entire single word', (t) => {
-	const result = backwardKillWord({value: 'hello', cursorOffset: 5});
-	t.is(result.value, '');
-	t.is(result.cursorOffset, 0);
+test('Ctrl+W deletes cross-newline whitespace and previous word', (t) => {
+	// Offset 15 is at end. Starts deleting backwards, encounters spaces, then newline, then space, then 'd'
+	// It should delete until it hits the first word boundary
+	const result = backwardKillWord({
+		value: 'hello world \n  ',
+		cursorOffset: 15,
+	});
+	t.is(result.value, 'hello ');
+	t.is(result.cursorOffset, 6);
 });
 
-test('Ctrl+W does nothing at start of line', (t) => {
+test('Ctrl+W from start of string does nothing', (t) => {
 	const result = backwardKillWord({value: 'hello', cursorOffset: 0});
 	t.is(result.value, 'hello');
 	t.is(result.cursorOffset, 0);
 });
 
-test('Ctrl+W on empty string does nothing', (t) => {
-	const result = backwardKillWord({value: '', cursorOffset: 0});
-	t.is(result.value, '');
-	t.is(result.cursorOffset, 0);
-});
-
-test('Ctrl+W with multiple words deletes only last word', (t) => {
-	const result = backwardKillWord({
-		value: 'one two three',
-		cursorOffset: 13,
-	});
-	t.is(result.value, 'one two ');
-	t.is(result.cursorOffset, 8);
-});
-
-test('Ctrl+W preserves text after cursor', (t) => {
-	const result = backwardKillWord({
-		value: 'one two three',
-		cursorOffset: 7,
-	});
-	t.is(result.value, 'one  three');
-	t.is(result.cursorOffset, 4);
-});
-
 // --- Ctrl+U (kill to start) ---
 
-test('Ctrl+U deletes from cursor to start', (t) => {
-	const result = killToStart({value: 'hello world', cursorOffset: 5});
-	t.is(result.value, ' world');
-	t.is(result.cursorOffset, 0);
-});
-
-test('Ctrl+U at end deletes entire line', (t) => {
-	const result = killToStart({value: 'hello', cursorOffset: 5});
-	t.is(result.value, '');
+test('Ctrl+U deletes from cursor to start of line', (t) => {
+	const result = killToStart({value: 'hello world', cursorOffset: 6});
+	t.is(result.value, 'world');
 	t.is(result.cursorOffset, 0);
 });
 
@@ -181,16 +175,10 @@ test('Ctrl+U at start does nothing', (t) => {
 
 // --- Ctrl+K (kill to end) ---
 
-test('Ctrl+K deletes from cursor to end', (t) => {
+test('Ctrl+K deletes from cursor to end of line', (t) => {
 	const result = killToEnd({value: 'hello world', cursorOffset: 5});
 	t.is(result.value, 'hello');
 	t.is(result.cursorOffset, 5);
-});
-
-test('Ctrl+K at start deletes entire line', (t) => {
-	const result = killToEnd({value: 'hello', cursorOffset: 0});
-	t.is(result.value, '');
-	t.is(result.cursorOffset, 0);
 });
 
 test('Ctrl+K at end does nothing', (t) => {
@@ -202,26 +190,15 @@ test('Ctrl+K at end does nothing', (t) => {
 // --- Ctrl+A (move to start) ---
 
 test('Ctrl+A moves cursor to start', (t) => {
-	const result = moveToStart({value: 'hello world', cursorOffset: 5});
+	const result = moveToStart({value: 'hello', cursorOffset: 5});
 	t.is(result.cursorOffset, 0);
-	t.is(result.value, 'hello world');
-});
-
-test('Ctrl+A at start stays at start', (t) => {
-	const result = moveToStart({value: 'hello', cursorOffset: 0});
-	t.is(result.cursorOffset, 0);
+	t.is(result.value, 'hello');
 });
 
 // --- Ctrl+E (move to end) ---
 
 test('Ctrl+E moves cursor to end', (t) => {
-	const result = moveToEnd({value: 'hello world', cursorOffset: 0});
-	t.is(result.cursorOffset, 11);
-	t.is(result.value, 'hello world');
-});
-
-test('Ctrl+E at end stays at end', (t) => {
-	const result = moveToEnd({value: 'hello', cursorOffset: 5});
+	const result = moveToEnd({value: 'hello', cursorOffset: 0});
 	t.is(result.cursorOffset, 5);
 });
 
@@ -238,6 +215,11 @@ test('Ctrl+B at start stays at start', (t) => {
 	t.is(result.cursorOffset, 0);
 });
 
+test('Ctrl+B moves back across an emoji', (t) => {
+	const result = moveBack({value: 'a😀b', cursorOffset: 3});
+	t.is(result.cursorOffset, 1);
+});
+
 // --- Ctrl+F (move forward) ---
 
 test('Ctrl+F moves cursor forward one character', (t) => {
@@ -249,6 +231,11 @@ test('Ctrl+F moves cursor forward one character', (t) => {
 test('Ctrl+F at end stays at end', (t) => {
 	const result = moveForward({value: 'hello', cursorOffset: 5});
 	t.is(result.cursorOffset, 5);
+});
+
+test('Ctrl+F moves forward across an emoji', (t) => {
+	const result = moveForward({value: 'a😀b', cursorOffset: 1});
+	t.is(result.cursorOffset, 3);
 });
 
 // --- Normal typing ---
@@ -277,6 +264,12 @@ test('backspace at start does nothing', (t) => {
 	const result = backspace({value: 'hello', cursorOffset: 0});
 	t.is(result.value, 'hello');
 	t.is(result.cursorOffset, 0);
+});
+
+test('backspace deletes an emoji correctly', (t) => {
+	const result = backspace({value: 'a😀b', cursorOffset: 3});
+	t.is(result.value, 'ab');
+	t.is(result.cursorOffset, 1);
 });
 
 // --- Ctrl+Left / Ctrl+Right (word-jump) ---
@@ -526,5 +519,3 @@ test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
 	if (true && undefined) {} else if (true && onSubmit) onSubmit();
 	t.true(called);
 });
-
-

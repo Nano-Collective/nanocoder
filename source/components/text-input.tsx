@@ -68,6 +68,30 @@ function TextInput({
 		});
 	}, [originalValue, focus, showCursor]);
 
+	// Code-point aware step helpers
+	function stepBackward(str: string, offset: number): number {
+		if (offset <= 0) return 0;
+		let i = 0;
+		let prev = 0;
+		for (const char of str) {
+			if (i >= offset) break;
+			prev = i;
+			i += char.length;
+		}
+		return prev;
+	}
+
+	function stepForward(str: string, offset: number): number {
+		if (offset >= str.length) return str.length;
+		let i = 0;
+		for (const char of str) {
+			if (i === offset) return i + char.length;
+			if (i > offset) return i;
+			i += char.length;
+		}
+		return str.length;
+	}
+
 	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
 	function moveToPrevWord(value: string, offset: number): number {
@@ -102,14 +126,15 @@ function TextInput({
 		let i = 0;
 
 		for (const char of value) {
-			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+			const charEnd = i + char.length - 1;
+			if (charEnd >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
 				renderedValue +=
 					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
 			} else {
 				renderedValue += char;
 			}
 
-			i++;
+			i += char.length;
 		}
 
 		if (value.length > 0 && cursorOffset === value.length) {
@@ -202,7 +227,10 @@ function TextInput({
 						case 'b': {
 							// Move cursor back one character
 							if (showCursor) {
-								nextCursorOffset--;
+								nextCursorOffset = stepBackward(
+									originalValueRef.current,
+									nextCursorOffset,
+								);
 							}
 
 							break;
@@ -211,7 +239,10 @@ function TextInput({
 						case 'f': {
 							// Move cursor forward one character
 							if (showCursor) {
-								nextCursorOffset++;
+								nextCursorOffset = stepForward(
+									originalValueRef.current,
+									nextCursorOffset,
+								);
 							}
 
 							break;
@@ -262,21 +293,28 @@ function TextInput({
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = stepBackward(
+						originalValueRef.current,
+						nextCursorOffset,
+					);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = stepForward(
+						originalValueRef.current,
+						nextCursorOffset,
+					);
 				}
 			} else if (key.backspace || key.delete) {
 				if (cursorOffset > 0) {
+					const prev = stepBackward(originalValueRef.current, cursorOffset);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(0, prev) +
 						originalValueRef.current.slice(
 							cursorOffset,
 							originalValueRef.current.length,
 						);
-					nextCursorOffset--;
+					nextCursorOffset = prev;
 				}
 			} else {
 				nextValue =
