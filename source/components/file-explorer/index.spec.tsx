@@ -361,6 +361,40 @@ test('FileExplorer preview directory error shows message', t => {
 // Everything above renders hand-written stand-ins, so none of it exercises
 // FileExplorer itself. These render the actual component.
 
+test('FileExplorer bounds index when exiting search', async t => {
+	const {stdin, lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
+
+	for (let i = 0; i < 20; i++) {
+		if (!stripAnsi(lastFrame() ?? '').includes('Loading file tree')) break;
+		await new Promise(r => setTimeout(r, 50));
+	}
+	await new Promise(r => setTimeout(r, 50));
+
+	// Search
+	stdin.write('/');
+	await new Promise(r => setTimeout(r, 10));
+	stdin.write('e');
+	await new Promise(r => setTimeout(r, 10));
+
+	// Move down a lot
+	for(let i=0; i<15; i++) {
+		stdin.write('\u001B[B');
+		await new Promise(r => setTimeout(r, 10));
+	}
+
+	// Exit search
+	stdin.write('\u001B'); // Esc
+	await new Promise(r => setTimeout(r, 10));
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// We expect the selected index to be clamped, so some element will be highlighted,
+	// or at least it doesn't stay out of bounds. The status bar usually shows the path.
+	t.regex(output, /Up\/Down: navigate/); // Check it's in tree mode
+	// If the index was out of bounds, selectedNode is undefined and the path isn't rendered!
+	// Specifically check that something is highlighted (which tree-item renders)
+	t.notRegex(output, /undefined/); // It shouldn't crash or render undefined
+});
+
 test('FileExplorer renders inside a rounded titled frame', t => {
 	const {lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
 

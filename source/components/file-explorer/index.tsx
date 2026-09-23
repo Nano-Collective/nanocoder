@@ -117,11 +117,17 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				)
 			: flatList;
 
+	// Clamp the selected index so it's always valid for the current list length.
+	const clampedSelectedIndex = Math.max(
+		0,
+		Math.min(selectedIndex, filteredList.length - 1),
+	);
+
 	// Calculate scroll window
 	const scrollStart = Math.max(
 		0,
 		Math.min(
-			selectedIndex - Math.floor(FILE_EXPLORER_VISIBLE_ITEMS / 2),
+			clampedSelectedIndex - Math.floor(FILE_EXPLORER_VISIBLE_ITEMS / 2),
 			filteredList.length - FILE_EXPLORER_VISIBLE_ITEMS,
 		),
 	);
@@ -131,7 +137,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 	);
 
 	// Get selected node
-	const selectedNode = filteredList[selectedIndex]?.node;
+	const selectedNode = filteredList[clampedSelectedIndex]?.node;
 
 	// Calculate estimated tokens for selected files
 	const estimatedTokens = useMemo(() => {
@@ -326,9 +332,21 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				setSearchQuery(prev => prev + input);
 				setSelectedIndex(0);
 			} else if (key.upArrow) {
-				setSelectedIndex(prev => Math.max(0, prev - 1));
+				setSelectedIndex(prev => {
+					const validCurrent = Math.max(
+						0,
+						Math.min(prev, filteredList.length - 1),
+					);
+					return Math.max(0, validCurrent - 1);
+				});
 			} else if (key.downArrow) {
-				setSelectedIndex(prev => Math.min(filteredList.length - 1, prev + 1));
+				setSelectedIndex(prev => {
+					const validCurrent = Math.max(
+						0,
+						Math.min(prev, filteredList.length - 1),
+					);
+					return Math.min(filteredList.length - 1, validCurrent + 1);
+				});
 			} else if (key.return) {
 				handleSelect();
 			}
@@ -337,9 +355,21 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 
 		// Normal tree mode
 		if (key.upArrow) {
-			setSelectedIndex(prev => Math.max(0, prev - 1));
+			setSelectedIndex(prev => {
+				const validCurrent = Math.max(
+					0,
+					Math.min(prev, filteredList.length - 1),
+				);
+				return Math.max(0, validCurrent - 1);
+			});
 		} else if (key.downArrow) {
-			setSelectedIndex(prev => Math.min(filteredList.length - 1, prev + 1));
+			setSelectedIndex(prev => {
+				const validCurrent = Math.max(
+					0,
+					Math.min(prev, filteredList.length - 1),
+				);
+				return Math.min(filteredList.length - 1, validCurrent + 1);
+			});
 		} else if (key.return) {
 			handleSelect();
 		} else if (input === '/') {
@@ -485,7 +515,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				) : (
 					visibleItems.map((item, idx) => {
 						const actualIndex = scrollStart + idx;
-						const isHighlighted = actualIndex === selectedIndex;
+						const isHighlighted = actualIndex === clampedSelectedIndex;
 						const isFileSelected = selectedFiles.has(item.node.path);
 						return (
 							<TreeItem
