@@ -4,7 +4,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
-import TextInput from '@/components/text-input';
+import TextInput, {type TextInputHandle} from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -207,6 +207,10 @@ export default function UserInput({
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
 	const [textInputKey, setTextInputKey] = useState(0);
+	// Imperative handle into TextInput so the terminal paste path can read the
+	// caret position before the splice and put it back after. Without this the
+	// pasted text would always land at the end of the value.
+	const textInputRef = useRef<TextInputHandle>(null);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
 	// so the auto-show effect doesn't immediately re-open it until they type more.
@@ -297,9 +301,17 @@ export default function UserInput({
 			return;
 		}
 		const handleTerminalPaste = (payload: string) => {
-			insertPaste(payload);
-			// Remount TextInput so its cursor follows the appended text.
-			setTextInputKey(prev => prev + 1);
+			// Read the caret off TextInput so the splice lands where the user
+			// was editing, not at the end of the value. insertPaste returns the
+			// new cursor offset; fall back to a remount only if no cursor is
+			// available (TextInput not yet mounted).
+			const cursorOffset = textInputRef.current?.getCursorOffset();
+			const result = insertPaste(payload, cursorOffset);
+			if (result && textInputRef.current) {
+				textInputRef.current.setCursorOffset(result.cursorOffset);
+			} else if (!result) {
+				setTextInputKey(prev => prev + 1);
+			}
 		};
 		pasteEvents.on('paste', handleTerminalPaste);
 		return () => {
@@ -1210,6 +1222,7 @@ export default function UserInput({
 							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
 						)}
 						<TextInput
+							ref={textInputRef}
 							key={textInputKey}
 							value={input}
 							onChange={handleInputChange}

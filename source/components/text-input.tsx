@@ -1,6 +1,12 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
-import {useEffect, useRef, useState} from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
 import {isNewlineKey} from '@/utils/newline-key';
 import {
 	getVisualLineSegments,
@@ -23,26 +29,55 @@ export type Props = {
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
 };
 
-function TextInput({
-	value: originalValue,
-	placeholder = '',
-	focus = true,
-	mask,
-	highlightPastedText = false,
-	showCursor = true,
-	onChange,
-	onSubmit,
-	onEnter,
-	wrapWidth,
-	handleEnter = true,
-	onEdgeArrow,
-}: Props) {
+/**
+ * Imperative handle for TextInput. Exposed so the parent can read the caret
+ * position before a programmatic insert (terminal paste) and restore it after,
+ * without lifting cursor state up the tree.
+ */
+export type TextInputHandle = {
+	getCursorOffset: () => number;
+	setCursorOffset: (offset: number) => void;
+};
+
+const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
+	{
+		value: originalValue,
+		placeholder = '',
+		focus = true,
+		mask,
+		highlightPastedText = false,
+		showCursor = true,
+		onChange,
+		onSubmit,
+		onEnter,
+		wrapWidth,
+		handleEnter = true,
+		onEdgeArrow,
+	}: Props,
+	ref,
+) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
 		cursorWidth: 0,
 	});
 
 	const {cursorOffset, cursorWidth} = state;
+
+	useImperativeHandle(
+		ref,
+		() => ({
+			getCursorOffset: () => cursorOffsetRef.current,
+			setCursorOffset: (offset: number) => {
+				const clamped = Math.max(
+					0,
+					Math.min(offset, originalValueRef.current.length),
+				);
+				cursorOffsetRef.current = clamped;
+				setState({cursorOffset: clamped, cursorWidth: 0});
+			},
+		}),
+		[],
+	);
 
 	// Refs so useInput handlers always read the latest values (avoids stale closures)
 	const cursorOffsetRef = useRef(cursorOffset);
@@ -418,6 +453,6 @@ function TextInput({
 			: finalValue;
 
 	return <Text>{displayValue}</Text>;
-}
+});
 
 export default TextInput;

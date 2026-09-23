@@ -1166,3 +1166,88 @@ test('redo stack is capped at MAX_UNDO_STACK', t => {
 
 	t.true(currentHook!.redoStack.length < MAX_UNDO_STACK);
 });
+
+// ============================================================================
+// insertPaste — cursor-aware bracketed paste
+// ============================================================================
+
+test('insertPaste with cursorOffset splices a short paste at the caret and returns the new cursor', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('PASTED', 5);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 11});
+	t.is(currentHook!.input, 'helloPASTED world');
+});
+
+test('insertPaste with cursorOffset returns the cursor after the placeholder for a long paste', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const pasted = 'x'.repeat(801);
+	const result = currentHook!.insertPaste(pasted, 5);
+	instance.rerender(<TestComponent />);
+
+	t.truthy(result);
+	// Placeholder label is `[Paste #1: 801 chars]` (24 chars), spliced at offset 5.
+	t.is(result!.cursorOffset, 5 + '[Paste #1: 801 chars]'.length);
+	t.true(currentHook!.input.startsWith('hello[Paste #1: 801 chars] world'));
+});
+
+test('insertPaste without a cursorOffset appends and returns null (legacy behaviour)', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('world');
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'helloworld');
+});
+
+test('insertPaste with an empty payload is a no-op', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('', 2);
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'hello');
+});
+
+test('insertPaste at cursor 0 inserts at the start', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('hello ', 0);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'hello world');
+});
+
+test('insertPaste at cursor equal to value length appends', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('abc');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('xyz', 3);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'abcxyz');
+});
