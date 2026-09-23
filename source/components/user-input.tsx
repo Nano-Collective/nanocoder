@@ -2,6 +2,7 @@ import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
+import {visibleCompletionWindow} from '@/components/completion-window';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput from '@/components/text-input';
@@ -1132,6 +1133,10 @@ export default function UserInput({
 
 		return {start, end, items: completions.slice(start, end)};
 	}, [completions, selectedCompletionIndex]);
+	const fileCompletionWindow = useMemo(
+		() => visibleCompletionWindow(fileCompletions, selectedFileIndex, 5),
+		[fileCompletions, selectedFileIndex],
+	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -1262,20 +1267,22 @@ export default function UserInput({
 							<Text color={colors.secondary}>
 								File suggestions (↑/↓ to navigate, Tab to select):
 							</Text>
-							{fileCompletions.slice(0, 5).map((file, index) => (
-								<Text
-									key={index}
-									color={
-										index === selectedFileIndex ? colors.info : colors.primary
-									}
-									bold={index === selectedFileIndex}
-								>
-									{index === selectedFileIndex ? '▸ ' : '  '}
-									{decodeMCPResourcePath(file.path)
-										? file.displayPath
-										: file.path}
-								</Text>
-							))}
+							{fileCompletionWindow.items.map((file, index) => {
+								const fileIndex = fileCompletionWindow.start + index;
+								const isSelected = fileIndex === selectedFileIndex;
+								return (
+									<Text
+										key={file.path}
+										color={isSelected ? colors.info : colors.primary}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}
+										{decodeMCPResourcePath(file.path)
+											? file.displayPath
+											: file.path}
+									</Text>
+								);
+							})}
 						</Box>
 					)}
 					{queuedMessages.length > 0 && (
