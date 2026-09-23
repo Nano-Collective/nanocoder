@@ -126,6 +126,8 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}),
 		vscode.commands.registerCommand('nanocoder.newChat', () => {
+			chatProvider.discardQueuedPrompts('new chat');
+			void acpClient.cancel();
 			acpClient.newChat();
 			chatProvider.resetSessionState();
 			chatProvider.postMessage({type: 'clear'});
@@ -133,8 +135,8 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('nanocoder.cancel', () => {
 			outputChannel.appendLine('[Extension] Cancel requested.');
-			void acpClient.cancel();
-    }),
+			chatProvider.cancel();
+		}),
 		vscode.commands.registerCommand('nanocoder.copyLastCodeBlock', () => {
 			chatProvider.requestCopyLastCodeBlock();
 		}),

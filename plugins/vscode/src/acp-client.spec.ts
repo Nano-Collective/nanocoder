@@ -129,7 +129,6 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	t.regex(shownError ?? '', /RequestError/, 'A genuine failure must still surface');
 });
 
-
 test('NanocoderAcpClient - reconnecting clears permissions left by the dead process', async (t) => {
 	const outputChannel = {appendLine: () => {}} as any;
 	const stateManager = new AcpStateManager();
@@ -144,4 +143,22 @@ test('NanocoderAcpClient - reconnecting clears permissions left by the dead proc
 	const result = await requestPromise;
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions());
+});
+
+test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', async (t) => {
+	const outputChannel = { appendLine: () => {} } as any;
+	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
+	t.false(client.isHandshakeComplete);
+
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version: '1.29.0'}}),
+	} as any);
+	t.false(client.isHandshakeComplete, 'stdio attached is not a completed handshake');
+
+	const ok = await client.initializeHandshake();
+	t.true(ok);
+	t.true(client.isHandshakeComplete);
+
+	client.setConnection({initialize: async () => ({agentInfo: {version: '1.29.0'}})} as any);
+	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
 });
