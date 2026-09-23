@@ -33,7 +33,7 @@ export function isPromptCachingEnabled(
 /**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
- * Currently handles two providers:
+ * Currently handles three providers:
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
@@ -41,6 +41,9 @@ export function isPromptCachingEnabled(
  *     `openrouter` provider key. The top-level `reasoningEffort` (from
  *     ModelParameters / `/tune`) is mapped to `reasoning.effort` when the
  *     user has not provided a more specific `openrouter.reasoning` block.
+ *   - openai-compatible: forwards `reasoningEffort` (from ModelParameters /
+ *     `/tune`) under the provider's name, which the SDK maps to
+ *     `reasoning_effort`.
  *
  * OpenRouter options come from `providerConfig.openrouter` (always-on, set
  * in agents.config.json) — not from tune, so they aren't dropped when the
@@ -100,6 +103,18 @@ export function buildProviderOptions(
 			return undefined;
 		}
 		return {openrouter: payload};
+	}
+
+	// openai-compatible (the default when sdkProvider is unset): forward
+	// `reasoningEffort` under the provider name -> SDK sends `reasoning_effort`.
+	// No default, unlike chatgpt-codex: a non-reasoning model may reject it.
+	const isOpenAICompatible =
+		providerConfig.sdkProvider === undefined ||
+		providerConfig.sdkProvider === 'openai-compatible';
+	if (isOpenAICompatible && modelParameters?.reasoningEffort) {
+		return {
+			[providerConfig.name]: {reasoningEffort: modelParameters.reasoningEffort},
+		};
 	}
 
 	return undefined;

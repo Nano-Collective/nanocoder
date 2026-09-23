@@ -401,9 +401,12 @@ function PresetPanel({
 	);
 }
 
-// Parameter definitions with validation. The tune UI only exposes scalar
-// numeric parameters today — reasoning, stop, and the openrouter block are
-// configured via agents.config.json rather than the modal.
+// Parameter definitions. Numeric params cycle through a validated min/max/step
+// range; enum params cycle through a fixed value list. `stop`, the provider
+// blocks, and any provider-specific extras are still configured via
+// agents.config.json rather than the modal.
+type EnumParamKey = 'reasoningEffort';
+
 type NumericParamKey =
 	| 'temperature'
 	| 'topP'
@@ -473,6 +476,26 @@ const PARAM_DEFS: {
 	},
 ];
 
+// Enum parameters cycle through a fixed value list instead of a numeric range.
+// `reasoningEffort` is mapped per provider: reasoning_effort in the request
+// body for openai-compatible providers, reasoning.effort for OpenRouter, and
+// providerOptions.openai for chatgpt-codex. Leaving it unset sends nothing,
+// which is the right choice for models that reject the field.
+const ENUM_PARAM_DEFS: {
+	key: EnumParamKey;
+	label: string;
+	tooltip: string;
+	values: NonNullable<ModelParameters['reasoningEffort']>[];
+}[] = [
+	{
+		key: 'reasoningEffort',
+		label: 'Reasoning Effort',
+		tooltip:
+			'How much the model should think before answering. Higher = more reasoning tokens. Sent as reasoning_effort to openai-compatible providers, reasoning.effort to OpenRouter, and providerOptions.openai to chatgpt-codex. Leave unset for models that reject the field.',
+		values: ['minimal', 'low', 'medium', 'high'],
+	},
+];
+
 // Model parameters sub-panel
 function ParametersPanel({
 	currentParams,
@@ -499,10 +522,16 @@ function ParametersPanel({
 			if (Array.isArray(value)) return value.join(', ');
 			return String(value);
 		};
-		const list: {label: string; value: string}[] = PARAM_DEFS.map(def => ({
-			label: `${def.label} - ${fmtValue(params?.[def.key])}`,
-			value: def.key,
-		}));
+		const list: {label: string; value: string}[] = [
+			...PARAM_DEFS.map(def => ({
+				label: `${def.label} - ${fmtValue(params?.[def.key])}`,
+				value: def.key,
+			})),
+			...ENUM_PARAM_DEFS.map(def => ({
+				label: `${def.label} - ${fmtValue(params?.[def.key])}`,
+				value: def.key,
+			})),
+		];
 		list.push(
 			{label: 'Reset All to Defaults', value: 'reset'},
 			{label: 'Done', value: 'done'},
@@ -511,7 +540,9 @@ function ParametersPanel({
 	}, [params]);
 
 	const [highlighted, setHighlighted] = useState<string>('temperature');
-	const highlightedDef = PARAM_DEFS.find(d => d.key === highlighted);
+	const highlightedDef =
+		PARAM_DEFS.find(d => d.key === highlighted) ??
+		ENUM_PARAM_DEFS.find(d => d.key === highlighted);
 
 	useInput((_input, key) => {
 		if (key.escape) {
@@ -535,6 +566,17 @@ function ParametersPanel({
 		}
 
 		// Cycle through values for the selected parameter
+		const enumDef = ENUM_PARAM_DEFS.find(d => d.key === item.value);
+		if (enumDef) {
+			// Walk the value list, then wrap back to unset (default) so the
+			// user can get back to "send nothing" without Reset All.
+			const current = params?.[enumDef.key];
+			const idx = current ? enumDef.values.indexOf(current) : -1;
+			const next = enumDef.values[idx + 1];
+			setParams(prev => ({...prev, [enumDef.key]: next}));
+			return;
+		}
+
 		const def = PARAM_DEFS.find(d => d.key === item.value);
 		if (!def) return;
 

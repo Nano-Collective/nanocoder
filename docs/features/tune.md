@@ -79,14 +79,75 @@ Fine-tune the model's generation parameters:
 | **Max Tokens** | 64 - 32768 | Maximum response length |
 | **Frequency Penalty** | -2.0 - 2.0 | Penalises repeated tokens. Higher = less repetition |
 | **Presence Penalty** | -2.0 - 2.0 | Penalises tokens already used. Higher = more topic diversity |
+| **Reasoning Effort** | minimal / low / medium / high | How long a reasoning model should think before answering |
 
-Press **Enter** on a parameter to cycle through values. Select **Reset All to Defaults** to clear all parameter overrides.
+Press **Enter** on a parameter to cycle through values. Numeric parameters step through their range and wrap back to the default. **Reasoning Effort** cycles `minimal → low → medium → high` and then wraps back to the default (unset), so you can return to sending nothing without resetting everything.
+
+Select **Reset All to Defaults** to clear all parameter overrides.
+
+Reasoning Effort is provider-dependent — see [Reasoning Effort](#reasoning-effort) below.
+
+### Reasoning Effort
+
+`reasoningEffort` controls how much a reasoning model thinks before answering. Nanocoder maps it to the mechanism the active provider understands:
+
+- **openai-compatible** providers — forwarded as the request body field `reasoning_effort`.
+- **openrouter** — mapped to `reasoning.effort` in `providerOptions`.
+- **chatgpt-codex** (OpenAI Responses API) — mapped to `providerOptions.openai`.
+
+Accepted values are `minimal`, `low`, `medium`, and `high`.
+
+What happens when it is unset depends on the provider:
+
+- **openai-compatible** and **openrouter** — nothing is sent, which is what you want for models that reject the field.
+- **chatgpt-codex** — falls back to `medium`, since the Responses API expects a reasoning hint to emit traces.
+
+A provider-specific reasoning block still wins where they overlap: an explicit `openrouter.reasoning.effort` beats this value, and for `chatgpt-codex` `medium` is only a fallback. See [ChatGPT/Codex](../configuration/providers/chatgpt-codex.md).
+
+Set it from the `/tune` modal (**Model Parameters → Reasoning Effort**) or in `agents.config.json`:
+
+```json
+{
+	"nanocoder": {
+		"tune": {
+			"modelParameters": {
+				"reasoningEffort": "high"
+			}
+		}
+	}
+}
+```
+
+> **This is a global setting, not a per-provider one.** It applies to whichever provider is active, so leave it unset if you also use models that reject the field.
+
+#### Overriding parameters from agents.config.json
+
+`tune.modelParameters` resolves as a **whole object per layer** — not key by key. The highest-priority layer that defines `modelParameters` at all replaces the entire object from lower layers, so unlisted keys are not inherited.
+
+With the config above, setting **Temperature** in the `/tune` modal saves `modelParameters.temperature` to `nanocoder-preferences.json`. But `agents.config.json` defines `modelParameters` too, so its object wins outright and the temperature is dropped — the request goes out with `reasoning_effort: "high"` and no temperature.
+
+To keep both, put them in the same layer. Either list every parameter in `agents.config.json`:
+
+```json
+{
+	"nanocoder": {
+		"tune": {
+			"modelParameters": {
+				"reasoningEffort": "high",
+				"temperature": 0.7
+			}
+		}
+	}
+}
+```
+
+...or leave `modelParameters` out of `agents.config.json` entirely and set everything from the modal.
 
 ### Provider-specific parameters
 
-Some providers accept additional reasoning controls that are configured through `agents.config.json` rather than the `/tune` modal:
+Fields that are not settable from the `/tune` modal are configured through `agents.config.json`:
 
-- **`reasoningEffort`** / **`reasoningSummary`** — reasoning controls for OpenAI Responses API models (GPT-5, o-series) via the `chatgpt-codex` provider. `reasoningEffort` is also forwarded to OpenRouter as `reasoning.effort`.
+- **`reasoningSummary`** — `auto` | `concise` | `detailed`. Controls how much reasoning text the `chatgpt-codex` provider returns.
 
 OpenRouter exposes additional always-on request body fields (provider routing, plugins, service tier, fallback models, etc) on the provider config itself — see [OpenRouter request options](../configuration/providers/openrouter.md#openrouter-request-options). Those settings are not tied to tune and apply on every request.
 
@@ -96,7 +157,7 @@ Three built-in presets are available via **Load Preset**:
 
 | Preset | Settings |
 |--------|----------|
-| **Default** | Resets everything to defaults (tune disabled) |
+| **Default** | Resets everything to defaults (auto profile, tune enabled) |
 | **Small Model** | Minimal tool profile, aggressive compact, temperature 0.7 |
 | **Nano (low-end hardware)** | Nano profile, aggressive compact, AGENTS.md off, temperature 0.4, max tokens 2048 |
 
@@ -104,39 +165,22 @@ Selecting a preset populates the tune form — you can further adjust settings b
 
 ## Configuration Layers
 
-Tune settings resolve from a 5-layer hierarchy (highest priority wins):
+Tune settings resolve from four layers, applied in order — each layer overrides the ones before it, so the **last** layer to set a field wins:
 
-1. **Hardcoded defaults** — `enabled: false`, `toolProfile: 'full'`, `aggressiveCompact: false`
-2. **Top-level config** — `tune` in `agents.config.json`
-3. **Per-provider config** — `tune` within a provider's configuration
-4. **Preferences** — saved via the `/tune` UI to `nanocoder-preferences.json`
-5. **Session override** — runtime changes in the current session
+1. **Hardcoded defaults** — `enabled: true`, `toolProfile: 'auto'`, `aggressiveCompact: false`
+2. **Preferences** — saved via the `/tune` UI to `nanocoder-preferences.json`
+3. **Top-level config** — `tune` in `agents.config.json`
+4. **Session override** — runtime changes in the current session
 
-### Example: Per-Provider Config
+In other words, `agents.config.json` outranks anything you saved through the modal, and a change applied in the current session outranks both.
 
-Set defaults for a specific provider in `agents.config.json`:
+> For `modelParameters` specifically, the winning layer replaces the whole object rather than merging key by key — see [Overriding parameters from agents.config.json](#overriding-parameters-from-agentsconfigjson) above.
 
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "type": "ollama",
-      "models": ["qwen2.5-coder:7b"],
-      "tune": {
-        "enabled": true,
-        "toolProfile": "minimal",
-        "aggressiveCompact": true
-      },
-      "config": {
-        "baseURL": "http://localhost:11434/v1"
-      }
-    }
-  }
-}
-```
+### Per-provider tune is not supported
 
-This automatically activates tune with the minimal profile whenever you switch to the Ollama provider.
+A `tune` block inside an individual provider's configuration has no effect. The per-provider layer exists in the merge function's signature, but no production code path supplies it: providers are loaded into the resolved config without copying `tune`, and every caller resolves tune with the per-provider argument left undefined.
+
+To vary settings per provider, switch provider and adjust `/tune`, or run separate projects with their own `agents.config.json`.
 
 ## Interaction with Development Modes
 
@@ -149,13 +193,13 @@ Tune works alongside [development modes](development-modes.md):
 
 ## Status Bar
 
-When tune is active, the status bar shows a summary of your settings:
+When tune is active, the status bar shows the **resolved** tool profile, so you can see what `auto` picked for the current model:
 
 ```
-tune: minimal | compact | temp:0.7
+tune: minimal (auto)
 ```
 
-On narrow terminals, this is shortened to just the profile name.
+With an explicit profile the `(auto)` suffix is omitted (`tune: full`). On narrow terminals the suffix is dropped to save space.
 
 ## Related
 
@@ -163,3 +207,5 @@ On narrow terminals, this is shortened to just the profile name.
 - [Context Compression](context-compression.md) — how compaction works
 - [Commands Reference](commands.md) — all slash commands
 - [Configuration](../configuration/index.md) — `agents.config.json` reference
+- [Custom Provider](../configuration/providers/custom.md) — forwarding `reasoning_effort` to OpenAI-compatible APIs
+- [ChatGPT / Codex](../configuration/providers/chatgpt-codex.md) — reasoning traces and `reasoningSummary`
