@@ -2,6 +2,7 @@ import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
+import {isExactSingleCommand} from '@/components/exact-command';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput from '@/components/text-input';
@@ -1026,7 +1027,11 @@ export default function UserInput({
 			!key.shift &&
 			showCompletions &&
 			completions.length > 0 &&
-			selectedCompletionIndex >= 0
+			selectedCompletionIndex >= 0 &&
+			!isExactSingleCommand(
+				input,
+				completions.map(completion => completion.name),
+			)
 		) {
 			const selected = completions[selectedCompletionIndex];
 			const completedText = `/${selected.name}`;
