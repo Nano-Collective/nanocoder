@@ -1176,13 +1176,14 @@ export default function UserInput({
 
 	return (
 		<>
-			{isBashMode && (
-				<Text color={colors.tool} bold>
-					Bash mode
-				</Text>
-			)}
-
 			<Box width={actualWidth} alignItems="center" flexDirection="column">
+				{isBashMode && (
+					<Box width={promptWidth}>
+						<Text color={colors.tool} bold>
+							Bash mode
+						</Text>
+					</Box>
+				)}
 				{showShortcuts && (
 					<TitledBoxWithPreferences
 						title="Keyboard Shortcuts"
