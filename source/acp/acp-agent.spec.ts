@@ -570,28 +570,6 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 	);
 });
 
-test('AcpAgent.prompt - rejects an overlapping prompt before the first async boundary', async t => {
-	const {agent} = createAgent();
-	const session = await agent.newSession({cwd: '/tmp'});
-
-	const first = agent.prompt({
-		sessionId: session.sessionId,
-		prompt: [{type: 'text', text: 'first'}],
-	});
-	const controller = agent['sessions'].get(session.sessionId)!.abortController;
-
-	await t.throwsAsync(
-		agent.prompt({
-			sessionId: session.sessionId,
-			prompt: [{type: 'text', text: 'second'}],
-		}),
-		{message: `Prompt already in progress for session: ${session.sessionId}`},
-	);
-
-	t.is(agent['sessions'].get(session.sessionId)!.abortController, controller);
-	t.is((await first).stopReason, 'end_turn');
-});
-
 test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	const {agent} = createAgent();
 	
@@ -651,6 +629,52 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 	const notice = persisted[persisted.length - 1];
 	t.is(notice.role, 'assistant');
 	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
+});
+
+test('AcpAgent.prompt - serializes overlapping prompts instead of throwing', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	let releaseFirst!: () => void;
+	const firstGate = new Promise<void>(resolve => {
+		releaseFirst = resolve;
+	});
+	let firstEntered!: () => void;
+	const firstEnteredAtChat = new Promise<void>(resolve => {
+		firstEntered = resolve;
+	});
+	let started = 0;
+
+	agent['initContext'].client.chat = async () => {
+		started += 1;
+		if (started === 1) {
+			firstEntered();
+			await firstGate;
+		}
+		return {choices: [{message: {content: `response-${started}`}}]};
+	};
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const second = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+
+	await firstEnteredAtChat;
+	await Promise.resolve();
+	t.is(
+		started,
+		1,
+		'A follow-up submitted mid-turn must wait, not throw RequestError: Internal error',
+	);
+
+	releaseFirst();
+	await Promise.all([first, second]);
+	t.is(started, 2);
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {
