@@ -202,6 +202,45 @@ test('UserInput renders development mode indicator', t => {
 
 // Serial: this test mutates the global process.stdout.columns. Run alone so the
 // forced width can't leak into a concurrently-rendering sibling test.
+// Inline mode: the transcript is printed by Ink's <Static> at column 0, which
+// no wrapper can shift, so the prompt box drops its centring to share that
+// left edge instead of sitting a couple of columns inside it.
+test.serial('UserInput sits flush left when it is not centered', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 100,
+		configurable: true,
+	});
+
+	try {
+		const indents = (centered: boolean) => {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" centered={centered} />
+				</TestWrapper>,
+			);
+			const lines = stripAnsi(lastFrame() ?? '').split('\n');
+			const border = lines.find(line => line.includes('╭'))!.indexOf('╭');
+			const mode = lines
+				.find(line => line.includes('normal mode on'))!
+				.search(/\S/);
+			unmount();
+			return {border, mode};
+		};
+
+		t.deepEqual(indents(false), {border: 0, mode: 1});
+		// Centred is the default and keeps its inset, one step for the indicator.
+		const centred = indents(true);
+		t.true(centred.border > 0);
+		t.is(centred.mode, centred.border + 1);
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test.serial(
 	'UserInput aligns the mode indicator with the input box left border',
 	t => {

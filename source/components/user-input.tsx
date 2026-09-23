@@ -159,7 +159,13 @@ interface ChatProps {
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
-	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	forceFocus?: boolean;
+	/**
+	 * Centre the prompt box in the terminal. Inline mode turns this off: the
+	 * transcript is printed by Ink's <Static> at column 0, which no wrapper can
+	 * shift, so the box shares that left edge instead of sitting inset from it.
+	 */
+	centered?: boolean; // Force focus for testing (bypasses useFocus)
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
@@ -189,6 +195,7 @@ export default function UserInput({
 	onDismissActiveEditor,
 	taskInfo,
 	forceFocus = false,
+	centered = true,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
@@ -206,6 +213,9 @@ export default function UserInput({
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
+	// One column right of the box's left border: 2 when the box is centred in
+	// the terminal, 0 when it sits flush left.
+	const indicatorIndent = centered ? 3 : 1;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
@@ -1170,7 +1180,11 @@ export default function UserInput({
 				</Text>
 			)}
 
-			<Box width={actualWidth} alignItems="center" flexDirection="column">
+			<Box
+				width={actualWidth}
+				alignItems={centered ? 'center' : 'flex-start'}
+				flexDirection="column"
+			>
 				{showShortcuts && (
 					<TitledBoxWithPreferences
 						title="Keyboard Shortcuts"
@@ -1325,14 +1339,14 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible. marginLeft={3} shifts
-			the indicator one step to the right so it aligns cleanly under the
-			input box content. */}
-			<Box marginLeft={3}>
+			{/* Development mode indicator - always visible. The indent puts it one
+			step to the right of the box's left border, so it aligns cleanly under
+			the input box content whether the box is centred or flush left. */}
+			<Box marginLeft={indicatorIndent}>
 				<DevelopmentModeIndicator
 					// Must match the wrapper's marginLeft: the indicator budgets its
 					// segments against the width left after this indent.
-					indentColumns={3}
+					indentColumns={indicatorIndent}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}

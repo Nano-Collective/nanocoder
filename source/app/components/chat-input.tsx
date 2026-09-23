@@ -254,6 +254,9 @@ export function ChatInput({
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
+					// Inline puts the transcript at column 0 (Ink's <Static>), so the
+					// prompt box drops its centring to share that left edge.
+					centered={fullscreen}
 					customCommands={customCommands}
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
