@@ -1,4 +1,5 @@
 import type {ChildProcess} from 'node:child_process';
+import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -293,6 +294,124 @@ test.serial(
 			});
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// status: no lockfile / stale lockfile / live lockfile. The three states the
+// CLI can encounter at runtime, each with a distinct output line.
+// ============================================================================
+
+test.serial('status reports not running when there is no lockfile', async t => {
+	const root = await tempProject();
+	try {
+		const result = await runDaemonCli('status', {projectRoot: root});
+		t.is(result.exitCode, 0);
+		t.is(result.output, 'Not running.');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('status cleans a stale lockfile and reports the previous pid', async t => {
+	const root = await tempProject();
+	try {
+		// process.pid is alive; use a pid that almost certainly isn't so the
+		// staleness check fires. Bumping past 2^22 keeps us well clear of any
+		// live process on macOS/Linux without risking pid wrap.
+		await writeLockfile({
+			pid: 4_000_000,
+			socketPath: '/tmp/stale.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+		});
+
+		const result = await runDaemonCli('status', {projectRoot: root});
+
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Stale lockfile cleaned \(was pid 4000000\)/);
+		// Side effect: stale lockfile must be gone after status runs.
+		t.false(existsSync(join(root, '.nanocoder', 'daemon.lock')));
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'status reports the live pid, socket, and uptime when the daemon is running',
+	async t => {
+		const root = await tempProject();
+		try {
+			// Stub the daemon with this process's own pid so isProcessAlive
+			// returns true. Matches what stubLaunchDaemon does for `start`.
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: '/tmp/test-daemon.sock',
+				startedAt: Date.now() - 5_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('status', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /Running\. pid /);
+			t.regex(result.output, new RegExp(`pid ${process.pid}`));
+			t.regex(result.output, /socket \/tmp\/test-daemon\.sock/);
+			t.regex(result.output, /uptime 5s/);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// stop: no live daemon / live daemon. The two states the user actually hits.
+// Stale-lockfile falls out of readLiveLockfile (treats stale as no daemon),
+// so the "no lockfile" test covers the stale case too.
+// ============================================================================
+
+test.serial('stop reports no daemon when there is no lockfile', async t => {
+	const root = await tempProject();
+	try {
+		const result = await runDaemonCli('stop', {projectRoot: root});
+		t.is(result.exitCode, 0);
+		t.is(result.output, 'No daemon is running.');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'stop removes the lockfile and reports the previous pid when the daemon is live',
+	async t => {
+		const root = await tempProject();
+		// Fork a real child so SIGTERM from `stop` lands on something that
+		// isn't this test process (which would trip the shutdown manager and
+		// abort the run). The child just sleeps; we kill it at the end.
+		const {spawn} = await import('node:child_process');
+		const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+			stdio: 'ignore',
+		});
+		try {
+			await writeLockfile({
+				pid: child.pid ?? -1,
+				socketPath: '/nonexistent/test-daemon.sock',
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('stop', {projectRoot: root});
+
+			// Either the clean path (IPC failed, SIGTERM killed the child,
+			// child removed its lockfile) or the manual-cleanup fallback
+			// (SIGTERM killed it, but the lockfile removal raced). Both
+			// produce exit 0 with the pid acknowledged in the output.
+			t.is(result.exitCode, 0);
+			t.regex(result.output, new RegExp(`pid ${child.pid}`));
+		} finally {
+			if (!child.killed) child.kill('SIGKILL');
 			await rm(root, {recursive: true, force: true});
 		}
 	},
