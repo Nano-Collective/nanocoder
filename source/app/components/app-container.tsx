@@ -13,19 +13,6 @@ import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
 import {homeRelative} from '@/utils/path';
 
 /**
- * Format a {@link GitStatusSummary} for inline display next to the
- * provider/model/config segment of the boot summary.
- */
-export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
-	const {branch, marker} = formatGitStatusSummary(status);
-	// The boot summary shares one line with provider/model/config, so only the
-	// detached marker earns its width here. Being on the default branch is the
-	// common case and stays unmarked; the /status panel shows every marker.
-	if (!marker || marker === 'default') return `⎇ ${branch}`;
-	return `⎇ ${branch} (${marker})`;
-}
-
-/**
  * Format the project/workspace segment shown in the startup summary.
  *
  * Keep this compact and user-oriented: show the directory Nanocoder is
@@ -39,7 +26,11 @@ export function formatBootSummaryProjectLabel(
 	if (!status) return workspace;
 
 	const {branch, marker} = formatGitStatusSummary(status);
-	const branchLabel = marker ? `${branch} (${marker})` : branch;
+	// Being on the default branch is the common case and stays unmarked here;
+	// only the detached marker earns its width. The /status panel shows every
+	// marker.
+	const branchLabel =
+		marker && marker !== 'default' ? `${branch} (${marker})` : branch;
 	return `${workspace} · ${branchLabel}`;
 }
 
@@ -93,7 +84,9 @@ function BootSummary({
 	// Narrow terminals: provider + model + mode on the first line, with the
 	// workspace/branch underneath so the line doesn't overflow.
 	if (isNarrow) {
-		if (!provider || !model) return <></>;
+		if (!provider || !model) {
+			return <Text color={colors.primary}>{projectLabel}</Text>;
+		}
 		return (
 			<Box flexDirection="column">
 				<Text>

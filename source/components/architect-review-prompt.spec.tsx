@@ -153,3 +153,22 @@ test('Escape in revise mode returns to the options without resolving', async t =
 
 	unmount();
 });
+
+test('revise mode does not advertise Esc as keep', async t => {
+	const {stdin, lastFrame, unmount} = renderPrompt();
+
+	await tick();
+	stdin.write(DOWN);
+	await tick();
+	stdin.write(DOWN);
+	await tick();
+	stdin.write('\r');
+	await tick();
+
+	// Escape goes back here, so the menu footer's "Esc to keep" would lie.
+	const frame = lastFrame() ?? '';
+	t.true(frame.includes('Escape to go back'));
+	t.false(frame.includes('Esc to keep'));
+
+	unmount();
+});

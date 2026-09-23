@@ -7,9 +7,14 @@ import {expandSections} from '@/utils/template-sections';
 
 export class CustomCommandExecutor {
 	/**
-	 * Execute a custom command with given arguments
+	 * Execute a custom command with given arguments.
+	 *
+	 * `args` are the shell-style parsed tokens that fill declared parameters
+	 * positionally. `rawArgs` is the text exactly as typed after the command
+	 * name; `{{args}}` uses it when given, because re-joining the tokens strips
+	 * quotes and eats apostrophes ("don't" parses as an opening quote).
 	 */
-	execute(command: CustomCommand, args: string[]): string {
+	execute(command: CustomCommand, args: string[], rawArgs?: string): string {
 		// Build template variables from parameters and arguments
 		const variables: Record<string, string> = {};
 
@@ -25,7 +30,7 @@ export class CustomCommandExecutor {
 		}
 
 		// Also provide all args as a single variable
-		variables['args'] = args.join(' ');
+		variables['args'] = rawArgs ?? args.join(' ');
 
 		// Add some default context variables
 		variables['cwd'] = process.cwd();

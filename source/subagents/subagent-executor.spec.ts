@@ -448,7 +448,12 @@ test.serial('caps tool output before the next subagent model turn', async t => {
 	t.true(result.success);
 	const toolResult = toolMessages.find(message => message.role === 'tool');
 	t.truthy(toolResult);
-	t.is(toolResult?.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap. The cut snaps back to whitespace so it never splits a
+	// token (a secret fragment would slip past the scrubber), which can leave
+	// the result a little under it.
+	const length = toolResult?.content.length ?? 0;
+	t.true(length <= MAX_TOOL_RESULT_CHARS);
+	t.true(length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(toolResult?.content.startsWith('HEAD\n') ?? false);
 	t.true(toolResult?.content.endsWith('TAIL') ?? false);
 });
@@ -1796,4 +1801,40 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		content.includes('audited'),
 		'an audit-log hook must see the failed delegated call too',
 	);
+});
+
+// Daemon-triggered runs are headless: nobody can answer a question, so a
+// subagent without an explicit tools list must not be offered ask_user.
+test.serial('headless subagents are not offered ask_user', async t => {
+	const root = join(tmpdir(), `nanocoder-headless-ask-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'agents', 'probe.md'),
+		'---\nname: probe\ndescription: probe\n---\nprobe\n',
+		'utf-8',
+	);
+	const noop = async () => '';
+	const toolManager = createMockToolManager({
+		read_file: {handler: noop, readOnly: true},
+		ask_user: {handler: noop, readOnly: true},
+	});
+	const offered: string[][] = [];
+	const client = createMockClient([{content: 'done'}, {content: 'done'}]);
+	const chat = client.chat.bind(client);
+	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
+		offered.push(Object.keys(args[1] ?? {}));
+		return chat(...args);
+	}) as LLMClient['chat'];
+
+	await new SubagentExecutor(toolManager, client, root, 'headless').execute({
+		subagent_type: 'probe',
+		description: 'x',
+	});
+	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
+		subagent_type: 'probe',
+		description: 'x',
+	});
+
+	t.deepEqual(offered[0], ['read_file']);
+	t.true(offered[1]?.includes('ask_user'));
 });

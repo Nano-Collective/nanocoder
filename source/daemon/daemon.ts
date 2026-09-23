@@ -52,6 +52,14 @@ export interface DaemonOptions {
 	 * standing up an LLM client.
 	 */
 	buildExecutor: ExecutorFactory;
+	/**
+	 * The tool registry triggered runs execute against. Production passes the
+	 * same instance its executor factory closes over: the skill pipeline
+	 * registers bundle and custom tools into this registry, so a separate one
+	 * left a triggered agent unable to call its own bundle's tools. Specs omit
+	 * it and get a fresh registry.
+	 */
+	toolManager?: ToolManager;
 	checkpointer?: Checkpointer;
 	/**
 	 * Override the activity listener. If omitted, the daemon's default
@@ -81,7 +89,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	}
 
 	// Layer 1: registries
-	const toolManager = new ToolManager();
+	const toolManager = opts.toolManager ?? new ToolManager();
 	const commandLoader = new CustomCommandLoader(opts.projectRoot);
 	// Use the global singleton: the SubagentExecutor resolves subagents via
 	// getSubagentLoader(projectRoot), so a fresh instance here would diverge
@@ -189,6 +197,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			cron.stop();
 			backpressure.dispose();
 			await ipcServer.stop();
+			// MCP stdio servers are child processes with open pipes; left
+			// connected they keep the event loop alive and the daemon never
+			// exits after an IPC `shutdown`.
+			await toolManager.disconnectMCP();
 			await removeLockfile(opts.projectRoot);
 		})();
 		return stopPromise;

@@ -445,7 +445,7 @@ async function runPlainConversationBody(
 			// bad tool calls cannot drain tokens unbounded.
 			if (malformedRetryCount >= maxMalformedRetries) {
 				// The caller prints the `error` outcome message; see above.
-				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
 				return {
 					kind: 'error',
 					message,
