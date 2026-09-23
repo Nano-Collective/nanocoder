@@ -241,6 +241,8 @@ export default function App({
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
@@ -799,6 +801,8 @@ export default function App({
 							handleSubagentToolApproval={handleSubagentToolApproval}
 							pendingToolConfirmation={pendingToolConfirmation}
 							handleToolConfirmation={handleToolConfirmation}
+							pendingVoiceInstall={pendingVoiceInstall}
+							onVoiceInstallConfirm={handleVoiceInstallConfirm}
 							handleQuestionAnswer={handleQuestionAnswer}
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}
