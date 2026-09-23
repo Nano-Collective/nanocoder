@@ -103,6 +103,55 @@ test('createProvider adds Opper trace header for opper provider', async t => {
 	t.is(provider.kind, 'openai-compatible');
 });
 
+test('createProvider attaches the Opper trace header to outbound requests', async t => {
+	const mockAgent = new MockAgent();
+	mockAgent.disableNetConnect();
+
+	let seenHeaders: Record<string, string> = {};
+	const mockPool = mockAgent.get('https://api.opper.ai');
+	mockPool
+		.intercept({path: '/v3/compat/chat/completions', method: 'POST'})
+		.reply(200, (opts: any) => {
+			seenHeaders = (opts.headers ?? {}) as Record<string, string>;
+			return {
+				id: 'chatcmpl-test',
+				object: 'chat.completion',
+				created: 0,
+				model: 'claude-sonnet-4-6',
+				choices: [
+					{
+						index: 0,
+						message: {role: 'assistant', content: 'ok'},
+						finish_reason: 'stop',
+					},
+				],
+				usage: {prompt_tokens: 1, completion_tokens: 1, total_tokens: 2},
+			};
+		}, {headers: {'content-type': 'application/json'}});
+
+	const config: AIProviderConfig = {
+		name: 'Opper',
+		type: 'openai',
+		models: ['claude-sonnet-4-6'],
+		config: {
+			baseURL: 'https://api.opper.ai/v3/compat',
+			apiKey: 'test-key',
+		},
+	};
+
+	const provider = await createProvider(config, mockAgent as unknown as Agent);
+	const model = (provider.provider as any)('claude-sonnet-4-6');
+	await model.doGenerate({
+		prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+	});
+
+	const lowered: Record<string, string> = {};
+	for (const [k, v] of Object.entries(seenHeaders)) {
+		lowered[k.toLowerCase()] = v;
+	}
+	t.is(lowered['x-opper-name'], 'nanocoder');
+});
+
 test('createProvider handles provider with no API key', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
