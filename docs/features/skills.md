@@ -178,6 +178,20 @@ nanocoder daemon install    # install per-user auto-start
 nanocoder daemon uninstall  # remove the auto-start unit
 ```
 
+`daemon start` refuses to run in a directory you haven't trusted, because
+the daemon dispatches skills in headless mode — no tool confirmations,
+including for `execute_bash`. Run `nanocoder` interactively in the
+directory once to accept the disclaimer, or pass `--trust-directory` to
+skip the check for that one run. `NANOCODER_TRUST_DIRECTORY=1` trusts the
+directory and records it in your preferences, so later runs and autostart
+boots skip the prompt too.
+
+`daemon install` is not gated: it only writes the auto-start unit, and the
+gate applies when the daemon actually boots, so trust the directory first.
+Installing in an untrusted directory succeeds, and every autostart boot after
+it is refused — with the reason written to `daemon.log` rather than to a
+terminal you are watching.
+
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at
 `.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive) are
