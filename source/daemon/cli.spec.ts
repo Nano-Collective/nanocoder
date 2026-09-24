@@ -3,13 +3,14 @@ import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import test from 'ava';
 import {
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
-import {runDaemonCli} from './cli';
+import {resolveDaemonEntryPath, runDaemonCli} from './cli';
 import {getLockfilePath, writeLockfile} from './lockfile';
 
 console.log(`\ncli.spec.ts`);
@@ -298,6 +299,61 @@ test.serial(
 		}
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Candidate-layout resolution tests
+//
+// resolveDaemonEntryPath() is the find(p => existsSync(p)) logic that lets
+// `nanocoder daemon start` spawn the compiled entry from either build layout.
+// The entry is never `import`ed, so a wrong candidate spawns a missing file and
+// the daemon silently never boots.
+// ---------------------------------------------------------------------------
+
+test('resolveDaemonEntryPath: uses ./entry.js for the nested tsc layout', async t => {
+	const base = await mkdtemp(join(tmpdir(), 'daemon-entry-tsc-'));
+	try {
+		const daemonDir = join(base, 'dist', 'daemon');
+		await mkdir(daemonDir, {recursive: true});
+		await writeFile(join(daemonDir, 'entry.js'), '// entry');
+
+		t.is(
+			resolveDaemonEntryPath(pathToFileURL(join(daemonDir, 'cli.js')).href),
+			join(daemonDir, 'entry.js'),
+		);
+	} finally {
+		await rm(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveDaemonEntryPath: uses ./daemon/entry.js for the flat rolldown layout', async t => {
+	const base = await mkdtemp(join(tmpdir(), 'daemon-entry-rolldown-'));
+	try {
+		const daemonDir = join(base, 'dist', 'daemon');
+		await mkdir(daemonDir, {recursive: true});
+		await writeFile(join(daemonDir, 'entry.js'), '// entry');
+
+		t.is(
+			resolveDaemonEntryPath(pathToFileURL(join(base, 'dist', 'cli.js')).href),
+			join(daemonDir, 'entry.js'),
+		);
+	} finally {
+		await rm(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveDaemonEntryPath: returns null when the entry is missing', async t => {
+	const base = await mkdtemp(join(tmpdir(), 'daemon-entry-empty-'));
+	try {
+		await mkdir(join(base, 'dist'), {recursive: true});
+
+		t.is(
+			resolveDaemonEntryPath(pathToFileURL(join(base, 'dist', 'cli.js')).href),
+			null,
+		);
+	} finally {
+		await rm(base, {recursive: true, force: true});
+	}
+});
 
 // ============================================================================
 // status: no lockfile / stale lockfile / live lockfile. The three states the

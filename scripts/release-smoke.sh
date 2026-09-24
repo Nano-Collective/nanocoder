@@ -50,3 +50,28 @@ if [[ "$got" != "$version" ]]; then
 	exit 1
 fi
 echo "$bin --version = $version"
+
+# Verify contributors.json was copied into dist/commands/ by build:fast.
+# /credits silently returns [] when this file is missing, so --version alone
+# would never catch it.
+contributors="$(dirname "$bin")/commands/contributors.json"
+if [[ ! -f "$contributors" ]]; then
+	echo "missing $contributors — run pnpm run build first" >&2
+	exit 1
+fi
+echo "data-file check: $contributors present"
+
+# Exercise a non-trivial chunk that loads the config module graph and reads
+# package.json via resolvePackageJsonPath(). If the __dirname candidates all
+# miss, getPackageVersion() returns "unknown" — assert the real version appears
+# in the output so a broken path is caught here rather than silently at runtime.
+config_out=$(node "$bin" config list 2>&1) || {
+	echo "$bin config list: exited non-zero" >&2
+	exit 1
+}
+if echo "$config_out" | grep -qF "unknown"; then
+	echo "$bin config list: 'unknown' found in output — package.json path is broken" >&2
+	echo "$config_out" >&2
+	exit 1
+fi
+echo "$bin config list: ok (no 'unknown' sentinel in output)"

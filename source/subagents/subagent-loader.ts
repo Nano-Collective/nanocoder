@@ -7,6 +7,7 @@
  * - Project-level configuration (.nanocoder/agents/)
  */
 
+import {existsSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -19,17 +20,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Resolve the built-in agents directory.
- * Works from both source (dev) and dist (built) locations.
+ * Resolve the built-in agents directory. The `.md` definitions are never
+ * compiled, so the built layouts read them straight from
+ * `source/subagents/built-in`; only this module's own directory moves:
+ *
+ * - source:   module in `source/subagents/` → `./built-in`
+ * - tsc:      module in `dist/subagents/`   → `../../source/subagents/built-in`
+ * - rolldown: module in the flat `dist/`    → `../source/subagents/built-in`
+ *
+ * The first candidate that exists wins; otherwise the first is returned so the
+ * failure surfaces as a missing directory. Exported so tests can drive the
+ * candidate logic with a temporary directory.
  */
+export function resolveBuiltInAgentsDir(moduleDir: string): string {
+	const candidates = [
+		path.resolve(moduleDir, './built-in'),
+		path.resolve(moduleDir, '../../source/subagents/built-in'),
+		path.resolve(moduleDir, '../source/subagents/built-in'),
+	];
+	return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
 function getBuiltInAgentsDir(): string {
-	// In source: source/subagents/built-in/
-	// In dist: dist/subagents/built-in/ -- but .md files are in source/
-	// Since .md files are not compiled, always reference from source
-	const sourceDir = path.resolve(__dirname, '../../source/subagents/built-in');
-	const localDir = path.resolve(__dirname, './built-in');
-	// Prefer the local dir (works in source), fall back to source dir (works from dist)
-	return localDir.includes('source') ? localDir : sourceDir;
+	return resolveBuiltInAgentsDir(__dirname);
 }
 
 /**

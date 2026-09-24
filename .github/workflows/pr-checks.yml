@@ -124,3 +124,46 @@ jobs:
         run: |
           pnpm generate:schema
           git diff --exit-code schemas/agents.config.schema.json
+
+  # build:fast bundles with rolldown rather than tsc+tsc-alias. Nothing in CI
+  # exercised it, so a shebang `banner` that made Rolldown emit only the banner
+  # and drop the entry body shipped a 20-byte dist/cli.js that exited 0 for
+  # every command. Build it and assert the bundle actually answers --version.
+  fast-bundle:
+    name: Fast Bundle Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the fast bundle
+        run: pnpm build:fast
+
+      - name: Smoke test the fast bundle
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          output=$(node dist/cli.js --version)
+          echo "dist/cli.js --version => ${output}"
+          test "${output}" = "${version}"
+
+      # --version exits before loading the app graph, so it cannot catch a data
+      # file (themes.json, contributors.json, package.json, ...) that resolves
+      # outside the package under the flat dist/ layout. Load a real code-split
+      # chunk that reads data files -- /credits -- and assert the reads succeed.
+      - name: Load a data-file chunk
+        run: node scripts/smoke-fast-bundle.mjs

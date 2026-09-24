@@ -1,3 +1,4 @@
+import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -8,16 +9,34 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
+import {resolvePackageJsonPath} from '@/utils/package-version';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Resolve the bundled `contributors.json` from the module directory. The data
+ * file lives under `dist/commands/` in both build layouts, but the compiled
+ * module does not:
+ *
+ * - tsc:      module at `dist/commands/credits.js`      → `./contributors.json`
+ * - rolldown: module at `dist/credits-<hash>.js` (flat) → `./commands/contributors.json`
+ *
+ * The first candidate that exists wins; otherwise the first is returned so the
+ * failure surfaces at read time. Exported so tests can drive the candidate
+ * logic with a temporary directory.
+ */
+export function resolveContributorsPath(moduleDir: string): string {
+	const candidates = [
+		path.join(moduleDir, './contributors.json'),
+		path.join(moduleDir, './commands/contributors.json'),
+	];
+	return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
 async function getContributors(): Promise<string[]> {
 	try {
-		const content = await readFile(
-			path.join(__dirname, './contributors.json'),
-			'utf8',
-		);
+		const content = await readFile(resolveContributorsPath(__dirname), 'utf8');
 		const data = JSON.parse(content) as {contributors: string[]};
 		return data.contributors;
 	} catch {
@@ -29,10 +48,7 @@ async function getDependencies(): Promise<
 	Array<{name: string; version: string}>
 > {
 	try {
-		const content = await readFile(
-			path.join(__dirname, '../../package.json'),
-			'utf8',
-		);
+		const content = await readFile(resolvePackageJsonPath(__dirname), 'utf8');
 		const packageJson = JSON.parse(content) as {
 			dependencies?: Record<string, string>;
 		};
