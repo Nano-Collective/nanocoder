@@ -354,7 +354,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					toggleFileSelection(selectedNode.path);
 				}
 			}
-		} else if (key.backspace) {
+		} else if (key.backspace || key.delete) {
 			// Go up one directory by collapsing current
 			handleGoUp();
 		}

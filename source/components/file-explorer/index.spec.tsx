@@ -2,7 +2,7 @@ import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
-import {Box, Text} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import {ThemeContext} from '../../hooks/useTheme';
 import {TitleShapeContext} from '../../hooks/useTitleShape';
 import {UIStateProvider} from '../../hooks/useUIState';
@@ -360,6 +360,22 @@ test('FileExplorer preview directory error shows message', t => {
 // === Real component ===
 // Everything above renders hand-written stand-ins, so none of it exercises
 // FileExplorer itself. These render the actual component.
+
+
+test('FileExplorer processes physical backspace byte without crashing', async t => {
+	const {stdin, lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
+
+	// Wait for async tree load
+	await new Promise(r => setTimeout(r, 100));
+
+	// Send \x7f (physical backspace / key.delete)
+	stdin.write('\x7f');
+
+	await new Promise(r => setTimeout(r, 100));
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /\/explorer/);
+});
 
 test('FileExplorer renders inside a rounded titled frame', t => {
 	const {lastFrame} = renderWithAllContexts(<FileExplorer onClose={() => {}} />);
