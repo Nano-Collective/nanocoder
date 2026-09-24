@@ -10,7 +10,21 @@ import {fileURLToPath} from 'url';
 import {tmpdir} from 'os';
 import test from 'ava';
 import {resetPreferencesCache} from '@/config/preferences';
+import {resetPreferencesCache} from '@/config/preferences';
 import {checkForUpdates} from './update-checker';
+
+// Mock logger so we can spy on it
+import {loggerProvider} from '@/utils/logging/logger-provider';
+let warnLogs: any[] = [];
+loggerProvider.getLogger = () => ({
+	warn: (meta: any, msg: string) => warnLogs.push({meta, msg}),
+	debug: () => {},
+} as any);
+
+test.beforeEach(() => {
+	warnLogs = [];
+});
+
 
 console.log(`\nupdate-checker.spec.ts`);
 
@@ -351,6 +365,8 @@ test('checkForUpdates: handles malformed JSON response', async t => {
 	const result = await checkForUpdates();
 
 	t.false(result.hasUpdate);
+	t.is(warnLogs.length, 1);
+	t.is(warnLogs[0].msg, 'Failed to fetch latest version');
 });
 
 // Edge Cases
