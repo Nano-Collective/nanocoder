@@ -46,6 +46,10 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Run in non-interactive mode',
 	},
 	{
+		name: 'storage',
+		description: 'Inspect storage (read-only; --format json for scripts)',
+	},
+	{
 		name: 'daemon',
 		description: 'Manage the per-project skill daemon',
 		children: ['start', 'stop', 'status', 'logs', 'install', 'uninstall'],

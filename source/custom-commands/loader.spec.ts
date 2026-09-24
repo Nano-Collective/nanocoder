@@ -619,6 +619,29 @@ Run tests.`,
 	t.is(loader.findRelevantCommands('add a test for this', []).length, 1);
 });
 
+test('CustomCommandLoader - findRelevantCommands matches literal punctuation in tags', t => {
+	const testDir = createTestDir('relevance-literal-tag');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	writeFileSync(
+		join(commandsDir, 'version-cmd.md'),
+		`---
+description: Check the API version
+tags: [v1.2]
+---
+Check version.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	t.is(loader.findRelevantCommands('Use API V1.2 please', []).length, 1);
+	t.is(loader.findRelevantCommands('Use API v1x2 please', []).length, 0);
+});
+
 test('CustomCommandLoader - findRelevantCommands scores description word overlap', t => {
 	const testDir = createTestDir('relevance-description');
 	t.teardown(() => cleanupTestDir(testDir));
