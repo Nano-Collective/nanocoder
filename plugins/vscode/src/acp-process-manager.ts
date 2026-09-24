@@ -193,6 +193,20 @@ export class AcpProcessManager {
 			}
 		} as any), stream);
 
+		await this._installConnection(child, connection, reportCrash);
+	}
+
+	/**
+	 * Install a fresh connection on the shared acpClient and await the
+	 * handshake, checking `isDisposed` before each shared-state write so a
+	 * Restart that lands during spawn or during the handshake round-trip
+	 * cannot overwrite the new manager's connection or reset its retry counter.
+	 */
+	private async _installConnection(
+		child: cp.ChildProcess,
+		connection: ClientSideConnection,
+		reportCrash: () => void,
+	): Promise<void> {
 		if (this.isDisposed) {
 			child.kill();
 			return;
