@@ -12,6 +12,10 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {
+	DEFAULT_SESSION_CONFIG,
+	normalizeSessionConfig,
+} from '@/config/session-config';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {
 	MAX_EMPTY_TURNS,
@@ -41,6 +45,8 @@ import type {
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+
+export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -254,83 +260,12 @@ function validateStrategy(strategy: unknown): CompressionStrategy {
 	return 'llm';
 }
 
-/**
- * Built-in session defaults. See DEFAULT_AUTO_COMPACT_CONFIG for why this is
- * exported rather than inlined.
- * @public
- */
-export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
-	autoSave: true,
-	saveInterval: 30000, // 30 seconds
-	maxSessions: 100,
-	maxMessages: 1000,
-	retentionDays: 30,
-	directory: '',
-	smartTitles: true,
-};
-
 // Load session configuration and Returns default config if not specified
 function loadSessionConfig(): AppConfig['sessions'] {
-	const defaults = DEFAULT_SESSION_CONFIG;
-
-	const normalizeSessionNumber = (
-		value: unknown,
-		min: number,
-		fallback: number,
-	): number => {
-		if (typeof value === 'number' && Number.isFinite(value)) {
-			return Math.max(min, value);
-		}
-		return fallback;
-	};
-
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
-			const sessions = config.nanocoder?.sessions;
-			if (sessions && typeof sessions === 'object') {
-				return {
-					autoSave:
-						sessions.autoSave !== undefined
-							? Boolean(sessions.autoSave)
-							: defaults.autoSave,
-					saveInterval: normalizeSessionNumber(
-						sessions.saveInterval,
-						1000, // Minimum 1 second
-						defaults.saveInterval ?? 30000,
-					),
-					maxSessions: normalizeSessionNumber(
-						sessions.maxSessions,
-						1,
-						defaults.maxSessions ?? 100,
-					),
-					maxMessages: normalizeSessionNumber(
-						sessions.maxMessages,
-						1,
-						defaults.maxMessages ?? 1000,
-					),
-					retentionDays: normalizeSessionNumber(
-						sessions.retentionDays,
-						1,
-						defaults.retentionDays ?? 30,
-					),
-					directory: sessions.directory || defaults.directory,
-					smartTitles:
-						sessions.smartTitles !== undefined
-							? Boolean(sessions.smartTitles)
-							: defaults.smartTitles,
-					// No default model: unset means "use the session's own".
-					titleModel:
-						typeof sessions.titleModel === 'string'
-							? sessions.titleModel
-							: undefined,
-					titleProvider:
-						typeof sessions.titleProvider === 'string'
-							? sessions.titleProvider
-							: undefined,
-				};
-			}
-			return null;
-		}) ?? {...defaults}
+		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config =>
+			normalizeSessionConfig(config.nanocoder?.sessions),
+		) ?? {...DEFAULT_SESSION_CONFIG}
 	);
 }
 
