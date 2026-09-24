@@ -43,7 +43,6 @@ import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {handleResourceMention} from '@/utils/resource-mention-handler';
-import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -323,12 +322,14 @@ export default function UserInput({
 	// Real pastes, as reported by the terminal via bracketed paste. The
 	// payload is lifted off stdin before Ink's keypress parser sees it, so
 	// a multi-line paste can no longer submit the prompt on its first
-	// newline — it arrives here whole, in one event.
-	useEffect(() => {
-		if (disabled || !effectiveFocus) {
-			return;
-		}
-		const handleTerminalPaste = (payload: string) => {
+	// newline — it arrives here whole, in one event. Delivered via
+	// TextInput's onPaste so every other text field shares the same path;
+	// only the splice differs (paste placeholders live in InputState).
+	const handleTerminalPaste = useCallback(
+		(payload: string) => {
+			if (disabled) {
+				return;
+			}
 			// Read the caret off TextInput so the splice lands where the user
 			// was editing, not at the end of the value. insertPaste returns the
 			// new cursor offset; fall back to a remount only if no cursor is
@@ -340,12 +341,9 @@ export default function UserInput({
 			} else if (!result) {
 				setTextInputKey(prev => prev + 1);
 			}
-		};
-		pasteEvents.on('paste', handleTerminalPaste);
-		return () => {
-			pasteEvents.off('paste', handleTerminalPaste);
-		};
-	}, [disabled, effectiveFocus, insertPaste]);
+		},
+		[disabled, insertPaste],
+	);
 
 	useEffect(() => {
 		if (
@@ -1261,6 +1259,7 @@ export default function UserInput({
 							onEdgeArrow={handleHistoryNavigation}
 							onSubmit={handleSubmit}
 							onEnter={handleSubmit}
+							onPaste={handleTerminalPaste}
 							placeholder="Ask anything..."
 							focus={effectiveFocus}
 							wrapWidth={inputWrapWidth}

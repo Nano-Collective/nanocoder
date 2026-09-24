@@ -2,12 +2,14 @@ import chalk from 'chalk';
 import {Text, useInput} from 'ink';
 import {
 	forwardRef,
+	useCallback,
 	useEffect,
 	useImperativeHandle,
 	useRef,
 	useState,
 } from 'react';
 import {isNewlineKey} from '@/utils/newline-key';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
@@ -56,6 +58,14 @@ export type Props = {
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
+	/**
+	 * Custom terminal-paste handler. When provided, a bracketed paste
+	 * (DECSET 2004, lifted off stdin in cli.tsx and re-emitted on
+	 * `pasteEvents`) is delivered here instead of the default verbatim
+	 * splice at the caret. Used by the main composer, whose value is an
+	 * InputState with paste placeholders rather than a plain string.
+	 */
+	readonly onPaste?: (payload: string) => void;
 };
 
 /**
@@ -82,6 +92,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		wrapWidth,
 		handleEnter = true,
 		onEdgeArrow,
+		onPaste,
 	}: Props,
 	ref,
 ) {
@@ -130,7 +141,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// replacement and parked the caret at the end of the old, shorter value:
 	// the next keystrokes then landed mid-word ("/tune" typed as "/etun").
 	const pendingEmitsRef = useRef<string[]>([]);
-	const recordEmit = (value: string) => {
+	const recordEmit = useCallback((value: string) => {
 		lastEmittedValueRef.current = value;
 		pendingEmitsRef.current.push(value);
 		// Only a runaway parent that never re-renders could grow this; keep it
@@ -138,7 +149,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		if (pendingEmitsRef.current.length > 64) {
 			pendingEmitsRef.current.shift();
 		}
-	};
+	}, []);
 
 	// When the imperative handle moves the caret, the upcoming value change
 	// (already in flight from the parent) would otherwise be misread by the
@@ -146,6 +157,54 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// Setting this flag tells the effect to respect whatever offset is now in
 	// state — and only clamp it against the new value's bounds.
 	const skipNextCursorResetRef = useRef(false);
+
+	// Refs so the paste handler always calls the latest callbacks (avoids
+	// stale closures when the parent re-creates onChange/onPaste each render).
+	const onChangeRef = useRef(onChange);
+	onChangeRef.current = onChange;
+	const onPasteRef = useRef(onPaste);
+	onPasteRef.current = onPaste;
+
+	// Bracketed paste (DECSET 2004) payloads are lifted off stdin in cli.tsx
+	// before Ink's keypress parser sees them and re-emitted on pasteEvents,
+	// so every focused TextInput subscribes here — not in individual screens
+	// — or pastes into any other field are silently discarded (#1456).
+	useEffect(() => {
+		if (!focus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			if (!payload) {
+				return;
+			}
+			const custom = onPasteRef.current;
+			if (custom) {
+				custom(payload);
+				return;
+			}
+			// Default: verbatim splice at the caret, with the same emit
+			// bookkeeping as the typing branch so cursor/echo tracking stays
+			// consistent. Newlines stay text — they never reach the keypress
+			// parser, so they can't submit.
+			const currentValue = originalValueRef.current;
+			const offset = cursorOffsetRef.current;
+			const nextValue =
+				currentValue.slice(0, offset) + payload + currentValue.slice(offset);
+			const nextCursorOffset = offset + payload.length;
+			cursorOffsetRef.current = nextCursorOffset;
+			originalValueRef.current = nextValue;
+			recordEmit(nextValue);
+			setState({
+				cursorOffset: nextCursorOffset,
+				cursorWidth: payload.length > 1 ? payload.length : 0,
+			});
+			onChangeRef.current(nextValue);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [focus, recordEmit]);
 
 	useEffect(() => {
 		if (!focus || !showCursor) {

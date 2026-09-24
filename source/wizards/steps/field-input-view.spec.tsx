@@ -2,6 +2,7 @@ import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
+import {pasteEvents} from '@/utils/terminal-paste';
 import type {TemplateField} from '../templates/provider-templates';
 import {
 	FieldInputView,
@@ -276,5 +277,30 @@ test('renders narrow keyboard hints when isNarrow is true', t => {
 	t.regex(output, /Enter: continue/);
 	t.regex(output, /Shift\+Tab: go back/);
 	t.notRegex(output, /Press Enter to continue \|/);
+	unmount();
+});
+
+// Regression for #1456: bracketed pastes used to reach only the main
+// composer — cli.tsx strips them off stdin and re-emits on pasteEvents, and
+// no wizard field subscribed. The shared TextInput now subscribes, so a
+// paste into a wizard field must arrive via onChange.
+test.serial('string field receives a terminal paste via onChange', async t => {
+	const {changes, submissions, unmount} = renderField({
+		currentField: {
+			name: 'serverName',
+			prompt: 'Server name',
+		},
+		currentValue: '',
+	});
+
+	await wait(50);
+	pasteEvents.emit('paste', 'my-mcp-server');
+	await wait(100);
+
+	t.deepEqual(submissions, [], 'a paste must not submit the field');
+	t.true(
+		changes.includes('my-mcp-server'),
+		`expected pasted text in onChange calls, got: ${JSON.stringify(changes)}`,
+	);
 	unmount();
 });
