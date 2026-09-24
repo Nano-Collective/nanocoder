@@ -23,9 +23,8 @@ function makeStubs() {
 		acpClient,
 		diffManager,
 	);
-	// Inject a minimal view directly so we don't need to drive
-	// resolveWebviewView (which reads media/chat-panel.html off disk and
-	// needs a real Webview).
+	// Inject the view directly instead of running resolveWebviewView, which
+	// reads media/chat-panel.html off disk and needs a real Webview.
 	(provider as any)._view = {
 		webview: {
 			postMessage: () => {
@@ -51,9 +50,8 @@ test('ChatWebviewProvider - _handlePrompt rejects a submit when a turn is alread
 
 	const {provider, acpClient, getPostMessageCalls} = makeStubs();
 
-	// Simulate "a turn is already in flight" by pre-setting activePrompt. This is
-	// exactly the state the real acpClient.prompt() leaves the field in for the
-	// duration of a turn - the busy-check in _handlePrompt reads it and bails.
+	// Pre-set activePrompt to mirror the state acpClient.prompt() leaves the
+	// field in for the duration of a turn - the busy-check reads it and bails.
 	(acpClient as any).activePrompt = {cancel: () => {}};
 
 	let promptCalls = 0;
