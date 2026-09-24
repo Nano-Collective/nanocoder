@@ -68,6 +68,7 @@
 		"schemas",
 		"source/app/prompts/sections",
 		"source/config/themes.json",
+		"source/subagents/built-in",
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {

@@ -340,8 +340,32 @@ async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	return {exitCode: 0, output: tail.toString('utf-8')};
 }
 
+/**
+ * Resolve the compiled daemon entry point from this module's URL.
+ *
+ * The entry is emitted as a sibling of this module by tsc
+ * (`dist/daemon/entry.js`) and as an explicit top-level rolldown entry in the
+ * flat bundle (`dist/daemon/entry.js`, referenced from a root-level chunk):
+ *
+ * - tsc:      module at `dist/daemon/cli.js` → `./entry.js`
+ * - rolldown: module in the flat `dist/`     → `./daemon/entry.js`
+ *
+ * Returns `null` when neither exists. Exported so tests can drive the
+ * candidate logic with a temporary directory.
+ */
+export function resolveDaemonEntryPath(moduleUrl: string): string | null {
+	const candidates = [
+		fileURLToPath(new URL('./entry.js', moduleUrl)),
+		fileURLToPath(new URL('./daemon/entry.js', moduleUrl)),
+	];
+	return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
 function launchSelfHosted(projectRoot: string): ChildProcess {
-	const daemonEntry = fileURLToPath(new URL('./entry.js', import.meta.url));
+	const daemonEntry = resolveDaemonEntryPath(import.meta.url);
+	if (!daemonEntry) {
+		throw new Error('Daemon entry point not found in package.');
+	}
 	return defaultLaunchDaemon(projectRoot, daemonEntry);
 }
 

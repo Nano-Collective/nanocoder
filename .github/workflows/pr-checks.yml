@@ -160,3 +160,10 @@ jobs:
           output=$(node dist/cli.js --version)
           echo "dist/cli.js --version => ${output}"
           test "${output}" = "${version}"
+
+      # --version exits before loading the app graph, so it cannot catch a data
+      # file (themes.json, contributors.json, package.json, ...) that resolves
+      # outside the package under the flat dist/ layout. Load a real code-split
+      # chunk that reads data files -- /credits -- and assert the reads succeed.
+      - name: Load a data-file chunk
+        run: node scripts/smoke-fast-bundle.mjs

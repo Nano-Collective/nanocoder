@@ -53,6 +53,23 @@ const EVENT_MESSAGES: Record<
 	},
 };
 
+/**
+ * Resolve the optional notification icon across both build layouts:
+ *
+ * - tsc:      module in `dist/utils/`    → `../../plugins/vscode/media/icon.png`
+ * - rolldown: module in the flat `dist/` → `../plugins/vscode/media/icon.png`
+ *
+ * The icon is cosmetic, so a miss returns `null` rather than throwing.
+ * Exported so tests can drive the candidate logic with a temporary directory.
+ */
+export function resolveNotificationIconPath(moduleDir: string): string | null {
+	const candidates = [
+		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc
+		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist
+	];
+	return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
 // Resolve the icon path relative to this module's location
 let _iconPath: string | null | undefined;
 function getIconPath(): string | null {
@@ -62,8 +79,7 @@ function getIconPath(): string | null {
 	try {
 		const __filename = fileURLToPath(import.meta.url);
 		const __dirname = dirname(__filename);
-		const iconPath = join(__dirname, '../../plugins/vscode/media/icon.png');
-		_iconPath = existsSync(iconPath) ? iconPath : null;
+		_iconPath = resolveNotificationIconPath(__dirname);
 	} catch {
 		_iconPath = null;
 	}
