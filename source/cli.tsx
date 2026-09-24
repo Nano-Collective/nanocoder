@@ -777,6 +777,9 @@ async function main(): Promise<void> {
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
 			} = await import('@/utils/terminal-paste');
+			const {splitControlKeypresses} = await import(
+				'@/utils/terminal-keypress'
+			);
 
 			// Bracketed paste in both screen modes. Without it the terminal
 			// sends a paste as bare bytes, so the CR at each line break
@@ -832,11 +835,34 @@ async function main(): Promise<void> {
 					wheelEvents.emit('wheel', direction);
 				}
 				if (result.clean) {
-					filtered.write(result.clean);
+					queueKeypresses(splitControlKeypresses(result.clean));
+				}
+			};
+			// Ink drains everything buffered on each 'readable', so pieces
+			// written back to back would merge again. Its 'readable' fires on
+			// a nextTick, so writing one piece per setImmediate hands it each
+			// piece as a separate read, in order.
+			const pendingKeypresses: string[] = [];
+			let drainScheduled = false;
+			const drainKeypresses = () => {
+				const next = pendingKeypresses.shift();
+				if (next === undefined) {
+					drainScheduled = false;
+					return;
+				}
+				filtered.write(next);
+				setImmediate(drainKeypresses);
+			};
+			const queueKeypresses = (pieces: string[]) => {
+				pendingKeypresses.push(...pieces);
+				if (!drainScheduled) {
+					drainScheduled = true;
+					drainKeypresses();
 				}
 			};
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {
+				pendingKeypresses.length = 0;
 				process.stdin.off('data', forwardInput);
 				process.stdin.pause();
 			};

@@ -2,6 +2,7 @@ import type React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import {generateKey} from '@/session/key-generator';
 import {formatError} from '@/utils/error-formatter';
+import {markRunFailed} from '@/utils/run-outcome';
 
 /**
  * Displays an error in the chat queue with special handling for cancellation errors.
@@ -24,6 +25,7 @@ export const displayError = (
 			/>,
 		);
 	} else {
+		markRunFailed(formatError(error));
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey(keyPrefix)}

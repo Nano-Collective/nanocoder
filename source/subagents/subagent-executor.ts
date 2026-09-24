@@ -371,6 +371,13 @@ export class SubagentExecutor {
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
 
+		// Headless runs (daemon-triggered) have nobody to answer a question.
+		// Offering ask_user there only produced a "Question handler not
+		// initialized" error after the model had already spent a turn on it.
+		if (this.currentMode() === 'headless') {
+			available = available.filter(name => name !== 'ask_user');
+		}
+
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development
 		// mode) would otherwise let a subagent overwrite the very plan, task

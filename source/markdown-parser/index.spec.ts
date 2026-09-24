@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
+import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
 import {parseMarkdown} from './index.js';
 
@@ -168,6 +169,19 @@ test('parseMarkdown renders tables with plain text (no markdown)', t => {
 	t.true(result.includes('npm install'));
 	t.true(result.includes('npm start'));
 	t.false(result.includes('`npm install`'));
+});
+
+test('parseMarkdown keeps the last row of a table that ends the text', t => {
+	// Replies are trimmed, so the final row has no newline after it. It used
+	// to fall outside the rendered table as a raw markdown line.
+	const text = `| A | B |
+|---|---|
+| a1 | b1 |
+| a2 | b2 |`;
+	const result = stripAnsi(parseMarkdown(text, mockColors));
+	t.true(result.includes('a2'));
+	t.false(/\|\s*a2\s*\|\s*b2\s*\|/.test(result));
+	t.true(result.trimEnd().endsWith('┘'));
 });
 
 // Code block tests

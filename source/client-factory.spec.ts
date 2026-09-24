@@ -1549,3 +1549,36 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'loadProviderConfigs carries promptCaching and maxRetries through',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'Anth',
+						sdkProvider: 'anthropic',
+						apiKey: 'test-key',
+						models: ['claude-sonnet-4-5'],
+						promptCaching: false,
+						maxRetries: 7,
+					},
+				],
+			});
+
+			const anth = loadProviderConfigs().find(p => p.name === 'Anth');
+
+			// Dropping these made the documented opt-out and retry count inert.
+			t.is(anth?.promptCaching, false);
+			t.is(anth?.maxRetries, 7);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);

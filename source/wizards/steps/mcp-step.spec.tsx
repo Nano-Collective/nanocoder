@@ -1048,6 +1048,62 @@ test('McpStep editing a custom-named template instance resolves its template', a
 	unmount();
 });
 
+// Regression: templates that store their key in an X-API-Key header (today
+// `serply`) must get the saved key back when edited. The edit flow used to
+// read only env vars and a bearer Authorization header, so the required
+// API key field came back empty and blocked a re-save.
+test('McpStep editing an X-API-Key template instance keeps its saved key', async t => {
+	const serplyServers: Record<
+		string,
+		{
+			name: string;
+			transport: 'http';
+			url: string;
+			headers: {'X-API-Key': string};
+			templateId: string;
+			tags: string[];
+		}
+	> = {
+		'serply-work': {
+			name: 'serply-work',
+			transport: 'http',
+			url: 'https://api.serply.io/mcp',
+			headers: {'X-API-Key': 'serply_test_key_123'},
+			templateId: 'serply',
+			tags: ['serply', 'search', 'web', 'scrape', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={serplyServers}
+			initialEditName="serply-work"
+		/>,
+	);
+
+	await waitTick();
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /Serply Configuration/);
+
+	// Accept the prefilled server name, then the prefilled API key.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /Serply API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved X-API-Key value should prefill the required key field',
+	);
+
+	unmount();
+});
+
 test('McpStep falls back to the menu when initialEditName is unknown', t => {
 	const {lastFrame} = render(
 		<McpStep

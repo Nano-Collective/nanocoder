@@ -51,6 +51,7 @@ import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
+import {markRunFailed} from '@/utils/run-outcome';
 import {calculateTokens} from '@/utils/token-calculator';
 import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -474,10 +475,11 @@ export const processAssistantResponse = async (
 		// Node's heap exhausts.
 		if (malformedRetryCount >= maxMalformedRetries) {
 			await flushAll();
+			markRunFailed('malformed-tool-giveup');
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('malformed-tool-giveup')}
-					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
+					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct. Try rephrasing the request or switching models.`}
 					hideBox={true}
 				/>,
 			);
@@ -802,6 +804,7 @@ export const processAssistantResponse = async (
 	// Surface the loop-detected stop. Callers must have paired this turn's
 	// tool calls with results in history before stopping.
 	const stopForRepeatedCalls = () => {
+		markRunFailed('repeated-tool-calls');
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey('tool-loop-detected')}
@@ -1279,6 +1282,7 @@ export const processAssistantResponse = async (
 
 			await flushAll();
 			// Exhausted all retries (nudges + compact-and-retry cycles)
+			markRunFailed('empty-response-giveup');
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}

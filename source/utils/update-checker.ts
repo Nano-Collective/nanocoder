@@ -4,7 +4,7 @@ import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import {detectInstallationMethod} from './installation-detector';
-import {getPackageVersion} from './package-version';
+import {getPackageVersion, UNKNOWN_VERSION} from './package-version';
 
 const UPDATE_COMMANDS = {
 	NPM: 'npm update -g @nanocollective/nanocoder',
@@ -46,10 +46,6 @@ function isNewerVersion(current: string, latest: string): boolean {
 	}
 
 	return false;
-}
-
-function getCurrentVersion(): string {
-	return getPackageVersion();
 }
 
 /**
@@ -96,7 +92,14 @@ function updateLastCheckTime(): void {
  * Check for package updates
  */
 export async function checkForUpdates(): Promise<UpdateInfo> {
-	const currentVersion = getCurrentVersion();
+	const currentVersion = getPackageVersion();
+
+	// A broken install has no version to compare. The banner and /doctor
+	// already show "unknown"; posting an error to the chat on top of that (it
+	// used to, and it pushed the welcome screen away) helps nobody.
+	if (currentVersion === UNKNOWN_VERSION) {
+		return {hasUpdate: false, currentVersion};
+	}
 
 	try {
 		const latestVersion = await fetchLatestVersion();

@@ -91,14 +91,18 @@ async function createCheckpoint(
 			metadata.model,
 		);
 
+		const captured = checkpointMetadata.filesChanged;
+		const filesLine =
+			captured.length === 0
+				? 'No modified files to capture'
+				: `${captured.length} files captured: ${captured.slice(0, 3).join(', ')}${
+						captured.length > 3 ? '...' : ''
+					}`;
+
 		return successMsg(
 			`Checkpoint '${checkpointMetadata.name}' created successfully
   └─ ${checkpointMetadata.messageCount} messages saved
-  └─ ${
-		checkpointMetadata.filesChanged.length
-	} files captured: ${checkpointMetadata.filesChanged.slice(0, 3).join(', ')}${
-		checkpointMetadata.filesChanged.length > 3 ? '...' : ''
-	}
+  └─ ${filesLine}
   └─ Provider: ${checkpointMetadata.provider.name} (${
 		checkpointMetadata.provider.model
 	})`,
