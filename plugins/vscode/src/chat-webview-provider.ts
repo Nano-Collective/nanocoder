@@ -788,6 +788,16 @@ export class ChatWebviewProvider
 				return;
 			}
 
+			// Refuse to start a second turn while one is already in flight. Without
+			// this guard, a second `_handlePrompt` call would overwrite
+			// `_acpClient.activePrompt` mid-turn, so a subsequent cancel() would
+			// target the new attempt and the original turn keeps running silently.
+			if (this._acpClient.activePrompt) {
+				vscode.window.showWarningMessage('Nanocoder: a turn is already in progress. Wait for it to finish or cancel it before sending a new message.');
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+				return;
+			}
+
 			// /clear resets the server-side conversation; wipe the visible
 			// transcript too so the UI matches (the server's confirmation
 			// message then streams into the fresh view).
