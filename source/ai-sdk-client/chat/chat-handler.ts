@@ -219,9 +219,9 @@ export async function handleChat(
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
 
 			// Provider-specific request extras (Codex Responses API fields,
-			// OpenRouter provider routing / reasoning / transforms / fallback
-			// models). buildProviderOptions returns undefined when nothing
-			// applies, so the SDK call site doesn't see an empty object.
+			// OpenRouter routing/reasoning, and OpenAI-compatible reasoning
+			// effort). buildProviderOptions returns undefined when nothing applies,
+			// so the SDK call site doesn't see an empty object.
 			const providerOptions = buildProviderOptions(
 				providerConfig,
 				systemContent,

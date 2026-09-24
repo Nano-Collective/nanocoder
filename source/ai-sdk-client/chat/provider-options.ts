@@ -33,14 +33,17 @@ export function isPromptCachingEnabled(
 /**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
- * Currently handles two providers:
+ * Currently handles three provider paths:
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
  *     `service_tier`, `route`, and `user` into the request body, keyed by
- *     the provider's configured name (see openAICompatibleOptionsKey). The top-level `reasoningEffort` (from
- *     ModelParameters / `/tune`) is mapped to `reasoning.effort` when the
- *     user has not provided a more specific `openrouter.reasoning` block.
+ *     the provider's configured name (see openAICompatibleOptionsKey). The
+ *     top-level `reasoningEffort` (from ModelParameters / `/tune`) is mapped
+ *     to `reasoning.effort` when the user has not provided a more specific
+ *     `openrouter.reasoning` block.
+ *   - other openai-compatible providers: forwards an explicitly configured
+ *     `reasoningEffort`, which the SDK serialises as `reasoning_effort`.
  *
  * OpenRouter options come from `providerConfig.openrouter` (always-on, set
  * in agents.config.json) — not from tune, so they aren't dropped when the
@@ -100,6 +103,21 @@ export function buildProviderOptions(
 			return undefined;
 		}
 		return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+	}
+
+	// The generic OpenAI-compatible SDK is the default when sdkProvider is
+	// omitted. Unlike chatgpt-codex, do not invent a default here: many models
+	// reject reasoning_effort, so it must only be sent when explicitly set.
+	if (
+		(providerConfig.sdkProvider === undefined ||
+			providerConfig.sdkProvider === 'openai-compatible') &&
+		modelParameters?.reasoningEffort !== undefined
+	) {
+		return {
+			[openAICompatibleOptionsKey(providerConfig.name)]: {
+				reasoningEffort: modelParameters.reasoningEffort,
+			},
+		};
 	}
 
 	return undefined;

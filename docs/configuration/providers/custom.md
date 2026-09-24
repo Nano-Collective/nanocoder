@@ -12,11 +12,17 @@ Any service that exposes an OpenAI-compatible API can be added as a custom provi
 
 ```json
 {
-	"name": "My Provider",
-	"baseUrl": "https://my-api.example.com/v1",
-	"apiKey": "optional-api-key",
-	"caCertPath": "/path/to/internal-ca.pem",
-	"models": ["model-name"]
+	"nanocoder": {
+		"providers": [
+			{
+				"name": "My Provider",
+				"baseUrl": "https://my-api.example.com/v1",
+				"apiKey": "optional-api-key",
+				"caCertPath": "/path/to/internal-ca.pem",
+				"models": ["model-name"]
+			}
+		]
+	}
 }
 ```
 
@@ -29,6 +35,34 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 - `disableTools` - Disable tool calling for this provider
 - `disableToolModels` - Disable tool calling for specific models
 - `caCertPath` - Path to a PEM CA bundle for self-signed or privately issued TLS certificates
+
+## Reasoning Effort
+
+For a reasoning model served through the default OpenAI-compatible SDK, set `reasoningEffort` in the top-level tune configuration:
+
+```json
+{
+	"nanocoder": {
+		"providers": [
+			{
+				"name": "My Provider",
+				"baseUrl": "https://my-api.example.com/v1",
+				"apiKey": "your-api-key",
+				"models": ["my-reasoning-model"]
+			}
+		],
+		"tune": {
+			"modelParameters": {
+				"reasoningEffort": "high"
+			}
+		}
+	}
+}
+```
+
+Nanocoder forwards the value as `reasoning_effort` in the request body. Accepted values are `"minimal"`, `"low"`, `"medium"`, and `"high"`. When the setting is absent, Nanocoder sends no `reasoning_effort` field, preserving compatibility with providers and models that reject it.
+
+See [Tune](../../features/tune.md#provider-specific-parameters) for configuration precedence and the provider-specific mappings.
 
 ## Setup via Wizard
 
