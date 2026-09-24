@@ -4,8 +4,8 @@ import AssistantMessage from '@/components/assistant-message';
 import ChatQueue from '@/components/chat-queue';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
-import {formatSubagentToolResult} from '@/components/tool-result-preview';
 import ToolMessage from '@/components/tool-message';
+import {formatSubagentToolResult} from '@/components/tool-result-preview';
 import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTheme} from '@/hooks/useTheme';
@@ -76,7 +76,7 @@ export function SubagentView({
 				return (
 					<ToolMessage
 						key={`tool-${index}`}
-						message={formatSubagentToolResult(msg.name, msg.content)}
+						message={formatSubagentToolResult(msg.name, msg.content ?? '')}
 						hideBox={true}
 					/>
 				);
