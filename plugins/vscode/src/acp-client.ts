@@ -87,6 +87,10 @@ export class NanocoderAcpClient {
 		return this.pendingPermissions.size > 0;
 	}
 
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
+	}
+
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
