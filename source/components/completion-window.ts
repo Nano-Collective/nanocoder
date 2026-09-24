@@ -18,7 +18,7 @@ export function visibleCompletionWindow<T>(
 	maxRows: number,
 ): CompletionWindow<T> {
 	if (items.length <= maxRows) {
-		return { start: 0, end: items.length, items: [...items] };
+		return {start: 0, end: items.length, items: [...items]};
 	}
 
 	const selected = selectedIndex >= 0 ? selectedIndex : 0;
@@ -27,5 +27,5 @@ export function visibleCompletionWindow<T>(
 	const start = Math.min(Math.max(centeredStart, 0), maxStart);
 	const end = start + maxRows;
 
-	return { start, end, items: items.slice(start, end) };
+	return {start, end, items: items.slice(start, end)};
 }
