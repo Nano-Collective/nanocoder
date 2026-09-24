@@ -17,10 +17,7 @@ import {
 } from './auto-compact-session';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
-import {
-	COMPRESSION_CONSTANTS,
-	compressMessages,
-} from './message-compression';
+import {COMPRESSION_CONSTANTS, compressMessages} from './message-compression';
 import {filterModelFacing} from './message-visibility';
 
 export {
@@ -323,13 +320,13 @@ export async function maybeAutoCompact(
 	}
 }
 
- // Set session override helpers live in `./auto-compact-session` (a
- // lightweight module without the tokenizer/config graph, so the inline
- // `?key=value` parser specs can import them without timing out). They are
- // re-exported above so existing importers keep working.
- //
- // `resetAutoCompactSession` is defined (not re-exported) here because it
- // additionally clears tune's aggressive-compact preset.
+// Set session override helpers live in `./auto-compact-session` (a
+// lightweight module without the tokenizer/config graph, so the inline
+// `?key=value` parser specs can import them without timing out). They are
+// re-exported above so existing importers keep working.
+//
+// `resetAutoCompactSession` is defined (not re-exported) here because it
+// additionally clears tune's aggressive-compact preset.
 export function resetAutoCompactSession(): void {
 	resetAutoCompactSessionOverrides();
 	tuneAggressiveCompact = false;
