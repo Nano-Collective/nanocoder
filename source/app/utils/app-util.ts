@@ -24,7 +24,20 @@ import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
@@ -697,6 +710,8 @@ async function handleSlashCommand(
 	// live server, not a module import. Intercepting here instead mirrors how
 	// handleCustomCommand (checked just above) already dispatches the other
 	// runtime-discovered command source - project `.nanocoder/commands/` files.
+	// Both runtime-discovered sources bypass `?key=value` parsing below and
+	// receive the raw message, so free-text `?word` tokens are never stripped.
 	if (
 		await handleMCPPromptCommand(
 			commandName,
@@ -707,34 +722,82 @@ async function handleSlashCommand(
 		return;
 	}
 
-	const commandParts = message.slice(1).trim().split(/\s+/);
+	// ?key=value tokens let a user test a per-session setting for one
+	// command without committing it to the session. Recognised keys are
+	// consumed here: once-scoped settings via the session-override stores
+	// (restored in `finally`), legacy boolean flags by expanding them to
+	// their `--flag` form. Anything else is forwarded to the command
+	// handler verbatim (rebuilt into `commandParts`/`cleanedMessage`) so
+	// each command's own unknown-arg handling runs — and surfaced once as
+	// a warning so a typo like `?threshhold=80` cannot silently no-op.
+	const rawParts = message.slice(1).trim().split(/\s+/);
+	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
+	const recognized = overrides.filter(o => isRecognizedOverrideKey(o.key));
+	const passthrough = overrides
+		.filter(o => !isRecognizedOverrideKey(o.key))
+		.map(formatInlineToken);
+	const expandedFlags = expandOverrideArgs(recognized);
+	const restTokens = [...positional, ...passthrough, ...expandedFlags].join(
+		' ',
+	);
+	const cleanedMessage = restTokens
+		? `/${commandName} ${restTokens}`
+		: `/${commandName}`;
+	const restoreOnce = await applyOnceOverrides(recognized);
+	// Explicit once-context for consumers: unlike the session store (which
+	// cannot tell a once-override apart from a persisted one), this is only
+	// set when the user typed `?threshold=` on this command.
+	const onceThreshold = getOnceThreshold(recognized);
+	try {
+		const commandParts = [
+			commandName,
+			...positional,
+			...passthrough,
+			...expandedFlags,
+		];
 
-	if (await handleCompactCommand(commandParts, options)) return;
-	if (await handleContextMaxCommand(commandParts, options)) return;
-	if (await handleCommandCreate(commandParts, options)) return;
-	if (await handleAgentCreate(commandParts, options)) return;
-	if (await handleAgentCopy(commandParts, options)) return;
-	if (await handleToolCreate(commandParts, options)) return;
-	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleSpecialCommand(commandName, options)) return;
-	if (await handleCheckpointLoad(commandParts, options)) return;
-	// Stateful handlers that replay or resume chat flow live alongside each other.
-	if (await handleResumeCommand(commandParts, options)) return;
-	if (
-		await handleRetryCommand(
-			[
-				commandName,
-				...parseCustomCommandArgs(message.slice(commandName.length + 2)),
-			],
-			options,
+		if (passthrough.length > 0) {
+			const keys = [...new Set(passthrough)].join(', ');
+			options.onAddToChatQueue(
+				warningMsg(
+					`Unknown inline override(s): ${keys} — no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
+					'inline-override-unknown',
+				),
+			);
+		}
+
+		if (await handleCompactCommand(commandParts, options, onceThreshold))
+			return;
+		if (await handleContextMaxCommand(commandParts, options)) return;
+		if (await handleCommandCreate(commandParts, options)) return;
+		if (await handleAgentCreate(commandParts, options)) return;
+		if (await handleAgentCopy(commandParts, options)) return;
+		if (await handleToolCreate(commandParts, options)) return;
+		if (await handleSkillsCreate(commandParts, options)) return;
+		if (await handleSpecialCommand(commandName, options)) return;
+		if (await handleCheckpointLoad(commandParts, options)) return;
+		// Stateful handlers that replay or resume chat flow live alongside each other.
+		if (await handleResumeCommand(commandParts, options)) return;
+		if (
+			await handleRetryCommand(
+				[
+					commandName,
+					...parseCustomCommandArgs(
+						cleanedMessage.slice(commandName.length + 2),
+					),
+				],
+				options,
+			)
 		)
-	)
-		return;
-	if (handleCopilotLogin(commandParts, options)) return;
-	if (handleCodexLogin(commandParts, options)) return;
-	if (handleStatsCommand(commandParts, options)) return;
+			return;
+		if (handleCopilotLogin(commandParts, options)) return;
+		if (handleCodexLogin(commandParts, options)) return;
+		if (handleStatsCommand(commandParts, options)) return;
 
-	await handleBuiltInCommand(message, options);
+		await handleBuiltInCommand(cleanedMessage, options);
+	} finally {
+		restoreOnce();
+	}
 }
 
 /**
