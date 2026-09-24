@@ -19,7 +19,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/model` | Switch between available models from any configured provider |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
-| `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary) |
+| `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
@@ -29,7 +29,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/compact` | Compress message history to reduce context usage (see [Context Compression](context-compression.md)) |
 | `/context-max` | Set maximum context length for the current session, or inspect the resolved context source. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
-| `/export` | Export current session to markdown file |
+| `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
@@ -51,10 +51,22 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
 | `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
 | `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
-| `/privacy` | Inspect what the prompt scrubber will remove from your prompts |
+| `/privacy` | Inspect what the prompt scrubber would remove from some text: `/privacy inspect <text>`. Scrubbing itself is switched on with the [`enablePromptScrubbing`](../configuration/preferences.md#what-gets-saved-automatically) preference (`/settings` → **Advanced** → **Privacy**) |
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |
 | `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
+
+### Exporting a Session
+
+```bash
+/export                     # markdown, filename generated from your first prompt and the date
+/export notes/auth.md       # markdown, your filename
+/export --json              # JSON, generated filename
+/export --json run.json     # JSON, your filename
+/export run.json            # a .json filename also selects JSON
+```
+
+JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
 
 ## Special Input Syntax
 
@@ -109,9 +121,15 @@ nanocoder --mode plan run "analyze the auth module"
 nanocoder --mode yolo run "update README and push"
 ```
 
+For long prompts, use `--prompt-file <path>` to read the prompt from a file instead of the command line. It takes precedence over a positional prompt, and avoids the Linux limit of 128 KiB per command-line argument, which makes large prompts (for example ones that embed file contents) fail to launch with `E2BIG`:
+
+```bash
+nanocoder run --prompt-file prompt.md
+```
+
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.
 
-Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error names the limit that fired and the run exits with status code `1`.
+Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. The run exits with status code `1` in this case, and also when it fails on a provider or connection error, so CI can tell a failed run from a finished one. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error also names the limit that fired.
 
 > **Warning - CI polling patterns:** the repeated-call hard stop triggers on *legitimate* repetition too. If your workflow's model is expected to run the identical command repeatedly - polling a deploy, waiting on a slow job by re-running the same check - the run aborts once `maxRepeatedToolCalls` consecutive identical calls are emitted (default 3). Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a pattern in CI.
 

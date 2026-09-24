@@ -230,9 +230,14 @@ async function handleCustomCommand(
 		return false;
 	}
 
-	const args = parseCustomCommandArgs(message.slice(commandName.length + 2));
+	const rawArgs = message.slice(commandName.length + 2).trim();
+	const args = parseCustomCommandArgs(rawArgs);
 
-	const processedPrompt = customCommandExecutor?.execute(customCommand, args);
+	const processedPrompt = customCommandExecutor?.execute(
+		customCommand,
+		args,
+		rawArgs,
+	);
 
 	if (processedPrompt) {
 		await onHandleChatMessage(processedPrompt);

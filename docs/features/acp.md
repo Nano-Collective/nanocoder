@@ -83,6 +83,7 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 - **Session history is in-memory.** Reopening a thread within the same running agent restores its history, but after the editor (and agent process) fully restarts, a reloaded thread starts empty — it is usable, but prior messages are not replayed.
 - **`ask_user` is selection-only.** ACP permission options have no text input, so the model receives whichever option you pick rather than a typed answer.
 - **Images and audio are not processed.** Non-text attachments are noted to the model but not interpreted.
+- **Sub-agent tool approvals ignore the session mode.** Tool calls inside a sub-agent always ask for permission, regardless of the ACP session's mode or the configured `alwaysAllow` list, so a `yolo` or `auto-accept` session is still prompted there. An approved sub-agent call is also marked `completed` as soon as it is approved, before it actually runs, so it may still fail afterwards.
 
 ## Troubleshooting
 

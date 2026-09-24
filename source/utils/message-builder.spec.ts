@@ -85,7 +85,9 @@ test('MessageBuilder caps results from optimized execution paths', t => {
 
 	const [message] = builder.build();
 
-	t.is(message.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap: the cut snaps to whitespace so it never splits a token.
+	t.true(message.content.length <= MAX_TOOL_RESULT_CHARS);
+	t.true(message.content.length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(message.content.startsWith('HEAD\n'));
 	t.true(message.content.endsWith('TAIL'));
 	t.true(message.content.includes('Output truncated'));

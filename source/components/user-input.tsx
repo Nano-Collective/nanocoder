@@ -4,7 +4,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
-import TextInput from '@/components/text-input';
+import TextInput, {type TextInputHandle} from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -48,6 +48,27 @@ import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
+const MAX_FILE_COMPLETION_ROWS = 5;
+
+// The rows of a completion list to render: all of them when they fit,
+// otherwise a window kept around the selected row so it never scrolls
+// out of view.
+function completionWindow<T>(
+	items: T[],
+	selectedIndex: number,
+	maxRows: number,
+): {start: number; end: number; items: T[]} {
+	if (items.length <= maxRows) {
+		return {start: 0, end: items.length, items};
+	}
+
+	const centeredStart =
+		(selectedIndex >= 0 ? selectedIndex : 0) - Math.floor(maxRows / 2);
+	const start = Math.min(Math.max(centeredStart, 0), items.length - maxRows);
+	const end = start + maxRows;
+
+	return {start, end, items: items.slice(start, end)};
+}
 
 // An MCP resource shares the file-mention `@` trigger and completion list,
 // distinguished from a filesystem path by this prefix so `handleFileSelection`
@@ -165,6 +186,12 @@ interface ChatProps {
 	isSaving?: boolean;
 	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
 	onDismissSuggestion?: () => void;
+	/**
+	 * Fullscreen keeps the root box's left padding (inline pulls the composer
+	 * back over it), so the status row sits one column further right and has
+	 * one column less to fill.
+	 */
+	fullscreen?: boolean;
 }
 
 export default function UserInput({
@@ -196,6 +223,7 @@ export default function UserInput({
 	isSaving,
 	suggestedCommand = null,
 	onDismissSuggestion,
+	fullscreen = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -211,6 +239,10 @@ export default function UserInput({
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
 	const [textInputKey, setTextInputKey] = useState(0);
+	// Imperative handle into TextInput so the terminal paste path can read the
+	// caret position before the splice and put it back after. Without this the
+	// pasted text would always land at the end of the value.
+	const textInputRef = useRef<TextInputHandle>(null);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
 	// so the auto-show effect doesn't immediately re-open it until they type more.
@@ -301,9 +333,17 @@ export default function UserInput({
 			return;
 		}
 		const handleTerminalPaste = (payload: string) => {
-			insertPaste(payload);
-			// Remount TextInput so its cursor follows the appended text.
-			setTextInputKey(prev => prev + 1);
+			// Read the caret off TextInput so the splice lands where the user
+			// was editing, not at the end of the value. insertPaste returns the
+			// new cursor offset; fall back to a remount only if no cursor is
+			// available (TextInput not yet mounted).
+			const cursorOffset = textInputRef.current?.getCursorOffset();
+			const result = insertPaste(payload, cursorOffset);
+			if (result && textInputRef.current) {
+				textInputRef.current.setCursorOffset(result.cursorOffset);
+			} else if (!result) {
+				setTextInputKey(prev => prev + 1);
+			}
 		};
 		pasteEvents.on('paste', handleTerminalPaste);
 		return () => {
@@ -1140,21 +1180,24 @@ export default function UserInput({
 		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
 	};
-	const commandCompletionWindow = useMemo(() => {
-		if (completions.length <= MAX_COMMAND_COMPLETION_ROWS) {
-			return {start: 0, end: completions.length, items: completions};
-		}
-
-		const selectedIndex =
-			selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0;
-		const centeredStart =
-			selectedIndex - Math.floor(MAX_COMMAND_COMPLETION_ROWS / 2);
-		const maxStart = completions.length - MAX_COMMAND_COMPLETION_ROWS;
-		const start = Math.min(Math.max(centeredStart, 0), maxStart);
-		const end = start + MAX_COMMAND_COMPLETION_ROWS;
-
-		return {start, end, items: completions.slice(start, end)};
-	}, [completions, selectedCompletionIndex]);
+	const commandCompletionWindow = useMemo(
+		() =>
+			completionWindow(
+				completions,
+				selectedCompletionIndex,
+				MAX_COMMAND_COMPLETION_ROWS,
+			),
+		[completions, selectedCompletionIndex],
+	);
+	const fileCompletionWindow = useMemo(
+		() =>
+			completionWindow(
+				fileCompletions,
+				selectedFileIndex,
+				MAX_FILE_COMPLETION_ROWS,
+			),
+		[fileCompletions, selectedFileIndex],
+	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -1187,13 +1230,14 @@ export default function UserInput({
 
 	return (
 		<>
-			{isBashMode && (
-				<Text color={colors.tool} bold>
-					Bash mode
-				</Text>
-			)}
-
 			<Box width={actualWidth} alignItems="center" flexDirection="column">
+				{isBashMode && (
+					<Box width={promptWidth}>
+						<Text color={colors.tool} bold>
+							Bash mode
+						</Text>
+					</Box>
+				)}
 				{showShortcuts && (
 					<TitledBoxWithPreferences
 						title="Keyboard Shortcuts"
@@ -1233,6 +1277,7 @@ export default function UserInput({
 							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
 						)}
 						<TextInput
+							ref={textInputRef}
 							key={textInputKey}
 							value={input}
 							onChange={handleInputChange}
@@ -1289,20 +1334,28 @@ export default function UserInput({
 							<Text color={colors.secondary}>
 								File suggestions (↑/↓ to navigate, Tab to select):
 							</Text>
-							{fileCompletions.slice(0, 5).map((file, index) => (
-								<Text
-									key={index}
-									color={
-										index === selectedFileIndex ? colors.info : colors.primary
-									}
-									bold={index === selectedFileIndex}
-								>
-									{index === selectedFileIndex ? '▸ ' : '  '}
-									{decodeMCPResourcePath(file.path)
-										? file.displayPath
-										: file.path}
+							{fileCompletionWindow.items.map((file, index) => {
+								const isSelected =
+									fileCompletionWindow.start + index === selectedFileIndex;
+								return (
+									<Text
+										key={file.path}
+										color={isSelected ? colors.info : colors.primary}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}
+										{decodeMCPResourcePath(file.path)
+											? file.displayPath
+											: file.path}
+									</Text>
+								);
+							})}
+							{fileCompletions.length > MAX_FILE_COMPLETION_ROWS && (
+								<Text color={colors.secondary}>
+									Showing {fileCompletionWindow.start + 1}-
+									{fileCompletionWindow.end} of {fileCompletions.length}
 								</Text>
-							))}
+							)}
 						</Box>
 					)}
 					{queuedMessages.length > 0 && (
@@ -1357,9 +1410,11 @@ export default function UserInput({
 			input box content. */}
 			<Box marginLeft={3}>
 				<DevelopmentModeIndicator
-					// Must match the wrapper's marginLeft: the indicator budgets its
-					// segments against the width left after this indent.
-					indentColumns={3}
+					// Must match the wrapper's marginLeft plus, in fullscreen, the
+					// root box's padding: the indicator budgets its segments against
+					// the width left after this indent, and overflowing it lets Ink
+					// cut the row mid-word.
+					indentColumns={fullscreen ? 4 : 3}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}

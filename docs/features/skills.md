@@ -178,6 +178,8 @@ nanocoder daemon install    # install per-user auto-start
 nanocoder daemon uninstall  # remove the auto-start unit
 ```
 
+`daemon start` refuses to start in a directory you haven't trusted, because triggered runs execute tools without confirmation. Trust the directory by running `nanocoder` interactively there once, pass `--trust-directory` to bypass the check for that one start (not saved), or set `NANOCODER_TRUST_DIRECTORY=1` to trust it and save that for future runs.
+
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at
 `.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive) are

@@ -152,6 +152,10 @@ Whatever the subagent produced before it got stuck is still handed to the main a
 
 The other retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), they don't use text-parsed tool calls (so `maxMalformedRetries` is too), and `maxTruncatedTurns` is specific to the `--plain` loop. There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
 
+## Context Limits
+
+Subagents follow the same context rules as the main conversation: [`sessions.maxMessages`](session-management.md#configuration) caps how much history is sent to the model on each turn, and [auto-compact](context-compression.md#auto-compact) compresses a long-running subagent's history using your `autoCompact` settings.
+
 ## Development Modes and Tune Profiles
 
 ### Plan Mode

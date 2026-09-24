@@ -50,3 +50,19 @@ test('never splits a placeholder token at the truncation boundary', t => {
 		(result.match(/«[A-Za-z]+_\d+»/g) ?? []).length,
 	);
 });
+
+test('does not cut through a whitespace-delimited token (a secret stays whole or goes)', t => {
+	const secret = 'sk-live-abcdef1234567890abcdef1234567890';
+	for (let offset = 700; offset < 760; offset++) {
+		const content = `${'A'.repeat(offset)} ${secret} ${'B'.repeat(5000)} ${secret} ${'C'.repeat(offset)}`;
+		const result = truncateToolResult(content, 2000);
+		// Every occurrence that survives is the complete secret, never a prefix
+		// or suffix a scrubber would no longer recognise.
+		for (const fragment of result.match(/\S*sk-live\S*/g) ?? []) {
+			t.is(fragment, secret, `offset ${offset}`);
+		}
+		for (const fragment of result.match(/\S*567890\S*/g) ?? []) {
+			t.true(fragment === secret, `offset ${offset}: ${fragment}`);
+		}
+	}
+});

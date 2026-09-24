@@ -12,9 +12,9 @@ Nanocoder automatically saves your preferences to remember your choices across s
 
 You should rarely need to edit these files by hand. `/settings` opens an in-TUI editor covering everything on this page, grouped into six tabs:
 
-- **Appearance** - theme, title shape, nanocoder ASCII shape, alternate screen mode
+- **Appearance** - theme, title shape, nanocoder ASCII shape, alternate screen mode, mouse wheel reporting
 - **Input** - paste threshold, desktop notifications
-- **Behavior** - tool results and thinking display, reasoning traces, default mode, auto-compact, session autosave
+- **Behavior** - tool results and thinking display, reasoning traces, professional tone, default mode, auto-compact, session autosave
 - **Providers** - configure providers, web search, tool auto-approval
 - **MCP** - configure MCP servers
 - **Advanced** - privacy, direct config file editing, environment, model tuning, IDE connection
@@ -50,7 +50,9 @@ Preferences follow the same location hierarchy as configuration files:
 | `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |
 | `semanticMemoryLimit` | Maximum memories considered for a single prompt. Default `8`, clamped to 1-50. Adjustable from `/settings` → **Advanced**. |
 | `alternateScreen` | When `true` (default), starts in fullscreen mode (alternate screen buffer with in-app scrolling). Set to `false` or pass `--no-alt-screen` to force inline mode. See [CLI Options](../getting-started/index.md#cli-options). |
-| `mouseReporting` | When `true`, terminal reports mouse events for scrolling in alternate screen mode. Default `false` for native text selection. Switchable with `--mouse` / `--no-mouse`. |
+| `mouseReporting` | When `true` (default), the terminal reports mouse wheel ticks in fullscreen mode so the wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Set to `false` for native click-drag selection, at the cost of wheel scrolling. Switchable with `--mouse` / `--no-mouse` or `/settings` → **Appearance** → **Mouse Wheel Reporting**. |
+| `compactToolDisplay` | When `true` (default), tool results render in compact form. Ctrl+O toggles it for the current session without saving. In `/settings` → **Behavior** → **Tool Results and Thinking** this appears as **Expand Tool Results by default**, which is the inverse of this value. |
+| `enablePromptScrubbing` | When `true`, sensitive identifiers are replaced with placeholders in everything sent to the provider - prompts, the system prompt, tool results (including `structuredContent`) and assistant tool-call arguments - and rehydrated to real values in the response. Applies in the TUI, `--plain`, ACP / VS Code, subagents and compaction. File paths and URLs are left in the clear so tools keep working. Default `false`. Toggle with `/settings` → **Advanced** → **Privacy**; preview what would be scrubbed with `/privacy inspect <text>`. |
 
 ### Paste Configuration
 

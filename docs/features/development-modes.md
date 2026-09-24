@@ -40,6 +40,7 @@ The default mode. Every tool call requires your explicit confirmation before exe
 
 - See exactly what the AI wants to do before it happens
 - Approve or reject each action individually
+- Approval cards for `execute_bash`, `string_replace`, `write_file`, `diff_edit`, and `file_op` can show a one-line description of the model's intent above the command or path, when the model supplies one
 - Best for unfamiliar codebases, sensitive operations, or when you want full control
 
 **When to use:** Starting a new project, working with code you don't fully understand, or when the AI is making changes you want to review carefully.

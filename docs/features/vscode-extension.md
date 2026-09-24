@@ -10,15 +10,15 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 
 **Key features:**
 
-- **Native Sidebar Chat**: A webview chat that streams responses, shows collapsible thinking sections, renders tool activity as live cards, and handles tool approvals inline.
-- **Provider, Model & Mode Switching**: Change your LLM provider, model, or operating mode on the fly from the dropdowns in the chat header. Switching provider refreshes the model list automatically.
+- **Native Sidebar Chat**: A webview chat that streams responses, groups each turn's thinking and tool activity into one collapsible work summary, and handles tool approvals inline.
+- **Provider, Model & Mode Switching**: Change your model from the picker under the composer, or your provider and operating mode from the Configuration popover beside it. Switching provider refreshes the model list automatically.
 - **Settings Tab**: Configure providers and assistant behaviour from the sidebar instead of editing `agents.config.json` by hand.
 - **Context Attachments**: Attach files and folders with `@` mention autocomplete, drag-and-drop, or the `+` menu. Images can be uploaded or pasted for multimodal messages.
 - **Changed Files in Context**: Files the agent creates or edits appear as chips above the composer as soon as each edit lands - click one to open the current version in the editor. A file it deletes drops off the row, and a rename follows the file to its new path.
 - **Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class.
 - **Sessions**: Start a new chat, browse previous sessions, and resume, rename or delete them - conversations persist to disk across restarts.
-- **Slash Commands**: `/help`, `/clear`, `/copy`, and your custom commands from `.nanocoder/commands` work directly in the chat.
-- **Copy to Clipboard**: Hover any message for a copy button, or grab the last code block with a keybinding.
+- **Slash Commands**: `/help`, `/clear`, `/copy`, the `/test`, `/explain` and `/doc` prompt templates, and your custom commands from `.nanocoder/commands` work directly in the chat. Typing `/` at the start of a line opens an autocomplete menu.
+- **Copy & Retry**: Each assistant response has copy and retry buttons, and a keybinding grabs the last code block.
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
 - **Agent Action List**: Tool calls are announced before the batch runs, so you can see queued work rather than only what has finished.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
@@ -62,9 +62,9 @@ nanocoder --vscode
 
 1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual.
 
-2. **Chat**: Responses stream in as they generate. Thinking appears in a collapsible "Thinking..." section that folds away when the answer starts.
+2. **Chat**: Responses stream in as they generate. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 
-3. **Tool activity**: Read-only tools group into an activity card; file edits get their own card - click it to open the change in VS Code's diff viewer.
+3. **Tool activity**: Inside the work summary, consecutive tool calls group into an activity card; file edits get their own card - click it to open the change in VS Code's diff viewer.
 
    Each file the agent finishes writing is also added to the context row above the composer, so the work of a turn is one click away from review. Those chips are dashed to set them apart from the files you attached yourself: clicking one opens the file as it stands now, the x dismisses it, and - unlike your own attachments - they are not sent along with your next message and are not cleared when you send it. Starting or resuming a conversation clears them.
 
@@ -78,7 +78,7 @@ nanocoder --vscode
 
 ### Provider, Model, and Mode
 
-The three dropdowns in the chat header switch the session's provider, model, and operating mode. Providers and models come from your `agents.config.json`; switching provider refreshes the model list (and reconciles the model if the current one isn't available on the new provider). Mode and model choices persist to VS Code settings.
+The model picker sits on the composer's bottom row and shows the current model. Next to it, the sliders button opens a **Configuration** popover with the **Provider** and **Mode** selectors; the mode selector shows the current mode (Normal, Auto-Accept, YOLO or Plan). Providers and models come from your `agents.config.json`; switching provider refreshes the model list (and reconciles the model if the current one isn't available on the new provider). Mode and model choices persist to VS Code settings.
 
 ### Settings Tab
 
@@ -93,6 +93,7 @@ The tab covers:
 - **Auto-compact** - whether it's enabled, its threshold, and its mode.
 - **Reasoning traces** - whether thinking is expanded by default.
 - **Sessions** - autosave on or off.
+- **Token usage** - whether token and cost footers show below responses (off by default).
 - **Web search** - whether it's configured.
 
 For anything the tab doesn't cover, `Nanocoder: Open Configuration` opens the raw `agents.config.json`.
@@ -117,19 +118,23 @@ Turn them off with the `nanocoder.codeLens` setting.
 
 ### Slash Commands
 
+Typing `/` at the start of a line opens an autocomplete menu of `/test`, `/explain`, `/doc`, `/clear` and `/copy`, filtered as you type. `/` elsewhere in a line (a URL, a path in prose) does not open it. Other commands, including custom ones, are typed in full.
+
+- `/test`, `/explain`, `/doc` - prompt templates: selecting one drops editable text (e.g. "Write tests for the following:") into the composer for you to finish and send. Nothing hidden is attached
 - `/help` - list available commands, including your custom commands
 - `/clear` - clear the conversation (both the visible transcript and the model's context)
 - `/copy` - copy the whole previous assistant response to the clipboard
 - `/copy code` - copy just the last fenced code block from the previous response
 - Custom commands from `.nanocoder/commands` run as they do in the CLI
-- `/model` and `/provider` point you to the header dropdowns
+- `/model` and `/provider` point you to the model and provider selectors
 - `/settings` points you to the Settings tab
 - Interactive CLI-only commands (`/init`, `/theme`, `/compact`, `/context-max`, `/usage`) explain that they need the terminal CLI
 - Messages that start with a file path (e.g. `/Users/me/file.ts`) are sent to the AI as normal text, not treated as commands
 
-### Copying Messages
+### Copying and Retrying Responses
 
-- Hover any user prompt or assistant response bubble to reveal a clipboard icon that copies that message's raw markdown.
+- Each assistant response has a clipboard button in its footer that copies the response's raw markdown. User messages have no copy button.
+- The retry button next to it sends the same prompt again: the old response is removed from the chat and the conversation is truncated back to that prompt, so the model does not see the discarded answer. Retry is unavailable while a turn is running.
 - `Cmd+Alt+Shift+C` (`Ctrl+Alt+Shift+C` on Windows/Linux) copies the last code block from the previous assistant response, the same as typing `/copy code`.
 
 ### Sessions
@@ -143,11 +148,11 @@ Turn them off with the `nanocoder.codeLens` setting.
 
 Every tool call in a turn is announced before the batch runs, so the chat shows the agent's queued work rather than only what it has already finished. Each entry moves through queued, then running, then done.
 
-A new tool call always starts a fresh card when something else - a thought, reply text, an edit card, or a plan update - came in between, so unrelated calls don't get folded into an earlier card. Collapsing a card by hand keeps it collapsed.
+A new tool call always starts a fresh card when something else - a thought, reply text, an edit card, or a plan update - came in between, so unrelated calls don't get folded into an earlier card. Cards don't collapse individually; collapsing is done on the turn's work summary.
 
 ### Thoughts
 
-Streamed reasoning is grouped into a single expandable section per response, rather than one dropdown per thought block. Thoughts interrupted by answer text or a tool call resume in the same section when the model returns to thinking.
+Streamed reasoning appears inside the turn's work summary as "Thought" entries, in order with the tool calls around it. Each uninterrupted stretch of thinking is one entry; when the model goes back to thinking after a tool call, a new entry starts below it.
 
 ### Subagent Progress
 
@@ -155,7 +160,7 @@ When the AI delegates to a subagent, the agent's tool card updates live with the
 
 ### Task Checklist
 
-When the AI organizes work with the task tool (`write_tasks`), a Tasks card appears in the chat showing each task with its status - open circle for pending, arrow for in progress, check for completed - plus a progress count in the header. The card updates in place as the AI works through the list.
+When the AI organizes work with the task tool (`write_tasks`), a Tasks card appears in that turn's work summary showing each task with its status - open circle for pending, arrow for in progress, check for completed - plus a progress count in the header. The card updates in place as the AI works through the list.
 
 ## Configuration
 
@@ -171,7 +176,9 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 | `nanocoder.codeLens`        | `true`        | Show `Explain Code` / `Generate Tests` lenses above symbols            |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
 | `nanocoder.autoStartCli`    | `false`       | Auto-start the CLI for companion mode if not running                  |
-| `nanocoder.serverPort`      | `51820`       | WebSocket port for the legacy companion mode                          |
+| `nanocoder.showTokenUsage`  | `false`       | Show token usage and estimated cost below chat responses (hidden by default; also a toggle in the Settings tab) |
+| `nanocoder.serverPort`      | `51820`       | Legacy companion port, used only as a fallback when the discovery file is missing or stale |
+| `nanocoder.serverToken`     | (empty)       | Legacy companion bearer token, for when the discovery file is unreachable (e.g. SSH) |
 
 ## Commands
 
@@ -209,6 +216,12 @@ Before the sidebar chat, the extension paired with a Nanocoder session running i
 
 The sidebar chat and companion mode are separate conversations - the GUI does not see what a terminal session is doing.
 
+### Companion Connection
+
+By default `nanocoder --vscode` binds an ephemeral loopback port (pass `--vscode-port <port>` to request a fixed one) and generates a random per-session token. It writes both to a discovery file, `vscode-server.json` in your Nanocoder config directory (e.g. `~/.config/nanocoder/vscode-server.json` on Linux, `~/Library/Preferences/nanocoder/vscode-server.json` on macOS, or under `NANOCODER_CONFIG_DIR` if set). The extension reads that file and sends the token as a bearer header; a file left behind by a CLI that is no longer running is ignored.
+
+If the discovery file isn't readable from VS Code - for example when the CLI runs on a remote host over SSH with the port forwarded - copy the `port` and `token` values from that file on the CLI's host into `nanocoder.serverPort` and `nanocoder.serverToken`. The CLI does not print the token to its logs.
+
 ## Troubleshooting
 
 **Sidebar chat won't connect?**
@@ -220,7 +233,8 @@ The sidebar chat and companion mode are separate conversations - the GUI does no
 **Companion mode not connecting?**
 
 - Ensure Nanocoder is running with the `--vscode` flag in a terminal
-- Verify port 51820 (or your `nanocoder.serverPort`) is not blocked or in use
+- Check that `vscode-server.json` exists in your Nanocoder config directory and was written by the running CLI (restart the CLI to rewrite it)
+- For SSH or other remote setups, set `nanocoder.serverPort` and `nanocoder.serverToken` from that file and make sure the port is forwarded
 - Click the status bar item to reconnect after restarting the CLI
 
 **Diff not showing?**

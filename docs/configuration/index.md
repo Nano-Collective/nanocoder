@@ -208,7 +208,7 @@ This setting is stored in `nanocoder-preferences.json` (see [Preferences](prefer
 | `autoSave` | boolean | `true` | Enable/disable automatic session saving |
 | `saveInterval` | number | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | number | `100` | Maximum sessions to keep (minimum 1) |
-| `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
+| `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat and by [subagents](../features/subagents.md) (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
 
@@ -358,6 +358,8 @@ Turn off individual tools globally with the top-level `disabledTools` array. Lis
 ```
 
 Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
+
+`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
 
 Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 

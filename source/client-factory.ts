@@ -210,6 +210,10 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		contextWindow: provider.contextWindow,
 		contextWindows: provider.contextWindows,
 		maxOutputTokens: provider.maxOutputTokens,
+		// Both documented provider settings; leaving them out of this mapping
+		// made `promptCaching: false` and a custom `maxRetries` silently inert.
+		promptCaching: provider.promptCaching as boolean | undefined,
+		maxRetries: provider.maxRetries,
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,

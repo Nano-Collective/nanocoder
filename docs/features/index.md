@@ -95,6 +95,8 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 
 Toggle between modes with **Shift+Tab**. The current mode is shown in the status bar.
 
+`fetch_url` refuses loopback, private-network, `*.localhost`, and cloud metadata addresses in every mode, including redirect hops, so a no-approval fetch can't reach internal services.
+
 ## Non-Interactive Mode
 
 For scripting and automation, run Nanocoder without an interactive session:
@@ -238,6 +240,10 @@ Run Nanocoder as an [Agent Client Protocol server](acp.md) so ACP-compatible edi
 ```bash
 nanocoder --acp
 ```
+
+### Language Servers
+
+When a language server is connected (`/lsp` lists them), the AI can read diagnostics with `lsp_get_diagnostics` and format a file with `lsp_format_document`, which formats through the language server, honours `.editorconfig` indent settings, and writes the result to disk. Formatting is a file edit, so it follows the same approval rules as other edits.
 
 ### MCP Servers
 

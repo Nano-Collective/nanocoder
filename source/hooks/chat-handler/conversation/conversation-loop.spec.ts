@@ -2730,7 +2730,7 @@ test.serial('malformed-retry limit honors a custom configured value', async t =>
 	const giveUpMessage = queuedComponents.find(
 		(c: any) =>
 			typeof c.props?.message === 'string' &&
-			c.props.message.includes('malformed tool calls 1 times'),
+			c.props.message.includes('malformed tool calls 1 time in a row'),
 	);
 	t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
 });

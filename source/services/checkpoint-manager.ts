@@ -27,7 +27,10 @@ export class CheckpointManager {
 	private readonly checkpointsDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
 
+	private readonly workspaceRoot: string;
+
 	constructor(workspaceRoot: string = process.cwd()) {
+		this.workspaceRoot = workspaceRoot;
 		// nosemgrep
 		this.checkpointsDir = path.join(workspaceRoot, '.nanocoder', 'checkpoints'); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
@@ -563,6 +566,41 @@ export class CheckpointManager {
 	checkpointExists(name: string): boolean {
 		const checkpointDir = this.getCheckpointDir(name);
 		return existsSync(checkpointDir);
+	}
+
+	/**
+	 * The checkpointed paths that differ on disk now: snapshotted files whose
+	 * bytes changed or that were deleted, and paths absent at capture that now
+	 * exist. A checkpoint records every path a tool was ABOUT to touch, so its
+	 * own lists include edits that failed or changed nothing.
+	 */
+	async getChangesSince(
+		name: string,
+	): Promise<{filesChanged: string[]; filesMissing: string[]}> {
+		const {metadata, fileSnapshots} = await this.loadCheckpoint(name);
+
+		const filesChanged: string[] = [];
+		for (const relativePath of metadata.filesChanged) {
+			const snapshot = fileSnapshots.get(relativePath);
+			const absolutePath = path.join(this.workspaceRoot, relativePath); // nosemgrep
+			let current: Buffer | null = null;
+			try {
+				current = await fs.readFile(absolutePath);
+			} catch {
+				current = null;
+			}
+			// No snapshot to compare against (unreadable at load): report it
+			// rather than hide a change we cannot rule out.
+			if (!snapshot || !current || !snapshot.equals(current)) {
+				filesChanged.push(relativePath);
+			}
+		}
+
+		const filesMissing = (metadata.filesMissing ?? []).filter(
+			relativePath => existsSync(path.join(this.workspaceRoot, relativePath)), // nosemgrep
+		);
+
+		return {filesChanged, filesMissing};
 	}
 
 	/**

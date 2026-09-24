@@ -45,7 +45,7 @@ nanocoder -h
 | `--version` | `-v` | Display the installed version number |
 | `--help` | `-h` | Show usage information and available options |
 | `--vscode` | | Run in VS Code mode (for extension) |
-| `--vscode-port` | | Specify VS Code server port |
+| `--vscode-port` | | Pin the VS Code server to a fixed port. By default it binds an ephemeral port and publishes it to a discovery file the extension reads, so this is only needed when you want a known port (e.g. for port forwarding) |
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
@@ -55,9 +55,12 @@ nanocoder -h
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
-| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run` and `nanocoder daemon start`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
+| `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
+| `--no-mouse` | | Disable mouse reporting in fullscreen mode: native text selection works directly, but the wheel no longer scrolls chat history. |
+| `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust` |
@@ -200,9 +203,10 @@ This fetches the diff against the default branch and runs an architect-level rev
 
 - Automatically executes the given prompt
 - Defaults to auto-accept (tools execute without confirmation); override with `--mode` (e.g. `--mode yolo` or `--mode plan`)
-- Renders through a dedicated shell — no welcome banner, no boot summary, no boxed user echo, no "ctrl+r to expand" hints. Assistant text prints as plain markdown; a single spinner status line shows progress below the transcript.
+- Renders through a dedicated shell - no welcome banner, no boxed user echo, no "ctrl+r to expand" hints. A single boot line shows the provider, model and mode, assistant text prints as plain markdown, and a single spinner status line shows progress below the transcript.
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
-- If a tool requires approval that auto-accept won't grant (e.g. bash in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1`
+- If a tool requires approval that auto-accept won't grant (e.g. bash in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output)
+- Exits with status code `1` when the run fails: a provider or connection error, or a retry limit being hit (e.g. malformed tool calls the model cannot self-correct)
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
 - Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override
@@ -215,7 +219,9 @@ The first time Nanocoder runs in a new directory, it shows a security disclaimer
 nanocoder --trust-directory run "your prompt here"
 ```
 
-The override is ephemeral: it does **not** add the directory to `trustedDirectories` in your [preferences file](../configuration/preferences.md), so subsequent interactive sessions will still see the disclaimer. The flag only applies to `run`; using it without `run` prints a warning and is otherwise ignored.
+The override is ephemeral: it does **not** add the directory to `trustedDirectories` in your [preferences file](../configuration/preferences.md), so subsequent interactive sessions will still see the disclaimer. The flag only applies to `run` and `nanocoder daemon start`; using it in interactive mode prints a warning and is otherwise ignored.
+
+To trust a directory permanently instead, set `NANOCODER_TRUST_DIRECTORY=1` for a `--plain` run (the default in CI and non-TTY environments) or for `nanocoder daemon start`. The first run with it set adds the directory to `trustedDirectories`, so later runs no longer need the variable.
 
 **Error Handling:**
 

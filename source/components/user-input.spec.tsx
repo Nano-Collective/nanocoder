@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -6,6 +9,7 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
@@ -1404,6 +1408,43 @@ test('UserInput windows long slash completion lists', async t => {
 	unmount();
 });
 
+test('UserInput windows long file mention lists', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
+	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('@zzfile');
+	// The file walk is async; wait for the list rather than a fixed delay.
+	for (let i = 0; i < 40 && !/Showing/.test(lastFrame()!); i++) {
+		await wait(50);
+	}
+	t.regex(lastFrame()!, /Showing 1-5 of 8/);
+
+	// Moving past the fifth row scrolls the list, so the highlight stays on a
+	// drawn file instead of moving onto ones that are not shown.
+	for (let i = 0; i < 7; i++) {
+		stdin.write('\u001B[B');
+		await wait(50);
+		t.regex(lastFrame()!, /▸ zzfile\d\.txt/);
+	}
+	t.notRegex(lastFrame()!, /Showing 1-5 of 8/);
+
+	unmount();
+});
+
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -1528,3 +1569,71 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
+
+// Regression for the cursor-mid-paste bug: a terminal paste used to leave the
+// caret at end-of-value regardless of where it started, so any keystroke after
+// the paste landed at the end instead of next to the inserted text. The
+// post-paste caret position is the bug; ink-testing-library strips inverse
+// styling from the frame, so we verify by typing one more character and
+// checking where it lands.
+test.serial(
+	'UserInput parks the caret after the splice when pasting mid-string',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+
+		// Move caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+
+		pasteEvents.emit('paste', 'XY');
+		await waitForFrame(lastFrame, /aXYbc/);
+
+		// One more keystroke lands immediately after the splice, not at the end.
+		stdin.write('Z');
+		await waitForFrame(lastFrame, /aXYZbc/);
+
+		// Match against the stripped frame: inverse ANSI on the cursor
+		// character interleaves with the surrounding text in the raw output,
+		// which makes a contiguous /aXYZbc/ regex miss. waitForFrame strips
+		// before matching for the same reason.
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput parks the caret after a multi-line placeholder splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('hello world');
+		await waitForFrame(lastFrame, /hello world/);
+
+		// Move caret to offset 5 (between 'hello' and ' world').
+		for (let i = 0; i < 6; i++) {
+			stdin.write('\x1B[D');
+		}
+
+		pasteEvents.emit('paste', 'line1\nline2\nline3');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
+
+		// Next keystroke lands immediately after the placeholder, before ' world'.
+		stdin.write('!');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]! world/);
+		t.notRegex(lastFrame()!, /!\[Paste/);
+		unmount();
+	},
+);

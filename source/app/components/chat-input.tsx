@@ -259,6 +259,7 @@ export function ChatInput({
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
+					fullscreen={fullscreen}
 					customCommands={customCommands}
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
