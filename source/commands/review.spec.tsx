@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
 import {createReviewCommand, type ReviewDependencies} from './review';
@@ -424,10 +425,10 @@ test('bare PR number fails clearly when fork and upstream numbers collide', asyn
 
 	t.truthy(React.isValidElement(result));
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
-	const output = lastFrame() || '';
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
 
 	t.true(
-		/exists in multiple configured GitHub\s+repositories/.test(output),
+		output.includes('exists in multiple configured GitHub repositories'),
 		output,
 	);
 	t.true(output.includes('full GitHub PR URL'));
