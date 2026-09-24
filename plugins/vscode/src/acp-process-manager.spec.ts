@@ -17,6 +17,19 @@ function makeManager(stateManager: AcpStateManager) {
 	return manager;
 }
 
+/** Like {@link makeManager} but keeps the prototype `start` so tests can drive it. */
+function makeManagerWithRealStart(stateManager: AcpStateManager) {
+	const outputChannel = { appendLine: () => {} } as any;
+	const acpClient = {
+		connection: null,
+		initializeHandshake: async () => true,
+		dispose: () => {}
+	} as any as NanocoderAcpClient;
+	const manager = new AcpProcessManager(outputChannel, stateManager, acpClient);
+	manager.start = AcpProcessManager.prototype.start;
+	return manager;
+}
+
 test('AcpProcessManager - restart logic and retry backoff', (t) => {
 	const stateManager = new AcpStateManager();
 	const manager = makeManager(stateManager);
@@ -77,4 +90,88 @@ test('AcpProcessManager - dispose keeps the shared state manager usable', (t) =>
 	});
 	stateManager.setStatus(ACPStatus.Connected);
 	t.true(fired, 'onDidChangeStatus must survive a manager dispose');
+});
+
+test('AcpProcessManager - dispose clears a pending retry timer', async (t) => {
+	const stateManager = new AcpStateManager();
+	const manager = makeManager(stateManager);
+
+	let startedAfterDispose = false;
+	manager.start = async () => {
+		startedAfterDispose = true;
+	};
+
+	(manager as any).retryTimer = setTimeout(() => {
+		void manager.start();
+	}, 5);
+
+	manager.dispose();
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.false(
+		startedAfterDispose,
+		'dispose() must cancel a pending retry timer',
+	);
+});
+
+test('AcpProcessManager - start() is a no-op when disposed', async (t) => {
+	const stateManager = new AcpStateManager();
+	const manager = makeManager(stateManager);
+
+	let launchCalled = false;
+	(manager as any).launch = async () => {
+		launchCalled = true;
+	};
+
+	manager.dispose();
+	await manager.start();
+
+	t.false(launchCalled, 'start() on a disposed manager must not invoke launch()');
+});
+
+test('AcpProcessManager - overlapping start() calls coalesce into one launch', async (t) => {
+	const stateManager = new AcpStateManager();
+	const manager = makeManagerWithRealStart(stateManager);
+
+	let launchCount = 0;
+	let releaseLaunch!: () => void;
+	(manager as any).launch = () => {
+		launchCount++;
+		return new Promise<void>(resolve => {
+			releaseLaunch = resolve;
+		});
+	};
+
+	const a = manager.start();
+	const b = manager.start();
+	const c = manager.start();
+
+	t.is(launchCount, 1, 'overlapping start() callers must share a single in-flight launch');
+
+	releaseLaunch();
+	await Promise.all([a, b, c]);
+
+	t.is(launchCount, 1, 'no extra launches should run after the first one resolves');
+	t.is(
+		(manager as any).currentLaunch,
+		null,
+		'currentLaunch must be cleared in the finally',
+	);
+});
+
+test('AcpProcessManager - launch() bails out without spawning when already disposed', async (t) => {
+	const stateManager = new AcpStateManager();
+	const manager = makeManager(stateManager);
+
+	let setConnectionCalls = 0;
+	(manager as any).acpClient.setConnection = () => {
+		setConnectionCalls++;
+	};
+
+	manager.dispose();
+	await (AcpProcessManager.prototype as any).launch.call(manager);
+
+	t.is(setConnectionCalls, 0, 'launch() on a disposed manager must not touch acpClient.connection');
+	t.is(stateManager.status, ACPStatus.Disconnected, 'launch() must not transition the state manager once disposed');
 });

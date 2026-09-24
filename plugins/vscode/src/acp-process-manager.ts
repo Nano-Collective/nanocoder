@@ -19,6 +19,8 @@ export class AcpProcessManager {
 	private maxRetries = 5;
 	private isDisposed = false;
 	private lastStderr = '';
+	private retryTimer: NodeJS.Timeout | null = null;
+	private currentLaunch: Promise<void> | null = null;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager, acpClient: NanocoderAcpClient) {
 		this.outputChannel = outputChannel;
@@ -27,23 +29,42 @@ export class AcpProcessManager {
 	}
 
 	async start(): Promise<void> {
-		// Nothing awaits start(), so an exception here would surface as an
-		// unhandled rejection: no log line, no status change, and a UI stuck on
-		// "Connecting". cp.spawn throws synchronously for an unspawnable path
-		// (a .cmd without a shell on Windows), which is exactly that case.
+		// Refuse to start a disposed manager: a retry timer scheduled before
+		// dispose() can still fire here and would overwrite the new manager's
+		// acpClient.connection.
+		if (this.isDisposed) {
+			return;
+		}
+		if (this.currentLaunch) {
+			return this.currentLaunch;
+		}
+		this.currentLaunch = this._runLaunch();
+		return this.currentLaunch;
+	}
+
+	private async _runLaunch(): Promise<void> {
 		try {
 			await this.launch();
 		} catch (error) {
+			if (this.isDisposed) {
+				this.outputChannel.appendLine(`ACP launch aborted after dispose: ${error}`);
+				return;
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			this.outputChannel.appendLine(`Failed to start ACP process: ${message}`);
 			this.stateManager.setStatus(ACPStatus.Failed, {reason: message});
 			vscode.window.showErrorMessage(
 				`Could not start the Nanocoder CLI: ${message}. See the Nanocoder output channel for details.`
 			);
+		} finally {
+			this.currentLaunch = null;
 		}
 	}
 
 	private async launch(): Promise<void> {
+		if (this.isDisposed) {
+			return;
+		}
 		this.stateManager.setStatus(ACPStatus.Starting);
 
 		const config = vscode.workspace.getConfiguration('nanocoder');
@@ -136,20 +157,21 @@ export class AcpProcessManager {
 			reportCrash();
 		});
 
-		// Create Web Streams from Node.js streams
+		// Closures capture the local `child`, not `this.childProcess`, so a
+		// late `data` event after dispose() cannot NPE on the nulled field.
 		const input = new ReadableStream<Uint8Array>({
 			start: (controller) => {
-				this.childProcess!.stdout!.on('data', (chunk: Buffer) => {
+				child.stdout!.on('data', (chunk: Buffer) => {
 					controller.enqueue(new Uint8Array(chunk));
 				});
-				this.childProcess!.stdout!.on('end', () => controller.close());
-				this.childProcess!.stdout!.on('error', (err) => controller.error(err));
+				child.stdout!.on('end', () => controller.close());
+				child.stdout!.on('error', (err) => controller.error(err));
 			}
 		});
 
 		const output = new WritableStream<Uint8Array>({
 			write: (chunk) => {
-				this.childProcess!.stdin!.write(chunk);
+				child.stdin!.write(chunk);
 			},
 			abort: (reason) => {
 				this.outputChannel.appendLine(`Stream output aborted: ${reason}`);
@@ -170,9 +192,19 @@ export class AcpProcessManager {
 				return this.acpClient.handleExtNotification(method, params);
 			}
 		} as any), stream);
+
+		if (this.isDisposed) {
+			child.kill();
+			return;
+		}
 		this.acpClient.setConnection(connection);
 		const initialized = await this.acpClient.initializeHandshake();
-		
+
+		if (this.isDisposed) {
+			child.kill();
+			return;
+		}
+
 		if (initialized) {
 			this.retryCount = 0; // Reset retries on successful connection
 		} else if (this.stateManager.status !== ACPStatus.VersionMismatch) {
@@ -194,9 +226,11 @@ export class AcpProcessManager {
 				totalAttempts: this.maxRetries,
 			});
 			this.outputChannel.appendLine(`ACP process crashed. Restarting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
-			
-			setTimeout(() => {
-				this.start();
+
+			this.retryTimer = setTimeout(() => {
+				this.retryTimer = null;
+				if (this.isDisposed) return;
+				void this.start();
 			}, delay);
 		} else {
 			const lastError = this.lastStderr.trim().split('\n').pop();
@@ -212,6 +246,12 @@ export class AcpProcessManager {
 
 	dispose() {
 		this.isDisposed = true;
+		// Clear the retry timer: an orphaned one would call start() on the
+		// disposed manager and overwrite the new manager's acpClient.connection.
+		if (this.retryTimer) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = null;
+		}
 		if (this.childProcess) {
 			this.childProcess.kill();
 			this.childProcess = null;
