@@ -1,7 +1,11 @@
-import {Box, Text, useApp, useInput} from 'ink';
-import {useState} from 'react';
-import {useTerminalRows} from '@/hooks/useTerminalWidth';
-import type {StorageReport, StorageSection} from './diagnostics.js';
+import {Box, Text, useApp, useInput, useStdout} from 'ink';
+import {useEffect, useState} from 'react';
+import type {
+	StorageFinding,
+	StorageItem,
+	StorageReport,
+	StorageSection,
+} from './diagnostics.js';
 
 const sectionNames = [
 	'sessions',
@@ -10,7 +14,7 @@ const sectionNames = [
 	'checkpoints',
 ] as const;
 type SectionName = (typeof sectionNames)[number];
-type Selection = {kind: 'item' | 'finding'; index: number};
+type Focus = 'stores' | 'entries' | 'detail';
 
 function size(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
@@ -24,195 +28,252 @@ function size(bytes: number): string {
 	return `${value.toFixed(1)} ${units[unit]}`;
 }
 
+/** Ink's stdout, not process.stdout, is the surface used by the renderer. */
+function useViewport() {
+	const {stdout} = useStdout();
+	const [viewport, setViewport] = useState(() => ({
+		columns: stdout.columns || 80,
+		rows: stdout.rows || 24,
+	}));
+	useEffect(() => {
+		const resize = () =>
+			setViewport({columns: stdout.columns || 80, rows: stdout.rows || 24});
+		stdout.on('resize', resize);
+		resize();
+		return () => {
+			stdout.off('resize', resize);
+		};
+	}, [stdout]);
+	return viewport;
+}
+
+function EntryDetails({
+	entry,
+}: {
+	entry:
+		| {kind: 'item'; data: StorageItem}
+		| {kind: 'finding'; data: StorageFinding};
+}) {
+	if (entry.kind === 'finding') {
+		const finding = entry.data;
+		return (
+			<>
+				<Text bold wrap="truncate-end">
+					Finding · {finding.code}
+				</Text>
+				<Text>Severity: {finding.severity}</Text>
+				<Text wrap="truncate-end">{finding.message}</Text>
+				{finding.path && <Text wrap="truncate-end">Path: {finding.path}</Text>}
+			</>
+		);
+	}
+	const item = entry.data;
+	return (
+		<>
+			<Text bold wrap="truncate-end">
+				Item · {item.name}
+			</Text>
+			<Text wrap="truncate-end">Path: {item.path}</Text>
+			<Text>Status: {item.status}</Text>
+			<Text>
+				Size: {size(item.sizeBytes)} ({item.sizeBytes} bytes)
+			</Text>
+			{item.modifiedAt && <Text>Modified: {item.modifiedAt}</Text>}
+			{item.ageDays !== undefined && <Text>Age: {item.ageDays} days</Text>}
+			{item.detail && <Text wrap="truncate-end">Detail: {item.detail}</Text>}
+		</>
+	);
+}
+
 export function StorageApp({report}: {report: StorageReport}) {
 	const {exit} = useApp();
-	const rows = useTerminalRows();
-	const [section, setSection] = useState<SectionName | undefined>();
+	const {columns, rows} = useViewport();
 	const [sectionIndex, setSectionIndex] = useState(0);
 	const [entryIndex, setEntryIndex] = useState(0);
-	const [selection, setSelection] = useState<Selection | undefined>();
-	const active: StorageSection | undefined = section
-		? report.sections[section]
-		: undefined;
-	const entryCount = active ? active.items.length + active.findings.length : 0;
-	const visibleCount = Math.max(1, Math.min(12, rows - 14));
-	const firstVisible = Math.min(
-		Math.max(0, entryIndex - Math.floor(visibleCount / 2)),
-		Math.max(0, entryCount - visibleCount),
+	const [focus, setFocus] = useState<Focus>('stores');
+	const name: SectionName = sectionNames[sectionIndex];
+	const active: StorageSection = report.sections[name];
+	const entries: Array<
+		{kind: 'item'; data: StorageItem} | {kind: 'finding'; data: StorageFinding}
+	> = [
+		...active.items.map(data => ({kind: 'item' as const, data})),
+		...active.findings.map(data => ({kind: 'finding' as const, data})),
+	];
+	const compact = columns < 72;
+	const short = rows < 18;
+	const tiny = columns < 40 || rows < 14;
+	const visibleCount = Math.max(
+		1,
+		Math.min(12, rows - (compact ? 19 : 17) - (active.limits?.length ?? 0)),
 	);
-	const visibleEntries = active
-		? [
-				...active.items.map((item, index) => ({
-					kind: 'item' as const,
-					index,
-					key: item.path,
-					label: `ITEM ${item.name} · ${item.status} · ${size(item.sizeBytes)}`,
-				})),
-				...active.findings.map((issue, index) => ({
-					kind: 'finding' as const,
-					index,
-					key: `${issue.code}-${index}`,
-					label: `FINDING ${issue.severity}: ${issue.message}`,
-				})),
-			].slice(firstVisible, firstVisible + visibleCount)
-		: [];
+	const selectedEntry = Math.min(entryIndex, Math.max(0, entries.length - 1));
+	const firstVisible = Math.min(
+		Math.max(0, selectedEntry - Math.floor(visibleCount / 2)),
+		Math.max(0, entries.length - visibleCount),
+	);
+	const visibleEntries = entries.slice(
+		firstVisible,
+		firstVisible + visibleCount,
+	);
 
 	useInput((input, key) => {
 		if ((key.ctrl && input === 'c') || input === 'q') {
 			exit();
 			return;
 		}
-		if (key.escape) {
-			if (selection) setSelection(undefined);
-			else if (section) setSection(undefined);
-			else exit();
+		if (key.escape || key.leftArrow) {
+			if (focus === 'detail') setFocus('entries');
+			else if (focus === 'entries') setFocus('stores');
+			else if (key.escape) exit();
 			return;
 		}
-		if (selection) return;
+		if (focus === 'detail') return;
 		if (key.upArrow || key.downArrow) {
 			const delta = key.downArrow ? 1 : -1;
-			if (section)
-				setEntryIndex(index =>
-					Math.max(0, Math.min(entryCount - 1, index + delta)),
-				);
-			else
+			if (focus === 'stores') {
 				setSectionIndex(index =>
 					Math.max(0, Math.min(sectionNames.length - 1, index + delta)),
 				);
-		} else if (key.return) {
-			if (!section) {
-				setSection(sectionNames[sectionIndex]);
 				setEntryIndex(0);
-			} else if (active && entryCount > 0) {
-				setSelection(
-					entryIndex < active.items.length
-						? {kind: 'item', index: entryIndex}
-						: {kind: 'finding', index: entryIndex - active.items.length},
+			} else {
+				setEntryIndex(index =>
+					Math.max(0, Math.min(entries.length - 1, index + delta)),
 				);
 			}
+		} else if (key.return || key.rightArrow) {
+			if (focus === 'stores' && entries.length > 0) setFocus('entries');
+			else if (focus === 'entries' && entries.length > 0) setFocus('detail');
 		}
 	});
 
-	return (
-		<Box flexDirection="column">
-			<Text bold>Storage diagnostics · read-only</Text>
-			<Text wrap="truncate-end">Project: {report.projectRoot}</Text>
-			<Text>Scanned: {report.scannedAt}</Text>
-			<Text> </Text>
-			{!section ? (
+	const footer =
+		focus === 'detail'
+			? 'Esc Back   q Quit'
+			: focus === 'entries'
+				? '↑↓ Select   Enter Details   Esc Stores   q Quit'
+				: '↑↓ Select   Enter Explore   Esc Exit   q Quit';
+	const bodyHeight = Math.max(1, rows - (short ? 5 : 7));
+	const sidebarWidth = Math.min(32, Math.max(24, Math.floor(columns * 0.33)));
+	const storeList = (
+		<Box
+			flexDirection="column"
+			width={compact ? undefined : sidebarWidth}
+			borderStyle={compact ? undefined : 'single'}
+			borderTop={false}
+			borderBottom={false}
+			borderLeft={false}
+			borderRight={!compact}
+			paddingX={1}
+		>
+			<Text bold>Stores</Text>
+			{sectionNames.map((section, index) => {
+				const data = report.sections[section];
+				const selected = index === sectionIndex;
+				return (
+					<Text
+						key={section}
+						color={selected ? 'cyan' : undefined}
+						bold={selected && focus === 'stores'}
+						wrap="truncate-end"
+					>
+						{selected ? '❯' : ' '} {section} · {size(data.sizeBytes)}
+						{data.findings.length > 0 ? ` · !${data.findings.length}` : ''}
+					</Text>
+				);
+			})}
+		</Box>
+	);
+	const detail = (
+		<Box flexDirection="column" flexGrow={1} paddingX={1}>
+			<Text bold wrap="truncate-end">
+				{name[0].toUpperCase() + name.slice(1)} [{active.scope}] ·{' '}
+				{active.count} items · {active.findings.length} findings
+			</Text>
+			<Text wrap="truncate-end">Root: {active.root}</Text>
+			{!short && (
 				<>
-					<Text bold>Overview · select a section</Text>
-					{sectionNames.map((name, index) => {
-						const data = report.sections[name];
+					{active.limits?.map(limit => (
+						<Text key={limit.label} dimColor wrap="truncate-end">
+							{limit.label}: {limit.value}
+						</Text>
+					))}
+					<Text> </Text>
+				</>
+			)}
+			{focus === 'detail' && entries[selectedEntry] ? (
+				<EntryDetails entry={entries[selectedEntry]} />
+			) : (
+				<>
+					<Text bold>Entries</Text>
+					{entries.length === 0 && <Text dimColor>No {name} found.</Text>}
+					{visibleEntries.map((entry, index) => {
+						const selected = firstVisible + index === selectedEntry;
+						const label =
+							entry.kind === 'item'
+								? `ITEM ${entry.data.name} · ${entry.data.status} · ${size(entry.data.sizeBytes)}`
+								: `FINDING ${entry.data.severity}: ${entry.data.message}`;
 						return (
 							<Text
-								key={name}
-								color={index === sectionIndex ? 'cyan' : undefined}
+								key={`${entry.kind}-${firstVisible + index}`}
+								color={selected && focus === 'entries' ? 'cyan' : undefined}
 								wrap="truncate-end"
 							>
-								{index === sectionIndex ? '❯' : ' '} {name} [{data.scope}] ·{' '}
-								{data.count} items · {size(data.sizeBytes)} ·{' '}
-								{data.findings.length} findings
+								{selected && focus === 'entries' ? '❯' : ' '} {label}
 							</Text>
 						);
 					})}
-					<Text> </Text>
-					<Text wrap="truncate-end">
-						Root: {report.sections[sectionNames[sectionIndex]].root}
-					</Text>
-				</>
-			) : (
-				active && (
-					<>
-						<Text bold>
-							{section} [{active.scope}] · {active.count} items ·{' '}
-							{size(active.sizeBytes)}
+					{entries.length > visibleCount && (
+						<Text dimColor>
+							Showing {firstVisible + 1}-{firstVisible + visibleEntries.length}{' '}
+							of {entries.length}
 						</Text>
-						<Text wrap="truncate-end">Root: {active.root}</Text>
-						{active.limits?.map((limit, index) => (
-							<Text key={`${limit.label}-${index}`}>
-								Limit · {limit.label}: {limit.value}
-							</Text>
-						))}
-						<Text> </Text>
-						{selection ? (
-							selection.kind === 'item' ? (
-								(() => {
-									const item = active.items[selection.index];
-									return (
-										<>
-											<Text bold>Item · {item.name}</Text>
-											<Text wrap="truncate-end">Path: {item.path}</Text>
-											<Text>Status: {item.status}</Text>
-											<Text>
-												Size: {size(item.sizeBytes)} ({item.sizeBytes} bytes)
-											</Text>
-											{item.modifiedAt && (
-												<Text>Modified: {item.modifiedAt}</Text>
-											)}
-											{item.ageDays !== undefined && (
-												<Text>Age: {item.ageDays} days</Text>
-											)}
-											{item.detail && (
-												<Text wrap="truncate-end">Detail: {item.detail}</Text>
-											)}
-										</>
-									);
-								})()
-							) : (
-								(() => {
-									const finding = active.findings[selection.index];
-									return (
-										<>
-											<Text bold>Finding · {finding.code}</Text>
-											<Text>Severity: {finding.severity}</Text>
-											<Text wrap="truncate-end">{finding.message}</Text>
-											{finding.path && (
-												<Text wrap="truncate-end">Path: {finding.path}</Text>
-											)}
-										</>
-									);
-								})()
-							)
-						) : (
-							<>
-								<Text bold>
-									Entries · {active.items.length} items ·{' '}
-									{active.findings.length} findings
-								</Text>
-								{entryCount === 0 && <Text> None</Text>}
-								{visibleEntries.map((entry, index) => (
-									<Text
-										key={`${entry.kind}-${entry.key}-${entry.index}`}
-										wrap="truncate-end"
-										color={
-											entryIndex === firstVisible + index ? 'cyan' : undefined
-										}
-									>
-										{entryIndex === firstVisible + index ? '❯' : ' '}{' '}
-										{entry.label}
-									</Text>
-								))}
-								{entryCount > visibleCount && (
-									<Text dimColor>
-										Showing {firstVisible + 1}-
-										{firstVisible + visibleEntries.length} of {entryCount}
-									</Text>
-								)}
-							</>
-						)}
-					</>
-				)
+					)}
+				</>
 			)}
-			<Text> </Text>
-			<Text dimColor wrap="truncate-end">
-				{!section
-					? '↑/↓ select · Enter open · Esc exit'
-					: selection
-						? 'Esc back'
-						: '↑/↓ select · Enter open · Esc back'}{' '}
-				· q / Ctrl+C exit · read-only
-			</Text>
+		</Box>
+	);
+
+	if (tiny) {
+		return (
+			<Box width={columns} height={rows} flexDirection="column">
+				<Text wrap="truncate-end">
+					Storage view needs 40 columns and 14 rows.
+				</Text>
+				<Text wrap="truncate-end">Resize the terminal or press q to quit.</Text>
+			</Box>
+		);
+	}
+
+	return (
+		<Box
+			width={columns}
+			height={rows}
+			borderStyle="round"
+			flexDirection="column"
+		>
+			<Box justifyContent="space-between" paddingX={1}>
+				<Text bold wrap="truncate-end">
+					Nanocoder storage
+				</Text>
+				<Text color="cyan">READ-ONLY</Text>
+			</Box>
+			{!short && (
+				<Text wrap="truncate-end"> Project: {report.projectRoot}</Text>
+			)}
+			<Text dimColor>{'─'.repeat(Math.max(1, columns - 2))}</Text>
+			<Box
+				flexDirection={compact ? 'column' : 'row'}
+				height={bodyHeight}
+				flexGrow={1}
+			>
+				{(!short || focus === 'stores') && storeList}
+				{!short && compact && (
+					<Text dimColor>{'─'.repeat(Math.max(1, columns - 2))}</Text>
+				)}
+				{(!short || focus !== 'stores') && detail}
+			</Box>
+			<Text dimColor>{'─'.repeat(Math.max(1, columns - 2))}</Text>
+			<Text wrap="truncate-end"> {footer}</Text>
 		</Box>
 	);
 }

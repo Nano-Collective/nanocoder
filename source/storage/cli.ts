@@ -77,7 +77,7 @@ export async function runStorageCli(
 		]);
 		// The inspector owns its own screen, independent of the chat application.
 		// Always restore the previous terminal contents, even if Ink throws.
-		out('\x1B[?1049h');
+		out('\x1B[?1049h\x1B[2J\x1B[H');
 		const restoreScreen = () => out('\x1B[?1049l');
 		const signals = ['SIGTERM', 'SIGHUP'] as const;
 		const onSignal = (signal: 'SIGTERM' | 'SIGHUP') => {
