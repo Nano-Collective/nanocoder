@@ -30,12 +30,15 @@ Checkpointing lets you save a snapshot of your current session — conversation 
 
 Files are saved and restored byte for byte, so binaries — images, fonts, compiled artifacts — survive a round trip intact alongside text.
 
+Nanocoder's own runtime state under `.nanocoder/` (earlier checkpoints, the action timeline, daemon files) is never captured, so checkpoints don't snapshot each other. Your own content there, such as `.nanocoder/commands`, `agents`, `tools` and `skills`, is still captured.
+
 ## Incomplete Checkpoints
 
 A checkpoint can cover less than your whole workspace:
 
 - A file that could not be read when the checkpoint was taken — an editor or antivirus holding a lock, or permissions — was never captured
 - At most 50 modified files are captured; anything beyond that is left out
+- A changed file outside the workspace is skipped rather than captured
 - A file that was captured but whose stored copy has since gone missing cannot be restored
 
 Any of these are reported when you restore, naming the files that were not put back, so a partial restore never looks like a complete one.
@@ -61,7 +64,7 @@ When loading a checkpoint that would overwrite current work, Nanocoder prompts y
 
 ## Storage
 
-Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`.
+Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`. Even if you don't, checkpoints never capture the checkpoint store or the action timeline.
 
 Snapshots skip anything matched by `.gitignore`, but deliberately ignore [`.nanocoderignore`](../configuration/index.md#ignoring-files). Hiding a file from the model's listings shouldn't quietly exclude it from restore, so a file in `.nanocoderignore` is still snapshotted and still reverted.
 

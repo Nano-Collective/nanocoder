@@ -137,7 +137,7 @@ Built-in variables are always available:
 
 - `{{cwd}}` - Current working directory
 - `{{command}}` - The command name
-- `{{args}}` - All arguments as a single string
+- `{{args}}` - All arguments as a single string, exactly as typed (quotes and apostrophes preserved). Named positional parameters still receive shell-style parsed tokens
 
 ### Optional arguments
 

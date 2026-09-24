@@ -81,13 +81,13 @@ Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You
 |--------|----------|
 | Paste text | Your terminal's own paste (Cmd+V on macOS, usually Ctrl+Shift+V on Linux) |
 | Copy last response to clipboard | `/copy` |
-| Toggle selection mode (fullscreen only) | Ctrl+P |
+| Select text (fullscreen) | Shift+drag (Option+drag in iTerm2) |
 
 Nanocoder enables **bracketed paste**, so the terminal hands over a pasted block in one piece rather than as a stream of keystrokes. Multi-line pastes no longer submit the prompt at the first line break. Pastes that are multi-line, or longer than the paste threshold, collapse into a placeholder to keep the input readable (`[Paste #1: 7 lines]` for a multi-line paste, `[Paste #1: 1234 chars]` for a single long line); the full text is still sent with your message. Adjust the threshold under `/settings`.
 
 Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste shortcut for text.
 
-**Selection mode** applies to fullscreen mode only. Fullscreen turns on mouse reporting so the wheel can scroll the chat viewport, and that takes click-drag selection away from the terminal. Ctrl+P suspends mouse reporting so you can select and copy with the mouse as normal; press it again to resume scrolling. Inline mode (the default) never enables mouse reporting, so selection works there without doing anything and Ctrl+P does nothing.
+**Selecting text in fullscreen.** Fullscreen mode (the default) turns on mouse reporting so the wheel can scroll the chat viewport, which takes plain click-drag selection away from the terminal. Hold Shift while dragging (Option in iTerm2) to select and copy as normal. To get plain selection back, disable mouse reporting with `--no-mouse`, `"mouseReporting": false` in your [preferences](../configuration/preferences.md), or the **Mouse Wheel Reporting** toggle in `/settings`; the wheel then no longer scrolls chat history. Inline mode (`--no-alt-screen`) never enables mouse reporting, so selection works there without doing anything.
 
 ## History & Navigation
 
@@ -95,6 +95,10 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
+| Scroll transcript half a page up / down (fullscreen) | PgUp / PgDn |
+| Scroll transcript 3 rows per tick (fullscreen) | Mouse wheel |
+
+Long prompts (more than 40 words or 300 characters) are shown collapsed in the transcript, ending in `...` with a `Full prompt: ↑ history` hint. The full text is still sent to the model; press Up to recall it into the input.
 
 ## During AI Response
 
@@ -109,4 +113,7 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
 | Toggle expanded reasoning traces | Ctrl+R |
-| Toggle selection mode (fullscreen only) | Ctrl+P |
+| Collapse / expand the live task list | Ctrl+T |
+| Attach to a running subagent, or cycle to the next one | Ctrl+S |
+
+Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation.

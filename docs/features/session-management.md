@@ -98,7 +98,7 @@ Customize session behaviour in your `nanocoder-preferences.json` (not `agents.co
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `autoSave` | `true` | Enable/disable automatic saving |
+| `autoSave` | `true` | Enable/disable automatic saving. The status line below the prompt briefly shows `saving` while a save is written |
 | `saveInterval` | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | `100` | Maximum sessions to keep (minimum 1) |
 | `maxMessages` | `1000` | Maximum messages sent to the model (context window capping) — on-disk history is NOT truncated (minimum 1) |
