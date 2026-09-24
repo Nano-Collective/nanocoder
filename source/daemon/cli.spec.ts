@@ -300,7 +300,6 @@ test.serial(
 	},
 );
 
-<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // Candidate-layout resolution tests
 //
@@ -355,7 +354,7 @@ test('resolveDaemonEntryPath: returns null when the entry is missing', async t =
 		await rm(base, {recursive: true, force: true});
 	}
 });
-=======
+
 // ============================================================================
 // status: no lockfile / stale lockfile / live lockfile. The three states the
 // CLI can encounter at runtime, each with a distinct output line.
@@ -476,4 +475,3 @@ test.serial(
 		}
 	},
 );
->>>>>>> upstream/main
