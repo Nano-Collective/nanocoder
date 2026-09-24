@@ -145,3 +145,38 @@ test('NanocoderAcpClient - reconnecting clears permissions left by the dead proc
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions());
 });
+
+test('NanocoderAcpClient - concurrent getOrCreateSession calls share a single newSession', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	let newSessionCalls = 0;
+	let releaseNewSession!: (value: {sessionId: string; modes?: any; configOptions?: any; _meta?: any}) => void;
+	client.setConnection({
+		newSession: () => {
+			newSessionCalls++;
+			return new Promise<any>(resolve => {
+				releaseNewSession = resolve;
+			});
+		},
+	} as any);
+
+	const a = client.getOrCreateSession('/cwd');
+	const b = client.getOrCreateSession('/cwd');
+	const c = client.getOrCreateSession('/cwd');
+
+	t.is(
+		newSessionCalls,
+		1,
+		'overlapping getOrCreateSession() callers must coalesce into a single newSession() call against the shared connection',
+	);
+
+	releaseNewSession({sessionId: 'session-1'});
+	const [sa, sb, sc] = await Promise.all([a, b, c]);
+
+	t.is(sa, 'session-1', 'first caller resolves with the session id');
+	t.is(sb, 'session-1', 'second caller resolves with the same session id');
+	t.is(sc, 'session-1', 'third caller resolves with the same session id');
+	t.is((client as any)._pendingSession, null, 'pending session is cleared after resolution so the next call is a fresh attempt');
+});

@@ -20,6 +20,8 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
+	private _pendingSession: Promise<string | undefined> | null = null;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
@@ -188,23 +190,39 @@ export class NanocoderAcpClient {
 			return this._sessionId;
 		}
 		if (!this.connection) return undefined;
+		// Coalesce overlapping callers. Without this, a click on "Send" racing
+		// the auto-init from `onConnectionReady` would each call newSession()
+		// against the shared connection; the second writer overwrites the
+		// first `_sessionId` and the first session is orphaned with its mode
+		// and configOptions already read into local state.
+		if (this._pendingSession) {
+			return this._pendingSession;
+		}
+		this._pendingSession = this._createSession(cwd);
+		try {
+			return await this._pendingSession;
+		} finally {
+			this._pendingSession = null;
+		}
+	}
 
+	private async _createSession(cwd: string): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
 			const initialModel = config.get<string>('model');
 
-			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
-			
+
 			// Parse modes and configOptions
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
 			}
-			
+
 			if (result.configOptions) {
 				this._parseConfigOptions(result.configOptions);
 			}
