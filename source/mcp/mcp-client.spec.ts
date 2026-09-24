@@ -1361,6 +1361,28 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.is(client.getServerInfo('seam-server')?.connected, true);
 });
 
+test('MCPClient.connectToServer: passes the configured timeout to connect and tools/list', async t => {
+	const seen: unknown[] = [];
+	const timedClient = {
+		async connect(_transport: unknown, options: unknown) {
+			seen.push(options);
+		},
+		async listTools(_params: unknown, options: unknown) {
+			seen.push(options);
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(timedClient);
+	await client.connectToServer({...httpServer, timeout: 1234});
+
+	t.deepEqual(seen, [{timeout: 1234}, {timeout: 1234}]);
+});
+
 // ============================================================================
 // Regression: annotations.readOnlyHint must be read by production code
 // ----------------------------------------------------------------------------

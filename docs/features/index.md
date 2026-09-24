@@ -88,12 +88,13 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
-| **Normal** (default) | Confirm each tool before it runs | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Most tools execute immediately; bash and destructive git still prompt | Trusted tasks, faster iteration |
-| **Yolo** | Every tool executes immediately — no exceptions | Zero interruptions, full trust |
-| **Plan** | Tools are shown but never executed | Exploring what the AI would do |
+| **Normal** (default) | Confirm each tool that can change something; read-only tools run directly | Unfamiliar codebases, sensitive operations |
+| **Auto-Accept** | Most tools execute immediately; bash, `git_commit`, `git_pr` create, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
+| **Yolo** | Every tool executes immediately with no prompt | Zero interruptions, full trust |
+| **Plan** | Read-only tools run; every mutation tool is removed, and the AI writes a plan for you to approve | Exploring and planning before any change |
+| **Architect** | File edits run without a prompt, then you keep or revert the whole turn | Multi-file changes you want to judge as a whole |
 
-Toggle between modes with **Shift+Tab**. The current mode is shown in the status bar.
+Toggle between modes with **Shift+Tab** (normal → auto-accept → yolo → plan → architect). The current mode is shown in the status bar.
 
 `fetch_url` refuses loopback, private-network, `*.localhost`, and cloud metadata addresses in every mode, including redirect hops, so a no-approval fetch can't reach internal services.
 
@@ -267,7 +268,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
-| [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
+| [Checkpointing](checkpointing.md) | Saving snapshots and restoring files |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
 | [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
@@ -278,3 +279,5 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
+| [Shell Completions](shell-completions.md) | Tab completion for the `nanocoder` CLI in bash, zsh and fish |
+| [Tool Output Conventions](tool-output-conventions.md) | What the file tools return to the model after reads and edits |

@@ -64,7 +64,7 @@ Sessions are stored in the platform-specific app data directory:
 | Linux | `~/.local/share/nanocoder/sessions/` |
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
-This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used instead, on every platform. This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
 
 ### Session Artifacts
 

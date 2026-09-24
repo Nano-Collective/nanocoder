@@ -338,8 +338,8 @@ async function handleSpecialCommand(
 			return true;
 
 		case SPECIAL_COMMANDS.RENAME: {
-			const newName = commandArgs?.join(' ') || '';
-			if (!newName.trim()) {
+			const newName = (commandArgs?.join(' ') || '').trim();
+			if (!newName) {
 				onAddToChatQueue(
 					errorMsg('Usage: /rename <session name>', 'rename-error'),
 				);
@@ -351,12 +351,9 @@ async function handleSpecialCommand(
 					),
 				);
 			} else {
-				onRenameSession(newName.trim());
+				onRenameSession(newName);
 				onAddToChatQueue(
-					successMsg(
-						`Session renamed to "${newName.trim()}".`,
-						'rename-success',
-					),
+					successMsg(`Session renamed to "${newName}".`, 'rename-success'),
 				);
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -555,7 +552,7 @@ function handleCodexLogin(
 		onCommandComplete,
 	} = options;
 
-	const providerName = commandParts[1]?.trim() || 'ChatGPT / Codex';
+	const providerName = commandParts[1]?.trim() || 'ChatGPT';
 
 	setIsToolExecuting(true);
 

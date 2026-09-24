@@ -952,9 +952,10 @@ export const processAssistantResponse = async (
 						// Prefer the live ref so a mode switch made while this turn's
 						// tools are still executing takes effect on the next call.
 						mode: developmentModeRef?.current ?? developmentMode,
-						alwaysAllow: nonInteractiveMode
-							? nonInteractiveAlwaysAllow
-							: undefined,
+						// The top-level alwaysAllow list applies in interactive
+						// sessions too; plan mode stays safe because its excluded
+						// tools are never offered in the first place.
+						alwaysAllow: getAppConfig().alwaysAllow ?? [],
 					},
 				));
 

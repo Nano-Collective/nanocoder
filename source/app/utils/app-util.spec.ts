@@ -878,6 +878,19 @@ test('rename command - valid name calls onRenameSession with trimmed value', asy
 	t.is(capturedName, 'my-session');
 });
 
+test('rename command - surrounding spaces do not count toward the length limit', async t => {
+	let capturedName: string | undefined;
+	const name = 'a'.repeat(100);
+	const options = createRenameTestOptions({
+		onRenameSession: value => {
+			capturedName = value;
+		},
+		commandArgs: ['', '', name, '', ''],
+	});
+	await handleMessageSubmission(`/rename   ${name}  `, options);
+	t.is(capturedName, name);
+});
+
 test('rename command - multi-word name is joined with spaces', async t => {
 	let capturedName: string | undefined;
 	const options = createRenameTestOptions({

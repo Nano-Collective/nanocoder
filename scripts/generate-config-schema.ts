@@ -12,8 +12,9 @@
  *   - `--required` is NOT used, so loader-defaulted sub-objects
  *     (autoCompact, tune, headless) stay all-optional. Genuinely required
  *     fields are added by hand (ProviderConfig.name/models,
- *     MCPServerConfig.name/transport, OpenRouterPlugin.id, and lspServers
- *     item name/command/languages).
+ *     OpenRouterPlugin.id, and lspServers item name/command/languages).
+ *     MCP servers are not part of agents.config.json: they live in .mcp.json
+ *     (or NANOCODER_MCPSERVERS), so MCPServerConfig is not in this schema.
  *   - `--noExtraProps` is NOT used: it corrupts `Record<string, X>` into
  *     `{type:object, additionalProperties:false}` which rejects every key.
  *     Instead `additionalProperties: false` is applied eagerly to every
@@ -226,7 +227,6 @@ function main(): void {
 	applyStrictness(definitions);
 	applyStrictness(raw.properties);
 	setRequired(definitions, 'ProviderConfig', ['name', 'models']);
-	setRequired(definitions, 'MCPServerConfig', ['name', 'transport']);
 	setRequired(definitions, 'OpenRouterPlugin', ['id']);
 	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 	setRequired(definitions, 'HookDefinition', ['command']);

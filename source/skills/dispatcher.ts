@@ -9,16 +9,22 @@
  *     a trigger fired and what its payload looks like;
  *   - hand the task to a `SubagentExecutorLike` to run.
  *
- * Command and tool targets are stubbed - plan open question 4 still owes
- * a concrete re-injection design for command targets, and tool targets
- * are explicitly out of scope per plan step 8.
+ * Command targets run the same way: the command's rendered prompt becomes
+ * the task prompt for a generic runner subagent (`COMMAND_RUNNER_AGENT`),
+ * which the daemon registers at boot. Tool targets are rejected at
+ * registration (see the registrar), so they never reach dispatch.
  *
  * See `agents/2026-05-20-skills-unification-plan.md` step 14.
  */
 
 import type {SubscriptionDispatcher} from '@/events/event-router';
 import type {Event, Subscription, TriggerContext} from '@/events/types';
-import type {SubagentResult, SubagentTask} from '@/subagents/types';
+import {
+	type SubagentConfigWithSource,
+	SubagentLoadPriority,
+	type SubagentResult,
+	type SubagentTask,
+} from '@/subagents/types';
 import type {DevelopmentMode} from '@/types/core';
 
 export interface SubagentExecutorLike {
@@ -57,6 +63,22 @@ export interface TriggeredRunActivity {
 
 export type ActivityListener = (activity: TriggeredRunActivity) => void;
 
+/**
+ * Renders a command target's prompt. Returns `undefined` when the command
+ * no longer exists. Production wiring renders through
+ * `CustomCommandExecutor` with no arguments, so parameter defaults apply.
+ */
+export type CommandPromptResolver = (
+	name: string,
+	subscription: Subscription,
+) => string | undefined;
+
+/**
+ * Name of the generic subagent that runs command targets. The daemon
+ * registers it at boot (see `buildCommandRunnerConfig`).
+ */
+export const COMMAND_RUNNER_AGENT = 'nanocoder-triggered-command';
+
 export interface SkillDispatcherOptions {
 	/**
 	 * Build a subagent executor for a given mode. The dispatcher calls this
@@ -83,6 +105,11 @@ export interface SkillDispatcherOptions {
 	 * `triggeredRunComplete` OS notification.
 	 */
 	onActivity?: ActivityListener;
+	/**
+	 * Resolve a command target to its rendered prompt. Without it, command
+	 * targets are reported through `onUnsupportedTarget`.
+	 */
+	resolveCommandPrompt?: CommandPromptResolver;
 }
 
 export class SkillDispatcher implements SubscriptionDispatcher {
@@ -91,7 +118,11 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 	async dispatch(subscription: Subscription, event: Event): Promise<void> {
 		const target = subscription.target;
 		if (target.kind === 'agent') {
-			await this.dispatchAgent(subscription, event);
+			await this.run(
+				subscription,
+				event,
+				buildTriggeredTask(subscription, event),
+			);
 			return;
 		}
 		if (target.kind === 'skill') {
@@ -102,26 +133,40 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 			return;
 		}
 		if (target.kind === 'command') {
-			this.options.onUnsupportedTarget?.(
+			const rendered = this.options.resolveCommandPrompt?.(
+				target.name,
 				subscription,
-				'command targets are not yet supported - see open question 4',
+			);
+			if (rendered === undefined) {
+				this.options.onUnsupportedTarget?.(
+					subscription,
+					this.options.resolveCommandPrompt
+						? `command "${target.name}" was not found`
+						: 'no command resolver is wired for command targets',
+				);
+				return;
+			}
+			await this.run(
+				subscription,
+				event,
+				buildTriggeredCommandTask(subscription, event, rendered),
 			);
 			return;
 		}
 		if (target.kind === 'tool') {
 			this.options.onUnsupportedTarget?.(
 				subscription,
-				'tool targets are deferred until a real use case lands',
+				'tool targets are rejected at registration and should never reach dispatch',
 			);
 			return;
 		}
 	}
 
-	private async dispatchAgent(
+	private async run(
 		subscription: Subscription,
 		event: Event,
+		task: SubagentTask,
 	): Promise<void> {
-		const task = buildTriggeredTask(subscription, event);
 		const mode = modeForSubscription(subscription);
 
 		let checkpointId: string | undefined;
@@ -169,6 +214,12 @@ export function modeForSubscription(
 	return subscription.confirm ? 'plan' : 'headless';
 }
 
+function triggerContextFor(event: Event): TriggerContext {
+	return event.kind === 'file.changed'
+		? {type: 'event', kind: 'file.changed', payload: event.payload}
+		: {type: 'event', kind: 'schedule.cron', payload: event.payload};
+}
+
 /**
  * Build the `SubagentTask` for a triggered subagent run. Exported so the
  * registrar's spec - and later the daemon - can inspect the exact shape
@@ -178,10 +229,7 @@ export function buildTriggeredTask(
 	subscription: Subscription,
 	event: Event,
 ): SubagentTask {
-	const trigger: TriggerContext =
-		event.kind === 'file.changed'
-			? {type: 'event', kind: 'file.changed', payload: event.payload}
-			: {type: 'event', kind: 'schedule.cron', payload: event.payload};
+	const trigger = triggerContextFor(event);
 
 	const payloadJson = JSON.stringify(event.payload);
 	const prompt = `An event of kind \`${event.kind}\` fired. Payload: \`${payloadJson}\`. Proceed according to your instructions.`;
@@ -191,5 +239,42 @@ export function buildTriggeredTask(
 		description: `Triggered by ${event.kind} (subscription ${subscription.id})`,
 		prompt,
 		context: {trigger},
+	};
+}
+
+/**
+ * Build the `SubagentTask` for a triggered command run. The command's
+ * rendered prompt is the instruction; the trigger payload is appended so
+ * the runner knows why it fired.
+ */
+function buildTriggeredCommandTask(
+	subscription: Subscription,
+	event: Event,
+	renderedPrompt: string,
+): SubagentTask {
+	const payloadJson = JSON.stringify(event.payload);
+	const prompt = `${renderedPrompt}\n\n[Triggered by an event of kind \`${event.kind}\`. Payload: \`${payloadJson}\`]`;
+
+	return {
+		subagent_type: COMMAND_RUNNER_AGENT,
+		description: `Triggered /${subscription.target.name} by ${event.kind} (subscription ${subscription.id})`,
+		prompt,
+		context: {trigger: triggerContextFor(event)},
+	};
+}
+
+/**
+ * The generic runner subagent command targets execute under. It has no
+ * tool allowlist, so it sees whatever the run's mode permits.
+ */
+export function buildCommandRunnerConfig(): SubagentConfigWithSource {
+	return {
+		name: COMMAND_RUNNER_AGENT,
+		description:
+			'Runs a custom command unattended when one of its event subscriptions fires.',
+		model: 'inherit',
+		systemPrompt:
+			'You are running a custom command unattended because an event subscription fired. No user is watching: do not ask questions. Carry out the command instructions using your tools, then reply with a short summary of what you did.',
+		source: {priority: SubagentLoadPriority.BuiltIn, isBuiltIn: true},
 	};
 }

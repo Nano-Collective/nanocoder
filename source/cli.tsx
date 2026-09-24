@@ -205,7 +205,8 @@ Options:
   -h, --help          Show help
   --vscode            Run in VS Code mode
   --vscode-port       Specify VS Code port
-  --provider          Specify AI provider (must be configured in agents.config.json)
+  --provider          Specify AI provider (must be configured in agents.config.json).
+                      Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
   --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
@@ -229,7 +230,7 @@ Options:
   --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
                       works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
-                      Only valid with the "run" command.
+                      Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout.
@@ -303,13 +304,16 @@ async function main(): Promise<void> {
 				? args[providerArgIndex].slice('--provider='.length)
 				: args[providerArgIndex + 1];
 	if (providerValue) {
-		// Allow alphanumeric, hyphen, underscore only to prevent injection
+		// Provider names are free-form in agents.config.json and the wizard's
+		// defaults include spaces, dots, slashes and parentheses ("GitHub
+		// Copilot", "llama.cpp server", "ChatGPT / Codex"). Allow those, but
+		// still refuse control characters and shell-ish punctuation.
 		const value = providerValue;
-		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
-			cliProvider = value;
+		if (/^[a-zA-Z0-9 _./():+@-]+$/.test(value) && value.trim() !== '') {
+			cliProvider = value.trim();
 		} else {
 			console.error(
-				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, hyphens, and underscores.`,
+				`Invalid --provider value: "${value}". Provider name may contain letters, digits, spaces and _ . / ( ) : + @ - only. Quote names with spaces, e.g. --provider "GitHub Copilot".`,
 			);
 			process.exit(1);
 		}
@@ -327,13 +331,14 @@ async function main(): Promise<void> {
 				? args[modelArgIndex].slice('--model='.length)
 				: args[modelArgIndex + 1];
 	if (modelValue) {
-		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
+		// Allow alphanumeric, hyphen, underscore, dot, slash, colon, @ and + for
+		// model ids like "claude-3.5-sonnet", "qwen2.5:7b" or "model@2024+beta"
 		const value = modelValue;
-		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
+		if (/^[a-zA-Z0-9_/.:@+-]+$/.test(value)) {
 			cliModel = value;
 		} else {
 			console.error(
-				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters, hyphens, underscores, dots, and slashes.`,
+				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters and - _ . / : @ +`,
 			);
 			process.exit(1);
 		}
@@ -373,8 +378,14 @@ async function main(): Promise<void> {
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		let rawValue: string | undefined;
-		if (arg === '--mode' && args[i + 1]) {
+		if (arg === '--mode') {
 			rawValue = args[i + 1];
+			if (!rawValue || rawValue.startsWith('-')) {
+				console.error(
+					`--mode requires a value. Must be one of: ${VALID_MODES.join(', ')}`,
+				);
+				process.exit(1);
+			}
 		} else if (arg.startsWith('--mode=')) {
 			rawValue = arg.slice('--mode='.length);
 		}
@@ -493,6 +504,16 @@ async function main(): Promise<void> {
 		nonInteractiveMode = true;
 	}
 
+	// `run` with nothing to run is a usage error on every runtime. Without this
+	// the Ink branch was taken (the plain branch needs a prompt), which under
+	// --plain or a non-TTY crashed on raw-mode stdin instead of explaining.
+	if (isRunCommand && !nonInteractivePrompt?.trim()) {
+		console.error(
+			'`nanocoder run` needs a prompt. Try: nanocoder run "your task" or nanocoder run --prompt-file <path>',
+		);
+		process.exit(1);
+	}
+
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
 	const continueRequested = args.includes('--continue') || args.includes('-c');
@@ -587,7 +608,16 @@ async function main(): Promise<void> {
 		!noPlainRequested &&
 		!vscodeMode &&
 		(!process.stdout.isTTY || ciDetected);
-	const plainMode = plainRequested || plainAuto;
+	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
+	// honouring the flag means taking the plain path even in a real terminal.
+	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
+		console.error(
+			'Error: --json needs the plain shell and cannot be combined with --no-plain.',
+		);
+		process.exit(1);
+	}
+	const plainForJson = outputFormat === 'json' && isRunCommand;
+	const plainMode = plainRequested || plainAuto || plainForJson;
 
 	// Hard-error when `review` lands in a non-interactive context (piped
 	// stdout, CI). The plain shell has no slash-command dispatch, so

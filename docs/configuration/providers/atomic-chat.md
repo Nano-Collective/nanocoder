@@ -50,4 +50,4 @@ Load your model with a context length as high as your system's memory can handle
 
 ## Fetching Available Models
 
-The `/settings providers` wizard can automatically fetch your loaded models from Atomic Chat when configuring this provider.
+There is no dedicated Atomic Chat entry in the `/settings providers` wizard. Choose **Custom Provider** and enter `http://127.0.0.1:1337/v1` as the base URL; the wizard can then fetch your loaded models from Atomic Chat automatically.

@@ -1,8 +1,5 @@
 import {readFileSync} from 'fs';
-import {
-	parseSubscribeBlock,
-	SubscribeParseError,
-} from '@/skills/parse-subscribe';
+import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
@@ -258,15 +255,7 @@ function extractSubscribe(
 ): SkillTrigger[] | undefined {
 	const raw = parseYamlObject(frontmatter);
 	if (!raw || raw.subscribe === undefined) return undefined;
-	try {
-		return parseSubscribeBlock(raw.subscribe);
-	} catch (err) {
-		if (err instanceof SubscribeParseError) {
-			logError(`Invalid subscribe block in ${filePath}: ${err.message}`);
-			return undefined;
-		}
-		throw err;
-	}
+	return parseSubscribeBlockOrWarn(raw.subscribe, filePath);
 }
 
 /**

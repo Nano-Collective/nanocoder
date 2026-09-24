@@ -20,7 +20,7 @@ To enable autocompletion and inline validation, add the `$schema` key at the top
 }
 ```
 
-The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema.
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
 
 You can also wire it up without the `$schema` key:
 
@@ -30,7 +30,7 @@ You can also wire it up without the `$schema` key:
 
 ## Configuration File Locations
 
-Nanocoder looks for configuration in the following order (first found wins):
+Nanocoder reads `agents.config.json` from two layers:
 
 1. **Project-level** (highest priority): `agents.config.json` in your current working directory
    - Use this for project-specific providers, models, or API keys
@@ -42,7 +42,16 @@ Nanocoder looks for configuration in the following order (first found wins):
    - **Windows**: `%APPDATA%\nanocoder\agents.config.json`
    - Your global default configuration
 
-> **Note:** When `NANOCODER_CONFIG_DIR` is set, it takes full precedence — the project-level and home directory checks are skipped, and Nanocoder looks for `agents.config.json` only in the specified directory.
+How the layers combine depends on the setting:
+
+- **Providers** are merged by name. Providers from the global file, the project file and the `NANOCODER_PROVIDERS` environment variable are all loaded; when two layers define a provider with the same name (case-insensitive), the higher-priority layer's entry replaces it (environment variable, then project, then global).
+- **Every `nanocoder.*` block** (`autoCompact`, `hooks`, `retries`, `modeProviders` and so on) is resolved block by block: the project file's block wins as a whole if it exists, otherwise the global file's block is used. See the note under [Inspecting the Effective Configuration](#inspecting-the-effective-configuration).
+  A top-level `providers` array outside the `nanocoder` key is still accepted as a legacy form. It is used only when the file has no `nanocoder.providers` array.
+- **MCP servers** are not read from `agents.config.json` at all. They come from `.mcp.json` files and `NANOCODER_MCPSERVERS`; see [MCP Configuration](mcp-configuration.md).
+
+> **Note:** `NANOCODER_CONFIG_DIR` replaces the platform-specific user-level directory above. It does not turn off the project layer for `agents.config.json` or `.mcp.json`: a project file in the working directory still applies. It does skip the project-level `nanocoder-preferences.json` for top-level preferences (see [Preferences](preferences.md) for the exceptions).
+
+If no user-level `agents.config.json` or `nanocoder-preferences.json` exists yet, Nanocoder creates an empty (`{}`) one in the user-level directory the first time it resolves that file.
 
 > **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
 
@@ -93,22 +102,25 @@ Keep API keys out of version control using environment variables. Variables are 
 
 | Variable | Description |
 |----------|-------------|
-| `NANOCODER_CONFIG_DIR` | Override the global configuration directory (skips all other config lookups) |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider context config applies and the model is not resolved from models.dev. Enables auto-compact and `/usage` to work correctly. Can also be set via the `--context-max` CLI flag (which takes priority) |
+| `NANOCODER_CONFIG_DIR` | Override the user-level configuration directory. Project-level `agents.config.json` and `.mcp.json` still apply; the project-level `nanocoder-preferences.json` is skipped for top-level preferences |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
+| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory for a `--plain` run or `nanocoder daemon start`, and save it to `trustedDirectories` for later runs. See [Getting Started](../getting-started/index.md) |
+| `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
+| `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
 
 ### Provider & MCP Overrides
 
-Override provider and MCP server configurations via environment variables. These take highest precedence over project-level and global config files.
+Add or override provider and MCP server configurations via environment variables. Entries are merged by name with the config files: an entry here replaces the file entry with the same name, and every other file entry stays in place.
 
 | Variable | Description |
 |----------|-------------|
-| `NANOCODER_PROVIDERS` | JSON string of provider configurations (overrides all config files) |
+| `NANOCODER_PROVIDERS` | JSON string of provider configurations (replaces same-named providers from config files) |
 | `NANOCODER_PROVIDERS_FILE` | Path to a JSON file containing provider configurations (used if `NANOCODER_PROVIDERS` is not set) |
-| `NANOCODER_MCPSERVERS` | JSON string of MCP server configurations (overrides all config files) |
+| `NANOCODER_MCPSERVERS` | JSON string of MCP server configurations (replaces same-named servers from `.mcp.json` files) |
 | `NANOCODER_MCPSERVERS_FILE` | Path to a JSON file containing MCP server configurations (used if `NANOCODER_MCPSERVERS` is not set) |
 
 See [Providers](providers/index.md) and [MCP Configuration](mcp-configuration.md) for format details and examples.
@@ -119,13 +131,9 @@ These are covered in detail on the [Logging](logging.md) page.
 
 | Variable | Description |
 |----------|-------------|
-| `NANOCODER_LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
-| `NANOCODER_LOG_TO_FILE` | Enable file logging (`true`/`false`) |
-| `NANOCODER_LOG_DISABLE_FILE` | Disable file logging (`true` to disable) |
+| `NANOCODER_LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` |
+| `NANOCODER_LOG_DISABLE_FILE` | Disable file logging (`true` to disable; overrides `NANOCODER_LOG_LEVEL`) |
 | `NANOCODER_LOG_DIR` | Override log directory |
-| `NANOCODER_LOG_TRANSPORTS` | Configure logging transports (comma-separated) |
-| `NANOCODER_CORRELATION_ENABLED` | Enable/disable correlation tracking (default: `true`) |
-| `NANOCODER_CORRELATION_DEBUG` | Enable debug logging for correlation tracking |
 
 ### Environment Variable Substitution
 
@@ -134,6 +142,8 @@ You can reference environment variables in your configuration files using substi
 **Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}`
 
 Substitution is applied recursively to all string fields in provider and MCP server configurations — any string value can reference environment variables, not just specific fields.
+
+Variable names must be uppercase (letters, digits and underscores, not starting with a digit). A lowercase reference such as `$myVar` or `${api_key}` is not substituted and is left in the value as literal text.
 
 See `.env.example` for setup instructions.
 
@@ -211,6 +221,9 @@ This setting is stored in `nanocoder-preferences.json` (see [Preferences](prefer
 | `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat and by [subagents](../features/subagents.md) (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
+| `smartTitles` | boolean | `true` | Generate a short title once per session (ACP clients only). See [Session Management](../features/session-management.md) |
+| `titleModel` | string | (session model) | Model used for title generation |
+| `titleProvider` | string | (session provider) | Provider used for title generation |
 
 ### Headless
 
@@ -326,12 +339,34 @@ Set the initial development mode for all new interactive sessions. Without this 
 
 | Value | Description |
 |-------|-------------|
-| `"normal"` | Standard mode — all tool calls require approval |
-| `"auto-accept"` | Semi-automatic — read-only and safe tools auto-run; writes and bash prompts |
+| `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
+| `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |
 
 The `--mode` CLI flag always takes precedence over this config value. Non-interactive runs (`nanocoder run ...`) always default to `auto-accept` regardless of this setting.
+
+### Mode Providers
+
+Use a different provider and model per development mode, for example a fast, cheap model for plan mode. When you switch into a mode listed here (or start in one), Nanocoder switches to its provider and model; switching into a mode that is not listed restores your normal provider and model.
+
+```json
+{
+  "nanocoder": {
+    "modeProviders": {
+      "plan": {"provider": "OpenRouter", "model": "google/gemini-2.5-flash"},
+      "yolo": {"provider": "Ollama", "model": "qwen3-coder:30b"}
+    }
+  }
+}
+```
+
+Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; if that provider has a non-empty `models` list, the model must be in it. Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
+
+### Model Tuning
+
+The `nanocoder.tune` block sets default tool profile, tool-calling mode and model parameters for every session. It is the same configuration `/tune` edits at runtime. See [Tune](../features/tune.md) for the fields and how this block layers with `/tune` preferences.
 
 ### Tool Auto-Approval
 
@@ -386,9 +421,9 @@ Run your own shell commands at fixed points in the agent loop — before/after a
 }
 ```
 
-Each entry takes `command` (required), plus optional `matchTools` (tool names the hook applies to; omitted means all), `timeout` (ms, default 30000, except `session-end` which defaults to 2000 to fit inside the shutdown budget), and `name` (label used in messages and `/doctor`). Context arrives as `NANOCODER_*` environment variables — `$VAR` references inside `command` are deliberately left unexpanded at load time so the shell sees them.
+Each entry takes `command` (required), plus optional `matchTools` (tool names the hook applies to; omitted means all), `matchPaths` (file globs the hook applies to; see [Scoping by file](../features/hooks.md#scoping-by-file)), `timeout` (ms, default 30000, except `session-end` which defaults to 2000 to fit inside the shutdown budget), and `name` (label used in messages and `/doctor`). Context arrives as `NANOCODER_*` environment variables - `$VAR` references inside `command` are deliberately left unexpanded at load time so the shell sees them.
 
-Hooks are project-local shell commands, so they carry the same code-execution weight as `mcpServers` in the same file and are gated by the same directory-trust prompt. See [Lifecycle Hooks](../features/hooks.md) for the full event list, environment contract, and blocking semantics.
+Hooks are project-local shell commands, so they carry the same code-execution weight as project MCP servers in `.mcp.json` and are gated by the same directory-trust prompt. See [Lifecycle Hooks](../features/hooks.md) for the full event list, environment contract, and blocking semantics.
 
 ### Custom System Prompt
 

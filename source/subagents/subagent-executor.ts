@@ -352,7 +352,14 @@ export class SubagentExecutor {
 		let available = allTools;
 
 		if (config.tools && config.tools.length > 0) {
-			available = available.filter(tool => config.tools?.includes(tool));
+			// A bundle subagent always keeps its sibling tools: they are
+			// scoped to it, and listing them in `tools:` is not required.
+			available = available.filter(
+				tool =>
+					config.tools?.includes(tool) ||
+					(config.ownerSkill !== undefined &&
+						this.toolManager.getOwnerSkill(tool) === config.ownerSkill),
+			);
 		}
 
 		if (config.disallowedTools && config.disallowedTools.length > 0) {
@@ -371,12 +378,15 @@ export class SubagentExecutor {
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
 
-		// Headless runs (daemon-triggered) have nobody to answer a question.
-		// Offering ask_user there only produced a "Question handler not
-		// initialized" error after the model had already spent a turn on it.
-		if (this.currentMode() === 'headless') {
-			available = available.filter(name => name !== 'ask_user');
-		}
+		// Apply the parent's development mode, exactly as the main
+		// conversation does. Without this a subagent spawned in plan mode
+		// could propose write_file or execute_bash, and a headless
+		// (daemon-triggered) run would be offered ask_user and tools that
+		// need an approval nobody is there to give.
+		available = this.toolManager.filterToolNamesForMode(
+			available,
+			this.currentMode(),
+		);
 
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development
@@ -785,6 +795,7 @@ export class SubagentExecutor {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
+			alwaysAllow: getAppConfig().alwaysAllow ?? [],
 		});
 	}
 

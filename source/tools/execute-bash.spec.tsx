@@ -417,3 +417,24 @@ test('bashRunFailed: distinguishes a clean run from a failure', t => {
 	// something to surface as a failed command.
 	t.false(bashRunFailed({...base, exitCode: null, error: null}));
 });
+
+// The fork-bomb pattern used to be an unescaped regex: `|` acted as
+// alternation and `()` as an empty group, so the real bomb slipped through
+// while harmless strings like `echo a:{:b` were blocked.
+for (const command of [
+	':(){ :|:& };:',
+	':(){:|:&};:',
+	'bomb(){ bomb|bomb& };bomb',
+]) {
+	test(`execute_bash validator blocks fork bomb ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
+for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
+	test(`execute_bash validator allows ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}

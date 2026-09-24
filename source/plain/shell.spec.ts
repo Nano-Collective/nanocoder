@@ -20,7 +20,9 @@ import type { RunPlainShellDeps } from "./shell.js";
 // Suppress ANSI so any incidental stderr writes stay readable if inspected.
 process.env.NO_COLOR = "1";
 
-const FAKE_CLIENT = {} as LLMClient;
+const FAKE_CLIENT = {
+	getProviderConfig: () => ({name: "test", type: "openai", models: [], config: {}}),
+} as unknown as LLMClient;
 const FAKE_TOOL_MANAGER = {
 	getAvailableToolNames: () => [],
 	getFilteredTools: () => ({}),

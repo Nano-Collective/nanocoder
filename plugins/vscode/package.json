@@ -178,11 +178,6 @@
 					"default": false,
 					"description": "Automatically connect to Nanocoder CLI on startup (legacy WebSocket companion)"
 				},
-				"nanocoder.autoStartCli": {
-					"type": "boolean",
-					"default": false,
-					"description": "Automatically start Nanocoder CLI if not running"
-				},
 				"nanocoder.showDiffPreview": {
 					"type": "boolean",
 					"default": true,

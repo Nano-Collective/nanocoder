@@ -37,8 +37,8 @@ export function isPromptCachingEnabled(
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
- *     `service_tier`, `route`, and `user` into the request body via the
- *     `openrouter` provider key. The top-level `reasoningEffort` (from
+ *     `service_tier`, `route`, and `user` into the request body, keyed by
+ *     the provider's configured name (see openAICompatibleOptionsKey). The top-level `reasoningEffort` (from
  *     ModelParameters / `/tune`) is mapped to `reasoning.effort` when the
  *     user has not provided a more specific `openrouter.reasoning` block.
  *
@@ -99,10 +99,20 @@ export function buildProviderOptions(
 		if (Object.keys(payload).length === 0) {
 			return undefined;
 		}
-		return {openrouter: payload};
+		return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
 	}
 
 	return undefined;
+}
+
+/**
+ * The `providerOptions` key `@ai-sdk/openai-compatible` reads for a provider
+ * created with `createOpenAICompatible({name})`. The SDK uses the exact
+ * provider name (up to the first dot, trimmed), not a lowercased id, so a
+ * provider named "OpenRouter" must receive its options under "OpenRouter".
+ */
+function openAICompatibleOptionsKey(providerName: string): string {
+	return providerName.split('.')[0].trim();
 }
 
 /**

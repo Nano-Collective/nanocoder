@@ -10,6 +10,7 @@ import {
 	OpenFileMessage,
 } from './protocol';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import {getGlobalConfigDir, resolveConfigPath} from './settings-manager';
 import {NanocoderAcpClient} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
 import {AcpStatusBarController} from './acp-status-bar';
@@ -117,7 +118,8 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
-			const configPath = path.join(cwdSetting, 'agents.config.json');
+			// Project-level config first, then the global one - the same order the CLI reads them.
+			const configPath = resolveConfigPath(cwdSetting, getGlobalConfigDir(), 'agents.config.json');
 			try {
 				const doc = await vscode.workspace.openTextDocument(configPath);
 				await vscode.window.showTextDocument(doc);

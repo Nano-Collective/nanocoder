@@ -23,7 +23,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Agent Action List**: Tool calls are announced before the batch runs, so you can see queued work rather than only what has finished.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
 - **Cancellation**: The Stop button or the Escape key ends the whole turn - the current tool is aborted and any queued tools are skipped.
-- **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json`.
+- **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json` - the project-level file if there is one, otherwise the global one.
 - **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
 
 ## Installation
@@ -78,7 +78,7 @@ nanocoder --vscode
 
 ### Provider, Model, and Mode
 
-The model picker sits on the composer's bottom row and shows the current model. Next to it, the sliders button opens a **Configuration** popover with the **Provider** and **Mode** selectors; the mode selector shows the current mode (Normal, Auto-Accept, YOLO or Plan). Providers and models come from your `agents.config.json`; switching provider refreshes the model list (and reconciles the model if the current one isn't available on the new provider). Mode and model choices persist to VS Code settings.
+The model picker sits on the composer's bottom row and shows the current model. Next to it, the sliders button opens a **Configuration** popover with the **Provider** and **Mode** selectors; the mode selector shows the current mode (Normal, Auto-Accept, YOLO, Plan or Architect). Providers and models come from your `agents.config.json`; switching provider refreshes the model list (and reconciles the model if the current one isn't available on the new provider). Mode and model choices persist to VS Code settings.
 
 ### Settings Tab
 
@@ -89,14 +89,14 @@ The tab covers:
 - **Providers** - the configured providers, their base URLs and model lists. API keys are masked; the tab only shows whether a key is set.
 - **MCP servers** - each server's name and transport, plus its command or URL.
 - **Tool auto-approval** - the always-allow list.
-- **Default mode** - the mode new sessions start in.
+- **Default mode** - the mode new terminal CLI sessions start in (`nanocoder.defaultMode`). Sidebar chat sessions don't use it: they start in the mode stored in the VS Code `nanocoder.mode` setting (Auto-Accept by default), which the mode selector updates.
 - **Auto-compact** - whether it's enabled, its threshold, and its mode.
 - **Reasoning traces** - whether thinking is expanded by default.
 - **Sessions** - autosave on or off.
 - **Token usage** - whether token and cost footers show below responses (off by default).
 - **Web search** - whether it's configured.
 
-For anything the tab doesn't cover, `Nanocoder: Open Configuration` opens the raw `agents.config.json`.
+For anything the tab doesn't cover, `Nanocoder: Open Configuration` opens the raw `agents.config.json` (project-level first, then global).
 
 ### Attaching Context
 
@@ -175,7 +175,6 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show `Explain Code` / `Generate Tests` lenses above symbols            |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
-| `nanocoder.autoStartCli`    | `false`       | Auto-start the CLI for companion mode if not running                  |
 | `nanocoder.showTokenUsage`  | `false`       | Show token usage and estimated cost below chat responses (hidden by default; also a toggle in the Settings tab) |
 | `nanocoder.serverPort`      | `51820`       | Legacy companion port, used only as a fallback when the discovery file is missing or stale |
 | `nanocoder.serverToken`     | (empty)       | Legacy companion bearer token, for when the discovery file is unreachable (e.g. SSH) |
@@ -191,7 +190,8 @@ Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 | `Nanocoder: Settings`                  | Toggle the Settings tab (also the gear view title icon)    |
 | `Nanocoder: Cancel Current Response`   | Cancel the in-flight turn (also the Escape key)            |
 | `Nanocoder: Copy Last Code Block`      | Copy the last code block from the previous response        |
-| `Nanocoder: Open Configuration`        | Open the active `agents.config.json`                       |
+| `Nanocoder: Open Configuration`        | Open the project `agents.config.json`, or the global one if the project has none |
+| `Nanocoder: Restart Nanocoder Agent Process` | Restart the background `nanocoder --acp` process (e.g. after changing config or upgrading the CLI) |
 | `Nanocoder: Connect to Nanocoder`      | Connect the legacy companion to a running terminal CLI     |
 | `Nanocoder: Disconnect from Nanocoder` | Disconnect the legacy companion                            |
 | `Nanocoder: Start Nanocoder CLI`       | Open a terminal and start `nanocoder --vscode` (companion) |

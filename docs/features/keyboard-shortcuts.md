@@ -44,6 +44,8 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Move cursor to end of line | Ctrl+E |
 | Move cursor back one character | Ctrl+B |
 | Move cursor forward one character | Ctrl+F |
+| Move cursor to start / end of input | Home / End |
+| Jump to previous / next word | Ctrl+Left / Ctrl+Right |
 
 ## Text Editing
 
@@ -55,16 +57,18 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Delete from cursor to start of line | Ctrl+U |
 | Delete from cursor to end of line | Ctrl+K |
 | Clear input | Esc (twice) |
+| Undo / redo the last input edit | Ctrl+Z / Ctrl+Y |
 
 ## Autocomplete
 
 | Action | Shortcut |
 |--------|----------|
-| Accept file/command suggestion | Tab |
-| Navigate file suggestions | Up/Down |
+| Accept highlighted file/command suggestion | Tab or Enter |
+| Navigate file/command suggestions | Up/Down |
+| Close the command menu | Esc |
 | Exit file autocomplete | Space |
 
-When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.
+Typing `/` at the start of the prompt opens the command menu straight away and filters it as you type. Up/Down move the highlight, and Tab or Enter accepts the highlighted command. Typing `@` opens file suggestions the same way.
 
 ## Image Attachments
 
@@ -73,7 +77,7 @@ When typing `@` for file mentions or `/` for commands, Tab accepts the current s
 | Paste image from clipboard | Ctrl+V |
 | Remove last attached image | Ctrl+X |
 
-Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You can also attach an image by typing, pasting, or dragging an image file path into the input — quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
+Ctrl+V pulls an image off the system clipboard and adds it as an attachment. Clipboard attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. You can also attach an image by typing, pasting, or dragging an image file path into the input - quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Those paths are picked up when you submit, so they don't show above the input and Ctrl+X can't remove them; delete the path text instead. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
 
 ## Copying & Pasting Text
 
@@ -95,8 +99,13 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
+| Select a queued message (empty input) | Down / Up |
+| Load the selected queued message back into the input | Enter |
+| Remove the selected queued message | Backspace / Delete |
 | Scroll transcript half a page up / down (fullscreen) | PgUp / PgDn |
 | Scroll transcript 3 rows per tick (fullscreen) | Mouse wheel |
+
+Messages you send while the agent is busy are queued below the input. With the input empty, Down moves into the queue and Up moves back out.
 
 Long prompts (more than 40 words or 300 characters) are shown collapsed in the transcript, ending in `...` with a `Full prompt: ↑ history` hint. The full text is still sent to the model; press Up to recall it into the input.
 
@@ -105,6 +114,15 @@ Long prompts (more than 40 words or 300 characters) are shown collapsed in the t
 | Action | Shortcut |
 |--------|----------|
 | Cancel response | Esc |
+| Take back the prompt you just sent (before any output arrives) | Esc |
+
+Pressing Esc before the model has produced any output, and before any tool has started, cancels the turn and puts your prompt back in the input so you can edit it.
+
+## Exiting
+
+| Action | Shortcut |
+|--------|----------|
+| Exit Nanocoder | Ctrl+C (or `/exit`) |
 
 ## Display
 

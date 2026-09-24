@@ -63,7 +63,7 @@ This is the easiest way to tweak a built-in agent — adjust the system prompt, 
 
 ### Manually
 
-Create a markdown file in `.nanocoder/agents/` (project-level) or `~/.config/nanocoder/agents/` (user-level):
+Create a markdown file in `.nanocoder/agents/` (project-level) or in the `agents/` folder of your personal config directory (user-level): `~/.config/nanocoder/agents/` on Linux, `~/Library/Preferences/nanocoder/agents/` on macOS, `%APPDATA%\nanocoder\agents\` on Windows, or `$NANOCODER_CONFIG_DIR/agents/` when that is set:
 
 `.nanocoder/agents/code-reviewer.md`:
 
@@ -132,17 +132,18 @@ If you set `contextWindow`, Nanocoder creates that subagent with its own context
 Subagent definitions are loaded from three sources in priority order:
 
 1. **Project-level** (`.nanocoder/agents/`) — highest priority
-2. **User-level** (`~/.config/nanocoder/agents/`) — medium priority
+2. **User-level** (`agents/` in your personal config directory) - medium priority
 3. **Built-in** — lowest priority
 
 A project-level agent with the same `name` as a built-in or user-level agent overrides it.
 
 ## Security
 
-- Subagent tools respect the same approval rules as the main agent. Write tools and bash commands prompt the user for approval unless they are in the `alwaysAllow` list or the session is in auto-accept/yolo mode.
+- Subagent tools respect the same approval rules as the main agent, in the parent's current [development mode](development-modes.md). File edits prompt in normal mode; bash prompts in every mode except yolo (and headless); anything in the `alwaysAllow` list runs without a prompt.
+- Subagents also get the parent mode's tool exclusions. A subagent started in plan mode is never offered `write_file`, `execute_bash`, or any other tool plan mode removes, and a headless (daemon-triggered) subagent is never offered `ask_user` or tools that would need an approval nobody is there to give.
 - The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need. The allow-list is enforced when a tool is *executed*, not just when the tool set is offered to the model, so a subagent cannot reach a tool it was never granted — including by naming one the model invented.
 - The session-artifact tools `write_plan`, `write_tasks`, and `write_walkthrough` are never available to a subagent, regardless of its `tools` list. Subagents run under the parent's session, so allowing them would let a subagent overwrite the plan, task list, or walkthrough the main conversation is working from. Subagents report back through their return value instead.
-- The `alwaysAllow` setting in `agents.config.json` applies to tools within subagents, so you can configure which tools run without prompts.
+- The top-level `nanocoder.alwaysAllow` list in `agents.config.json` applies to every tool within subagents (built-in, custom, and git tools alike), so you can configure which tools run without prompts.
 
 ## Loop Protection
 
@@ -162,9 +163,9 @@ Subagents follow the same context rules as the main conversation: [`sessions.max
 
 In plan mode, subagents can run but any write tools they attempt will require user approval (same as the main agent in plan mode). The built-in agents only have read tools configured, so they work seamlessly in plan mode. A subagent cannot write the plan artifact — `write_plan` belongs to the main conversation.
 
-### Scheduler Mode
+### Headless Mode
 
-Subagents are not available in scheduler mode. The `agent` tool is excluded because subagent execution requires user approval, which is not possible in non-interactive scheduler runs.
+Daemon-triggered runs use `headless` mode. A triggered run can itself be a subagent (an `agent:` subscription target), but it can't spawn further subagents: the `agent` tool is excluded in headless mode, because nobody is there to approve what a delegated run does.
 
 ### Tune Profiles
 

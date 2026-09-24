@@ -51,7 +51,7 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {resolveAutoCompactSettings} from '@/utils/auto-compact';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
@@ -403,22 +403,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			const config = getAppConfig();
 			const autoCompactConfig = config.autoCompact;
 			if (autoCompactConfig) {
-				const enabled =
-					autoCompactSessionOverrides.enabled !== null
-						? autoCompactSessionOverrides.enabled
-						: autoCompactConfig.enabled;
-				const threshold =
-					autoCompactSessionOverrides.threshold !== null
-						? autoCompactSessionOverrides.threshold
-						: autoCompactConfig.threshold;
-				const mode =
-					autoCompactSessionOverrides.mode !== null
-						? autoCompactSessionOverrides.mode
-						: autoCompactConfig.mode;
-				const hasOverrides =
-					autoCompactSessionOverrides.enabled !== null ||
-					autoCompactSessionOverrides.threshold !== null ||
-					autoCompactSessionOverrides.mode !== null;
+				const {enabled, threshold, mode, hasOverrides} =
+					resolveAutoCompactSettings(autoCompactConfig);
 
 				autoCompactInfo = {
 					enabled,
