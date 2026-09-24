@@ -37,7 +37,6 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
-import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -156,7 +155,6 @@ export default function UserInput({
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
-		insertPaste,
 	} = inputState;
 
 	const {
@@ -183,25 +181,6 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
-
-	// Real pastes, as reported by the terminal via bracketed paste. The
-	// payload is lifted off stdin before Ink's keypress parser sees it, so
-	// a multi-line paste can no longer submit the prompt on its first
-	// newline — it arrives here whole, in one event.
-	useEffect(() => {
-		if (disabled || !effectiveFocus) {
-			return;
-		}
-		const handleTerminalPaste = (payload: string) => {
-			insertPaste(payload);
-			// Remount TextInput so its cursor follows the appended text.
-			setTextInputKey(prev => prev + 1);
-		};
-		pasteEvents.on('paste', handleTerminalPaste);
-		return () => {
-			pasteEvents.off('paste', handleTerminalPaste);
-		};
-	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (
@@ -766,9 +745,8 @@ export default function UserInput({
 
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
 		// Text pasted into the terminal arrives as a bracketed paste on stdin
-		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
-		// never as a Ctrl+V keypress, so this binding is free to mean
-		// "paste image".
+		// (cli.tsx enables DECSET 2004), never as a Ctrl+V keypress, so
+		// this binding is free to mean "paste image".
 		if (key.ctrl && inputChar === 'v') {
 			const image = readClipboardImage();
 			if (image) {

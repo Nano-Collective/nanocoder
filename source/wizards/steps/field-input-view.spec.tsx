@@ -3,6 +3,7 @@ import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
 import type {TemplateField} from '../templates/provider-templates';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {
 	FieldInputView,
 	type FieldInputViewProps,
@@ -215,6 +216,29 @@ test('string field (default) renders a TextInput', t => {
 	t.regex(output, /API key/);
 	t.regex(output, /sk-test/);
 	t.regex(output, /╭/);
+	unmount();
+});
+
+test.serial('string field natively handles bracketed paste via TextInput', async t => {
+	let submittedValue = '';
+	const {lastFrame, unmount} = renderField({
+		currentField: {
+			type: 'string',
+			prompt: 'Paste test',
+		},
+		currentValue: '',
+		onChange: (v) => { submittedValue = v; },
+	});
+
+	// Emit a bracketed paste payload.
+	// Wait a moment for rendering, then emit.
+	await new Promise(r => setTimeout(r, 50));
+	pasteEvents.emit('paste', 'pasted_token_123');
+	await new Promise(r => setTimeout(r, 50));
+
+	// The new value should be propagated via onChange from TextInput.
+	t.is(submittedValue, 'pasted_token_123');
+
 	unmount();
 });
 

@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
 import {useEffect, useRef, useState} from 'react';
+import {pasteEvents} from '@/utils/terminal-paste';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
@@ -67,6 +68,30 @@ function TextInput({
 			return previousState;
 		});
 	}, [originalValue, focus, showCursor]);
+
+	useEffect(() => {
+		if (!focus) {
+			return;
+		}
+		const handleTerminalPaste = (payload: string) => {
+			const val = originalValueRef.current || '';
+			const cur = cursorOffsetRef.current;
+			const nextValue = val.slice(0, cur) + payload + val.slice(cur);
+			const nextCursorOffset = cur + payload.length;
+
+			cursorOffsetRef.current = nextCursorOffset;
+			setState({
+				cursorOffset: nextCursorOffset,
+				cursorWidth: payload.length > 1 ? payload.length : 0,
+			});
+			originalValueRef.current = nextValue;
+			onChange(nextValue);
+		};
+		pasteEvents.on('paste', handleTerminalPaste);
+		return () => {
+			pasteEvents.off('paste', handleTerminalPaste);
+		};
+	}, [focus, onChange]);
 
 	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
