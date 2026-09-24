@@ -27,9 +27,17 @@ import {formatError} from '@/utils/error-formatter';
 import {
 	applyOnceOverrides,
 	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
@@ -710,25 +718,51 @@ async function handleSlashCommand(
 	}
 
 	// ?key=value tokens let a user test a per-session setting for one
-	// command without committing it to the session. They live in the args
-	// list alongside the existing positional / --flag arguments, so we
-	// extract them here, rebuild commandParts with the legacy flag form
-	// appended, AND rebuild the raw `message` without the `?` tokens so
-	// every downstream handler (including the lazy-registry built-ins and
-	// the retry branch, which re-split the message themselves) stays
-	// oblivious to the override feature.
+	// command without committing it to the session. Recognised keys are
+	// consumed here: once-scoped settings via the session-override stores
+	// (restored in `finally`), legacy boolean flags by expanding them to
+	// their `--flag` form. Anything else is forwarded to the command
+	// handler verbatim (rebuilt into `commandParts`/`cleanedMessage`) so
+	// each command's own unknown-arg handling runs — and surfaced once as
+	// a warning so a typo like `?threshhold=80` cannot silently no-op.
 	const rawParts = message.slice(1).trim().split(/\s+/);
 	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
-	const expandedFlags = expandOverrideArgs(overrides);
-	const restTokens = [...positional, ...expandedFlags].join(' ');
+	const recognized = overrides.filter(o => isRecognizedOverrideKey(o.key));
+	const passthrough = overrides
+		.filter(o => !isRecognizedOverrideKey(o.key))
+		.map(formatInlineToken);
+	const expandedFlags = expandOverrideArgs(recognized);
+	const restTokens = [...positional, ...passthrough, ...expandedFlags].join(
+		' ',
+	);
 	const cleanedMessage = restTokens
 		? `/${commandName} ${restTokens}`
 		: `/${commandName}`;
-	const restoreOnce = await applyOnceOverrides(overrides);
+	const restoreOnce = await applyOnceOverrides(recognized);
+	// Explicit once-context for consumers: unlike the session store (which
+	// cannot tell a once-override apart from a persisted one), this is only
+	// set when the user typed `?threshold=` on this command.
+	const onceThreshold = getOnceThreshold(recognized);
 	try {
-		const commandParts = [commandName, ...positional, ...expandedFlags];
+		const commandParts = [
+			commandName,
+			...positional,
+			...passthrough,
+			...expandedFlags,
+		];
 
-		if (await handleCompactCommand(commandParts, options)) return;
+		if (passthrough.length > 0) {
+			const keys = [...new Set(passthrough)].join(', ');
+			options.onAddToChatQueue(
+				warningMsg(
+					`Unknown inline override(s): ${keys} — no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
+					'inline-override-unknown',
+				),
+			);
+		}
+
+		if (await handleCompactCommand(commandParts, options, onceThreshold))
+			return;
 		if (await handleContextMaxCommand(commandParts, options)) return;
 		if (await handleCommandCreate(commandParts, options)) return;
 		if (await handleAgentCreate(commandParts, options)) return;

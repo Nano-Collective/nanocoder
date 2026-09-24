@@ -9,6 +9,9 @@ import {getSessionContextLimit, resetSessionContextLimit, setSessionContextLimit
 import {
 	applyOnceOverrides,
 	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
 	parseInlineOverrides,
 } from './inline-overrides.js';
 
@@ -220,4 +223,78 @@ test('applyOnceOverrides ignores out-of-range threshold values', async t => {
 		75,
 		'no apply → no restore, prior value is still 75',
 	);
+});
+
+// ============================================================================
+// isRecognizedOverrideKey / formatInlineToken
+// ============================================================================
+
+test('isRecognizedOverrideKey accepts once-scoped settings and legacy flags', t => {
+	for (const key of [
+		'threshold',
+		'auto-compact',
+		'context-max',
+		'preview',
+		'llm',
+		'mechanical',
+		'aggressive',
+		'conservative',
+		'auto-on',
+		'auto-off',
+	]) {
+		t.true(isRecognizedOverrideKey(key), `${key} is recognised`);
+	}
+});
+
+test('isRecognizedOverrideKey rejects unknown keys', t => {
+	for (const key of ['unknown', 'threshhold', 'config', 'once']) {
+		t.false(isRecognizedOverrideKey(key), `${key} is not recognised`);
+	}
+});
+
+test('formatInlineToken rebuilds the original ?token', t => {
+	t.is(formatInlineToken({key: 'preview', value: true}), '?preview');
+	t.is(formatInlineToken({key: 'threshold', value: '80'}), '?threshold=80');
+	t.is(
+		formatInlineToken({key: 'config', value: 'key=value'}),
+		'?config=key=value',
+	);
+});
+
+test('expandOverrideArgs forwards auto-on and auto-off to their --flags', t => {
+	t.deepEqual(expandOverrideArgs([{key: 'auto-on', value: true}]), [
+		'--auto-on',
+	]);
+	t.deepEqual(expandOverrideArgs([{key: 'auto-off', value: true}]), [
+		'--auto-off',
+	]);
+});
+
+// ============================================================================
+// getOnceThreshold
+// ============================================================================
+
+test('getOnceThreshold returns undefined when no threshold override is present', t => {
+	t.is(getOnceThreshold([]), undefined);
+	t.is(getOnceThreshold([{key: 'context-max', value: '200k'}]), undefined);
+});
+
+test('getOnceThreshold parses and rounds a valid threshold', t => {
+	t.is(getOnceThreshold([{key: 'threshold', value: '80'}]), 80);
+});
+
+test('getOnceThreshold lets the last valid threshold win', t => {
+	t.is(
+		getOnceThreshold([
+			{key: 'threshold', value: '80'},
+			{key: 'threshold', value: '90'},
+		]),
+		90,
+	);
+});
+
+test('getOnceThreshold ignores unparseable and out-of-range values', t => {
+	t.is(getOnceThreshold([{key: 'threshold', value: 'abc'}]), undefined);
+	t.is(getOnceThreshold([{key: 'threshold', value: '40'}]), undefined);
+	t.is(getOnceThreshold([{key: 'threshold', value: '99'}]), undefined);
 });

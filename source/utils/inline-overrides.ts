@@ -15,23 +15,31 @@
  *
  * Scope notes (see #1151 review): the one key with a synchronous reader
  * during slash-command dispatch is `context-max` on `/usage` (which reads
- * `getSessionContextLimit()` inside its awaited handler). `threshold` and
- * `auto-compact` are applied through the same session-override plumbing and
- * restored to their prior values in a `finally` block, but no built-in slash
- * command reads them synchronously during dispatch — the automatic
- * compaction path (`maybeAutoCompact`) only runs on chat turns. They are kept
- * as reserved plumbing (with round-trip apply/restore tests) rather than
- * advertised as working examples.
+ * `getSessionContextLimit()` inside its awaited handler). `threshold` is
+ * additionally observed by `/compact` via an explicit once-threshold gate
+ * (see `handleCompactCommand`'s `onceThreshold` parameter): when present,
+ * manual compaction is skipped with an informational message if current
+ * usage sits below the threshold, mirroring the automatic path's gate.
+ * `auto-compact` is applied through the same session-override plumbing and
+ * restored to its prior value, but no built-in slash command currently
+ * reads it synchronously during dispatch — the automatic compaction path
+ * (`maybeAutoCompact`) only runs on chat turns. It is kept as reserved
+ * plumbing (with round-trip apply/restore tests) rather than advertised
+ * as a working command example.
  *
- * Unknown `?foo=bar` keys are silently dropped: the dispatcher never
- * forwards them to the handler, so a user can't accidentally pass an
- * unrecognised token to a command that doesn't know about it.
+ * Unknown `?foo=bar` keys are never consumed: they are excluded from the
+ * session-override stores and from flag expansion, forwarded to the command
+ * handler verbatim so each command's own unknown-arg handling runs, and
+ * surfaced once by the dispatcher as a warning so a typo cannot silently
+ * no-op.
  *
  * Value validation in `applyOnceOverrides` is best-effort: unparseable or
  * out-of-range values are ignored (no apply, no restore, no error). For
  * strict validation with an explicit error message, use the regular
  * `--flag value` form of the same argument.
  */
+
+import {COMPRESSION_CONSTANTS} from './message-compression';
 
 export interface InlineOverride {
 	key: string;
@@ -98,7 +106,31 @@ const LEGACY_FLAG_NAMES: Record<string, string> = {
 	mechanical: '--mechanical',
 	aggressive: '--aggressive',
 	conservative: '--conservative',
+	'auto-on': '--auto-on',
+	'auto-off': '--auto-off',
 };
+
+/** Once-scoped keys consumed by `applyOnceOverrides` (never forwarded). */
+const ONCE_SCOPED_KEYS = new Set(['threshold', 'auto-compact', 'context-max']);
+
+/**
+ * Whether the dispatcher recognises this override key: either a once-scoped
+ * session-override key or a legacy boolean flag. Anything else is forwarded
+ * to the command handler verbatim (see `formatInlineToken`) so typos and
+ * command-specific keys stay visible instead of silently vanishing.
+ */
+export function isRecognizedOverrideKey(key: string): boolean {
+	return ONCE_SCOPED_KEYS.has(key) || key in LEGACY_FLAG_NAMES;
+}
+
+/**
+ * Rebuild the original `?key` / `?key=value` token from a parsed override.
+ * Lossless for everything `parseInlineOverrides` produces: a boolean `true`
+ * came from a bare `?flag`, any other value followed an `=`.
+ */
+export function formatInlineToken({key, value}: InlineOverride): string {
+	return value === true ? `?${key}` : `?${key}=${value}`;
+}
 
 const TRUE_STRINGS = new Set(['1', 'true', 'yes', 'on']);
 
@@ -160,6 +192,8 @@ export async function applyOnceOverrides(
 
 	// Only import the setter modules when we actually have an override
 	// to apply. Keeps `parseInlineOverrides` testable in isolation.
+	// (COMPRESSION_CONSTANTS is a static import: message-compression has no
+	// runtime imports of its own, so it adds nothing to the init graph.)
 	const [
 		{
 			autoCompactSessionOverrides,
@@ -168,12 +202,10 @@ export async function applyOnceOverrides(
 		},
 		models,
 		{parseContextLimit},
-		{COMPRESSION_CONSTANTS},
 	] = await Promise.all([
 		import('./auto-compact-session.js'),
 		import('@/models/index.js'),
 		import('./parse-context-limit.js'),
-		import('./message-compression.js'),
 	]);
 
 	for (const {key, value} of overrides) {
@@ -223,4 +255,32 @@ export async function applyOnceOverrides(
 			}
 		}
 	};
+}
+
+/**
+ * Extract the once-scoped `threshold` value from already-parsed overrides
+ * for explicit consumers (`/compact`'s gate). Mirrors the validation in
+ * `applyOnceOverrides` — last valid value wins, anything unparseable or
+ * out of range yields `undefined` (fail open: the command runs un-gated).
+ * Returns `undefined` when no `?threshold` override is present so callers
+ * can tell "no once-threshold" apart from a persisted session override and
+ * leave the default unconditional behaviour untouched.
+ */
+export function getOnceThreshold(
+	overrides: readonly InlineOverride[],
+): number | undefined {
+	let found: number | undefined;
+	for (const {key, value} of overrides) {
+		if (key !== 'threshold') continue;
+		const numeric = Number.parseFloat(String(value));
+		if (
+			Number.isNaN(numeric) ||
+			numeric < COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT ||
+			numeric > COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT
+		) {
+			continue;
+		}
+		found = Math.round(numeric);
+	}
+	return found;
 }

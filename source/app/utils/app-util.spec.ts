@@ -16,7 +16,7 @@ import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
-import type {MessageSubmissionOptions} from '@/types/index';
+import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {
 	autoCompactSessionOverrides,
 	resetAutoCompactSession,
@@ -1221,8 +1221,8 @@ test('inline overrides - /usage ?context-max=200k is parsed into a session-overr
 	// ?context-max is a session-override key (handled by applyOnceOverrides),
 	// not a legacy --flag, so expandOverrideArgs leaves it alone and the
 	// dispatcher applies it through the existing session-override stores.
-	// It is the one key with a synchronous reader during dispatch: /usage
-	// reads getSessionContextLimit() inside its awaited handler.
+	// /usage reads getSessionContextLimit() inside its awaited handler, so
+	// the override is observable for that command's run.
 	const trimmed = '/usage ?context-max=200k'.slice(1).trim().split(/\s+/);
 	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
 	t.deepEqual(args, []);
@@ -1246,10 +1246,36 @@ test('inline overrides - applyOnceOverrides restore function is idempotent and s
 	t.notThrows(() => restore());
 });
 
-test('inline overrides - parseInput keeps the `?` token in args for downstream cleaning', t => {
-	const parsed = parseInput('/usage ?context-max=200k');
-	t.is(parsed.command, 'usage');
-	t.deepEqual(parsed.args, ['?context-max=200k']);
+function queuedText(node: React.ReactNode): string {
+	if (React.isValidElement(node)) {
+		const {message} = node.props as {message?: unknown};
+		return typeof message === 'string' ? message : '';
+	}
+	return typeof node === 'string' ? node : '';
+}
+
+test.serial('inline overrides - unknown ?keys warn and reach the handler unchanged', async t => {
+	// Regression: an unrecognised `?key=value` token must neither vanish
+	// silently nor pollute the override stores. The dispatcher forwards it
+	// verbatim (so `/context-max` reports its usual "invalid limit" error
+	// for the `?bogus=1` positional) and queues one warning naming the key.
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/context-max ?bogus=1', options);
+
+	t.true(
+		texts.some(text => text.includes('?bogus')),
+		`expected an unknown-override warning naming ?bogus, got: ${JSON.stringify(texts)}`,
+	);
+	t.true(
+		texts.some(text => text.includes('Invalid context limit')),
+		`expected the handler's normal invalid-limit error, got: ${JSON.stringify(texts)}`,
+	);
 });
 
 test.serial('inline overrides - dispatcher applies a ?context-max override and restores the prior value', async t => {
@@ -1284,5 +1310,96 @@ test.serial('inline overrides - dispatcher applies a ?context-max override and r
 		'restoreOnce should have put the prior 8192 back after the command',
 	);
 
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold skips compaction below the threshold', async t => {
+	// End-to-end for the headline example: the once-threshold gates the
+	// manual compaction (mirroring the automatic path's gate). A tiny
+	// transcript against a huge once-limit sits near 0%, so the command
+	// reports the skip instead of compacting — and restores both stores.
+	const {
+		getSessionContextLimit,
+		resetSessionContextLimit,
+	} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+	setAutoCompactThreshold(50);
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	options.messages = messages;
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission(
+		'/compact ?threshold=80 ?context-max=999999999',
+		options,
+	);
+
+	t.true(
+		texts.some(text => text.includes('below') && text.includes('80%')),
+		`expected a below-threshold skip message, got: ${JSON.stringify(texts)}`,
+	);
+	t.is(rewritten, null, 'skipped compaction must not rewrite messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		50,
+		'prior threshold is restored after the gated command',
+	);
+	t.is(
+		getSessionContextLimit(),
+		null,
+		'once context limit is restored after the gated command',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold proceeds at or above the threshold', async t => {
+	// Mirror image: a 1-token once-limit puts any transcript at hundreds of
+	// percent, so the gate passes and the normal mechanical compaction runs.
+	const {resetSessionContextLimit} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	options.messages = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission('/compact ?threshold=80 ?context-max=1', options);
+
+	t.true(
+		texts.some(text => text.includes('Compacted')),
+		`expected a compaction success message, got: ${JSON.stringify(texts)}`,
+	);
+	t.not(rewritten, null, 'compaction above the threshold rewrites messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		null,
+		'no prior threshold means null after restore',
+	);
+
+	resetAutoCompactSession();
 	resetSessionContextLimit();
 });
