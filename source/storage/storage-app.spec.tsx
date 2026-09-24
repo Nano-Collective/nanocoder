@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import type {StorageReport} from './diagnostics.js';
 import {StorageApp} from './storage-app.js';
 
@@ -119,11 +120,12 @@ test('an 80 by 24 terminal renders one full dashboard frame', async t => {
 		Object.defineProperty(view.stdout, 'rows', {value: 24, configurable: true});
 		view.stdout.emit('resize');
 		await settle();
-		const lines = view.lastFrame()!.split('\n');
+		const frame = stripAnsi(view.lastFrame()!);
+		const lines = frame.split('\n');
 		t.is(lines.length, 24);
 		t.true(lines[0]?.startsWith('╭'));
 		t.regex(lines[1]!, /Nanocoder storage.*READ-ONLY/);
-		t.regex(view.lastFrame()!, /Stores\s+│ Sessions \[global\]/);
+		t.regex(lines[4]!, /Stores\s+│ Sessions \[global\]/);
 		t.regex(lines[22]!, /Enter Explore/);
 		t.true(lines[23]?.startsWith('╰'));
 	} finally {
