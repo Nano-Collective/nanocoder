@@ -456,10 +456,10 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
+			this._sessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);

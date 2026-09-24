@@ -145,7 +145,6 @@ test('NanocoderAcpClient - reconnecting clears permissions left by the dead proc
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions());
 });
-
 test('NanocoderAcpClient - concurrent getOrCreateSession calls share a single newSession', async (t) => {
 	const outputChannel = {appendLine: () => {}} as any;
 	const stateManager = new AcpStateManager();
@@ -179,4 +178,31 @@ test('NanocoderAcpClient - concurrent getOrCreateSession calls share a single ne
 	t.is(sb, 'session-1', 'second caller resolves with the same session id');
 	t.is(sc, 'session-1', 'third caller resolves with the same session id');
 	t.is((client as any)._pendingSession, null, 'pending session is cleared after resolution so the next call is a fresh attempt');
+});
+test('NanocoderAcpClient - failed resumeSession does not leave a stale _sessionId', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	let toasts = 0;
+	(vscode.window as any).showErrorMessage = () => {
+		toasts++;
+		return Promise.resolve(undefined);
+	};
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session not found')),
+	} as any);
+
+	await client.resumeSession('session-bogus');
+
+	t.is(
+		(client as any)._sessionId,
+		undefined,
+		'_sessionId must not be set when resumeSession throws; otherwise getOrCreateSession returns it and every subsequent prompt hangs',
+	);
+	t.is(toasts, 1, 'a real failure must still surface as an error toast');
 });
