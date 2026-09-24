@@ -299,6 +299,7 @@ async function runPlainConversationBody(
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
 			nonInteractiveAlwaysAllow,
+			modelParameters: tune?.enabled ? tune.modelParameters : undefined,
 		};
 
 		let streamedReasoning = '';

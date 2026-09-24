@@ -125,6 +125,8 @@ Tune settings resolve from these layers, lowest priority first (later layers win
 
 Because top-level config sits above preferences, a `nanocoder.tune` block in `agents.config.json` wins over whatever `/tune` saved last time once you restart. Use `/tune` for per-session experiments, or remove `nanocoder.tune` if you want the saved preferences to stick.
 
+Layers are merged shallowly. In particular, a `modelParameters` object in a higher-priority layer replaces the whole `modelParameters` object from lower-priority layers rather than merging individual parameters. Keep related parameters in the same layer if they must apply together.
+
 ### Example: Per-Provider Config
 
 Set defaults for a specific provider in `agents.config.json`:

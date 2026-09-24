@@ -12,11 +12,17 @@ Any service that exposes an OpenAI-compatible API can be added as a custom provi
 
 ```json
 {
-	"name": "My Provider",
-	"baseUrl": "https://my-api.example.com/v1",
-	"apiKey": "optional-api-key",
-	"caCertPath": "/path/to/internal-ca.pem",
-	"models": ["model-name"]
+	"nanocoder": {
+		"providers": [
+			{
+				"name": "My Provider",
+				"baseUrl": "https://my-api.example.com/v1",
+				"apiKey": "optional-api-key",
+				"caCertPath": "/path/to/internal-ca.pem",
+				"models": ["model-name"]
+			}
+		]
+	}
 }
 ```
 
@@ -32,7 +38,7 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 
 ## Reasoning Effort
 
-For a reasoning model served through the default OpenAI-compatible SDK, set `reasoningEffort` in the provider's tune defaults:
+For a reasoning model served through the default OpenAI-compatible SDK, set `reasoningEffort` in the top-level tune configuration:
 
 ```json
 {
@@ -42,21 +48,21 @@ For a reasoning model served through the default OpenAI-compatible SDK, set `rea
 				"name": "My Provider",
 				"baseUrl": "https://my-api.example.com/v1",
 				"apiKey": "your-api-key",
-				"models": ["my-reasoning-model"],
-				"tune": {
-					"modelParameters": {
-						"reasoningEffort": "high"
-					}
-				}
+				"models": ["my-reasoning-model"]
 			}
-		]
+		],
+		"tune": {
+			"modelParameters": {
+				"reasoningEffort": "high"
+			}
+		}
 	}
 }
 ```
 
 Nanocoder forwards the value as `reasoning_effort` in the request body. Accepted values are `"minimal"`, `"low"`, `"medium"`, and `"high"`. When the setting is absent, Nanocoder sends no `reasoning_effort` field, preserving compatibility with providers and models that reject it.
 
-You can also configure the same field in the top-level `nanocoder.tune.modelParameters` block. See [Tune](../../features/tune.md#provider-specific-parameters) for configuration precedence and the provider-specific mappings.
+See [Tune](../../features/tune.md#provider-specific-parameters) for configuration precedence and the provider-specific mappings.
 
 ## Setup via Wizard
 

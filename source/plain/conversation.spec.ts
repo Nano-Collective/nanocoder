@@ -18,6 +18,7 @@ import type {
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
@@ -119,6 +120,36 @@ test("returns success when model emits content and no tool calls", async (t) => 
 
 	t.is(outcome.kind, "success");
 	t.is(outcome.steps, 1);
+});
+
+test("forwards enabled tune model parameters to the client", async (t) => {
+	let capturedOverrides: ModeOverrides | undefined;
+	const client = {
+		chat: async (...args: Parameters<LLMClient["chat"]>) => {
+			capturedOverrides = args[4];
+			return {
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		tune: {
+			enabled: true,
+			toolProfile: "full",
+			aggressiveCompact: false,
+			modelParameters: { reasoningEffort: "high" },
+		},
+	});
+
+	t.deepEqual(capturedOverrides?.modelParameters, { reasoningEffort: "high" });
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
