@@ -599,6 +599,39 @@ test('cheaper-inference template: uses default provider name and model default',
 	t.is(config.name, 'Cheaper Inference');
 });
 
+test('yolo-auto template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'yolo-auto');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Yolo-Auto',
+		apiKey: 'test-key',
+		model: 'yolo, yolo-small',
+	});
+
+	t.is(config.name, 'Yolo-Auto');
+	t.is(config.baseUrl, 'https://yolo-auto.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['yolo', 'yolo-small']);
+});
+
+test('yolo-auto template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'yolo-auto');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'yolo,yolo-small');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'yolo',
+	});
+
+	t.is(config.name, 'Yolo-Auto');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not

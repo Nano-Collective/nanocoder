@@ -50,6 +50,7 @@ Hosted services using the OpenAI-compatible API format.
 - [Atlas Cloud](atlas-cloud.md) - Aggregates 300+ models behind one OpenAI-compatible endpoint
 - [Z.ai](z-ai.md) - GLM models from Zhipu AI
 - [Z.ai Coding](z-ai-coding.md) - Z.ai coding subscription plan
+- [Yolo-Auto](yolo-auto.md) - OpenAI-compatible API with flat-rate plans and `yolo`/`yolo-small` aliases
 
 ## Native SDK Providers
 
