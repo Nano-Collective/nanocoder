@@ -64,8 +64,8 @@ const EVENT_MESSAGES: Record<
  */
 export function resolveNotificationIconPath(moduleDir: string): string | null {
 	const candidates = [
-		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc
-		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist
+		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist -- nosemgrep: path-join-resolve-traversal
 	];
 	return candidates.find(candidate => existsSync(candidate)) ?? null;
 }

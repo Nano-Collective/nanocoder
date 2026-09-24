@@ -56,9 +56,9 @@ let cachedAvailableClis: string[] | null = null;
  */
 export function resolveVsixPath(moduleDir: string): string | null {
 	const candidates = [
-		join(moduleDir, '../../assets/nanocoder-vscode.vsix'), // tsc / development
-		join(moduleDir, '../../../assets/nanocoder-vscode.vsix'), // nested install
-		join(moduleDir, '../assets/nanocoder-vscode.vsix'), // rolldown flat dist
+		join(moduleDir, '../../assets/nanocoder-vscode.vsix'), // tsc / development -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../../../assets/nanocoder-vscode.vsix'), // nested install -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../assets/nanocoder-vscode.vsix'), // rolldown flat dist -- nosemgrep: path-join-resolve-traversal
 	];
 
 	return candidates.find(candidate => existsSync(candidate)) ?? null;
