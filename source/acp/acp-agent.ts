@@ -61,6 +61,7 @@ import {
 	deriveTitleFromFirstMessage,
 } from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -208,6 +209,7 @@ export class AcpAgent implements Agent {
 		// the finally, so a clean turn has to be tracked explicitly rather than
 		// inferred from getting there.
 		let turnSucceeded = false;
+		const turnStart = Date.now();
 
 		try {
 			const {text: userText, images} = await acpContentToUserMessage(
@@ -387,7 +389,13 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
-			this.attachResponseUsage(session, response, previousAssistant);
+			const turnDurationMs = Date.now() - turnStart;
+			this.attachResponseUsage(
+				session,
+				response,
+				previousAssistant,
+				turnDurationMs,
+			);
 			turnSucceeded = true;
 			return response;
 		} catch (error) {
@@ -410,6 +418,8 @@ export class AcpAgent implements Agent {
 					role: 'assistant',
 					content: cancelNotice,
 					displayOnly: true,
+					durationMs: Date.now() - turnStart,
+					outcome: 'cancelled',
 				});
 				return {stopReason: 'cancelled'};
 			}
@@ -431,6 +441,8 @@ export class AcpAgent implements Agent {
 				role: 'assistant',
 				content: formattedError,
 				displayOnly: true,
+				durationMs: Date.now() - turnStart,
+				outcome: 'failed',
 			});
 
 			throw error;
@@ -709,6 +721,51 @@ export class AcpAgent implements Agent {
 			};
 		}
 
+		if (method === 'retryTurn') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('retryTurn requires string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error('Cannot retry turn while a prompt is in progress');
+			}
+			const promptText =
+				typeof params.promptText === 'string'
+					? params.promptText.trim()
+					: undefined;
+			let targetUserIdx = -1;
+			if (promptText) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					const m = session.messages[i];
+					if (m.role !== 'user') continue;
+					const contentStr =
+						typeof m.content === 'string' ? m.content.trim() : '';
+					if (contentStr === promptText) {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx < 0) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					if (session.messages[i].role === 'user') {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx >= 0) {
+				session.messages = session.messages.slice(0, targetUserIdx);
+				await this.saveAcpSessionToDisk(session);
+				await session.timeline.truncateAfter(targetUserIdx);
+			}
+			logger.info(
+				`ACP extMethod retryTurn: session=${sessionId} truncatedTo=${session.messages.length}`,
+			);
+			return {ok: true, messagesCount: session.messages.length};
+		}
+
 		throw new Error(`Unknown extension method: ${method}`);
 	}
 
@@ -820,14 +877,22 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
-				if (message.responseUsage) {
+				if (message.responseUsage || message.durationMs || message.outcome) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
 							sessionUpdate: 'agent_message_chunk',
 							content: {type: 'text', text: ''},
 							_meta: {
-								'nanocoder/response-usage': message.responseUsage,
+								...(message.responseUsage
+									? {'nanocoder/response-usage': message.responseUsage}
+									: {}),
+								...(message.durationMs
+									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
+								...(message.outcome
+									? {'nanocoder/outcome': message.outcome}
+									: {}),
 							},
 						},
 					});
@@ -840,11 +905,17 @@ export class AcpAgent implements Agent {
 		session: AcpSession,
 		response: PromptResponse,
 		previousAssistant?: (typeof session.messages)[number],
+		turnDurationMs?: number,
 	): void {
-		if (!response.usage) return;
-
 		const assistant = findLastAssistantMessage(session);
 		if (!assistant || assistant === previousAssistant) return;
+
+		if (turnDurationMs !== undefined) {
+			assistant.durationMs = turnDurationMs;
+			assistant.outcome = 'completed';
+		}
+
+		if (!response.usage) return;
 
 		const cost = (
 			response._meta as
@@ -912,7 +983,12 @@ export class AcpAgent implements Agent {
 		const {toolManager} = this.initContext;
 		const {provider, model} = this.initContext;
 
-		const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+		const tune = resolveTune(
+			getAppConfig(),
+			this.initContext.client.getProviderConfig(),
+			loadPreferences(),
+		);
+		applyTuneCompaction(tune);
 		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -966,6 +1042,22 @@ export class AcpAgent implements Agent {
 			);
 
 			if (saveableMessages.length === 0) {
+				if (existingSession) {
+					await sessionManager.saveSession({
+						id: session.sessionId,
+						title: existingSession.title || 'New Session',
+						titleManuallySet: existingSession.titleManuallySet,
+						titleGenerated: existingSession.titleGenerated,
+						createdAt: existingSession.createdAt || timestamp,
+						lastAccessedAt: timestamp,
+						messageCount: 0,
+						provider:
+							this.initContext.client.getProviderConfig().name || 'openai',
+						model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+						workingDirectory: session.cwd,
+						messages: [],
+					});
+				}
 				return;
 			}
 

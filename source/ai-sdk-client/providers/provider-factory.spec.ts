@@ -812,3 +812,53 @@ test('createReasoningItemNormalizer handles a CRLF separator split across chunks
 	]);
 	t.true(output.includes('\r\n\r\n'));
 });
+
+test('createProvider google provider honours baseURL and headers', async t => {
+	const mockAgent = new MockAgent();
+	mockAgent.disableNetConnect();
+	let seenHeaders: Record<string, string> = {};
+	mockAgent
+		.get('https://gemini-proxy.example.com')
+		.intercept({
+			path: '/v1beta/models/gemini-2.5-flash:generateContent',
+			method: 'POST',
+		})
+		.reply(opts => {
+			seenHeaders = opts.headers as Record<string, string>;
+			return {
+				statusCode: 200,
+				data: JSON.stringify({
+					candidates: [
+						{content: {parts: [{text: 'ok'}], role: 'model'}, finishReason: 'STOP'},
+					],
+				}),
+				responseOptions: {headers: {'content-type': 'application/json'}},
+			};
+		});
+
+	const {kind, provider} = await createProvider(
+		{
+			name: 'Gemini',
+			type: 'openai',
+			models: ['gemini-2.5-flash'],
+			sdkProvider: 'google',
+			config: {
+				apiKey: 'test-key',
+				baseURL: 'https://gemini-proxy.example.com/v1beta',
+				headers: {'X-Proxy-Token': 'secret'},
+			},
+		},
+		mockAgent as unknown as Agent,
+	);
+	t.is(kind, 'google');
+
+	const {generateText} = await import('ai');
+	const result = await generateText({
+		model: (provider as (id: string) => Parameters<typeof generateText>[0]['model'])(
+			'gemini-2.5-flash',
+		),
+		prompt: 'hi',
+	});
+	t.is(result.text, 'ok');
+	t.is(seenHeaders['x-proxy-token'], 'secret');
+});

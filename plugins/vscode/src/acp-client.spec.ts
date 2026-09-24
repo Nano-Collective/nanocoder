@@ -129,64 +129,6 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	t.regex(shownError ?? '', /RequestError/, 'A genuine failure must still surface');
 });
 
-test('NanocoderAcpClient - listTimeline returns entries from extMethod', async (t) => {
-	const client = makeClient({
-		extMethod: async (method: string, params: Record<string, unknown>) => {
-			t.is(method, 'timeline/list');
-			t.is(params.sessionId, 'session-1');
-			return {
-				entries: [
-					{
-						id: 'cp-1',
-						seq: 1,
-						toolCallId: 'call-1',
-						toolName: 'write_file',
-						title: 'write_file: a.ts',
-						timestamp: '2026-01-01T00:00:00.000Z',
-						filesChanged: ['a.ts'],
-					},
-				],
-			};
-		},
-	});
-
-	const entries = await client.listTimeline();
-	t.is(entries.length, 1);
-	t.is(entries[0].id, 'cp-1');
-});
-
-test('NanocoderAcpClient - revertTimeline calls timeline/revert', async (t) => {
-	let called: {method?: string; params?: Record<string, unknown>} = {};
-	const client = makeClient({
-		extMethod: async (method: string, params: Record<string, unknown>) => {
-			called = {method, params};
-			return {revertedTo: {id: 'cp-1'}, filesRestored: ['a.ts']};
-		},
-	});
-
-	await client.revertTimeline('cp-1');
-	t.is(called.method, 'timeline/revert');
-	t.deepEqual(called.params, {sessionId: 'session-1', checkpointId: 'cp-1'});
-});
-
-test('NanocoderAcpClient - revertTimeline throws when there is no session', async (t) => {
-	const outputChannel = {appendLine: () => {}} as any;
-	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
-
-	// Returning quietly here would let the caller clear the chat view for a
-	// revert that never happened.
-	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /Not connected/});
-});
-
-test('NanocoderAcpClient - revertTimeline rethrows a refused revert', async (t) => {
-	const client = makeClient({
-		extMethod: async () => {
-			throw new Error('Cannot revert the timeline while a prompt is in progress');
-		},
-	});
-
-	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /in progress/});
-});
 
 test('NanocoderAcpClient - reconnecting clears permissions left by the dead process', async (t) => {
 	const outputChannel = {appendLine: () => {}} as any;
@@ -202,4 +144,106 @@ test('NanocoderAcpClient - reconnecting clears permissions left by the dead proc
 	const result = await requestPromise;
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions());
+});
+test('NanocoderAcpClient - concurrent getOrCreateSession calls share a single newSession', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	let newSessionCalls = 0;
+	let releaseNewSession!: (value: {sessionId: string; modes?: any; configOptions?: any; _meta?: any}) => void;
+	client.setConnection({
+		newSession: () => {
+			newSessionCalls++;
+			return new Promise<any>(resolve => {
+				releaseNewSession = resolve;
+			});
+		},
+	} as any);
+
+	const a = client.getOrCreateSession('/cwd');
+	const b = client.getOrCreateSession('/cwd');
+	const c = client.getOrCreateSession('/cwd');
+
+	t.is(
+		newSessionCalls,
+		1,
+		'overlapping getOrCreateSession() callers must coalesce into a single newSession() call against the shared connection',
+	);
+
+	releaseNewSession({sessionId: 'session-1'});
+	const [sa, sb, sc] = await Promise.all([a, b, c]);
+
+	t.is(sa, 'session-1', 'first caller resolves with the session id');
+	t.is(sb, 'session-1', 'second caller resolves with the same session id');
+	t.is(sc, 'session-1', 'third caller resolves with the same session id');
+	t.is((client as any)._pendingSession, null, 'pending session is cleared after resolution so the next call is a fresh attempt');
+});
+
+test('NanocoderAcpClient - a rejected newSession clears _pendingSession so the next call retries', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	let newSessionCalls = 0;
+	client.setConnection({
+		newSession: () => {
+			newSessionCalls++;
+			return Promise.reject(new Error('backend down'));
+		},
+	} as any);
+
+	// Overlapping callers must share the rejected promise - none of them should
+	// spin up their own newSession retry while the first one is still in flight.
+	const a = client.getOrCreateSession('/cwd');
+	const b = client.getOrCreateSession('/cwd');
+	const c = client.getOrCreateSession('/cwd');
+
+	t.is(newSessionCalls, 1, 'overlapping callers must share a single in-flight newSession even when it will reject');
+
+	const [ra, rb, rc] = await Promise.all([a, b, c]);
+
+	t.is(ra, undefined, 'first caller resolves with undefined on rejection');
+	t.is(rb, undefined, 'second caller resolves with undefined on rejection');
+	t.is(rc, undefined, 'third caller resolves with undefined on rejection');
+	t.is(
+		(client as any)._pendingSession,
+		null,
+		'_pendingSession is cleared in the finally block even when the promise rejects',
+	);
+	t.is((client as any)._sessionId, undefined, '_sessionId must not be set when newSession rejects');
+
+	// The regression the finally block is guarding against: a second call after
+	// rejection must issue a fresh newSession, not reuse the cached rejected
+	// promise (which would make every subsequent prompt fail forever).
+	const next = await client.getOrCreateSession('/cwd');
+	t.is(newSessionCalls, 2, 'a follow-up call after rejection must issue a fresh newSession, proving finally cleared the cache');
+	t.is(next, undefined, 'follow-up call still resolves to undefined on rejection, but only because it actually tried');
+});
+test('NanocoderAcpClient - failed resumeSession does not leave a stale _sessionId', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	let toasts = 0;
+	(vscode.window as any).showErrorMessage = () => {
+		toasts++;
+		return Promise.resolve(undefined);
+	};
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session not found')),
+	} as any);
+
+	await client.resumeSession('session-bogus');
+
+	t.is(
+		(client as any)._sessionId,
+		undefined,
+		'_sessionId must not be set when resumeSession throws; otherwise getOrCreateSession returns it and every subsequent prompt hangs',
+	);
+	t.is(toasts, 1, 'a real failure must still surface as an error toast');
 });

@@ -15,10 +15,24 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 | Action | Shortcut | Notes |
 |--------|----------|-------|
 | Submit prompt | Enter | |
-| New line | Ctrl+J | Official supported shortcut |
-| New line fallback | Shift+Enter | Terminal-dependent fallback only |
+| New line | Ctrl+J | Works in every terminal |
+| New line | Option+Enter (macOS) / Alt+Enter | Sends ESC+CR, which most terminals emit natively |
+| New line | Shift+Enter | Only in terminals that encode it distinctly; see below |
 
-> **Note on multi-line input**: Ctrl+J is the only officially supported newline shortcut. Some terminals also send Shift+Enter as a newline, but that behavior is terminal-dependent and should be treated as a fallback only.
+**Why Shift+Enter is terminal-dependent.** Most terminals send Shift+Enter as a bare carriage return, byte-identical to plain Enter, so no application can tell the two apart. Nanocoder recognises every encoding that *is* distinguishable: a literal line feed (Ctrl+J), ESC+CR (Option/Alt+Enter), the kitty keyboard protocol's `CSI 13;2u`, and xterm's modifyOtherKeys form `CSI 27;2;13~`, which the VS Code integrated terminal can be configured to send.
+
+If Shift+Enter submits instead of adding a line, bind it in your terminal to send a line feed. In VS Code, add this to `keybindings.json`:
+
+```json
+{
+  "key": "shift+enter",
+  "command": "workbench.action.terminal.sendSequence",
+  "args": { "text": "\n" },
+  "when": "terminalFocus"
+}
+```
+
+Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal backslash followed by the newline, leaving a stray `\` in the prompt on every press.
 
 ## Cursor Movement
 
@@ -30,6 +44,8 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 | Move cursor to end of line | Ctrl+E |
 | Move cursor back one character | Ctrl+B |
 | Move cursor forward one character | Ctrl+F |
+| Move cursor to start / end of input | Home / End |
+| Jump to previous / next word | Ctrl+Left / Ctrl+Right |
 
 ## Text Editing
 
@@ -41,16 +57,18 @@ Press `?` in an empty prompt to open an in-app overlay listing the main shortcut
 | Delete from cursor to start of line | Ctrl+U |
 | Delete from cursor to end of line | Ctrl+K |
 | Clear input | Esc (twice) |
+| Undo / redo the last input edit | Ctrl+Z / Ctrl+Y |
 
 ## Autocomplete
 
 | Action | Shortcut |
 |--------|----------|
-| Accept file/command suggestion | Tab |
-| Navigate file suggestions | Up/Down |
+| Accept highlighted file/command suggestion | Tab or Enter |
+| Navigate file/command suggestions | Up/Down |
+| Close the command menu | Esc |
 | Exit file autocomplete | Space |
 
-When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.
+Typing `/` at the start of the prompt opens the command menu straight away and filters it as you type. Up/Down move the highlight, and Tab or Enter accepts the highlighted command. Typing `@` opens file suggestions the same way.
 
 ## Image Attachments
 
@@ -59,7 +77,7 @@ When typing `@` for file mentions or `/` for commands, Tab accepts the current s
 | Paste image from clipboard | Ctrl+V |
 | Remove last attached image | Ctrl+X |
 
-Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You can also attach an image by typing, pasting, or dragging an image file path into the input — quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
+Ctrl+V pulls an image off the system clipboard and adds it as an attachment. Clipboard attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. You can also attach an image by typing, pasting, or dragging an image file path into the input - quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Those paths are picked up when you submit, so they don't show above the input and Ctrl+X can't remove them; delete the path text instead. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
 
 ## Copying & Pasting Text
 
@@ -67,13 +85,13 @@ Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You
 |--------|----------|
 | Paste text | Your terminal's own paste (Cmd+V on macOS, usually Ctrl+Shift+V on Linux) |
 | Copy last response to clipboard | `/copy` |
-| Toggle selection mode (fullscreen only) | Ctrl+P |
+| Select text (fullscreen) | Shift+drag (Option+drag in iTerm2) |
 
 Nanocoder enables **bracketed paste**, so the terminal hands over a pasted block in one piece rather than as a stream of keystrokes. Multi-line pastes no longer submit the prompt at the first line break. Pastes that are multi-line, or longer than the paste threshold, collapse into a placeholder to keep the input readable (`[Paste #1: 7 lines]` for a multi-line paste, `[Paste #1: 1234 chars]` for a single long line); the full text is still sent with your message. Adjust the threshold under `/settings`.
 
 Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste shortcut for text.
 
-**Selection mode** applies to fullscreen mode only. Fullscreen turns on mouse reporting so the wheel can scroll the chat viewport, and that takes click-drag selection away from the terminal. Ctrl+P suspends mouse reporting so you can select and copy with the mouse as normal; press it again to resume scrolling. Inline mode (the default) never enables mouse reporting, so selection works there without doing anything and Ctrl+P does nothing.
+**Selecting text in fullscreen.** Fullscreen mode (the default) turns on mouse reporting so the wheel can scroll the chat viewport, which takes plain click-drag selection away from the terminal. Hold Shift while dragging (Option in iTerm2) to select and copy as normal. To get plain selection back, disable mouse reporting with `--no-mouse`, `"mouseReporting": false` in your [preferences](../configuration/preferences.md), or the **Mouse Wheel Reporting** toggle in `/settings`; the wheel then no longer scrolls chat history. Inline mode (`--no-alt-screen`) never enables mouse reporting, so selection works there without doing anything.
 
 ## History & Navigation
 
@@ -81,12 +99,30 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
+| Select a queued message (empty input) | Down / Up |
+| Load the selected queued message back into the input | Enter |
+| Remove the selected queued message | Backspace / Delete |
+| Scroll transcript half a page up / down (fullscreen) | PgUp / PgDn |
+| Scroll transcript 3 rows per tick (fullscreen) | Mouse wheel |
+
+Messages you send while the agent is busy are queued below the input. With the input empty, Down moves into the queue and Up moves back out.
+
+Long prompts (more than 40 words or 300 characters) are shown collapsed in the transcript, ending in `...` with a `Full prompt: ↑ history` hint. The full text is still sent to the model; press Up to recall it into the input.
 
 ## During AI Response
 
 | Action | Shortcut |
 |--------|----------|
 | Cancel response | Esc |
+| Take back the prompt you just sent (before any output arrives) | Esc |
+
+Pressing Esc before the model has produced any output, and before any tool has started, cancels the turn and puts your prompt back in the input so you can edit it.
+
+## Exiting
+
+| Action | Shortcut |
+|--------|----------|
+| Exit Nanocoder | Ctrl+C (or `/exit`) |
 
 ## Display
 
@@ -95,4 +131,7 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
 | Toggle expanded reasoning traces | Ctrl+R |
-| Toggle selection mode (fullscreen only) | Ctrl+P |
+| Collapse / expand the live task list | Ctrl+T |
+| Attach to a running subagent, or cycle to the next one | Ctrl+S |
+
+Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation.

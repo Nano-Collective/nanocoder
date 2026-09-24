@@ -3,7 +3,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {reloadAppConfig} from '@/config/index';
-import {createFileToolApproval} from './tool-approval';
+import {createFileToolApproval, isFileMutationTool} from './tool-approval';
 
 console.log('\ntool-approval.spec.ts');
 
@@ -24,6 +24,7 @@ test('returned function is mode-aware', t => {
 	t.true(approvalFn({}, 'normal'), 'normal mode requires approval');
 	t.false(approvalFn({}, 'auto-accept'), 'auto-accept skips approval');
 	t.false(approvalFn({}, 'headless'), 'headless skips approval');
+	t.false(approvalFn({}, 'architect'), 'architect skips per-tool approval');
 });
 
 test('different tool names produce independent functions', t => {
@@ -72,5 +73,40 @@ test.serial('alwaysAllow short-circuits approval for the listed tool', async t =
 		}
 		reloadAppConfig();
 		await rm(dir, {recursive: true, force: true});
+	}
+});
+
+// Architect waives approval for exactly the tools registered here, and reads
+// the same set to decide what to checkpoint. The two questions must never be
+// answered by separate lists, or a newly added mutator auto-executes outside
+// the checkpoint and cannot be reverted.
+test('registers every tool built through createFileToolApproval', t => {
+	createFileToolApproval('some_new_file_tool');
+	t.true(isFileMutationTool('some_new_file_tool'));
+});
+
+test('does not claim tools that never built a file approval', t => {
+	t.false(isFileMutationTool('read_file'));
+	t.false(isFileMutationTool('web_search'));
+	t.false(isFileMutationTool('ask_user'));
+});
+
+test('covers the built-in file mutators once their modules are loaded', async t => {
+	await import('@/tools/file-ops/write-file');
+	await import('@/tools/file-ops/string-replace');
+	await import('@/tools/file-ops/diff-edit');
+	await import('@/tools/file-ops/file-op');
+	await import('@/tools/lsp-format-document');
+
+	for (const name of [
+		'write_file',
+		'string_replace',
+		'diff_edit',
+		'file_op',
+		// The one a hardcoded capture list missed: it mutates files and
+		// architect auto-executes it, so it has to be checkpointed too.
+		'lsp_format_document',
+	]) {
+		t.true(isFileMutationTool(name), `${name} should be a file mutation tool`);
 	}
 });

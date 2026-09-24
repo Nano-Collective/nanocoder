@@ -46,8 +46,13 @@ export class ScheduleEventSource {
 	 */
 	register(expression: string): void {
 		const count = this.refCounts.get(expression) ?? 0;
-		this.refCounts.set(expression, count + 1);
-		if (count > 0) return;
+		if (count > 0) {
+			this.refCounts.set(expression, count + 1);
+			return;
+		}
+		// Build the job before bumping the count: an invalid expression throws
+		// here, and the caller must be able to skip it without leaving a
+		// phantom reference behind.
 		const job = this.factory(expression, () => {
 			void this.router.emit({
 				kind: 'schedule.cron',
@@ -55,6 +60,7 @@ export class ScheduleEventSource {
 				at: Date.now(),
 			});
 		});
+		this.refCounts.set(expression, 1);
 		this.jobs.set(expression, job);
 	}
 

@@ -210,6 +210,10 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		contextWindow: provider.contextWindow,
 		contextWindows: provider.contextWindows,
 		maxOutputTokens: provider.maxOutputTokens,
+		// Both documented provider settings; leaving them out of this mapping
+		// made `promptCaching: false` and a custom `maxRetries` silently inert.
+		promptCaching: provider.promptCaching as boolean | undefined,
+		maxRetries: provider.maxRetries,
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,
@@ -222,11 +226,21 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
 		// by tune so users get consistent routing across sessions.
 		openrouter: provider.openrouter,
+		// Per-provider tune defaults, layered between top-level config and
+		// preferences by resolveTune.
+		tune: provider.tune,
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',
 			caCertPath: provider.caCertPath,
-			headers: provider.headers ?? {},
+			// organizationId is sugar for the OpenAI-Organization header; an
+			// explicit header of the same name in `headers` wins.
+			headers: {
+				...(provider.organizationId
+					? {'OpenAI-Organization': provider.organizationId}
+					: {}),
+				...provider.headers,
+			},
 		},
 	}));
 }

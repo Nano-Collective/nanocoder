@@ -126,7 +126,7 @@ pnpm run build
 pnpm run start
 ```
 
-Or build and run in one command:
+For development, recompile on every change (this only compiles; run `pnpm run start` in another terminal to launch):
 
 ```bash
 pnpm run dev

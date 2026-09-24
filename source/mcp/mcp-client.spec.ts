@@ -70,7 +70,32 @@ console.log(`\nmcp-client.spec.ts`);
 // CI would couple our pipeline to those services' uptime. Run them locally to
 // verify HTTP transport against live servers.
 const isCI = process.env.CI === 'true' || process.env.CI === '1';
-const testOrSkip = isCI ? test.skip : test;
+const testOrSkip = (title: string, impl: (t: any) => Promise<void> | void) => {
+	if (isCI) {
+		test.skip(title, impl as any);
+	} else {
+		test.serial(title, async t => {
+			let lastErr: any;
+			for (let i = 0; i < 3; i++) {
+				const result = await (t as any).try(impl);
+				if (result.passed) {
+					result.commit();
+					return;
+				}
+				
+				result.discard();
+				lastErr = result.errors[0] || new Error('Unknown test failure');
+				// These are remote integration tests, so we retry any failure 
+				// (usually fetch failures or socket hang ups wrapped in AssertionErrors)
+				if (i < 2) {
+					await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+					continue;
+				}
+			}
+			throw lastErr;
+		});
+	}
+};
 
 // ============================================================================
 // Tests for MCPClient - Transport Support
@@ -1334,6 +1359,28 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.true(client.isServerConnected('seam-server'));
 	t.is(client.getServerTools('seam-server').length, 1);
 	t.is(client.getServerInfo('seam-server')?.connected, true);
+});
+
+test('MCPClient.connectToServer: passes the configured timeout to connect and tools/list', async t => {
+	const seen: unknown[] = [];
+	const timedClient = {
+		async connect(_transport: unknown, options: unknown) {
+			seen.push(options);
+		},
+		async listTools(_params: unknown, options: unknown) {
+			seen.push(options);
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(timedClient);
+	await client.connectToServer({...httpServer, timeout: 1234});
+
+	t.deepEqual(seen, [{timeout: 1234}, {timeout: 1234}]);
 });
 
 // ============================================================================

@@ -1,8 +1,5 @@
 import {readFileSync} from 'node:fs';
-import {
-	parseSubscribeBlock,
-	SubscribeParseError,
-} from '@/skills/parse-subscribe';
+import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {
 	CustomToolApprovalPolicy,
 	CustomToolMetadata,
@@ -78,15 +75,10 @@ export function parseCustomToolFile(filePath: string): ParsedCustomToolFile {
 		throw new CustomToolParseError('Tool body (shell script) is empty');
 	}
 
-	let subscribe: SkillTrigger[] | undefined;
-	try {
-		subscribe = parseSubscribeBlock(raw.subscribe);
-	} catch (err) {
-		if (err instanceof SubscribeParseError) {
-			throw new CustomToolParseError(err.message);
-		}
-		throw err;
-	}
+	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlockOrWarn(
+		raw.subscribe,
+		filePath,
+	);
 
 	return {metadata, body: split.body, subscribe};
 }

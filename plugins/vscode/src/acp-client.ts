@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
-import type {TimelineCheckpoint} from './webview-protocol';
 import {PromptAttempt} from './prompt-attempt';
 
 // We expect at least the version of the CLI where ACP was introduced
@@ -21,6 +20,8 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
+	private _pendingSession: Promise<string | undefined> | null = null;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
@@ -84,6 +85,10 @@ export class NanocoderAcpClient {
 
 	hasPendingPermissions(): boolean {
 		return this.pendingPermissions.size > 0;
+	}
+
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
 	}
 
 	setConnection(connection: ClientSideConnection): void {
@@ -189,23 +194,39 @@ export class NanocoderAcpClient {
 			return this._sessionId;
 		}
 		if (!this.connection) return undefined;
+		// Coalesce overlapping callers. Without this, a click on "Send" racing
+		// the auto-init from `onConnectionReady` would each call newSession()
+		// against the shared connection; the second writer overwrites the
+		// first `_sessionId` and the first session is orphaned with its mode
+		// and configOptions already read into local state.
+		if (this._pendingSession) {
+			return this._pendingSession;
+		}
+		this._pendingSession = this._createSession(cwd);
+		try {
+			return await this._pendingSession;
+		} finally {
+			this._pendingSession = null;
+		}
+	}
 
+	private async _createSession(cwd: string): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
 			const initialModel = config.get<string>('model');
 
-			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
-			
+
 			// Parse modes and configOptions
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
 			}
-			
+
 			if (result.configOptions) {
 				this._parseConfigOptions(result.configOptions);
 			}
@@ -439,10 +460,10 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
+			this._sessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
@@ -458,40 +479,21 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async listTimeline(): Promise<TimelineCheckpoint[]> {
-		if (!this.connection || !this._sessionId) return [];
-		try {
-			const result = await this.connection.extMethod('timeline/list', {
-				sessionId: this._sessionId,
-			});
-			const entries = (result as {entries?: unknown}).entries;
-			return Array.isArray(entries) ? entries : [];
-		} catch (error) {
-			this.outputChannel.appendLine(`listTimeline failed: ${error}`);
-			return [];
-		}
-	}
-
 	/**
-	 * Throws on every failure path, including "not connected": the caller
-	 * tears down and rebuilds the chat view on success, so it has to be able
-	 * to tell a real revert from a no-op.
+	 * Erases the retried turn from session history before resending the prompt,
+	 * preventing duplicate user bubbles and stale assistant responses in history.
 	 */
-	async revertTimeline(checkpointId: string): Promise<void> {
+	async retryTurn(promptText?: string): Promise<void> {
 		if (!this.connection || !this._sessionId) {
-			const message = 'Not connected to a nanocoder session';
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${message}`);
-			throw new Error(message);
+			return;
 		}
 		try {
-			await this.connection.extMethod('timeline/revert', {
+			await this.connection.extMethod('retryTurn', {
 				sessionId: this._sessionId,
-				checkpointId,
+				promptText,
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`revertTimeline failed: ${error}`);
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${error}`);
-			throw error;
+			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}
 	}
 

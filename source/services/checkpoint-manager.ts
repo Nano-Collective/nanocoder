@@ -27,7 +27,10 @@ export class CheckpointManager {
 	private readonly checkpointsDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
 
+	private readonly workspaceRoot: string;
+
 	constructor(workspaceRoot: string = process.cwd()) {
+		this.workspaceRoot = workspaceRoot;
 		// nosemgrep
 		this.checkpointsDir = path.join(workspaceRoot, '.nanocoder', 'checkpoints'); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
@@ -139,6 +142,13 @@ export class CheckpointManager {
 			timestamp: new Date().toISOString(),
 			messageCount: messages.length,
 			filesChanged: Array.from(fileSnapshots.keys()),
+			filesMissing: filesToSnapshot
+				.map(filePath => filePath.split(path.sep).join('/'))
+				.filter(
+					filePath =>
+						!fileSnapshots.has(filePath) &&
+						!skipped.some(skippedFile => skippedFile.path === filePath),
+				),
 			provider: {name: provider, model},
 			description: this.generateDescription(messages),
 			// Only recorded when the checkpoint really is incomplete, so a clean
@@ -178,14 +188,92 @@ export class CheckpointManager {
 			const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 			await fs.mkdir(filesDir, {recursive: true});
 
-			for (const [relativePath, content] of fileSnapshots) {
+			for (const [relativePath, snapshot] of fileSnapshots) {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const fileDir = path.dirname(filePath);
+
 				await fs.mkdir(fileDir, {recursive: true});
-				await fs.writeFile(filePath, content);
+				await fs.writeFile(filePath, snapshot);
 			}
 		}
 
+		return metadata;
+	}
+	/**
+	 * Extend an existing checkpoint with file snapshots that were not
+	 * known when the checkpoint was originally created.
+	 *
+	 * This keeps a single logical checkpoint for an Architect turn while
+	 * ensuring files first encountered by later tool calls are captured
+	 * before they are mutated.
+	 */
+	async extendCheckpoint(
+		name: string,
+		modifiedFiles: string[],
+	): Promise<CheckpointMetadata> {
+		const checkpointDir = this.getCheckpointDir(name);
+
+		if (!existsSync(checkpointDir)) {
+			return this.getCheckpointMetadata(name);
+		}
+
+		// Load current metadata.
+		const metadataPath = path.join(checkpointDir, 'metadata.json'); // nosemgrep
+		const metadataContent = await fs.readFile(metadataPath, 'utf-8');
+		const metadata = JSON.parse(metadataContent) as CheckpointMetadata;
+
+		const existingFiles = new Set(metadata.filesChanged);
+		const newFiles = modifiedFiles.filter(
+			relativePath => !existingFiles.has(relativePath),
+		);
+
+		// Nothing new to capture.
+		if (newFiles.length === 0) {
+			return metadata;
+		}
+
+		//Capture the new paths BEFORE their mutations execute.
+		const {snapshots: fileSnapshots, skipped} =
+			await this.fileSnapshotService.captureFiles(newFiles);
+		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
+		await fs.mkdir(filesDir, {recursive: true});
+
+		for (const [relativePath, snapshot] of fileSnapshots) {
+			const filePath = path.join(filesDir, relativePath); // nosemgrep
+			const fileDir = path.dirname(filePath);
+
+			await fs.mkdir(fileDir, {recursive: true});
+			await fs.writeFile(filePath, snapshot);
+		}
+
+		// Extend metadata while preserving the original checkpoint
+		// timestamp and conversation information.
+		metadata.filesChanged = [...metadata.filesChanged, ...fileSnapshots.keys()];
+
+		const existingMissing = new Set(metadata.filesMissing ?? []);
+
+		for (const relativePath of newFiles) {
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
+			if (
+				!fileSnapshots.has(normalizedPath) &&
+				!skipped.some(skippedFile => skippedFile.path === normalizedPath)
+			) {
+				existingMissing.add(normalizedPath);
+			}
+		}
+
+		metadata.filesMissing = [...existingMissing];
+
+		if (skipped.length > 0) {
+			metadata.skippedFiles = [...(metadata.skippedFiles ?? []), ...skipped];
+		}
+
+		await fs.writeFile(
+			metadataPath,
+			JSON.stringify(metadata, null, 2),
+			'utf-8',
+		);
 		return metadata;
 	}
 
@@ -231,20 +319,23 @@ export class CheckpointManager {
 		const fileSnapshots = new Map<string, Buffer>();
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 
-		if (existsSync(filesDir)) {
-			for (const relativePath of metadata.filesChanged) {
-				try {
-					const filePath = path.join(filesDir, relativePath); // nosemgrep
-					const content = await fs.readFile(filePath);
-					fileSnapshots.set(relativePath, content);
-				} catch (error) {
-					logWarning('Could not load file snapshot', true, {
-						context: {
-							relativePath,
-							error: formatError(error),
-						},
-					});
-				}
+		for (const relativePath of metadata.filesChanged) {
+			if (!existsSync(filesDir)) {
+				continue;
+			}
+
+			try {
+				const filePath = path.join(filesDir, relativePath); // nosemgrep
+				const content = await fs.readFile(filePath);
+
+				fileSnapshots.set(relativePath, content);
+			} catch (error) {
+				logWarning('Could not load file snapshot', true, {
+					context: {
+						relativePath,
+						error: formatError(error),
+					},
+				});
 			}
 		}
 
@@ -411,6 +502,14 @@ export class CheckpointManager {
 		// but gaps.
 		const gaps = describeCheckpointGaps(checkpointData);
 
+		// Files absent at capture are restored by being absent again. Runs
+		// before the early return below: a turn that only created files has no
+		// snapshots to write back, and skipping the delete there is exactly the
+		// case where revert silently left the new files on disk.
+		await this.fileSnapshotService.removeFiles(
+			checkpointData.metadata.filesMissing ?? [],
+		);
+
 		if (checkpointData.fileSnapshots.size === 0) {
 			return gaps; // No files to restore
 		}
@@ -467,6 +566,41 @@ export class CheckpointManager {
 	checkpointExists(name: string): boolean {
 		const checkpointDir = this.getCheckpointDir(name);
 		return existsSync(checkpointDir);
+	}
+
+	/**
+	 * The checkpointed paths that differ on disk now: snapshotted files whose
+	 * bytes changed or that were deleted, and paths absent at capture that now
+	 * exist. A checkpoint records every path a tool was ABOUT to touch, so its
+	 * own lists include edits that failed or changed nothing.
+	 */
+	async getChangesSince(
+		name: string,
+	): Promise<{filesChanged: string[]; filesMissing: string[]}> {
+		const {metadata, fileSnapshots} = await this.loadCheckpoint(name);
+
+		const filesChanged: string[] = [];
+		for (const relativePath of metadata.filesChanged) {
+			const snapshot = fileSnapshots.get(relativePath);
+			const absolutePath = path.join(this.workspaceRoot, relativePath); // nosemgrep
+			let current: Buffer | null = null;
+			try {
+				current = await fs.readFile(absolutePath);
+			} catch {
+				current = null;
+			}
+			// No snapshot to compare against (unreadable at load): report it
+			// rather than hide a change we cannot rule out.
+			if (!snapshot || !current || !snapshot.equals(current)) {
+				filesChanged.push(relativePath);
+			}
+		}
+
+		const filesMissing = (metadata.filesMissing ?? []).filter(
+			relativePath => existsSync(path.join(this.workspaceRoot, relativePath)), // nosemgrep
+		);
+
+		return {filesChanged, filesMissing};
 	}
 
 	/**

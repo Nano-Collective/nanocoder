@@ -11,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test, {type ExecutionContext} from 'ava';
 import {
+	applyParameterDefaults,
 	buildHandler,
 	expandVars,
 	mergeEnv,
@@ -72,6 +73,20 @@ function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
 		...extra,
 	};
 }
+
+test('applyParameterDefaults fills omitted args and keeps provided ones', t => {
+	const m = meta({
+		parameters: {
+			selector: {type: 'string', default: 'app=api'},
+			limit: {type: 'number', default: 10},
+			name: {type: 'string'},
+		},
+	});
+	t.deepEqual(applyParameterDefaults(m, {limit: 3}), {
+		selector: 'app=api',
+		limit: 3,
+	});
+});
 
 test('expandVars replaces $VAR and ${VAR}', t => {
 	const prev = process.env.NCT_FOO;

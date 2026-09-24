@@ -134,9 +134,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 						<Text>No saved sessions found.</Text>
 					)}
 					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Press Escape to continue • Esc to cancel
-						</Text>
+						<Text color={colors.secondary}>Press Esc to close</Text>
 					</Box>
 				</Box>
 			</TitledBoxWithPreferences>

@@ -40,6 +40,7 @@ Hosted services using the OpenAI-compatible API format.
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
 - [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
+- [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
@@ -79,12 +80,15 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |
 | `maxOutputTokens` | Cap on tokens the model may generate in one response, for all models on this provider (optional, see [Output Token Ceiling](#output-token-ceiling)) |
 | `sdkProvider` | AI SDK provider to use (see below, defaults to `openai-compatible`) |
-| `organizationId` | Organization ID for OpenAI (optional) |
+| `organizationId` | OpenAI organization ID, sent as the `OpenAI-Organization` header (optional) |
+| `headers` | Extra HTTP headers sent with every request to this provider, as an object of name/value pairs (optional). An explicit `OpenAI-Organization` here wins over `organizationId` |
+| `tune` | [Tune](../../features/tune.md) defaults applied while this provider is active (optional) |
+| `openrouter` | OpenRouter request options (provider routing, reasoning, plugins, fallback models). Only read for a provider named `openrouter` in any case. See [OpenRouter](openrouter.md) (optional) |
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
 | `promptCaching` | Set to `false` to opt out of prompt caching (optional, boolean). Only read when `sdkProvider` is `anthropic`, where it defaults to `true`; ignored on every other SDK provider. See [Anthropic](anthropic.md#prompt-caching) |
-| `requestTimeout` | Overall request timeout in milliseconds (default: 120,000). Set to `-1` to disable (optional) |
-| `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
+| `requestTimeout` | Fallback for `socketTimeout` in milliseconds (optional). Not a separate whole-request deadline, see [Timeouts & Connection Pooling](#timeouts--connection-pooling) |
+| `socketTimeout` | Connect, response-header and body timeout in milliseconds (default: 120,000, or 600,000 for a local `baseUrl`). Uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
 
@@ -144,7 +148,8 @@ A `/tune` max-tokens value, where one is set, takes priority. Headless runs (`na
 | `openai-compatible` | Default. Works with any OpenAI-compatible API |
 | `google` | Native Google Gemini support via `@ai-sdk/google` |
 | `anthropic` | Native Anthropic support via `@ai-sdk/anthropic`. Also used by Kimi Code, MiniMax, and Thesean AI |
-| `github-copilot` | GitHub Copilot with device OAuth authentication |
+| `github-copilot` | GitHub Copilot with device OAuth authentication. See [GitHub Copilot](github-copilot.md) |
+| `chatgpt-codex` | ChatGPT Plus/Pro subscription via the Codex backend, with device OAuth authentication. See [ChatGPT / Codex](chatgpt-codex.md) |
 
 ## Environment Variable Overrides
 
@@ -189,9 +194,9 @@ API keys and other config values support environment variable substitution:
 
 ## Timeouts & Connection Pooling
 
-By default, requests timeout after 2 minutes (120,000 ms). For local models that may take longer to respond, you can increase or disable timeouts.
+By default, a request times out if the connection, response headers or the gap between streamed chunks exceed 2 minutes (120,000 ms). When `baseUrl` points at this machine (`localhost`, `127.0.0.1`, `0.0.0.0` or `::1`) the default is 10 minutes (600,000 ms) instead, since local models can be slow to produce the first token.
 
-It is recommended to set both `requestTimeout` and `socketTimeout` to the same value for consistent behavior. Set both to `-1` to disable timeouts entirely.
+`socketTimeout` sets all three of those limits. `requestTimeout` is only used when `socketTimeout` is not set, so setting either one is enough. Neither is a deadline for the whole response: a stream that keeps producing tokens is never cut off. Set the value to `-1` to disable timeouts entirely.
 
 The `connectionPool` object accepts:
 
@@ -225,7 +230,7 @@ The `connectionPool` object accepts:
 If you experience the model repeating tool calls or getting into loops (especially with multi-turn conversations), this is often caused by insufficient context length settings in your local AI provider. Set the context length as high as your system's memory can handle — agentic coding conversations need large context to track tool calls, file contents, and conversation history.
 
 - **LM Studio**: Increase "Context Length" in Settings > Model Settings
-- **Ollama**: Set context length with `OLLAMA_NUM_CTX=32768`
+- **Ollama**: Set context length with `OLLAMA_CONTEXT_LENGTH=32768` when starting `ollama serve`, or `num_ctx` in a Modelfile
 - **llama.cpp**: Use `--ctx-size 32768` or higher when starting the server
 - **vLLM**: Set `--max-model-len 32768` when launching
 

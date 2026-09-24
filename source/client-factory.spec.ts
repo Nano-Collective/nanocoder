@@ -1549,3 +1549,73 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'loadProviderConfigs carries promptCaching and maxRetries through',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'Anth',
+						sdkProvider: 'anthropic',
+						apiKey: 'test-key',
+						models: ['claude-sonnet-4-5'],
+						promptCaching: false,
+						maxRetries: 7,
+					},
+				],
+			});
+
+			const anth = loadProviderConfigs().find(p => p.name === 'Anth');
+
+			// Dropping these made the documented opt-out and retry count inert.
+			t.is(anth?.promptCaching, false);
+			t.is(anth?.maxRetries, 7);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);
+
+test.serial(
+	'loadProviderConfigs carries tune and turns organizationId into a header',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenAI',
+						baseUrl: 'https://api.openai.com/v1',
+						apiKey: 'test-key',
+						models: ['gpt-5'],
+						organizationId: 'org-123',
+						headers: {'X-Extra': '1'},
+						tune: {enabled: true, toolProfile: 'minimal'},
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openai = resolved.find(p => p.name === 'OpenAI');
+
+			t.deepEqual(openai?.tune, {enabled: true, toolProfile: 'minimal'});
+			t.deepEqual(openai?.config.headers, {
+				'OpenAI-Organization': 'org-123',
+				'X-Extra': '1',
+			});
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);

@@ -337,7 +337,7 @@ test('openai template: handles multiple models', t => {
 	t.deepEqual(config.models, ['gpt-5-codex', 'gpt-4-turbo', 'gpt-4']);
 });
 
-test('custom template: includes timeout', t => {
+test('custom template: writes requestTimeout, the key the client reads', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);
 
@@ -345,10 +345,20 @@ test('custom template: includes timeout', t => {
 		providerName: 'custom-provider',
 		baseUrl: 'http://localhost:8000/v1',
 		model: 'my-model',
-		timeout: '60000',
+		requestTimeout: '60000',
 	});
 
-	t.is(config.timeout, 60000);
+	t.is(config.requestTimeout, 60000);
+	t.is(config.timeout, undefined);
+});
+
+test('chatgpt-codex template: default provider name matches the login default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'chatgpt-codex');
+	t.truthy(template);
+	const field = template!.fields.find(f => f.name === 'providerName');
+	t.is(field?.default, 'ChatGPT');
+	const config = template!.buildConfig({model: 'gpt-5.3-codex'});
+	t.is(config.name, 'ChatGPT');
 });
 
 test('gemini template: sets sdkProvider to google', t => {
@@ -564,6 +574,39 @@ test('orcarouter template: uses default provider name and model default', t => {
 	});
 
 	t.is(config.name, 'OrcaRouter');
+});
+
+test('cheaper-inference template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Cheaper Inference',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-5, deepseek-v4.1-flash',
+	});
+
+	t.is(config.name, 'Cheaper Inference');
+	t.is(config.baseUrl, 'https://api.cheaperinference.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['claude-sonnet-5', 'deepseek-v4.1-flash']);
+});
+
+test('cheaper-inference template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'claude-sonnet-5');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-5',
+	});
+
+	t.is(config.name, 'Cheaper Inference');
 });
 
 // ============================================================================

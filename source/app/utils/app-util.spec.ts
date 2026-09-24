@@ -431,6 +431,22 @@ test.serial('chat message - displayValue is optional (callers without a placehol
 	t.is(received.displayValue, undefined);
 });
 
+test.serial('delayed slash-command completion is delivered after the handler returns', async t => {
+	let completed = false;
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {
+			completed = true;
+		},
+	});
+	options.onShowStatus = () => {};
+
+	await handleMessageSubmission('/status', options);
+
+	t.false(completed);
+	await new Promise(resolve => setTimeout(resolve, 125));
+	t.true(completed);
+});
+
 test.serial('retry command - /retry without a prior user turn shows an error', async t => {
 	let queued: React.ReactNode = null;
 	let submitted = false;
@@ -860,6 +876,19 @@ test('rename command - valid name calls onRenameSession with trimmed value', asy
 	});
 	await handleMessageSubmission('/rename my-session', options);
 	t.is(capturedName, 'my-session');
+});
+
+test('rename command - surrounding spaces do not count toward the length limit', async t => {
+	let capturedName: string | undefined;
+	const name = 'a'.repeat(100);
+	const options = createRenameTestOptions({
+		onRenameSession: value => {
+			capturedName = value;
+		},
+		commandArgs: ['', '', name, '', ''],
+	});
+	await handleMessageSubmission(`/rename   ${name}  `, options);
+	t.is(capturedName, name);
 });
 
 test('rename command - multi-word name is joined with spaces', async t => {

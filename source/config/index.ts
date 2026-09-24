@@ -528,6 +528,47 @@ function loadDisabledToolsConfig(): string[] | undefined {
 	);
 }
 
+// User-defined LSP servers. Entries without a name, command or languages list
+// are dropped rather than handed to the LSP manager half-formed.
+function loadLspServersConfig(): AppConfig['lspServers'] {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'lspServers', config => {
+			const lspServers = config.nanocoder?.lspServers;
+			if (!Array.isArray(lspServers)) {
+				return null;
+			}
+			const valid: NonNullable<AppConfig['lspServers']> = [];
+			for (const server of lspServers) {
+				if (
+					!server ||
+					typeof server.name !== 'string' ||
+					typeof server.command !== 'string' ||
+					!Array.isArray(server.languages)
+				) {
+					continue;
+				}
+				valid.push({
+					name: server.name,
+					command: server.command,
+					args: Array.isArray(server.args)
+						? server.args.filter(
+								(arg: unknown): arg is string => typeof arg === 'string',
+							)
+						: undefined,
+					languages: server.languages.filter(
+						(lang: unknown): lang is string => typeof lang === 'string',
+					),
+					env:
+						server.env && typeof server.env === 'object'
+							? server.env
+							: undefined,
+				});
+			}
+			return valid;
+		}) ?? undefined
+	);
+}
+
 function loadSystemPromptConfig(): SystemPromptConfig | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'systemPrompt', config => {
@@ -570,19 +611,42 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 
 	const definition: HookDefinition = {command};
 
-	if (Array.isArray(entry.matchTools)) {
-		const matchTools = entry.matchTools.filter(
-			(item: unknown): item is string => typeof item === 'string',
-		);
-		if (matchTools.length > 0) definition.matchTools = matchTools;
-	}
-
-	if (Array.isArray(entry.matchPaths)) {
-		const matchPaths = entry.matchPaths.filter(
+	// A bare string is accepted as a one-item list. Dropping it silently would
+	// widen a scoped guard to every tool.
+	const rawMatchTools =
+		typeof entry.matchTools === 'string'
+			? [entry.matchTools]
+			: entry.matchTools;
+	if (Array.isArray(rawMatchTools)) {
+		const matchTools = rawMatchTools.filter(
 			(item: unknown): item is string =>
 				typeof item === 'string' && item.trim() !== '',
 		);
-		if (matchPaths.length > 0) definition.matchPaths = matchPaths;
+		if (matchTools.length > 0) {
+			definition.matchTools = matchTools;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchTools list, so it runs for every tool. Remove matchTools to make that explicit, or list the tools to scope it.`,
+			);
+		}
+	}
+
+	const rawMatchPaths =
+		typeof entry.matchPaths === 'string'
+			? [entry.matchPaths]
+			: entry.matchPaths;
+	if (Array.isArray(rawMatchPaths)) {
+		const matchPaths = rawMatchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) {
+			definition.matchPaths = matchPaths;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchPaths list, so it is not scoped by path.`,
+			);
+		}
 	}
 
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
@@ -732,7 +796,12 @@ function loadAppConfig(): AppConfig {
 
 	// Load MCP servers from the new hierarchical configuration system
 	const mcpServersWithSource = loadAllMCPConfigs();
-	const mcpServers = mcpServersWithSource.map(item => item.server);
+	// Keep provenance on the runtime objects: validateProjectConfigSecurity
+	// filters on MCPServerConfig.source, which the loader only tracks on the wrapper.
+	const mcpServers = mcpServersWithSource.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
 
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
@@ -774,9 +843,13 @@ function loadAppConfig(): AppConfig {
 
 	const sandbox = loadSandboxConfig();
 
+	// Load user-defined LSP servers (auto-discovery still runs alongside)
+	const lspServers = loadLspServersConfig();
+
 	return {
 		providers,
 		mcpServers,
+		lspServers,
 		autoCompact,
 		sessions,
 		headless,

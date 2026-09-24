@@ -150,7 +150,15 @@ export class MCPClient {
 					serverName: normalizedServer.name,
 				});
 
-				await client.connect(transport);
+				// `timeout` bounds the connection handshake (initialize) and the
+				// initial tools/list; tool calls keep the SDK's own default.
+				const connectOptions =
+					typeof normalizedServer.timeout === 'number' &&
+					normalizedServer.timeout > 0
+						? {timeout: normalizedServer.timeout}
+						: undefined;
+
+				await client.connect(transport, connectOptions);
 
 				// Stdio transports are created with stderr:'pipe' (see
 				// TransportFactory) so server children can't write to the
@@ -177,7 +185,7 @@ export class MCPClient {
 				// List available tools from this server. Do this before registering
 				// the server so a failed tools/list doesn't leave it visible as
 				// connected — the maps are populated only once discovery succeeds.
-				const toolsResult = await client.listTools();
+				const toolsResult = await client.listTools(undefined, connectOptions);
 				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
 					name: tool.name,
 					description: tool.description || undefined,

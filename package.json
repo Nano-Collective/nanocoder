@@ -66,7 +66,9 @@
 		"dist",
 		"schemas",
 		"source/app/prompts/sections",
+		"source/subagents/built-in",
 		"source/config/themes.json",
+		"assets/nanocoder-icon.png",
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
@@ -158,7 +160,8 @@
 		"environmentVariables": {
 			"NODE_ENV": "test",
 			"LC_ALL": "en-US.UTF-8",
-			"LANG": "en-US.UTF-8"
+			"LANG": "en-US.UTF-8",
+			"NANOCODER_DATA_DIR": ".test-temp/data"
 		}
 	},
 	"c8": {

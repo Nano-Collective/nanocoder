@@ -37,7 +37,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Categories
 
-Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`.
+Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
 
 ## Recall
 
@@ -57,7 +57,7 @@ Recall runs on:
 - subagent runs (the `agent` tool)
 - daemon-triggered skill runs (they use the same subagent executor)
 
-The TUI, plain shell, and ACP print `Recalling N project memories...` when memories are injected. Subagent and daemon runs inject the same block silently, since there is no chat UI to attach that notice to.
+The TUI and plain shell print `Recalling N project memories...` when memories are injected. ACP writes the recall to the Nanocoder log only, so nothing appears in the editor. Subagent and daemon runs inject the same block silently, since there is no chat UI to attach that notice to.
 
 ### Tuning the budget
 
@@ -98,10 +98,10 @@ Memories are stored per-repository in a local JSON file under the Nanocoder data
 | Platform | Path |
 |---|---|
 | macOS | `~/Library/Application Support/nanocoder/memory/` |
-| Linux | `~/.local/share/nanocoder/memory/` (or `$XDG_DATA_HOME/nanocoder/memory/`) |
+| Linux | `~/.local/share/nanocoder/memory/` |
 | Windows | `%APPDATA%\nanocoder\memory\` |
 
-Setting `NANOCODER_DATA_DIR` overrides all of these.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/memory/` is used instead, on every platform. Setting `NANOCODER_DATA_DIR` overrides all of these.
 
 The filename is a hash of the repository's `git remote origin.url`, or of its absolute path for non-git directories. This means:
 

@@ -28,6 +28,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
@@ -146,6 +147,11 @@ const stringReplaceCoreTool = tool({
 				type: 'string',
 				description:
 					'The replacement string. Can be empty to delete content. Must preserve proper indentation and formatting.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this replacement.',
 			},
 		},
 		required: ['path', 'old_str', 'new_str'],

@@ -24,6 +24,7 @@ import {
 	runLifecycleHooks,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -50,7 +51,7 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {resolveAutoCompactSettings} from '@/utils/auto-compact';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
@@ -105,6 +106,22 @@ interface UseAppHandlersProps {
 		value: {show: boolean; originalMessage: string} | null,
 	) => void;
 	setPendingPlanProceed: (value: string | null) => void;
+
+	setArchitectReviewState: (
+		value: {
+			show: boolean;
+			checkpointName: string;
+			filesChanged: string[];
+			filesMissing: string[];
+		} | null,
+	) => void;
+
+	architectReviewState: {
+		show: boolean;
+		checkpointName: string;
+		filesChanged: string[];
+		filesMissing: string[];
+	} | null;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -161,6 +178,9 @@ export interface AppHandlers {
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
+	handleArchitectKeep: () => Promise<void>;
+	handleArchitectRevert: () => Promise<void>;
+	handleArchitectRevertAndRevise: (instructions: string) => Promise<void>;
 	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
@@ -232,14 +252,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// non-interactive mode entered by the daemon, not the user.
 		if (props.developmentMode === 'headless') return;
 
-		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
-			'normal',
-			'auto-accept',
-			'yolo',
-			'plan',
-		];
+		const modes: Array<
+			'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'
+		> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 		const currentIndex = modes.indexOf(
-			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+			props.developmentMode as
+				| 'normal'
+				| 'auto-accept'
+				| 'yolo'
+				| 'plan'
+				| 'architect',
 		);
 		const nextIndex = (currentIndex + 1) % modes.length;
 		const nextMode = modes[nextIndex];
@@ -381,22 +403,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			const config = getAppConfig();
 			const autoCompactConfig = config.autoCompact;
 			if (autoCompactConfig) {
-				const enabled =
-					autoCompactSessionOverrides.enabled !== null
-						? autoCompactSessionOverrides.enabled
-						: autoCompactConfig.enabled;
-				const threshold =
-					autoCompactSessionOverrides.threshold !== null
-						? autoCompactSessionOverrides.threshold
-						: autoCompactConfig.threshold;
-				const mode =
-					autoCompactSessionOverrides.mode !== null
-						? autoCompactSessionOverrides.mode
-						: autoCompactConfig.mode;
-				const hasOverrides =
-					autoCompactSessionOverrides.enabled !== null ||
-					autoCompactSessionOverrides.threshold !== null ||
-					autoCompactSessionOverrides.mode !== null;
+				const {enabled, threshold, mode, hasOverrides} =
+					resolveAutoCompactSettings(autoCompactConfig);
 
 				autoCompactInfo = {
 					enabled,
@@ -653,6 +661,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const handlePlanAskMore = React.useCallback(async () => {
 		// Hide the review bar and stay in plan mode; the model asks its questions
 		// and the user answers before a new plan is produced.
+		props.setIsConversationComplete(false);
 		props.setPlanReviewState(null);
 		await props.handleChatMessage(
 			'please ask me any additional clarifying questions before proceeding',
@@ -661,6 +670,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	const handlePlanModify = React.useCallback(() => {
 		// Return to input without changing mode so the user can request revisions.
+		// Keep the queue blocked until that revision turn has completed.
+		props.setIsConversationComplete(false);
 		props.setPlanReviewState(null);
 		props.addToChatQueue(
 			<SuccessMessage
@@ -670,6 +681,186 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			/>,
 		);
 	}, [props.setPlanReviewState, props.addToChatQueue, props]);
+
+	// Architect review action bar handlers
+
+	/**
+	 * Release the turn's checkpoint once the gate has resolved.
+	 *
+	 * Every exit from the bar runs this. Architect takes a checkpoint per turn,
+	 * so leaving them behind fills `/checkpoint list` with machine-named entries
+	 * and a full file-and-conversation snapshot each. Failure is not worth
+	 * surfacing: the gate is already resolved and the user's files are in the
+	 * state they asked for.
+	 */
+	const releaseArchitectCheckpoint = React.useCallback(
+		async (checkpointName: string) => {
+			try {
+				await new CheckpointManager(getProjectRoot()).deleteCheckpoint(
+					checkpointName,
+				);
+			} catch {
+				// Intentionally ignored - see above.
+			}
+		},
+		[],
+	);
+
+	/**
+	 * Tell the model what the gate did to its work.
+	 *
+	 * Without this the conversation still says every write succeeded while the
+	 * files have moved back underneath it, so the next `string_replace` matches
+	 * `old_str` against a state that no longer exists. Appended as a user turn
+	 * so it travels with the next request.
+	 */
+	const appendArchitectRevertNotice = React.useCallback(
+		(filesChanged: string[]) => {
+			const fileList =
+				filesChanged.length > 0
+					? ` The following files were restored to their previous contents: ${filesChanged.join(', ')}.`
+					: '';
+
+			props.updateMessages([
+				...props.messages,
+				{
+					role: 'user',
+					content: `[The changes from your previous turn were reverted and are no longer on disk.${fileList} Re-read any file before editing it - your earlier edits are gone.]`,
+				},
+			]);
+		},
+		[props.messages, props.updateMessages],
+	);
+
+	const handleArchitectKeep = React.useCallback(async () => {
+		const reviewState = props.architectReviewState;
+
+		props.setArchitectReviewState(null);
+
+		if (!reviewState?.checkpointName) {
+			return;
+		}
+
+		await releaseArchitectCheckpoint(reviewState.checkpointName);
+
+		props.addToChatQueue(
+			<SuccessMessage
+				key={generateKey('architect-keep')}
+				message={`✓ Kept ${reviewState.filesChanged.length + reviewState.filesMissing.length} changed file(s)`}
+				hideBox={true}
+			/>,
+		);
+	}, [
+		props.architectReviewState,
+		props.setArchitectReviewState,
+		props.addToChatQueue,
+		releaseArchitectCheckpoint,
+		props,
+	]);
+
+	const handleArchitectRevert = React.useCallback(async () => {
+		const reviewState = props.architectReviewState;
+
+		if (!reviewState?.checkpointName) {
+			return;
+		}
+
+		try {
+			const manager = new CheckpointManager(getProjectRoot());
+
+			const checkpointData = await manager.loadCheckpoint(
+				reviewState.checkpointName,
+				{
+					validateIntegrity: true,
+				},
+			);
+
+			await manager.restoreFiles(checkpointData);
+
+			props.setArchitectReviewState(null);
+			appendArchitectRevertNotice(reviewState.filesChanged);
+			await releaseArchitectCheckpoint(reviewState.checkpointName);
+
+			props.addToChatQueue(
+				<SuccessMessage
+					key={generateKey('architect-revert-success')}
+					message={`✓ Architect changes reverted successfully`}
+					hideBox={true}
+				/>,
+			);
+		} catch (error) {
+			props.addToChatQueue(
+				<ErrorMessage
+					key={generateKey('architect-revert-error')}
+					message={`Failed to revert Architect changes: ${formatError(error)}`}
+					hideBox={true}
+				/>,
+			);
+		}
+	}, [
+		props.architectReviewState,
+		props.setArchitectReviewState,
+		props.addToChatQueue,
+		appendArchitectRevertNotice,
+		releaseArchitectCheckpoint,
+		props,
+	]);
+
+	const handleArchitectRevertAndRevise = React.useCallback(
+		async (instructions: string) => {
+			const reviewState = props.architectReviewState;
+
+			if (!reviewState?.checkpointName) {
+				return;
+			}
+
+			try {
+				const manager = new CheckpointManager(getProjectRoot());
+
+				const checkpointData = await manager.loadCheckpoint(
+					reviewState.checkpointName,
+					{
+						validateIntegrity: true,
+					},
+				);
+
+				await manager.restoreFiles(checkpointData);
+
+				// Mark the conversation incomplete before the review bar goes away.
+				// Dismissing the bar leaves a render where nothing is generating and
+				// the turn still reads complete, and the revise turn below starts
+				// through handleChatMessage, which never resets the flag itself. A
+				// queued prompt would otherwise drain into that gap.
+				props.setIsConversationComplete(false);
+				props.setArchitectReviewState(null);
+				await releaseArchitectCheckpoint(reviewState.checkpointName);
+
+				// Says reverted, not "review the changes you just made" - those
+				// changes are gone, and the old wording pointed the model at a
+				// disk state that no longer existed.
+				await props.handleChatMessage(
+					`Your previous changes were reverted and are no longer on disk. Re-read any file before editing it, then redo the work with these instructions:\n\n${instructions}`,
+					instructions,
+				);
+			} catch (error) {
+				props.addToChatQueue(
+					<ErrorMessage
+						key={generateKey('architect-revise-error')}
+						message={`Failed to revert Architect changes: ${formatError(error)}`}
+						hideBox={true}
+					/>,
+				);
+			}
+		},
+		[
+			props.architectReviewState,
+			props.setArchitectReviewState,
+			props.setIsConversationComplete,
+			props.addToChatQueue,
+			releaseArchitectCheckpoint,
+			props,
+		],
+	);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
@@ -852,5 +1043,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handlePlanProceed,
 		handlePlanAskMore,
 		handlePlanModify,
+		handleArchitectKeep,
+		handleArchitectRevert,
+		handleArchitectRevertAndRevise,
 	};
 }

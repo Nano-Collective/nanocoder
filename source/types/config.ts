@@ -75,7 +75,10 @@ export interface ProviderConfig {
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
+	// Sent as the OpenAI-Organization header.
 	organizationId?: string;
+	// Legacy: older Custom Provider wizard runs wrote this, but it was never
+	// read. Use requestTimeout instead.
 	timeout?: number;
 	connectionPool?: {
 		idleTimeout?: number;
@@ -90,6 +93,8 @@ export interface ProviderConfig {
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
+	// Tune defaults applied while this provider is active.
+	tune?: Partial<TuneConfig>;
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
@@ -295,8 +300,6 @@ export interface DiskNanocoderConfig {
 		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
 		maxTurns?: number;
 	};
-	/** Model Context Protocol server configurations. */
-	mcpServers?: MCPServerConfig[];
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
 		name: string;
@@ -456,6 +459,11 @@ export interface MCPServerConfig {
 	enabled?: boolean;
 	// Optional source information for display purposes
 	source?: 'project' | 'global' | 'env';
+	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
+	// references are expanded before runtime use, so the scanner must read
+	// these raw copies or every $API_KEY looks hardcoded.
+	rawEnv?: Record<string, string>;
+	rawHeaders?: Record<string, string>;
 }
 
 // Tune configuration for runtime model tuning via /tune command.
