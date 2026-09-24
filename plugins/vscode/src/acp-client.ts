@@ -38,7 +38,7 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
-	public activePrompt?: PromptAttempt;
+	private activePrompt?: PromptAttempt;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -83,6 +83,10 @@ export class NanocoderAcpClient {
 
 	hasPendingPermissions(): boolean {
 		return this.pendingPermissions.size > 0;
+	}
+
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
 	}
 
 	setConnection(connection: ClientSideConnection): void {

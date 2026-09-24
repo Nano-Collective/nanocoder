@@ -790,7 +790,7 @@ export class ChatWebviewProvider
 
 			// A second turn would overwrite acpClient.activePrompt mid-flight,
 			// making cancel() target the new attempt instead of the one running.
-			if (this._acpClient.activePrompt) {
+			if (this._acpClient.hasActivePrompt()) {
 				vscode.window.showWarningMessage('Nanocoder: a turn is already in progress. Wait for it to finish or cancel it before sending a new message.');
 				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 				return;

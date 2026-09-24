@@ -9,7 +9,7 @@ function makeStubs() {
 
 	const acpClient = {
 		hasPendingPermissions: () => false,
-		activePrompt: undefined as any,
+		hasActivePrompt: () => false,
 		currentMode: undefined,
 		getOrCreateSession: async () => 'session-1',
 		prompt: async () => ({stopReason: 'end_turn'}),
@@ -52,7 +52,7 @@ test('ChatWebviewProvider - _handlePrompt rejects a submit when a turn is alread
 
 	// Pre-set activePrompt to mirror the state acpClient.prompt() leaves the
 	// field in for the duration of a turn - the busy-check reads it and bails.
-	(acpClient as any).activePrompt = {cancel: () => {}};
+	(acpClient as any).hasActivePrompt = () => true;
 
 	let promptCalls = 0;
 	let getOrCreateCalls = 0;
