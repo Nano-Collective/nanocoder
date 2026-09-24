@@ -11,6 +11,7 @@ import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
 import type {useChatHandler} from '@/hooks/chat-handler';
+import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
@@ -18,6 +19,7 @@ import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {hasStagedChanges} from '@/tools/git/utils';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
@@ -124,6 +126,30 @@ export function InteractiveApp({
 	const handleToggleReasoningExpanded = () => {
 		appState.setReasoningExpanded(!appState.reasoningExpanded);
 	};
+
+	// After a turn that edited files, suggest a follow-up command in the empty
+	// prompt: /commit when changes are already staged (it only reads the staged
+	// diff), otherwise /checkpoint create. Keyed on the message count, so a slash
+	// command completing - the suggested one included - doesn't bring it back.
+	const [suggestedCommand, setSuggestedCommand] = React.useState<string | null>(
+		null,
+	);
+	const suggestionKeyRef = React.useRef<number | null>(null);
+	React.useEffect(() => {
+		if (!appState.isConversationComplete) return;
+		const key = appState.messages.length;
+		if (suggestionKeyRef.current === key) return;
+		suggestionKeyRef.current = key;
+		if (!lastTurnEditedFiles(appState.messages)) {
+			setSuggestedCommand(null);
+			return;
+		}
+		void hasStagedChanges().then(staged => {
+			if (suggestionKeyRef.current === key) {
+				setSuggestedCommand(staged ? '/commit' : '/checkpoint create');
+			}
+		});
+	}, [appState.isConversationComplete, appState.messages]);
 
 	const showModalSelectors =
 		(appState.activeMode !== null &&
@@ -600,6 +626,8 @@ export function InteractiveApp({
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
 								isSaving={isSaving}
+								suggestedCommand={suggestedCommand}
+								onDismissSuggestion={() => setSuggestedCommand(null)}
 							/>
 						)}
 

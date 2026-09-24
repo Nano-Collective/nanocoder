@@ -134,11 +134,11 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
-	['Tab', 'Accept file / command suggestion'],
+	['Tab', 'Accept suggestion / insert suggested command'],
 	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
 	['Ctrl+W', 'Delete previous word'],
 	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
-	['Esc Esc', 'Clear input'],
+	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
 	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
 	['Shift+Tab', 'Cycle development mode'],
 	['Ctrl+O', 'Toggle compact tool output'],
@@ -184,6 +184,8 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
+	onDismissSuggestion?: () => void;
 	/**
 	 * Fullscreen keeps the root box's left padding (inline pulls the composer
 	 * back over it), so the status row sits one column further right and has
@@ -219,6 +221,8 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	suggestedCommand = null,
+	onDismissSuggestion,
 	fullscreen = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
@@ -669,6 +673,7 @@ export default function UserInput({
 			attachments: images,
 		});
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		onDismissSuggestion?.();
 		resetInput();
 		resetUIState();
 		setAttachments([]);
@@ -683,6 +688,7 @@ export default function UserInput({
 		currentState,
 		isBusy,
 		onSubmittedDraft,
+		onDismissSuggestion,
 	]);
 
 	// Handle escape key logic
@@ -698,6 +704,11 @@ export default function UserInput({
 			setFileCompletions([]);
 			return;
 		}
+		// Esc in an empty prompt dismisses the suggested command first.
+		if (suggestedCommand && input === '') {
+			onDismissSuggestion?.();
+			return;
+		}
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
@@ -711,6 +722,8 @@ export default function UserInput({
 		input,
 		showCompletions,
 		isFileAutocompleteMode,
+		suggestedCommand,
+		onDismissSuggestion,
 		showClearMessage,
 		setShowCompletions,
 		setSelectedCompletionIndex,
@@ -992,6 +1005,16 @@ export default function UserInput({
 
 		// Handle Tab key
 		if (key.tab) {
+			// Tab in an empty prompt inserts the suggested command, without
+			// popping the completion menu over it.
+			if (suggestedCommand && input === '') {
+				completionJustSelectedRef.current = true;
+				setInputState({displayValue: suggestedCommand, placeholderContent: {}});
+				setTextInputKey(prev => prev + 1);
+				onDismissSuggestion?.();
+				return;
+			}
+
 			// File autocomplete takes priority
 			if (isFileAutocompleteMode) {
 				void handleFileSelection();
@@ -1261,7 +1284,11 @@ export default function UserInput({
 							onEdgeArrow={handleHistoryNavigation}
 							onSubmit={handleSubmit}
 							onEnter={handleSubmit}
-							placeholder="Ask anything..."
+							placeholder={
+								suggestedCommand
+									? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
+									: 'Ask anything...'
+							}
 							focus={effectiveFocus}
 							wrapWidth={inputWrapWidth}
 							handleEnter={false}
