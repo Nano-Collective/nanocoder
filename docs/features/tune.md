@@ -96,7 +96,8 @@ Press **Enter** on a parameter to cycle through values. Select **Reset All to De
 
 Some providers accept additional reasoning controls that are configured through `agents.config.json` rather than the `/tune` modal:
 
-- **`reasoningEffort`** / **`reasoningSummary`** — reasoning controls for OpenAI Responses API models (GPT-5, o-series) via the `chatgpt-codex` provider. `reasoningEffort` is also forwarded to OpenRouter as `reasoning.effort`.
+- **`reasoningEffort`** — forwarded as `reasoning_effort` to OpenAI-compatible providers, as `reasoning.effort` to OpenRouter, and as an OpenAI Responses API option to `chatgpt-codex`. It is omitted for OpenAI-compatible providers when unset, so models that do not support it are unaffected.
+- **`reasoningSummary`** — controls reasoning summaries for OpenAI Responses API models (GPT-5, o-series) via the `chatgpt-codex` provider.
 
 OpenRouter exposes additional always-on request body fields (provider routing, plugins, service tier, fallback models, etc) on the provider config itself — see [OpenRouter request options](../configuration/providers/openrouter.md#openrouter-request-options). Those settings are not tied to tune and apply on every request.
 
