@@ -157,6 +157,9 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// paste lands in exactly the field that typing would. The handler is read
 	// through a ref so the subscription doesn't churn on every render.
 	const handlePasteRef = useRef<(payload: string) => void>(() => {});
+	// Reassigned on every render, deliberately outside an effect: the listener
+	// must always call the latest onPaste/onChange. Moving this into an effect
+	// would bring back the stale closure the ref is here to avoid.
 	handlePasteRef.current = (payload: string) => {
 		if (onPaste) {
 			onPaste(payload);

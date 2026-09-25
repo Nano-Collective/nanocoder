@@ -1254,7 +1254,10 @@ export default function UserInput({
 							onSubmit={handleSubmit}
 							onEnter={handleSubmit}
 							placeholder="Ask anything..."
-							focus={effectiveFocus}
+							// TextInput takes keys and pastes only while focused, so fold
+							// `disabled` in here rather than relying on the disabled branch
+							// above never mounting it.
+							focus={effectiveFocus && !disabled}
 							wrapWidth={inputWrapWidth}
 							handleEnter={false}
 							onPaste={handleTerminalPaste}

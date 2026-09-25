@@ -420,3 +420,26 @@ test('component onPaste replaces the default insert', async t => {
 	t.deepEqual(pastes, ['handled elsewhere']);
 	t.deepEqual(changes, []);
 });
+
+test('component paste listener is removed on blur and on unmount', async t => {
+	// pasteEvents is a process-wide singleton, so a leaked listener would make
+	// a later field's paste land twice. Effects flush after render returns, so
+	// settle before each count.
+	const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+	const baseline = pasteEvents.listenerCount('paste');
+	const {rerender, unmount} = render(<TextInput value="" onChange={() => {}} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline + 1);
+
+	rerender(<TextInput value="" onChange={() => {}} focus={false} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline);
+
+	rerender(<TextInput value="" onChange={() => {}} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline + 1);
+
+	unmount();
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline);
+});
