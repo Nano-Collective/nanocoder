@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
+import {pasteEvents} from '../utils/terminal-paste';
 import TextInput from './text-input';
 
 /**
@@ -352,3 +353,70 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 	unmount();
 });
 
+
+// --- Bracketed paste ---
+//
+// cli.tsx lifts bracketed pastes off stdin and publishes them on pasteEvents,
+// so a field only ever sees a paste if it subscribes. Only the composer used
+// to, so pasting into any other field did nothing.
+
+test('component paste inserts at the caret of a focused field', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="ac" />,
+	);
+	t.teardown(unmount);
+
+	await press(stdin, '\u001b[D'); // left -> caret between a and c
+	pasteEvents.emit('paste', 'b');
+	await waitForValue(valueRef, v => v === 'abc');
+	t.is(valueRef.current, 'abc');
+
+	// The caret ends after the pasted text, so typing continues from there.
+	await press(stdin, 'X');
+	await waitForValue(valueRef, v => v === 'abXc');
+	t.is(valueRef.current, 'abXc');
+});
+
+test('component paste turns the CR line breaks a terminal sends into newlines', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {unmount} = render(<ControlledTextInput valueRef={valueRef} />);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'one\rtwo\r\nthree');
+	await waitForValue(valueRef, v => v.length > 0);
+	t.is(valueRef.current, 'one\ntwo\nthree');
+});
+
+test('component paste is ignored by a field without focus', async t => {
+	const changes: string[] = [];
+	const {unmount} = render(
+		<TextInput value="" onChange={v => changes.push(v)} focus={false} />,
+	);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'nope');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(changes, []);
+});
+
+test('component onPaste replaces the default insert', async t => {
+	const changes: string[] = [];
+	const pastes: string[] = [];
+	const {unmount} = render(
+		<TextInput
+			value=""
+			onChange={v => changes.push(v)}
+			onPaste={payload => pastes.push(payload)}
+		/>,
+	);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'handled elsewhere');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(pastes, ['handled elsewhere']);
+	t.deepEqual(changes, []);
+});
