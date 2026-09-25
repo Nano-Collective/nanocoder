@@ -43,7 +43,6 @@ import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {handleResourceMention} from '@/utils/resource-mention-handler';
-import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -323,29 +322,22 @@ export default function UserInput({
 	// Real pastes, as reported by the terminal via bracketed paste. The
 	// payload is lifted off stdin before Ink's keypress parser sees it, so
 	// a multi-line paste can no longer submit the prompt on its first
-	// newline — it arrives here whole, in one event.
-	useEffect(() => {
-		if (disabled || !effectiveFocus) {
-			return;
+	// newline — it arrives here whole, in one event. TextInput subscribes
+	// while focused and hands the payload here instead of inserting it, so
+	// long pastes can collapse into placeholders.
+	const handleTerminalPaste = (payload: string) => {
+		// Read the caret off TextInput so the splice lands where the user
+		// was editing, not at the end of the value. insertPaste returns the
+		// new cursor offset; fall back to a remount only if no cursor is
+		// available (TextInput not yet mounted).
+		const cursorOffset = textInputRef.current?.getCursorOffset();
+		const result = insertPaste(payload, cursorOffset);
+		if (result && textInputRef.current) {
+			textInputRef.current.setCursorOffset(result.cursorOffset);
+		} else if (!result) {
+			setTextInputKey(prev => prev + 1);
 		}
-		const handleTerminalPaste = (payload: string) => {
-			// Read the caret off TextInput so the splice lands where the user
-			// was editing, not at the end of the value. insertPaste returns the
-			// new cursor offset; fall back to a remount only if no cursor is
-			// available (TextInput not yet mounted).
-			const cursorOffset = textInputRef.current?.getCursorOffset();
-			const result = insertPaste(payload, cursorOffset);
-			if (result && textInputRef.current) {
-				textInputRef.current.setCursorOffset(result.cursorOffset);
-			} else if (!result) {
-				setTextInputKey(prev => prev + 1);
-			}
-		};
-		pasteEvents.on('paste', handleTerminalPaste);
-		return () => {
-			pasteEvents.off('paste', handleTerminalPaste);
-		};
-	}, [disabled, effectiveFocus, insertPaste]);
+	};
 
 	useEffect(() => {
 		if (
@@ -1262,9 +1254,13 @@ export default function UserInput({
 							onSubmit={handleSubmit}
 							onEnter={handleSubmit}
 							placeholder="Ask anything..."
-							focus={effectiveFocus}
+							// TextInput takes keys and pastes only while focused, so fold
+							// `disabled` in here rather than relying on the disabled branch
+							// above never mounting it.
+							focus={effectiveFocus && !disabled}
 							wrapWidth={inputWrapWidth}
 							handleEnter={false}
+							onPaste={handleTerminalPaste}
 						/>
 					</Box>
 
