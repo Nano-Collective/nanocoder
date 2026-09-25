@@ -281,6 +281,9 @@ function execProcess(
 	label: string,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
+		// command is a fixed git/gh binary (see execGit/execGh); args are
+		// caller-built argv, never a shell string.
+		// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 		const proc = spawn(command, args, {
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: GIT_ENV,

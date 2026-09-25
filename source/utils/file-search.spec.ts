@@ -1,4 +1,4 @@
-import {chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -16,6 +16,10 @@ import {
 
 function createTempDir(name: string): string {
 	return join(tmpdir(), `nanocoder-${name}-${process.pid}-${Date.now()}`);
+}
+
+function countNanocoderIgnoreDirs(): number {
+	return readdirSync(tmpdir()).filter(name => name.startsWith('nanocoder-ignore-')).length;
 }
 
 test('matchesGlob handles supported file discovery patterns', t => {
@@ -943,6 +947,294 @@ test.serial('searchProjectContents skips ignored and binary files', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'searchProjectContents honors a depth-agnostic **/ rule like git does',
+	async t => {
+		const testDir = createTempDir('test-file-search-doublestar-rule-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			mkdirSync(join(testDir, 'pkg', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '**/generated/\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'src', 'generated', 'out.js'), dense.join('\n'));
+			writeFileSync(join(testDir, 'pkg', 'generated', 'out.js'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents treats gitignore backslash escapes as literals',
+	async t => {
+		const testDir = createTempDir('test-file-search-escaped-rules-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '\\#hashtag.txt\n\\!bang.txt\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(join(testDir, 'src', '#hashtag.txt'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', '!bang.txt'), dense.join('\n'));
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			// Neither escaped name can be ignored by unlucky comment/negation
+			// parsing - both are real filenames that gitignore semantics should hide.
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents lets .nanocoderignore re-include a gitignored dir through the ignore-file path',
+	async t => {
+		const testDir = createTempDir('test-file-search-reinclude-search-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			writeFileSync(
+				join(testDir, '.nanocoderignore'),
+				'!generated\n!generated/**\n',
+			);
+			writeFileSync(
+				join(testDir, 'src', 'generated', 'out.js'),
+				'const searchTarget = true;\n',
+			);
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				10,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/generated/out.js', 'src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents cleans up its transient ignore file when aborted',
+	async t => {
+		const testDir = createTempDir('test-file-search-abort-cleanup-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const controller = new AbortController();
+			controller.abort(new Error('cleanup-test aborted'));
+			const before = countNanocoderIgnoreDirs();
+			await t.throwsAsync(() =>
+				searchProjectContents(
+					'searchTarget',
+					testDir,
+					5,
+					false,
+					undefined,
+					join(testDir, 'src'),
+					undefined,
+					undefined,
+					undefined,
+					controller.signal,
+				),
+			);
+
+			t.is(countNanocoderIgnoreDirs(), before);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents stops counting when gitignored-directory matches are filtered (#1341)',
+	async t => {
+		const testDir = createTempDir('test-file-search-ignore-budget-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			// The gitignore rule is cwd-relative; rg must prune these during traversal
+			// rather than streaming them and counting toward the kill budget.
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			// Enough dense matches in the ignored dir to exceed any reasonable rgMaxCount.
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(
+				join(testDir, 'src', 'generated', 'out.js'),
+				dense.join('\n'),
+			);
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents stops counting ignored-directory matches when context lines are enabled (#1341)',
+	async t => {
+		const testDir = createTempDir('test-file-search-ignore-budget-context-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(
+				join(testDir, 'src', 'generated', 'out.js'),
+				dense.join('\n'),
+			);
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				5,
+				false,
+				undefined,
+				join(testDir, 'src'),
+				undefined,
+				3,
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'cwd-anchored gitignore rules passed raw to rg do not over-prune sibling directories',
+	async t => {
+		const testDir = createTempDir('test-file-search-anchored-rule-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			mkdirSync(join(testDir, 'src', 'lib', 'generated'), {recursive: true});
+			// `/src/generated/` is anchored at cwd; rg anchors `--ignore-file`
+			// rules at its process cwd, so it prunes only cwd/src/generated and
+			// src/lib/generated must be kept.
+			writeFileSync(join(testDir, '.gitignore'), '/src/generated/\n');
+			const dense = Array.from({length: 2000}, (_, i) => `searchTarget line ${i}`);
+			writeFileSync(
+				join(testDir, 'src', 'generated', 'out.js'),
+				dense.join('\n'),
+			);
+			writeFileSync(
+				join(testDir, 'src', 'lib', 'generated', 'keep.js'),
+				'const searchTarget = true;',
+			);
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'const searchTarget = true;');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				testDir,
+				10,
+				false,
+				undefined,
+				join(testDir, 'src'),
+			);
+
+			t.deepEqual(
+				result.matches.map(m => m.file),
+				['src/lib/generated/keep.js', 'src/main.ts'],
+			);
+			t.false(result.truncated);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'walkProjectEntries prunes ignored directories during traversal via --ignore-file',
+	async t => {
+		const testDir = createTempDir('test-file-search-walk-ignore-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
+			writeFileSync(join(testDir, 'src', 'generated', 'out.js'), 'x');
+			writeFileSync(join(testDir, 'src', 'main.ts'), 'x');
+
+			const files: string[] = [];
+			await walkProjectEntries(
+				testDir,
+				join(testDir, 'src'),
+				entry => {
+					if (!entry.isDirectory) files.push(entry.relativePath);
+					return false;
+				},
+			);
+
+			t.deepEqual(files, ['src/main.ts']);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'searchProjectContents respects a .gitignore nested in a subdirectory',

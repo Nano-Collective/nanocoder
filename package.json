@@ -37,7 +37,7 @@
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
-		"test:all": "./scripts/test.sh",
+		"test:all": "node scripts/test-all.mjs",
 		"test:ava": "ava",
 		"test:ava:coverage": "c8 ava",
 		"test:format": "biome check --no-errors-on-unmatched .",
