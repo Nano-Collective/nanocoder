@@ -90,7 +90,7 @@
 		"clipboardy": "^5.3.1",
 		"croner": "^10.0.1",
 		"diff": "^9.0.0",
-		"dotenv": "^17.2.3",
+		"dotenv": "^18.0.0",
 		"ignore": "^7.0.5",
 		"ink": "^6.3.1",
 		"ink-big-text": "^2.0.0",
