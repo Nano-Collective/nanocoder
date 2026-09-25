@@ -396,6 +396,34 @@ test('quick review resolves a bare PR number to the unique upstream parent', asy
 	]);
 });
 
+test('bare PR resolution ignores a stale remote that returns 404', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'https://github.com/acme/app.git',
+			stale: 'https://github.com/deleted-org/gone.git',
+		},
+		pullRequests: {
+			'acme/app': ['42'],
+		},
+		pullRequestErrors: {
+			'deleted-org/gone': 'HTTP 404: Not Found',
+		},
+	});
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(['quick', '42'], baseMessages, {
+		...testMetadata,
+		client: createClient('PR review looks good.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+
+	t.true(output.includes('Review scope: PR #42 in acme/app.'));
+	t.deepEqual(ghCalls.at(-1), ['pr', 'diff', '42', '--repo', 'acme/app']);
+});
+
 test('bare PR number fails clearly when fork and upstream numbers collide', async t => {
 	const {dependencies, ghCalls} = createGitHubFixture({
 		remoteUrls: {

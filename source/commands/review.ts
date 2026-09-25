@@ -220,6 +220,7 @@ async function getGitHubRepositoryCandidates(
 			const response = await execGh(['api', `repos/${repository}`]);
 			metadata = JSON.parse(response);
 		} catch (error) {
+			if (isGitHubNotFound(error)) continue;
 			throw new Error(
 				`Could not inspect GitHub repository ${repository}: ${
 					error instanceof Error ? error.message : String(error)
