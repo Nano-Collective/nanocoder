@@ -55,40 +55,16 @@
             pkgs.makeBinaryWrapper
           ];
 
-          # fetcherVersion = 3 bundles the deps store into a reproducible
-          # tarball (nixpkgs PR #469950).
+          # fetcherVersion = 4 dumps SQLite database to an SQL file
           #
-          # Work around a bug in nixpkgs' fetchPnpmDeps installPhase for
-          # pnpm >= 11: it writes
-          #     export pnpm_config_side_effects_cache false
-          #     export pnpm_config_update_notifier false
-          # which is incorrect shell — `export VAR value` does not assign,
-          # it exports VAR (often empty) and runs `value` as a command.
-          # So both settings end up at their pnpm defaults, and the default
-          # `side-effects-cache=true` makes pnpm record a per-package
-          # `sideEffects` field in v11/index.db whose value depends on the
-          # order in which packages are installed in parallel. The single
-          # row that drifts here is `ink@6.8.0`. Three identical CI runs
-          # produced three distinct pnpmDeps hashes before this fix.
-          #
-          # Setting the values as derivation attributes makes Nix export
-          # them as build env vars before installPhase runs, so the broken
-          # upstream `export X val` lines become idempotent no-ops.
-          #
-          # Verify upstream has fixed the typo before dropping these:
-          #   nix eval --raw nixpkgs#path \
-          #     | xargs -I{} grep -n 'export pnpm_config_' \
-          #         {}/pkgs/build-support/node/fetch-pnpm-deps/default.nix
-          # If those lines show `export X=val` (with `=`), drop these
-          # two attrs and re-run the update-nix workflow to refresh the
-          # pnpmDeps hash.
+          # * updated from `fetcherVersion = 3` because support has been dropped (nixpkgs PR #538919)
+          # * an issue in nixpkgs/pkgs/build-support/node/fetch-pnpm-deps/default.nix concerning 
+          #   environment variables `pnpm_config_side_effects_cache` and `pnpm_config_update_notifier`
+          #   has been resolved, hence we can simply use `fetchPnpmDeps` here without `.overrideAttrs`
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-uhr+l0VYMmPVd6dJKoIKpcr5tYrvUUyc8yY8gJNgVWQ=";
-            fetcherVersion = 3;
-          }).overrideAttrs (_: {
-            pnpm_config_side_effects_cache = "false";
-            pnpm_config_update_notifier = "false";
+            hash = "sha256-J9DxZAW9627pa+gUEhGqcr/Fd4s4jqDlIcLE2iI5vXE=";
+            fetcherVersion = 4;
           });
 
           buildPhase = ''
