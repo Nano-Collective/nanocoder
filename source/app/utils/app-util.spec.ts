@@ -11,6 +11,7 @@ import {
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
+import {createReviewCommand} from '@/commands/review';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
@@ -1148,6 +1149,85 @@ function createProgressTestOptions(overrides: {
 		setLiveComponent: overrides.setLiveComponent ?? (() => {}),
 	};
 }
+
+test.serial(
+	'review command - echoes the submitted invocation before its result',
+	async t => {
+		const queued: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			onAddToChatQueue: component => queued.push(component),
+		});
+		const originalExecute = commandRegistry.execute;
+		commandRegistry.execute = async () => 'Review result';
+
+		try {
+			await handleMessageSubmission('/review quick 1467', options);
+
+			t.is(queued.length, 2);
+			t.is(
+				(queued[0] as React.ReactElement<{message: string}>).props.message,
+				'$ /review quick 1467',
+			);
+			t.is(
+				(queued[1] as React.ReactElement<{message: string}>).props.message,
+				'Review result',
+			);
+		} finally {
+			commandRegistry.execute = originalExecute;
+		}
+	},
+);
+
+test.serial(
+	'TUI /review quick runs a one-shot review with a mock provider',
+	async t => {
+		const originalReview = commandRegistry.get('review');
+		const queued: React.ReactNode[] = [];
+		let chatCalls = 0;
+		commandRegistry.register({
+			...createReviewCommand({
+				execGit: async args => {
+					if (args[0] === 'rev-parse') return '';
+					return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+				},
+				getCurrentBranch: async () => 'feature',
+				getDefaultBranch: async () => 'main',
+			}),
+			echoInvocation: true,
+		});
+		const options = createProgressTestOptions({
+			onAddToChatQueue: component => queued.push(component),
+		});
+		options.client = {
+			chat: async () => {
+				chatCalls += 1;
+				return {choices: [{message: {content: 'Mock provider review.'}}]};
+			},
+		} as NonNullable<MessageSubmissionOptions['client']>;
+
+		try {
+			await handleMessageSubmission('/review quick feature', options);
+
+			t.is(chatCalls, 1);
+			t.is(queued.length, 2);
+			t.is(
+				(queued[0] as React.ReactElement<{message: string}>).props.message,
+				'$ /review quick feature',
+			);
+			const resultMessage = (
+				queued[1] as React.ReactElement<{message: string}>
+			).props.message;
+			t.true(
+				resultMessage.includes(
+					'Review scope: branch "feature" against "main".',
+				),
+			);
+			t.true(resultMessage.includes('Mock provider review.'));
+		} finally {
+			if (originalReview) commandRegistry.register(originalReview);
+		}
+	},
+);
 
 test.serial(
 	'progress spinner - /commit mounts CommandProgress then clears it',

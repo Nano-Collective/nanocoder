@@ -608,7 +608,12 @@ async function handleBuiltInCommand(
 	// perceptible — and release it in `finally` so a throwing handler cannot
 	// strand a spinner that never resolves.
 	const commandName = message.slice(1).trim().split(/\s+/)[0];
-	const progressLabel = commandRegistry.get(commandName)?.progressLabel;
+	const command = commandRegistry.get(commandName);
+	const progressLabel = command?.progressLabel;
+
+	if (command?.echoInvocation) {
+		onAddToChatQueue(infoMsg(`$ ${message.trim()}`, 'command-invocation'));
+	}
 
 	if (progressLabel) {
 		setLiveComponent(

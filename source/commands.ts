@@ -38,6 +38,7 @@ class CommandRegistry {
 			name: entry.name,
 			description: entry.description,
 			progressLabel: entry.progressLabel,
+			echoInvocation: entry.echoInvocation,
 			handler: async (args, messages, metadata) => {
 				if (!resolved) {
 					resolved = await entry.load();
