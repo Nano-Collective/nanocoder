@@ -617,6 +617,8 @@ Run tests.`,
 
 	t.is(loader.findRelevantCommands('upgrade to the latest release', []).length, 0);
 	t.is(loader.findRelevantCommands('add a test for this', []).length, 1);
+	// A later whole-word hit still counts after an embedded one.
+	t.is(loader.findRelevantCommands('the latest TEST.', []).length, 1);
 });
 
 test('CustomCommandLoader - findRelevantCommands scores description word overlap', t => {
