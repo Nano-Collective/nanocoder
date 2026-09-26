@@ -1184,6 +1184,61 @@ test('typing a space after a command hides completions so args submit', async t 
 	unmount();
 });
 
+test('Enter submits a command typed in full on the first press', async t => {
+	// The highlighted completion is exactly what was typed, so there is nothing
+	// to select. Enter used to "select" it anyway, close the menu and stop,
+	// needing a second Enter to run the command.
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-help');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submitted !== null);
+
+	t.is(submitted, '/test-help');
+});
+
+test('Enter on a partly typed command still completes it without submitting', async t => {
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-he');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(
+		() => !/Available commands:/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	await wait(50);
+
+	t.regex(stripAnsi(lastFrame()!), /\/test-help/);
+	t.is(submitted, null);
+});
+
 test('completion menu dismissal/reset after selection or escape', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
