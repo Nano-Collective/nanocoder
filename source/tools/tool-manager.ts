@@ -129,7 +129,7 @@ export class ToolManager {
 		{
 			approval: CustomToolApprovalPolicy;
 			readOnly: boolean;
-			source: 'personal' | 'project';
+			source: 'built-in' | 'personal' | 'project';
 			filePath: string;
 			subscribe?: import('@/types/skills').SkillTrigger[];
 		}
@@ -438,7 +438,7 @@ export class ToolManager {
 		| {
 				approval: CustomToolApprovalPolicy;
 				readOnly: boolean;
-				source: 'personal' | 'project';
+				source: 'built-in' | 'personal' | 'project';
 				filePath: string;
 				subscribe?: import('@/types/skills').SkillTrigger[];
 		  }
