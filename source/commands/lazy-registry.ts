@@ -106,6 +106,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{
+		name: 'share',
+		description:
+			'Share the current session as a self-contained HTML viewer (use --json for raw JSON, --no-open to skip the browser, or pass a path/filename)',
+		load: () => import('@/commands/share').then(m => m.shareCommand),
+	},
+	{
 		name: 'update',
 		description: 'Update Nanocoder to the latest version',
 		load: () => import('@/commands/update').then(m => m.updateCommand),
