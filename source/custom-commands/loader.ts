@@ -16,8 +16,18 @@ const MAX_COMMANDS_IN_CONTEXT = 3;
 function containsPhrase(haystack: string, phrase: string): boolean {
 	const needle = phrase.trim().toLowerCase();
 	if (!needle) return false;
-	const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(haystack);
+	const text = haystack.toLowerCase();
+	const isWordChar = (c: string | undefined) => !!c && /[a-z0-9]/.test(c);
+	for (
+		let i = text.indexOf(needle);
+		i !== -1;
+		i = text.indexOf(needle, i + 1)
+	) {
+		if (!isWordChar(text[i - 1]) && !isWordChar(text[i + needle.length])) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** Distinct lowercase words of four or more letters. */
