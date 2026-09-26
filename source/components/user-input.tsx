@@ -1070,15 +1070,19 @@ export default function UserInput({
 		) {
 			const selected = completions[selectedCompletionIndex];
 			const completedText = `/${selected.name}`;
-			completionJustSelectedRef.current = true;
-			setInputState({
-				displayValue: completedText,
-				placeholderContent: {},
-			});
-			setShowCompletions(false);
-			setSelectedCompletionIndex(-1);
-			setTextInputKey(prev => prev + 1);
-			return;
+			// Already typed in full, so there is nothing to complete: fall
+			// through and submit instead of needing a second Enter.
+			if (completedText !== input) {
+				completionJustSelectedRef.current = true;
+				setInputState({
+					displayValue: completedText,
+					placeholderContent: {},
+				});
+				setShowCompletions(false);
+				setSelectedCompletionIndex(-1);
+				setTextInputKey(prev => prev + 1);
+				return;
+			}
 		}
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
