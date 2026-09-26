@@ -23,20 +23,9 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
 
-// A real POSIX shell for the two new robustness cases. We can't just use
-// `bash` by name on Windows: it can resolve to the WSL launcher
-// (`System32\bash.exe`), which prints an error and exits instead of running
-// anything. Prefer a Git Bash binary; if none is installed the cases are
-// skipped, matching how this suite already gates the symlink cases.
-const WINDOWS_BASH_CANDIDATES = [
-	'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-	'C:\\Program Files\\Git\\bin\\bash.exe',
-];
-const testShell =
-	process.platform === 'win32'
-		? (WINDOWS_BASH_CANDIDATES.find(path => existsSync(path)) ?? null)
-		: '/bin/sh';
-const shellCase = testShell === null ? test.skip : test;
+// These cases exercise POSIX syntax and paths. They must not accidentally
+// select cmd.exe on Windows; the focused cmd.exe case below covers that path.
+const shellCase = process.platform === 'win32' ? test.skip : test;
 
 let testDir: string;
 let prevLcAll: string | undefined;
@@ -70,6 +59,9 @@ function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
 		approval: 'never',
 		readOnly: true,
 		timeoutMs: 5_000,
+		// Use the public configuration value rather than an implementation path.
+		// POSIX-only handler execution assertions are gated below on Windows.
+		shell: 'sh',
 		...extra,
 	};
 }
@@ -99,14 +91,27 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	else process.env.NCT_FOO = prev;
 });
 
-test('shellArgs uses /d /s /c for cmd.exe and -c for posix shells', t => {
-	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
-	t.deepEqual(shellArgs('cmd', 'echo hi'), ['/d', '/s', '/c', 'echo hi']);
-	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
+test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells', t => {
+	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
 		'/d',
+		'/v:off',
 		'/s',
 		'/c',
-		'echo hi',
+		'"echo hi"',
+	]);
+	t.deepEqual(shellArgs('cmd', 'echo hi'), [
+		'/d',
+		'/v:off',
+		'/s',
+		'/c',
+		'"echo hi"',
+	]);
+	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
+		'/d',
+		'/v:off',
+		'/s',
+		'/c',
+		'"echo hi"',
 	]);
 	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
 	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
@@ -125,13 +130,35 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 		shell: bin,
 		timeoutMs: 5_000,
 	});
-	t.is(result, 'EXIT_CODE: 0\n/d\n/s\n/c\necho hi');
+	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/s\n/c\n"echo hi"');
 });
+
+const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
+/* c8 ignore start -- the callback runs in the dedicated Windows workflow */
+cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
+	const probe = join(testDir, 'print-argv.mjs');
+	writeFileSync(
+		probe,
+		'console.log(JSON.stringify(process.argv.slice(2)));\n',
+	);
+	const handler = buildHandler(
+		// An omitted shell resolves to cmd.exe on Windows through pickShell.
+		meta({shell: undefined}),
+		'{{ node }} {{ probe }} {{ value }}',
+		testDir,
+	);
+	const value = 'a b&c|d<e>f^g"h!i';
+	const result = await handler({node: 'node', probe, value});
+	t.is(result, `EXIT_CODE: 0\n${JSON.stringify([value])}`);
+});
+/* c8 ignore stop */
 
 test('mergeEnv overlays configured vars onto process.env', t => {
 	const env = mergeEnv({CUSTOM_VAR: 'value'});
 	t.is(env.CUSTOM_VAR, 'value');
-	t.truthy(env.PATH);
+	// Windows exposes its inherited search path as `Path`; POSIX uses `PATH`.
+	// The merge must preserve whichever spelling the host supplied.
+	t.truthy(env.PATH ?? env.Path);
 });
 
 test('resolveCwd handles missing paths by falling back to projectRoot', t => {
@@ -228,7 +255,7 @@ test('resolveCwd throws for ${HOME} outside the project', t => {
 	t.throws(() => resolveCwd('${HOME}', root), {message: ESCAPES});
 });
 
-test('runScript: captures stdout', async t => {
+shellCase('runScript: captures stdout', async t => {
 	const result = await runScript(`echo 'hello world'`, {
 		cwd: testDir,
 		env: process.env,
@@ -238,7 +265,7 @@ test('runScript: captures stdout', async t => {
 	t.is(result, 'EXIT_CODE: 0\nhello world');
 });
 
-test('runScript: non-zero exit returns output with EXIT_CODE prefix', async t => {
+shellCase('runScript: non-zero exit returns output with EXIT_CODE prefix', async t => {
 	const result = await runScript(`echo oops >&2; exit 3`, {
 		cwd: testDir,
 		env: process.env,
@@ -250,7 +277,7 @@ test('runScript: non-zero exit returns output with EXIT_CODE prefix', async t =>
 	t.regex(result, /^EXIT_CODE: 3\nSTDERR:\noops\nSTDOUT:\n$/);
 });
 
-test('runScript: audit-style non-zero exit with stdout output', async t => {
+shellCase('runScript: audit-style non-zero exit with stdout output', async t => {
 	// Mirrors `pnpm audit`: vulnerabilities go to stdout, exit code 1.
 	const result = await runScript(
 		`printf 'vulnerability table here\\n'; exit 1`,
@@ -264,7 +291,7 @@ test('runScript: audit-style non-zero exit with stdout output', async t => {
 	t.is(result, 'EXIT_CODE: 1\nvulnerability table here');
 });
 
-test('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
+shellCase('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
 	const result = await runScript(`echo hello`, {
 		cwd: testDir,
 		env: process.env,
@@ -276,7 +303,7 @@ test('runScript: zero exit returns stdout with EXIT_CODE prefix', async t => {
 	t.is(result, 'EXIT_CODE: 0\nhello');
 });
 
-test('runScript: timeout kills long-running script', async t => {
+shellCase('runScript: timeout kills long-running script', async t => {
 	await t.throwsAsync(
 		runScript(`sleep 5`, {
 			cwd: testDir,
@@ -301,7 +328,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -334,7 +361,7 @@ shellCase(
 			runScript(script, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 500,
 			}).then(value => ({value}), (error: Error) => ({error})),
 			(async () => {
@@ -386,7 +413,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -423,7 +450,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -456,7 +483,7 @@ shellCase(
 			{
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 30_000,
 			},
 		);
@@ -484,7 +511,7 @@ shellCase(
 			runScript(`echo 'started before timeout' ; sleep 30`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 250,
 			}),
 			{message: /timed out/},
@@ -504,7 +531,7 @@ shellCase(
 			runScript(`trap '' TERM; sleep 5 >/dev/null 2>&1`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 100,
 			}),
 			{message: /timed out/},
@@ -529,7 +556,7 @@ shellCase(
 			runScript(`trap '' TERM; sleep 5 & wait`, {
 				cwd: testDir,
 				env: process.env,
-				shell: testShell!,
+				shell: '/bin/sh',
 				timeoutMs: 100,
 			}),
 			{message: /timed out/},
@@ -539,13 +566,13 @@ shellCase(
 	},
 );
 
-test('buildHandler renders body and executes', async t => {
+shellCase('buildHandler renders body and executes', async t => {
 	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);
 	const result = await handler({name: 'world'});
 	t.is(result, 'EXIT_CODE: 0\nworld');
 });
 
-test('buildHandler: shell-escape blocks injection', async t => {
+shellCase('buildHandler: shell-escape blocks injection', async t => {
 	const handler = buildHandler(meta(), `echo {{ payload }}`, testDir);
 	// If quoting were broken, the inner `; ls` would run separately and
 	// stdout would not contain the literal payload.
@@ -553,7 +580,7 @@ test('buildHandler: shell-escape blocks injection', async t => {
 	t.is(result, 'EXIT_CODE: 0\n; ls / ; echo done');
 });
 
-test('buildHandler honors env merging', async t => {
+shellCase('buildHandler honors env merging', async t => {
 	const handler = buildHandler(
 		meta({env: {NCT_CUSTOM_HANDLER_TEST: 'hello-env'}}),
 		`echo "$NCT_CUSTOM_HANDLER_TEST"`,
