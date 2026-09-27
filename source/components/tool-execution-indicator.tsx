@@ -10,24 +10,16 @@ export default function ToolExecutionIndicator({
 }: ToolExecutionIndicatorProps) {
 	const {colors} = useTheme();
 	return (
-		<Box flexDirection="column" marginBottom={1}>
-			<Box>
-				<Spinner type="dots" />
-				<Text color={colors.tool}> Executing tool: </Text>
-				<Text color={colors.primary}>{toolName}</Text>
-			</Box>
-
+		<Box marginBottom={1} marginLeft={2}>
+			<Spinner type="dots" />
+			<Text color={colors.tool}> {toolName}</Text>
 			{totalTools > 1 && (
-				<Box marginTop={1}>
-					<Text color={colors.secondary}>
-						Tool {currentIndex + 1} of {totalTools}
-					</Text>
-				</Box>
+				<Text color={colors.secondary}>
+					{' '}
+					{currentIndex + 1}/{totalTools}
+				</Text>
 			)}
-
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>Press Escape to cancel</Text>
-			</Box>
+			<Text color={colors.secondary}> · Press Esc to cancel</Text>
 		</Box>
 	);
 }

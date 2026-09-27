@@ -101,7 +101,7 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
 	const {colors} = useTheme();
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} marginLeft={2}>
 			{Object.entries(counts).map(([toolName, count]) => (
 				<Text key={toolName} color={colors.tool}>
 					{'\u2692'} {getGroupedCompactDescription(toolName, count)}
@@ -177,10 +177,12 @@ export async function displayToolResult(
 		// so this only trims the user-facing display.
 		if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
 			addToChatQueue(
-				<CompactToolError
+				<Box
 					key={generateKey(`tool-error-compact-${result.tool_call_id}`)}
-					toolName={result.name}
-				/>,
+					marginLeft={2}
+				>
+					<CompactToolError toolName={result.name} />
+				</Box>,
 			);
 			return;
 		}
@@ -204,11 +206,12 @@ export async function displayToolResult(
 	if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
 		const description = getGroupedCompactDescription(result.name, 1);
 		addToChatQueue(
-			<CompactToolResult
+			<Box
 				key={generateKey(`tool-compact-${result.tool_call_id}`)}
-				toolName={result.name}
-				description={description}
-			/>,
+				marginLeft={2}
+			>
+				<CompactToolResult toolName={result.name} description={description} />
+			</Box>,
 		);
 		return;
 	}

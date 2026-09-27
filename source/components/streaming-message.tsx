@@ -88,7 +88,7 @@ export default memo(function StreamingMessage({
 
 	return (
 		<>
-			<Box marginBottom={1} marginTop={1}>
+			<Box marginTop={1}>
 				<Text color={colors.info} bold>
 					<Spinner type="dots" /> {model}
 				</Text>
