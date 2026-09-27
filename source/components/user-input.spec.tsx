@@ -1395,6 +1395,1319 @@ test('typing a space after a command hides completions so args submit', async t 
 	unmount();
 });
 
+// Component Rendering Tests
+// ============================================================================
+
+test('UserInput renders without crashing', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	unmount();
+});
+
+test('UserInput renders with placeholder text', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput placeholder="Custom placeholder" />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// Placeholder text should be visible
+	unmount();
+});
+
+test('UserInput renders prompt symbol', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, />/); // Prompt symbol
+	unmount();
+});
+
+test('UserInput renders with disabled state', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput disabled={true} />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// Shows a spinner when disabled (dots spinner uses braille characters like ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏)
+	t.regex(output!, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+	unmount();
+});
+
+test('UserInput shows a suggested command in the empty prompt and inserts it on Tab', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/checkpoint create"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		/Try \/checkpoint create · Tab to insert · Esc to dismiss/.test(
+			stripAnsi(lastFrame() ?? ''),
+		),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/checkpoint create') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /checkpoint create'),
+	);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput dismisses the suggested command on Esc in an empty prompt', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\x1B');
+	await waitForCondition(() => dismissed === 1);
+	// The first Esc went to the suggestion, not the clear-input double press.
+	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
+test('UserInput clears the suggested command when a message is submitted', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'hello');
+	await waitForCondition(() => dismissed === 1);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput submits an inserted suggested command on Enter and clears the suggestion', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	// Wait for the inserted value itself, not the "Try /commit" placeholder.
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/commit') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/commit');
+	// Tab dismissed once on insert; submitting dismisses again.
+	await waitForCondition(() => dismissed === 2);
+	t.is(submittedMessage, '/commit');
+	t.is(dismissed, 2);
+	unmount();
+});
+
+test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	// The legend row, not the status row's "(Shift+Tab to cycle)" hint below it.
+	t.regex(lastFrame()!, /Cycle development mode/);
+	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
+
+	// Keys are swallowed while the overlay is open, so the prompt stays empty
+	// (the placeholder only renders for an empty value).
+	stdin.write('x');
+	stdin.write('\x1B');
+	await waitForCondition(() => !/Keyboard Shortcuts/.test(lastFrame() ?? ''));
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	unmount();
+});
+
+test('UserInput closes the shortcuts overlay on a second ?', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	stdin.write('?');
+	await waitForCondition(() =>
+		/Ask anything/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
+	unmount();
+});
+
+test('UserInput types ? literally when the prompt is not empty', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('why');
+	await waitForFrame(lastFrame, /why/);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /why\?/);
+	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
+	unmount();
+});
+
+test('UserInput renders development mode indicator', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /normal mode on/); // Development mode indicator
+	unmount();
+});
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+// Inline mode: the transcript is printed by Ink's <Static> at column 0, which
+// no wrapper can shift, so the prompt box drops its centring to share that
+// left edge instead of sitting a couple of columns inside it.
+test.serial('UserInput sits flush left when it is not centered', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 100,
+		configurable: true,
+	});
+
+	try {
+		const indents = (centered: boolean) => {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" centered={centered} />
+				</TestWrapper>,
+			);
+			const lines = stripAnsi(lastFrame() ?? '').split('\n');
+			const border = lines.find(line => line.includes('╭'))!.indexOf('╭');
+			const mode = lines
+				.find(line => line.includes('normal mode on'))!
+				.search(/\S/);
+			unmount();
+			return {border, mode};
+		};
+
+		t.deepEqual(indents(false), {border: 0, mode: 1});
+		// Centred is the default and keeps its inset, one step for the indicator.
+		const centred = indents(true);
+		t.true(centred.border > 0);
+		t.is(centred.mode, centred.border + 1);
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
+test.serial(
+	'UserInput aligns the mode indicator with the input box left border',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 100,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const lines = output.split('\n');
+
+			const borderLine = lines.find(line => line.includes('╭'));
+			const modeLine = lines.find(line => line.includes('normal mode on'));
+			t.truthy(borderLine, 'Should find the input box top border');
+			t.truthy(modeLine, 'Should find the mode indicator line');
+
+			const borderIndent = borderLine!.indexOf('╭');
+			const modeIndent = modeLine!.search(/\S/);
+			t.is(
+				modeIndent,
+				borderIndent + 1,
+				'Mode indicator text should start one step to the right of the input box border',
+			);
+
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test('UserInput renders auto-accept mode indicator', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="auto-accept" />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /auto-accept mode/); // Auto-accept mode indicator
+	unmount();
+});
+
+test('UserInput renders plan mode indicator', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="plan" />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /plan mode/); // Plan mode indicator
+	unmount();
+});
+
+test('UserInput renders with custom commands', t => {
+	const customCommands = ['custom-command', 'another-command'];
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput customCommands={customCommands} />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	unmount();
+});
+
+test('UserInput calls onSubmit when message is submitted', t => {
+	let submittedMessage = '';
+	const handleSubmit = (message: string) => {
+		submittedMessage = message;
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput onSubmit={handleSubmit} />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	// Note: Testing actual user interaction with stdin is complex
+	// This test verifies the component renders with onSubmit callback
+	unmount();
+});
+
+test('UserInput renders while busy (Escape deferred to global handler)', t => {
+	// When busy, UserInput no longer owns cancellation; the section-level handler
+	// does. UserInput just swallows Escape so it doesn't clear the input.
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput isBusy={true} disabled={true} />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	unmount();
+});
+
+test('UserInput reports and restores submitted drafts with attachments', async t => {
+	let submittedMessage = '';
+	let submittedDraft:
+		| Parameters<
+				NonNullable<React.ComponentProps<typeof UserInput>['onSubmittedDraft']>
+		  >[0]
+		| null = null;
+
+	const restoreDraft = {
+		id: 1,
+		inputState: {
+			displayValue: 'edit this request',
+			placeholderContent: {},
+		},
+		attachments: [{data: 'abc', mediaType: 'image/png'}],
+	};
+
+	const {stdin, lastFrame, rerender, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onSubmittedDraft={draft => {
+					submittedDraft = draft;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('original');
+	await waitForFrame(lastFrame, /original/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'original');
+
+	t.is(submittedDraft?.inputState.displayValue, 'original');
+	t.deepEqual(submittedDraft?.inputState.placeholderContent, {});
+	t.deepEqual(submittedDraft?.attachments, []);
+
+	rerender(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				restoreSubmittedDraft={restoreDraft}
+			/>
+		</TestWrapper>,
+	);
+	await waitForFrame(lastFrame, /edit this request/);
+
+	t.regex(lastFrame()!, /\[image #1: image\]/);
+	unmount();
+});
+
+test('UserInput queues submitted messages while busy', async t => {
+	let submittedMessage = '';
+	let queuedMessage = '';
+	let queuedDisplay = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onQueueMessage={message => {
+					queuedMessage = message.message;
+					queuedDisplay = message.displayValue;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('queued while busy');
+	await waitForFrame(lastFrame, /queued while busy/);
+	stdin.write('\r');
+	await waitForCondition(() => queuedMessage === 'queued while busy');
+
+	t.is(submittedMessage, '');
+	t.is(queuedMessage, 'queued while busy');
+	t.is(queuedDisplay, 'queued while busy');
+	unmount();
+});
+
+test('UserInput submits slash commands immediately while busy', async t => {
+	let submittedMessage = '';
+	let queuedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onQueueMessage={message => {
+					queuedMessage = message.message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('/help');
+	await waitForFrame(lastFrame, /\/help/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/help');
+
+	t.is(submittedMessage, '/help');
+	t.is(queuedMessage, '');
+	unmount();
+});
+
+test('UserInput renders queued messages while busy', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				isBusy={true}
+				queuedMessages={[
+					{
+						id: 'queued-1',
+						message: 'first full message',
+						displayValue: 'first queued message',
+					},
+					{
+						id: 'queued-2',
+						message: 'second full message',
+						displayValue: 'second queued message',
+						images: [{data: 'abc', mediaType: 'image/png'}],
+					},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Queued messages/);
+	t.regex(output, /first queued message/);
+	t.regex(output, /second queued message/);
+	t.regex(output, /1 image/);
+	unmount();
+});
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput truncates long queued messages on narrow terminals', t => {
+	const originalColumns = process.stdout.columns;
+	// Force a narrow terminal so width-based truncation must kick in.
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 40,
+		configurable: true,
+	});
+
+	try {
+		const longMessage =
+			'this is a very long queued message that should be truncated because it far exceeds the narrow terminal width available';
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: longMessage, displayValue: longMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const output = lastFrame() ?? '';
+		// Truncated with the shared ellipsis, and the tail is dropped.
+		t.regex(output, /\.\.\./);
+		t.notRegex(output, /terminal width available/);
+		// The queued-message line itself fits within the terminal width. Scope to
+		// that line rather than every rendered line: the component truncates the
+		// message deterministically, whereas the decorative section header relies
+		// on Ink's ambient wrapping, which can flake under deferred re-layout.
+		const messageLine = output
+			.split('\n')
+			.find(line => line.includes('this is a very long'));
+		t.truthy(messageLine);
+		t.true(stripAnsi(messageLine ?? '').length <= 40);
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput keeps a long CJK queued message on a single row', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 80,
+		configurable: true,
+	});
+
+	try {
+		// Every character here is a CJK ideograph, 2 terminal columns wide -
+		// the exact repro from the bug report. formatQueuedMessage budgeted the
+		// truncation in UTF-16 units, so this ran to roughly twice the terminal
+		// width and wrapped: two full rows plus a dangling row of only "...".
+		const cjkMessage = '请把所有的测试用例都重新运行一遍然后告诉我结果'.repeat(4);
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: cjkMessage, displayValue: cjkMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const lines = stripAnsi(lastFrame() ?? '').split('\n');
+		// Rows are bordered ("│ ... │") and right-padded to the box width, so
+		// isolate each row's content before checking it - a naive trim() leaves
+		// the border character behind and never matches a bare "...".
+		const rowContent = (line: string) =>
+			line.replace(/^\s*│\s?/, '').replace(/\s*│\s*$/, '').trim();
+		t.true(lines.some(line => rowContent(line).includes('...')));
+		t.false(lines.some(line => rowContent(line) === '...'));
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
+test('UserInput navigates queued messages while busy with empty input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+
+	const output = lastFrame()!;
+	t.regex(output, /▸ first queued/);
+	t.notRegex(output, /▸ second queued/);
+	unmount();
+});
+
+test('UserInput loads selected queued message for editing while idle', async t => {
+	let removedId = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\r');
+	await wait(50);
+
+	t.is(removedId, 'queued-2');
+	t.regex(lastFrame()!, /second queued/);
+	unmount();
+});
+
+test('UserInput loads selected queued message for editing while busy', async t => {
+	let removedId = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\r');
+	await wait(50);
+
+	t.is(removedId, 'queued-2');
+	t.regex(lastFrame()!, /second queued/);
+	unmount();
+});
+
+test('UserInput up arrow returns from the first queued message to the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	// Enter the queue, then step back up to the input.
+	stdin.write('\u001B[B');
+	await wait(50);
+	t.regex(lastFrame()!, /▸ first queued/);
+
+	stdin.write('\u001B[A');
+	await wait(50);
+
+	const output = lastFrame()!;
+	t.notRegex(output, /▸ first queued/);
+	t.notRegex(output, /▸ second queued/);
+	unmount();
+});
+
+test('UserInput removes selected queued message with Delete', async t => {
+	let removedId = '';
+	const QueueHarness = () => {
+		const [messages, setMessages] = React.useState([
+			{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+			{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+		]);
+
+		return (
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={messages}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+					setMessages(current =>
+						current.filter(message => message.id !== id),
+					);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<QueueHarness />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[3;5~');
+	await wait(50);
+
+	t.is(removedId, 'queued-1');
+	t.notRegex(lastFrame()!, /first queued/);
+
+	unmount();
+});
+
+test('UserInput calls onToggleMode when provided', t => {
+	let toggleCalled = false;
+	const handleToggle = () => {
+		toggleCalled = true;
+	};
+
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput onToggleMode={handleToggle} />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	// Note: Actual toggle invocation requires Shift+Tab simulation
+	unmount();
+});
+
+test('UserInput renders bash mode indicator when input starts with !', t => {
+	// This test verifies the component can handle bash mode
+	// Actual input testing requires stdin manipulation
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	unmount();
+});
+
+test('UserInput renders help text when not disabled', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// New design: heading removed, shorter placeholder inside rounded border
+	t.regex(output!, /Ask anything\.\.\./);
+	t.notRegex(output!, /What would you like me to help with\?/);
+	unmount();
+});
+
+test('UserInput hides help text when disabled', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput disabled={true} />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /What would you like me to help with\?/);
+	t.notRegex(output!, /Ask anything\.\.\./);
+	unmount();
+});
+
+test('UserInput renders with all props provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				onSubmit={() => {}}
+				placeholder="Test"
+				customCommands={['test']}
+				disabled={false}
+				onToggleMode={() => {}}
+				developmentMode="normal"
+			/>
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	unmount();
+});
+
+// ============================================================================
+// File Autocomplete UI Tests
+// ============================================================================
+
+test('UserInput renders file autocomplete suggestions header', t => {
+	// Note: Testing file autocomplete requires state manipulation
+	// This test verifies the component structure supports it
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// File suggestions would appear when @ is typed and files are found
+	unmount();
+});
+
+test('UserInput responsive placeholder for narrow terminals', t => {
+	// Test that placeholder adapts to terminal width
+	// The actual implementation uses useResponsiveTerminal hook
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// Placeholder text should be present (either long or short version)
+	unmount();
+});
+
+// ============================================================================
+// Integration Tests
+// ============================================================================
+
+test('UserInput maintains state across renders', t => {
+	const {lastFrame, rerender, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const firstRender = lastFrame();
+	t.truthy(firstRender);
+
+	rerender(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const secondRender = lastFrame();
+	t.truthy(secondRender);
+	unmount();
+});
+
+test('UserInput renders with default development mode', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// Default mode is 'normal'
+	t.regex(output!, /normal mode/);
+	unmount();
+});
+
+test('UserInput handles empty custom commands array', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput customCommands={[]} />
+		</TestWrapper>,
+	);
+
+	t.truthy(lastFrame());
+	unmount();
+});
+
+test('UserInput component structure is valid', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.true(output!.length > 0);
+	unmount();
+});
+
+test('UserInput does not treat carriage return as a multiline shortcut', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	stdin.write('a');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('b');
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /b/);
+	unmount();
+});
+
+// ============================================================================
+// Compact Tool Display Tests
+// ============================================================================
+
+test('UserInput shows ctrl-o expand hint when disabled with compact display on', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleCompactDisplay={() => {}}
+				compactToolDisplay={true}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /ctrl-o.*expand/);
+	unmount();
+});
+
+test('UserInput shows ctrl-o compact hint when disabled with compact display off', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleCompactDisplay={() => {}}
+				compactToolDisplay={false}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /ctrl-o.*compact/);
+	unmount();
+});
+
+test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput disabled={true} />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /ctrl-o/);
+	unmount();
+});
+
+test('UserInput renders the task badge when taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 4,
+					completedCount: 2,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: false,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~2\/4 Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput renders the task badge when disabled and taskInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleTaskList={() => {}}
+				taskInfo={{
+					totalCount: 3,
+					completedCount: 1,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: true,
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Tasks \(~1\/3\* Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed', async t => {
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => toggles++} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput calls onToggleTaskList when ctrl+t is pressed while disabled', async t => {
+	// The task list is on screen precisely while the agent is working, which is
+	// when the input is disabled - so the binding has to survive that guard.
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				disabled={true}
+				onToggleTaskList={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0014');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput does not insert a literal character when ctrl+t is pressed', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleTaskList={() => {}} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hi');
+	await waitForFrame(lastFrame, /hi/);
+	stdin.write('\u0014');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /hit/);
+	unmount();
+});
+
+// ============================================================================
+// Undo / Redo (Ctrl+Z / Ctrl+Y) Tests
+// ============================================================================
+
+test('UserInput undoes the last edit with ctrl+z', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Ctrl+Z (0x1A) should revert the last edit. Watch for a frame WITHOUT the
+	// full value: the value must shrink (how far depends on paste detection,
+	// which may collapse a rapid keystroke run into one edit).
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /abcde/);
+	unmount();
+});
+
+test('UserInput redoes an undone edit with ctrl+y', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	// Undo with Ctrl+Z, settle so the redo stack commits, then redo with Ctrl+Y.
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await wait(100);
+	await waitForCondition(() => /abcde/.test(stripAnsi(lastFrame() ?? '')));
+
+	t.regex(stripAnsi(lastFrame()!), /abcde/);
+	unmount();
+});
+
+test('UserInput puts the caret at the end of a redone edit', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await waitForFrame(lastFrame, /abcde/);
+	await wait(100);
+
+	// Undo/redo restore a whole value and carry no caret of their own, so the
+	// caret must land at the end. It used to keep the offset the undo clamped it
+	// to (0), which sent the next keystroke to the front: "Xabcde".
+	stdin.write('X');
+	await waitForFrame(lastFrame, /abcdeX/);
+
+	t.regex(stripAnsi(lastFrame()!), /abcdeX/);
+	t.notRegex(stripAnsi(lastFrame()!), /Xabcde/);
+	unmount();
+});
+
+test('UserInput ctrl+z does not insert a literal character', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	// Not 'ab': the status row's "(Shift+Tab to cycle)" hint contains it.
+	stdin.write('xy');
+	await waitForFrame(lastFrame, /xy/);
+	stdin.write('\u001a');
+	await wait(50);
+
+	// Undo should remove "y", not append a control character.
+	t.notRegex(lastFrame()!, /xy/);
+	unmount();
+});
+
+// ============================================================================
+// Command Completion Navigation Tests
+// ============================================================================
+
+// Test commands to ensure completions appear in test environment
+const TEST_COMMANDS = ['test-clear', 'test-help', 'test-exit'];
+
+test('arrow key navigation updates the selected completion', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+	await wait();
+
+	const beforeNav = lastFrame()!;
+	t.regex(beforeNav, /Available commands:/);
+	t.regex(beforeNav, /▸ \//);
+
+	stdin.write('\u001B[B');
+	await wait();
+
+	const afterDown = lastFrame()!;
+	t.regex(afterDown, /Available commands:/);
+	t.notRegex(afterDown, /^.*▸ \/.*\n.*▸ \//s);
+
+	unmount();
+});
+
+test('Enter selects the highlighted completion and populates the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\r');
+	await wait();
+
+	const afterEnter = lastFrame()!;
+	t.notRegex(afterEnter, /Available commands:/);
+	t.regex(afterEnter, /\/\w+/);
+
+	unmount();
+});
+
+test('typing a space after a command hides completions so args submit', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/test');
+	await wait();
+	await wait();
+
+	// While still typing the command name, completions are visible
+	t.regex(lastFrame()!, /Available commands:/);
+
+	// Once a space is typed, the user is entering arguments - completions hide
+	// so Enter submits the full `/test arg` instead of selecting `/test`
+	stdin.write(' arg');
+	await wait();
+
+	const afterArg = lastFrame()!;
+	t.notRegex(afterArg, /Available commands:/);
+	t.regex(afterArg, /\/test arg/);
+
+	unmount();
+});
+
 test('Enter submits a command typed in full on the first press', async t => {
 	// The highlighted completion is exactly what was typed, so there is nothing
 	// to select. Enter used to "select" it anyway, close the menu and stop,
@@ -1448,6 +2761,73 @@ test('Enter on a partly typed command still completes it without submitting', as
 
 	t.regex(stripAnsi(lastFrame()!), /\/test-help/);
 	t.is(submitted, null);
+test('Escape on an empty composer does not offer to clear', async t => {
+	// Nothing to clear: no text, no attachments, no active editor pill.
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	// Can't synchronize on a second keystroke here: any other key - including
+	// one sent purely to prove Escape's handler has run - dismisses the hint
+	// itself (user-input.tsx's own "clear clear message on other input"), so
+	// it would pass whether or not Escape actually skipped showing it. 500ms
+	// is generous slack for a synchronous state update with no async work in
+	// between.
+	await wait(500);
+
+	t.notRegex(lastFrame()!, /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape still offers to clear when the composer has text', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(
+		() => !/hello/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	t.notRegex(stripAnsi(lastFrame()!), /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape with only an active editor pill still offers to clear, and clearing dismisses it', async t => {
+	// The pill is the only clearable thing here - an empty-input skip must not
+	// strand it undismissable.
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				activeEditor={{fileName: 'app.ts'}}
+				onDismissActiveEditor={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(() => dismissed > 0);
+
+	t.is(dismissed, 1);
+	unmount();
+
 });
 
 test('completion menu dismissal/reset after selection or escape', async t => {
