@@ -12,12 +12,30 @@ const MAX_COMMANDS_IN_CONTEXT = 3;
 /**
  * Whether `phrase` appears in `haystack` as whole words, case-insensitive.
  * A plain substring test lets the tag `test` match "latest".
+ *
+ * Deliberately avoids building a RegExp from the phrase: it comes from
+ * user-authored command frontmatter, and a dynamic pattern is both a
+ * ReDoS-shaped risk the security scanner (rightly) flags and needless work —
+ * a linear scan does the same job.
  */
 function containsPhrase(haystack: string, phrase: string): boolean {
 	const needle = phrase.trim().toLowerCase();
 	if (!needle) return false;
-	const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(haystack);
+	const hay = haystack.toLowerCase();
+	let at = hay.indexOf(needle);
+	while (at !== -1) {
+		const beforeOk = at === 0 || !isWordChar(hay[at - 1]);
+		const after = at + needle.length;
+		const afterOk = after === hay.length || !isWordChar(hay[after]);
+		if (beforeOk && afterOk) return true;
+		at = hay.indexOf(needle, at + 1);
+	}
+	return false;
+}
+
+/** Word characters for whole-word matching: [a-z0-9]. */
+function isWordChar(char: string): boolean {
+	return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9');
 }
 
 /** Distinct lowercase words of four or more letters. */

@@ -329,6 +329,85 @@ test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
 	t.deepEqual(result, {openrouter: {experimental_flag: true}});
 });
 
+test('openai-compatible forwards an explicit reasoningEffort under the provider name', t => {
+	for (const sdkProvider of [undefined, 'openai-compatible'] as const) {
+		const result = buildProviderOptions(
+			makeProvider({name: 'DeepSeek', sdkProvider}),
+			'',
+			{reasoningEffort: 'high'},
+		);
+		t.deepEqual(result, {DeepSeek: {reasoningEffort: 'high'}});
+	}
+});
+
+test('openai-compatible omits reasoning options when reasoningEffort is unset', t => {
+	const result = buildProviderOptions(
+		makeProvider({name: 'DeepSeek', sdkProvider: 'openai-compatible'}),
+		'',
+		{temperature: 0.5},
+	);
+	t.is(result, undefined);
+});
+
+test('reasoningEffort is not forwarded to other SDK providers', t => {
+	for (const sdkProvider of ['anthropic', 'google', 'github-copilot'] as const) {
+		const result = buildProviderOptions(
+			makeProvider({name: 'Other', sdkProvider}),
+			'',
+			{reasoningEffort: 'high'},
+		);
+		t.is(result, undefined, `${sdkProvider} must not receive reasoningEffort`);
+	}
+});
+
+test('openai-compatible serialises reasoningEffort as reasoning_effort only when set', async t => {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const {generateText} = await import('ai');
+	const bodies: Record<string, unknown>[] = [];
+	const provider = createOpenAICompatible({
+		name: 'DeepSeek',
+		baseURL: 'https://api.deepseek.test/v1',
+		apiKey: 'test-key',
+		fetch: async (_input, init) => {
+			bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+			return new Response(
+				JSON.stringify({
+					id: '1',
+					created: 0,
+					model: 'deepseek-chat',
+					choices: [
+						{
+							index: 0,
+							message: {role: 'assistant', content: 'ok'},
+							finish_reason: 'stop',
+						},
+					],
+				}),
+				{headers: {'content-type': 'application/json'}},
+			);
+		},
+	});
+	const providerConfig = makeProvider({
+		name: 'DeepSeek',
+		sdkProvider: 'openai-compatible',
+	});
+
+	for (const modelParameters of [{reasoningEffort: 'high'} as const, {}]) {
+		await generateText({
+			model: provider.chatModel('deepseek-chat'),
+			prompt: 'hi',
+			providerOptions: buildProviderOptions(
+				providerConfig,
+				'',
+				modelParameters,
+			) as Parameters<typeof generateText>[0]['providerOptions'],
+		});
+	}
+
+	t.is(bodies[0]?.['reasoning_effort'], 'high');
+	t.is(bodies[1]?.['reasoning_effort'], undefined);
+});
+
 test('isPromptCachingEnabled is on by default for the anthropic SDK', t => {
 	t.true(
 		isPromptCachingEnabled(makeProvider({sdkProvider: 'anthropic'})),

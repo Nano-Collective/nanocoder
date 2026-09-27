@@ -31,6 +31,7 @@ import {
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
+import type {TuneConfig} from '@/types/config';
 import type {
 	ApiUsage,
 	DevelopmentMode,
@@ -77,6 +78,7 @@ export interface RunAcpConversationOptions {
 	toolManager: ToolManager;
 	conn: AgentSideConnection;
 	nonInteractiveAlwaysAllow: string[];
+	tune?: TuneConfig;
 }
 
 /**
@@ -181,7 +183,7 @@ const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
 async function runTurn(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
-	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow} =
+	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow, tune} =
 		options;
 	const {developmentMode, abortController} = session;
 
@@ -286,6 +288,7 @@ async function runTurn(
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
 			nonInteractiveAlwaysAllow,
+			modelParameters: tune?.enabled ? tune.modelParameters : undefined,
 		};
 
 		let streamedReasoning = '';

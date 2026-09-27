@@ -381,6 +381,11 @@ export class AcpAgent implements Agent {
 
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
+			const tune = resolveTune(
+				config,
+				this.initContext.client.getProviderConfig(),
+				loadPreferences(),
+			);
 
 			const response = await runAcpConversation({
 				session,
@@ -388,6 +393,7 @@ export class AcpAgent implements Agent {
 				toolManager: this.initContext.toolManager,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
+				tune,
 			});
 			const turnDurationMs = Date.now() - turnStart;
 			this.attachResponseUsage(

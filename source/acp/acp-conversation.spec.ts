@@ -15,7 +15,12 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
-import type {LLMClient, Message, ToolCall} from '@/types/core';
+import type {
+	LLMClient,
+	Message,
+	ModeOverrides,
+	ToolCall,
+} from '@/types/core';
 import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
@@ -217,6 +222,34 @@ test('runAcpConversation - returns end_turn on response with no choices', async 
 	});
 
 	t.is(result.stopReason, 'end_turn');
+});
+
+test('runAcpConversation - forwards enabled tune model parameters to the client', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	let capturedOverrides: ModeOverrides | undefined;
+	const client = {
+		chat: async (...args: Parameters<LLMClient['chat']>) => {
+			capturedOverrides = args[4];
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+		tune: {
+			enabled: true,
+			toolProfile: 'full',
+			aggressiveCompact: false,
+			modelParameters: {reasoningEffort: 'high'},
+		},
+	});
+
+	t.deepEqual(capturedOverrides?.modelParameters, {reasoningEffort: 'high'});
 });
 
 // ============================================================================

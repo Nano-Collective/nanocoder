@@ -619,6 +619,32 @@ Run tests.`,
 	t.is(loader.findRelevantCommands('add a test for this', []).length, 1);
 });
 
+test('CustomCommandLoader - whole-word matching treats digits as word characters', t => {
+	const testDir = createTestDir('relevance-word-boundary-digits');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'cmd.md'),
+		`---
+description: Numbered command
+tags: [v2]
+---
+Body.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	// `v2` must not match inside `v20`; the old regex used [a-z0-9]
+	// boundaries and the linear replacement must keep that behaviour.
+	t.is(loader.findRelevantCommands('upgrade to v20 please', []).length, 0);
+	t.is(loader.findRelevantCommands('switch to v2 now', []).length, 1);
+});
+
 test('CustomCommandLoader - findRelevantCommands scores description word overlap', t => {
 	const testDir = createTestDir('relevance-description');
 	t.teardown(() => cleanupTestDir(testDir));
