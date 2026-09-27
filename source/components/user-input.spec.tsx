@@ -1184,6 +1184,74 @@ test('typing a space after a command hides completions so args submit', async t 
 	unmount();
 });
 
+test('Escape on an empty composer does not offer to clear', async t => {
+	// Nothing to clear: no text, no attachments, no active editor pill.
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	// Can't synchronize on a second keystroke here: any other key - including
+	// one sent purely to prove Escape's handler has run - dismisses the hint
+	// itself (user-input.tsx's own "clear clear message on other input"), so
+	// it would pass whether or not Escape actually skipped showing it. 500ms
+	// is generous slack for a synchronous state update with no async work in
+	// between.
+	await wait(500);
+
+	t.notRegex(lastFrame()!, /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape still offers to clear when the composer has text', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(
+		() => !/hello/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	t.notRegex(stripAnsi(lastFrame()!), /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape with only an active editor pill still offers to clear, and clearing dismisses it', async t => {
+	// The pill is the only clearable thing here - an empty-input skip must not
+	// strand it undismissable.
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				activeEditor={{fileName: 'app.ts'}}
+				onDismissActiveEditor={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(() => dismissed > 0);
+
+	t.is(dismissed, 1);
+	unmount();
+});
+
 test('completion menu dismissal/reset after selection or escape', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
