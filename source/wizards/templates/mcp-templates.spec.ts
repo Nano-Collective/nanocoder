@@ -327,6 +327,52 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	});
 });
 
+function answersFor(template: McpTemplate): Record<string, string> {
+	const answers: Record<string, string> = {};
+	for (const field of template.fields) {
+		answers[field.name] = field.sensitive
+			? 'secret'
+			: (field.default ?? 'placeholder');
+	}
+	return answers;
+}
+
+test('templates with a serverName field stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.id === 'custom') continue;
+		if (!template.fields.some(field => field.name === 'serverName')) continue;
+
+		const answers = answersFor(template);
+		answers.serverName = `${template.id}-renamed`;
+		const built = template.buildConfig(answers);
+
+		t.is(built.name, `${template.id}-renamed`, template.id);
+		t.is(built.templateId, template.id, template.id);
+		t.is(resolveMcpTemplateId(built), template.id, template.id);
+	}
+});
+
+test('templates without a serverName field do not stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.fields.some(field => field.name === 'serverName')) continue;
+
+		const built = template.buildConfig(answersFor(template));
+		t.is(built.templateId, undefined, template.id);
+	}
+});
+
+test('resolveMcpTemplateId: legacy github-remote without templateId keeps its template', t => {
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-work',
+			transport: 'http',
+			url: 'https://api.githubcopilot.com/mcp/',
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		}),
+		'github-remote',
+	);
+});
+
 test('you template: builds authenticated HTTP config with API key', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'you');
 	t.truthy(template);

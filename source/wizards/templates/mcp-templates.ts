@@ -140,11 +140,14 @@ function remoteHttpTemplate(opts: {
 			description: opts.description,
 			tags: opts.tags,
 			timeout: TIMEOUT_MCP_DEFAULT_MS,
+			templateId: opts.id,
 		}),
 		category: 'remote',
 		transportType: 'http',
 	};
 }
+
+const GITHUB_REMOTE_URL = 'https://api.githubcopilot.com/mcp/';
 
 export const MCP_TEMPLATES: McpTemplate[] = [
 	{
@@ -293,7 +296,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.serverName || 'github-remote',
 			transport: 'http' as McpTransportType,
-			url: 'https://api.githubcopilot.com/mcp/',
+			url: GITHUB_REMOTE_URL,
 			description:
 				'Remote GitHub MCP server for repository management and operations',
 			tags: ['remote', 'github', 'git', 'repository', 'http'],
@@ -301,6 +304,10 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			headers: {
 				Authorization: `Bearer ${answers.githubToken}`,
 			},
+			// Stamp the origin template so the edit flow can resolve this
+			// server back here even under a custom name. Tags say `github`,
+			// which is the stdio template, so they don't.
+			templateId: 'github-remote',
 		}),
 		category: 'remote',
 		transportType: 'http',
@@ -583,12 +590,14 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  * Resolve which wizard template a saved server came from, for the edit flow.
  *
  * Resolution order:
- * 1. `templateId` — stamped by the wizard when the config is built. This is
- *    the only signal that survives a custom `serverName` (e.g. `you-paid`),
- *    since name-based matching misses and would fall through to `custom`,
- *    whose buildConfig never writes headers — silently dropping the bearer
- *    token.
- * 2. `tags` — configs written before the stamp existed, or hand-edited ones
+ * 1. `templateId` — stamped by the wizard when the config is built. This
+ *    survives a custom `serverName` (e.g. `you-paid`, `gh-work`). Name
+ *    matching misses those and would fall through to `custom`, whose
+ *    buildConfig never writes headers — silently dropping the bearer token.
+ * 2. `url` — `https://api.githubcopilot.com/mcp/` is `github-remote`. Configs
+ *    saved before that stamp have no `templateId`, and their tags say
+ *    `github` (the stdio template), so this is what keeps the bearer header.
+ * 3. `tags` — configs written before the stamp existed, or hand-edited ones
  *    that kept their tags. Three conditions, all necessary:
  *    - the tag equals a real template id;
  *    - the template's transport agrees with the saved server's, since
@@ -599,12 +608,11 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  *      the name in `buildConfig` (`simpleStdioTemplate` and friends return
  *      `name: opts.id`), so resolving a renamed server to them would rename
  *      it back on save and replace its command/args with template defaults.
- *      The `custom` fallback round-trips those servers intact.
- *    Note that `deepwiki` / `context7` / `github-remote` / `brave-search` do
- *    not carry their own id as a tag, so a renamed instance of those still
- *    falls through to `custom` — pre-existing, and for `github-remote` that
- *    still drops the bearer header on re-save. Tracked separately.
- * 3. Server name equal to a template id — covers default names. No
+ *      The `custom` fallback round-trips those servers intact. Those
+ *      templates are not stamped, for the same reason. `deepwiki` and
+ *      `context7` are stamped; a rename saved before that still misses, and
+ *      neither server has a credential to drop.
+ * 4. Server name equal to a template id — covers default names. No
  *    `serverName` check here: rebuilding under a name that already equals
  *    the template id cannot rename anything.
  *
@@ -612,7 +620,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  * `custom` template.
  */
 export function resolveMcpTemplateId(
-	config: Pick<McpServerConfig, 'name' | 'tags' | 'transport'> & {
+	config: Pick<McpServerConfig, 'name' | 'tags' | 'transport' | 'url'> & {
 		templateId?: string;
 	},
 ): string | undefined {
@@ -627,6 +635,13 @@ export function resolveMcpTemplateId(
 
 	if (config.templateId && knownTemplate(config.templateId)) {
 		return config.templateId;
+	}
+	if (
+		config.transport === 'http' &&
+		config.url === GITHUB_REMOTE_URL &&
+		knownTemplate('github-remote')
+	) {
+		return 'github-remote';
 	}
 	if (config.tags?.length) {
 		for (const tag of config.tags) {

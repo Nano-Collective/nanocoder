@@ -1104,6 +1104,52 @@ test('McpStep editing an X-API-Key template instance keeps its saved key', async
 	unmount();
 });
 
+// Regression (#1424): a renamed github-remote saved before the templateId
+// stamp only has a `github` tag, which is the stdio template. Edit opened
+// Custom and saving dropped Authorization. The token field is required, so
+// the saved bearer value has to come back filled in.
+test('McpStep editing a renamed github-remote server keeps its bearer token', async t => {
+	const servers = {
+		'gh-work': {
+			name: 'gh-work',
+			transport: 'http' as const,
+			url: 'https://api.githubcopilot.com/mcp/',
+			headers: {Authorization: 'Bearer ghp_test123'},
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={servers}
+			initialEditName="gh-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /GitHub \(Remote\) Configuration/);
+	t.notRegex(output, /Custom MCP Server Configuration/);
+
+	// Accept the prefilled name, then the prefilled token.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /GitHub Personal Access Token/);
+	stdin.write('\r');
+	await waitTick();
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved bearer token should prefill the required githubToken field',
+	);
+
+	unmount();
+});
+
 test('McpStep falls back to the menu when initialEditName is unknown', t => {
 	const {lastFrame} = render(
 		<McpStep
