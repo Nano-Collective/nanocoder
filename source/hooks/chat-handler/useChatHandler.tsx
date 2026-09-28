@@ -20,6 +20,7 @@ import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {processAssistantResponse} from './conversation/conversation-loop';
+import {startVerificationTurn} from './conversation/verification-turn';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
 import {displayError as displayErrorHelper} from './utils/message-helpers';
@@ -295,6 +296,12 @@ export function useChatHandler({
 					workingDirectory: process.cwd(),
 					onToolExecuted,
 					onFinalAssistantText,
+					// A fresh verification orchestrator per user turn. It holds the
+					// pre-edit baseline and the spent attempt budget, so carrying it
+					// across turns would measure the next turn's edits against a
+					// baseline from an unrelated request. `null` when the feature is
+					// off, which is the signal for the loop to stay out of the way.
+					verificationTurn: startVerificationTurn(),
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.

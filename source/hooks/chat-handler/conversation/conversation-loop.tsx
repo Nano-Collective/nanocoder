@@ -73,6 +73,13 @@ import {
 	executeApprovedTool,
 	executeToolsDirectly,
 } from './tool-executor';
+import {
+	postEditHook,
+	preEditHook,
+	prepareForVerificationInstruction,
+	turnEditedFiles,
+	type VerificationTurn,
+} from './verification-turn';
 
 interface ArchitectCheckpointState {
 	created: boolean;
@@ -199,6 +206,12 @@ interface ProcessAssistantResponseParams {
 	// continuation, so user-facing counts report the true repetition streak.
 	repeatedToolCallTotal?: number;
 	walkthroughLifecycle?: WalkthroughLifecycle;
+	// Per-user-turn verification state, created by `startVerificationTurn` at
+	// the top of a turn and threaded forward only through the tool-execution
+	// continuation. Reset to undefined at every other recursion site, because
+	// each of those is a *new* turn and a stale orchestrator would carry a spent
+	// attempt budget into it.
+	verificationTurn?: VerificationTurn | null;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -1036,6 +1049,18 @@ export const processAssistantResponse = async (
 			}
 		}
 
+		// 0) Post-edit verification: establish whether the repository was
+		//    already failing *before* the first edit lands. Everything the model
+		//    is later told it "introduced" is measured against this, so taking it
+		//    after the edit would blame it for pre-existing failures and send it
+		//    off to rewrite unrelated code. The hook is a no-op when the feature
+		//    is off or this turn touches no file contents.
+		await preEditHook(
+			params.verificationTurn ?? undefined,
+			validToolCalls,
+			controller.signal,
+		);
+
 		// 1) Auto-approved tools execute as a batch (parallelizes consecutive
 		//    read-only / agent runs).
 		if (autoTools.length > 0) {
@@ -1187,12 +1212,41 @@ export const processAssistantResponse = async (
 					processToolUse,
 				);
 			}
+
+			// Post-edit verification, after the results are in. Ordered after
+			// auto-diagnostics so a broken check is the last word: it is the
+			// ground truth, where diagnostics are one signal among several.
+			const verification = await postEditHook(
+				params.verificationTurn ?? undefined,
+				turnEditedFiles(validToolCalls),
+				controller.signal,
+			);
+			if (verification.kind === 'report') {
+				addToChatQueue(
+					<InfoMessage
+						key={generateKey(`verify-${verification.status}`)}
+						message={`Verification: ${verification.text}`}
+						hideBox={true}
+					/>,
+				);
+			}
+
 			const builder = new MessageBuilder(updatedMessages);
 			builder.addToolResults(turnResults);
 			if (autoDiagnosticsMessage) {
 				builder.addMessage(autoDiagnosticsMessage);
 			}
-			const nextMessages = builder.build();
+			// The results have to land before the instruction that refers to them,
+			// and the previous attempt's instruction is dropped so retries do not
+			// stack copies of the same output in history.
+			const nextMessages =
+				verification.kind === 'instruct'
+					? prepareForVerificationInstruction(
+							builder.build(),
+							verification.message,
+						)
+					: builder.build();
+
 			setMessages(nextMessages);
 			await processAssistantResponse({
 				...params,
@@ -1210,6 +1264,10 @@ export const processAssistantResponse = async (
 				repeatedToolCallCount: repeatedCountForNextTurn,
 				repeatedToolCallTotal: currentRepeatedTotal,
 				walkthroughLifecycle,
+				// Forwarded, not reset: the verification instruction is answered
+				// by the *next* turn, and a fresh orchestrator here would measure
+				// the retry against no baseline and spend a second attempt.
+				verificationTurn: params.verificationTurn ?? undefined,
 			});
 			return;
 		}
