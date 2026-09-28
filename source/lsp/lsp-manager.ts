@@ -8,6 +8,7 @@ import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';
 import {formatError} from '@/utils/error-formatter';
+import {createChildLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, LSPServerConfig} from './lsp-client';
 import {
@@ -43,11 +44,14 @@ export interface DiagnosticsResult {
 	diagnostics: Diagnostic[];
 }
 
+const logger = createChildLogger({module: 'lsp-manager'});
+
 export class LSPManager extends EventEmitter {
 	private clients: Map<string, LSPClient> = new Map(); // serverName -> client
 	private languageToServer: Map<string, string> = new Map(); // extension -> serverName
 	private documentServers: Map<string, string> = new Map(); // uri -> serverName
 	private diagnosticsCache: Map<string, Diagnostic[]> = new Map(); // uri -> diagnostics
+	private restartAttempts: Map<string, number> = new Map(); // serverName -> count
 	private rootUri: string;
 	private initialized: boolean = false;
 
@@ -132,12 +136,39 @@ export class LSPManager extends EventEmitter {
 				this.emit('diagnostics', params);
 			});
 
-			client.on('exit', (_code: number | null) => {
+			client.on('exit', (code: number | null) => {
 				this.clients.delete(config.name);
 				// Remove language mappings for this server
 				for (const [lang, serverName] of this.languageToServer.entries()) {
 					if (serverName === config.name) {
 						this.languageToServer.delete(lang);
+					}
+				}
+
+				if (code !== 0 && code !== null) {
+					const attempts = this.restartAttempts.get(config.name) || 0;
+					if (attempts < 3) {
+						this.restartAttempts.set(config.name, attempts + 1);
+						logger.info(
+							{server: config.name, attempts: attempts + 1},
+							'Attempting to restart crashed LSP server',
+						);
+
+						setTimeout(() => {
+							if (!this.clients.has(config.name) && this.initialized) {
+								this.startServer(config).catch(err => {
+									logger.error(
+										{err, server: config.name},
+										'Failed to restart LSP server',
+									);
+								});
+							}
+						}, 1000);
+					} else {
+						logger.error(
+							{server: config.name},
+							'LSP server failed to restart after 3 attempts',
+						);
 					}
 				}
 			});

@@ -75,7 +75,14 @@ export class LSPClient extends EventEmitter {
 					this.handleData(data.toString());
 				});
 
-				this.process.stderr?.on('data', (_data: Buffer) => {});
+				let stderrTail = '';
+				this.process.stderr?.on('data', (data: Buffer) => {
+					stderrTail += data.toString();
+					// Keep only the last 1000 characters
+					if (stderrTail.length > 1000) {
+						stderrTail = stderrTail.slice(-1000);
+					}
+				});
 
 				this.process.on('error', error => {
 					this.emit('error', error);
@@ -83,6 +90,22 @@ export class LSPClient extends EventEmitter {
 				});
 
 				this.process.on('exit', code => {
+					if (code !== 0 && code !== null) {
+						const errorMsg = `LSP server ${this.config.name} crashed with code ${code}. Stderr: ${stderrTail.trim() || '<empty>'}`;
+						logger.error(
+							{server: this.config.name, code, stderr: stderrTail},
+							'LSP crash',
+						);
+						this.emit('error', new Error(errorMsg));
+
+						// Reject all pending requests to prevent hanging
+						for (const [id, pending] of this.pendingRequests.entries()) {
+							clearTimeout(pending.timeoutId);
+							pending.reject(new Error(errorMsg));
+							this.pendingRequests.delete(id);
+						}
+					}
+
 					this.emit('exit', code);
 					this.initialized = false;
 				});
