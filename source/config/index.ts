@@ -22,7 +22,9 @@ import {
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
 	MAX_TRUNCATED_TURNS,
+	MAX_VERIFICATION_ATTEMPTS,
 } from '@/constants';
+import {parseVerificationCommand} from '@/services/verification/command-parser';
 import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
@@ -316,6 +318,7 @@ export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
 	maxEmptyTurns: MAX_EMPTY_TURNS,
 	maxMalformedRetries: MAX_MALFORMED_RETRIES,
 	maxTruncatedTurns: MAX_TRUNCATED_TURNS,
+	maxVerificationAttempts: MAX_VERIFICATION_ATTEMPTS,
 };
 
 function loadRetryLimitsConfig(): RetryLimitsConfig {
@@ -365,11 +368,106 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 						0,
 						defaults.maxTruncatedTurns,
 					),
+					maxVerificationAttempts: normalizeLimit(
+						retries.maxVerificationAttempts,
+						0,
+						defaults.maxVerificationAttempts,
+					),
 				};
 			}
 			return null;
 		}) ?? {...defaults}
 	);
+}
+
+const DEFAULT_VERIFICATION_CONFIG = {
+	enabled: true,
+	timeoutMs: 120_000,
+	maxOutputBytes: 16_000,
+} as const;
+
+/**
+ * Resolve the post-edit verification command, if any.
+ *
+ * The command is normalised to argv here, once, rather than tokenised on every
+ * edit. A malformed command then surfaces as a single load-time warning instead
+ * of a silent no-op that only the user would notice, much later, as "why isn't
+ * verification running".
+ *
+ * Returns `undefined` when nothing usable is configured, which is the single
+ * "stay out of the way" signal for every caller. No command means no behaviour
+ * change, and `nanocoder config get nanocoder.verification` can say so
+ * directly instead of leaving the user to infer it from missing output.
+ */
+function loadVerificationConfig(): AppConfig['verification'] {
+	const defaults = DEFAULT_VERIFICATION_CONFIG;
+
+	// Deliberately uncapped above, like the retry limits: the supported way to
+	// ask for a long run is to ask for a long run.
+	const normalizePositive = (value: unknown, fallback: number): number => {
+		if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+			return Math.round(value);
+		}
+		return fallback;
+	};
+
+	// A minimum of 1024 rather than 1: below that the cap cannot even carry the
+	// elision marker, so the output silently becomes a meaningless tail. A
+	// configuration asking for less is a mistake, not a preference.
+	const normalizeBytes = (value: unknown, fallback: number): number => {
+		if (typeof value === 'number' && Number.isFinite(value) && value >= 1024) {
+			return Math.round(value);
+		}
+		return fallback;
+	};
+
+	const block = loadHierarchicalConfig(
+		'agents.config.json',
+		'verification',
+		config => {
+			const verification = config.nanocoder?.verification;
+			if (!verification || typeof verification !== 'object') return null;
+			return verification as Record<string, unknown>;
+		},
+	);
+
+	if (block === null) return undefined;
+
+	const rawCommand = block.command;
+	let command: string[] | null = null;
+
+	// Both forms go through the same parser, so a command writable in the
+	// config is exactly a command the runner can spawn, and malformed input is
+	// rejected on identical grounds in both places. Anything that is neither a
+	// string nor an array is not a command; that is not worth a warning, since
+	// the feature simply stays off.
+	const parsed =
+		typeof rawCommand === 'string' || Array.isArray(rawCommand)
+			? parseVerificationCommand(rawCommand)
+			: null;
+
+	if (parsed?.ok) {
+		command = [parsed.value.command, ...parsed.value.args];
+	} else if (parsed) {
+		// Warn rather than throw: a bad command must not stop the session from
+		// starting, or one typo in one config block bricks the tool.
+		logWarning(`nanocoder.verification.command ignored: ${parsed.error}`);
+	}
+
+	// No usable command means no verification, whatever else the block says.
+	// Returning undefined rather than a disabled object keeps the "is this
+	// feature on" test a single null check for every caller.
+	if (command === null) return undefined;
+
+	return {
+		command,
+		enabled: block.enabled === false ? false : defaults.enabled,
+		timeoutMs: normalizePositive(block.timeoutMs, defaults.timeoutMs),
+		maxOutputBytes: normalizeBytes(
+			block.maxOutputBytes,
+			defaults.maxOutputBytes,
+		),
+	};
 }
 
 /**
@@ -781,6 +879,9 @@ function loadAppConfig(): AppConfig {
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
+	// Post-edit verification command (absent unless one is configured)
+	const verification = loadVerificationConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -799,6 +900,7 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
+		...(verification ? {verification} : {}),
 	};
 }
 
@@ -857,6 +959,8 @@ export function getRetryLimits(): RetryLimitsConfig {
 		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
 		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
 		maxTruncatedTurns: retries?.maxTruncatedTurns ?? MAX_TRUNCATED_TURNS,
+		maxVerificationAttempts:
+			retries?.maxVerificationAttempts ?? MAX_VERIFICATION_ATTEMPTS,
 	};
 }
 

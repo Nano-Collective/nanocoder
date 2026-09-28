@@ -383,6 +383,17 @@ function blockSpecs(): BlockSpec[] {
 			defaults: DEFAULT_RETRY_LIMITS as unknown as Record<string, unknown>,
 		},
 		{
+			path: ['nanocoder', 'verification'],
+			file: agents,
+			// `effective` is undefined unless a usable command is configured, so
+			// an unconfigured block renders as a single `nanocoder.verification`
+			// row rather than three leaves of defaults that look like a live
+			// setting. "Feature off" is the fact worth surfacing, and it is what
+			// makes `config get` useful for answering "why did it not run?".
+			effective: config.verification ?? {enabled: false},
+			leaf: true,
+		},
+		{
 			path: ['nanocoder', 'paste'],
 			file: preferences,
 			effective: config.paste,

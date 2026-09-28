@@ -418,6 +418,7 @@ test('RetryLimitsConfig requires no fields and exposes every retry cap', t => {
 		'maxMalformedRetries',
 		'maxRepeatedToolCalls',
 		'maxTruncatedTurns',
+		'maxVerificationAttempts',
 	]);
 });
 
@@ -478,6 +479,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'retries',
 		'hooks',
 		'sandbox',
+		'verification',
 	];
 	for (const key of expected) {
 		t.true(
@@ -495,8 +497,73 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 	t.is(schema.definitions.DiskNanocoderConfig.additionalProperties, false);
 });
 
-test('definition names are clean (no TypeScript generics)', t => {
-	for (const name of Object.keys(schema.definitions)) {
+// ---------------------------------------------------------------------------
+// nanocoder.verification
+// ---------------------------------------------------------------------------
+
+test('verification command accepts the array form', t => {
+	assertValid(t, 'array command', {
+		nanocoder: {verification: {command: ['npm', 'run', 'test:ci']}},
+	});
+});
+
+test('verification command accepts the string form', t => {
+	assertValid(t, 'string command', {
+		nanocoder: {verification: {command: 'npm run test:ci'}},
+	});
+});
+
+test('verification accepts an empty block, since the command is what enables it', t => {
+	// Valid but inert: the loader treats "no usable command" as "feature off".
+	// Rejecting it in the schema would only force users to comment the block out
+	// instead of emptying it.
+	assertValid(t, 'commandless verification', {
+		nanocoder: {verification: {}},
+	});
+});
+
+test('verification rejects a non-string, non-array command', t => {
+	assertInvalid(t, 'numeric command', {
+		nanocoder: {verification: {command: 42}},
+	});
+	assertInvalid(t, 'object command', {
+		nanocoder: {verification: {command: {run: 'tests'}}},
+	});
+});
+
+test('verification rejects an array holding non-strings', t => {
+	assertInvalid(t, 'mixed array', {
+		nanocoder: {verification: {command: ['npm', 5]}},
+	});
+});
+
+test('verification rejects unknown keys', t => {
+	// The block decides what gets executed. A silently-ignored key here is
+	// someone believing they configured something that never runs.
+	assertInvalid(t, 'unknown verification key', {
+		nanocoder: {verification: {command: ['npm', 'test'], retries: 3}},
+	});
+});
+
+test('verification requires every documented key to have the right type', t => {
+	assertInvalid(t, 'non-boolean enabled', {
+		nanocoder: {verification: {command: ['npm', 'test'], enabled: 'yes'}},
+	});
+	assertInvalid(t, 'non-numeric timeoutMs', {
+		nanocoder: {verification: {command: ['npm', 'test'], timeoutMs: '30s'}},
+	});
+	assertInvalid(t, 'non-numeric maxOutputBytes', {
+		nanocoder: {verification: {command: ['npm', 'test'], maxOutputBytes: 'big'}},
+	});
+});
+
+test('maxVerificationAttempts is accepted under retries', t => {
+	assertValid(t, 'maxVerificationAttempts', {
+		nanocoder: {retries: {maxVerificationAttempts: 3}},
+	});
+});
+
+test('definition names are clean (no TypeScript generics)', t => {	for (const name of Object.keys(schema.definitions)) {
 		for (const pattern of ['<', '>', '%3C', '%3E']) {
 			t.false(
 				name.includes(pattern),

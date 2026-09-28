@@ -136,6 +136,10 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"verification": {
+					"$ref": "#/definitions/VerificationConfig",
+					"description": "Run a check after the agent edits files and offer the result back to the\nmodel. Inert unless `command` is set, so adding this section changes\nnothing until you fill it in.\n\nProject-local, like `hooks` and `mcpServers` above, and therefore covered\nby the same directory-trust prompt - a cloned repository can name a\ncommand to execute, and that has to be a decision the user makes."
 				}
 			},
 			"type": "object",
@@ -516,6 +520,9 @@
 				},
 				"maxTruncatedTurns": {
 					"type": "number"
+				},
+				"maxVerificationAttempts": {
+					"type": "number"
 				}
 			},
 			"type": "object",
@@ -666,6 +673,39 @@
 				"mode": {
 					"enum": ["append", "replace"],
 					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"VerificationConfig": {
+			"description": "Post-edit verification: run a check after the agent edits files, and offer\nits output back to the model so it can fix what it broke.\n\nOff unless a `command` is set. Nothing about the default session changes.",
+			"properties": {
+				"command": {
+					"anyOf": [
+						{
+							"items": {
+								"type": "string"
+							},
+							"type": "array"
+						},
+						{
+							"type": "string"
+						}
+					],
+					"description": "The check to run. The array form is preferred and behaves identically on\nevery platform: `\"command\": [\"npm\", \"run\", \"test:ci\"]`.\n\nThe string form is tokenised, and rejected if it contains anything a\nshell would interpret. That is not caution for its own sake: on Windows\n`cmd.exe` has to run `.cmd` shims such as `npm.cmd`, so a command that is\ninert on a Mac can mean something entirely different on Windows. One\nconfig must not change meaning per platform.\n\nThe command is never run through a shell you did not ask for, and the\nwhole verification output is capped before it reaches the model."
+				},
+				"enabled": {
+					"description": "Set false to skip verification without deleting the command. Useful for\nturning it off in one profile while keeping it configured.",
+					"type": "boolean"
+				},
+				"maxOutputBytes": {
+					"description": "Bytes of output retained for the model. Default 16000, head and tail\nkept with the middle elided, since the summary line and the assertion\ndiff are at the end.",
+					"type": "number"
+				},
+				"timeoutMs": {
+					"description": "Wall-clock budget for one run. Default 120000. A run that exceeds it is\nreported as a timeout and is not retried - there is no failure output to\nact on.",
+					"type": "number"
 				}
 			},
 			"type": "object",
