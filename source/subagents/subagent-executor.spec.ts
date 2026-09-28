@@ -1,4 +1,11 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {execSync} from 'node:child_process';
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -1988,3 +1995,106 @@ test.serial('subagent tools in alwaysAllow skip the approval prompt', async t =>
 		reloadAppConfig();
 	}
 });
+
+// ============================================================================
+// nanocoder.autoCommit in delegated work.
+//
+// Subagents do not go through processToolUse, so auto-commit has to be wired
+// into their loop separately — and, as there, after the post-tool-use hooks.
+// ============================================================================
+
+test.serial(
+	'a subagent edit is auto-committed, including a formatter hook rewrite',
+	async t => {
+		const repo = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-autocommit-')),
+		);
+		const git = (command: string) =>
+			execSync(`git ${command}`, {cwd: repo, encoding: 'utf8'}).trimEnd();
+		git('init -q -b main');
+		git('config user.email test@example.com');
+		git('config user.name Test');
+		git('config commit.gpgsign false');
+		git('config core.autocrlf false');
+		git('config core.hooksPath .no-hooks');
+		git('commit -q --allow-empty -m baseline');
+
+		// A project subagent allowed to write, kept outside the repo so its
+		// definition does not show up as an untracked change.
+		const agentsRoot = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-writer-')),
+		);
+		mkdirSync(join(agentsRoot, '.nanocoder', 'agents'), {recursive: true});
+		writeFileSync(
+			join(agentsRoot, '.nanocoder', 'agents', 'writer.md'),
+			'---\nname: writer\ndescription: writer\ntools:\n  - write_file\n---\nwrite\n',
+			'utf-8',
+		);
+
+		const file = join(repo, 'edited.ts');
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async args => {
+					writeFileSync(String((args as {path: string}).path), 'agent\n');
+					return 'File written.';
+				},
+				readOnly: false,
+			},
+		});
+		const toolResults: Message[] = [];
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 'tc-commit',
+							function: {
+								name: 'write_file',
+								arguments: JSON.stringify({path: file}),
+							},
+						},
+					],
+				},
+				{content: 'Done.'},
+			],
+			messages => {
+				const toolMessage = messages.find(message => message.role === 'tool');
+				if (toolMessage) toolResults.push(toolMessage);
+			},
+		);
+
+		const leave = enterSubagentHookFixture({
+			'post-tool-use': [
+				{
+					command: subagentHookNode(
+						"require('fs').appendFileSync(process.env.NANOCODER_FILE, 'formatted\\n')",
+					),
+				},
+			],
+		});
+		getAppConfig().autoCommit = true;
+		let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+		let committed: string;
+		let status: string;
+		try {
+			result = await new SubagentExecutor(
+				toolManager,
+				client,
+				agentsRoot,
+			).execute({subagent_type: 'writer', description: 'Write edited.ts'});
+			committed = git('show HEAD:edited.ts');
+			status = git('status --porcelain');
+		} finally {
+			// reloadAppConfig() in leave() also turns autoCommit back off.
+			leave();
+			rmSync(repo, {recursive: true, force: true});
+			rmSync(agentsRoot, {recursive: true, force: true});
+		}
+
+		t.true(result.success, result.error);
+		t.regex(String(toolResults[0]?.content), /\[auto-commit\] [a-f0-9]{7,} /);
+		t.is(committed, 'agent\nformatted');
+		t.is(status, '', 'nothing the edit or the hook wrote is left behind');
+	},
+);

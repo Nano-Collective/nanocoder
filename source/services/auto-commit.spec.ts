@@ -1,5 +1,11 @@
 import {execSync} from 'node:child_process';
-import {mkdtempSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -7,6 +13,7 @@ import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
 import {
 	cleanMessage,
+	formatCommitNote,
 	maybeAutoCommit,
 	setAutoCommitClient,
 } from './auto-commit';
@@ -202,21 +209,32 @@ test.serial('skips ignored files', async t => {
 	}
 });
 
-test.serial('skips while a merge is in progress', async t => {
-	const dir = makeRepo();
-	try {
-		writeFileSync(
-			join(dir, '.git', 'MERGE_HEAD'),
-			`${git(dir, 'rev-parse HEAD')}\n`,
-		);
-		const file = join(dir, 'a.ts');
-		writeFileSync(file, 'x\n');
-		t.is(await maybeAutoCommit('write_file', {path: file}), null);
-		t.is(commitCount(dir), 1);
-	} finally {
-		rmSync(dir, {recursive: true, force: true});
-	}
-});
+// The marker git leaves in .git/ while each operation is paused mid-way.
+for (const [operation, marker, isDir] of [
+	['merge', 'MERGE_HEAD', false],
+	['cherry-pick', 'CHERRY_PICK_HEAD', false],
+	['revert', 'REVERT_HEAD', false],
+	['rebase (merge backend)', 'rebase-merge', true],
+	['rebase (apply backend)', 'rebase-apply', true],
+] as const) {
+	test.serial(`skips while a ${operation} is in progress`, async t => {
+		const dir = makeRepo();
+		try {
+			const markerPath = join(dir, '.git', marker);
+			if (isDir) {
+				mkdirSync(markerPath);
+			} else {
+				writeFileSync(markerPath, `${git(dir, 'rev-parse HEAD')}\n`);
+			}
+			const file = join(dir, 'a.ts');
+			writeFileSync(file, 'x\n');
+			t.is(await maybeAutoCommit('write_file', {path: file}), null);
+			t.is(commitCount(dir), 1);
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	});
+}
 
 test.serial('serializes concurrent edits into separate commits', async t => {
 	const dir = makeRepo();
@@ -273,6 +291,17 @@ test.serial('commits what a post-tool-use formatter hook wrote', async t => {
 		setToolRegistryGetter(() => ({}));
 		rmSync(dir, {recursive: true, force: true});
 	}
+});
+
+test('formatCommitNote bounds a long model-written subject', t => {
+	t.is(
+		formatCommitNote('abc1234', 'fix: short'),
+		'[auto-commit] abc1234 fix: short',
+	);
+	const note = formatCommitNote('abc1234', `feat: ${'x'.repeat(500)}`);
+	t.is(note.length, '[auto-commit] abc1234 '.length + 72);
+	t.true(note.endsWith('…'));
+	t.is(formatCommitNote('', 'docs: y'), '[auto-commit] docs: y');
 });
 
 test('cleanMessage strips a code fence around the message', t => {
