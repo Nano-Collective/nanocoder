@@ -351,6 +351,10 @@ A timeout, a command that cannot be found, or a cancelled run is never retried: 
 
 > **Warning - untrusted repositories:** `verification.command` is project-local configuration, exactly like `hooks` and `mcpServers`, and it names a command to execute. A cloned repository can carry one in its `agents.config.json`. Treat the first-run trust prompt as a real decision, and run `--help` in directories you do not trust before accepting.
 
+#### Checking a command before trusting it
+
+`/verify` runs the configured check on demand and reports the result without involving the model. Use it to confirm the command resolves, the timeout is generous enough, and the output is useful, before letting it run after every edit. It works even when `enabled` is `false`, since typing the command is the ask.
+
 ### Paste Handling
 
 Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer pastes are collapsed into a `[Paste #N: X chars]` placeholder and multi-line pastes into a `[Paste #N: X lines]` placeholder.

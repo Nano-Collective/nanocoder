@@ -52,6 +52,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
 | `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber would remove from some text: `/privacy inspect <text>`. Scrubbing itself is switched on with the [`enablePromptScrubbing`](../configuration/preferences.md#what-gets-saved-automatically) preference (`/settings` → **Advanced** → **Privacy**) |
+| `/verify` | Run the configured verification check on demand and report the result, without asking the model to fix anything. The fastest way to confirm a check is wired up correctly (see [Post-Edit Verification](../configuration/index.md#post-edit-verification)) |
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
 | `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
