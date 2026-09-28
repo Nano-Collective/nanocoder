@@ -30,6 +30,10 @@
 					},
 					"type": "array"
 				},
+				"autoCommit": {
+					"description": "Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default.",
+					"type": "boolean"
+				},
 				"autoCompact": {
 					"$ref": "#/definitions/AutoCompactConfig",
 					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
