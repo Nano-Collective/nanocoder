@@ -148,7 +148,22 @@ async function commitFile(absPath: string): Promise<string | null> {
 	const hash = output.match(/\[[^\]]*?([a-f0-9]{7,})\]/)?.[1] ?? '';
 	const subject = message.split('\n')[0];
 	logInfo(`Auto-committed ${pathspec}${hash ? ` (${hash})` : ''}: ${subject}`);
-	return `[auto-commit] ${hash ? `${hash} ` : ''}${subject}`;
+	return formatCommitNote(hash, subject);
+}
+
+/** Longest subject the model-visible note carries (git's own convention). */
+const MAX_NOTE_SUBJECT_CHARS = 72;
+
+/**
+ * The note appended to the tool result. It is added after the result has been
+ * capped, and the subject is model-written, so its length is bounded here.
+ */
+export function formatCommitNote(hash: string, subject: string): string {
+	const shortSubject =
+		subject.length > MAX_NOTE_SUBJECT_CHARS
+			? `${subject.slice(0, MAX_NOTE_SUBJECT_CHARS - 1)}…`
+			: subject;
+	return `[auto-commit] ${hash ? `${hash} ` : ''}${shortSubject}`;
 }
 
 async function isOperationInProgress(
