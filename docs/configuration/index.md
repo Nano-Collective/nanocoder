@@ -350,6 +350,8 @@ The retry count is [`retries.maxVerificationAttempts`](#retry-limits), which def
 A timeout, a command that cannot be found, or a cancelled run is never retried: there is no failure output to act on, so asking the model to fix it would only produce invention.
 
 > **Warning - untrusted repositories:** `verification.command` is project-local configuration, exactly like `hooks` and `mcpServers`, and it names a command to execute. A cloned repository can carry one in its `agents.config.json`. Treat the first-run trust prompt as a real decision, and run `--help` in directories you do not trust before accepting.
+>
+> The gate is the directory-trust prompt, and it is inherited rather than checked separately: no command from the project directory runs until the directory is trusted, because the conversation loop that would spawn it only exists after initialization, which only runs post-trust. `/doctor` lists the command under **Verification** alongside the hook and MCP commands, so you can read what a repository asked to run.
 
 #### Checking a command before trusting it
 

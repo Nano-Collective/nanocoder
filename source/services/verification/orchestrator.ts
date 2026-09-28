@@ -41,7 +41,7 @@ import {
 } from './verifier.js';
 
 /** Opening words of the synthetic message injected into the conversation. */
-export const VERIFICATION_MESSAGE_PREFIX =
+const VERIFICATION_MESSAGE_PREFIX =
 	'The verification command failed after your edits.';
 
 export interface VerificationSettings {
