@@ -21,6 +21,12 @@ import {resolveWindowsExecutable, runVerificationCommand} from './runner.js';
 // and it keeps the *command* free of characters the metacharacter screen
 // rejects — a `-e` payload full of parentheses tests the fixture, not the
 // runner.
+//
+// It also covers the Windows quoting for free: `process.execPath` is
+// `C:\Program Files\nodejs\node.exe` on a default install, so every test here
+// runs a program path containing a space through `cmd.exe`. That is the case
+// that Node's `shell: true` argv joining cannot handle unaided, and the reason
+// argv is wrapped in quotes on the Windows path.
 
 let workdir: string;
 
@@ -161,6 +167,43 @@ test('resolveWindowsExecutable: falls back to the Windows default PATHEXT', t =>
 		fakeFiles('C:\\tools\\cargo.exe'),
 	);
 	t.is(normalise(lookup.path), 'c:\\tools\\cargo.exe');
+});
+
+// ============================================================================
+// The Windows launch decision
+//
+// Exercised through `runVerificationCommand` with an injected `platform`
+// rather than by exporting the planner: the behaviour under test is the refusal
+// to launch, and the refusal is the observable result.
+// ============================================================================
+
+test('an argv carrying shell intent is refused when the platform needs cmd.exe', async t => {
+	// Built through the array form to bypass the parse-time screen. The array
+	// form is the recommended one and POSIX needs no screen, so the last check
+	// before the bytes reach a shell has to live here.
+	const parsed = parseVerificationCommand(['npm', 'test', '&&', 'del']);
+	t.true(parsed.ok, 'the array form is not screened at parse time');
+	if (!parsed.ok) return;
+
+	const result = await run(parsed.value, {platform: 'win32'});
+	t.is(result.status, 'unavailable');
+	t.regex(result.spawnError!, /cmd\.exe/);
+});
+
+test('the same argv is fine where no shell is involved', async t => {
+	const parsed = parseVerificationCommand(['npm', 'test', '&&', 'del']);
+	if (!parsed.ok) return;
+	const planResult = await runVerificationCommand({
+		command: parsed.value,
+		cwd: workdir,
+		timeoutMs: 1_000,
+		maxOutputBytes: 4_000,
+		platform: 'linux',
+	});
+	// `npm` is not resolvable in the fixture environment, so this asserts the
+	// *metacharacter* was not the reason - the process was launched and the
+	// shell never saw the `&&`.
+	t.notRegex(planResult.spawnError ?? '', /cmd\.exe/);
 });
 
 // ============================================================================

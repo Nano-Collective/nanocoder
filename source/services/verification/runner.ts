@@ -161,11 +161,11 @@ export function resolveWindowsExecutable(
  * This shape is only used once {@link resolveWindowsExecutable} has established
  * that a command interpreter is genuinely required; native executables are
  * spawned with `shell: false` and need neither defence.
+ *
+ * Not exported: the Windows branch is reachable through `platform: 'win32'` on
+ * {@link runVerificationCommand}, so it is testable without widening the API.
  */
-export function resolveSpawnPlan(
-	command: ParsedCommand,
-	platform: string,
-): SpawnPlan {
+function resolveSpawnPlan(command: ParsedCommand, platform: string): SpawnPlan {
 	if (platform !== 'win32') {
 		// No shell, and the child leads its own process group so a negative
 		// pid signals the whole tree on timeout.
@@ -229,7 +229,7 @@ function quoteForCmd(element: string): string {
  * anything. The injectable `platform` on {@link RunCommandOptions} shapes the
  * spawn decision, which is a pure function worth testing; the kill is not.
  */
-export function killProcessTree(proc: ChildProcess): void {
+function killProcessTree(proc: ChildProcess): void {
 	const pid = proc.pid;
 	if (pid === undefined) return;
 
