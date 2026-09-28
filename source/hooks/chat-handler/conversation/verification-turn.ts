@@ -24,7 +24,7 @@ import {
 	VerificationOrchestrator,
 	type VerificationSettings,
 } from '@/services/verification/orchestrator';
-import type {Message, ToolCall} from '@/types/core';
+import type {Message, ToolCall, ToolResult} from '@/types/core';
 
 /** File-mutating tools whose output a content check can be blamed on. */
 const EDIT_TOOL_NAMES = new Set(['write_file', 'string_replace', 'diff_edit']);
@@ -59,6 +59,36 @@ export function startVerificationTurn(): VerificationTurn | null {
 /** True when the turn ran a tool that changed file contents. */
 export function turnEditedFiles(toolCalls: readonly ToolCall[]): boolean {
 	return toolCalls.some(call => EDIT_TOOL_NAMES.has(call.function.name));
+}
+
+/**
+ * True when the turn changed file contents *and the change succeeded*.
+ *
+ * The result list is what separates the two. A write rejected by the user, a
+ * diff that matched nothing, a path outside the sandbox - each returns an error
+ * result and leaves the tree byte-identical. Counting those as edits would run
+ * the check against unchanged code and then report a pre-existing failure as
+ * if the model had just caused it, which is the single most expensive way for
+ * this feature to be wrong: the model gets told to fix something it did not
+ * break.
+ *
+ * Falls back to the calls when results are unavailable, so a caller that has
+ * not run its tools yet is not silently treated as having edited nothing.
+ */
+export function turnEditedFilesSuccessfully(
+	toolCalls: readonly ToolCall[],
+	results?: readonly ToolResult[],
+): boolean {
+	if (results === undefined) return turnEditedFiles(toolCalls);
+	if (!turnEditedFiles(toolCalls)) return false;
+
+	const succeeded = new Set(
+		results.filter(result => !result.isError).map(result => result.name),
+	);
+	for (const name of succeeded) {
+		if (EDIT_TOOL_NAMES.has(name)) return true;
+	}
+	return false;
 }
 
 /**

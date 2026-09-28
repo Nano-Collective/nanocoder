@@ -77,7 +77,7 @@ import {
 	postEditHook,
 	preEditHook,
 	prepareForVerificationInstruction,
-	turnEditedFiles,
+	turnEditedFilesSuccessfully,
 	type VerificationTurn,
 } from './verification-turn';
 
@@ -1218,7 +1218,7 @@ export const processAssistantResponse = async (
 			// ground truth, where diagnostics are one signal among several.
 			const verification = await postEditHook(
 				params.verificationTurn ?? undefined,
-				turnEditedFiles(validToolCalls),
+				turnEditedFilesSuccessfully(validToolCalls, turnResults),
 				controller.signal,
 			);
 			if (verification.kind === 'report') {

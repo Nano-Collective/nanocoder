@@ -171,14 +171,18 @@ export class VerificationOrchestrator {
 	/**
 	 * Run the check after the edits and decide what happens next.
 	 *
-	 * Called once per post-edit turn. `settled` makes the second and later
-	 * attempts no-ops, which is what bounds the loop: the caller re-enters the
-	 * conversation after every `feedback`, and each of those turns must not
-	 * spend another run.
+	 * Called after every turn that carried an edit. A `feedback` outcome leaves
+	 * the orchestrator live: the model is about to make another edit and this
+	 * has to run again, and `maxVerificationAttempts` is the only thing bounding
+	 * that. Latching on feedback instead would silently make every value above
+	 * `1` behave exactly like `1`.
+	 *
+	 * The latch is what stops a *pass* from re-running, and what makes a
+	 * terminal stop final, so a session cannot pay for a check it has already
+	 * been told the outcome of.
 	 */
 	async afterEdits(signal?: AbortSignal): Promise<VerificationOutcome> {
 		if (this.settled) return {action: 'skipped', reason: 'not-configured'};
-		this.settled = true;
 
 		if (inFlight > 0) return {action: 'skipped', reason: 'busy'};
 
@@ -186,6 +190,10 @@ export class VerificationOrchestrator {
 		try {
 			result = await runGuarded(this.run, this.settings, signal);
 		} catch (error) {
+			// Settles the turn. An error does not consume an attempt, so leaving
+			// this live would allow edit → error → edit → error forever with
+			// nothing in `maxVerificationAttempts` to stop it.
+			this.settled = true;
 			return {
 				action: 'error',
 				message: error instanceof Error ? error.message : String(error),
@@ -198,10 +206,12 @@ export class VerificationOrchestrator {
 		this.state = state;
 
 		if (decision.action === 'done') {
+			this.settled = true;
 			return {action: 'passed', result, attempts: decision.attempts};
 		}
 
 		if (decision.action === 'stop') {
+			this.settled = true;
 			return {
 				action: 'stopped',
 				text: formatStop(decision),

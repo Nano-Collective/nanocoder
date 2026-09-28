@@ -157,21 +157,38 @@ test.serial('maxAttempts 1 reports and never asks for a fix', async t => {
 	t.is(outcome.reason, 'attempts-exhausted');
 });
 
-test.serial('the loop stops after one post-edit run, not one per turn', async t => {
-	const run = counting([failed('FAIL a.test.ts > one\n')]);
+test.serial('a fix is re-checked until the budget is gone', async t => {
+	// `maxAttempts: 3` means three post-edit runs, so the caller re-entering
+	// after each `feedback` has to be able to spend the next one. Latching on
+	// feedback would make every budget above 1 behave like 1.
+	//
+	// Each attempt fails on a strict subset of the previous one: a fix that
+	// removes a failure without adding any. That clears the `no-progress` and
+	// `regression` stops, so the only thing that can end the run is the budget
+	// - which is exactly the thing under test.
+	const run = counting([
+		passed(),
+		failed('FAIL a > one\nFAIL a > two\nFAIL a > three\n'),
+		failed('FAIL a > two\nFAIL a > three\n'),
+		failed('FAIL a > three\n'),
+	]);
 	const orchestrator = new VerificationOrchestrator(
 		{...SETTINGS, maxAttempts: 3},
 		run,
 	);
 
 	await orchestrator.ensureBaseline();
-	await orchestrator.afterEdits();
-	// The caller re-enters the conversation after `feedback`; that new turn must
-	// not buy another run.
-	const second = await orchestrator.afterEdits();
+	const first = await orchestrator.afterEdits();
+	t.is(first.action, 'feedback');
 
-	t.is(second.action, 'skipped');
-	t.is(run.count, 2); // baseline + exactly one post-edit run
+	const second = await orchestrator.afterEdits();
+	t.is(second.action, 'feedback');
+
+	const third = await orchestrator.afterEdits();
+	t.is(third.action, 'stopped');
+	if (third.action !== 'stopped') return;
+	t.is(third.reason, 'attempts-exhausted');
+	t.is(run.count, 4); // baseline + all three attempts, none wasted
 });
 
 test.serial('a passing run ends the loop successfully', async t => {
@@ -182,6 +199,36 @@ test.serial('a passing run ends the loop successfully', async t => {
 	const outcome = await orchestrator.afterEdits();
 
 	t.is(outcome.action, 'passed');
+});
+
+test.serial('a pass is not re-run by a later edit in the same turn', async t => {
+	const run = counting([passed(), passed()]);
+	const orchestrator = new VerificationOrchestrator(
+		{...SETTINGS, maxAttempts: 3},
+		run,
+	);
+
+	await orchestrator.ensureBaseline();
+	t.is((await orchestrator.afterEdits()).action, 'passed');
+
+	// Settled on a pass: the turn already has its answer, and re-running would
+	// charge the user for the same verdict.
+	t.is((await orchestrator.afterEdits()).action, 'skipped');
+	t.is(run.count, 2);
+});
+
+test.serial('a stop is not re-run by a later edit in the same turn', async t => {
+	const run = counting([passed(), failed('FAIL a.test.ts > one\n')]);
+	const orchestrator = new VerificationOrchestrator(
+		{...SETTINGS, maxAttempts: 1},
+		run,
+	);
+
+	await orchestrator.ensureBaseline();
+	t.is((await orchestrator.afterEdits()).action, 'stopped');
+
+	t.is((await orchestrator.afterEdits()).action, 'skipped');
+	t.is(run.count, 2);
 });
 
 test.serial('a timeout stops rather than spending another attempt', async t => {

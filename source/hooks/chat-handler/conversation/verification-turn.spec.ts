@@ -4,9 +4,10 @@ import {
 	preEditHook,
 	prepareForVerificationInstruction,
 	turnEditedFiles,
+	turnEditedFilesSuccessfully,
 } from './verification-turn';
 import {VerificationOrchestrator, type VerificationRunner} from '@/services/verification/orchestrator';
-import type {Message, ToolCall} from '@/types/core';
+import type {Message, ToolCall, ToolResult} from '@/types/core';
 
 console.log(`\nverification-turn.spec.ts`);
 
@@ -58,6 +59,16 @@ function call(name: string): ToolCall {
 	return {id: `c-${name}`, function: {name, arguments: {}}};
 }
 
+function result(name: string, isError: boolean): ToolResult {
+	return {
+		role: 'tool',
+		tool_call_id: `c-${name}`,
+		name,
+		content: isError ? 'rejected' : 'written',
+		isError,
+	} as unknown as ToolResult;
+}
+
 // ============================================================================
 // Edit detection
 // ============================================================================
@@ -82,6 +93,39 @@ test('read-only and non-content tools do not', t => {
 
 test('a mixed turn counts as an edit', t => {
 	t.true(turnEditedFiles([call('read_file'), call('write_file')]));
+});
+
+test('an edit that failed does not count', t => {
+	// The tree is byte-identical after a rejected write, so running the check
+	// here would report a pre-existing failure as freshly introduced.
+	t.false(
+		turnEditedFilesSuccessfully(
+			[call('write_file')],
+			[result('write_file', true)],
+		),
+	);
+});
+
+test('a failed edit does not mask a successful one in the same turn', t => {
+	t.true(
+		turnEditedFilesSuccessfully(
+			[call('string_replace'), call('write_file')],
+			[result('string_replace', true), result('write_file', false)],
+		),
+	);
+});
+
+test('a successful non-edit tool does not make a turn an edit', t => {
+	t.false(
+		turnEditedFilesSuccessfully(
+			[call('read_file')],
+			[result('read_file', false)],
+		),
+	);
+});
+
+test('no results yet falls back to the attempted calls', t => {
+	t.true(turnEditedFilesSuccessfully([call('write_file')], undefined));
 });
 
 // ============================================================================
