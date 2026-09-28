@@ -8,8 +8,8 @@ import {
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
-import {Command, Message} from '@/types/index';
 import type {LLMClient} from '@/types/core';
+import {Command, Message} from '@/types/index';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {
@@ -198,10 +198,13 @@ async function loadCheckpoint(
 
 			const gaps = await manager.restoreFiles(checkpointData);
 
-			await restoreCheckpointConversation(checkpointData.conversation.messages, {
-				setMessages: metadata.setMessages,
-				client: metadata.client,
-			});
+			await restoreCheckpointConversation(
+				checkpointData.conversation.messages,
+				{
+					setMessages: metadata.setMessages,
+					client: metadata.client,
+				},
+			);
 
 			return React.createElement(
 				React.Fragment,
