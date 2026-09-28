@@ -18,7 +18,8 @@ import {
 	getCurrentBranch,
 	getDefaultBranch,
 	getUpstreamBranch,
-} from './utils';
+	gitOperationMutex,
+} from './utils.js';
 
 // ============================================================================
 // Types
@@ -269,7 +270,7 @@ const gitPrCoreTool = tool({
 		required: [],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitPr(args);
+		return await gitOperationMutex.enqueue(() => executeGitPr(args));
 	},
 });
 

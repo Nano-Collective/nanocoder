@@ -11,7 +11,13 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {execGit, formatStatusChar, getDiffStats, parseGitStatus} from './utils';
+import {
+	execGit,
+	formatStatusChar,
+	getDiffStats,
+	gitOperationMutex,
+	parseGitStatus,
+} from './utils.js';
 
 // ============================================================================
 // Types
@@ -117,7 +123,7 @@ const gitAddCoreTool = tool({
 		required: [],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitAdd(args);
+		return await gitOperationMutex.enqueue(() => executeGitAdd(args));
 	},
 });
 

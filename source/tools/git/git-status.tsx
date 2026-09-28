@@ -20,10 +20,11 @@ import {
 	getDiffStats,
 	getStashCount,
 	getUpstreamBranch,
+	gitOperationMutex,
 	isMergeInProgress,
 	isRebaseInProgress,
 	parseGitStatus,
-} from './utils';
+} from './utils.js';
 
 // ============================================================================
 // Types
@@ -236,7 +237,7 @@ const gitStatusCoreTool = tool({
 		required: [],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitStatus(args);
+		return await gitOperationMutex.enqueue(() => executeGitStatus(args));
 	},
 });
 

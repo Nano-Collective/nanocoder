@@ -7,6 +7,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+
 import {
 	parseGitStatus,
 	isGitAvailable,
@@ -15,7 +16,8 @@ import {
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
 	truncateDiff,
-} from './utils';
+	GitMutex,
+} from './utils.js';
 
 // ============================================================================
 // Test Helpers
@@ -354,3 +356,57 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// GitMutex Tests
+// ============================================================================
+
+test('GitMutex serializes operations', async t => {
+	const mutex = new GitMutex();
+	const order: number[] = [];
+
+	const op1 = mutex.enqueue(async () => {
+		await new Promise(resolve => setTimeout(resolve, 50));
+		order.push(1);
+		return 'result1';
+	});
+
+	const op2 = mutex.enqueue(async () => {
+		order.push(2);
+		return 'result2';
+	});
+
+	const op3 = mutex.enqueue(async () => {
+		await new Promise(resolve => setTimeout(resolve, 10));
+		order.push(3);
+		return 'result3';
+	});
+
+	const [res1, res2, res3] = await Promise.all([op1, op2, op3]);
+
+	t.deepEqual(order, [1, 2, 3]);
+	t.is(res1, 'result1');
+	t.is(res2, 'result2');
+	t.is(res3, 'result3');
+});
+
+test('GitMutex continues if an operation throws', async t => {
+	const mutex = new GitMutex();
+	const order: number[] = [];
+
+	const op1 = mutex.enqueue(async () => {
+		order.push(1);
+		throw new Error('fail');
+	});
+
+	const op2 = mutex.enqueue(async () => {
+		order.push(2);
+		return 'success';
+	});
+
+	await t.throwsAsync(op1, {message: 'fail'});
+	const res2 = await op2;
+
+	t.deepEqual(order, [1, 2]);
+	t.is(res2, 'success');
+});

@@ -11,7 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {execGit, truncateDiff} from './utils';
+import {execGit, gitOperationMutex, truncateDiff} from './utils.js';
 
 // ============================================================================
 // Types
@@ -132,7 +132,7 @@ const gitDiffCoreTool = tool({
 		required: [],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitDiff(args);
+		return await gitOperationMutex.enqueue(() => executeGitDiff(args));
 	},
 });
 

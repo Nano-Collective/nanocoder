@@ -15,10 +15,11 @@ import {
 	execGit,
 	type FileChange,
 	getDiffStats,
+	gitOperationMutex,
 	hasStagedChanges,
 	isLastCommitPushed,
 	parseGitStatus,
-} from './utils';
+} from './utils.js';
 
 // ============================================================================
 // Types
@@ -163,7 +164,7 @@ const gitCommitCoreTool = tool({
 		required: ['message'],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitCommit(args);
+		return await gitOperationMutex.enqueue(() => executeGitCommit(args));
 	},
 });
 

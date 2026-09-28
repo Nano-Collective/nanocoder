@@ -12,6 +12,38 @@ import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
 
+// ============================================================================
+// Mutex for Git Operations
+// ============================================================================
+
+/**
+ * A simple mutex lock to queue asynchronous operations.
+ * This is used to serialize mutating git tool executions (like git_add and git_commit)
+ * to prevent race conditions on index.lock when called in parallel by the agent.
+ */
+export class GitMutex {
+	private queue: Promise<void> = Promise.resolve();
+
+	async enqueue<T>(operation: () => Promise<T>): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			this.queue = this.queue
+				.then(async () => {
+					try {
+						const result = await operation();
+						resolve(result);
+					} catch (error) {
+						reject(error);
+					}
+				})
+				.catch(() => {
+					// Prevent the queue itself from rejecting, so subsequent operations still run
+				});
+		});
+	}
+}
+
+export const gitOperationMutex = new GitMutex();
+
 /**
  * File change status from git
  */

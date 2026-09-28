@@ -11,7 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {getCommits, getCurrentBranch} from './utils';
+import {getCommits, getCurrentBranch, gitOperationMutex} from './utils.js';
 
 // ============================================================================
 // Types
@@ -112,7 +112,7 @@ const gitLogCoreTool = tool({
 		required: [],
 	}),
 	execute: async (args, _options) => {
-		return await executeGitLog(args);
+		return await gitOperationMutex.enqueue(() => executeGitLog(args));
 	},
 });
 
