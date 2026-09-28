@@ -477,9 +477,9 @@ export function runVerificationCommand(
 		// stdin is ignored on purpose: a command that stops to prompt would
 		// otherwise block until the timeout, producing a confusing failure
 		// instead of an honest one.
-		// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 		let proc: ChildProcess;
 		try {
+			// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true, javascript.lang.security.detect-child-process.detect-child-process
 			proc = spawn(plan.file, plan.args, {
 				cwd,
 				shell: plan.shell,
