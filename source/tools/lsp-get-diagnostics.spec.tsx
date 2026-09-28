@@ -1,6 +1,7 @@
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import type {DiagnosticInfo} from '@/vscode/index';
 import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
@@ -361,13 +362,27 @@ test('get_diagnostics: formats multiple diagnostics', async t => {
 test('get_diagnostics: handles URI to path conversion', async t => {
 	// Test URI to path conversion (file:// prefix removal)
 	const fileUri = 'file:///home/user/test.ts';
-	const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
+	let path = fileUri;
+	if (fileUri.startsWith('file://')) {
+		try {
+			path = fileURLToPath(fileUri);
+		} catch {
+			path = fileUri;
+		}
+	}
 
-	t.is(path, '/home/user/test.ts');
+	t.is(path, fileURLToPath('file:///home/user/test.ts'));
 
 	// Test non-URI paths
 	const plainPath = '/home/user/test.ts';
-	const unchangedPath = plainPath.startsWith('file://') ? plainPath.slice(7) : plainPath;
+	let unchangedPath = plainPath;
+	if (plainPath.startsWith('file://')) {
+		try {
+			unchangedPath = fileURLToPath(plainPath);
+		} catch {
+			unchangedPath = plainPath;
+		}
+	}
 
 	t.is(unchangedPath, '/home/user/test.ts');
 });

@@ -1,6 +1,7 @@
 import {constants} from 'node:fs';
 import {access} from 'node:fs/promises';
 import {resolve as resolvePath} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import type {JSONValue} from 'ai';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -247,7 +248,14 @@ const executeGetDiagnostics = async (
 
 	for (const {uri, diagnostics} of allDiagnostics) {
 		// Convert URI to path
-		const path = uri.startsWith('file://') ? uri.slice(7) : uri;
+		let path = uri;
+		if (uri.startsWith('file://')) {
+			try {
+				path = fileURLToPath(uri);
+			} catch {
+				path = uri;
+			}
+		}
 		lines.push(`\n${path}:`);
 
 		for (const diag of diagnostics) {
