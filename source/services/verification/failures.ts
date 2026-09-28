@@ -104,10 +104,22 @@ const SUMMARY_LINE =
 	/\b\d+\s+(?:passed|failed|failures?|pending|skipped|todo|total|errors?)\b|\btests?\s*:|^\s*(?:OK|PASS|FAIL)\b/i;
 
 /**
+ * Section banners, which name a group of failures without being one.
+ *
+ * `=================== FAILURES ===================` and pytest's
+ * `____ test_add ____` underline match the failure hint purely because the word
+ * is in them. Extracted, they become phantom entries: they inflate every count
+ * the model and the user are shown ("3 failures" for one broken test) and add a
+ * line to the diff that never means anything.
+ */
+const SECTION_BANNER = /^[=_\-*~#]{3,}\s*\S|\S\s*[=_\-*~#]{3,}\s*$/;
+
+/**
  * True when a line looks like it reports a failure rather than narrating.
  */
 function looksLikeFailure(line: string): boolean {
 	if (SUMMARY_LINE.test(line)) return false;
+	if (SECTION_BANNER.test(line)) return false;
 	return FAILURE_HINT.test(line) || /^[●✕✗×]/.test(line);
 }
 
@@ -118,19 +130,38 @@ function truncate(line: string): string {
 }
 
 /**
+ * Numbers that move between two runs of the *same* failure.
+ *
+ * Applied only to the fallback key. `normalizeForSignature` keeps bare digits on
+ * purpose, because for the whole-output "did anything change" signature a moved
+ * number really is a changed result. A failure *key* is different: it is an
+ * identity that has to survive a re-run, and a test's own values are the least
+ * stable part of its output. `assert 3 == 4` becoming `assert 5 == 4` is the
+ * same test moving forward, not a new failure plus a resolved one.
+ *
+ * Without this, one edited assertion reports twice — once as introduced, once
+ * as resolved — and the model is told it broke a test that was passing while
+ * also being congratulated for fixing one it did not.
+ */
+const VOLATILE_NUMBER = /\b\d+(?:\.\d+)?\b/g;
+
+/**
  * The identity for a failure line, or `null` if no convention matched.
  *
  * Normalising the whole line is the fallback because it is stable enough to
- * compare runs by - it is exactly what `signatureOf` does - even though it
- * shifts if the message text changes. A wrong-but-consistent key is better than
- * a missing one, because a missing key makes the failure invisible to the diff.
+ * compare runs by *provided its volatile parts are removed* — see
+ * {@link VOLATILE_NUMBER}. A wrong-but-consistent key is better than a missing
+ * one, because a missing key makes the failure invisible to the diff; a key
+ * that shifts between runs is worse than both, because it fabricates a
+ * resolved/introduced pair out of a single failure.
  */
 function keyOf(line: string): string | null {
 	for (const pattern of FAILURE_PATTERNS) {
 		const match = pattern.exec(line);
 		if (match?.[1]) return normalizeForSignature(match[1]).trim();
 	}
-	return looksLikeFailure(line) ? normalizeForSignature(line).trim() : null;
+	if (!looksLikeFailure(line)) return null;
+	return normalizeForSignature(line).replace(VOLATILE_NUMBER, '<n>').trim();
 }
 
 /**

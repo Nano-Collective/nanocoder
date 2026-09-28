@@ -64,6 +64,11 @@ export interface SpawnPlan {
 	args: string[];
 	shell: boolean;
 	detached: boolean;
+	/**
+	 * `true` when argv is already a finished Windows command line and Node must
+	 * not apply its own quoting on top of it.
+	 */
+	verbatim?: boolean;
 	/** Set when the command must not be run at all. */
 	error?: string;
 }
@@ -150,13 +155,26 @@ export function resolveWindowsExecutable(
  * from the parser, because the array form is deliberately unscreened during
  * parsing and this is the last point before the bytes reach a shell.
  *
- * **Quoting.** Under `shell: true` Node joins argv with spaces and does not
- * re-quote, so an element containing a space is split — including the program
- * path itself, which on a default Windows install is
- * `C:\Program Files\nodejs\node.exe`. Every element is therefore wrapped in
- * double quotes. That is only sound because the screen above also rejects the
- * double quote, so no element can close the wrapper and append its own command.
- * One screen, one quoting rule, no way to route around either.
+ * **Quoting.** The `cmd.exe` command line is built here, in full, and handed to
+ * `spawn` with `windowsVerbatimArguments`, rather than being left to
+ * `shell: true`. Two things go wrong if Node is left to assemble it:
+ *
+ * 1. `/s` makes `cmd.exe` strip the *first and last* quote of the string after
+ *    `/c` and take the rest verbatim. Node's own per-argument quoting sits
+ *    inside that range, so a program path containing a space
+ *    (`C:\Program Files\nodejs\...`) is left unbalanced and the command never
+ *    runs.
+ * 2. When the quotes *are* balanced, `cmd.exe` hands the inner pair to the shim
+ *    as real characters. A `.cmd` written the ordinary way
+ *    (`if "%1"=="--watch"`) then compares against `"--watch"` with quotes and
+ *    takes the wrong branch — silently running something other than what was
+ *    configured.
+ *
+ * So the line is assembled explicitly: quote only the elements that need it,
+ * then wrap the whole thing in the one extra pair of quotes that `/s` needs to
+ * strip. Sound only because the screen above also rejects the double quote, so
+ * no element can close the wrapper and append its own command. One screen, one
+ * quoting rule, no way to route around either.
  *
  * This shape is only used once {@link resolveWindowsExecutable} has established
  * that a command interpreter is genuinely required; native executables are
@@ -165,7 +183,11 @@ export function resolveWindowsExecutable(
  * Not exported: the Windows branch is reachable through `platform: 'win32'` on
  * {@link runVerificationCommand}, so it is testable without widening the API.
  */
-function resolveSpawnPlan(command: ParsedCommand, platform: string): SpawnPlan {
+function resolveSpawnPlan(
+	command: ParsedCommand,
+	platform: string,
+	lookup?: {path: string; needsShell: boolean},
+): SpawnPlan {
 	if (platform !== 'win32') {
 		// No shell, and the child leads its own process group so a negative
 		// pid signals the whole tree on timeout.
@@ -193,25 +215,35 @@ function resolveSpawnPlan(command: ParsedCommand, platform: string): SpawnPlan {
 		};
 	}
 
+	// Run the *resolved* path, not the bare name. `cmd.exe` searches the current
+	// directory before PATH, so a same-named `.cmd` sitting in the repository
+	// would otherwise shadow the tool that was just validated — meaning the
+	// `unavailable` verdict and the screen above were both decided about a
+	// different file than the one that actually runs.
+	const file = lookup?.path ?? command.command;
+	const line = [file, ...command.args].map(quoteForCmdLine).join(' ');
+
 	return {
-		file: quoteForCmd(command.command),
-		args: command.args.map(quoteForCmd),
-		shell: true,
+		file: process.env.ComSpec || 'cmd.exe',
+		args: ['/d', '/s', '/c', `"${line}"`],
+		shell: false,
 		detached: false,
+		verbatim: true,
 	};
 }
 
 /**
- * Wrap one argv element for `cmd.exe`.
+ * Quote one element for a `cmd.exe` command line — and only if it needs it.
  *
- * Only ever called on elements that passed {@link findShellMetacharacter},
- * which rejects `"` — so there is no sequence here that closes the wrapper
- * early. A stray backslash needs no handling: cmd.exe does not use backslash
- * escaping (unlike a POSIX shell or the C runtime), so a trailing `\` is
- * passed through literally.
+ * Quoting an element that does not need it is not a no-op: the shim receives
+ * the quote characters as part of the argument. An empty element still needs a
+ * pair, or it disappears entirely.
+ *
+ * The screen in {@link resolveSpawnPlan} has already rejected `"` and every
+ * `cmd.exe` metacharacter, so no element here can close its own wrapper.
  */
-function quoteForCmd(element: string): string {
-	return `"${element}"`;
+function quoteForCmdLine(element: string): string {
+	return element === '' || /[\s"]/.test(element) ? `"${element}"` : element;
 }
 
 /**
@@ -341,14 +373,16 @@ export function runVerificationCommand(
 		return Promise.resolve(immediate('aborted', startedAt));
 	}
 
-	let plan = resolveSpawnPlan(command, platform);
-
-	if (platform === 'win32' && !plan.error) {
-		// Establish that the command is real and that an interpreter is
-		// required before spending a process on it. Native executables skip
-		// the shell entirely, so their argv is never interpreted at all.
+	let plan: SpawnPlan;
+	if (platform === 'win32') {
+		// Establish that the command is real, and whether an interpreter is
+		// required, before spending a process on it. Native executables skip
+		// the shell entirely, so their argv is never interpreted at all. The
+		// resolved path is threaded into the plan so the file that was
+		// validated is also the file that runs.
 		const lookup = resolveWindowsExecutable(command.command);
-		if (lookup.path === null) {
+		const resolved = lookup.path;
+		if (resolved === null) {
 			return Promise.resolve(
 				immediate(
 					'unavailable',
@@ -357,14 +391,20 @@ export function runVerificationCommand(
 				),
 			);
 		}
+		plan = resolveSpawnPlan(command, platform, {
+			path: resolved,
+			needsShell: lookup.needsShell,
+		});
 		if (!lookup.needsShell) {
 			plan = {
-				file: lookup.path,
+				file: resolved,
 				args: command.args,
 				shell: false,
 				detached: true,
 			};
 		}
+	} else {
+		plan = resolveSpawnPlan(command, platform);
 	}
 
 	if (plan.error) {
@@ -438,13 +478,34 @@ export function runVerificationCommand(
 		// otherwise block until the timeout, producing a confusing failure
 		// instead of an honest one.
 		// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-		const proc = spawn(plan.file, plan.args, {
-			cwd,
-			shell: plan.shell,
-			detached: plan.detached,
-			stdio: ['ignore', 'pipe', 'pipe'],
-			windowsHide: true,
-		});
+		let proc: ChildProcess;
+		try {
+			proc = spawn(plan.file, plan.args, {
+				cwd,
+				shell: plan.shell,
+				detached: plan.detached,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				windowsHide: true,
+				windowsVerbatimArguments: plan.verbatim === true,
+			});
+		} catch (error) {
+			// `spawn` throws synchronously for loadable-looking but unloadable
+			// targets: on Windows an `*.exe`/`*.com` that is not a real PE image
+			// (empty file, text file, wrong-architecture binary) surfaces as a
+			// raw `ErrnoException` instead of the async `error` event, because
+			// that errno is outside libuv's allowlist. Left unhandled it rejects
+			// the promise, which reaches `unhandledRejection` and takes the whole
+			// session down over a bad verification command. This function
+			// promises never to reject, so resolve it like any other reason the
+			// command cannot be run.
+			finish(
+				'unavailable',
+				null,
+				null,
+				error instanceof Error ? error.message : String(error),
+			);
+			return;
+		}
 
 		proc.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
 		proc.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));

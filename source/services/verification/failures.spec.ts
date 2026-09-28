@@ -135,6 +135,19 @@ test('failuresOf: an explicitly-marked failure survives the summary guard', t =>
 	t.is(failuresOf('FAILED tests/test_a.py::test_one').length, 1);
 });
 
+test('failuresOf: a section banner is not a failure in its own right', t => {
+	// pytest prints `=================== FAILURES ===================` and
+	// underlines each test with `____ test_add ____`. Both match the failure
+	// hint only because the word is in them; extracted, they become phantom
+	// entries that inflate every count and every diff.
+	t.deepEqual(
+		failuresOf(
+			'=================== FAILURES ===================\n____ test_add ____\nFAILED tests/test_a.py::test_add',
+		),
+		[{key: 'tests/test_a.py::test_add', line: 'FAILED tests/test_a.py::test_add'}],
+	);
+});
+
 // ============================================================================
 // Diffing
 // ============================================================================

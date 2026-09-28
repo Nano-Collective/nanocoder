@@ -22,11 +22,10 @@ import {resolveWindowsExecutable, runVerificationCommand} from './runner.js';
 // rejects — a `-e` payload full of parentheses tests the fixture, not the
 // runner.
 //
-// It also covers the Windows quoting for free: `process.execPath` is
-// `C:\Program Files\nodejs\node.exe` on a default install, so every test here
-// runs a program path containing a space through `cmd.exe`. That is the case
-// that Node's `shell: true` argv joining cannot handle unaided, and the reason
-// argv is wrapped in quotes on the Windows path.
+// It does *not* cover the `cmd.exe` quoting, despite appearances: every fixture
+// here is `node.exe`, which resolves through the native-executable branch and is
+// spawned with `shell: false`, so `cmd.exe` never sees the argv. The shell path
+// is covered by the dedicated `.cmd` shim tests below.
 
 let workdir: string;
 
@@ -230,6 +229,83 @@ test('runVerificationCommand: a missing binary is unavailable, not retried', asy
 	const result = await run(parsed.value);
 	t.is(result.status, 'unavailable');
 	t.truthy(result.spawnError, 'the reason is the only clue for a typo');
+});
+
+// Regression: a file that exists and is named like an executable but is not
+// loadable makes `spawn` throw *synchronously* (on Windows the bad-format
+// errno is outside libuv's async allowlist). Unhandled it rejects the promise,
+// and the rejection reaches `unhandledRejection` -> gracefulShutdown(1), so a
+// bad verification command in the config killed the whole session.
+test('runVerificationCommand: a present-but-unloadable binary resolves as unavailable', async t => {
+	const bogus = join(workdir, 'not-really.exe');
+	writeFileSync(bogus, 'this is a text file, not a PE image\n', 'utf8');
+
+	const result = await run({
+		command: bogus,
+		args: [],
+		display: 'not-really.exe',
+	});
+
+	t.is(result.status, 'unavailable');
+	t.truthy(result.spawnError, 'the reason is the only clue');
+});
+
+// Regression: over-quoting argv. `cmd.exe` hands the inner quote pair to the
+// shim as real characters, so a shim written the ordinary way
+// (`if "%1"=="--watch"`) compared against `"--watch"`, took the other branch,
+// and the configured command silently did something else.
+test('runVerificationCommand: a .cmd shim receives its arguments unquoted', async t => {
+	if (process.platform !== 'win32') {
+		t.pass('cmd.exe is Windows-only');
+		return;
+	}
+	const out = join(workdir, 'arg1.txt');
+	const shim = join(workdir, 'shim.cmd');
+	writeFileSync(
+		shim,
+		`@echo off\r\necho [%1] > "${out}"\r\n`,
+		'utf8',
+	);
+
+	const result = await run({
+		command: shim,
+		args: ['--watch'],
+		display: 'shim.cmd --watch',
+	});
+
+	t.is(result.status, 'passed');
+	t.is(readFileSync(out, 'utf8').trim(), '[--watch]');
+});
+
+// Regression: under-quoting argv. With `shell: true` the `cmd.exe /s` flag
+// strips the first and last quote of the string after `/c`, and Node's own
+// per-argument quoting sits inside that range — so a program path containing a
+// space was left unbalanced and the command never ran at all.
+test('runVerificationCommand: a .cmd shim in a path with a space still runs', async t => {
+	if (process.platform !== 'win32') {
+		t.pass('cmd.exe is Windows-only');
+		return;
+	}
+	const nested = join(workdir, 'dir with space');
+	mkdirSync(nested, {recursive: true});
+	const out = join(nested, 'sp.txt');
+	const shim = join(nested, 'spacey.cmd');
+	writeFileSync(
+		shim,
+		`@echo off\r\necho [%~nx0] [%1] > "${out}"\r\n`,
+		'utf8',
+	);
+
+	const result = await run({
+		command: shim,
+		args: ['--out my file.txt'],
+		display: 'spacey.cmd --out my file.txt',
+	});
+
+	t.is(result.status, 'passed');
+	// A single argument containing a space is conventionally quoted, exactly as
+	// it would be in a console; the point is that it arrives as one argument.
+	t.is(readFileSync(out, 'utf8').trim(), '[spacey.cmd] ["--out my file.txt"]');
 });
 
 test('runVerificationCommand: runs in the requested cwd', async t => {
