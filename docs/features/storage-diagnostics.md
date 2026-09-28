@@ -14,7 +14,9 @@ root path, limits, entries, and findings. On narrow terminals the panes stack.
 Use Up/Down to select a store, Enter to explore its entries, then Enter again
 for an item or finding's details and path. Esc goes back (or exits from the
 store list); `q` or Ctrl+C exits at any time. A "potential orphan" warning does
-not prove a session is inactive.
+not prove a session is inactive. Note that timeline and checkpoint directories
+are intentionally not cross-referenced against saved sessions because an unsaved 
+or live session can still legally own them, and checkpoints do not track session IDs.
 
 For scripts or terminals without an interactive TTY, use:
 
