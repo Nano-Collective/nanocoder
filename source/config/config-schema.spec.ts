@@ -95,6 +95,7 @@ test('all documented nanocoder fields are accepted together', t => {
 			nanocoderTools: {webSearch: {apiKey: 'sk-abc'}},
 			headless: {maxTurns: 20},
 			sandbox: true,
+			autoCommit: true,
 		},
 	});
 });
@@ -478,6 +479,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'retries',
 		'hooks',
 		'sandbox',
+		'autoCommit',
 	];
 	for (const key of expected) {
 		t.true(

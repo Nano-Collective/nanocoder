@@ -17,6 +17,7 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {
 	recordSubagentApiCallForStats,
 	SubagentExecutor,
@@ -110,6 +111,7 @@ export async function initializePlain(
 	}
 
 	updateLastUsed(actualProvider, finalModel);
+	setAutoCommitClient(client);
 
 	const subagentExecutor = new SubagentExecutor(
 		toolManager,

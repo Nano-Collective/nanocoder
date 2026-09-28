@@ -15,6 +15,7 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {maybeAutoCommit} from '@/services/auto-commit';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -891,11 +892,17 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
+			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
 				truncateToolResult(content),
 			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const failed = typeof result !== 'string' && result.isError;
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return commitNote ? `${withHooks}\n\n${commitNote}` : withHooks;
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
