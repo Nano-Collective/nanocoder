@@ -46,25 +46,34 @@ export type CommandParseResult =
  * expansion (`!`), variable expansion (`%`), and glob/tilde expansion
  * (`* ? ~`).
  *
+ * The double quote is here because the Windows path quotes every argv element
+ * before handing it to `cmd.exe` (see `resolveSpawnPlan`). Quoting is only
+ * safe while no element can contain a quote to break out with, so the screen
+ * and the quoting have to be one rule rather than two.
+ *
  * Absent from this set, and therefore allowed: `- _ . : , / \ = @ + #` — which
  * together cover the overwhelming majority of real test invocations
  * (`--reporter=dot`, `./gradlew`, `src/foo.test.ts:12`).
  */
-const SHELL_METACHARACTERS = /[;&|<>^$(){}\r\n`!*?~%]/;
+const SHELL_METACHARACTERS = /[";&|<>^$(){}\r\n`!*?~%]/;
 
 const METACHARACTER_HELP =
 	'The array form passes each element straight to the process with no ' +
 	'interpretation, and is supported on every platform: ' +
 	'`"command": ["npm", "run", "test:ci"]`.';
 
+/** Why tokenisation failed, or the tokens themselves. */
+type TokenizeResult = {ok: true; tokens: string[]} | {ok: false; error: string};
+
 /**
  * Tokenise a command string, honouring single and double quotes.
  *
- * Returns `null` for input the user has to fix (unterminated quote, trailing
- * backslash); every other input yields at least one token, because `''` is a
- * legitimate empty argument and is tracked separately from "no token yet".
+ * Returns an error rather than `null` for input the user has to fix, so the
+ * caller can say which mistake was made. Every other input yields at least one
+ * token, because `''` is a legitimate empty argument and is tracked separately
+ * from "no token yet".
  */
-function tokenize(input: string): string[] | null {
+function tokenize(input: string): TokenizeResult {
 	const tokens: string[] = [];
 	let current = '';
 	// Distinguishes `''` (one empty argument) from `''` (no argument), which
@@ -92,7 +101,9 @@ function tokenize(input: string): string[] | null {
 				current += input[i];
 				i++;
 			}
-			if (i >= input.length) return null;
+			if (i >= input.length) {
+				return {ok: false, error: 'unterminated single quote'};
+			}
 			i++;
 			continue;
 		}
@@ -101,20 +112,30 @@ function tokenize(input: string): string[] | null {
 			i++;
 			hasToken = true;
 			while (i < input.length && input[i] !== '"') {
-				// Only `\"` and `\\` are escapes; a lone backslash before any
-				// other character stays literal, matching POSIX shells.
+				// Only `\\` is an escape; a lone backslash before any other
+				// character stays literal, matching POSIX shells.
 				if (input[i] === '\\' && i + 1 < input.length) {
 					const next = input[i + 1];
-					if (next === '"' || next === '\\') {
+					if (next === '\\') {
 						current += next;
 						i += 2;
 						continue;
+					}
+					if (next === '"') {
+						// An escaped double quote could only ever produce a
+						// token the metacharacter screen rejects, so the escape
+						// is refused here with a useful message instead of
+						// failing later for an unrelated-looking reason. The
+						// array form is the way to pass a literal quote.
+						return {ok: false, error: 'escaped double quote'};
 					}
 				}
 				current += input[i];
 				i++;
 			}
-			if (i >= input.length) return null;
+			if (i >= input.length) {
+				return {ok: false, error: 'unterminated double quote'};
+			}
 			i++;
 			continue;
 		}
@@ -125,11 +146,12 @@ function tokenize(input: string): string[] | null {
 	}
 
 	if (hasToken) tokens.push(current);
-	return tokens;
+	return {ok: true, tokens};
 }
 
 function describeMetacharacter(char: string): string {
 	const named: Record<string, string> = {
+		'"': '"',
 		';': ';',
 		'&': '&',
 		'|': '|',
@@ -234,13 +256,16 @@ export function parseVerificationCommand(
 		};
 	}
 
-	const tokens = tokenize(trimmed);
-	if (tokens === null) {
+	const tokenized = tokenize(trimmed);
+	if (!tokenized.ok) {
 		return {
 			ok: false,
-			error: `Unterminated quote in verification command: ${JSON.stringify(trimmed)}. ${METACHARACTER_HELP}`,
+			error:
+				`Could not tokenise verification command: ${tokenized.error}. ` +
+				`${METACHARACTER_HELP}`,
 		};
 	}
+	const {tokens} = tokenized;
 	if (tokens.length === 0) {
 		return {ok: false, error: 'Verification command is empty.'};
 	}

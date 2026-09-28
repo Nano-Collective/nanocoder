@@ -71,8 +71,17 @@ test('string form honours single quotes as fully literal', t => {
 });
 
 test('string form honours double quotes and their escapes', t => {
-	t.deepEqual(tokens('echo "a \\"b\\" c"'), ['echo', 'a "b" c']);
 	t.deepEqual(tokens('echo "back\\\\slash"'), ['echo', 'back\\slash']);
+});
+
+test('string form rejects an escaped double quote rather than deferring it', t => {
+	// The escape could only ever yield a token that the metacharacter screen
+	// rejects, so it is refused during tokenisation with a message that names
+	// the mistake. Tested at the public boundary: the exact wording is not the
+	// contract, but the rejection is.
+	const result = parseVerificationCommand('echo "a \\"b\\" c"');
+	t.false(result.ok);
+	t.regex(result.ok ? '' : result.error, /tokenise/);
 });
 
 test('string form leaves a backslash before an ordinary character alone', t => {
@@ -86,13 +95,13 @@ test('string form keeps a quoted empty string as an empty argument', t => {
 test('string form rejects an unterminated single quote', t => {
 	const result = parseVerificationCommand(`npm test --grep 'oops`);
 	t.false(result.ok);
-	t.regex(result.ok ? '' : result.error, /Unterminated quote/);
+	t.regex(result.ok ? '' : result.error, /tokenise/);
 });
 
 test('string form rejects an unterminated double quote', t => {
 	const result = parseVerificationCommand('npm test --grep "oops');
 	t.false(result.ok);
-	t.regex(result.ok ? '' : result.error, /Unterminated quote/);
+	t.regex(result.ok ? '' : result.error, /tokenise/);
 });
 
 // ============================================================================
@@ -138,6 +147,23 @@ test('metacharacters inside quotes are still rejected', t => {
 	const result = parseVerificationCommand(`pytest -k "test(a)"`);
 	t.false(result.ok);
 	t.regex(result.ok ? '' : result.error, /must not contain "\("/);
+});
+
+test('a double quote in the array form is left to the runtime screen', t => {
+	// The array form is deliberately unscreened at parse time — it is the
+	// recommended form and POSIX needs no screen. On Windows the argv elements
+	// are wrapped in double quotes for cmd.exe, so a literal quote has to be
+	// refused there, at the point where it would matter. See
+	// `resolveSpawnPlan` in runner.ts.
+	const result = parseVerificationCommand(['pytest', '--tb=short', 'a"b']);
+	t.true(result.ok);
+});
+
+test('a double quote in the string form is a metacharacter', t => {
+	// Reachable in the string form only via a token that keeps its quote, e.g.
+	// a value spliced in by another layer before parsing.
+	const result = parseVerificationCommand('pytest --tb "short');
+	t.false(result.ok);
 });
 
 test('string form allows the punctuation real test commands use', t => {
