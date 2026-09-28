@@ -180,7 +180,13 @@ test('an argv carrying shell intent is refused when the platform needs cmd.exe',
 	// Built through the array form to bypass the parse-time screen. The array
 	// form is the recommended one and POSIX needs no screen, so the last check
 	// before the bytes reach a shell has to live here.
-	const parsed = parseVerificationCommand(['npm', 'test', '&&', 'del']);
+	//
+	// The command is an explicitly-pathed `.cmd` fixture rather than `npm`:
+	// `resolveWindowsExecutable` resolves against the real PATH, so `npm`
+	// becomes a `.cmd` shim on Windows but resolves to nothing on Linux, and
+	// the test would pass or fail by host.
+	const shim = script('refuse.cmd', '@echo off\r\n');
+	const parsed = parseVerificationCommand([shim, 'test', '&&', 'del']);
 	t.true(parsed.ok, 'the array form is not screened at parse time');
 	if (!parsed.ok) return;
 

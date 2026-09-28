@@ -19,7 +19,7 @@
 
 import {type ChildProcess, spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
-import {extname, join} from 'node:path';
+import {win32} from 'node:path';
 import {findShellMetacharacter, type ParsedCommand} from './command-parser.js';
 import {prepareOutputForModel, stripAnsi} from './output.js';
 
@@ -105,6 +105,11 @@ export interface ExecutableLookup {
  * It also lets the common case skip the shell entirely: anything resolving to
  * `.exe`/`.com` is spawned directly, so its argv never reaches `cmd.exe` and
  * needs neither screening nor quoting.
+ *
+ * Path semantics are `win32`'s, not the host's. The function models what
+ * `cmd.exe` would find, and the spec exercises it with Windows-style paths from
+ * any OS, so `path.join` — which emits `/` on POSIX — would make the answer
+ * depend on where the tests happen to run.
  */
 export function resolveWindowsExecutable(
 	file: string,
@@ -116,7 +121,9 @@ export function resolveWindowsExecutable(
 		if (!fileExists(file)) return {path: null, needsShell: false};
 		return {
 			path: file,
-			needsShell: !NATIVE_WINDOWS_EXECUTABLES.has(extname(file).toLowerCase()),
+			needsShell: !NATIVE_WINDOWS_EXECUTABLES.has(
+				win32.extname(file).toLowerCase(),
+			),
 		};
 	}
 
@@ -130,9 +137,9 @@ export function resolveWindowsExecutable(
 		for (const ext of extensions) {
 			// A name that already carries an extension is only tried as-is, so
 			// `npm.cmd` does not also get probed as `npm.cmd.cmd`.
-			const candidate = extname(file)
-				? join(dir, file)
-				: `${join(dir, file)}${ext}`;
+			const candidate = win32.extname(file)
+				? win32.join(dir, file)
+				: `${win32.join(dir, file)}${ext}`;
 			if (!fileExists(candidate)) continue;
 			return {
 				path: candidate,
