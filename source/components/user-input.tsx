@@ -704,11 +704,15 @@ export default function UserInput({
 			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
-		} else {
+		} else if (input || attachments.length > 0 || activeEditor) {
+			// Nothing to clear otherwise - no-op instead of arming a hint for a
+			// second Escape that would have nothing to do either.
 			setShowClearMessage(true);
 		}
 	}, [
 		input,
+		attachments,
+		activeEditor,
 		showCompletions,
 		isFileAutocompleteMode,
 		showClearMessage,
