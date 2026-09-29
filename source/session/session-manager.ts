@@ -6,9 +6,13 @@ import {
 	artifactManager,
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
-import {getAppDataPath} from '@/config/paths';
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {isValidSessionId} from '@/session/session-id';
+import {getSessionsDirectory} from '@/session/session-paths';
+import {
+	isValidSession,
+	isValidSessionMetadata,
+} from '@/session/session-validation';
 import type {Message} from '@/types/core';
 
 export interface Session {
@@ -40,29 +44,6 @@ export interface SessionMetadata {
 	workingDirectory: string;
 	titleManuallySet?: boolean;
 	titleGenerated?: boolean;
-}
-
-function isRecord(obj: unknown): obj is Record<string, unknown> {
-	return typeof obj === 'object' && obj !== null && !Array.isArray(obj);
-}
-
-function isValidSessionMetadata(obj: unknown): obj is SessionMetadata {
-	if (!isRecord(obj)) return false;
-	return (
-		typeof obj.id === 'string' &&
-		typeof obj.title === 'string' &&
-		typeof obj.createdAt === 'string' &&
-		typeof obj.lastAccessedAt === 'string' &&
-		typeof obj.messageCount === 'number' &&
-		typeof obj.provider === 'string' &&
-		typeof obj.model === 'string' &&
-		typeof obj.workingDirectory === 'string'
-	);
-}
-
-function isValidSession(obj: unknown): obj is Session {
-	if (!isRecord(obj)) return false;
-	return isValidSessionMetadata(obj) && Array.isArray(obj.messages);
 }
 
 /** Write data to a temp file then atomically rename into place. */
@@ -113,29 +94,7 @@ export class SessionManager {
 			return;
 		}
 
-		const config = getAppConfig();
-		const sessionConfig = config.sessions;
-		const configuredDir = sessionConfig?.directory;
-
-		if (configuredDir) {
-			// User explicitly configured a directory — expand tilde
-			let sessionDirPath = configuredDir;
-			if (sessionDirPath === '~') {
-				sessionDirPath = path.resolve(
-					process.env.HOME || process.env.USERPROFILE || '.',
-				);
-			} else if (sessionDirPath.startsWith('~/')) {
-				sessionDirPath = path.join(
-					process.env.HOME || process.env.USERPROFILE || '.',
-					sessionDirPath.slice(2),
-				);
-			}
-			this.sessionsDir = sessionDirPath;
-		} else {
-			// Default: use platform-aware app data path
-			this.sessionsDir = path.join(getAppDataPath(), 'sessions');
-		}
-
+		this.sessionsDir = getSessionsDirectory(getAppConfig().sessions?.directory);
 		this.sessionsIndexPath = path.join(this.sessionsDir, 'sessions.json');
 	}
 
