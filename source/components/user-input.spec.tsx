@@ -145,7 +145,8 @@ test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes i
 
 	stdin.write('?');
 	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
-	t.regex(lastFrame()!, /Shift\+Tab/);
+	// The legend row, not the status row's "(Shift+Tab to cycle)" hint below it.
+	t.regex(lastFrame()!, /Cycle development mode/);
 	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
 
 	// Keys are swallowed while the overlay is open, so the prompt stays empty
@@ -1093,13 +1094,14 @@ test('UserInput ctrl+z does not insert a literal character', async t => {
 		</TestWrapper>,
 	);
 
-	stdin.write('ab');
-	await waitForFrame(lastFrame, /ab/);
+	// Not 'ab': the status row's "(Shift+Tab to cycle)" hint contains it.
+	stdin.write('xy');
+	await waitForFrame(lastFrame, /xy/);
 	stdin.write('\u001a');
 	await wait(50);
 
-	// Undo should remove "b", not append a control character.
-	t.notRegex(lastFrame()!, /ab/);
+	// Undo should remove "y", not append a control character.
+	t.notRegex(lastFrame()!, /xy/);
 	unmount();
 });
 
