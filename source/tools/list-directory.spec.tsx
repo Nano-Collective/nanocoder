@@ -294,6 +294,21 @@ test.serial('list_directory throws error for nonexistent directory', async t => 
 	t.regex(error.message, /does not exist/);
 });
 
+test.serial('list_directory throws error for out-of-root absolute path', async t => {
+	t.timeout(10000);
+	const error = await t.throwsAsync(
+		async () => {
+			await listDirectoryTool.tool.execute!(
+				{path: '/etc'},
+				{toolCallId: 'test', messages: []},
+			);
+		},
+		{instanceOf: Error},
+	);
+
+	t.regex(error.message, /Invalid path/);
+});
+
 // ============================================================================
 // Tests for list_directory Tool Handler - Recursive
 // ============================================================================
