@@ -272,12 +272,17 @@ export async function checkAssertions(
 				break;
 			}
 			case 'final-text-matches': {
+				// assertion.pattern comes from a vendored fixture's task.json,
+				// authored by the benchmark's own maintainers, not runtime
+				// user input - ReDoS is not a concern here.
+				// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 				if (!new RegExp(assertion.pattern, 'i').test(report.finalText)) {
 					return `final text does not match /${assertion.pattern}/i`;
 				}
 				break;
 			}
 			case 'final-text-not-matches': {
+				// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 				if (new RegExp(assertion.pattern, 'i').test(report.finalText)) {
 					return `final text unexpectedly matches /${assertion.pattern}/i`;
 				}
