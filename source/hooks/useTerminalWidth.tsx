@@ -1,3 +1,4 @@
+import cliTruncate from 'cli-truncate';
 import {useEffect, useState} from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
 
@@ -120,11 +121,12 @@ export const useResponsiveTerminal = () => {
 
 	const size = getSize(actualWidth);
 
-	// Utility to truncate long text with ellipsis
-	const truncate = (text: string, maxLength: number): string => {
-		if (text.length <= maxLength) return text;
-		return text.slice(0, maxLength - 3) + '...';
-	};
+	// Utility to truncate long text with ellipsis, budgeted in terminal
+	// columns rather than UTF-16 code units - a double-width CJK ideograph or
+	// emoji is one code unit but two columns, so a code-unit budget let a
+	// "truncated" line render at roughly twice maxLength and wrap.
+	const truncate = (text: string, maxLength: number): string =>
+		cliTruncate(text, maxLength, {truncationCharacter: '...'});
 
 	// Utility to truncate path intelligently (keep end of path)
 	const truncatePath = (
