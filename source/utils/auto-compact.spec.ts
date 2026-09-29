@@ -565,6 +565,7 @@ test('performAutoCompact falls back to mechanical when LLM throws', async t => {
 		getTimeout: () => undefined,
 	};
 
+	const notifications: string[] = [];
 	const result = await performAutoCompact(
 		messages,
 		systemMessage,
@@ -575,9 +576,9 @@ test('performAutoCompact falls back to mechanical when LLM throws', async t => {
 			threshold: 50,
 			mode: 'default',
 			strategy: 'llm',
-			notifyUser: false,
+			notifyUser: true,
 		},
-		undefined,
+		notification => notifications.push(notification),
 		client,
 	);
 
@@ -586,6 +587,10 @@ test('performAutoCompact falls back to mechanical when LLM throws', async t => {
 	t.false(
 		(result || []).some(m => (m.content || '').includes('<conversation-summary>')),
 		'output is mechanical (no LLM summary marker)',
+	);
+	t.true(
+		notifications.some(n => n.includes('(summary degraded: LLM call failed)')),
+		'notification alerts user that LLM call failed',
 	);
 });
 

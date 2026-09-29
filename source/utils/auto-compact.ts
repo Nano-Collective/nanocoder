@@ -176,6 +176,8 @@ export async function performAutoCompact(
 
 		compressionBackup.storeBackup(messages);
 
+		let llmFailed = false;
+
 		// LLM strategy: ask the model to summarise the compressible segment into
 		// a single synthetic message. Falls back to mechanical on any failure
 		// (network error, malformed response, etc.) so a transient model issue
@@ -227,6 +229,7 @@ export async function performAutoCompact(
 				if (signal?.aborted) {
 					return null;
 				}
+				llmFailed = true;
 				// fall through to mechanical
 			}
 		}
@@ -249,8 +252,11 @@ export async function performAutoCompact(
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
 			const reduction = Math.round(result.reductionPercentage);
+			const fallbackMarker = llmFailed
+				? ' (summary degraded: LLM call failed)'
+				: '';
 			onNotify(
-				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
+				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting${fallbackMarker}...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
 			);
 		}
 
