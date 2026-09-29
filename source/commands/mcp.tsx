@@ -123,11 +123,11 @@ export function MCP({toolManager}: MCPProps) {
 										<Text color={colors.success}>{serverInfo.description}</Text>
 									)}
 
-									{/* {serverInfo?.tags && serverInfo.tags.length > 0 && (
+									{!!serverInfo?.tags?.length && (
 										<Text color={colors.secondary}>
 											Tags: {serverInfo.tags.map(tag => `#${tag}`).join(' ')}
 										</Text>
-									)} */}
+									)}
 									{!!serverInfo?.autoApprovedCommands?.length && (
 										<Text color={colors.secondary}>
 											Auto-approved tools:{' '}

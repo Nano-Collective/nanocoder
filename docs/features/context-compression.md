@@ -28,7 +28,7 @@ Either way, the system preserves:
 Use the `/compact` command to manually compress your conversation history:
 
 ```bash
-/compact              # Compress using the current strategy (LLM by default)
+/compact              # Compress using the current strategy and mode (LLM by default)
 /compact --preview    # Preview compression without applying
 /compact --restore    # Restore from pre-compression backup
 ```
@@ -39,7 +39,9 @@ Use the `/compact` command to manually compress your conversation history:
 |----------|------|-------------|
 | LLM (default) | `--llm` | Force LLM summarisation for this invocation |
 | Mechanical | `--mechanical` | Force mechanical (regex) compression for this invocation |
-| Session-wide | `--strategy llm` / `--strategy mechanical` | Persist strategy for the current session |
+| Session-wide | `--strategy llm` / `--strategy mechanical` | Set the strategy for the rest of the session (manual and auto-compact). Does not compact on its own |
+
+Without `--llm` or `--mechanical`, `/compact` uses the session strategy set with `--strategy`, then `autoCompact.strategy` from config, then `llm`. With no model connected it always runs mechanically.
 
 ### Mechanical Compression Modes
 
@@ -47,9 +49,11 @@ These only apply to the mechanical strategy:
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| Default | (none) | Balanced compression — good for most cases |
+| Default | `--default` | Balanced compression, good for most cases |
 | Conservative | `--conservative` | Preserves more content, less aggressive |
 | Aggressive | `--aggressive` | Maximum compression, minimal content retention |
+
+Without a mode flag, `/compact` uses the same mode auto-compact would: tune's aggressive compact if it is on, otherwise `autoCompact.mode` from config (`conservative` by default).
 
 **Examples:**
 
@@ -113,7 +117,7 @@ Override auto-compact settings for the current session without modifying config 
 /compact --strategy mechanical  # Use mechanical compression for this session
 ```
 
-Session overrides are temporary and reset when you restart Nanocoder.
+These flags only change settings - they don't compact anything by themselves. Run `/compact` separately to compress now. Session overrides are temporary and reset when you restart Nanocoder. They take priority over both config and tune's [Aggressive Compact](tune.md#aggressive-compact) setting.
 
 ## How Compression Works
 
@@ -142,7 +146,7 @@ Each older message is truncated individually using regex heuristics:
 While preserving:
 
 1. **System messages** — Always kept intact
-2. **Recent messages** — Last 2 messages kept at full detail (configurable)
+2. **Recent messages** - Last 2 messages kept at full detail
 3. **Tool calls** — Structure preserved for conversation continuity
 4. **Error information** — Error types and resolution status retained
 

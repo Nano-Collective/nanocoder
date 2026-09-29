@@ -8,7 +8,7 @@ sidebar_order: 10
 
 When the AI needs to take an action — editing a file, running a command, searching your codebase — it makes a **tool call**. Development modes control whether those tool calls require your approval.
 
-Toggle between modes with **Shift+Tab** during a chat session. The current mode is shown in the status bar.
+Toggle between modes with **Shift+Tab** during a chat session. It cycles in the order normal → auto-accept → yolo → plan → architect, then back to normal. The current mode is shown in the status bar.
 
 You can also boot directly into a specific mode with `--mode`, which works in both interactive and non-interactive runs:
 
@@ -26,17 +26,21 @@ The modes differ along two axes: whether each tool call is gated, and whether an
 
 | Mode | Per-tool approval | Reaches disk | Review point |
 |------|------------------|--------------|--------------|
-| **Normal** | Every tool | Yes | Before each call |
-| **Auto-accept** | Bash and destructive git only | Yes | Before risky calls |
+| **Normal** | Every tool that can change something | Yes | Before each call |
+| **Auto-accept** | Bash, `git_commit`, `git_pr` create, and custom tools with `approval: always` | Yes | Before risky calls |
 | **Yolo** | None | Yes | None |
-| **Plan** | N/A — cannot mutate | No | The plan, before any work |
-| **Architect** | Bash and destructive git only | Yes | The whole turn, after it runs |
+| **Plan** | N/A - cannot mutate | No | The plan, before any work |
+| **Architect** | Same as auto-accept, plus MCP tools | Yes | The whole turn, after it runs |
+
+In every mode, tools listed in the top-level [`nanocoder.alwaysAllow`](../configuration/index.md#tool-auto-approval) skip the prompt.
 
 Plan and architect are the two reviewing modes, and they review different things. Plan reviews a *proposal* before any work happens. Architect lets the work happen and reviews the *result*, with a one-keypress undo.
 
 ## Normal Mode
 
-The default mode. Every tool call requires your explicit confirmation before execution.
+The default mode. Every tool call that can change something requires your explicit confirmation before execution.
+
+Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`, `git_status`, `git_diff`, `git_log`, `lsp_get_diagnostics`, `web_search`, `fetch_url`, `check_skill`) and the conversation tools (`ask_user`, `agent`, `write_tasks`, `write_plan`, `write_walkthrough`) run without a prompt. So does anything in `nanocoder.alwaysAllow`.
 
 - See exactly what the AI wants to do before it happens
 - Approve or reject each action individually
@@ -52,16 +56,17 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 - Significantly faster for iterative workflows
 - All tool execution results are still displayed — you can see what happened
 - The AI can chain multiple actions without waiting for approval
-- Bash commands and destructive git operations (hard reset, force delete, stash drop/clear) still prompt for confirmation
+- Still prompts: `execute_bash`, `git_commit`, `git_pr` when it creates a pull request, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
 
 ## Yolo Mode
 
-Automatically accepts and executes **every** tool call without exception — including bash commands and destructive git operations.
+Automatically accepts and executes **every** tool call without a confirmation prompt, including bash commands and git commits.
 
 - No tool confirmation prompts at all — everything runs immediately
-- Bash commands, hard resets, force deletes, stash drops — all auto-accepted
+- Bash commands, commits, and pull requests are all auto-accepted
+- `execute_bash` still refuses a small set of catastrophic commands in every mode (for example `rm -rf /`, `mkfs`, `dd if=`, and fork bombs); those are blocked outright rather than prompted
 - The status bar turns red to make it clear you're in yolo mode
 - One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
@@ -90,7 +95,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 | Category | Tools Available |
 |----------|---------------|
-| **Exploration** | `read_file`, `find_files`, `search_file_contents`, `list_directory` |
+| **Exploration** | `read_file`, `find_files`, `search_file_contents`, `list_directory`, `check_skill` |
 | **Git (read-only)** | `git_status`, `git_diff`, `git_log` |
 | **Diagnostics** | `lsp_get_diagnostics` |
 | **Web** | `web_search`, `fetch_url` |
@@ -99,7 +104,9 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: all file mutation tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`, `delete_file`, etc.), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and git write tools (`git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`).
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
+
+Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
 MCP tools follow the same rule. An MCP tool is available in plan mode only when its server annotates it read-only (`readOnlyHint` in the tool's MCP annotations); anything unannotated is treated as a possible mutation and hidden. A server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools) list does not override this — it applies in normal mode only.
 
@@ -138,10 +145,10 @@ When [Tune](tune.md) is active with the **minimal** profile, plan mode uses an e
 | Profile | Plan Mode Tools |
 |---------|----------------|
 | **full** | All plan-mode tools listed above |
-| **minimal** | `read_file`, `find_files`, `search_file_contents`, `list_directory`, `write_plan` |
+| **minimal** | `read_file`, `find_files`, `search_file_contents`, `list_directory`, `agent`, `write_plan` |
 | **nano** | `read_file`, `search_file_contents`, `write_plan` |
 
-Because the minimal tune profile already limits the available tools, `ask_user`, `agent`, diagnostics, web tools, and git tools are not available in that configuration. `write_plan` is the exception: plan mode adds it back on every profile, so the review-and-approve flow works the same for small local models.
+Because the minimal tune profile already limits the available tools, `ask_user`, diagnostics, web tools, and git tools are not available in that configuration (`agent` is part of the minimal profile, so it stays). `write_plan` is the exception: plan mode adds it back on every profile, so the review-and-approve flow works the same for small local models.
 
 ### Simplified Prompts
 
@@ -180,7 +187,7 @@ Revert restores files. It does not undo side effects — a `git push`, a deleted
 Architect waives per-call approval for file mutation tools only. Everything with a side effect a checkpoint cannot undo still prompts exactly as it does in normal mode:
 
 - **Waived** — `write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`, and any custom tool that mutates files
-- **Still prompts** — `execute_bash` and destructive git operations
+- **Still prompts** - `execute_bash`, `git_pr` when it creates a pull request, MCP tools (unless listed in the server's `alwaysAllow`), and custom tools declared `approval: always`
 
 Gating a turn twice would make architect worse than normal mode rather than better, so the batching only pays off if the turn runs uninterrupted.
 

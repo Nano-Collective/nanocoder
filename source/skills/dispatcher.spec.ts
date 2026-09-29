@@ -4,6 +4,7 @@ import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import type {DevelopmentMode} from '@/types/core';
 import {
 	buildTriggeredTask,
+	COMMAND_RUNNER_AGENT,
 	modeForSubscription,
 	SkillDispatcher,
 } from './dispatcher';
@@ -99,7 +100,7 @@ test('dispatch: routes agent target through executor.execute', async t => {
 	t.is(calls[0]?.subagent_type, 'docs-agent');
 });
 
-test('dispatch: command target is reported as unsupported', async t => {
+test('dispatch: command target without a resolver is reported as unsupported', async t => {
 	const unsupported: string[] = [];
 	const dispatcher = new SkillDispatcher({
 		buildExecutor: () => ({
@@ -121,6 +122,56 @@ test('dispatch: command target is reported as unsupported', async t => {
 	);
 	t.is(unsupported.length, 1);
 	t.regex(unsupported[0] ?? '', /command targets/);
+});
+
+test('dispatch: command target runs its rendered prompt under the runner agent', async t => {
+	const calls: SubagentTask[] = [];
+	const dispatcher = new SkillDispatcher({
+		buildExecutor: () => ({
+			async execute(task) {
+				calls.push(task);
+				return {
+					subagentName: task.subagent_type,
+					output: 'done',
+					success: true,
+					executionTimeMs: 0,
+				};
+			},
+		}),
+		resolveCommandPrompt: name =>
+			name === 'weekly-report' ? 'Write the weekly report.' : undefined,
+	});
+
+	await dispatcher.dispatch(
+		fileChangedSub({kind: 'command', name: 'weekly-report'}),
+		fileEvent(),
+	);
+
+	t.is(calls.length, 1);
+	t.is(calls[0]?.subagent_type, COMMAND_RUNNER_AGENT);
+	t.regex(calls[0]?.prompt ?? '', /^Write the weekly report\./);
+	t.regex(calls[0]?.prompt ?? '', /docs\/intro\.md/);
+});
+
+test('dispatch: command target whose command is gone is reported', async t => {
+	const unsupported: string[] = [];
+	const dispatcher = new SkillDispatcher({
+		buildExecutor: () => ({
+			async execute() {
+				t.fail('executor should not run');
+				return {subagentName: 'no', output: '', success: false, executionTimeMs: 0};
+			},
+		}),
+		resolveCommandPrompt: () => undefined,
+		onUnsupportedTarget: (_sub, reason) => unsupported.push(reason),
+	});
+
+	await dispatcher.dispatch(
+		fileChangedSub({kind: 'command', name: 'deleted'}),
+		fileEvent(),
+	);
+	t.is(unsupported.length, 1);
+	t.regex(unsupported[0] ?? '', /"deleted" was not found/);
 });
 
 test('dispatch: tool target is reported as unsupported', async t => {

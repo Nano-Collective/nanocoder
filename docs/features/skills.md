@@ -36,7 +36,10 @@ home with one manifest and one shareable artifact.
 ## Single-file form
 
 Drop one `.md` into the right flat dir. Frontmatter declares the
-member; the file basename is the skill name.
+member; the file basename is the skill name (a namespaced command such
+as `commands/refactor/dry.md` is the skill `refactor:dry`). A command,
+an agent and a tool may share a name - they show up as separate
+entries in `/skills`.
 
 ```markdown
 <!-- .nanocoder/agents/docs-agent.md -->
@@ -71,10 +74,11 @@ A directory under `.nanocoder/skills/<name>/` with `skill.yaml`:
 
 ```yaml
 # skill.yaml
-name: k8s
-description: Kubernetes operational helpers.
-version: 0.2.0
-author: you@example.com
+name: k8s                        # required, kebab-case: ^[a-z][a-z0-9-]*$
+description: Kubernetes operational helpers.   # required
+version: 0.2.0                   # optional
+author: you@example.com          # optional
+tags: [kubernetes, ops]          # optional, informational (not used for matching)
 
 subscribe:
   - kind: file.changed
@@ -85,10 +89,14 @@ tools_visibility:
   default: scoped
 ```
 
+`tools_visibility: scoped` (or `global`) is shorthand for the
+`default:` mapping above.
+
 Inside a bundle, members are aware of each other:
 
 - A bundle's subagent automatically gets its sibling tools in its
-  effective tool list. You do not list `k8s_pods` and `k8s_logs` in
+  effective tool list, even when its frontmatter has a `tools:`
+  allowlist. You do not list `k8s_pods` and `k8s_logs` in
   `agents/k8s-agent.md`'s `tools:` field - they are siblings.
 - Scoped tools (`tools_visibility.default: scoped`, the default for
   bundles) are hidden from the global tool list - only the bundle's
@@ -104,7 +112,8 @@ Inside a bundle, members are aware of each other:
   `/k8s:status`. Shortcut: `commands/<bundleName>.md` (e.g.
   `commands/k8s.md`) keeps the bare bundle name (`/k8s`).
 - `agents/` — **exactly one (or zero)**. The agent is the bundle's
-  brain; if you need a second one, that's a second skill.
+  brain; if you need a second one, that's a second skill. Extra `.md`
+  files in `agents/` are ignored and reported as a load error.
 - `tools/` — **any number**. Tools are named by their frontmatter
   `name:` (snake_case), independent of the bundle name.
 
@@ -140,13 +149,40 @@ subscribe:
     cron: "0 9 * * MON"
 ```
 
-Accepted manifest target kinds are `command:`, `agent:`, and `tool:`.
-`skill:` is parsed for forward compatibility, but registering it today
-raises a clear "not supported yet" error instead of loading a dead
-subscription.
+Inside a bundle, member frontmatter must not set `target:` itself - a
+member's subscription always targets that member. Put explicit targets
+in `skill.yaml`.
 
-v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`) and
-`schedule.cron` (filter: `cron`).
+Target kinds:
+
+- `agent:` - the daemon runs the subagent with a prompt describing the
+  event and its payload.
+- `command:` - the daemon renders the command (with no arguments, so
+  parameter defaults apply) and runs it as an unattended agent run,
+  with the event payload appended. In a bundle manifest, name the
+  member as it appears in `commands/` (`command:status`, not
+  `command:k8s:status`).
+- `tool:` - rejected. A triggered tool call has nothing to fill in its
+  arguments, so the subscription reports an error at load time. Point
+  the subscription at an agent or command that calls the tool instead.
+- `skill:` - parsed for forward compatibility, but registering it
+  today raises a clear "not supported yet" error.
+
+Event kinds:
+
+- `file.changed` - filters: `paths` (glob list; omit it to match every
+  file) and `eventKinds` (any of `add`, `change`, `unlink`; omit it to
+  match all three). Globs support `*`, `**`, `?` and `{a,b}`; negation
+  (`!`) is not supported. Changes under `.git/`, `node_modules/` and
+  `.nanocoder/` are never reported.
+- `schedule.cron` - filter: `cron`, a standard 5-field expression (or
+  6-field with seconds). An invalid expression is rejected when the
+  file loads instead of reaching the daemon.
+
+A malformed `subscribe:` block on a single-file command, agent or tool
+is logged and dropped: the member still loads, just without triggers.
+In `skill.yaml` it fails the bundle's load, with the error shown by
+`/skills` and in the daemon log.
 
 ### `confirm: true`
 
@@ -205,8 +241,9 @@ prefers an IPC shutdown request (clean drain of the event loop) and
 falls back to `SIGTERM` only if the daemon is unreachable, so stops are
 graceful on Windows too where `SIGTERM` would otherwise be force-kill.
 
-Internally, the daemon runs every triggered subagent in **`headless`**
-mode (no foreground prompts, no `ask_user`, no `agent`). The
+Internally, the daemon runs every triggered agent or command in
+**`headless`** mode (no foreground prompts, no `ask_user`, no `agent`,
+and only tools that never need approval). The
 `confirm: true` opt-in below switches a specific subscription to plan
 mode instead.
 
@@ -337,7 +374,8 @@ Skills load from three levels, highest priority first:
 - **personal / global** - the same layout under your platform config dir
   (`~/.config/nanocoder/` on Linux, `~/Library/Preferences/nanocoder/` on
   macOS, or `$NANOCODER_CONFIG_DIR`). Available in every repo on the machine.
-- **built-in** - shipped with nanocoder.
+- **built-in** - shipped with nanocoder. Today that is only the
+  `explore` subagent; no built-in bundles ship yet.
 
 A project skill shadows a personal one of the same name, which shadows a
 built-in. To reuse a skill you wrote in one repo everywhere, move it up a
@@ -369,7 +407,8 @@ The legacy scheduler (the `ScheduleRunner` that read
 happen exclusively through skill subscriptions executed by the daemon.
 
 Move each entry into the targeted command's frontmatter, or into a bundle
-manifest:
+manifest. When the cron fires, the daemon renders the command and runs it
+as an unattended agent run in `headless` mode:
 
 Before:
 ```json

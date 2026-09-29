@@ -149,7 +149,7 @@ The body is the system prompt the subagent sees on every invocation.
 
 # Rules that catch out AI-generated agents
 
-1. **\`name:\` matches the filename.** \`docs-agent.md\` → \`name: docs-agent\`. The parser cross-checks.
+1. **\`name:\` matches the filename.** \`docs-agent.md\` → \`name: docs-agent\`. The parser does not enforce this, but the agent is invoked by \`name:\` and listed by filename, so keep them the same.
 2. **\`description:\` is for the main agent, not the user.** It's how the main agent decides when to delegate. Write it as instructions, not marketing.
 3. **\`tools:\` is a whitelist.** If you list any, ONLY those are visible - including read-only essentials. Easier to use \`disallowedTools:\` for blocking specific dangerous tools while keeping the rest.
 4. **No \`subscribe:\` on a single-file agent unless you want it triggered.** If you do add one, omit \`target:\` - the implicit target is the agent itself.
@@ -379,7 +379,7 @@ kubectl get pods -n {{ namespace }} -o wide
 
 - **\`never\`** — runs without prompting. Use for read-only operations: \`ls\`, \`cat\`, \`git status\`, \`kubectl get\`, \`gh pr list\`, etc.
 - **\`always\`** — prompts the user every time. Use when the tool mutates state and you want a confirmation per invocation.
-- **\`destructive\`** — prompts in normal mode, auto-approves in auto-accept/yolo. Use for file-mutation-style tools that should match the built-in \`write_file\` posture.
+- **\`destructive\`** — prompts in normal mode, auto-approves in auto-accept/architect/yolo and in daemon-triggered (headless) runs. Use for file-mutation-style tools that should match the built-in \`write_file\` posture.
 
 # Rules that catch out AI-generated tools
 
@@ -559,7 +559,7 @@ built-in (\`cwd\`, \`command\`, \`args\`).
 
 \`\`\`markdown
 ---
-name: ${name}-agent                          # required, must match this file
+name: ${name}-agent                          # required; keep it the same as the filename
 description: When to delegate to this agent. # required
 model: inherit                               # optional; usually 'inherit'
 tools:                                       # optional; if set, ONLY these names are visible
@@ -571,8 +571,8 @@ You are a specialized agent. Describe the role, the tools you should use,
 and any constraints. The body is the system prompt the subagent sees.
 \`\`\`
 
-If \`tools:\` is omitted, the agent automatically gets the bundle's sibling
-tools. Bundle-scoped tools are ALWAYS visible to this subagent (the
+The agent automatically gets the bundle's sibling tools, whether or not
+\`tools:\` is set. Bundle-scoped tools are ALWAYS visible to this subagent (the
 \`tools_visibility: scoped\` setting hides them from \`/tools\` and from the
 main agent, but not from this skill's own subagent).
 
@@ -588,7 +588,7 @@ description: One-line summary.               # *
 approval: never                              # * 'never' | 'always' | 'destructive'
                                              #   - never: read-only ops (ls, cat, git status, kubectl get)
                                              #   - always: prompts the user every time
-                                             #   - destructive: prompts in normal mode, auto in auto-accept/yolo
+                                             #   - destructive: prompts in normal mode, auto in auto-accept/architect/yolo/headless
 read_only: true                              # default: (approval == 'never'); set false for writes
 timeout_ms: 30000                            # default 30000, max 300000
 shell: bash                                  # 'bash' | 'sh'; default bash if available else sh
@@ -696,7 +696,6 @@ parameters: [filename, "mode=review"] # optional; positional names; "name=defaul
 tags: [testing, quality]              # optional; categorize for /commands grouping
 triggers: [write tests, unit test]    # optional; auto-inject when the user mentions these phrases
 estimated-tokens: 2000                # optional; rough token cost shown in the auto-injectable list
-resources: true                       # optional; expose sibling files in .nanocoder/commands/<name>/resources/
 category: testing                     # optional; free-form group label
 version: 1.0.0                        # optional
 author: you                           # optional

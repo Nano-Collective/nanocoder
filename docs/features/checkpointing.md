@@ -6,7 +6,7 @@ sidebar_order: 4
 
 # Checkpointing
 
-Checkpointing lets you save a snapshot of your current session — conversation history, file changes, and configuration — so you can experiment freely and roll back if things don't work out. Think of it like a save point in a game.
+Checkpointing lets you save a snapshot of your current session - conversation history, file changes, and configuration - so you can experiment freely and roll back your files if things don't work out. Think of it like a save point in a game.
 
 ## When to Use Checkpoints
 
@@ -16,14 +16,15 @@ Checkpointing lets you save a snapshot of your current session — conversation 
 
 ## Commands
 
-- `/checkpoint create [name]` — Save a checkpoint (auto-generates a timestamp name if omitted)
-- `/checkpoint list` — List all checkpoints with creation time, message count, and files changed
-- `/checkpoint load [name]` — Restore files from a checkpoint (interactive selector if no name given)
-- `/checkpoint delete <name>` — Permanently delete a checkpoint
+- `/checkpoint create [name]` (alias `save`) - Save a checkpoint (auto-generates a timestamp name if omitted)
+- `/checkpoint list` (alias `ls`) - List all checkpoints with creation time, message count, and files changed
+- `/checkpoint load [name]` (alias `restore`) - Restore files from a checkpoint (interactive selector if no name given)
+- `/checkpoint delete <name>` (aliases `remove`, `rm`) - Permanently delete a checkpoint, immediately and without a confirmation prompt
+- `/checkpoint help` - Show command help
 
 ## What Gets Saved
 
-- Complete conversation history
+- Complete conversation history (stored for reference; see the note below)
 - Modified files with their content (detected via git)
 - Active provider and model configuration
 - Timestamp and metadata
@@ -60,7 +61,7 @@ Any of these are reported when you restore, naming the files that were not put b
 /checkpoint list
 ```
 
-When loading a checkpoint that would overwrite current work, Nanocoder prompts you to create a backup first.
+When you load a checkpoint through the interactive selector (`/checkpoint load` with no name) and the current session has messages, Nanocoder offers to create a backup checkpoint first. `/checkpoint load <name>` restores straight away, with no prompt.
 
 ## Storage
 
@@ -68,4 +69,8 @@ Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. E
 
 Snapshots skip anything matched by `.gitignore`, but deliberately ignore [`.nanocoderignore`](../configuration/index.md#ignoring-files). Hiding a file from the model's listings shouldn't quietly exclude it from restore, so a file in `.nanocoderignore` is still snapshotted and still reverted.
 
-> **Note:** Loading a checkpoint restores files immediately, but restoring conversation history requires restarting Nanocoder.
+> **Note:** Loading a checkpoint restores files only. The conversation history saved in the checkpoint is not restored into the chat, even after a restart. To go back to an earlier conversation, use [`/resume`](session-management.md).
+
+## Architect Mode Checkpoints
+
+[Architect mode](development-modes.md#architect-mode) uses the same mechanism automatically. The first file-changing tool call in a turn creates an `architect-<timestamp>` checkpoint. Files that later calls in the same turn touch are added to that checkpoint before they change, so one checkpoint covers the whole turn. It is deleted once you resolve the review bar.

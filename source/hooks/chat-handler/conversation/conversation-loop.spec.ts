@@ -3029,3 +3029,83 @@ test.serial(
 		);
 	},
 );
+
+// ============================================================================
+// Top-level alwaysAllow in interactive sessions
+//
+// nanocoder.alwaysAllow used to reach resolveToolApproval only in
+// non-interactive runs, so tools with a hard `approval: true` (git_commit,
+// custom `approval: always` tools) still prompted in the TUI.
+// ============================================================================
+
+for (const [listed, expectedPrompts] of [
+	[true, 0],
+	[false, 1],
+] as const) {
+	test.serial(
+		`interactive loop ${listed ? 'skips' : 'keeps'} the prompt for a tool ${listed ? 'in' : 'not in'} alwaysAllow`,
+		async t => {
+			const leave = enterHookFixture();
+			let confirmPrompts = 0;
+			let chatCalls = 0;
+			try {
+				writeFileSync(
+					join(HOOK_GATE_DIR, 'agents.config.json'),
+					JSON.stringify({
+						nanocoder: {alwaysAllow: listed ? ['some_tool'] : []},
+					}),
+					'utf-8',
+				);
+				reloadAppConfig();
+				setGlobalToolConfirmHandler(async () => {
+					confirmPrompts++;
+					return true;
+				});
+
+				const mockClient = createMockClient({content: '', toolCalls: []});
+				mockClient.chat = async () => {
+					chatCalls++;
+					if (chatCalls === 1) {
+						return {
+							choices: [
+								{
+									message: {
+										role: 'assistant',
+										content: '',
+										tool_calls: [
+											{
+												id: 'call_1',
+												function: {name: 'some_tool', arguments: '{}'},
+											},
+										],
+									},
+								},
+							],
+							toolsDisabled: false,
+						} as never;
+					}
+					return {
+						choices: [{message: {role: 'assistant', content: 'done'}}],
+						toolsDisabled: false,
+					} as never;
+				};
+
+				await processAssistantResponse(
+					createDefaultParams({
+						client: mockClient,
+						toolManager: createMockToolManager({
+							tools: ['some_tool'],
+							needsApproval: true,
+						}) as never,
+						nonInteractiveMode: false,
+					}) as never,
+				);
+			} finally {
+				setGlobalToolConfirmHandler(async () => true);
+				leave();
+			}
+
+			t.is(confirmPrompts, expectedPrompts);
+		},
+	);
+}

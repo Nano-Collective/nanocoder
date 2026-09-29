@@ -166,3 +166,49 @@ test('all four fused flags are removed without consuming prompt words', t => {
 	for (const {property, expected} of flags) t.is(props[property], expected);
 	t.is(props.nonInteractivePrompt, 'analyze code');
 });
+
+test('--provider accepts names with spaces, dots and slashes', t => {
+	for (const name of ['GitHub Copilot', 'llama.cpp server', 'ChatGPT / Codex']) {
+		const result = runCli(['--provider', name, 'run', 'hello']);
+		t.is(result.status, 0, result.stderr);
+		t.is(JSON.parse(result.stdout).cliProvider, name);
+	}
+});
+
+test('--provider still rejects shell punctuation', t => {
+	const result = runCli(['--provider', 'a;rm -rf', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('Invalid --provider value'), result.stderr);
+});
+
+test('--model accepts @ and + in model ids', t => {
+	const result = runCli(['--model', 'org/model@2024+beta', 'run', 'hello']);
+	t.is(result.status, 0, result.stderr);
+	t.is(JSON.parse(result.stdout).cliModel, 'org/model@2024+beta');
+});
+
+test('--mode with no value is rejected', t => {
+	for (const args of [
+		['run', 'hello', '--mode'],
+		['--mode', '--plain', 'run', 'hello'],
+	]) {
+		const result = runCli(args);
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('--mode requires a value'), result.stderr);
+	}
+});
+
+test('run with no prompt is a usage error', t => {
+	for (const args of [['run'], ['run', '--trust-directory'], ['run', '   ']]) {
+		const result = runCli(args);
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('needs a prompt'), result.stderr);
+	}
+});
+
+test('--json cannot be combined with --no-plain', t => {
+	// runCli always passes --no-plain; --json needs the plain shell.
+	const result = runCli(['--json', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
+});

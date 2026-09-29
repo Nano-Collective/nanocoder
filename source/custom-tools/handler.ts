@@ -24,7 +24,10 @@ export function buildHandler(
 	projectRoot: string,
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
-		const rendered = renderBody(body, args ?? {});
+		const rendered = renderBody(
+			body,
+			applyParameterDefaults(metadata, args ?? {}),
+		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
 		const env = mergeEnv(metadata.env);
 		const shell = pickShell(metadata.shell);
@@ -35,6 +38,24 @@ export function buildHandler(
 			timeoutMs: metadata.timeoutMs,
 		});
 	};
+}
+
+/**
+ * Fill each omitted argument with its declared `default:`. The JSON schema
+ * advertises defaults to the model, but models routinely leave optional
+ * arguments out, so the template has to apply them itself.
+ */
+export function applyParameterDefaults(
+	metadata: CustomToolMetadata,
+	args: Record<string, unknown>,
+): Record<string, unknown> {
+	const filled = {...args};
+	for (const [name, def] of Object.entries(metadata.parameters)) {
+		if (filled[name] === undefined && def.default !== undefined) {
+			filled[name] = def.default;
+		}
+	}
+	return filled;
 }
 
 export interface RunOptions {
