@@ -1,3 +1,6 @@
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
@@ -137,7 +140,7 @@ test('FileExplorer tree view shows navigation help', t => {
 	const TreeViewHelp = () => (
 		<Box marginTop={1}>
 			<Text color="gray" >
-				Up/Down: navigate | Enter: expand/preview | Space: select | /: search | Esc: done
+				Up/Down: navigate | Enter: expand/preview | Backspace: up | Space: select | /: search | Esc: done
 			</Text>
 		</Box>
 	);
@@ -379,4 +382,83 @@ test('FileExplorer keeps the frame while the tree is still loading', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	t.regex(output, /╭/);
 	t.regex(output, /Loading file tree/);
+});
+
+test('FileExplorer Backspace collapses an open directory, then moves up to the parent', async t => {
+	// The explorer reads process.cwd(), so run it from a fixture:
+	// outer/inner/file.txt next to top.txt.
+	const root = mkdtempSync(join(tmpdir(), 'nanocoder-explorer-'));
+	mkdirSync(join(root, 'outer', 'inner'), {recursive: true});
+	writeFileSync(join(root, 'outer', 'inner', 'file.txt'), '');
+	writeFileSync(join(root, 'top.txt'), '');
+
+	const originalCwd = process.cwd();
+	process.chdir(root);
+	const {stdin, lastFrame, unmount} = renderWithAllContexts(
+		<FileExplorer onClose={() => {}} />,
+	);
+	t.teardown(() => {
+		unmount();
+		process.chdir(originalCwd);
+		rmSync(root, {recursive: true, force: true});
+	});
+
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	// Poll rather than sleep: a fixed wait can read the frame before Ink flushes.
+	const waitUntil = async (predicate: (output: string) => boolean) => {
+		const start = Date.now();
+		while (!predicate(frame()) && Date.now() - start < 3000) {
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+	};
+	// Let the previous render's input handler attach before the next key:
+	// a key sent the moment a row appears is handled by the old closure.
+	const press = async (key: string) => {
+		await new Promise(resolve => setTimeout(resolve, 50));
+		stdin.write(key);
+		await new Promise(resolve => setTimeout(resolve, 30));
+	};
+	const BACKSPACE = '\u007f';
+	// The status bar prints the highlighted node's path alone on its row.
+	// buildFileTree joins paths with path.join, so build the expected one the
+	// same way.
+	const statusIs = (path: string) => (output: string) =>
+		output.split('\n').some(line => line.replace(/[│\s]/g, '') === path);
+	const INNER = join('outer', 'inner');
+
+	await waitUntil(output => /outer\//.test(output));
+	t.regex(frame(), /Backspace: up/);
+
+	// Open outer and outer/inner, then highlight the file inside.
+	await press('\r');
+	await waitUntil(output => /inner\//.test(output));
+	await press('\u001b[B');
+	await waitUntil(statusIs(INNER));
+	await press('\r');
+	await waitUntil(output => /file\.txt/.test(output));
+	await press('\u001b[B');
+	await waitUntil(output => /file\.txt \(0 B\)/.test(output));
+
+	// On a file: move up to its directory, which stays open.
+	await press(BACKSPACE);
+	await waitUntil(statusIs(INNER));
+	t.true(statusIs(INNER)(frame()), frame());
+	t.regex(frame(), /file\.txt/);
+
+	// On an open directory: collapse it, keeping the selection.
+	await press(BACKSPACE);
+	await waitUntil(output => !/file\.txt/.test(output));
+	t.notRegex(frame(), /file\.txt/);
+	t.true(statusIs(INNER)(frame()), frame());
+
+	// On a collapsed directory: move up to the parent...
+	await press(BACKSPACE);
+	await waitUntil(statusIs('outer'));
+	t.true(statusIs('outer')(frame()), frame());
+
+	// ...and collapse that one too.
+	await press(BACKSPACE);
+	await waitUntil(output => !/inner\//.test(output));
+	t.notRegex(frame(), /inner\//);
+	t.true(statusIs('outer')(frame()), frame());
 });

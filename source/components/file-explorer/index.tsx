@@ -1,4 +1,5 @@
 import {readFile} from 'node:fs/promises';
+import {dirname} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
@@ -253,18 +254,25 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 		}
 	};
 
+	// Collapse the highlighted directory if it is open, otherwise move up to
+	// its parent row. Paths come from path.join in buildFileTree, so they use
+	// the platform separator; dirname splits them the same way.
 	const handleGoUp = () => {
-		// Find parent directory and collapse it
 		if (!selectedNode) return;
-		const parts = selectedNode.path.split('/');
-		if (parts.length > 1) {
-			parts.pop();
-			const parentPath = parts.join('/');
+		if (selectedNode.isDirectory && expanded.has(selectedNode.path)) {
 			setExpanded(prev => {
 				const next = new Set(prev);
-				next.delete(parentPath);
+				next.delete(selectedNode.path);
 				return next;
 			});
+			return;
+		}
+		const parentPath = dirname(selectedNode.path);
+		const parentIndex = filteredList.findIndex(
+			item => item.node.path === parentPath,
+		);
+		if (parentIndex !== -1) {
+			setSelectedIndex(parentIndex);
 		}
 	};
 
@@ -356,7 +364,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 			}
 		} else if (key.backspace || key.delete) {
 			// Ink reports the usual Backspace byte (\x7f) as `delete`, so accept
-			// both. Collapses the highlighted node's parent directory.
+			// both.
 			handleGoUp();
 		}
 	});
@@ -519,7 +527,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					<Text color={colors.secondary}>
 						{searchMode
 							? 'Type to filter | Backspace: delete | Esc: exit search'
-							: 'Up/Down: navigate | Enter: expand/preview | Space: select | /: search | Esc: done'}
+							: 'Up/Down: navigate | Enter: expand/preview | Backspace: up | Space: select | /: search | Esc: done'}
 					</Text>
 				</Box>
 			</Box>
