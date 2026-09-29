@@ -224,6 +224,8 @@ export async function performAutoCompact(
 					}
 
 					return llmCompressed;
+				} else {
+					llmFailed = true;
 				}
 			} catch (_error) {
 				if (signal?.aborted) {
