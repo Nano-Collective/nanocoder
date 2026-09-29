@@ -270,6 +270,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
 | [Checkpointing](checkpointing.md) | Saving snapshots and restoring files |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
+| [Storage Diagnostics](storage-diagnostics.md) | Read-only storage overview and JSON report |
 | [Task Management](task-management.md) | Tracking multi-step work |
 | [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
