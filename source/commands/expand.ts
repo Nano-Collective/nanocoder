@@ -22,7 +22,16 @@ function summarizeToolCall(toolCall: ToolCall): string {
 		const value = SUMMARY_ARG_KEYS.map(key => args[key]).find(
 			arg => typeof arg === 'string',
 		);
-		return value ? ` ${value}` : '';
+		if (!value) return '';
+		// Collapse whitespace so multi-line commands stay on one row, and cap
+		// the length so a long argument can't blow out the list layout.
+		const collapsed = value.replace(/\s+/g, ' ').trim();
+		const maxSummaryLength = 60;
+		const truncated =
+			collapsed.length > maxSummaryLength
+				? `${collapsed.slice(0, maxSummaryLength - 1)}…`
+				: collapsed;
+		return ` ${truncated}`;
 	} catch {
 		return '';
 	}

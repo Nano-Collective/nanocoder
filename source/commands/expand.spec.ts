@@ -52,6 +52,29 @@ test('/expand lists recent results with their numbers', async t => {
 	t.true(output.includes(`${id}  read_file src/app.ts`));
 });
 
+test('/expand collapses multi-line arguments to one row', async t => {
+	const id = record(
+		'execute_bash',
+		{command: 'for f in *.ts; do\n  cat "$f"\ndone'},
+		'ok',
+	);
+
+	const output = await runExpand([]);
+
+	t.true(output.includes(`${id}  execute_bash for f in *.ts; do cat "$f" done`));
+	t.false(output.includes('\ndone'));
+});
+
+test('/expand truncates over-long arguments', async t => {
+	const longPath = `${'a'.repeat(80)}.ts`;
+	const id = record('read_file', {path: longPath}, 'contents');
+
+	const output = await runExpand([]);
+
+	t.true(output.includes('…'));
+	t.false(output.includes(longPath));
+});
+
 test('/expand <n> prints the whole result past the line cap', async t => {
 	const content = Array.from({length: 30}, (_, i) => `line ${i + 1}`).join(
 		'\n',
