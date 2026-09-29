@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {getColors} from '@/config/index';
 import {BaseConfigWizard} from './base-config-wizard';
 import {McpStep} from './steps/mcp-step';
@@ -37,7 +38,7 @@ function McpSummaryItems({items}: {items: McpServers}) {
 			<Text color={colors.secondary}>MCP Servers ({entries.length}):</Text>
 			{entries.map(([key, server]) => (
 				<Text key={key} color={colors.success}>
-					• {server.name} ({server.transport})
+					{ICON_BULLET} {server.name} ({server.transport})
 				</Text>
 			))}
 		</Box>

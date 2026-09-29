@@ -1,4 +1,10 @@
 import {Box, Text} from 'ink';
+import {
+	ICON_SUCCESS,
+	ICON_TASK_IN_PROGRESS,
+	ICON_TREE_COLLAPSED,
+	ICON_TREE_EXPANDED,
+} from '@/components/ui/icons';
 import type {TreeItemProps} from '@/types/file-explorer';
 import {getAllFilesInDirectory} from './utils';
 
@@ -26,11 +32,13 @@ export function TreeItem({
 		// Selection icon replaces expand icon when there's a selection
 		let prefix: string;
 		if (allSelected) {
-			prefix = '✓ ';
+			prefix = `${ICON_SUCCESS} `;
 		} else if (hasSelection) {
-			prefix = '◐ ';
+			prefix = `${ICON_TASK_IN_PROGRESS} `;
 		} else if (hasChildren) {
-			prefix = isExpanded ? 'v ' : '> ';
+			prefix = isExpanded
+				? `${ICON_TREE_EXPANDED} `
+				: `${ICON_TREE_COLLAPSED} `;
 		} else {
 			prefix = '  ';
 		}
@@ -63,7 +71,7 @@ export function TreeItem({
 		<Box>
 			<Text color={isSelected ? colors.success : colors.text}>
 				{indent}
-				{isSelected ? '✓ ' : '  '}
+				{isSelected ? `${ICON_SUCCESS} ` : '  '}
 			</Text>
 			<Text
 				color={

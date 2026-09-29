@@ -75,7 +75,7 @@ test('formatValidationError renders structured details as lines', t => {
 
 test('formatValidationError without details is a single line', t => {
 	const out = formatValidationError('bad args');
-	t.is(out, '⚒ Validation failed: bad args');
+	t.is(out, '! Validation failed: bad args');
 });
 
 test('toolErrorToContent formats validation errors with detail, others generically', t => {

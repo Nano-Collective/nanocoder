@@ -4,6 +4,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import TextInput from '@/components/text-input';
+import {ICON_SELECTION} from '@/components/ui/icons';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -912,8 +913,8 @@ export default function UserInput({
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
 		// Truncate against the true terminal width like tool result rows do, not
 		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
-		// and a right-edge safety margin.
+		// overhead covers the box border + padding (2), the selection
+		// marker (2), and a right-edge safety margin.
 		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
 		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
@@ -1029,7 +1030,7 @@ export default function UserInput({
 									}
 									bold={isSelected}
 								>
-									{isSelected ? '▸ ' : '  '}/{completion.name}
+									{isSelected ? ICON_SELECTION + ' ' : '  '}/{completion.name}
 								</Text>
 							);
 						})}
@@ -1054,7 +1055,7 @@ export default function UserInput({
 								}
 								bold={index === selectedFileIndex}
 							>
-								{index === selectedFileIndex ? '▸ ' : '  '}
+								{index === selectedFileIndex ? ICON_SELECTION + ' ' : '  '}
 								{file.path}
 							</Text>
 						))}
@@ -1073,7 +1074,7 @@ export default function UserInput({
 									color={isSelected ? colors.info : colors.primary}
 									bold={isSelected}
 								>
-									{isSelected ? '▸ ' : '  '}
+									{isSelected ? ICON_SELECTION + ' ' : '  '}
 									{formatQueuedMessage(message)}
 								</Text>
 							);

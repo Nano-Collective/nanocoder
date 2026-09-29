@@ -3,6 +3,7 @@ import {join, relative} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -43,7 +44,7 @@ const executeListDirectory = async (
 	const root = getProjectRoot();
 	if (!isValidFilePath(dirPath, root)) {
 		throw new Error(
-			`⚒ Invalid path. Path must be within the project directory.`,
+			`! Invalid path. Path must be within the project directory.`,
 		);
 	}
 
@@ -266,7 +267,7 @@ const ListDirectoryFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ list_directory</Text>
+				<Text color={colors.tool}>{ICON_TOOL} list_directory</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>

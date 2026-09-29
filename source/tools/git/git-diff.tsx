@@ -6,6 +6,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_SUCCESS} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -187,7 +188,7 @@ function GitDiffFormatter({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ git_diff</Text>
+			<Text color={colors.tool}>› git_diff</Text>
 
 			<Box>
 				<Text color={colors.secondary}>Comparing: </Text>
@@ -212,7 +213,7 @@ function GitDiffFormatter({
 
 			{isEmpty && (
 				<Box marginTop={1}>
-					<Text color={colors.success}>✓ No changes</Text>
+					<Text color={colors.success}>{ICON_SUCCESS} No changes</Text>
 				</Box>
 			)}
 

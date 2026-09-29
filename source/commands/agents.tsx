@@ -1,3 +1,4 @@
+import {ICON_LIST_ROW} from '@/components/ui/icons';
 /**
  * Agents Command
  *
@@ -66,7 +67,7 @@ function SubagentsList({subagents}: SubagentsListProps) {
 					>
 						<Box>
 							<Text color={colors.text} bold>
-								› {agent.name}
+								{ICON_LIST_ROW} {agent.name}
 							</Text>
 							<Text color={colors.secondary}>
 								{' '}

@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_EDITOR} from '@/components/ui/icons';
 import {
 	TOKEN_THRESHOLD_CRITICAL_PERCENT,
 	TOKEN_THRESHOLD_WARNING_PERCENT,
@@ -53,7 +54,8 @@ export const DevelopmentModeIndicator = React.memo(
 		currentModel,
 		activeEditor,
 	}: DevelopmentModeIndicatorProps) => {
-		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+		const {isNarrow, actualWidth, truncate, visualWidth} =
+			useResponsiveTerminal();
 		const modeLabel = isNarrow
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
@@ -93,8 +95,8 @@ export const DevelopmentModeIndicator = React.memo(
 				!!activeEditor.endLine;
 			const editorPrefix = editorFileName
 				? hasSelection
-					? '⊡ '
-					: '⊡ In '
+					? `${ICON_EDITOR} `
+					: `${ICON_EDITOR} In `
 				: '';
 			const editorSuffixFull =
 				editorFileName && hasSelection
@@ -117,14 +119,16 @@ export const DevelopmentModeIndicator = React.memo(
 			const minSessionLen = sessionName ? minLen : 0;
 			const minEditorLen = editorFileName ? minLen : 0;
 
-			// Width consumed by parts that always render.
+			// Width consumed by parts that always render. Counts VISUAL columns
+			// rather than UTF-16 code units, so mode/editor/session labels
+			// containing non-ASCII glyphs can't silently overflow the budget.
 			const requiredWidth =
-				modeLabel.length +
-				tuneSegment.length +
-				ctxSegment.length +
-				sessionSeparator.length +
-				editorSeparator.length +
-				editorPrefix.length +
+				visualWidth(modeLabel) +
+				visualWidth(tuneSegment) +
+				visualWidth(ctxSegment) +
+				visualWidth(sessionSeparator) +
+				visualWidth(editorSeparator) +
+				visualWidth(editorPrefix) +
 				minSessionLen +
 				minEditorLen;
 
@@ -133,32 +137,32 @@ export const DevelopmentModeIndicator = React.memo(
 			let editorSuffix = editorSuffixFull;
 			let shiftHint = shiftHintFull;
 			if (
-				requiredWidth + editorSuffix.length + shiftHint.length + 1 >
+				requiredWidth + visualWidth(editorSuffix) + visualWidth(shiftHint) + 1 >
 				actualWidth
 			) {
 				editorSuffix = '';
-				if (requiredWidth + shiftHint.length + 1 > actualWidth) {
+				if (requiredWidth + visualWidth(shiftHint) + 1 > actualWidth) {
 					shiftHint = '';
 				}
 			}
 
 			const fixedWidth =
-				modeLabel.length +
-				shiftHint.length +
-				tuneSegment.length +
-				ctxSegment.length +
-				sessionSeparator.length +
-				editorSeparator.length +
-				editorPrefix.length +
-				editorSuffix.length;
+				visualWidth(modeLabel) +
+				visualWidth(shiftHint) +
+				visualWidth(tuneSegment) +
+				visualWidth(ctxSegment) +
+				visualWidth(sessionSeparator) +
+				visualWidth(editorSeparator) +
+				visualWidth(editorPrefix) +
+				visualWidth(editorSuffix);
 
 			const remaining = Math.max(0, actualWidth - fixedWidth - 1);
 
 			let sessionMax = 0;
 			let filenameMax = 0;
 			if (sessionName && editorFileName) {
-				const sessionNeed = sessionName.length;
-				const filenameNeed = editorFileName.length;
+				const sessionNeed = visualWidth(sessionName);
+				const filenameNeed = visualWidth(editorFileName);
 				if (sessionNeed + filenameNeed <= remaining) {
 					sessionMax = sessionNeed;
 					filenameMax = filenameNeed;

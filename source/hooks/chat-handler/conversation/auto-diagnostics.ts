@@ -28,7 +28,7 @@ function parseToolArgs(
 function isSuccessfulToolResult(result: ToolResult): boolean {
 	return !(
 		result.content.startsWith('Error: ') ||
-		result.content.startsWith('⚒ Validation failed') ||
+		result.content.startsWith('! Validation failed') ||
 		result.content === 'Tool execution was cancelled by the user.'
 	);
 }

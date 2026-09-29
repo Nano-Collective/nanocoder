@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_GIT_BRANCH} from '@/components/ui/icons';
 import WelcomeMessage from '@/components/welcome-message';
 import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -18,7 +19,9 @@ import {homeRelative} from '@/utils/path';
  */
 export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
 	const {branch, marker} = formatGitStatusSummary(status);
-	return marker ? `⎇ ${branch} (${marker})` : `⎇ ${branch}`;
+	return marker
+		? `${ICON_GIT_BRANCH} ${branch} (${marker})`
+		: `${ICON_GIT_BRANCH} ${branch}`;
 }
 
 export interface AppContainerProps {

@@ -269,7 +269,7 @@ test('preselects initialSelectedValue', t => {
 		<FilterableSelectList items={many} initialSelectedValue="2" onSelect={() => {}} />,
 	);
 	const out = lastFrame()!;
-	// gamma is highlighted (❯ marker) — present in output
+	// gamma is highlighted (▸ marker) — present in output
 	t.regex(out, /gamma \(c\)/);
 	unmount();
 });

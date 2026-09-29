@@ -375,8 +375,9 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 		);
 
 		const output = lastFrame() ?? '';
-		// Truncated with the shared ellipsis, and the tail is dropped.
-		t.regex(output, /\.\.\./);
+		// Truncated with the shared single-column ellipsis (`…`), and the
+		// tail is dropped.
+		t.regex(output, /\u2026/);
 		t.notRegex(output, /terminal width available/);
 		// The queued-message line itself fits within the terminal width. Scope to
 		// that line rather than every rendered line: the component truncates the

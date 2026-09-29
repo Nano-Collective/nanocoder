@@ -1,7 +1,13 @@
 import {existsSync} from 'fs';
 import {Box, Text} from 'ink';
 import {memo} from 'react';
-
+import {
+	ICON_BULLET,
+	ICON_CONTINUATION,
+	ICON_ERROR,
+	ICON_SUCCESS,
+	ICON_WARNING,
+} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {confDirMap} from '@/config/index';
 import {getThemeColors, themes} from '@/config/themes';
@@ -138,26 +144,28 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							✓ AGENTS.md
+							{ICON_SUCCESS} AGENTS.md
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
-							✗ No AGENTS.md
+							{ICON_ERROR} No AGENTS.md
 						</Text>
 					)}
 					{preferencesLoaded && (
-						<Text color={colors.secondary}>✓ Preferences loaded</Text>
+						<Text color={colors.secondary}>
+							{ICON_SUCCESS} Preferences loaded
+						</Text>
 					)}
 					{customCommandsCount !== undefined && customCommandsCount > 0 && (
 						<Text color={colors.secondary}>
-							✓ {customCommandsCount} custom commands
+							{ICON_SUCCESS} {customCommandsCount} custom commands
 						</Text>
 					)}
 					{vscodeMode && vscodePort && (
 						<Text color={showPortWarning ? colors.warning : colors.secondary}>
 							{showPortWarning
-								? `⚠ VS Code: port ${vscodeRequestedPort}→${vscodePort}`
-								: `✓ VS Code: port ${vscodePort}`}
+								? `${ICON_WARNING} VS Code: port ${vscodeRequestedPort}→${vscodePort}`
+								: `${ICON_SUCCESS} VS Code: port ${vscodePort}`}
 						</Text>
 					)}
 					{mcpTotal > 0 && (
@@ -168,8 +176,8 @@ export default memo(function Status({
 									: getStatusColor(mcpConnected, mcpTotal)
 							}
 						>
-							{mcpConnected === mcpTotal ? '✓ ' : ''}MCP: {mcpConnected}/
-							{mcpTotal} connected
+							{mcpConnected === mcpTotal ? `${ICON_SUCCESS} ` : ''}MCP:{' '}
+							{mcpConnected}/{mcpTotal} connected
 						</Text>
 					)}
 					{lspTotal > 0 && (
@@ -180,8 +188,8 @@ export default memo(function Status({
 									: getStatusColor(lspConnected, lspTotal)
 							}
 						>
-							{lspConnected === lspTotal ? '✓ ' : ''}LSP: {lspConnected}/
-							{lspTotal} connected
+							{lspConnected === lspTotal ? `${ICON_SUCCESS} ` : ''}LSP:{' '}
+							{lspConnected}/{lspTotal} connected
 						</Text>
 					)}
 					{contextUsage && contextUsage.contextLimit && (
@@ -194,18 +202,20 @@ export default memo(function Status({
 					)}
 					{autoCompactInfo && (
 						<Text color={colors.secondary}>
-							Auto-Compact: {autoCompactInfo.enabled ? '✓' : '✗'}
+							Auto-Compact:{' '}
+							{autoCompactInfo.enabled ? ICON_SUCCESS : ICON_ERROR}
 							{autoCompactInfo.hasOverrides && ' (override)'}
 						</Text>
 					)}
 					{updateInfo?.hasUpdate && (
 						<>
 							<Text color={colors.warning}>
-								⚠ v{updateInfo.currentVersion} → v{updateInfo.latestVersion}
+								{ICON_WARNING} v{updateInfo.currentVersion} → v
+								{updateInfo.latestVersion}
 							</Text>
 							{updateInfo.updateCommand ? (
 								<Text color={colors.secondary}>
-									↳ Run: /update or {updateInfo.updateCommand}
+									{ICON_CONTINUATION} Run: /update or {updateInfo.updateCommand}
 								</Text>
 							) : updateInfo.updateMessage ? (
 								<Text color={colors.secondary}>{updateInfo.updateMessage}</Text>
@@ -249,27 +259,31 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							<Text>↳ Using AGENTS.md. Project initialized</Text>
+							<Text>
+								{ICON_CONTINUATION} Using AGENTS.md. Project initialized
+							</Text>
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
-							↳ No AGENTS.md file found, run `/init` to initialize this
-							directory
+							{ICON_CONTINUATION} No AGENTS.md file found, run `/init` to
+							initialize this directory
 						</Text>
 					)}
 					{preferencesLoaded && (
-						<Text color={colors.secondary}>✓ Preferences loaded</Text>
+						<Text color={colors.secondary}>
+							{ICON_SUCCESS} Preferences loaded
+						</Text>
 					)}
 					{customCommandsCount !== undefined && customCommandsCount > 0 && (
 						<Text color={colors.secondary}>
-							✓ {customCommandsCount} custom commands loaded
+							{ICON_SUCCESS} {customCommandsCount} custom commands loaded
 						</Text>
 					)}
 					{vscodeMode && vscodePort && (
 						<Text color={showPortWarning ? colors.warning : colors.secondary}>
 							{showPortWarning
-								? `⚠ VS Code server on port ${vscodePort} (requested ${vscodeRequestedPort} was in use)`
-								: `✓ VS Code server listening on port ${vscodePort}`}
+								? `${ICON_WARNING} VS Code server on port ${vscodePort} (requested ${vscodeRequestedPort} was in use)`
+								: `${ICON_SUCCESS} VS Code server listening on port ${vscodePort}`}
 						</Text>
 					)}
 					{mcpTotal > 0 && (
@@ -281,8 +295,8 @@ export default memo(function Status({
 										: getStatusColor(mcpConnected, mcpTotal)
 								}
 							>
-								{mcpConnected === mcpTotal ? '✓ ' : ''}MCP: {mcpConnected}/
-								{mcpTotal} connected
+								{mcpConnected === mcpTotal ? `${ICON_SUCCESS} ` : ''}MCP:{' '}
+								{mcpConnected}/{mcpTotal} connected
 							</Text>
 							{mcpConnected < mcpTotal && (
 								<Box flexDirection="column" marginLeft={2}>
@@ -290,7 +304,7 @@ export default memo(function Status({
 										.filter(s => s.status === 'failed')
 										.map(server => (
 											<Text key={server.name} color={colors.error}>
-												• {server.name}:{' '}
+												{ICON_BULLET} {server.name}:{' '}
 												{server.errorMessage || 'Connection failed'}
 											</Text>
 										))}
@@ -307,8 +321,8 @@ export default memo(function Status({
 										: getStatusColor(lspConnected, lspTotal)
 								}
 							>
-								{lspConnected === lspTotal ? '✓ ' : ''}LSP: {lspConnected}/
-								{lspTotal} connected
+								{lspConnected === lspTotal ? `${ICON_SUCCESS} ` : ''}LSP:{' '}
+								{lspConnected}/{lspTotal} connected
 							</Text>
 							{lspConnected < lspTotal && (
 								<Box flexDirection="column" marginLeft={2}>
@@ -316,7 +330,7 @@ export default memo(function Status({
 										.filter(s => s.status === 'failed')
 										.map(server => (
 											<Text key={server.name} color={colors.error}>
-												• {server.name}:{' '}
+												{ICON_BULLET} {server.name}:{' '}
 												{server.errorMessage || 'Connection failed'}
 											</Text>
 										))}
@@ -334,7 +348,8 @@ export default memo(function Status({
 							</Text>
 							{contextUsage.percentUsed >= 60 && (
 								<Text color={colors.warning} italic>
-									↳ Consider using /compact to reduce context usage
+									{ICON_CONTINUATION} Consider using /compact to reduce context
+									usage
 								</Text>
 							)}
 						</Box>
@@ -343,13 +358,15 @@ export default memo(function Status({
 						<Box flexDirection="column">
 							<Text color={colors.secondary}>
 								<Text bold={true}>Auto-Compact: </Text>
-								{autoCompactInfo.enabled ? '✓ enabled' : '✗ disabled'}
+								{autoCompactInfo.enabled
+									? `${ICON_SUCCESS} enabled`
+									: `${ICON_ERROR} disabled`}
 								{autoCompactInfo.hasOverrides && ' (session override)'}
 							</Text>
 							{autoCompactInfo.enabled && (
 								<Text color={colors.secondary} italic>
-									↳ Threshold: {autoCompactInfo.threshold}%, Mode:{' '}
-									{autoCompactInfo.mode}
+									{ICON_CONTINUATION} Threshold: {autoCompactInfo.threshold}%,
+									Mode: {autoCompactInfo.mode}
 								</Text>
 							)}
 						</Box>
@@ -362,7 +379,7 @@ export default memo(function Status({
 							</Text>
 							{updateInfo.updateCommand ? (
 								<Text color={colors.secondary}>
-									↳ Run: /update or {updateInfo.updateCommand}
+									{ICON_CONTINUATION} Run: /update or {updateInfo.updateCommand}
 								</Text>
 							) : updateInfo.updateMessage ? (
 								<Text color={colors.secondary}>{updateInfo.updateMessage}</Text>

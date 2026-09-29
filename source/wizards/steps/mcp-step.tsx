@@ -2,6 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -440,7 +441,7 @@ export function McpStep({
 						</Text>
 						{Object.values(servers).map((server, index) => (
 							<Text key={index} color={colors.secondary}>
-								• {server.name} ({server.transport})
+								{ICON_BULLET} {server.name} ({server.transport})
 							</Text>
 						))}
 					</Box>

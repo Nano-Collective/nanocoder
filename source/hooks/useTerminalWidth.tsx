@@ -1,5 +1,10 @@
 import {useEffect, useState} from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
+import {
+	truncateByColumns,
+	truncatePathByColumns,
+	width as visualWidth,
+} from '@/utils/width';
 
 type TerminalSize = 'narrow' | 'normal' | 'wide';
 
@@ -120,20 +125,18 @@ export const useResponsiveTerminal = () => {
 
 	const size = getSize(actualWidth);
 
-	// Utility to truncate long text with ellipsis
-	const truncate = (text: string, maxLength: number): string => {
-		if (text.length <= maxLength) return text;
-		return text.slice(0, maxLength - 3) + '...';
-	};
+	// Utility to truncate long text with ellipsis. Counts VISUAL columns
+	// (using `string-width` with ambiguous-as-narrow), so a string of CJK
+	// or wide-symbol glyphs can't silently overflow the budget.
+	const truncate = (text: string, maxLength: number): string =>
+		truncateByColumns(text, maxLength);
 
-	// Utility to truncate path intelligently (keep end of path)
+	// Utility to truncate path intelligently (keep end of path). Also
+	// counts visual columns rather than UTF-16 code units.
 	const truncatePath = (
 		pathStr: string | undefined,
 		maxLength: number,
-	): string => {
-		if (!pathStr || pathStr.length <= maxLength) return pathStr || '';
-		return '...' + pathStr.slice(-(maxLength - 3));
-	};
+	): string => truncatePathByColumns(pathStr, maxLength);
 
 	return {
 		boxWidth,
@@ -144,5 +147,6 @@ export const useResponsiveTerminal = () => {
 		isWide: size === 'wide',
 		truncate,
 		truncatePath,
+		visualWidth,
 	};
 };

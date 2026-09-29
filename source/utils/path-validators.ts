@@ -13,7 +13,7 @@ export function validatePath(path: string): ValidationResult {
 	if (!isValidFilePath(path, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path. Path must be within the project directory.`,
+			error: `! Invalid file path. Path must be within the project directory.`,
 		};
 	}
 
@@ -23,7 +23,7 @@ export function validatePath(path: string): ValidationResult {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `! Path validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -42,14 +42,14 @@ export function validatePathPair(
 	if (!isValidFilePath(source, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid source path. Path must be within the project directory.`,
+			error: `! Invalid source path. Path must be within the project directory.`,
 		};
 	}
 
 	if (!isValidFilePath(destination, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid destination path. Path must be within the project directory.`,
+			error: `! Invalid destination path. Path must be within the project directory.`,
 		};
 	}
 
@@ -60,7 +60,7 @@ export function validatePathPair(
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `! Path validation failed: ${errorMessage}`,
 		};
 	}
 

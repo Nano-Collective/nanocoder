@@ -235,19 +235,19 @@ export type DevelopmentMode =
 	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
-	normal: '▶ normal mode on',
-	'auto-accept': '⏵⏵ auto-accept mode on',
-	yolo: '⏵⏵⏵ yolo mode on',
-	plan: '⏸ plan mode on',
-	headless: '⏵⏵ headless mode on',
+	normal: '\u203A normal mode on',
+	'auto-accept': '\u203A\u203A auto-accept mode on',
+	yolo: '\u203A\u203A\u203A yolo mode on',
+	plan: '? plan mode on',
+	headless: '\u203A\u203A headless mode on',
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
-	normal: '▶ normal',
-	'auto-accept': '⏵⏵ auto',
-	yolo: '⏵⏵⏵ yolo',
-	plan: '⏸ plan',
-	headless: '⏵⏵ headless',
+	normal: '\u203A normal',
+	'auto-accept': '\u203A\u203A auto',
+	yolo: '\u203A\u203A\u203A yolo',
+	plan: '? plan',
+	headless: '\u203A\u203A headless',
 };
 
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';

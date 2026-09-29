@@ -1,6 +1,11 @@
 import React from 'react';
 
 import {TaskListDisplay} from '@/components/task-list-display';
+import {
+	ICON_TASK_COMPLETE,
+	ICON_TASK_IN_PROGRESS,
+	ICON_TASK_PENDING,
+} from '@/components/ui/icons';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {generateTaskId, loadTasks, saveTasks} from './storage';
@@ -17,9 +22,9 @@ interface WriteTasksArgs {
 }
 
 const STATUS_ICON: Record<TaskStatus, string> = {
-	pending: '○',
-	in_progress: '◐',
-	completed: '✓',
+	pending: ICON_TASK_PENDING,
+	in_progress: ICON_TASK_IN_PROGRESS,
+	completed: ICON_TASK_COMPLETE,
 };
 
 const executeWriteTasks = async (args: WriteTasksArgs): Promise<string> => {

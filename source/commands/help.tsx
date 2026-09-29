@@ -4,6 +4,7 @@ import path from 'path';
 import React from 'react';
 import {fileURLToPath} from 'url';
 import {commandRegistry} from '@/commands';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -80,12 +81,25 @@ function Help({
 			</Box>
 			<Text color={colors.text}>
 				{' '}
-				• Ask questions about your codebase {'>'} How does foo.py work?
+				{ICON_BULLET} Ask questions about your codebase {'>'} How does foo.py
+				work?
 			</Text>
-			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
-			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
-			<Text color={colors.text}> • Run commands {'>'} /help</Text>
-			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Edit files {'>'} Update bar.ts to...
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Fix errors {'>'} cargo build
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Run commands {'>'} /help
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Resume sessions {'>'} /resume
+			</Text>
 
 			<Box marginTop={1}>
 				<Text color={colors.primary} bold>
@@ -98,7 +112,7 @@ function Help({
 				commands.map((cmd, index) => (
 					<Text key={index} color={colors.text}>
 						{' '}
-						• /{cmd.name} - {cmd.description}
+						{ICON_BULLET} /{cmd.name} - {cmd.description}
 					</Text>
 				))
 			)}

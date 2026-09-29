@@ -3,6 +3,7 @@
 // only users who actually invoke `fetch_url` pay the cost.
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_WARNING} from '@/components/ui/icons';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -97,7 +98,7 @@ function FetchUrlFormatterComponent({
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Text color={colors.tool}>⚒ fetch_url</Text>
+			<Text color={colors.tool}>› fetch_url</Text>
 			<Box>
 				<Text color={colors.secondary}>URL: </Text>
 				<Box marginLeft={1}>
@@ -113,7 +114,7 @@ function FetchUrlFormatterComponent({
 					{wasTruncated && (
 						<Box>
 							<Text color={colors.warning}>
-								⚠ Content was truncated to 100KB
+								{ICON_WARNING} Content was truncated to 100KB
 							</Text>
 						</Box>
 					)}

@@ -2,6 +2,7 @@ import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {
@@ -196,7 +197,7 @@ const SearchFileContentsFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ search_file_contents</Text>
+				<Text color={colors.tool}>{ICON_TOOL} search_file_contents</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Query: </Text>

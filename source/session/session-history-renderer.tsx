@@ -3,6 +3,7 @@ import React, {memo} from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
+import {ICON_TOOL} from '@/components/ui/icons';
 import UserMessage from '@/components/user-message';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -75,7 +76,7 @@ function describeToolCall(toolCall: ToolCall): string {
 function isErrorResult(content: string | undefined): boolean {
 	if (!content) return false;
 	return (
-		content.startsWith('Error: ') || content.startsWith('⚒ Validation failed')
+		content.startsWith('Error: ') || content.startsWith('! Validation failed')
 	);
 }
 
@@ -103,7 +104,7 @@ const HistoryToolSummary = memo(function HistoryToolSummary({
 	return (
 		<Box width={boxWidth}>
 			<Text color={failed ? colors.error : colors.tool}>
-				{'⚒'} {label}
+				{ICON_TOOL} {label}
 				{failed ? ' (failed)' : ''}
 			</Text>
 		</Box>

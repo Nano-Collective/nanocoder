@@ -57,7 +57,7 @@ test('AssistantMessage renders with basic message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /test-model:/);
+	t.regex(output!, /test-model/);
 	t.regex(output!, /Hello world/);
 });
 
@@ -222,7 +222,7 @@ test('AssistantMessage renders without crashing with empty message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /test-model:/);
+	t.regex(output!, /test-model/);
 });
 
 test('AssistantMessage renders model name correctly', t => {
@@ -234,7 +234,7 @@ test('AssistantMessage renders model name correctly', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /gpt-4:/);
+	t.regex(output!, /gpt-4/);
 });
 
 // ============================================================================
@@ -1090,7 +1090,7 @@ test('AssistantMessage strips whitespace-only content to empty', t => {
 	// runs must be gone. The box adds 1-char padding plus may pad lines to
 	// terminal width with trailing spaces; strip only `┃` and trim trailing
 	// width-padding before asserting the leading 3-space prefix is gone.
-	t.true(output.includes('test-model:'));
+	t.true(output.includes('test-model'));
 	const boxContent = output
 		.split('\n')
 		.filter(l => l.includes('┃'))

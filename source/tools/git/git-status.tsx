@@ -6,6 +6,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_SUCCESS, ICON_TOOL} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -283,7 +284,7 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ git_status</Text>
+			<Text color={colors.tool}>{ICON_TOOL} git_status</Text>
 
 			{branch && (
 				<Box>
@@ -334,7 +335,9 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 				!hasConflicts &&
 				branch && (
 					<Box marginTop={1}>
-						<Text color={colors.success}>✓ Working tree clean</Text>
+						<Text color={colors.success}>
+							{ICON_SUCCESS} Working tree clean
+						</Text>
 					</Box>
 				)}
 		</Box>

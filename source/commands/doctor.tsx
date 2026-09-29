@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	type DaemonLock,
@@ -309,14 +310,14 @@ export function Doctor({report}: {report: DoctorReport}) {
 
 			<SectionTitle>System</SectionTitle>
 			<Text color={colors.text}>
-				• Node {report.system.nodeVersion} • {report.system.platform}/
-				{report.system.arch}
+				{ICON_BULLET} Node {report.system.nodeVersion} {ICON_BULLET}{' '}
+				{report.system.platform}/{report.system.arch}
 			</Text>
 
 			<SectionTitle>Nanocoder</SectionTitle>
 			{report.nanocoder.status === 'ok' ? (
 				<Text color={colors.text}>
-					• version {report.nanocoder.data.version}
+					{ICON_BULLET} version {report.nanocoder.data.version}
 				</Text>
 			) : (
 				<SectionError message={report.nanocoder.error} />
@@ -326,12 +327,15 @@ export function Doctor({report}: {report: DoctorReport}) {
 			{report.providers.status === 'error' ? (
 				<SectionError message={report.providers.error} />
 			) : report.providers.data.length === 0 ? (
-				<Text color={colors.secondary}>• No providers configured</Text>
+				<Text color={colors.secondary}>
+					{ICON_BULLET} No providers configured
+				</Text>
 			) : (
 				report.providers.data.map(provider => (
 					<Text key={provider.name} color={colors.text}>
-						• {provider.name}: {provider.modelCount} model
-						{provider.modelCount === 1 ? '' : 's'} • {provider.location}
+						{ICON_BULLET} {provider.name}: {provider.modelCount} model
+						{provider.modelCount === 1 ? '' : 's'} {ICON_BULLET}{' '}
+						{provider.location}
 						{provider.baseURL ? ` • ${provider.baseURL}` : ''}
 						{provider.location === 'local' ? ` • ${provider.reachability}` : ''}
 					</Text>
@@ -344,14 +348,18 @@ export function Doctor({report}: {report: DoctorReport}) {
 			) : (
 				<>
 					<Text color={colors.text}>
-						• {report.lsp.data.initialized ? 'initialized' : 'not initialized'}
+						{ICON_BULLET}{' '}
+						{report.lsp.data.initialized ? 'initialized' : 'not initialized'}
 					</Text>
 					{report.lsp.data.servers.length === 0 ? (
-						<Text color={colors.secondary}>• No LSP servers connected</Text>
+						<Text color={colors.secondary}>
+							{ICON_BULLET} No LSP servers connected
+						</Text>
 					) : (
 						report.lsp.data.servers.map(server => (
 							<Text key={server.name} color={colors.text}>
-								• {server.name}: {server.ready ? 'ready' : 'initializing'}
+								{ICON_BULLET} {server.name}:{' '}
+								{server.ready ? 'ready' : 'initializing'}
 								{server.languages.length > 0
 									? ` • ${server.languages.join(', ')}`
 									: ''}
@@ -365,11 +373,14 @@ export function Doctor({report}: {report: DoctorReport}) {
 			{report.mcp.status === 'error' ? (
 				<SectionError message={report.mcp.error} />
 			) : report.mcp.data.length === 0 ? (
-				<Text color={colors.secondary}>• No MCP servers connected</Text>
+				<Text color={colors.secondary}>
+					{ICON_BULLET} No MCP servers connected
+				</Text>
 			) : (
 				report.mcp.data.map(server => (
 					<Text key={server.name} color={colors.text}>
-						• {server.name}: {server.transport} • {server.toolCount} tool
+						{ICON_BULLET} {server.name}: {server.transport} {ICON_BULLET}{' '}
+						{server.toolCount} tool
 						{server.toolCount === 1 ? '' : 's'}
 						{server.url ? ` • ${server.url}` : ''}
 					</Text>
@@ -382,17 +393,17 @@ export function Doctor({report}: {report: DoctorReport}) {
 			) : report.daemon.data.state === 'running' ? (
 				<>
 					<Text color={colors.text}>
-						• running • pid {report.daemon.data.lock.pid} • uptime{' '}
+						{ICON_BULLET} running • pid {report.daemon.data.lock.pid} • uptime{' '}
 						{formatDuration(report.daemon.data.uptimeMs)}
 					</Text>
 					<Text color={colors.secondary}>
-						• socket {report.daemon.data.lock.socketPath}
+						{ICON_BULLET} socket {report.daemon.data.lock.socketPath}
 					</Text>
 				</>
 			) : report.daemon.data.state === 'stale-cleaned' ? (
-				<Text color={colors.warning}>• stale lockfile cleaned</Text>
+				<Text color={colors.warning}>{ICON_BULLET} stale lockfile cleaned</Text>
 			) : (
-				<Text color={colors.secondary}>• not running</Text>
+				<Text color={colors.secondary}>{ICON_BULLET} not running</Text>
 			)}
 		</TitledBoxWithPreferences>
 	);

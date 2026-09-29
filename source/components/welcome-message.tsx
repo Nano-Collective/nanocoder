@@ -5,6 +5,7 @@ import Gradient from 'ink-gradient';
 import path from 'path';
 import {memo} from 'react';
 import {fileURLToPath} from 'url';
+import {BRAND_MARK, ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getNanocoderShape} from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -28,45 +29,57 @@ export default memo(function WelcomeMessage() {
 	// Get the user's preferred nanocoder shape or use default
 	const nanocoderShape = getNanocoderShape() ?? DEFAULT_SHAPE;
 
+	// Nano Collective brand colour, with a fallback to the theme's primary
+	// for any user-defined theme that hasn't filled in `brand` yet.
+	const brandColor = colors.brand ?? colors.primary;
+
+	// Brand-aware gradient — pinned to the Nano Collective brand palette
+	// (purple → cyan) so the wordmark is recognisable regardless of theme.
+	const gradientColors = [brandColor, colors.tool];
+
 	return (
 		<>
 			{/* Narrow terminal: simple text without boxes */}
 			{isNarrow ? (
 				<>
-					<Gradient colors={[colors.primary, colors.tool]}>
+					<Gradient colors={gradientColors}>
 						<BigText text="NC" font={nanocoderShape} />
 					</Gradient>
 					<Box
 						flexDirection="column"
 						marginBottom={1}
 						borderStyle="round"
-						borderColor={colors.primary}
+						borderColor={brandColor}
 						paddingY={1}
 						paddingX={2}
 					>
 						<Box marginBottom={1}>
-							<Text color={colors.primary} bold>
-								✻ Version {packageJson.version} ✻
+							<Text color={brandColor} bold>
+								{BRAND_MARK} Version {packageJson.version} {BRAND_MARK}
 							</Text>
 						</Box>
 
 						<Text color={colors.text}>Quick tips:</Text>
-						<Text color={colors.secondary}>• Use natural language</Text>
-						<Text color={colors.secondary}>• /help for commands</Text>
-						<Text color={colors.secondary}>• Ctrl+C to quit</Text>
+						<Text color={colors.secondary}>
+							{ICON_BULLET} Use natural language
+						</Text>
+						<Text color={colors.secondary}>
+							{ICON_BULLET} /help for commands
+						</Text>
+						<Text color={colors.secondary}>{ICON_BULLET} Ctrl+C to quit</Text>
 					</Box>
 				</>
 			) : (
 				/* Normal/Wide terminal: full version with TitledBoxWithPreferences */
 				<>
-					<Gradient colors={[colors.primary, colors.tool]}>
+					<Gradient colors={gradientColors}>
 						<BigText text="Nanocoder" font={nanocoderShape} />
 					</Gradient>
 
 					<TitledBoxWithPreferences
-						title={`✻ Welcome to Nanocoder ${packageJson.version} ✻`}
+						title={`${BRAND_MARK} Welcome to Nanocoder ${packageJson.version} ${BRAND_MARK}`}
 						width={boxWidth}
-						borderColor={colors.primary}
+						borderColor={brandColor}
 						paddingX={2}
 						paddingY={1}
 						flexDirection="column"
@@ -94,6 +107,7 @@ export default memo(function WelcomeMessage() {
 							</Text>
 						</Box>
 						<Text color={colors.text}>/help for help</Text>
+						<Text color={colors.secondary}> by Nano Collective</Text>
 					</TitledBoxWithPreferences>
 				</>
 			)}

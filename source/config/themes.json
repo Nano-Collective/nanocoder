@@ -16,7 +16,8 @@
 			"diffAdded": "#1e2f1e",
 			"diffRemoved": "#2f1e1e",
 			"diffAddedText": "#9ece6a",
-			"diffRemovedText": "#f7768e"
+			"diffRemovedText": "#f7768e",
+			"brand": "#8373F7"
 		}
 	},
 	"synthwave-84": {
@@ -36,7 +37,8 @@
 			"diffAdded": "#2d4a1e",
 			"diffRemoved": "#4a1e2d",
 			"diffAddedText": "#a6e22e",
-			"diffRemovedText": "#ff3838"
+			"diffRemovedText": "#ff3838",
+			"brand": "#8373F7"
 		}
 	},
 	"forest-night": {
@@ -56,7 +58,8 @@
 			"diffAdded": "#2d3f2d",
 			"diffRemoved": "#3f2d2d",
 			"diffAddedText": "#a7c080",
-			"diffRemovedText": "#e67e80"
+			"diffRemovedText": "#e67e80",
+			"brand": "#8373F7"
 		}
 	},
 	"material-ocean": {
@@ -76,7 +79,8 @@
 			"diffAdded": "#1a3d2e",
 			"diffRemoved": "#3d1a1a",
 			"diffAddedText": "#66bb6a",
-			"diffRemovedText": "#ef5350"
+			"diffRemovedText": "#ef5350",
+			"brand": "#8373F7"
 		}
 	},
 	"sunset-glow": {
@@ -96,7 +100,8 @@
 			"diffAdded": "#2d4a1e",
 			"diffRemoved": "#4a1e2d",
 			"diffAddedText": "#52c41a",
-			"diffRemovedText": "#ff4757"
+			"diffRemovedText": "#ff4757",
+			"brand": "#8373F7"
 		}
 	},
 	"nord-frost": {
@@ -116,7 +121,8 @@
 			"diffAdded": "#2d3f2d",
 			"diffRemoved": "#3f2d2d",
 			"diffAddedText": "#a3be8c",
-			"diffRemovedText": "#bf616a"
+			"diffRemovedText": "#bf616a",
+			"brand": "#8373F7"
 		}
 	},
 	"rose-pine-dawn": {
@@ -136,7 +142,8 @@
 			"diffAdded": "#f0f0e8",
 			"diffRemoved": "#f2e9e1",
 			"diffAddedText": "#618a3d",
-			"diffRemovedText": "#b4637a"
+			"diffRemovedText": "#b4637a",
+			"brand": "#8373F7"
 		}
 	},
 	"neon-jungle": {
@@ -156,7 +163,8 @@
 			"diffAdded": "#1a4d1a",
 			"diffRemoved": "#4d1a4d",
 			"diffAddedText": "#32cd32",
-			"diffRemovedText": "#ff1493"
+			"diffRemovedText": "#ff1493",
+			"brand": "#8373F7"
 		}
 	},
 	"midnight-amethyst": {
@@ -176,7 +184,8 @@
 			"diffAdded": "#2d1a4d",
 			"diffRemoved": "#4d1a1a",
 			"diffAddedText": "#9370db",
-			"diffRemovedText": "#dc143c"
+			"diffRemovedText": "#dc143c",
+			"brand": "#8373F7"
 		}
 	},
 	"desert-mirage": {
@@ -196,7 +205,8 @@
 			"diffAdded": "#2d4a1e",
 			"diffRemoved": "#4a1e1e",
 			"diffAddedText": "#228b22",
-			"diffRemovedText": "#dc143c"
+			"diffRemovedText": "#dc143c",
+			"brand": "#8373F7"
 		}
 	},
 	"cherry-blossom": {
@@ -216,7 +226,8 @@
 			"diffAdded": "#f0fff0",
 			"diffRemoved": "#ffe4e1",
 			"diffAddedText": "#3cb371",
-			"diffRemovedText": "#cd5c5c"
+			"diffRemovedText": "#cd5c5c",
+			"brand": "#8373F7"
 		}
 	},
 	"electric-storm": {
@@ -236,7 +247,8 @@
 			"diffAdded": "#2d4a1e",
 			"diffRemoved": "#4a1e1e",
 			"diffAddedText": "#adff2f",
-			"diffRemovedText": "#ff4500"
+			"diffRemovedText": "#ff4500",
+			"brand": "#8373F7"
 		}
 	},
 	"deep-sea": {
@@ -256,7 +268,8 @@
 			"diffAdded": "#1e3a3a",
 			"diffRemoved": "#3a1e1e",
 			"diffAddedText": "#20b2aa",
-			"diffRemovedText": "#ff6347"
+			"diffRemovedText": "#ff6347",
+			"brand": "#8373F7"
 		}
 	},
 	"volcanic-ash": {
@@ -276,7 +289,8 @@
 			"diffAdded": "#2d4a1e",
 			"diffRemoved": "#4a1e1e",
 			"diffAddedText": "#32cd32",
-			"diffRemovedText": "#ff0000"
+			"diffRemovedText": "#ff0000",
+			"brand": "#8373F7"
 		}
 	},
 	"cyberpunk-mint": {
@@ -296,7 +310,8 @@
 			"diffAdded": "#1a4d1a",
 			"diffRemoved": "#4d1a4d",
 			"diffAddedText": "#32cd32",
-			"diffRemovedText": "#ff00ff"
+			"diffRemovedText": "#ff00ff",
+			"brand": "#8373F7"
 		}
 	},
 	"dracula": {
@@ -316,7 +331,8 @@
 			"diffAdded": "#2d4a2d",
 			"diffRemoved": "#4a2d2d",
 			"diffAddedText": "#50fa7b",
-			"diffRemovedText": "#ff5555"
+			"diffRemovedText": "#ff5555",
+			"brand": "#8373F7"
 		}
 	},
 	"catppuccin-latte": {
@@ -337,7 +353,8 @@
 			"diffRemoved": "#f5d5dc",
 			"diffAddedText": "#40a02b",
 			"diffRemovedText": "#d20f39",
-			"gradientColors": ["#dc8a78", "#8839ef", "#1e66f5"]
+			"gradientColors": ["#dc8a78", "#8839ef", "#1e66f5"],
+			"brand": "#8373F7"
 		}
 	},
 	"catppuccin-frappe": {
@@ -358,7 +375,8 @@
 			"diffRemoved": "#4a2d2d",
 			"diffAddedText": "#a6d189",
 			"diffRemovedText": "#e78284",
-			"gradientColors": ["#ea999c", "#81c8be", "#99d1db"]
+			"gradientColors": ["#ea999c", "#81c8be", "#99d1db"],
+			"brand": "#8373F7"
 		}
 	},
 	"catppuccin-macchiato": {
@@ -379,7 +397,8 @@
 			"diffRemoved": "#4a2d2d",
 			"diffAddedText": "#a6da95",
 			"diffRemovedText": "#ed8796",
-			"gradientColors": ["#f5a97f", "#91d7e3", "#8aadf4"]
+			"gradientColors": ["#f5a97f", "#91d7e3", "#8aadf4"],
+			"brand": "#8373F7"
 		}
 	},
 	"catppuccin-mocha": {
@@ -400,7 +419,8 @@
 			"diffRemoved": "#4a2d2d",
 			"diffAddedText": "#a6e3a1",
 			"diffRemovedText": "#f38ba8",
-			"gradientColors": ["#f5e0dc", "#cba6f7", "#89b4fa"]
+			"gradientColors": ["#f5e0dc", "#cba6f7", "#89b4fa"],
+			"brand": "#8373F7"
 		}
 	},
 	"gruvbox-dark": {
@@ -420,7 +440,8 @@
 			"diffAdded": "#3d4220",
 			"diffRemoved": "#4c2020",
 			"diffAddedText": "#b8bb26",
-			"diffRemovedText": "#fb4934"
+			"diffRemovedText": "#fb4934",
+			"brand": "#8373F7"
 		}
 	},
 	"gruvbox-light": {
@@ -440,7 +461,8 @@
 			"diffAdded": "#e8e5c0",
 			"diffRemoved": "#f0d5d5",
 			"diffAddedText": "#79740e",
-			"diffRemovedText": "#9d0006"
+			"diffRemovedText": "#9d0006",
+			"brand": "#8373F7"
 		}
 	},
 	"solarized-dark": {
@@ -460,7 +482,8 @@
 			"diffAdded": "#1a3a20",
 			"diffRemoved": "#3a1a1a",
 			"diffAddedText": "#859900",
-			"diffRemovedText": "#dc322f"
+			"diffRemovedText": "#dc322f",
+			"brand": "#8373F7"
 		}
 	},
 	"solarized-light": {
@@ -480,7 +503,8 @@
 			"diffAdded": "#e8f0e0",
 			"diffRemoved": "#f0e0e0",
 			"diffAddedText": "#859900",
-			"diffRemovedText": "#dc322f"
+			"diffRemovedText": "#dc322f",
+			"brand": "#8373F7"
 		}
 	},
 	"one-dark": {
@@ -500,7 +524,8 @@
 			"diffAdded": "#2d4a2d",
 			"diffRemoved": "#4a2d2d",
 			"diffAddedText": "#98c379",
-			"diffRemovedText": "#e06c75"
+			"diffRemovedText": "#e06c75",
+			"brand": "#8373F7"
 		}
 	},
 	"one-light": {
@@ -520,7 +545,8 @@
 			"diffAdded": "#e6f4e6",
 			"diffRemoved": "#f4e6e6",
 			"diffAddedText": "#50a14f",
-			"diffRemovedText": "#e45649"
+			"diffRemovedText": "#e45649",
+			"brand": "#8373F7"
 		}
 	},
 	"monokai": {
@@ -540,7 +566,8 @@
 			"diffAdded": "#3e4a22",
 			"diffRemoved": "#4a2232",
 			"diffAddedText": "#a6e22e",
-			"diffRemovedText": "#f92672"
+			"diffRemovedText": "#f92672",
+			"brand": "#8373F7"
 		}
 	},
 	"github-dark": {
@@ -560,7 +587,8 @@
 			"diffAdded": "#1b4721",
 			"diffRemoved": "#5c2125",
 			"diffAddedText": "#3fb950",
-			"diffRemovedText": "#f85149"
+			"diffRemovedText": "#f85149",
+			"brand": "#8373F7"
 		}
 	},
 	"github-light": {
@@ -580,7 +608,8 @@
 			"diffAdded": "#d4f8db",
 			"diffRemoved": "#ffcecb",
 			"diffAddedText": "#1a7f37",
-			"diffRemovedText": "#cf222e"
+			"diffRemovedText": "#cf222e",
+			"brand": "#8373F7"
 		}
 	},
 	"rose-pine": {
@@ -600,7 +629,8 @@
 			"diffAdded": "#1f2d3d",
 			"diffRemoved": "#3d1f2d",
 			"diffAddedText": "#9ccfd8",
-			"diffRemovedText": "#eb6f92"
+			"diffRemovedText": "#eb6f92",
+			"brand": "#8373F7"
 		}
 	},
 	"rose-pine-moon": {
@@ -620,7 +650,8 @@
 			"diffAdded": "#1f2d3d",
 			"diffRemoved": "#3d1f2d",
 			"diffAddedText": "#9ccfd8",
-			"diffRemovedText": "#eb6f92"
+			"diffRemovedText": "#eb6f92",
+			"brand": "#8373F7"
 		}
 	},
 	"ayu-dark": {
@@ -640,7 +671,8 @@
 			"diffAdded": "#1a2d1a",
 			"diffRemoved": "#2d1a1a",
 			"diffAddedText": "#c2d94c",
-			"diffRemovedText": "#f07178"
+			"diffRemovedText": "#f07178",
+			"brand": "#8373F7"
 		}
 	},
 	"ayu-mirage": {
@@ -660,7 +692,8 @@
 			"diffAdded": "#2d3d2d",
 			"diffRemoved": "#3d2d2d",
 			"diffAddedText": "#bae67e",
-			"diffRemovedText": "#f28779"
+			"diffRemovedText": "#f28779",
+			"brand": "#8373F7"
 		}
 	},
 	"ayu-light": {
@@ -680,7 +713,8 @@
 			"diffAdded": "#e8f4e8",
 			"diffRemoved": "#f4e8e8",
 			"diffAddedText": "#86b300",
-			"diffRemovedText": "#f07171"
+			"diffRemovedText": "#f07171",
+			"brand": "#8373F7"
 		}
 	},
 	"night-owl": {
@@ -700,7 +734,8 @@
 			"diffAdded": "#1a3d2d",
 			"diffRemoved": "#3d1a1a",
 			"diffAddedText": "#addb67",
-			"diffRemovedText": "#ef5350"
+			"diffRemovedText": "#ef5350",
+			"brand": "#8373F7"
 		}
 	},
 	"palenight": {
@@ -720,7 +755,8 @@
 			"diffAdded": "#2d3d2d",
 			"diffRemoved": "#3d2d2d",
 			"diffAddedText": "#c3e88d",
-			"diffRemovedText": "#ff5370"
+			"diffRemovedText": "#ff5370",
+			"brand": "#8373F7"
 		}
 	},
 	"horizon": {
@@ -740,7 +776,8 @@
 			"diffAdded": "#1a3d2d",
 			"diffRemoved": "#3d1a2d",
 			"diffAddedText": "#29d398",
-			"diffRemovedText": "#e95678"
+			"diffRemovedText": "#e95678",
+			"brand": "#8373F7"
 		}
 	},
 	"kanagawa": {
@@ -760,7 +797,8 @@
 			"diffAdded": "#1f2f1e",
 			"diffRemoved": "#2f1f1f",
 			"diffAddedText": "#9ece6a",
-			"diffRemovedText": "#f7768e"
+			"diffRemovedText": "#f7768e",
+			"brand": "#8373F7"
 		}
 	},
 	"aurora-borealis": {
@@ -781,7 +819,8 @@
 			"diffRemoved": "#2f0a1a",
 			"diffAddedText": "#39ff14",
 			"diffRemovedText": "#ff006e",
-			"gradientColors": ["#00ff9f", "#00d4ff", "#7b68ee"]
+			"gradientColors": ["#00ff9f", "#00d4ff", "#7b68ee"],
+			"brand": "#8373F7"
 		}
 	},
 	"high-contrast-dark": {
@@ -802,7 +841,8 @@
 			"diffRemoved": "#3a0000",
 			"diffAddedText": "#00ff00",
 			"diffRemovedText": "#ff6b6b",
-			"gradientColors": ["#ffff00", "#00ffff", "#ffffff"]
+			"gradientColors": ["#ffff00", "#00ffff", "#ffffff"],
+			"brand": "#8373F7"
 		}
 	},
 	"high-contrast-light": {
@@ -823,7 +863,8 @@
 			"diffRemoved": "#ffd7d7",
 			"diffAddedText": "#006400",
 			"diffRemovedText": "#b00020",
-			"gradientColors": ["#0000ee", "#005a9c", "#000000"]
+			"gradientColors": ["#0000ee", "#005a9c", "#000000"],
+			"brand": "#8373F7"
 		}
 	},
 	"everforest-dark": {
@@ -844,7 +885,8 @@
 			"diffRemoved": "#443333",
 			"diffAddedText": "#a7c080",
 			"diffRemovedText": "#e67e80",
-			"gradientColors": ["#a7c080", "#7fbbb3", "#d699b6"]
+			"gradientColors": ["#a7c080", "#7fbbb3", "#d699b6"],
+			"brand": "#8373F7"
 		}
 	},
 	"everforest-light": {
@@ -865,7 +907,8 @@
 			"diffRemoved": "#f8dfd8",
 			"diffAddedText": "#8da101",
 			"diffRemovedText": "#f85552",
-			"gradientColors": ["#8da101", "#35a77c", "#df69ba"]
+			"gradientColors": ["#8da101", "#35a77c", "#df69ba"],
+			"brand": "#8373F7"
 		}
 	},
 	"vscode-dark-plus": {
@@ -885,7 +928,8 @@
 			"diffAdded": "#1f3a24",
 			"diffRemoved": "#3a1f1f",
 			"diffAddedText": "#6a9955",
-			"diffRemovedText": "#f44747"
+			"diffRemovedText": "#f44747",
+			"brand": "#8373F7"
 		}
 	},
 	"vscode-light-plus": {
@@ -905,7 +949,8 @@
 			"diffAdded": "#e6ffed",
 			"diffRemoved": "#ffeef0",
 			"diffAddedText": "#008000",
-			"diffRemovedText": "#cd3131"
+			"diffRemovedText": "#cd3131",
+			"brand": "#8373F7"
 		}
 	},
 	"darcula": {
@@ -926,7 +971,8 @@
 			"diffRemoved": "#4b2b2b",
 			"diffAddedText": "#6a8759",
 			"diffRemovedText": "#ff6b68",
-			"gradientColors": ["#cc7832", "#6897bb", "#9876aa"]
+			"gradientColors": ["#cc7832", "#6897bb", "#9876aa"],
+			"brand": "#8373F7"
 		}
 	},
 	"papercolor-light": {
@@ -946,7 +992,8 @@
 			"diffAdded": "#d7ffd7",
 			"diffRemoved": "#ffd7d7",
 			"diffAddedText": "#008700",
-			"diffRemovedText": "#af0000"
+			"diffRemovedText": "#af0000",
+			"brand": "#8373F7"
 		}
 	},
 	"papercolor-dark": {
@@ -966,7 +1013,8 @@
 			"diffAdded": "#263b26",
 			"diffRemoved": "#3b2626",
 			"diffAddedText": "#afdf5f",
-			"diffRemovedText": "#df5f5f"
+			"diffRemovedText": "#df5f5f",
+			"brand": "#8373F7"
 		}
 	},
 	"amber-terminal": {
@@ -987,7 +1035,8 @@
 			"diffRemoved": "#351400",
 			"diffAddedText": "#ffd27a",
 			"diffRemovedText": "#ff7043",
-			"gradientColors": ["#ff8c00", "#ffb000", "#ffe08a"]
+			"gradientColors": ["#ff8c00", "#ffb000", "#ffe08a"],
+			"brand": "#8373F7"
 		}
 	},
 	"poimandres": {
@@ -1008,7 +1057,8 @@
 			"diffRemoved": "#3d1f2d",
 			"diffAddedText": "#5de4c7",
 			"diffRemovedText": "#d0679d",
-			"gradientColors": ["#add7ff", "#5de4c7", "#d0679d"]
+			"gradientColors": ["#add7ff", "#5de4c7", "#d0679d"],
+			"brand": "#8373F7"
 		}
 	}
 }

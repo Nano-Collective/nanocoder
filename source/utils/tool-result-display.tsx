@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -21,7 +22,7 @@ export const ALWAYS_EXPANDED_TOOLS = new Set(['write_tasks', 'ask_user']);
 export const LIVE_TASK_TOOLS = new Set(['write_tasks']);
 
 /**
- * Compact tool result display - shows "⚒ toolName  description" in tool color.
+ * Compact tool result display - shows "› toolName  description" in tool color.
  */
 function CompactToolResult({
 	toolName,
@@ -33,13 +34,13 @@ function CompactToolResult({
 	const {colors} = useTheme();
 	return (
 		<Text color={colors.tool}>
-			{'\u2692'} {description}
+			{ICON_TOOL} {description}
 		</Text>
 	);
 }
 
 /**
- * Compact tool error display - shows "\u2692 toolName failed" in error red.
+ * Compact tool error display - shows "› toolName failed" in error red.
  * Used in compact display mode so failures don't dump the full verbose
  * error; the model still receives the full error in conversation history,
  * so this only trims what the user sees.
@@ -48,7 +49,7 @@ function CompactToolError({toolName}: {toolName: string}) {
 	const {colors} = useTheme();
 	return (
 		<Text color={colors.error}>
-			{'\u2692'} {toolName} failed
+			{ICON_TOOL} {toolName} failed
 		</Text>
 	);
 }
@@ -95,7 +96,7 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 
 /**
  * Live display component for running compact tool counts.
- * Shows accumulated counts during execution (e.g. "⚒ Read 7 files").
+ * Shows accumulated counts during execution (e.g. "› Read 7 files").
  * Rendered in the live area (not Static) so it updates in-place.
  */
 export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
@@ -104,7 +105,7 @@ export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
 		<Box flexDirection="column" marginBottom={1}>
 			{Object.entries(counts).map(([toolName, count]) => (
 				<Text key={toolName} color={colors.tool}>
-					{'\u2692'} {getGroupedCompactDescription(toolName, count)}
+					{ICON_TOOL} {getGroupedCompactDescription(toolName, count)}
 				</Text>
 			))}
 		</Box>
@@ -165,14 +166,14 @@ export async function displayToolResult(
 ): Promise<void> {
 	// Check if this is an error result. Generic failures are prefixed "Error: ";
 	// validation failures (bad arg types, failed per-tool validators) come back
-	// as "⚒ Validation failed: …" — both should render as a red error so the
+	// as "! Validation failed: …" — both should render as a red error so the
 	// user sees the same feedback the model gets.
-	const isValidationError = result.content.startsWith('⚒ Validation failed');
+	const isValidationError = result.content.startsWith('! Validation failed');
 	const isError = result.content.startsWith('Error: ') || isValidationError;
 
 	if (isError) {
 		// Compact mode: condense failures to a short red one-liner
-		// ("⚒ write_file ") instead of the full error output.
+		// ("› write_file ") instead of the full error output.
 		// The model still receives the full error in conversation history,
 		// so this only trims the user-facing display.
 		if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
@@ -230,7 +231,7 @@ export async function displayToolResult(
 					addToChatQueue(
 						<ToolMessage
 							key={generateKey(`tool-result-${result.tool_call_id}`)}
-							title={`⚒ ${result.name}`}
+							title={`${ICON_TOOL} ${result.name}`}
 							message={String(formattedResult)}
 							hideBox={true}
 						/>,
@@ -241,7 +242,7 @@ export async function displayToolResult(
 				addToChatQueue(
 					<ToolMessage
 						key={generateKey(`tool-result-${result.tool_call_id}`)}
-						title={`⚒ ${result.name}`}
+						title={`${ICON_TOOL} ${result.name}`}
 						message={result.content}
 						hideBox={true}
 					/>,
@@ -252,7 +253,7 @@ export async function displayToolResult(
 			addToChatQueue(
 				<ToolMessage
 					key={generateKey(`tool-result-${result.tool_call_id}`)}
-					title={`⚒ ${result.name}`}
+					title={`${ICON_TOOL} ${result.name}`}
 					message={result.content}
 					hideBox={true}
 				/>,

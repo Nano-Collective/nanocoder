@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useMemo, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {ICON_WARNING} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {updateConfigNestedValue} from '@/config/config-writer';
@@ -122,7 +123,11 @@ export function SettingsAutoCompactPanel({
 							onSubmit={submitThreshold}
 						/>
 					</Box>
-					{error && <Text color={colors.error}>⚠ {error}</Text>}
+					{error && (
+						<Text color={colors.error}>
+							{ICON_WARNING} {error}
+						</Text>
+					)}
 					<Text color={colors.secondary}>Enter to save · Esc to cancel</Text>
 				</Box>
 			) : (

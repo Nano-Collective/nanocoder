@@ -211,7 +211,7 @@ test('collectEditedPaths skips failed or cancelled edits', t => {
 		],
 		[
 			toolResult('call_1', 'write_file', 'Error: no permissions'),
-			toolResult('call_2', 'string_replace', '⚒ Validation failed: old_str'),
+			toolResult('call_2', 'string_replace', '! Validation failed: old_str'),
 			toolResult(
 				'call_3',
 				'write_file',

@@ -103,7 +103,7 @@ test('createStaticComponents renders boot summary with mode in non-interactive m
 	t.truthy(output);
 	t.regex(output!, /test-provider/);
 	t.regex(output!, /test-model/);
-	// Mode label (e.g. "⏵⏵⏵ yolo mode on") is surfaced.
+	// Mode label (e.g. "››› yolo mode on") is surfaced.
 	t.regex(output!, /yolo/);
 	unmount();
 });
@@ -132,14 +132,14 @@ test('createStaticComponents omits mode label when interactive', t => {
 // Boot Summary — Git Branch Display
 // ============================================================================
 
-test('formatBootSummaryGitLabel renders feature branch with ⎇ prefix', t => {
+test('formatBootSummaryGitLabel renders feature branch with ╲ prefix', t => {
 	t.is(
 		formatBootSummaryGitLabel({
 			branch: 'fix/read-file-empty',
 			isDefault: false,
 			detached: false,
 		}),
-		'⎇ fix/read-file-empty',
+		'╲ fix/read-file-empty',
 	);
 });
 
@@ -150,7 +150,7 @@ test('formatBootSummaryGitLabel marks the default branch', t => {
 			isDefault: true,
 			detached: false,
 		}),
-		'⎇ main (default)',
+		'╲ main (default)',
 	);
 });
 
@@ -161,7 +161,7 @@ test('formatBootSummaryGitLabel marks detached HEAD', t => {
 			isDefault: false,
 			detached: true,
 		}),
-		'⎇ abc1234 (detached)',
+		'╲ abc1234 (detached)',
 	);
 });
 
@@ -180,7 +180,7 @@ test.serial(
 		const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 		const output = lastFrame();
 		t.truthy(output);
-		t.regex(output!, /⎇\s+\S+/);
+		t.regex(output!, /╲\s+\S+/);
 		unmount();
 	},
 );
@@ -202,7 +202,7 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
-			t.notRegex(output!, /⎇/);
+			t.notRegex(output!, /╲/);
 			unmount();
 		} finally {
 			process.chdir(originalCwd);
@@ -226,7 +226,7 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
-			t.regex(output!, /⎇/);
+			t.regex(output!, /╲/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;
@@ -252,7 +252,7 @@ test.serial(
 			// Branch label sits on a line by itself, separated from the
 			// provider/model line by a newline. Strip ANSI so color codes
 			// (present when CI forces color) don't break the adjacency match.
-			t.regex(stripAnsi(output!), /test-model[^\n]*\n⎇\s+\S+/);
+			t.regex(stripAnsi(output!), /test-model[^\n]*\n╲\s+\S+/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;

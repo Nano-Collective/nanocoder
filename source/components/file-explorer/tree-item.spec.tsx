@@ -151,7 +151,7 @@ test('TreeItem renders directory with trailing slash', t => {
 	t.regex(output!, /src\//);
 });
 
-test('TreeItem renders collapsed directory with > prefix', t => {
+test('TreeItem renders collapsed directory with ▸ prefix', t => {
 	const item = createFlatNode('src', 'src', true, 0, false, true, [
 		createFileNode('index.ts', 'src/index.ts', false),
 	]);
@@ -167,10 +167,10 @@ test('TreeItem renders collapsed directory with > prefix', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, />/);
+	t.regex(output!, /\u25B8/); // ▸
 });
 
-test('TreeItem renders expanded directory with v prefix', t => {
+test('TreeItem renders expanded directory with ▾ prefix', t => {
 	const item = createFlatNode('src', 'src', true, 0, true, true, [
 		createFileNode('index.ts', 'src/index.ts', false),
 	]);
@@ -186,7 +186,7 @@ test('TreeItem renders expanded directory with v prefix', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /v/);
+	t.regex(output!, /\u25BE/); // ▾
 });
 
 test('TreeItem renders empty directory without expand indicator', t => {
@@ -267,7 +267,7 @@ test('TreeItem renders unselected directory with expand indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, />/);
+	t.regex(output!, /\u25B8/); // ▸ collapsed indicator
 	t.notRegex(output!, /[✓◐]/);
 });
 

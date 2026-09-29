@@ -29,7 +29,7 @@ export function formatValidationError(
 	error: string,
 	details?: ValidationErrorDetail[],
 ): string {
-	const base = `⚒ Validation failed: ${error}`;
+	const base = `! Validation failed: ${error}`;
 	if (!details || details.length === 0) {
 		return base;
 	}

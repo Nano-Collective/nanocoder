@@ -112,7 +112,7 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 
 	const messageContent = (
 		<Box flexDirection="column">
-			<Text color={colors.tool}>⚒ write_file</Text>
+			<Text color={colors.tool}>› write_file</Text>
 
 			<Box>
 				<Text color={colors.secondary}>Path: </Text>

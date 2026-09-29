@@ -1,5 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import {useMemo, useState} from 'react';
+import {ICON_SELECTION, ICON_SUCCESS} from '@/components/ui/icons';
 import {getColors} from '@/config/index';
 import type {FetchedModel} from '../utils/fetch-models';
 
@@ -183,7 +184,8 @@ export function ModelSelectionList({
 								color={isHighlighted ? colors.primary : colors.text}
 								bold={isHighlighted}
 							>
-								{isHighlighted ? '❯' : ' '} {isSelected ? '[✓]' : '[ ]'}{' '}
+								{isHighlighted ? ICON_SELECTION : ' '}{' '}
+								{isSelected ? `[${ICON_SUCCESS}]` : '[ ]'}{' '}
 								{model.name === model.id
 									? model.id
 									: `${model.name} — ${model.id}`}

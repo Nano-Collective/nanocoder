@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import {memo, useRef} from 'react';
+import {ICON_ELLIPSIS, ICON_THOUGHT} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -46,7 +47,7 @@ export default memo(function StreamingReasoning({
 		<Box flexDirection="column" marginBottom={2}>
 			<Box>
 				<Text color={colors.tool}>
-					{'\u2699'} Thinking
+					{ICON_THOUGHT} Thinking
 					<Spinner type="simpleDots" />
 				</Text>
 				{expand ? (
@@ -59,7 +60,7 @@ export default memo(function StreamingReasoning({
 			</Box>
 			{expand && (
 				<Box flexDirection="column">
-					{truncated && <Text color={colors.secondary}>…</Text>}
+					{truncated && <Text color={colors.secondary}>{ICON_ELLIPSIS}</Text>}
 					<Text color={colors.secondary} italic>
 						{displayText}
 					</Text>

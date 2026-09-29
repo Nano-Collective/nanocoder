@@ -14,6 +14,7 @@
  */
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
+import {ICON_PLAN} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -101,7 +102,7 @@ export default function PlanReviewPrompt({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.primary} bold>
-					📋 Plan ready.{' '}
+					{ICON_PLAN} Plan ready.{' '}
 				</Text>
 				<Text color={colors.secondary}>What would you like to do?</Text>
 			</Box>

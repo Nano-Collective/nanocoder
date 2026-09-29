@@ -3,6 +3,7 @@ import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_ERROR, ICON_SUCCESS, ICON_TOOL} from '@/components/ui/icons';
 import {getColors} from '@/config/index';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import type {Colors} from '@/types/index';
@@ -55,7 +56,7 @@ export async function formatStringReplacePreview(
 					<ToolMessage
 						message={
 							<Box flexDirection="column" marginBottom={1}>
-								<Text color={themeColors.tool}>⚒ string_replace</Text>
+								<Text color={themeColors.tool}>{ICON_TOOL} string_replace</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
@@ -64,8 +65,8 @@ export async function formatStringReplacePreview(
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
-										✗ Error: Content not found in file. The file may have
-										changed since you last read it.
+										{ICON_ERROR} Error: Content not found in file. The file may
+										have changed since you last read it.
 									</Text>
 								</Box>
 							</Box>
@@ -80,7 +81,7 @@ export async function formatStringReplacePreview(
 					<ToolMessage
 						message={
 							<Box flexDirection="column">
-								<Text color={themeColors.tool}>⚒ string_replace</Text>
+								<Text color={themeColors.tool}>{ICON_TOOL} string_replace</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
@@ -89,7 +90,7 @@ export async function formatStringReplacePreview(
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
-										✗ Error: Found {occurrences} matches
+										{ICON_ERROR} Error: Found {occurrences} matches
 									</Text>
 									<Text color={themeColors.secondary}>
 										Add more surrounding context to make the match unique.
@@ -361,7 +362,7 @@ export async function formatStringReplacePreview(
 			<ToolMessage
 				message={
 					<Box flexDirection="column">
-						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						<Text color={themeColors.tool}>{ICON_TOOL} string_replace</Text>
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
@@ -374,7 +375,9 @@ export async function formatStringReplacePreview(
 						</Box>
 						<Box flexDirection="column" marginTop={1} marginBottom={1}>
 							<Text color={themeColors.success}>
-								{isResult ? '✓ Replace completed' : '✓ Replacing'}{' '}
+								{isResult
+									? `${ICON_SUCCESS} Replace completed`
+									: `${ICON_SUCCESS} Replacing`}{' '}
 								{oldStrLines.length} line{oldStrLines.length > 1 ? 's' : ''}{' '}
 								with {newStrLines.length} line
 								{newStrLines.length > 1 ? 's' : ''}
@@ -395,7 +398,7 @@ export async function formatStringReplacePreview(
 			<ToolMessage
 				message={
 					<Box flexDirection="column">
-						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						<Text color={themeColors.tool}>{ICON_TOOL} string_replace</Text>
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>

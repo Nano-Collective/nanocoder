@@ -1,7 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import BashProgress from '@/components/bash-progress';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -100,7 +100,7 @@ function ExecuteBashFormatterComponent({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ execute_bash</Text>
+			<Text color={colors.tool}>{ICON_TOOL} execute_bash</Text>
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
 				<Text wrap="wrap" color={colors.primary}>

@@ -1,4 +1,9 @@
 import {Box, Text} from 'ink';
+import {
+	ICON_TASK_COMPLETE,
+	ICON_TASK_IN_PROGRESS,
+	ICON_TASK_PENDING,
+} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
@@ -9,9 +14,9 @@ interface TaskListDisplayProps {
 }
 
 const STATUS_ICONS: Record<Task['status'], string> = {
-	pending: '○',
-	in_progress: '◐',
-	completed: '✓',
+	pending: ICON_TASK_PENDING,
+	in_progress: ICON_TASK_IN_PROGRESS,
+	completed: ICON_TASK_COMPLETE,
 };
 
 export function TaskListDisplay({

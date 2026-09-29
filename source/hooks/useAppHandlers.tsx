@@ -11,6 +11,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import {ICON_SUCCESS} from '@/components/ui/icons';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -471,7 +472,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.addToChatQueue(
 					<SuccessMessage
 						key={generateKey('restore-success')}
-						message={`✓ Checkpoint '${checkpointName}' restored successfully`}
+						message={`${ICON_SUCCESS} Checkpoint '${checkpointName}' restored successfully`}
 						hideBox={true}
 					/>,
 				);

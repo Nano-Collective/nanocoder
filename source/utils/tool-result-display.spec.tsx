@@ -123,7 +123,7 @@ test('displayToolResult - renders a validation failure as a red error', async t 
 	const result = createMockToolResult(
 		'call-1',
 		'TestTool',
-		'⚒ Validation failed: one or more arguments have the wrong type\n  - `path`: expected string, received object',
+		'! Validation failed: one or more arguments have the wrong type\n  - `path`: expected string, received object',
 	);
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
@@ -163,7 +163,7 @@ test('displayToolResult - compact mode condenses a validation failure too', asyn
 	const result = createMockToolResult(
 		'call-1',
 		'write_file',
-		'⚒ Validation failed: Invalid file path: "/abs/path". Path must be relative.',
+		'! Validation failed: Invalid file path: "/abs/path". Path must be relative.',
 	);
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
@@ -286,7 +286,7 @@ test('displayToolResult - displays formatted result as ToolMessage when formatte
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.type, ToolMessage);
 	t.is(element.props.message, 'Formatted content');
-	t.is(element.props.title, '⚒ ReadFile');
+	t.is(element.props.title, '› ReadFile');
 });
 
 test('displayToolResult - clones React element when formatter returns element', async t => {
@@ -331,7 +331,7 @@ test('displayToolResult - falls back to raw result when formatter throws', async
 	t.is(queue.length, 1);
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.props.message, 'raw result');
-	t.is(element.props.title, '⚒ BrokenTool');
+	t.is(element.props.title, '› BrokenTool');
 });
 
 test('displayToolResult - displays raw result when no formatter exists', async t => {
@@ -356,7 +356,7 @@ test('displayToolResult - displays raw result when no formatter exists', async t
 	t.is(queue.length, 1);
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.props.message, 'raw content');
-	t.is(element.props.title, '⚒ NoFormatterTool');
+	t.is(element.props.title, '› NoFormatterTool');
 });
 
 // ============================================================================
@@ -662,15 +662,15 @@ test('LiveCompactCounts - renders empty counts without error', t => {
 	unmount();
 });
 
-test('LiveCompactCounts - renders hammer icon for each entry', t => {
+test('LiveCompactCounts - renders tool glyph for each entry', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<LiveCompactCounts counts={{read_file: 1, execute_bash: 2}} />,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	const hammerCount = (output!.match(/\u2692/g) || []).length;
-	t.is(hammerCount, 2);
+	const toolGlyphCount = (output!.match(/\u203A/g) || []).length;
+	t.is(toolGlyphCount, 2);
 	unmount();
 });
 

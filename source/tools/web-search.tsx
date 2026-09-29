@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_TOOL} from '@/components/ui/icons';
 
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {
@@ -148,7 +149,7 @@ function WebSearchFormatterComponent({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ web_search</Text>
+			<Text color={colors.tool}>{ICON_TOOL} web_search</Text>
 			<Box>
 				<Text color={colors.secondary}>Query: </Text>
 				<Box marginLeft={1} flexShrink={1}>
