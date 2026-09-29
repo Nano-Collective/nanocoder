@@ -200,48 +200,51 @@ test('useResponsiveTerminal truncate budgets in terminal columns, not UTF-16 uni
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
-	let capturedTerminal: ReturnType<typeof useResponsiveTerminal> | null = null;
+	try {
+		let capturedTerminal: ReturnType<typeof useResponsiveTerminal> | null =
+			null;
 
-	render(
-		React.createElement(ResponsiveTerminalConsumer, {
-			onRender: terminal => {
-				capturedTerminal = terminal;
-			},
-		}),
-	);
+		render(
+			React.createElement(ResponsiveTerminalConsumer, {
+				onRender: terminal => {
+					capturedTerminal = terminal;
+				},
+			}),
+		);
 
-	t.truthy(capturedTerminal);
+		t.truthy(capturedTerminal);
 
-	// Every character here is a CJK ideograph, which renders 2 terminal
-	// columns wide. A code-unit budget (the bug) let a "truncated" CJK
-	// message run to roughly twice maxLength and wrap onto extra rows.
-	const phrase = '请把所有的测试用例都重新运行一遍然后告诉我结果';
-	const longText = phrase.repeat(4);
-	const maxLength = 74; // formatQueuedMessage's own budget at 80 columns
+		// Every character here is a CJK ideograph, which renders 2 terminal
+		// columns wide. A code-unit budget (the bug) let a "truncated" CJK
+		// message run to roughly twice maxLength and wrap onto extra rows.
+		const phrase = '请把所有的测试用例都重新运行一遍然后告诉我结果';
+		const longText = phrase.repeat(4);
+		const maxLength = 74; // formatQueuedMessage's own budget at 80 columns
 
-	const truncated = capturedTerminal!.truncate(longText, maxLength);
+		const truncated = capturedTerminal!.truncate(longText, maxLength);
 
-	t.true(truncated.endsWith('...'));
-	const kept = truncated.slice(0, -3);
-	t.true(
-		[...kept].every(char => phrase.includes(char)),
-		`unexpected character survived truncation: ${JSON.stringify(kept)}`,
-	);
+		t.true(truncated.endsWith('...'));
+		const kept = truncated.slice(0, -3);
+		t.true(
+			[...kept].every(char => phrase.includes(char)),
+			`unexpected character survived truncation: ${JSON.stringify(kept)}`,
+		);
 
-	// Each kept character is 2 columns wide, plus 3 for the ellipsis. Allow
-	// one column of slack: a column-aware truncator still keeps a whole wide
-	// character rather than splitting it, so an odd remaining budget can land
-	// one column over. The old code-unit budget kept maxLength - 3 = 71
-	// characters here (~145 rendered columns), so this still fails loudly
-	// if the fix regresses.
-	const renderedWidth = kept.length * 2 + 3;
-	t.true(
-		renderedWidth <= maxLength + 1,
-		`rendered width ${renderedWidth} exceeds the ${maxLength}-column budget`,
-	);
-	t.true(kept.length < maxLength - 10);
-
-	process.stdout.columns = originalColumns;
+		// Each kept character is 2 columns wide, plus 3 for the ellipsis. Allow
+		// one column of slack: a column-aware truncator still keeps a whole wide
+		// character rather than splitting it, so an odd remaining budget can land
+		// one column over. The old code-unit budget kept maxLength - 3 = 71
+		// characters here (~145 rendered columns), so this still fails loudly
+		// if the fix regresses.
+		const renderedWidth = kept.length * 2 + 3;
+		t.true(
+			renderedWidth <= maxLength + 1,
+			`rendered width ${renderedWidth} exceeds the ${maxLength}-column budget`,
+		);
+		t.true(kept.length < maxLength - 10);
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
 });
 
 test('useResponsiveTerminal truncatePath utility works correctly', t => {
