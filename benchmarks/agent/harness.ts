@@ -41,6 +41,7 @@ export type Assertion =
 	| {kind: 'file-contains'; path: string; text: string}
 	| {kind: 'file-not-contains'; path: string; text: string}
 	| {kind: 'final-text-matches'; pattern: string}
+	| {kind: 'final-text-not-matches'; pattern: string}
 	| {kind: 'files-unchanged'}
 	| {kind: 'command'; command: string; args: string[]};
 
@@ -273,6 +274,12 @@ export async function checkAssertions(
 			case 'final-text-matches': {
 				if (!new RegExp(assertion.pattern, 'i').test(report.finalText)) {
 					return `final text does not match /${assertion.pattern}/i`;
+				}
+				break;
+			}
+			case 'final-text-not-matches': {
+				if (new RegExp(assertion.pattern, 'i').test(report.finalText)) {
+					return `final text unexpectedly matches /${assertion.pattern}/i`;
 				}
 				break;
 			}

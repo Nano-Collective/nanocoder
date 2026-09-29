@@ -114,7 +114,9 @@ test('parseJsonReport rejects output holding no report at all', t => {
 test('loadFixtures reads every vendored task with its assertions', async t => {
 	const fixtures = await loadFixtures(fixturesDir);
 
-	t.is(fixtures.length, 6);
+	// A lower bound, not an exact count: the README invites contributors to
+	// add fixtures, and this must not force a test edit every time one lands.
+	t.true(fixtures.length >= 6, 'at least the six fixtures vendored today');
 	for (const fixture of fixtures) {
 		t.truthy(fixture.prompt, `${fixture.name} has a prompt`);
 		t.true(
@@ -214,6 +216,27 @@ test('final-text-matches is case-insensitive', async t => {
 			]),
 		),
 		/does not match/,
+	);
+});
+
+test('final-text-not-matches catches a distractor name the model should have left out', async t => {
+	t.is(
+		await check(
+			tempRoot,
+			[{kind: 'final-text-not-matches', pattern: 'formatAddress'}],
+			{finalText: 'sendEmail, sendWebhook, sendSlackMessage'},
+		),
+		null,
+	);
+	t.regex(
+		String(
+			await check(
+				tempRoot,
+				[{kind: 'final-text-not-matches', pattern: 'formatAddress'}],
+				{finalText: 'sendEmail, formatAddress'},
+			),
+		),
+		/unexpectedly matches/,
 	);
 });
 
