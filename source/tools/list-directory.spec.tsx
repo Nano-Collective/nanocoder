@@ -750,3 +750,81 @@ test.serial(
 		}
 	},
 );
+// ============================================================================
+// Regression tests: out-of-root absolute path containment (issue #1520)
+// ============================================================================
+
+test.serial(
+	'list_directory rejects an out-of-root absolute path',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsroot-'));
+		// A sibling directory outside the project root that the model should
+		// never be able to explore.
+		const outside = mkdtempSync(join(tmpdir(), 'nc-lsoutside-'));
+		try {
+			writeFileSync(join(outside, 'secret.txt'), 'x');
+			mkdirSync(join(root, 'src'));
+			writeFileSync(join(root, 'src', 'a.ts'), 'x');
+			setProjectRoot(root);
+
+			await t.throwsAsync(
+				listDirectoryTool.tool.execute!(
+					{path: outside},
+					{toolCallId: 'test', messages: []},
+				),
+				{message: /within the project directory/},
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'list_directory rejects an absolute path into a dot-directory outside the root',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsroot-'));
+		const outside = mkdtempSync(join(tmpdir(), 'nc-lsdot-'));
+		try {
+			mkdirSync(join(outside, '.ssh'));
+			writeFileSync(join(outside, '.ssh', 'id_ed25519'), 'x');
+			setProjectRoot(root);
+
+			await t.throwsAsync(
+				listDirectoryTool.tool.execute!(
+					{path: join(outside, '.ssh')},
+					{toolCallId: 'test', messages: []},
+				),
+				{message: /within the project directory/},
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'list_directory accepts an absolute path inside the project root',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsroot-'));
+		try {
+			mkdirSync(join(root, 'src'));
+			writeFileSync(join(root, 'src', 'keep.ts'), 'x');
+			setProjectRoot(root);
+			setSessionCwd(root);
+
+			const result = await listDirectoryTool.tool.execute!(
+				{path: join(root, 'src')},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('keep.ts'), 'in-root absolute path still lists');
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);
