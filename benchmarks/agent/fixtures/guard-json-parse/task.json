@@ -1,0 +1,13 @@
+{
+	"category": "single-file-edit",
+	"prompt": "loadConfig in src/load-config.js throws when config.json holds invalid JSON. Make it return the default config instead, then check your work by running `node scripts/verify.js`.",
+	"assertions": [
+		{"kind": "command", "command": "node", "args": ["scripts/verify.js"]},
+		{"kind": "file-contains", "path": "src/load-config.js", "text": "catch"},
+		{
+			"kind": "file-contains",
+			"path": "src/load-config.js",
+			"text": "defaultConfig"
+		}
+	]
+}

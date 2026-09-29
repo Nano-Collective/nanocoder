@@ -49,6 +49,7 @@
 		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
+		"test:agent-eval": "tsx benchmarks/agent/run.ts",
 		"test:benchmark": "tsx benchmarks/report.ts",
 		"test:benchmark:update": "tsx benchmarks/report.ts --update",
 		"test:benchmark:explain": "tsx benchmarks/report.ts --explain",
@@ -149,6 +150,7 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
+			"benchmarks/**/*.spec.ts",
 			"plugins/**/*.spec.ts",
 			"plugins/**/*.spec.tsx",
 			"!plugins/**/node_modules/**",
