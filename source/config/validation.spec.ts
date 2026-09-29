@@ -8,6 +8,7 @@ import {
 	validateProjectConfigSecurity,
 } from '@/config/validation';
 import type {MCPServerConfig} from '@/types/config';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
 
 console.log(`\nvalidation.spec.ts`);
 
@@ -306,6 +307,80 @@ test.serial(
 				process.env.MY_REAL_KEY = originalKey;
 			} else {
 				delete process.env.MY_REAL_KEY;
+			}
+			clearAppConfig();
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// The scanner's findings are only useful if the app shows them: through the
+// real load path, validateProjectConfigSecurity must post a warning for the
+// project server's hardcoded key, and none for the same key from a
+// non-project source.
+test.serial(
+	'reloadAppConfig + validateProjectConfigSecurity warns only for project servers',
+	async t => {
+		const {getAppConfig, reloadAppConfig, clearAppConfig} = await import(
+			'./index.js'
+		);
+
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const originalEnvServers = process.env.NANOCODER_MCPSERVERS;
+		const testDir = join(tmpdir(), `nanocoder-mcp-warn-${Date.now()}`);
+		const emptyConfigDir = join(testDir, 'empty-global');
+		mkdirSync(emptyConfigDir, {recursive: true});
+
+		const server = (name: string) => ({
+			name,
+			transport: 'stdio',
+			command: 'npx',
+			env: {API_KEY: 'sk-hardcoded-literal'},
+		});
+
+		const warnings: string[] = [];
+		setGlobalMessageQueue(component => {
+			warnings.push((component as {props: {message: string}}).props.message);
+		});
+
+		try {
+			writeFileSync(
+				join(testDir, '.mcp.json'),
+				JSON.stringify({mcpServers: {'project-bad': server('project-bad')}}),
+				'utf-8',
+			);
+			process.env.NANOCODER_MCPSERVERS = JSON.stringify([server('env-bad')]);
+			process.chdir(testDir);
+			process.env.NANOCODER_CONFIG_DIR = emptyConfigDir;
+			clearAppConfig();
+			reloadAppConfig();
+
+			const servers = getAppConfig().mcpServers ?? [];
+			t.deepEqual(
+				servers.map(s => [s.name, s.source]).sort(),
+				[
+					['env-bad', 'env'],
+					['project-bad', 'project'],
+				],
+			);
+
+			validateProjectConfigSecurity(servers);
+
+			t.is(warnings.length, 1, `expected one warning, got: ${warnings.join(' | ')}`);
+			t.true(warnings[0].includes('project-bad'));
+		} finally {
+			setGlobalMessageQueue(() => {});
+			process.chdir(originalCwd);
+			for (const [key, value] of [
+				['NANOCODER_CONFIG_DIR', originalConfigDir],
+				['NANOCODER_MCPSERVERS', originalEnvServers],
+			] as const) {
+				if (value !== undefined) {
+					process.env[key] = value;
+				} else {
+					delete process.env[key];
+				}
 			}
 			clearAppConfig();
 			rmSync(testDir, {recursive: true, force: true});
