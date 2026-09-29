@@ -290,6 +290,31 @@ test('LSPManager - initialize sets initialized flag', async t => {
 	t.true(manager.isInitialized());
 });
 
+test('LSPManager - initialize sets initialized false if startServer rejects', async t => {
+	const manager = new LSPManager();
+
+	const origStartServer = (manager as any).startServer.bind(manager);
+	(manager as any).startServer = async () => {
+		return { serverName: 'bad-server', success: false, error: 'Failed' };
+	};
+
+	await manager.initialize({
+		autoDiscover: false,
+		servers: [
+			{
+				name: 'bad-server',
+				command: 'dummy',
+				languages: ['ts'],
+			},
+		],
+	});
+
+	t.false(manager.isInitialized());
+
+	// restore
+	(manager as any).startServer = origStartServer;
+});
+
 test('LSPManager - initialize accepts onProgress callback', async t => {
 	const manager = new LSPManager();
 	const progressResults: unknown[] = [];

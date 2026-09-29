@@ -8,6 +8,7 @@ import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';
 import {formatError} from '@/utils/error-formatter';
+import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, LSPServerConfig} from './lsp-client';
 import {
@@ -115,7 +116,8 @@ export class LSPManager extends EventEmitter {
 
 		await Promise.all(startPromises);
 
-		this.initialized = true;
+		this.initialized =
+			serversToStart.length === 0 || results.every(r => r.success);
 		return results;
 	}
 
@@ -125,6 +127,13 @@ export class LSPManager extends EventEmitter {
 	private async startServer(config: LSPServerConfig): Promise<LSPInitResult> {
 		try {
 			const client = new LSPClient(config);
+
+			// Intercept error events at the client level so they do not crash the Node
+			// process as unhandled exceptions when spawn fails (e.g. ENOENT). The failure
+			// itself is safely propagated via the Promise rejection in client.start().
+			client.on('error', () => {
+				// No-op: handled by start() promise rejection
+			});
 
 			// Handle diagnostics from this server
 			client.on('diagnostics', (params: PublishDiagnosticsParams) => {
@@ -147,6 +156,13 @@ export class LSPManager extends EventEmitter {
 			// Store client and language mappings
 			this.clients.set(config.name, client);
 			for (const lang of config.languages) {
+				const existingServer = this.languageToServer.get(lang);
+				if (existingServer && existingServer !== config.name) {
+					getLogger().warn(
+						{lang, existingServer, newServer: config.name},
+						`LSP conflict: server "${config.name}" is replacing "${existingServer}" for language ".${lang}"`,
+					);
+				}
 				this.languageToServer.set(lang, config.name);
 			}
 
