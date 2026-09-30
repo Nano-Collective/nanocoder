@@ -6,16 +6,22 @@ import {StyledTitle} from '@/components/ui/styled-title';
 import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
+	getMouseReporting,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
+	updateMouseReporting,
+	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
@@ -36,6 +42,7 @@ import {
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
 	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
@@ -140,7 +147,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'nanocoder-shape',
 					label: 'Nanocoder Shape',
-					value: getNanocoderShape() ?? 'tiny',
+					value: getNanocoderShape() ?? DEFAULT_NANOCODER_SHAPE,
 					panel: 'nanocoder-shape',
 				},
 				{
@@ -149,6 +156,13 @@ function buildRowsForTab(
 					label: 'Alternate Screen',
 					value: getAlternateScreen(),
 					onToggle: () => updateAlternateScreen(!getAlternateScreen()),
+				},
+				{
+					kind: 'boolean',
+					id: 'mouse-reporting',
+					label: 'Mouse Wheel Reporting',
+					value: getMouseReporting(),
+					onToggle: () => updateMouseReporting(!getMouseReporting()),
 				},
 			];
 		}
@@ -188,6 +202,13 @@ function buildRowsForTab(
 					label: 'Reasoning Traces',
 					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
 					panel: 'reasoning-traces',
+				},
+				{
+					kind: 'boolean',
+					id: 'professional-tone',
+					label: 'Professional Tone',
+					value: getProfessionalTone(),
+					onToggle: () => updateProfessionalTone(!getProfessionalTone()),
 				},
 				{
 					kind: 'managed',
@@ -250,6 +271,15 @@ function buildRowsForTab(
 			];
 		case 'advanced': {
 			const rows: SettingRow[] = [
+				{
+					kind: 'managed',
+					id: 'semantic-memory',
+					label: 'Semantic Memory',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
+					panel: 'semantic-memory',
+				},
 				{
 					kind: 'managed',
 					id: 'privacy',
@@ -399,6 +429,8 @@ function renderManagedPanel(
 			return <SettingsNotificationsPanel onBack={onBack} onCancel={onBack} />;
 		case 'display-settings':
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
+		case 'semantic-memory':
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':

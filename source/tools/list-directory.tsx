@@ -49,6 +49,14 @@ const executeListDirectory = async (
 	}
 
 	const resolvedPath = resolveFilePath(dirPath, cwd, root);
+	// Dotfiles stay hidden unless the caller explicitly asked for a hidden
+	// directory (`.github`, `./.config`). Match the project-relative path, not
+	// the raw argument: `'.'.startsWith('.')` is true and used to leak every
+	// dotfile at the project root (#1237), and an absolute path would otherwise
+	// pick up hidden *ancestors* of the project itself (`~/.local/share/proj`).
+	const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(
+		relative(root, resolvedPath),
+	);
 	// Load from the project root so root-level rules still apply after a `cd`
 	// into a subdir; entries are matched root-relative below.
 	const ig = loadGitignore(root);
@@ -71,7 +79,7 @@ const executeListDirectory = async (
 					if (
 						!showHiddenFiles &&
 						item.name.startsWith('.') &&
-						!dirPath.startsWith('.')
+						!listingHiddenDir
 					) {
 						continue;
 					}
@@ -79,8 +87,16 @@ const executeListDirectory = async (
 					const fullPath = join(currentPath, item.name);
 
 					// Check if this item should be ignored using gitignore patterns.
-					// Match root-relative so the project-root .gitignore applies.
-					if (ig.ignores(relative(root, fullPath))) {
+					// Match root-relative so the project-root .gitignore applies. A
+					// directory is tested with its trailing slash too: a
+					// directory-only pattern (`node_modules/`, `dist/`) matches only
+					// that form, so without it the ignored folder still listed and
+					// then read back as empty.
+					const ignorePath = relative(root, fullPath);
+					if (
+						ig.ignores(ignorePath) ||
+						(item.isDirectory() && ig.ignores(`${ignorePath}/`))
+					) {
 						continue;
 					}
 

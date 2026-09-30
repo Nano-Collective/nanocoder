@@ -36,25 +36,86 @@ export interface ToolVisibilityOptions {
 
 // Tools to exclude per development mode
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
-	yolo: [],
+	normal: ['write_plan'],
+	'auto-accept': ['write_plan'],
+	yolo: ['write_plan'],
 	plan: [
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
 		'string_replace',
 		'diff_edit',
 		'file_op',
+		'lsp_format_document',
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
+		'write_walkthrough',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
-	headless: ['ask_user', 'agent'],
+	headless: ['ask_user', 'agent', 'write_plan'],
+	architect: ['write_plan', 'git_commit', 'git_pr'],
 };
+
+export interface ModeFilterLookups {
+	getCustomToolPolicy(
+		name: string,
+	): {approval: CustomToolApprovalPolicy; readOnly: boolean} | undefined;
+	/** Server read-only annotation for an MCP tool; undefined when not MCP. */
+	getMcpReadOnly(name: string): boolean | undefined;
+}
+
+/**
+ * Apply a development mode's tool exclusions to a list of tool names.
+ *
+ * Custom tools follow the same posture as built-ins but with policy applied
+ * per-tool from their approval/readOnly metadata. MCP tools can't be
+ * enumerated in MODE_EXCLUDED_TOOLS (their names come from the server), so
+ * plan mode gates them on the server's read-only annotation instead - an
+ * unannotated tool may mutate, so it's hidden. The annotation is a
+ * server-supplied hint read off the MCP client, not the registry entry:
+ * isReadOnly() also decides checkpointing and parallel batching, which it
+ * must not influence.
+ */
+export function filterToolNamesForMode(
+	names: string[],
+	mode: DevelopmentMode,
+	lookups: ModeFilterLookups,
+): string[] {
+	const excludeSet = new Set(MODE_EXCLUDED_TOOLS[mode]);
+	let result = names.filter(n => !excludeSet.has(n));
+
+	if (mode === 'plan' || mode === 'headless') {
+		result = result.filter(n => {
+			const meta = lookups.getCustomToolPolicy(n);
+			if (!meta) {
+				return lookups.getMcpReadOnly(n) ?? true;
+			}
+			if (mode === 'headless') {
+				return meta.approval === 'never';
+			}
+			// plan mode: only read-only tools with no approval are safe
+			return meta.approval === 'never' && meta.readOnly;
+		});
+	}
+
+	return result;
+}
+
+/**
+ * Session-artifact tools. These write to the *parent session's* artifact
+ * directory, so a subagent calling one would silently overwrite the plan,
+ * task list, or walkthrough the user is about to act on. Subagents converse
+ * in text and report back through their return value; they have no business
+ * owning the session's lifecycle artifacts.
+ */
+export const SESSION_ARTIFACT_TOOLS = [
+	'write_plan',
+	'write_tasks',
+	'write_walkthrough',
+] as const;
 
 /**
  * Manages built-in tools, MCP tools, and file-based custom tools.
@@ -84,13 +145,21 @@ export class ToolManager {
 	}
 
 	/**
-	 * Initialize MCP servers and register their tools
+	 * Initialize MCP servers and register their tools.
+	 *
+	 * Servers marked `"enabled": false` are skipped entirely — no connection,
+	 * no tools, no init result. That flag is the documented server-level gate
+	 * (see docs/configuration/mcp-configuration.md), and it is the only opt-out
+	 * for headless runs, where every MCP tool executes unattended. An absent
+	 * flag means enabled, so existing configs are unaffected.
 	 */
 	async initializeMCP(
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
 	): Promise<MCPInitResult[]> {
-		if (servers && servers.length > 0) {
+		const enabledServers = servers?.filter(server => server.enabled !== false);
+
+		if (enabledServers && enabledServers.length > 0) {
 			// Dynamic import — only paid for by sessions with configured MCP servers.
 			const {MCPClient} = await import('@/mcp/mcp-client');
 			this.mcpClient = new MCPClient();
@@ -104,7 +173,7 @@ export class ToolManager {
 			});
 
 			const results = await this.mcpClient.connectToServers(
-				servers,
+				enabledServers,
 				onProgress,
 			);
 
@@ -181,27 +250,23 @@ export class ToolManager {
 			}
 		}
 
+		// The plan artifact is a mode capability, not a general-purpose tool.
+		// Keep it available even when a slim profile filters the normal tool set.
+		// Copy rather than push: `names` may still alias the shared, module-level
+		// profile array from getToolsForProfile(), and mutating that would leak
+		// write_plan into every later lookup of that profile for the life of the
+		// process.
+		if (
+			developmentMode === 'plan' &&
+			this.registry.hasTool('write_plan') &&
+			!names.includes('write_plan')
+		) {
+			names = [...names, 'write_plan'];
+		}
+
 		// Apply mode-based exclusions
 		if (developmentMode) {
-			const excluded = MODE_EXCLUDED_TOOLS[developmentMode];
-			if (excluded.length > 0) {
-				const excludeSet = new Set(excluded);
-				names = names.filter(n => !excludeSet.has(n));
-			}
-
-			// Custom tools follow the same posture as built-ins but with policy
-			// applied per-tool from their approval/readOnly metadata.
-			if (developmentMode === 'plan' || developmentMode === 'headless') {
-				names = names.filter(n => {
-					const meta = this.customTools.get(n);
-					if (!meta) return true;
-					if (developmentMode === 'headless') {
-						return meta.approval === 'never';
-					}
-					// plan mode: only read-only tools with no approval are safe
-					return meta.approval === 'never' && meta.readOnly;
-				});
-			}
+			names = this.filterToolNamesForMode(names, developmentMode);
 		}
 
 		// Apply user-configured disable list (intersects with profile + mode).
@@ -214,6 +279,42 @@ export class ToolManager {
 		}
 
 		return names;
+	}
+
+	/**
+	 * Drop the tools a development mode must not offer. Shared by the main
+	 * conversation (via getAvailableToolNames) and subagents, so a subagent
+	 * spawned in plan or headless mode can't reach tools its parent can't.
+	 */
+	filterToolNamesForMode(names: string[], mode: DevelopmentMode): string[] {
+		return filterToolNamesForMode(names, mode, {
+			getCustomToolPolicy: name => this.getCustomToolPolicy(name),
+			getMcpReadOnly: name =>
+				mode === 'plan'
+					? this.mcpClient?.getToolMapping().get(name)?.readOnly
+					: undefined,
+		});
+	}
+
+	/**
+	 * Approval/read-only policy for a file-based custom tool, or for a
+	 * skill-bundle tool (registered straight into the registry, so its policy
+	 * is recovered from the entry's approval shape).
+	 */
+	private getCustomToolPolicy(
+		name: string,
+	): {approval: CustomToolApprovalPolicy; readOnly: boolean} | undefined {
+		const meta = this.customTools.get(name);
+		if (meta) return meta;
+		const entry = this.registry.getEntry(name);
+		if (!entry?.ownerSkill) return undefined;
+		const approval: CustomToolApprovalPolicy =
+			entry.approval === false || entry.approval === undefined
+				? 'never'
+				: entry.approval === true
+					? 'always'
+					: 'destructive';
+		return {approval, readOnly: entry.readOnly === true};
 	}
 
 	// =========================================================================
@@ -375,9 +476,6 @@ export class ToolManager {
 			this.registry.unregisterMany(mcpToolNames);
 			await this.mcpClient.disconnect();
 
-			// Reset registry to only static tools
-			this.registry = ToolRegistry.fromToolExports(allToolExports);
-			this.customTools.clear();
 			this.mcpClient = null;
 		}
 

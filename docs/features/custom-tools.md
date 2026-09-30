@@ -46,19 +46,23 @@ approval: never
 read_only: true
 ---
 
-kubectl get pods -n {{ namespace }} {{# selector }}-l "{{ selector }}"{{/ selector }}
+kubectl get pods -n {{ namespace }} {{# selector }}-l {{ selector }}{{/ selector }}
 ```
 
 Restart Nanocoder. The model can now call `k8s_pods({ namespace: "default" })`. Run `/tools` to see all loaded tools by source.
 
+Don't wrap placeholders in your own quotes. Every substituted value is already single-quoted, so `-l "{{ selector }}"` would pass the quote characters through as part of the value (`-l "'app=api'"`).
+
 ## File Structure
 
-Custom tools live in `.nanocoder/tools/` in your project root, or in `~/.config/nanocoder/tools/` for personal tools that travel with your machine. Project tools override personal tools by name.
+Custom tools live in `.nanocoder/tools/` in your project root, or in the `tools/` folder of your personal config directory for tools that travel with your machine: `~/.config/nanocoder/tools/` on Linux, `~/Library/Preferences/nanocoder/tools/` on macOS, `%APPDATA%\nanocoder\tools\` on Windows (or `$NANOCODER_CONFIG_DIR/tools/` when that is set). Project tools override personal tools by name.
+
+The tool's name comes from the required `name:` field in the frontmatter, not from the filename. Naming the file after the tool keeps things easy to find:
 
 ```
 .nanocoder/tools/
-  k8s-pods.md         -> k8s_pods
-  jira-ticket.md      -> jira_ticket
+  k8s-pods.md         (name: k8s_pods)
+  jira-ticket.md      (name: jira_ticket)
 ```
 
 One file, one tool. Phase 1 only supports `.md` files; `.ts` and `.js` files are reserved for a later phase.
@@ -72,13 +76,13 @@ All fields:
 name: snake_case_name           # required, must match ^[a-z][a-z0-9_]*$
 description: Description shown to the LLM   # required
 parameters:                     # optional, default {}
-  param_name:
+  param_name:                   # snake_case, must match ^[a-z][a-z0-9_]*$
     type: string | number | integer | boolean | array
     description: shown to the LLM
     required: true | false      # default false
-    default: any                # used when not provided
+    default: any                # filled in when the model omits the argument
     enum: [a, b, c]             # restrict values
-    pattern: '^regex$'          # string only
+    pattern: '^regex$'          # string only, max 1024 characters
     minLength: 1                # string only
     maxLength: 100              # string only
     min: 0                      # number/integer only
@@ -87,20 +91,29 @@ parameters:                     # optional, default {}
 approval: never | always | destructive   # default: always
 read_only: true | false         # default: (approval == never)
 timeout_ms: 30000               # default 30000, max 300000
-cwd: ./scripts                  # default: project root; supports ${VAR}
+cwd: ./scripts                  # default: project root; supports ${VAR}; must stay in the project
 env:
   FOO: bar                      # extra env vars; values support ${VAR}
-shell: bash | sh                # default: bash if available, else sh
+shell: bash | sh                # default: bash if available, else sh; Windows: ComSpec/cmd.exe
 ---
 
 # Body is a shell script. See "Template Syntax" below.
+```
+
+`parameters` also accepts a list of entries that each carry their own `name:`, the shape AI-generated stubs often produce:
+
+```yaml
+parameters:
+  - name: namespace
+    type: string
+    required: true
 ```
 
 ### Approval
 
 - `approval: never` — runs without confirmation (still subject to mode-based overrides).
 - `approval: always` (default) — always prompts the user.
-- `approval: destructive` — prompts in `normal` mode but auto-approves in `auto-accept` and `yolo` modes, matching how built-in file-mutation tools behave.
+- `approval: destructive` - prompts in `normal` mode but auto-approves in `auto-accept`, `architect` and `yolo` modes, matching how built-in file-mutation tools behave.
 
 Tools listed in the top-level `alwaysAllow` config field skip the prompt regardless. Tools listed in `disabledTools` don't load at all.
 
@@ -108,15 +121,27 @@ Tools listed in the top-level `alwaysAllow` config field skip the prompt regardl
 
 Tools marked `read_only: true` can run in parallel with other read-only tools. The default is `true` when `approval: never`, otherwise `false`. Set it explicitly if your tool reads state but still needs approval, or vice versa.
 
+### Working directory
+
+`cwd` defaults to the project root. Relative paths resolve against it, and `${VAR}` is substituted from the environment first.
+
+The resolved directory has to stay inside the project once symlinks are resolved. A `cwd` that escapes - an absolute path elsewhere, `${HOME}`, a `../` traversal, or a `./scripts` that is a symlink pointing out of the repo - fails the tool call with `Custom tool cwd escapes the project directory`. The tool is not run somewhere else instead: silently relocating a script that expects a scratch directory is how a `rm -rf ./*` body ends up pointed at your project.
+
+A `cwd` that does not exist is not an error - it falls back to the project root, so a tool referencing a directory a teammate has not checked out yet still runs.
+
+This is containment against misconfiguration, not a sandbox. The script body is arbitrary shell and can `cd` wherever it likes; the check only governs where the shell starts.
+
 ## Template Syntax
 
 The body is a shell script with two placeholder forms:
 
-- **`{{ name }}`** — substitutes `args[name]`, shell-quoted. Arrays expand to space-separated quoted tokens.
+- **`{{ name }}`** — substitutes `args[name]`, POSIX-quoted. Arrays expand to space-separated quoted tokens. Not cmd-safe; see below.
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
 - **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
-All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. This blocks shell injection through parameter values:
+All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. That is shell-safe under bash/sh. It is **not** shell-safe under cmd.exe: cmd does not treat `'` as a quote, so `type {{ file }}` becomes `type 'notes.txt'` (file not found) and `&`, `|`, `>`, `^`, `%VAR%` in a value can break out. Per-shell quoting in `renderValue` is a follow-up (#1084); until then the default Windows shell is cmd.
+
+This blocks shell injection through parameter values on POSIX:
 
 ```markdown
 echo {{ name }}
@@ -135,11 +160,11 @@ echo '; rm -rf /; #'
 When the tool runs:
 
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
-2. The body is rendered, then handed to the chosen shell via `-c`.
-3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`).
+2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /s /c` for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
+3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
 4. The script runs with `timeout_ms` enforcement.
-5. On exit code 0, stdout (and any stderr) is returned to the model, truncated at the standard output limit.
-6. On non-zero exit, the conversation surfaces `Custom tool failed (exit N): <stderr>` to the model.
+5. The output always starts with `EXIT_CODE: N`, followed by the captured output. When the script wrote to stderr, the output is split into `STDERR:` and `STDOUT:` sections. Everything is truncated at the standard output limit.
+6. A non-zero exit is not treated as a tool failure: the model sees the exit code and output and decides what to do, the same as with `execute_bash`. Plenty of CLIs (`grep`, `git diff --exit-code`, test runners) exit non-zero in normal use. The tool call only fails outright when the shell can't start or the script hits `timeout_ms`.
 
 ## Mode Behavior
 
@@ -147,9 +172,10 @@ When the tool runs:
 | ---- | -------------------- |
 | `normal` | All custom tools available; approval policy applies. |
 | `auto-accept` | Same as normal, but `destructive` approval auto-approves. |
+| `architect` | Same as auto-accept. |
 | `yolo` | All tools auto-approve. |
 | `plan` | Only `approval: never` + `read_only: true` tools are available. |
-| `scheduler` (cron) | Only `approval: never` tools are available; nothing that needs a human prompt. |
+| `headless` (daemon-triggered runs) | Only `approval: never` tools are available; nothing that needs a human prompt. |
 
 ## Slash Commands
 
@@ -158,9 +184,9 @@ When the tool runs:
 
 ## Security Model
 
-A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are shell-escaped, but the script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
+A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are POSIX-quoted, which is not a cmd.exe injection barrier. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
 
-Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in `~/.config/nanocoder/tools/` and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
+Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in your personal config directory and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
 
 ## What This Is Not
 

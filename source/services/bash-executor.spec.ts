@@ -449,6 +449,120 @@ test('output cap trips and appends the truncation marker exactly once', async t 
 	);
 });
 
+const STDOUT_TRUNCATION_MARKER = '... [Output truncated to prevent memory exhaustion]';
+const STDERR_TRUNCATION_MARKER = '... [Stderr truncated to prevent memory exhaustion]';
+
+test('flooding stderr past the cap does not truncate stdout - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stderr.write('E' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stderr.flush(); sys.stdout.write('important stdout data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.fullOutput.includes('important stdout data'),
+		'stdout should be fully intact - stderr flooding its own budget must not affect stdout at all',
+	);
+	t.false(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
+test('flooding stdout past the cap does not truncate stderr - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stdout.write('O' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stdout.flush(); sys.stderr.write('important stderr data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.stderr.includes('important stderr data'),
+		'stderr should be fully intact - stdout flooding its own budget must not affect stderr at all',
+	);
+	t.false(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
+test('stdout chunk split across two writes does not corrupt a multi-byte UTF-8 character', async t => {
+	const executor = createExecutor();
+
+	// em dash is 3 bytes; splitting the write forces two separate chunks
+	const { promise } = executor.execute(
+		`python3 -c "import sys, time; b = '\\u2014'.encode('utf-8'); o = sys.stdout.buffer; o.write(b[:1]); o.flush(); time.sleep(0.05); o.write(b[1:]); o.flush()"`,
+	);
+	const result = await promise;
+
+	t.is(
+		result.fullOutput,
+		'—',
+		'the split character should decode correctly instead of as replacement characters',
+	);
+});
+
+test('a trailing incomplete multi-byte sequence is flushed at stream end, not dropped', async t => {
+	const executor = createExecutor();
+
+	// 'a', 'b', then only the first byte of a 2-byte UTF-8 char
+	const { promise } = executor.execute(
+		`node -e "process.stdout.write(Buffer.from([0x61, 0x62, 0xc3]))"`,
+	);
+	const result = await promise;
+
+	t.is(result.fullOutput.length, 3, 'the dangling byte should be flushed, not silently dropped');
+	t.true(result.fullOutput.startsWith('ab'));
+});
+
+test('truncation cut landing mid-character does not leak a replacement char after the marker', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+	const padLen = BASH_MAX_OUTPUT_BYTES - 1;
+
+	// pads to one byte short of the cap, cutting the char that follows
+	const { promise } = executor.execute(
+		`python3 -c "import sys; o = sys.stdout.buffer; o.write(b'A' * ${padLen}); o.write('\\u2014'.encode('utf-8')); o.flush()"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.endsWith(STDOUT_TRUNCATION_MARKER),
+		'output should end with the truncation marker, not a stray decoded byte',
+	);
+	t.false(
+		result.fullOutput.includes('�'),
+		'no replacement character should leak into the output',
+	);
+});
+
+test('cancel while a decoder is holding a partial character does not throw and leaves stable output', async t => {
+	const executor = createExecutor();
+
+	const { executionId, promise } = executor.execute(
+		`python3 -c "import sys, time; sys.stdout.buffer.write(b'\\xc3'); sys.stdout.buffer.flush(); time.sleep(10)"`,
+	);
+	await new Promise(resolve => setTimeout(resolve, 200));
+	executor.cancel(executionId);
+	const result = await promise;
+
+	t.is(result.error, 'Cancelled by user');
+	t.is(typeof result.fullOutput, 'string');
+	t.is(typeof result.stderr, 'string');
+});
+
 test('cancel() on a detached process kills a spawned child (process-group assertion)', async t => {
 	const executor = createExecutor();
 	const { promise, executionId } = executor.execute('node -e "setInterval(() => {}, 1000)" & echo $!');

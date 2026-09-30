@@ -23,6 +23,12 @@ interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
 	onBack?: () => void;
 	onDelete?: () => void;
+	/**
+	 * Opens the mode-specific provider step. When omitted, that entry is left
+	 * out of the menu entirely — it is an advanced option, so callers that
+	 * don't support it (or don't want it) simply don't pass a handler.
+	 */
+	onConfigureModes?: (providers: ProviderConfig[]) => void;
 	existingProviders?: ProviderConfig[];
 	configExists?: boolean;
 	/**
@@ -97,6 +103,7 @@ export function ProviderStep({
 	onComplete,
 	onBack,
 	onDelete,
+	onConfigureModes,
 	existingProviders,
 	configExists = false,
 	initialEditName,
@@ -171,6 +178,14 @@ export function ProviderStep({
 			? [
 					{label: 'Add another provider', value: 'templates'},
 					{label: 'Edit existing providers', value: 'edit'},
+					...(onConfigureModes
+						? [
+								{
+									label: 'Configure mode-specific providers',
+									value: 'modes',
+								},
+							]
+						: []),
 					{label: 'Done & Save', value: 'done'},
 					...(configExists && onDelete
 						? [{label: 'Delete config file', value: 'delete'}]
@@ -208,6 +223,8 @@ export function ProviderStep({
 			}
 		} else if (item.value === 'edit') {
 			setMode('edit-selection');
+		} else if (item.value === 'modes' && onConfigureModes) {
+			onConfigureModes(providers);
 		} else if (item.value === 'done') {
 			onComplete(providers);
 		} else if (item.value === 'delete' && onDelete) {

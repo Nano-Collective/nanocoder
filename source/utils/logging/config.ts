@@ -79,23 +79,17 @@ function createProductionConfig(): EnhancedLoggerConfig {
 
 	// File log level defaults to 'info' for useful diagnostics
 	// Can be overridden with NANOCODER_LOG_LEVEL env var
-	const fileLogLevel =
-		(process.env.NANOCODER_LOG_LEVEL as LogLevel) ||
-		(disableFileLogging ? 'silent' : 'info');
+	const fileLogLevel: LogLevel = disableFileLogging
+		? 'silent'
+		: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'info';
 
-	const baseConfig = {
+	return {
 		level: fileLogLevel,
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
 		serialize: true,
 	};
-
-	if (disableFileLogging) {
-		return baseConfig;
-	}
-
-	return baseConfig;
 }
 
 /**

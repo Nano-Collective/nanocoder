@@ -63,6 +63,27 @@ function mapServerConfig(server: unknown): MCPServerConfig {
 }
 
 /**
+ * Map + substitute one parsed server. Snapshots pre-substitution env/headers
+ * onto rawEnv/rawHeaders so the credential scanner can distinguish `$API_KEY`
+ * (correct) from a literal secret.
+ */
+function mapAndSubstituteServer(
+	server: unknown,
+	source: ConfigSource,
+): MCPServerWithSource {
+	const raw = mapServerConfig(server);
+	const substituted = substituteEnvVars(raw);
+	return {
+		server: {
+			...substituted,
+			rawEnv: raw.env,
+			rawHeaders: raw.headers,
+		},
+		source,
+	};
+}
+
+/**
  * Load project-level MCP configuration from .mcp.json
  */
 export function loadProjectMCPConfig(): MCPServerWithSource[] {
@@ -79,12 +100,9 @@ export function loadProjectMCPConfig(): MCPServerWithSource[] {
 		const mcpServers = parseMCPServers(config);
 
 		if (Array.isArray(mcpServers) && mcpServers.length > 0) {
-			const processedServers = substituteEnvVars(mcpServers);
-
-			return processedServers.map((server: unknown) => ({
-				server: mapServerConfig(server),
-				source: 'project' as ConfigSource,
-			}));
+			return mcpServers.map(server =>
+				mapAndSubstituteServer(server, 'project'),
+			);
 		}
 	} catch (error) {
 		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
@@ -111,12 +129,7 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 		const mcpServers = parseMCPServers(config);
 
 		if (Array.isArray(mcpServers) && mcpServers.length > 0) {
-			const processedServers = substituteEnvVars(mcpServers);
-
-			return processedServers.map((server: unknown) => ({
-				server: mapServerConfig(server),
-				source: 'global' as ConfigSource,
-			}));
+			return mcpServers.map(server => mapAndSubstituteServer(server, 'global'));
 		}
 	} catch (error) {
 		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
@@ -207,12 +220,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 		}
 
 		if (Array.isArray(servers) && servers.length > 0) {
-			const processedServers = substituteEnvVars(servers);
-
-			return processedServers.map((server: unknown) => ({
-				server: mapServerConfig(server),
-				source: 'env' as ConfigSource,
-			}));
+			return servers.map(server => mapAndSubstituteServer(server, 'env'));
 		}
 	} catch (error) {
 		logError(`Failed to parse MCP configs from environment: ${String(error)}`);

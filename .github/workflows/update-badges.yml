@@ -1,8 +1,20 @@
 name: Update Status Badges
+
+# Thin caller for the shared org workflow. Everything lives in
+# Nano-Collective/.github — change it there and every repo picks it up on its
+# next run.
+#
+# PAT_TOKEN is how the push gets past the branch rulesets. It is optional in the
+# shared workflow, but without it the push is made as github-actions[bot], which
+# the rulesets will refuse: adding the built-in Actions integration as a bypass
+# actor is rejected by GitHub with "Actor GitHub Actions integration must be
+# part of the ruleset source or owner organization" (tested 2026-09-07). So for
+# now every repo needs the secret.
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'  # Once a day at midnight UTC
+    - cron: '0 0 * * *' # daily at midnight UTC
   release:
     types: [published]
 
@@ -10,137 +22,7 @@ permissions:
   contents: write
 
 jobs:
-  generate-badges:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run tests for latest coverage
-        run: pnpm run test:ava:coverage || echo "Coverage test failed or not available"
-
-      - name: Extract coverage (if available)
-        id: coverage
-        run: |
-          if [ -f "coverage/coverage-summary.json" ]; then
-            COVERAGE=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct // "N/A"')
-            echo "percentage=${COVERAGE}" >> $GITHUB_OUTPUT
-          else
-            echo "percentage=N/A" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run build to check status
-        id: build
-        run: |
-          if pnpm build; then
-            echo "status=passing" >> $GITHUB_OUTPUT
-            echo "color=brightgreen" >> $GITHUB_OUTPUT
-          else
-            echo "status=failing" >> $GITHUB_OUTPUT
-            echo "color=red" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate badges
-        run: |
-          # Create badges directory if it doesn't exist
-          mkdir -p badges
-
-          # Coverage badge (with fallback if coverage not available) - with for-the-badge style
-          if [ "${{ steps.coverage.outputs.percentage }}" != "N/A" ]; then
-            COVERAGE_PERCENTAGE="${{ steps.coverage.outputs.percentage }}"
-            COVERAGE_COLOR=$(echo "${COVERAGE_PERCENTAGE}" | awk '{print ($1 >= 80) ? "brightgreen" : ($1 >= 50) ? "yellow" : "red"}')
-            curl -s "https://img.shields.io/badge/coverage-${COVERAGE_PERCENTAGE}%25-${COVERAGE_COLOR}?style=for-the-badge" > badges/coverage.svg
-          else
-            curl -s "https://img.shields.io/badge/coverage-N%2FA-lightgrey?style=for-the-badge" > badges/coverage.svg
-          fi
-
-          # Build status badge - with for-the-badge style and githubactions logo
-          curl -s "https://img.shields.io/badge/build-${{ steps.build.outputs.status }}-${{ steps.build.outputs.color }}?style=for-the-badge&logo=githubactions" > badges/build.svg
-
-          # NPM Downloads (monthly) - with for-the-badge style and npm logo
-          curl -s "https://img.shields.io/npm/dm/@nanocollective/nanocoder?style=for-the-badge&logo=npm" > badges/npm-downloads-monthly.svg
-
-          # NPM License - with for-the-badge style and npm logo
-          curl -s "https://img.shields.io/npm/l/@nanocollective/nanocoder?style=for-the-badge" > badges/npm-license.svg
-
-          # GitHub Repo Size - with for-the-badge style and github logo
-          curl -s "https://img.shields.io/github/repo-size/Nano-Collective/nanocoder?style=for-the-badge&logo=github" > badges/repo-size.svg
-
-          # GitHub Repo Stars - with for-the-badge style and github logo
-          curl -s "https://img.shields.io/github/stars/Nano-Collective/nanocoder?style=for-the-badge&logo=github" > badges/stars.svg
-
-          # GitHub Forks - with for-the-badge style and github logo
-          curl -s "https://img.shields.io/github/forks/Nano-Collective/nanocoder?style=for-the-badge&logo=github" > badges/forks.svg
-
-          # NPM version - with for-the-badge style and npm logo
-          curl -s "https://img.shields.io/npm/v/@nanocollective/nanocoder?style=for-the-badge&logo=npm" > badges/npm-version.svg
-
-      - name: Update README with badges
-        run: |
-          # Update badges in README.md
-          if [ -f "README.md" ]; then
-            # Create a temporary file to avoid direct modification issues
-            cp README.md README.md.tmp
-            
-            # Replace or add badges in the README
-            sed -i 's|!\[Build Status\].*|![Build Status](https://github.com/Nano-Collective/nanocoder/raw/main/badges/build.svg)|' README.md.tmp || echo "Build badge not found, will add it"
-            sed -i 's|!\[Coverage\].*|![Coverage](https://github.com/Nano-Collective/nanocoder/raw/main/badges/coverage.svg)|' README.md.tmp || echo "Coverage badge not found, will add it"
-            sed -i 's|!\[Version\].*|![Version](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-version.svg)|' README.md.tmp || echo "Version badge not found, will add it"
-            sed -i 's|!\[NPM Downloads\].*|![NPM Downloads](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-downloads-monthly.svg)|' README.md.tmp || echo "NPM downloads badge not found, will add it"
-            sed -i 's|!\[Stars\].*|![Stars](https://github.com/Nano-Collective/nanocoder/raw/main/badges/stars.svg)|' README.md.tmp || echo "Stars badge not found, will add it"
-            sed -i 's|!\[License\].*|![License](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-license.svg)|' README.md.tmp || echo "License badge not found, will add it"
-            sed -i 's|!\[Repo Size\].*|![Repo Size](https://github.com/Nano-Collective/nanocoder/raw/main/badges/repo-size.svg)|' README.md.tmp || echo "Repo size badge not found, will add it"
-            sed -i 's|!\[Forks\].*|![Forks](https://github.com/Nano-Collective/nanocoder/raw/main/badges/forks.svg)|' README.md.tmp || echo "Forks badge not found, will add it"
-            
-            # If badges section doesn't exist, add it after the first heading
-            if ! grep -q "Build Status\|Coverage\|Version\|NPM Downloads\|Stars\|License" README.md.tmp; then
-              # Add badges after the first heading
-              sed -i '2i \
-          \
-          # Status Badges \
-          \
-          ![Build Status](https://github.com/Nano-Collective/nanocoder/raw/main/badges/build.svg) \
-          ![Coverage](https://github.com/Nano-Collective/nanocoder/raw/main/badges/coverage.svg) \
-          ![Version](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-version.svg) \
-          ![NPM Downloads](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-downloads-monthly.svg) \
-          ![Stars](https://github.com/Nano-Collective/nanocoder/raw/main/badges/stars.svg) \
-          ![License](https://github.com/Nano-Collective/nanocoder/raw/main/badges/npm-license.svg) \
-          ![Repo Size](https://github.com/Nano-Collective/nanocoder/raw/main/badges/repo-size.svg) \
-          ![Forks](https://github.com/Nano-Collective/nanocoder/raw/main/badges/forks.svg) \
-          \
-          ' README.md.tmp
-            fi
-            
-            # Replace the original file
-            mv README.md.tmp README.md
-          fi
-
-      - name: Commit and push badges
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add badges/ README.md
-          # Only commit if there are staged changes
-          if ! git diff --cached --quiet; then
-            # --no-verify: skip husky pre-commit (lint-staged) — this is an
-            # automated badge commit, not human-authored code, and the hook's
-            # pnpm/Node environment has caused silent commit failures in CI.
-            git commit --no-verify -m "Update status badges [skip ci]"
-            git push
-          else
-            echo "No changes to commit"
-          fi
+  badges:
+    uses: Nano-Collective/.github/.github/workflows/update-badges.yml@main
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

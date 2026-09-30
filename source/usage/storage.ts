@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath, getConfigPath} from '@/config/paths';
 import {MAX_DAILY_AGGREGATES, MAX_USAGE_SESSIONS} from '@/constants';
+import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 import {logInfo, logWarning} from '@/utils/message-queue';
 import type {DailyAggregate, SessionUsage, UsageData} from '../types/usage';
@@ -121,7 +122,7 @@ export function writeUsageData(data: UsageData): void {
 		data.lastUpdated = Date.now();
 
 		const filePath = getUsageFilePath();
-		fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+		atomicWriteFileSync(filePath, JSON.stringify(data, null, 2));
 	} catch (error) {
 		logWarning('Failed to write usage data:', true, {
 			context: {error},

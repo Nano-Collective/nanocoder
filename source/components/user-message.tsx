@@ -16,6 +16,14 @@ function stripVSCodeContext(message: string): string {
 	);
 }
 
+function getCollapsedPreview(message: string): string {
+	const words = [...message.matchAll(/\S+/g)];
+	const wordLimitEnd = words[COLLAPSE_WORD_LIMIT]?.index ?? message.length;
+	const previewEnd = Math.min(COLLAPSE_CHAR_LIMIT, wordLimitEnd);
+
+	return `${message.slice(0, previewEnd).trimEnd()}...`;
+}
+
 // Parse a line and return segments with file/image placeholders highlighted
 function parseLineWithPlaceholders(line: string) {
 	const segments: Array<{text: string; isPlaceholder: boolean}> = [];
@@ -24,7 +32,6 @@ function parseLineWithPlaceholders(line: string) {
 	let match;
 
 	while ((match = filePattern.exec(line)) !== null) {
-		// Add text before the placeholder
 		if (match.index > lastIndex) {
 			segments.push({
 				text: line.slice(lastIndex, match.index),
@@ -32,7 +39,6 @@ function parseLineWithPlaceholders(line: string) {
 			});
 		}
 
-		// Add the placeholder
 		segments.push({
 			text: match[0],
 			isPlaceholder: true,
@@ -41,7 +47,6 @@ function parseLineWithPlaceholders(line: string) {
 		lastIndex = match.index + match[0].length;
 	}
 
-	// Add remaining text
 	if (lastIndex < line.length) {
 		segments.push({
 			text: line.slice(lastIndex),
@@ -51,6 +56,9 @@ function parseLineWithPlaceholders(line: string) {
 
 	return segments;
 }
+
+const COLLAPSE_WORD_LIMIT = 40;
+const COLLAPSE_CHAR_LIMIT = 300;
 
 export default memo(function UserMessage({
 	message,
@@ -70,11 +78,16 @@ export default memo(function UserMessage({
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = boxWidth - 3;
-
-	// Strip VS Code context blocks and pre-wrap to avoid Ink's trim:false
-	// leaving leading spaces on wrapped lines
+	const strippedMessage = stripVSCodeContext(message);
+	const wordCount = [...strippedMessage.matchAll(/\S+/g)].length;
+	const isLongMessage =
+		wordCount > COLLAPSE_WORD_LIMIT ||
+		strippedMessage.length > COLLAPSE_CHAR_LIMIT;
+	const visibleMessage = isLongMessage
+		? getCollapsedPreview(strippedMessage)
+		: strippedMessage;
 	const displayMessage = wrapWithTrimmedContinuations(
-		stripVSCodeContext(message),
+		visibleMessage,
 		textWidth,
 	);
 	const lines = displayMessage.split('\n');
@@ -86,6 +99,7 @@ export default memo(function UserMessage({
 					{ICON_USER} You
 				</Text>
 			</Box>
+
 			<Box
 				flexDirection="column"
 				marginBottom={1}
@@ -101,7 +115,7 @@ export default memo(function UserMessage({
 			>
 				<Box flexDirection="column">
 					{lines.map((line, lineIndex) => {
-						// Skip empty lines - they create paragraph spacing via marginBottom
+						// Skip empty lines — they create paragraph spacing via marginBottom.
 						if (line.trim() === '') {
 							return null;
 						}
@@ -129,6 +143,13 @@ export default memo(function UserMessage({
 					})}
 				</Box>
 			</Box>
+
+			{isLongMessage && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>Full prompt: ↑ history</Text>
+				</Box>
+			)}
+
 			{imageCount > 0 && (
 				<Box marginBottom={1}>
 					<Text color={colors.info}>
@@ -137,6 +158,7 @@ export default memo(function UserMessage({
 					</Text>
 				</Box>
 			)}
+
 			<Box marginBottom={2}>
 				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
 			</Box>

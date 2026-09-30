@@ -978,3 +978,44 @@ test('ProviderStep without initialEditName still opens the template menu', t => 
 
 	t.regex(lastFrame()!, /Let's add AI providers/);
 });
+
+test('ProviderStep omits the mode entry when no handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	// Mode-specific providers are advanced and opt-in: a caller that doesn't
+	// support them must not show a menu row that goes nowhere.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
+	t.regex(lastFrame()!, /Done & Save/);
+});
+
+test('ProviderStep offers the mode entry when a handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			onConfigureModes={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Configure mode-specific providers/);
+	// It sits above Done & Save so the save action stays the last row.
+	t.true(
+		output.indexOf('Configure mode-specific providers') <
+			output.indexOf('Done & Save'),
+	);
+});
+
+test('ProviderStep hides the mode entry until a provider exists', t => {
+	const {lastFrame} = render(
+		<ProviderStep onComplete={() => {}} onConfigureModes={() => {}} />,
+	);
+
+	// Nothing to assign a mode to yet.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
+});

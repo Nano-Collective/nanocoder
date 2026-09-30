@@ -39,14 +39,29 @@ import {
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
+import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {
+	getProjectContextPreferences,
+	loadPreferences,
+	updateLastUsed,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {TimelineManager} from '@/services/timeline-manager';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
+import {
+	ACTIVE_FILE_PREFIX,
+	deriveTitleFromFirstMessage,
+} from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -55,7 +70,28 @@ const logger = getLogger();
 // Stable id for the model selector config option (category `model`).
 const MODEL_CONFIG_ID = 'model';
 
+async function listSessionArtifacts(sessionId: string) {
+	try {
+		return await artifactManager.listArtifacts(sessionId);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith('Invalid session ID:')
+		) {
+			return [];
+		}
+		throw error;
+	}
+}
+
 export class AcpAgent implements Agent {
+	/**
+	 * The in-flight background titling run. Exposed only so tests can await
+	 * work that production deliberately fires and forgets - asserting on it
+	 * with a fixed sleep goes flaky the moment CI is loaded.
+	 */
+	private pendingTitleGeneration: Promise<void> = Promise.resolve();
+
 	private sessions = new Map<string, AcpSession>();
 	private initContext: AcpInitContext;
 	private conn: AgentSideConnection;
@@ -145,6 +181,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -166,159 +205,199 @@ export class AcpAgent implements Agent {
 
 		session.beginTurn();
 
-		const {text: userText, images} = await acpContentToUserMessage(
-			params.prompt,
-			{
-				conn: this.conn,
-				sessionId: params.sessionId,
-				canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
-			},
-		);
-		logger.info(
-			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
-		);
+		// Both the cancel early-return below and the rethrow after it still run
+		// the finally, so a clean turn has to be tracked explicitly rather than
+		// inferred from getting there.
+		let turnSucceeded = false;
+		const turnStart = Date.now();
 
-		// Prepend active workspace context (e.g. the file focused in VS Code) so
-		// the model always knows what the user is looking at.
-		let contextualUserText = userText;
+		try {
+			const {text: userText, images} = await acpContentToUserMessage(
+				params.prompt,
+				{
+					conn: this.conn,
+					sessionId: params.sessionId,
+					canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
+				},
+			);
+			logger.info(
+				`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
+			);
 
-		// Slash command interception
-		const trimmedUserText = userText.trim();
-		if (trimmedUserText.startsWith('/')) {
-			const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
+			// Prepend active workspace context (e.g. the file focused in VS Code) so
+			// the model always knows what the user is looking at.
+			let contextualUserText = userText;
 
-			// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
-			// not a slash command. Skip command interception.
-			if (!commandName.includes('/')) {
-				const command =
-					this.initContext.customCommandLoader?.getCommand(commandName);
+			// Slash command interception
+			const trimmedUserText = userText.trim();
+			if (trimmedUserText.startsWith('/')) {
+				const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
 
-				if (command) {
-					// Custom user-defined command — expand its instructions into the prompt
-					const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-					contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
-				} else {
-					// Check for built-in commands that have special ACP handling
-					const sendBuiltinReply = (msg: string) => {
-						session.messages = [
-							...session.messages,
-							{role: 'user', content: contextualUserText},
-							{role: 'assistant', content: msg},
-						];
-						this.conn.sessionUpdate({
-							sessionId: params.sessionId,
-							update: {
-								sessionUpdate: 'agent_message_chunk',
-								content: {type: 'text', text: msg},
-							},
-						});
-						return {stopReason: 'end_turn' as const};
-					};
+				// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
+				// not a slash command. Skip command interception.
+				if (!commandName.includes('/')) {
+					const command =
+						this.initContext.customCommandLoader?.getCommand(commandName);
 
-					if (commandName === 'clear') {
-						// Clear the conversation history
-						session.messages = [];
-						const msg = 'Conversation cleared.';
-						this.conn.sessionUpdate({
-							sessionId: params.sessionId,
-							update: {
-								sessionUpdate: 'agent_message_chunk',
-								content: {type: 'text', text: msg},
-							},
-						});
-						return {stopReason: 'end_turn'};
+					if (command) {
+						// Custom user-defined command — expand its instructions into the prompt
+						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
+						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+					} else {
+						// Check for built-in commands that have special ACP handling
+						const sendBuiltinReply = (msg: string) => {
+							session.messages = [
+								...session.messages,
+								{
+									role: 'user',
+									content: contextualUserText,
+									displayOnly: true,
+								},
+								{role: 'assistant', content: msg, displayOnly: true},
+							];
+							this.conn.sessionUpdate({
+								sessionId: params.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: msg},
+								},
+							});
+							return {stopReason: 'end_turn' as const};
+						};
+
+						if (commandName === 'clear') {
+							// Clear the conversation history and action timeline
+							session.messages = [];
+							await session.timeline.clear();
+							const msg = 'Conversation cleared.';
+							this.conn.sessionUpdate({
+								sessionId: params.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: msg},
+								},
+							});
+							return {stopReason: 'end_turn'};
+						}
+
+						if (commandName === 'help') {
+							const customCmds =
+								this.initContext.customCommandLoader?.getAllCommands() ?? [];
+							const customList =
+								customCmds.length > 0
+									? customCmds
+											.map(
+												c =>
+													`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
+											)
+											.join('\n')
+									: '';
+							const msg = [
+								'**Available slash commands in VS Code GUI:**',
+								'',
+								'- `/clear` — Clear the current conversation',
+								'- `/copy` — Copy the last assistant response',
+								'- `/copy code` — Copy the last code block from the last response',
+								'- `/help` — Show this help message',
+								'',
+								'**Not available in VS Code GUI** (CLI-only):',
+								'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+								'',
+								customList ? `**Your custom commands:**\n${customList}` : '',
+							]
+								.filter(Boolean)
+								.join('\n');
+							return sendBuiltinReply(msg);
+						}
+
+						// `/copy` is normally intercepted by the webview before it
+						// reaches us, but `/help` advertises it, so a client without
+						// that interception must not get "unrecognized command".
+						if (commandName === 'copy') {
+							const msg =
+								'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
+							return sendBuiltinReply(msg);
+						}
+
+						if (['model', 'provider'].includes(commandName)) {
+							const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
+							return sendBuiltinReply(msg);
+						}
+
+						if (commandName === 'settings') {
+							const msg =
+								'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
+							return sendBuiltinReply(msg);
+						}
+
+						if (
+							['init', 'theme', 'compact', 'context-max', 'usage'].includes(
+								commandName,
+							)
+						) {
+							const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
+							return sendBuiltinReply(msg);
+						}
+
+						// Truly unrecognized command
+						const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
+						return sendBuiltinReply(errorMsg);
 					}
-
-					if (commandName === 'help') {
-						const customCmds =
-							this.initContext.customCommandLoader?.getAllCommands() ?? [];
-						const customList =
-							customCmds.length > 0
-								? customCmds
-										.map(
-											c =>
-												`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
-										)
-										.join('\n')
-								: '';
-						const msg = [
-							'**Available slash commands in VS Code GUI:**',
-							'',
-							'- `/clear` — Clear the current conversation',
-							'- `/copy` — Copy the last assistant response',
-							'- `/copy code` — Copy the last code block from the last response',
-							'- `/help` — Show this help message',
-							'',
-							'**Not available in VS Code GUI** (CLI-only):',
-							'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
-							'',
-							customList ? `**Your custom commands:**\n${customList}` : '',
-						]
-							.filter(Boolean)
-							.join('\n');
-						return sendBuiltinReply(msg);
-					}
-
-					// `/copy` is normally intercepted by the webview before it
-					// reaches us, but `/help` advertises it, so a client without
-					// that interception must not get "unrecognized command".
-					if (commandName === 'copy') {
-						const msg =
-							'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
-						return sendBuiltinReply(msg);
-					}
-
-					if (['model', 'provider'].includes(commandName)) {
-						const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
-						return sendBuiltinReply(msg);
-					}
-
-					if (
-						[
-							'init',
-							'theme',
-							'compact',
-							'context-max',
-							'usage',
-							'settings',
-						].includes(commandName)
-					) {
-						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
-						return sendBuiltinReply(msg);
-					}
-
-					// Truly unrecognized command
-					const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
-					return sendBuiltinReply(errorMsg);
 				}
 			}
-		}
 
-		if (session.activeFile) {
-			contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
-		}
+			if (session.activeFile) {
+				contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
+			}
 
-		session.messages = [
-			...session.messages,
-			{
-				role: 'user',
-				content: contextualUserText,
-				...(images.length > 0 ? {images} : {}),
-			},
-		];
+			const previousAssistant = findLastAssistantMessage(session);
+			session.messages = [
+				...session.messages,
+				{
+					role: 'user',
+					content: contextualUserText,
+					...(images.length > 0 ? {images} : {}),
+				},
+			];
 
-		const config = getAppConfig();
-		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
+			if (session.baseSystemMessage) {
+				const projectContext = await appendRelevantProjectContextWithCount(
+					session.baseSystemMessage.content,
+					userText,
+					session.getMemoryFinder(),
+					getProjectContextPreferences(),
+				);
+				session.systemMessage = {
+					role: 'system',
+					content: projectContext.systemPrompt,
+				};
+				setLastBuiltPrompt(projectContext.systemPrompt);
+				if (projectContext.memoryCount > 0) {
+					logger.info(
+						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+					);
+				}
+			}
 
-		session.turnActive = true;
-		try {
-			return await runAcpConversation({
+			const config = getAppConfig();
+			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
+
+			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
 				toolManager: this.initContext.toolManager,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
+			const turnDurationMs = Date.now() - turnStart;
+			this.attachResponseUsage(
+				session,
+				response,
+				previousAssistant,
+				turnDurationMs,
+			);
+			turnSucceeded = true;
+			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -335,7 +414,13 @@ export class AcpAgent implements Agent {
 						content: {type: 'text', text: cancelNotice},
 					},
 				});
-				session.messages.push({role: 'assistant', content: cancelNotice});
+				session.messages.push({
+					role: 'assistant',
+					content: cancelNotice,
+					displayOnly: true,
+					durationMs: Date.now() - turnStart,
+					outcome: 'cancelled',
+				});
 				return {stopReason: 'cancelled'};
 			}
 
@@ -355,6 +440,9 @@ export class AcpAgent implements Agent {
 			session.messages.push({
 				role: 'assistant',
 				content: formattedError,
+				displayOnly: true,
+				durationMs: Date.now() - turnStart,
+				outcome: 'failed',
 			});
 
 			throw error;
@@ -363,6 +451,30 @@ export class AcpAgent implements Agent {
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
+
+			// Fire and forget: the turn must return to idle immediately, and a
+			// cosmetic title landing a moment later is fine. The promise is kept
+			// only so tests can await it instead of sleeping; nothing in
+			// production reads it.
+			if (turnSucceeded) {
+				this.pendingTitleGeneration = maybeGenerateTitle({
+					sessionId: session.sessionId,
+					messages: session.messages,
+					client: this.initContext.client,
+					onTitle: title => {
+						// notify(), not the deprecated extNotification() alias.
+						// The client receives it as extNotification(method, params).
+						// Lands after the turn went idle, so the client may already be
+						// gone; an unhandled rejection here would kill the agent.
+						void this.conn
+							.notify('_nanocoder/sessionTitleChanged', {
+								sessionId: session.sessionId,
+								title,
+							})
+							.catch(() => {});
+					},
+				}).catch(() => {});
+			}
 		}
 	}
 
@@ -483,6 +595,18 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
+		const existing = this.sessions.get(params.sessionId);
+		if (existing) {
+			await existing.timeline.clear();
+		} else {
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			if (persisted) {
+				await new TimelineManager(
+					persisted.workingDirectory,
+					params.sessionId,
+				).clear();
+			}
+		}
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
@@ -514,6 +638,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -544,6 +671,99 @@ export class AcpAgent implements Agent {
 			}
 			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
 			return {title: updated.title};
+		}
+
+		if (method === 'timeline/list') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('timeline/list requires a string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			return {entries: await session.timeline.list()};
+		}
+
+		if (method === 'timeline/revert') {
+			const sessionId = params.sessionId;
+			const checkpointId = params.checkpointId;
+			if (typeof sessionId !== 'string' || typeof checkpointId !== 'string') {
+				throw new Error(
+					'timeline/revert requires string sessionId and checkpointId',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error(
+					'Cannot revert the timeline while a prompt is in progress',
+				);
+			}
+
+			const result = await session.timeline.revertTo(checkpointId);
+			session.messages = session.messages.slice(
+				0,
+				resolveTruncationPoint(session.messages, result.revertedTo),
+			);
+			// Harness chrome, not model output: it tells the user what the revert
+			// did. The model learns about the revert from the truncated history
+			// itself, so this must never come back as its own past turn.
+			session.messages.push({
+				role: 'assistant',
+				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+				displayOnly: true,
+			});
+			await this.saveAcpSessionToDisk(session);
+			await this.replaySessionHistory(session);
+			logger.info(
+				`ACP extMethod timeline/revert: session=${sessionId} checkpoint=${checkpointId}`,
+			);
+			return {
+				revertedTo: result.revertedTo,
+				filesRestored: result.filesRestored,
+			};
+		}
+
+		if (method === 'retryTurn') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('retryTurn requires string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error('Cannot retry turn while a prompt is in progress');
+			}
+			const promptText =
+				typeof params.promptText === 'string'
+					? params.promptText.trim()
+					: undefined;
+			let targetUserIdx = -1;
+			if (promptText) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					const m = session.messages[i];
+					if (m.role !== 'user') continue;
+					const contentStr =
+						typeof m.content === 'string' ? m.content.trim() : '';
+					if (contentStr === promptText) {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx < 0) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					if (session.messages[i].role === 'user') {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx >= 0) {
+				session.messages = session.messages.slice(0, targetUserIdx);
+				await this.saveAcpSessionToDisk(session);
+				await session.timeline.truncateAfter(targetUserIdx);
+			}
+			logger.info(
+				`ACP extMethod retryTurn: session=${sessionId} truncatedTo=${session.messages.length}`,
+			);
+			return {ok: true, messagesCount: session.messages.length};
 		}
 
 		throw new Error(`Unknown extension method: ${method}`);
@@ -579,6 +799,14 @@ export class AcpAgent implements Agent {
 		return {};
 	}
 
+	private requireSession(sessionId: string): AcpSession {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		return session;
+	}
+
 	private registerSession(sessionId: string, cwd: string): AcpSession {
 		const session = new AcpSession({
 			sessionId,
@@ -601,6 +829,7 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
+			if (isInternalWalkthroughMessage(message)) continue;
 			if (message.role === 'user') {
 				if (typeof message.content === 'string' && message.content.length > 0) {
 					await this.conn.sessionUpdate({
@@ -648,8 +877,58 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
+				if (message.responseUsage || message.durationMs || message.outcome) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: ''},
+							_meta: {
+								...(message.responseUsage
+									? {'nanocoder/response-usage': message.responseUsage}
+									: {}),
+								...(message.durationMs
+									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
+								...(message.outcome
+									? {'nanocoder/outcome': message.outcome}
+									: {}),
+							},
+						},
+					});
+				}
 			}
 		}
+	}
+
+	private attachResponseUsage(
+		session: AcpSession,
+		response: PromptResponse,
+		previousAssistant?: (typeof session.messages)[number],
+		turnDurationMs?: number,
+	): void {
+		const assistant = findLastAssistantMessage(session);
+		if (!assistant || assistant === previousAssistant) return;
+
+		if (turnDurationMs !== undefined) {
+			assistant.durationMs = turnDurationMs;
+			assistant.outcome = 'completed';
+		}
+
+		if (!response.usage) return;
+
+		const cost = (
+			response._meta as
+				| {'nanocoder/usage'?: {cost?: unknown}}
+				| null
+				| undefined
+		)?.['nanocoder/usage']?.cost;
+		assistant.responseUsage = {
+			inputTokens: response.usage.inputTokens,
+			outputTokens: response.usage.outputTokens,
+			totalTokens: response.usage.totalTokens,
+			...(typeof cost === 'number' && Number.isFinite(cost) ? {cost} : {}),
+		};
 	}
 
 	// 0.25.0 folded model selection into the generic session-config system: a
@@ -704,7 +983,12 @@ export class AcpAgent implements Agent {
 		const {toolManager} = this.initContext;
 		const {provider, model} = this.initContext;
 
-		const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+		const tune = resolveTune(
+			getAppConfig(),
+			this.initContext.client.getProviderConfig(),
+			loadPreferences(),
+		);
+		applyTuneCompaction(tune);
 		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -736,7 +1020,8 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
-		session.systemMessage = {role: 'system', content: systemContent};
+		session.baseSystemMessage = {role: 'system', content: systemContent};
+		session.systemMessage = session.baseSystemMessage;
 	}
 
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
@@ -753,10 +1038,26 @@ export class AcpAgent implements Agent {
 
 			// We only want user/assistant messages for the title generation/saving
 			const saveableMessages = session.messages.filter(
-				m => m.role === 'user' || m.role === 'assistant',
+				m => (m.role === 'user' || m.role === 'assistant') && !m.displayOnly,
 			);
 
 			if (saveableMessages.length === 0) {
+				if (existingSession) {
+					await sessionManager.saveSession({
+						id: session.sessionId,
+						title: existingSession.title || 'New Session',
+						titleManuallySet: existingSession.titleManuallySet,
+						titleGenerated: existingSession.titleGenerated,
+						createdAt: existingSession.createdAt || timestamp,
+						lastAccessedAt: timestamp,
+						messageCount: 0,
+						provider:
+							this.initContext.client.getProviderConfig().name || 'openai',
+						model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+						workingDirectory: session.cwd,
+						messages: [],
+					});
+				}
 				return;
 			}
 
@@ -766,17 +1067,17 @@ export class AcpAgent implements Agent {
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
-				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
-					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
-				} else {
-					title = 'New Session';
-				}
+				title =
+					(typeof firstUserMessage?.content === 'string'
+						? deriveTitleFromFirstMessage(firstUserMessage.content)
+						: null) ?? 'New Session';
 			}
 
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
@@ -787,7 +1088,7 @@ export class AcpAgent implements Agent {
 					if (m.role === 'user' && typeof m.content === 'string') {
 						return {
 							...m,
-							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+							content: m.content.replace(ACTIVE_FILE_PREFIX, ''),
 						};
 					}
 					return m;
@@ -797,6 +1098,17 @@ export class AcpAgent implements Agent {
 			logger.error(`Failed to save session to disk: ${error}`);
 		}
 	}
+}
+
+function findLastAssistantMessage(
+	session: AcpSession,
+): (typeof session.messages)[number] | undefined {
+	for (let index = session.messages.length - 1; index >= 0; index--) {
+		if (session.messages[index].role === 'assistant') {
+			return session.messages[index];
+		}
+	}
+	return undefined;
 }
 
 function isToolCallingDisabled(provider: string, model: string): boolean {

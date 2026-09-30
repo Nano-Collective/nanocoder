@@ -27,8 +27,12 @@ export type SkillLevel = 'global' | 'project';
 export interface PromotionPlan {
 	skillName: string;
 	shape: 'single-file' | 'bundle';
-	/** Current level the skill resolves from. */
-	fromLevel: 'built-in' | 'personal' | 'project';
+	/**
+	 * Where the copy comes from. `remote` is the installer's origin
+	 * (`nanocoder skills add`), which lands a cloned bundle through the same
+	 * copy / collision / force path as a promote.
+	 */
+	fromLevel: 'built-in' | 'personal' | 'project' | 'remote';
 	/** Level the copy is written to. */
 	toLevel: SkillLevel;
 	source: string;

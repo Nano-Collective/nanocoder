@@ -16,7 +16,15 @@ Here's what you need to know right away:
 
 ### Talking to the AI
 
-Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** to add a new line — it's the official supported newline shortcut.
+Type your message and press **Enter** to send. The AI streams its response token-by-token. If you need multi-line input, press **Ctrl+J** or **Option/Alt+Enter** to add a new line. Shift+Enter works too, but only in terminals that encode it distinctly from Enter — see [Keyboard Shortcuts](keyboard-shortcuts.md) if yours submits instead.
+
+Each response ends with a small grey footer showing what that turn cost:
+
+```
+Tokens: 4.2k | ~$0.01
+```
+
+The token count is whatever the provider reported for that response, and the cost is an estimate priced from [models.dev](https://models.dev). Providers that report no token telemetry (common with local models) get no footer at all, and the cost segment is omitted when no pricing is available — so a missing number means "unknown", never "zero". For a breakdown of your whole context window rather than a single response, use `/usage`.
 
 ### Giving the AI Context
 
@@ -41,6 +49,8 @@ Prefix any command with **`!`** to run it directly in your shell without leaving
 !npm test
 ```
 
+With `nanocoder.sandbox` set (see [Configuration](../configuration/index.md#os-sandbox)), those commands run in an OS jail (writes + network; reads are not blocked). Off by default.
+
 ### Attaching Images
 
 Press **Ctrl+V** to paste an image from your clipboard, or drag an image file into the terminal, to send it to a vision-capable model. Pending attachments show above the input box; **Ctrl+X** removes the last one. See [Image Attachments](image-attachments.md) for supported formats and platform requirements.
@@ -52,7 +62,7 @@ These are the shortcuts you'll use constantly:
 | Action | Shortcut |
 |--------|----------|
 | Submit prompt | Enter |
-| New line | Ctrl+J |
+| New line | Ctrl+J or Option/Alt+Enter |
 | Toggle development mode | Shift+Tab |
 | Cancel AI response | Esc |
 | Clear input | Esc (twice) |
@@ -78,12 +88,15 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
-| **Normal** (default) | Confirm each tool before it runs | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Most tools execute immediately; bash and destructive git still prompt | Trusted tasks, faster iteration |
-| **Yolo** | Every tool executes immediately — no exceptions | Zero interruptions, full trust |
-| **Plan** | Tools are shown but never executed | Exploring what the AI would do |
+| **Normal** (default) | Confirm each tool that can change something; read-only tools run directly | Unfamiliar codebases, sensitive operations |
+| **Auto-Accept** | Most tools execute immediately; bash, `git_commit`, `git_pr` create, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
+| **Yolo** | Every tool executes immediately with no prompt | Zero interruptions, full trust |
+| **Plan** | Read-only tools run; every mutation tool is removed, and the AI writes a plan for you to approve | Exploring and planning before any change |
+| **Architect** | File edits run without a prompt, then you keep or revert the whole turn | Multi-file changes you want to judge as a whole |
 
-Toggle between modes with **Shift+Tab**. The current mode is shown in the status bar.
+Toggle between modes with **Shift+Tab** (normal → auto-accept → yolo → plan → architect). The current mode is shown in the status bar.
+
+`fetch_url` refuses loopback, private-network, `*.localhost`, and cloud metadata addresses in every mode, including redirect hops, so a no-approval fetch can't reach internal services.
 
 ## Non-Interactive Mode
 
@@ -154,13 +167,13 @@ For multi-step tasks, the [task management](task-management.md) system keeps you
 /tasks add Update API documentation
 ```
 
-The AI also has access to task tools and will proactively create and update tasks when working on involved problems.
+The AI also has a task tool and will proactively create and update tasks when working on involved problems. Task state lives with the session rather than in your project directory, and is restored when you resume.
 
 ## Customizing Nanocoder
 
 ### Project Setup with `/init`
 
-Run `/init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `/init --force` to regenerate it.
+Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 
@@ -184,6 +197,20 @@ These are the kinds of members a skill can contain. Each page covers its primiti
 - **[Subagents](subagents.md)** — specialized AI agents the main agent can delegate to. Isolated context, filtered tools, optionally a different model.
 - **[Custom Tools](custom-tools.md)** — model-callable shell scripts with declared input schemas and approval policy.
 - **Event subscriptions** — cron and `file.changed` triggers that fire skill members through the per-project daemon. See [Skills → Event subscriptions](skills.md#event-subscriptions).
+
+### Lifecycle Hooks
+
+Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md)** run your own shell command at a fixed point in the agent loop — before or after a tool, on session start/end, on prompt submit, before compaction. No model, no tokens, and they fire every time:
+
+```json
+{"nanocoder": {"hooks": {
+  "post-tool-use": [
+    {"matchTools": ["write_file", "string_replace"], "command": "biome check --write \"$NANOCODER_FILE\""}
+  ]
+}}}
+```
+
+A `pre-tool-use` hook that exits non-zero denies the tool call and tells the model why, which makes rules like "never touch `.env`" enforceable rather than merely requested.
 
 ### File Explorer
 
@@ -215,6 +242,10 @@ Run Nanocoder as an [Agent Client Protocol server](acp.md) so ACP-compatible edi
 nanocoder --acp
 ```
 
+### Language Servers
+
+When a language server is connected (`/lsp` lists them), the AI can read diagnostics with `lsp_get_diagnostics` and format a file with `lsp_format_document`, which formats through the language server, honours `.editorconfig` indent settings, and writes the result to disk. Formatting is a file edit, so it follows the same approval rules as other edits.
+
 ### MCP Servers
 
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
@@ -232,13 +263,16 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files (a kind of skill member) |
 | [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
+| [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
-| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |
+| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
-| [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
+| [Checkpointing](checkpointing.md) | Saving snapshots and restoring files |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
+| [Storage Diagnostics](storage-diagnostics.md) | Read-only storage overview and JSON report |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
@@ -246,3 +280,5 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
+| [Shell Completions](shell-completions.md) | Tab completion for the `nanocoder` CLI in bash, zsh and fish |
+| [Tool Output Conventions](tool-output-conventions.md) | What the file tools return to the model after reads and edits |

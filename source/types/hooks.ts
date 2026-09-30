@@ -4,6 +4,7 @@ import type {ImageAttachment} from '@/types/core';
 export enum PlaceholderType {
 	PASTE = 'paste',
 	FILE = 'file',
+	RESOURCE = 'resource',
 	// Future types can be added here:
 	// TEMPLATE = 'template',
 	// ENV_VAR = 'env_var',
@@ -21,7 +22,9 @@ export interface PastePlaceholderContent extends BasePlaceholderContent {
 	type: PlaceholderType.PASTE;
 	content: string; // The actual pasted text
 	originalSize: number;
-	detectionMethod?: 'rate' | 'size' | 'multiline';
+	// 'bracketed' is a real paste reported by the terminal (DECSET 2004);
+	// the others are heuristic guesses used when the terminal can't.
+	detectionMethod?: 'rate' | 'size' | 'multiline' | 'bracketed';
 	timestamp?: number; // When the paste occurred
 }
 
@@ -35,10 +38,20 @@ interface FilePlaceholderContent extends BasePlaceholderContent {
 	checksum?: string; // For detecting file changes
 }
 
+interface ResourcePlaceholderContent extends BasePlaceholderContent {
+	type: PlaceholderType.RESOURCE;
+	uri: string; // MCP resource URI
+	content: string; // Resource contents at time of inclusion
+	mimeType?: string; // Resource MIME type
+	serverName: string; // MCP server that provided the resource
+	resourceName: string; // Human-readable resource name
+}
+
 // Union type for all placeholder content types - fully type-safe
 export type PlaceholderContent =
 	| PastePlaceholderContent
-	| FilePlaceholderContent;
+	| FilePlaceholderContent
+	| ResourcePlaceholderContent;
 
 // Core data structure for placeholder handling system
 export interface InputState {

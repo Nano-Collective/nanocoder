@@ -49,6 +49,12 @@ function createEnvironmentLogger(
 	baseConfig: pino.LoggerOptions,
 	transportConfig: EnvironmentTransportConfig,
 ): Logger {
+	// NANOCODER_LOG_DISABLE_FILE wins over NANOCODER_LOG_LEVEL: no log
+	// directory, no daily file, nothing written.
+	if (process.env.NANOCODER_LOG_DISABLE_FILE === 'true') {
+		return createEnhancedLogger(pino({...baseConfig, level: 'silent'}));
+	}
+
 	const logDir = getDefaultLogDirectory();
 
 	// Create single file transport logger for all environments

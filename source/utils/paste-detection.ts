@@ -16,9 +16,41 @@ const DEFAULT_PASTE_OPTIONS: PasteDetectionOptions = {
 	lineThreshold: 2, // Multiple lines added instantly
 };
 
+/**
+ * Extract the text inserted between two revisions of the input.
+ *
+ * The input buffer supports cursor movement, so an insertion is not always an
+ * append. Trimming the shared prefix and suffix recovers the inserted run
+ * wherever the cursor happened to be. For an edit that also removes text (a
+ * replacement) this returns the whole replacing run, which is the content the
+ * caller cares about.
+ */
+function extractInsertedText(previousText: string, newText: string): string {
+	const maxPrefix = Math.min(previousText.length, newText.length);
+	let prefix = 0;
+	while (prefix < maxPrefix && previousText[prefix] === newText[prefix]) {
+		prefix++;
+	}
+
+	const maxSuffix = Math.min(
+		previousText.length - prefix,
+		newText.length - prefix,
+	);
+	let suffix = 0;
+	while (
+		suffix < maxSuffix &&
+		previousText[previousText.length - 1 - suffix] ===
+			newText[newText.length - 1 - suffix]
+	) {
+		suffix++;
+	}
+
+	return newText.slice(prefix, newText.length - suffix);
+}
+
 export class PasteDetector {
 	private lastInputTime = 0;
-	private lastInputLength = 0;
+	private lastInput = '';
 
 	/**
 	 * Detect if a text change is likely a paste operation
@@ -40,29 +72,35 @@ export class PasteDetector {
 		};
 	} {
 		const currentTime = Date.now();
+		const previousText = this.lastInput;
 		const timeElapsed = currentTime - this.lastInputTime;
-		const charsAdded = newText.length - this.lastInputLength;
+		const charsAdded = newText.length - previousText.length;
 
 		// Calculate lines added in THIS change, not total lines in text
-		const previousLineCount =
-			this.lastInputLength > 0
-				? newText.slice(0, this.lastInputLength).split('\n').length
-				: 1;
-		const currentLineCount = newText.split('\n').length;
-		const linesAdded = currentLineCount - previousLineCount;
-
-		// Get the added text (assuming it's at the end)
-		const addedText = newText.slice(this.lastInputLength);
+		const linesAdded =
+			newText.split('\n').length - previousText.split('\n').length;
 
 		// Update tracking
 		this.lastInputTime = currentTime;
-		this.lastInputLength = newText.length;
+		this.lastInput = newText;
 
 		const details = {
 			timeElapsed,
 			charsAdded,
 			linesAdded,
 		};
+
+		// Deletions and unchanged input do not contain added text to inspect.
+		if (charsAdded <= 0) {
+			return {
+				isPaste: false,
+				method: 'none',
+				addedText: '',
+				details,
+			};
+		}
+
+		const addedText = extractInsertedText(previousText, newText);
 
 		// Method 1: Rate-based detection (fast input)
 		if (
@@ -110,7 +148,7 @@ export class PasteDetector {
 	 */
 	reset(): void {
 		this.lastInputTime = 0;
-		this.lastInputLength = 0;
+		this.lastInput = '';
 	}
 
 	/**
@@ -119,6 +157,6 @@ export class PasteDetector {
 	 */
 	updateState(text: string): void {
 		this.lastInputTime = Date.now();
-		this.lastInputLength = text.length;
+		this.lastInput = text;
 	}
 }

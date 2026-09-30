@@ -1,6 +1,6 @@
 import test from 'ava';
-import {MCP_TEMPLATES} from './mcp-templates.js';
-import type {McpTransportType} from './mcp-templates.js';
+import {MCP_TEMPLATES, resolveMcpTemplateId} from './mcp-templates.js';
+import type {McpTemplate, McpTransportType} from './mcp-templates.js';
 
 test('filesystem template: single directory', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'filesystem');
@@ -327,6 +327,264 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	});
 });
 
+test('you template: builds authenticated HTTP config with API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'you-paid',
+		apiKey: 'ydc_test_key_123',
+	});
+
+	t.is(config.name, 'you-paid');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+	t.deepEqual(config.tags, ['you', 'search', 'web', 'research', 'http']);
+});
+
+test('you template: defaults server name to you when unset', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
+});
+
+test('you template: builds keyless free-profile config without API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'you');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
+test('you template: trims whitespace from API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '  ydc_test_key_123  ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp');
+	t.deepEqual(config.headers, {
+		Authorization: 'Bearer ydc_test_key_123',
+	});
+});
+
+test('you template: empty-string API key falls back to free profile', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		apiKey: '   ',
+	});
+
+	t.is(config.url, 'https://api.you.com/mcp?profile=free');
+	t.is(config.headers, undefined);
+});
+
+test('you template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'you');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'you-paid',
+		apiKey: 'ydc_test_key_123',
+	});
+
+	t.is(config.templateId, 'you');
+	// The custom name no longer matches a template id, but resolution must
+	// still find `you` via the stamp rather than falling through to `custom`.
+	t.is(resolveMcpTemplateId(config), 'you');
+});
+
+test('serply template: builds HTTP config with X-API-Key header', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'serply',
+		apiKey: 'serply_test_key_123',
+	});
+
+	t.is(config.name, 'serply');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://api.serply.io/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
+	t.deepEqual(config.tags, ['serply', 'search', 'web', 'scrape', 'http']);
+});
+
+test('serply template: requires the API key field', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.truthy(apiKeyField);
+	t.true(apiKeyField!.required);
+	t.true(apiKeyField!.sensitive);
+});
+
+test('serply template: defaults server name to serply when unset', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({apiKey: 'serply_test_key_123'});
+
+	t.is(config.name, 'serply');
+});
+
+test('serply template: trims whitespace from API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({apiKey: '  serply_test_key_123  '});
+
+	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
+});
+
+test('serply template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'serply-work',
+		apiKey: 'serply_test_key_123',
+	});
+
+	t.is(config.templateId, 'serply');
+	t.is(resolveMcpTemplateId(config), 'serply');
+});
+
+test('resolveMcpTemplateId: prefers templateId over tags and name', t => {
+	t.is(
+		resolveMcpTemplateId({
+			name: 'you-paid',
+			transport: 'http',
+			templateId: 'you',
+		}),
+		'you',
+	);
+});
+
+test('resolveMcpTemplateId: falls back to a matching tag for hand-edited configs', t => {
+	t.is(
+		resolveMcpTemplateId({name: 'you-paid', transport: 'http', tags: ['you']}),
+		'you',
+	);
+});
+
+test('resolveMcpTemplateId: tag fallback respects transport (github-remote)', t => {
+	// `github-remote` tags include `github`, but that template is stdio —
+	// an http server must not resolve to it.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-enterprise',
+			transport: 'http',
+			tags: ['remote', 'github'],
+		}),
+		undefined,
+	);
+	// The stdio counterpart is transport-compatible, but `github` hardcodes
+	// `name: 'github'` in buildConfig, so resolving to it would rename the
+	// server on save. It stays with the `custom` fallback instead.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-local',
+			transport: 'stdio',
+			tags: ['github'],
+		}),
+		undefined,
+	);
+});
+
+test('resolveMcpTemplateId: tag fallback skips templates that hardcode the name', t => {
+	// A hand-renamed filesystem server keeps its tags. Before the serverName
+	// guard this resolved to `filesystem`, whose buildConfig returns
+	// `name: 'filesystem'` — saving the edit silently renamed the server and
+	// replaced its args. `custom` round-trips name, command and args intact.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'docs-fs',
+			transport: 'stdio',
+			tags: ['filesystem', 'local'],
+		}),
+		undefined,
+	);
+	// Zero-field templates are the same story via `simpleStdioTemplate`.
+	t.is(
+		resolveMcpTemplateId({
+			name: 'notes',
+			transport: 'stdio',
+			tags: ['memory', 'storage', 'stdio'],
+		}),
+		undefined,
+	);
+});
+
+test('resolveMcpTemplateId: never resolves a renamed server to a template that would rename it', t => {
+	// Property guard for the whole registry: whatever a template's tags are,
+	// a custom-named instance may only resolve to a template that can carry
+	// the custom name back through buildConfig.
+	const answersFor = (template: McpTemplate, customName: string) => {
+		const answers: Record<string, string> = {};
+		for (const field of template.fields) {
+			answers[field.name] = field.default ?? 'placeholder';
+		}
+		answers.serverName = customName;
+		return answers;
+	};
+
+	for (const template of MCP_TEMPLATES) {
+		if (template.id === 'custom') continue;
+
+		const customName = `${template.id}-renamed`;
+		const built = template.buildConfig(answersFor(template, customName));
+		const resolvedId = resolveMcpTemplateId({
+			name: customName,
+			transport: template.transportType,
+			tags: built.tags,
+		});
+		if (!resolvedId) continue;
+
+		const resolved = MCP_TEMPLATES.find(t => t.id === resolvedId);
+		if (!resolved) {
+			t.fail(`${template.id} resolved to unknown id ${resolvedId}`);
+			continue;
+		}
+		t.is(
+			resolved.buildConfig(answersFor(resolved, customName)).name,
+			customName,
+			`${template.id} resolves to ${resolvedId}, which would rename the server`,
+		);
+	}
+});
+
+test('resolveMcpTemplateId: falls back to the server name for default names', t => {
+	t.is(resolveMcpTemplateId({name: 'you', transport: 'http'}), 'you');
+});
+
+test('resolveMcpTemplateId: returns undefined for unmatched servers', t => {
+	t.is(resolveMcpTemplateId({name: 'my-custom-server', transport: 'http'}), undefined);
+	t.is(
+		resolveMcpTemplateId({name: 'x', transport: 'http', tags: ['not-a-template']}),
+		undefined,
+	);
+	// The generic `custom` tag must not resolve to the custom template —
+	// callers handle that fallback themselves and it carries no fields.
+	t.is(resolveMcpTemplateId({name: 'x', transport: 'http', tags: ['custom']}), undefined);
+});
+
 test('remote templates: have no required fields', t => {
 	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
 
@@ -479,7 +737,7 @@ test('local templates: use stdio transport', t => {
 });
 
 test('remote templates: use http transport', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);

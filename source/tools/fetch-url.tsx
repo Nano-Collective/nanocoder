@@ -3,9 +3,9 @@
 // only users who actually invoke `fetch_url` pay the cost.
 import {Box, Text} from 'ink';
 import React from 'react';
-import {ICON_WARNING} from '@/components/ui/icons';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
+import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -15,20 +15,97 @@ interface FetchArgs {
 	url: string;
 }
 
-const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
-	// Validate URL
+const MAX_REDIRECTS = 5;
+const URL_FETCH_TIMEOUT_MS = 15_000;
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+
+/** Statuses that mean "this server will not answer a HEAD", so retry as GET. */
+const HEAD_UNSUPPORTED_STATUS_CODES = new Set([400, 403, 405, 501]);
+
+/**
+ * Ask one hop what it is, without downloading it.
+ *
+ * The walk below only needs a status and a `Location`, so it asks for headers
+ * rather than a body. A GET here would transfer the whole final page and
+ * throw it away, since `convertToMarkdown` fetches the resolved URL itself -
+ * every `fetch_url` call would move the target twice, doubling bandwidth and
+ * rate-limit consumption and hitting any endpoint that meters or logs
+ * requests once per call more than it should.
+ *
+ * Not every server answers HEAD. One that refuses, or that fails outright,
+ * falls back to a GET whose body is discarded - the old behaviour, now only
+ * on the servers that actually need it.
+ */
+const probeHop = async (url: string): Promise<Response> => {
 	try {
-		new URL(args.url);
+		const head = await fetch(url, {
+			method: 'HEAD',
+			redirect: 'manual',
+			signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+		});
+		if (!HEAD_UNSUPPORTED_STATUS_CODES.has(head.status)) {
+			return head;
+		}
+		await head.body?.cancel();
 	} catch {
-		throw new Error(`Invalid URL: ${args.url}`);
+		// Network-level refusal of the HEAD itself; let the GET report the
+		// real error so the message the model sees is unchanged.
 	}
 
+	return await fetch(url, {
+		redirect: 'manual',
+		signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+	});
+};
+
+const resolveSafeRedirects = async (url: string): Promise<string> => {
+	let currentUrl = url;
+
+	for (let redirectCount = 0; ; redirectCount++) {
+		const validation = await fetchUrlValidator({url: currentUrl});
+		if (!validation.valid) {
+			throw new Error(validation.error);
+		}
+
+		const response = await probeHop(currentUrl);
+
+		try {
+			if (!REDIRECT_STATUS_CODES.has(response.status)) {
+				return currentUrl;
+			}
+
+			const location = response.headers.get('location');
+			if (!location) {
+				throw new Error(
+					`Redirect response from ${currentUrl} did not include a Location header`,
+				);
+			}
+
+			if (redirectCount >= MAX_REDIRECTS) {
+				throw new Error(`Too many redirects while fetching ${url}`);
+			}
+
+			currentUrl = new URL(location, currentUrl).toString();
+		} finally {
+			await response.body?.cancel();
+		}
+	}
+};
+
+const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
+	assertPublicHttpUrl(args.url);
+
 	try {
+		const safeUrl = await resolveSafeRedirects(args.url);
+
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
 		// so the ~100-module HTML-parsing graph only loads when the tool
 		// actually runs).
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
-		const result = await convertToMarkdown(args.url);
+		// The redirect chain was validated hop by hop above. Keep redirects off
+		// for the conversion fetch as well, so a changed response cannot escape
+		// validation between the probe and conversion requests.
+		const result = await convertToMarkdown(safeUrl, {followRedirects: false});
 
 		const content = result.markdown;
 
@@ -45,7 +122,11 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		return content;
 	} catch (error: unknown) {
 		const message = formatError(error);
-		throw new Error(`Failed to fetch URL: ${message}`);
+		throw new Error(
+			message.startsWith('Failed to fetch URL:')
+				? message
+				: `Failed to fetch URL: ${message}`,
+		);
 	}
 };
 
@@ -114,7 +195,8 @@ function FetchUrlFormatterComponent({
 					{wasTruncated && (
 						<Box>
 							<Text color={colors.warning}>
-								{ICON_WARNING} Content was truncated to 100KB
+								! Content was truncated to{' '}
+								{MAX_URL_CONTENT_BYTES.toLocaleString()} characters
 							</Text>
 						</Box>
 					)}
@@ -136,44 +218,13 @@ const fetchUrlFormatter = (
 const fetchUrlValidator = (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	// Validate URL format
 	try {
-		const parsedUrl = new URL(args.url);
-
-		// Check for valid protocol
-		if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-			return Promise.resolve({
-				valid: false,
-				error: `Invalid URL protocol "${parsedUrl.protocol}". Only http: and https: are supported.`,
-			});
-		}
-
-		// Check for localhost/internal IPs (security consideration)
-		const hostname = parsedUrl.hostname.toLowerCase();
-		if (
-			hostname === 'localhost' ||
-			hostname === '127.0.0.1' ||
-			hostname === '0.0.0.0' ||
-			// IPv6 loopback/unspecified. The URL parser normalizes every spelling
-			// (`[::1]`, expanded, IPv4-mapped `[::ffff:127.0.0.1]`) to these forms.
-			hostname === '[::1]' ||
-			hostname === '[::ffff:7f00:1]' ||
-			hostname === '[::]' ||
-			hostname.startsWith('192.168.') ||
-			hostname.startsWith('10.') ||
-			hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
-		) {
-			return Promise.resolve({
-				valid: false,
-				error: `Cannot fetch from internal/private network address: ${hostname}`,
-			});
-		}
-
+		assertPublicHttpUrl(args.url);
 		return Promise.resolve({valid: true});
-	} catch {
+	} catch (error: unknown) {
 		return Promise.resolve({
 			valid: false,
-			error: `Invalid URL format: ${args.url}`,
+			error: formatError(error),
 		});
 	}
 };

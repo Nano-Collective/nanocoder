@@ -1,5 +1,9 @@
 import type React from 'react';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import type {
+	MemoryFinder,
+	ProjectContextOptions,
+} from '@/memory/project-context';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
@@ -24,10 +28,16 @@ export interface UseChatHandlerProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
-	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	developmentMode?:
+		| 'normal'
+		| 'auto-accept'
+		| 'yolo'
+		| 'plan'
+		| 'headless'
+		| 'architect';
 	// Live mode ref so the conversation loop can read mode changes mid-turn.
 	developmentModeRef?: React.RefObject<
-		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless' | 'architect'
 	>;
 	nonInteractiveMode?: boolean;
 	onConversationComplete?: () => void;
@@ -37,6 +47,7 @@ export interface UseChatHandlerProps {
 	// which is racy: the user can toggle modes mid-generation, so a completing
 	// normal-mode turn would otherwise look like a finished plan.
 	onPlanTurnComplete?: () => void;
+	onArchitectTurnComplete?: (checkpointName: string) => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
@@ -55,6 +66,10 @@ export interface UseChatHandlerProps {
 	subagentsReady?: boolean;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	memoryFinder?: MemoryFinder;
+	projectContextOptions?: ProjectContextOptions;
+	/** Ensure tool calls in this turn share the persisted conversation ID. */
+	ensureCurrentSessionId?: () => string;
 }
 
 export interface ChatHandlerReturn {
@@ -62,6 +77,7 @@ export interface ChatHandlerReturn {
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		historyMessages?: Message[],
 	) => Promise<void>;
 	processAssistantResponse: (
 		systemMessage: Message,

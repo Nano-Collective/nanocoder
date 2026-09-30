@@ -1,11 +1,12 @@
 import {Box, Text} from 'ink';
-import {useEffect, useState} from 'react';
+import {useContext, useEffect, useState} from 'react';
 
-import ToolMessage from '@/components/tool-message';
-import {ICON_ELLIPSIS, ICON_TOOL} from '@/components/ui/icons';
-import {BASH_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
+import {TOOL_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
+import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface BashProgressProps {
@@ -16,7 +17,7 @@ interface BashProgressProps {
 	/** If true, renders with reduced margins for live display */
 	isLive?: boolean;
 	/** If true, renders the captured output once the command completes.
-	 * Used for user-typed !commands; model tool calls stay compact. */
+	 * Used by user-typed !commands and by agent bash when showAgentBashOutput is on. */
 	showOutput?: boolean;
 }
 
@@ -91,10 +92,11 @@ export default function BashProgress({
 			: totalOutput;
 	const estimatedTokens = calculateTokens(truncatedOutput);
 
-	// Completed output for user-typed !commands. Mirrors the error/stderr-first
-	// ordering of formatBashResultForLLM, tail-capped so a verbose command
-	// can't flood the static transcript (the model still receives the full,
-	// separately-truncated output).
+	// Completed output for user-typed !commands and opted-in agent bash. Mirrors
+	// the error/stderr-first ordering of formatBashResultForLLM, tail-capped so
+	// a verbose command can't flood the static transcript (the model still
+	// receives the full, separately-truncated output).
+	const {expanded} = useContext(ToolOutputContext);
 	let displayedOutput = '';
 	let hiddenLineCount = 0;
 	if (showOutput && state.isComplete) {
@@ -106,8 +108,9 @@ export default function BashProgress({
 				: '',
 		].filter(Boolean);
 		const lines = sections.join('\n').split('\n');
-		hiddenLineCount = Math.max(0, lines.length - BASH_OUTPUT_DISPLAY_LINES);
-		displayedOutput = lines.slice(-BASH_OUTPUT_DISPLAY_LINES).join('\n');
+		const displayLimit = expanded ? lines.length : TOOL_OUTPUT_DISPLAY_LINES;
+		hiddenLineCount = Math.max(0, lines.length - displayLimit);
+		displayedOutput = lines.slice(-displayLimit).join('\n');
 	}
 
 	const messageContent = (
@@ -116,9 +119,11 @@ export default function BashProgress({
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
-				<Text wrap="wrap" color={colors.primary}>
-					{command}
-				</Text>
+				{splitCommandForDisplay(command).map((segment, i) => (
+					<Text key={i} wrap="wrap" color={colors.primary}>
+						{segment}
+					</Text>
+				))}
 			</Box>
 			{state.isComplete && (
 				<Box>
@@ -138,7 +143,7 @@ export default function BashProgress({
 				<Box flexDirection="column">
 					{hiddenLineCount > 0 && (
 						<Text color={colors.secondary}>
-							{ICON_ELLIPSIS} (+{hiddenLineCount} earlier lines)
+							… (+{hiddenLineCount} earlier lines)
 						</Text>
 					)}
 					<Text wrap="wrap" color={colors.text}>

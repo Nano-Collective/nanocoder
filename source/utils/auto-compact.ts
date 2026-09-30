@@ -1,12 +1,24 @@
+import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {createTokenizer} from '@/tokenization/index';
-import type {CompressionMode, CompressionStrategy} from '@/types/config';
+import type {
+	CompressionMode,
+	CompressionStrategy,
+	TuneConfig,
+} from '@/types/config';
 import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
+import {getLogger} from '@/utils/logging';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
-import {compressMessages} from './message-compression';
+import {
+	COMPRESSION_CONSTANTS,
+	clampThreshold,
+	compressMessages,
+} from './message-compression';
+import {filterModelFacing} from './message-visibility';
 import {createSessionOverride} from './session-override';
 
 export interface AutoCompactSessionOverrides {
@@ -16,11 +28,11 @@ export interface AutoCompactSessionOverrides {
 	strategy: CompressionStrategy | null;
 }
 
-// Session overrides for auto-compact. `threshold` is clamped to 50–95.
+// Session overrides for auto-compact. `threshold` is clamped to the configured range.
 const autoCompactSession = {
 	enabled: createSessionOverride<boolean>(),
 	threshold: createSessionOverride<number>(value =>
-		value !== null ? Math.max(50, Math.min(95, value)) : null,
+		value !== null ? clampThreshold(value) : null,
 	),
 	mode: createSessionOverride<CompressionMode>(),
 	strategy: createSessionOverride<CompressionStrategy>(),
@@ -44,6 +56,61 @@ export const autoCompactSessionOverrides: AutoCompactSessionOverrides =
 			return true;
 		},
 	});
+
+// Tune's "Aggressive Compact" preset. It sits between the config file and the
+// user's explicit `/compact` session overrides, so turning tune on or off never
+// clobbers a threshold or mode the user set by hand.
+let tuneAggressiveCompact = false;
+
+/** Threshold used by tune's aggressive compact (the lowest supported value). */
+export const AGGRESSIVE_COMPACT_THRESHOLD =
+	COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT;
+
+/**
+ * Apply (or clear) tune's aggressive-compact preset from a resolved tune config.
+ * Call whenever the active tune changes, including at startup.
+ */
+export function applyTuneCompaction(tune: TuneConfig | undefined): void {
+	tuneAggressiveCompact = Boolean(tune?.enabled && tune.aggressiveCompact);
+}
+
+export interface ResolvedAutoCompactSettings {
+	enabled: boolean;
+	threshold: number;
+	mode: CompressionMode;
+	strategy: CompressionStrategy;
+	hasOverrides: boolean;
+}
+
+/**
+ * Resolve the effective auto-compact settings.
+ * Precedence: `/compact` session override > tune aggressive compact > config.
+ */
+export function resolveAutoCompactSettings(config: {
+	enabled: boolean;
+	threshold: number;
+	mode: CompressionMode;
+	strategy?: CompressionStrategy;
+}): ResolvedAutoCompactSettings {
+	const session = autoCompactSessionOverrides;
+	const tuneThreshold = tuneAggressiveCompact
+		? AGGRESSIVE_COMPACT_THRESHOLD
+		: null;
+	const tuneMode: CompressionMode | null = tuneAggressiveCompact
+		? 'aggressive'
+		: null;
+	return {
+		enabled: session.enabled ?? config.enabled,
+		threshold: session.threshold ?? tuneThreshold ?? config.threshold,
+		mode: session.mode ?? tuneMode ?? config.mode,
+		strategy: session.strategy ?? config.strategy ?? 'llm',
+		hasOverrides:
+			session.enabled !== null ||
+			session.threshold !== null ||
+			session.mode !== null ||
+			tuneAggressiveCompact,
+	};
+}
 
 /**
  * Perform auto-compact on messages (async)
@@ -74,34 +141,18 @@ export async function performAutoCompact(
 	onNotify?: (message: string) => void,
 	client?: LLMClient,
 	nativeTools?: Record<string, AISDKCoreTool>,
+	signal?: AbortSignal,
 ): Promise<Message[] | null> {
-	// Check if auto compact is enabled
-	const enabled =
-		autoCompactSessionOverrides.enabled !== null
-			? autoCompactSessionOverrides.enabled
-			: config.enabled;
+	if (signal?.aborted) {
+		return null;
+	}
+
+	const {enabled, threshold, mode, strategy} =
+		resolveAutoCompactSettings(config);
 
 	if (!enabled) {
 		return null;
 	}
-
-	// Get threshold
-	const threshold =
-		autoCompactSessionOverrides.threshold !== null
-			? autoCompactSessionOverrides.threshold
-			: config.threshold;
-
-	// Get mode
-	const mode =
-		autoCompactSessionOverrides.mode !== null
-			? autoCompactSessionOverrides.mode
-			: config.mode;
-
-	// Get strategy — session override wins, then config, then 'llm' default
-	const strategy: CompressionStrategy =
-		autoCompactSessionOverrides.strategy !== null
-			? autoCompactSessionOverrides.strategy
-			: (config.strategy ?? 'llm');
 
 	// Get context limit: session override takes priority
 	let contextLimit: number | null;
@@ -122,6 +173,10 @@ export async function performAutoCompact(
 		return null;
 	}
 
+	if (signal?.aborted) {
+		return null;
+	}
+
 	// Create tokenizer
 	let tokenizer: Tokenizer | undefined;
 	try {
@@ -131,10 +186,13 @@ export async function performAutoCompact(
 	}
 
 	try {
-		// Calculate current token count
+		// Calculate current token count. Display-only notices are filtered out of
+		// the provider payload, so counting them would trip the threshold on
+		// tokens the model never receives — but they stay in `allMessages`, which
+		// is what compaction rewrites and the UI renders.
 		const allMessages = [systemMessage, ...messages];
 		let messageTokens = 0;
-		for (const msg of allMessages) {
+		for (const msg of filterModelFacing(allMessages)) {
 			messageTokens += tokenizer.countTokens(msg);
 		}
 
@@ -153,6 +211,11 @@ export async function performAutoCompact(
 			return null;
 		}
 
+		// Last chance for a hook to see the pre-compaction conversation (e.g.
+		// archive it). Observe-only: pre-compact cannot veto compaction, since
+		// refusing it would leave the context over the model's limit.
+		await runLifecycleHooks('pre-compact', {messageCount: messages.length});
+
 		compressionBackup.storeBackup(messages);
 
 		// LLM strategy: ask the model to summarise the compressible segment into
@@ -160,20 +223,31 @@ export async function performAutoCompact(
 		// (network error, malformed response, etc.) so a transient model issue
 		// never blocks compaction.
 		if (strategy === 'llm' && client) {
+			if (signal?.aborted) {
+				return null;
+			}
+			if (config.notifyUser && onNotify) {
+				onNotify('auto-compacting context...');
+			}
 			try {
 				const llmCompressed = await summariseWithLLM({
 					messages,
 					systemMessage,
 					client,
 					tokenizer,
+					signal,
 				});
+
+				if (signal?.aborted) {
+					return null;
+				}
 
 				if (llmCompressed) {
 					// Tool definitions are constant across compaction, so include them on
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
 					const compressedTokenCount =
-						[systemMessage, ...llmCompressed].reduce(
+						[systemMessage, ...filterModelFacing(llmCompressed)].reduce(
 							(sum, msg) => sum + tokenizer.countTokens(msg),
 							0,
 						) + toolDefTokens;
@@ -192,8 +266,15 @@ export async function performAutoCompact(
 					return llmCompressed;
 				}
 			} catch (_error) {
+				if (signal?.aborted) {
+					return null;
+				}
 				// fall through to mechanical
 			}
+		}
+
+		if (signal?.aborted) {
+			return null;
 		}
 
 		// Include system message in compression input so compressMessages()
@@ -225,6 +306,49 @@ export async function performAutoCompact(
 	}
 }
 
+export async function maybeAutoCompact(
+	messages: Message[],
+	systemMessage: Message,
+	client: LLMClient,
+	nativeTools?: Record<string, AISDKCoreTool>,
+	options?: {
+		signal?: AbortSignal;
+		onNotify?: (message: string) => void;
+		// Callers that already track the active provider/model (the TUI reads
+		// them from app state) pass them explicitly. Everything else derives
+		// them from the client.
+		provider?: string;
+		model?: string;
+	},
+): Promise<Message[]> {
+	if (options?.signal?.aborted) {
+		return messages;
+	}
+
+	const autoCompactConfig = getAppConfig().autoCompact;
+	if (!autoCompactConfig) {
+		return messages;
+	}
+
+	try {
+		const compressed = await performAutoCompact(
+			messages,
+			systemMessage,
+			options?.provider ?? client.getProviderConfig().name,
+			options?.model ?? client.getCurrentModel(),
+			autoCompactConfig,
+			options?.onNotify,
+			client,
+			nativeTools,
+			options?.signal,
+		);
+		return compressed ?? messages;
+	} catch (error) {
+		getLogger().debug('auto-compact failed; leaving history unchanged', error);
+		return messages;
+	}
+}
+
 // Set session override for auto-compact enabled state
 export function setAutoCompactEnabled(enabled: boolean | null): void {
 	autoCompactSession.enabled.set(enabled);
@@ -253,4 +377,5 @@ export function resetAutoCompactSession(): void {
 	autoCompactSession.threshold.reset();
 	autoCompactSession.mode.reset();
 	autoCompactSession.strategy.reset();
+	tuneAggressiveCompact = false;
 }

@@ -1,10 +1,24 @@
 import test from 'ava';
+import {mkdtempSync, rmSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import React from 'react';
 import {render} from 'ink-testing-library';
+import {
+	resetPreferencesCache,
+	updateProfessionalTone,
+} from '@/config/preferences';
+import {setToolRegistryGetter} from '@/message-handler';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
 import {useUserMessageQueue} from '../useUserMessageQueue';
+import {
+        resetSessionCwd,
+        setProjectRoot,
+        setSessionCwd,
+} from '@/services/session-cwd';
 
 // Test component that uses the hook and exposes results
 function TestHookComponent(props: UseChatHandlerProps & {onResult?: (result: ChatHandlerReturn) => void}) {
@@ -195,7 +209,7 @@ test('useChatHandler - handles messages with content', t => {
 });
 
 test('useChatHandler - handles different development modes', t => {
-	const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = ['normal', 'auto-accept', 'yolo', 'plan'];
+	const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 
 	for (const mode of modes) {
 		let hookResult: ChatHandlerReturn | null = null;
@@ -282,6 +296,30 @@ test('useChatHandler - handles null client gracefully', t => {
 	});
 
 	t.truthy(hookResult);
+});
+
+test('useChatHandler - signals completion when chat dependencies are unavailable', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let completionCalls = 0;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				onConversationComplete: () => {
+					completionCalls++;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('queued after unavailable setup');
+
+	t.is(completionCalls, 1);
+	rendered.unmount();
 });
 
 test('useChatHandler - setMessages callback works', t => {
@@ -417,7 +455,7 @@ test('useChatHandler - drains queued message when setup fails before conversatio
 	rendered.unmount();
 });
 
-test('useChatHandler - fires onPlanTurnComplete when a plan-mode turn completes', async t => {
+test('useChatHandler - does not offer review when plan mode wrote no artifact', async t => {
 	let planComplete = 0;
 	let hookResult: ChatHandlerReturn | null = null;
 	const customCommandLoader = {
@@ -443,7 +481,361 @@ test('useChatHandler - fires onPlanTurnComplete when a plan-mode turn completes'
 
 	await waitForCondition(() => hookResult !== null);
 	await hookResult!.handleChatMessage('make a plan');
-	t.is(planComplete, 1);
+	t.is(planComplete, 0);
+});
+
+test('useChatHandler - offers review after write_plan succeeds', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	let callCount = 0;
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			callbacks.onFinish?.();
+			callCount++;
+			return {
+				choices: [
+					{
+						message:
+							callCount === 1
+								? {
+									role: 'assistant' as const,
+									content: '',
+									tool_calls: [
+										{
+											id: 'write-plan',
+											function: {
+												name: 'write_plan',
+												arguments: {content: '# Plan'},
+											},
+										},
+									],
+								}
+								: {role: 'assistant' as const, content: 'Plan ready'},
+					},
+				],
+			};
+		},
+	};
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
+		getToolNames: () => ['write_plan'],
+		hasTool: (name: string) => name === 'write_plan',
+		getToolEntry: () => ({
+			name: 'write_plan',
+			approval: false,
+			readOnly: false,
+		}),
+		isReadOnly: () => false,
+		getToolFormatter: () => undefined,
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+	setToolRegistryGetter(() => ({write_plan: async () => 'Plan saved'}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager,
+					customCommandLoader,
+					developmentMode: 'plan',
+					ensureCurrentSessionId: () =>
+						'11111111-1111-4111-8111-111111111111',
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+		t.is(planComplete, 1);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - offers review after Architect mutation succeeds', async t => {
+        let architectCheckpointName: string | undefined;
+        let hookResult: ChatHandlerReturn | null = null;
+        let callCount = 0;
+
+        const tempProjectRoot = mkdtempSync(
+                join(tmpdir(), 'nanocoder-architect-test-'),
+        );
+
+        setProjectRoot(tempProjectRoot);
+        setSessionCwd(tempProjectRoot);
+
+        const client: LLMClient = {
+                ...createMockClient(),
+                chat: async (_messages, _tools, callbacks) => {
+                        callbacks.onFinish?.();
+                        callCount++;
+
+                        return {
+                                choices: [
+                                        {
+                                                message:
+                                                        callCount === 1
+                                                                ? {
+                                                                        role: 'assistant' as const,
+                                                                        content: '',
+                                                                        tool_calls: [
+                                                                                {
+                                                                                        id: 'write-file',
+                                                                                        function: {
+                                                                                                name: 'write_file',
+                                                                                                arguments: {
+                                                                                                        path: 'test.txt',
+                                                                                                        content:
+                                                                                                                'Architect change',
+                                                                                                },
+                                                                                        },
+                                                                                },
+                                                                        ],
+                                                                }
+                                                                : {
+                                                                        role: 'assistant' as const,
+                                                                        content:
+                                                                                'Changes ready for review',
+                                                                },
+                                        },
+                                ],
+                        };
+                },
+        };
+
+        const toolManager = {
+                ...createMockToolManager(),
+                getAvailableToolNames: () => ['write_file'],
+                getToolNames: () => ['write_file'],
+                hasTool: (name: string) => name === 'write_file',
+                getToolEntry: () => ({
+                        name: 'write_file',
+                        approval: false,
+                        readOnly: false,
+                }),
+                isReadOnly: () => false,
+                getToolFormatter: () => undefined,
+        } as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+
+        const customCommandLoader = {
+                findRelevantCommands: () => [],
+        } as unknown as NonNullable<
+                UseChatHandlerProps['customCommandLoader']
+        >;
+
+        setToolRegistryGetter(() => ({
+                write_file: async (args: {path: string; content: string}) => {
+                        await import('node:fs/promises').then(({writeFile}) =>
+                                writeFile(
+                                        join(tempProjectRoot, args.path),
+                                        args.content,
+                                        'utf-8',
+                                ),
+                        );
+                        return 'File written';
+                },
+        }));
+
+        try {
+                render(
+                        <TestHookComponent
+                                {...createMockProps({
+                                        client,
+                                        toolManager,
+                                        customCommandLoader,
+                                        developmentMode: 'architect',
+                                        ensureCurrentSessionId: () =>
+                                                '11111111-1111-4111-8111-111111111111',
+                                        onArchitectTurnComplete: checkpointName => {
+                                                architectCheckpointName =
+                                                        checkpointName;
+                                        },
+                                })}
+                                onResult={result => {
+                                        hookResult = result;
+                                }}
+                        />,
+                );
+
+                await waitForCondition(() => hookResult !== null);
+                await hookResult!.handleChatMessage(
+                        'make the requested change',
+                );
+
+                t.truthy(architectCheckpointName);
+                t.true(architectCheckpointName!.length > 0);
+        } finally {
+                setToolRegistryGetter(() => ({}));
+                resetSessionCwd();
+                rmSync(tempProjectRoot, {recursive: true, force: true});
+        }
+});
+
+test('useChatHandler - persists a prose plan when write_plan was omitted', async t => {
+	let planComplete = 0;
+	let persistedContent = '';
+	let persistedSessionId: string | undefined;
+	let hookResult: ChatHandlerReturn | null = null;
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant' as const,
+							content: '# Plan\n\n1. Build it.',
+						},
+					},
+				],
+			};
+		},
+	};
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
+		getToolNames: () => ['write_plan'],
+		hasTool: (name: string) => name === 'write_plan',
+		getToolEntry: () => ({
+			name: 'write_plan',
+			approval: false,
+			readOnly: false,
+		}),
+		isReadOnly: () => false,
+		getToolFormatter: () => undefined,
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args, options) => {
+			persistedContent = args.content;
+			persistedSessionId = options?.sessionId;
+			return 'Plan saved';
+		},
+	}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager,
+					customCommandLoader,
+					developmentMode: 'plan',
+					ensureCurrentSessionId: () =>
+						'11111111-1111-4111-8111-111111111111',
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+		t.is(persistedContent, '# Plan\n\n1. Build it.');
+		t.is(persistedSessionId, '11111111-1111-4111-8111-111111111111');
+		t.is(planComplete, 1);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - allocates a session before starting a turn', async t => {
+	let ensureCalls = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				ensureCurrentSessionId: () => {
+					ensureCalls++;
+					return '11111111-1111-4111-8111-111111111111';
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('start a session');
+	t.is(ensureCalls, 1);
+});
+
+// Regression (reviewer feedback on #1172): a caller (the MCP prompt handler)
+// can supply prior-turn messages to splice into history ahead of the new user
+// message, preserving their roles instead of flattening a multi-message
+// prompt into one user turn.
+test('useChatHandler - handleChatMessage splices historyMessages ahead of the new user message', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	// The conversation loop calls setMessages again once the (mocked) assistant
+	// reply comes back, so only the FIRST call reflects what this fix actually
+	// changed: how the new user message and its preceding history get merged
+	// into the existing conversation before the round-trip starts.
+	let firstMessages: Message[] | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				setMessages: msgs => {
+					firstMessages ??= msgs;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage(
+		'real question',
+		undefined,
+		undefined,
+		[
+			{role: 'user', content: 'example input'},
+			{role: 'assistant', content: 'example output'},
+		],
+	);
+
+	t.deepEqual(
+		firstMessages?.map(m => ({role: m.role, content: m.content})),
+		[
+			{role: 'user', content: 'example input'},
+			{role: 'assistant', content: 'example output'},
+			{role: 'user', content: 'real question'},
+		],
+	);
 });
 
 // The signal must be scoped to plan mode — a normal-mode turn completing must
@@ -541,4 +933,172 @@ test('getBaseSystemPrompt - normal mode reuses cached prompt', t => {
 	);
 
 	t.is(result, 'cached-prompt');
+});
+
+test.serial(
+	'useChatHandler - toggling professional tone rebuilds the cached prompt',
+	async t => {
+		// The settings panel writes preferences straight to disk. Without the
+		// subscription the memoized base prompt would keep the old TONE state
+		// until the next mode or model switch.
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-tone-hook-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+		updateProfessionalTone(false);
+
+		try {
+			render(
+				<TestHookComponent
+					{...createMockProps({toolManager: createMockToolManager()})}
+				/>,
+			);
+
+			t.false(getLastBuiltPrompt().includes('## TONE'));
+
+			updateProfessionalTone(true);
+			await waitForCondition(() => getLastBuiltPrompt().includes('## TONE'));
+
+			t.true(getLastBuiltPrompt().includes('## TONE'));
+		} finally {
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test('useChatHandler - injects project context from memory finder', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const queuedComponents: React.ReactNode[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: 'ok',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	const props = createMockProps({
+		client,
+		toolManager: createMockToolManager(),
+		addToChatQueue: component => {
+			queuedComponents.push(component);
+		},
+		memoryFinder: {
+			findRelevantMemories: async (query, limit) => {
+				t.is(query, 'refactor auth');
+				t.is(limit, 8);
+				return [
+					{
+						id: 'memory-1',
+						content: 'Auth uses Clerk and avoids middleware.',
+						category: 'architecture',
+						timestamp: '2026-07-17T00:00:00.000Z',
+					},
+				];
+			},
+		},
+	});
+
+	const rendered = render(
+		<TestHookComponent
+			{...props}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+
+	t.true(sentMessages[0].content.includes('## Project Context'));
+	t.true(
+		sentMessages[0].content.includes(
+			'- Auth uses Clerk and avoids middleware.',
+		),
+	);
+	t.true(
+		queuedComponents.some(
+			component =>
+				React.isValidElement(component) &&
+				component.props.message === 'Recalling 1 project memory...',
+		),
+	);
+	rendered.unmount();
+});
+
+test('useChatHandler - does not accumulate project context across turns', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	const sentSystemPrompts: string[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentSystemPrompts.push(String(messages[0]?.content ?? ''));
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: 'ok',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	const props = createMockProps({
+		client,
+		toolManager: createMockToolManager(),
+		memoryFinder: {
+			findRelevantMemories: async query => {
+				if (query === 'refactor auth') {
+					return [
+						{
+							id: 'memory-1',
+							content: 'Auth uses Clerk and avoids middleware.',
+							category: 'architecture',
+							timestamp: '2026-07-17T00:00:00.000Z',
+						},
+					];
+				}
+				return [];
+			},
+		},
+	});
+
+	const rendered = render(
+		<TestHookComponent
+			{...props}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+	await hookResult!.handleChatMessage('unrelated question about docs');
+
+	t.true(sentSystemPrompts[0]?.includes('## Project Context'));
+	t.false(sentSystemPrompts[1]?.includes('## Project Context'));
+	rendered.unmount();
 });

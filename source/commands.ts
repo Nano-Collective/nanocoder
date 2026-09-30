@@ -37,6 +37,7 @@ class CommandRegistry {
 		const proxy: Command = {
 			name: entry.name,
 			description: entry.description,
+			progressLabel: entry.progressLabel,
 			handler: async (args, messages, metadata) => {
 				if (!resolved) {
 					resolved = await entry.load();
@@ -104,6 +105,7 @@ class CommandRegistry {
 			developmentMode?: import('@/types/core').DevelopmentMode;
 			lastApiUsage?: import('@/types/core').ApiUsageSnapshot | null;
 			apiCallHistory?: import('@/types/core').ApiCallRecord[];
+			sessionId?: string;
 		},
 	): Promise<void | string | React.ReactNode> {
 		const parts = input.trim().split(/\s+/);

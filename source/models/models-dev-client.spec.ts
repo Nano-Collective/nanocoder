@@ -445,6 +445,16 @@ test('getModelPricing - returns pricing for claude-3-opus (models.dev)', async t
 	t.true(pricing!.output >= 0);
 });
 
+test('getModelPricing - surfaces cache rates when models.dev publishes them', async t => {
+	// The cache-aware cost path prices reads/writes at their own rates and only
+	// falls back to the input rate when these are absent, so dropping them in
+	// the mapper would silently bill every cache hit at full price.
+	const pricing = await getModelPricing('claude-sonnet-4-5');
+	t.truthy(pricing);
+	t.is(typeof pricing!.cache_read, 'number');
+	t.true(pricing!.cache_read! < pricing!.input, 'cache reads are discounted');
+});
+
 test('getModelPricing - returns null for unknown model', async t => {
 	const pricing = await getModelPricing('unknown-model-12345');
 	t.is(pricing, null);

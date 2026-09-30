@@ -9,6 +9,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {
 	parseGitStatus,
+	execGit,
 	isGitAvailable,
 	isGhAvailable,
 	getCurrentBranchSync,
@@ -160,6 +161,28 @@ test('parseGitStatus ignores empty lines', t => {
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
 	t.is(result.unstaged.length, 1);
+});
+
+// ============================================================================
+// execGit Tests
+// ============================================================================
+
+// A `!` alias runs a shell command with git's environment and stdio, so
+// these observe exactly what a hook or credential helper would see.
+
+test('execGit disables terminal prompts', async t => {
+	const out = await execGit([
+		'-c',
+		'alias.envcheck=!printenv GIT_TERMINAL_PROMPT',
+		'envcheck',
+	]);
+	t.is(out, '0');
+});
+
+test('execGit closes stdin so a prompt cannot block', async t => {
+	// Hangs forever without the fix: `cat` waits for stdin that never closes.
+	const out = await execGit(['-c', 'alias.readstdin=!cat', 'readstdin']);
+	t.is(out, '');
 });
 
 // ============================================================================

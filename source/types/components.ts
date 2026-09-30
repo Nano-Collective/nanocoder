@@ -10,6 +10,12 @@ export interface AssistantMessageProps {
 	 * client-side token estimate of the message text.
 	 */
 	usage?: ResponseUsage;
+	/**
+	 * Whether to render the gray usage footer at all. Defaults to true;
+	 * set false by the `showUsageFooter` user preference, which drops the
+	 * footer line (both the provider-reported form and the estimate).
+	 */
+	showUsageFooter?: boolean;
 }
 
 export interface AssistantReasoningProps {
@@ -28,6 +34,13 @@ export interface ChatQueueProps {
 	 * to print into. Only a bounded tail of components is rendered.
 	 */
 	disableStatic?: boolean;
+	/**
+	 * Overrides the default fullscreen tail cap (see FULLSCREEN_TAIL_CAP in
+	 * chat-queue.tsx). ChatHistory derives this from terminal height via
+	 * computeFullscreenTailCap so the mounted tail tracks what can actually
+	 * be visible instead of a flat worst-case constant.
+	 */
+	fullscreenTailCap?: number;
 }
 
 export type Completion = {name: string; isCustom: boolean};

@@ -1,20 +1,29 @@
 import test from 'ava';
-import {resetSessionContextLimit, setSessionContextLimit} from '@/models/models-dev-client.js';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {
+	AGGRESSIVE_COMPACT_THRESHOLD,
+	applyTuneCompaction,
 	autoCompactSessionOverrides,
+	maybeAutoCompact,
 	performAutoCompact,
 	resetAutoCompactSession,
+	resolveAutoCompactSettings,
 	setAutoCompactEnabled,
 	setAutoCompactMode,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from './auto-compact.js';
+} from './auto-compact';
+import {COMPRESSION_CONSTANTS} from './message-compression';
 
 // Reset session overrides before each test
 test.beforeEach(() => {
 	resetAutoCompactSession();
+	resetSessionContextLimit();
 });
 
 // ==================== Session override enabled state ====================
@@ -46,24 +55,36 @@ test('setAutoCompactThreshold sets threshold value', t => {
 	t.is(autoCompactSessionOverrides.threshold, 75);
 });
 
-test('setAutoCompactThreshold clamps to minimum of 50', t => {
-	setAutoCompactThreshold(30);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold clamps to the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT - 20);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold clamps to maximum of 95', t => {
-	setAutoCompactThreshold(99);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold clamps to the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT + 4);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 50', t => {
-	setAutoCompactThreshold(50);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold handles the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 95', t => {
-	setAutoCompactThreshold(95);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold handles the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
 test('setAutoCompactThreshold sets threshold to null', t => {
@@ -115,6 +136,74 @@ test('resetAutoCompactSession resets all overrides to null', t => {
 	t.is(autoCompactSessionOverrides.enabled, null);
 	t.is(autoCompactSessionOverrides.threshold, null);
 	t.is(autoCompactSessionOverrides.mode, null);
+});
+
+// ==================== Tune aggressive compact layer ====================
+
+const baseConfig = {
+	enabled: true,
+	threshold: 70,
+	mode: 'conservative' as const,
+	strategy: 'llm' as const,
+};
+
+test('resolveAutoCompactSettings uses config when nothing overrides it', t => {
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, 70);
+	t.is(resolved.mode, 'conservative');
+	t.is(resolved.strategy, 'llm');
+	t.false(resolved.hasOverrides);
+});
+
+test('tune aggressive compact lowers threshold to the minimum and sets aggressive mode', t => {
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, AGGRESSIVE_COMPACT_THRESHOLD);
+	t.is(AGGRESSIVE_COMPACT_THRESHOLD, COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT);
+	t.is(resolved.mode, 'aggressive');
+	t.true(resolved.hasOverrides);
+});
+
+test('tune aggressive compact is ignored when tune is disabled', t => {
+	applyTuneCompaction({
+		enabled: false,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	t.is(resolveAutoCompactSettings(baseConfig).threshold, 70);
+});
+
+test('explicit /compact session overrides beat tune aggressive compact', t => {
+	setAutoCompactThreshold(85);
+	setAutoCompactMode('default');
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, 85);
+	t.is(resolved.mode, 'default');
+});
+
+test('turning tune aggressive compact off keeps a user threshold override', t => {
+	setAutoCompactThreshold(85);
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: false,
+	});
+	t.is(autoCompactSessionOverrides.threshold, 85);
+	t.is(resolveAutoCompactSettings(baseConfig).mode, 'conservative');
 });
 
 // ==================== Proxy compatibility ====================
@@ -457,6 +546,7 @@ test('performAutoCompact uses LLM client when strategy=llm and client provided',
 
 	t.truthy(result);
 	t.is(client.calls, 1, 'LLM was called once');
+	t.is(notifications[0], 'auto-compacting context...');
 	t.true(
 		notifications.some(n => n.includes('LLM summary')),
 		'notification mentions LLM path',
@@ -465,6 +555,41 @@ test('performAutoCompact uses LLM client when strategy=llm and client provided',
 		result!.some(m => (m.content || '').includes('<conversation-summary>')),
 		'output contains the synthetic summary message',
 	);
+});
+
+test('performAutoCompact notifies before the LLM summariser call', async t => {
+	setupAutoCompactEnv(100);
+
+	const order: string[] = [];
+	const messages: Message[] = [
+		{role: 'user', content: 'old context sentence. '.repeat(60)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const client = makeStubClient(() => {
+		order.push('chat');
+		return '## Context\ndid stuff';
+	});
+
+	await performAutoCompact(
+		messages,
+		{role: 'system', content: 'sys'},
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => order.push(n),
+		client,
+	);
+
+	t.is(order[0], 'auto-compacting context...');
+	t.is(order[1], 'chat');
 });
 
 test('performAutoCompact skips LLM when strategy=mechanical', async t => {
@@ -632,4 +757,209 @@ test('performAutoCompact honours contextWindow from the client provider config',
 		result,
 		'Compaction must trigger when client provider config supplies contextWindow',
 	);
+});
+
+test('maybeAutoCompact returns the same array when auto-compact is off', async t => {
+	setAutoCompactEnabled(false);
+
+	const messages: Message[] = [{role: 'user', content: 'hi'}];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+	);
+
+	t.is(result, messages);
+});
+
+test('maybeAutoCompact returns history without a system role when over threshold', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: 'recent question'},
+	];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+	);
+
+	t.not(result, messages);
+	t.false(result.some(msg => msg.role === 'system'));
+	t.true(
+		result.some(
+			msg =>
+				typeof msg.content === 'string' && msg.content.length < oldContent.length,
+		),
+		'mechanical compact must shrink an earlier oversized user turn',
+	);
+});
+
+test('maybeAutoCompact skips mechanical fallback when aborted during LLM summarise', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('llm');
+	setAutoCompactThreshold(50);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: 'recent question'},
+	];
+	const controller = new AbortController();
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+		chat: async (
+			_messages: Message[],
+			_tools?: unknown,
+			_callbacks?: unknown,
+			signal?: AbortSignal,
+		) => {
+			controller.abort();
+			if (signal?.aborted) {
+				throw new Error('aborted');
+			}
+			return {choices: [{message: {content: 'summary'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+		undefined,
+		{signal: controller.signal},
+	);
+
+	t.is(result, messages);
+});
+
+test('maybeAutoCompact returns the same array when the abort signal is already aborted', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old context sentence. '.repeat(60)},
+	];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+	const signal = AbortSignal.abort();
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+		undefined,
+		{signal},
+	);
+
+	t.is(result, messages);
+});
+
+test('maybeAutoCompact leaves history unchanged when performAutoCompact throws', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactEnabled(true);
+
+	const messages: Message[] = [{role: 'user', content: 'hi'}];
+	const client = {
+		getCurrentModel: () => {
+			throw new Error('boom');
+		},
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+	);
+
+	t.is(result, messages);
+});
+
+test('maybeAutoCompact omits native tools from the gate when toolsDisabled', async t => {
+	setupAutoCompactEnv(1000);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const nativeTools = {
+		big_tool: tool({
+			description: Array.from({length: 2000}, (_, i) => `param${i}`).join(' '),
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+	};
+	const messages: Message[] = [
+		{role: 'user', content: 'Tell me a story. '.repeat(10)},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+
+	const without = await maybeAutoCompact(messages, systemMessage, client);
+	t.is(without, messages);
+
+	const withTools = await maybeAutoCompact(
+		messages,
+		systemMessage,
+		client,
+		nativeTools,
+	);
+	t.not(withTools, messages);
+});
+
+test('maybeAutoCompact uses caller-supplied provider and model over the client', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'ack'},
+		{role: 'user', content: 'recent question'},
+	];
+	// A client that cannot report its provider/model — the TUI supplies both
+	// from app state, so compaction must still run rather than being swallowed
+	// by the catch in maybeAutoCompact.
+	const client = {} as unknown as LLMClient;
+
+	const result = await maybeAutoCompact(
+		messages,
+		{role: 'system', content: 'You are a helpful assistant.'},
+		client,
+		undefined,
+		{provider: 'openai', model: 'gpt-4'},
+	);
+
+	t.not(result, messages, 'compaction must run on the caller-supplied model');
 });

@@ -51,19 +51,27 @@ const sendPlan = (panel: any) =>
 const rowsOf = (card: StubElement): string[] =>
 	card.querySelectorAll('.tool-label').map((row: StubElement) => row.textContent);
 
-const isOpen = (card: StubElement) => card.children[1].style.display !== 'none';
+const isOpen = (summary: StubElement) =>
+	summary.children[1].style.display !== 'none';
 
-const collapse = (card: StubElement) => card.children[0].onclick();
+const clickHeader = (summary: StubElement) => summary.children[0].onclick();
 
-/** What the transcript holds, in order, one word per element. */
-const transcript = (panel: any): string[] =>
-	panel.container.children.map((child: StubElement) => {
+/**
+ * The work the turn's summary holds, in order, one word per activity. The
+ * agent's own prose is not in here: it stays outside the summary so a
+ * collapsed box can never hide the answer.
+ */
+const work = (panel: any): string[] => {
+	const summary = panel.summaries()[0];
+	if (!summary) return [];
+	return summary.children[1].children.map((child: StubElement) => {
 		if (child.className.includes('tool-aggregator')) return 'tools';
-		if (child.className.includes('thought-aggregator')) return 'thoughts';
+		if (child.className.includes('work-summary-thought')) return 'thoughts';
 		if (child.className.includes('tool-card')) return 'edit';
 		if (String(child.id).startsWith('plan-card')) return 'plan';
-		return 'text';
+		return 'unknown';
 	});
+};
 
 // ============================================================================
 // A finished tool phase closes when anything else is inserted (#856)
@@ -83,7 +91,7 @@ test('a thought between two tool phases starts a fresh card', t => {
 	t.is(cards.length, 2);
 	t.deepEqual(rowsOf(cards[0]), ['Reading first.ts']);
 	t.deepEqual(rowsOf(cards[1]), ['Reading second.ts']);
-	t.deepEqual(transcript(panel), ['tools', 'thoughts', 'tools']);
+	t.deepEqual(work(panel), ['tools', 'thoughts', 'tools']);
 });
 
 test('reply text between two tool phases starts a fresh card', t => {
@@ -95,7 +103,10 @@ test('reply text between two tool phases starts a fresh card', t => {
 	const cards = panel.aggregators();
 	t.is(cards.length, 2);
 	t.deepEqual(rowsOf(cards[1]), ['Reading second.ts']);
-	t.deepEqual(transcript(panel), ['tools', 'text', 'tools']);
+	// The reply is not part of the work, so it is not inside the summary - but
+	// it still ends the run of tools before it.
+	t.deepEqual(work(panel), ['tools', 'tools']);
+	t.is(panel.container.querySelectorAll('.agent-markdown').length, 1);
 });
 
 test('an edit card between two tool phases starts a fresh card', t => {
@@ -109,7 +120,7 @@ test('an edit card between two tool phases starts a fresh card', t => {
 	// The read after the edit must not fall back into the card above it.
 	t.deepEqual(rowsOf(cards[0]), ['Reading first.ts']);
 	t.deepEqual(rowsOf(cards[1]), ['Reading second.ts']);
-	t.deepEqual(transcript(panel), ['tools', 'edit', 'tools']);
+	t.deepEqual(work(panel), ['tools', 'edit', 'tools']);
 });
 
 test('a plan card between two tool phases starts a fresh card', t => {
@@ -121,7 +132,7 @@ test('a plan card between two tool phases starts a fresh card', t => {
 	const cards = panel.aggregators();
 	t.is(cards.length, 2);
 	t.deepEqual(rowsOf(cards[1]), ['Reading second.ts']);
-	t.deepEqual(transcript(panel), ['tools', 'plan', 'tools']);
+	t.deepEqual(work(panel), ['tools', 'plan', 'tools']);
 });
 
 test('an uninterrupted run of tools stays in one card', t => {
@@ -134,13 +145,17 @@ test('an uninterrupted run of tools stays in one card', t => {
 	t.deepEqual(rowsOf(cards[0]), ['Reading first.ts', 'Reading second.ts']);
 });
 
-test('a finished phase collapses once the agent moves on', t => {
+test('each card names how many tools it ran', t => {
 	const panel = createPanel();
-	runTool(panel, 'r1');
-	t.true(isOpen(panel.aggregators()[0]), 'stays open while it is the phase');
+	runTool(panel, 'r1', 'first.ts');
+	t.is(panel.aggregators()[0].children[0].children[0].textContent, 'Tools (1)');
+
+	runTool(panel, 'r2', 'second.ts');
+	t.is(panel.aggregators()[0].children[0].children[0].textContent, 'Tools (2)');
 
 	panel.text('Done looking.');
-	t.false(isOpen(panel.aggregators()[0]));
+	runTool(panel, 'r3', 'third.ts');
+	t.is(panel.aggregators()[1].children[0].children[0].textContent, 'Tools (1)');
 });
 
 // ============================================================================
@@ -151,13 +166,14 @@ test('a finished phase collapses once the agent moves on', t => {
 // first spinning forever.
 // ============================================================================
 
-test('a running tool holds its card open across an interruption', t => {
+test('a running tool holds its card across an interruption', t => {
 	const panel = createPanel();
 	startTool(panel, 'r1');
 	panel.thought('while that runs');
 
 	t.is(panel.aggregators().length, 1);
-	t.true(isOpen(panel.aggregators()[0]));
+	// The summary stays open too, so the running tool is still on screen.
+	t.true(isOpen(panel.summaries()[0]));
 });
 
 test('a running tool interrupted mid-flight is not duplicated', t => {
@@ -201,31 +217,39 @@ test('a phase closes once its last tool finishes', t => {
 });
 
 // ============================================================================
-// A manual collapse survives the card being closed
+// Collapse belongs to the turn's summary, not to each card
 //
-// close() collapsed by calling toggle(false), but toggle ignored its argument
-// and simply flipped, so closing a card the user had already collapsed
-// re-expanded it.
+// Nesting a collapsible card inside a collapsible summary gave the user two
+// headers to fight with to reach one tool, so the cards no longer toggle.
 // ============================================================================
 
-test('closing does not re-expand a card the user collapsed', t => {
+test('the tool cards have no collapse control of their own', t => {
 	const panel = createPanel();
 	runTool(panel, 'r1');
 
-	collapse(panel.aggregators()[0]);
-	t.false(isOpen(panel.aggregators()[0]));
-
-	panel.text('Moving on.');
-	t.false(isOpen(panel.aggregators()[0]), 'stays as the user left it');
+	t.is(panel.aggregators()[0].children[0].onclick, undefined);
 });
 
-test('a collapsed card can still be reopened by hand', t => {
+test('ending the turn does not re-expand a summary the user collapsed', t => {
 	const panel = createPanel();
+	panel.userMessage('look at this');
 	runTool(panel, 'r1');
 
-	collapse(panel.aggregators()[0]);
-	panel.text('Moving on.');
-	collapse(panel.aggregators()[0]);
+	clickHeader(panel.summaries()[0]);
+	t.false(isOpen(panel.summaries()[0]));
 
-	t.true(isOpen(panel.aggregators()[0]));
+	panel.finish();
+	t.false(isOpen(panel.summaries()[0]), 'stays as the user left it');
+});
+
+test('ending the turn does not collapse a summary the user opened', t => {
+	const panel = createPanel();
+	panel.userMessage('look at this');
+	runTool(panel, 'r1');
+
+	clickHeader(panel.summaries()[0]);
+	clickHeader(panel.summaries()[0]);
+
+	panel.finish();
+	t.true(isOpen(panel.summaries()[0]));
 });

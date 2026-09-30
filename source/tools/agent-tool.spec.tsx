@@ -155,6 +155,38 @@ test.serial('startAgentExecution returns promise that resolves', async t => {
 	t.truthy(result.error);
 });
 
+test.serial('startAgentExecution forwards the parent execution context', async t => {
+	let receivedArgs: unknown[] = [];
+	setAgentToolExecutor({
+		execute: async (...args: unknown[]) => {
+			receivedArgs = args;
+			return {
+				subagentName: 'explore',
+				output: 'done',
+				success: true,
+				executionTimeMs: 1,
+			};
+		},
+	} as unknown as SubagentExecutor);
+	const abortController = new AbortController();
+
+	const {promise} = startAgentExecution(
+		{subagent_type: 'explore', description: 'Test'},
+		{
+			abortSignal: abortController.signal,
+			sessionId: '11111111-1111-4111-8111-111111111111',
+			workingDirectory: '/workspace',
+		},
+	);
+	await promise;
+
+	t.is(receivedArgs[1], abortController.signal);
+	t.deepEqual(receivedArgs[4], {
+		sessionId: '11111111-1111-4111-8111-111111111111',
+		workingDirectory: '/workspace',
+	});
+});
+
 // ============================================================================
 // ReadOnly Tests
 // ============================================================================

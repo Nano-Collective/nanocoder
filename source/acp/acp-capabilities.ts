@@ -6,13 +6,20 @@ import type {
 import {PROTOCOL_VERSION} from '@agentclientprotocol/sdk';
 import type {DevelopmentMode} from '@/types/core';
 
-const ACP_MODES: SessionModeId[] = ['normal', 'auto-accept', 'yolo', 'plan'];
+const ACP_MODES: SessionModeId[] = [
+	'normal',
+	'auto-accept',
+	'yolo',
+	'plan',
+	'architect',
+];
 
 const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	normal: 'normal',
 	'auto-accept': 'auto-accept',
 	yolo: 'yolo',
 	plan: 'plan',
+	architect: 'architect',
 };
 
 export function getAgentCapabilities(): AgentCapabilities {

@@ -9,6 +9,8 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {readFileTool} from '../read-file.js';
+import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
 // ============================================================================
 // Test Helpers
@@ -837,6 +839,30 @@ test('string_replace formatter: renders preview with basic replacement', async t
 	t.regex(output!, /Replacing 1 line/);
 });
 
+test('string_replace formatter: says when the line cap hides edits', async t => {
+	const oldLines = Array.from({length: 25}, (_, i) => `old line ${i + 1}`);
+	const filePath = await createTestFile(
+		'long-replace.txt',
+		[...oldLines, 'tail 1', 'tail 2', 'tail 3'].join('\n'),
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: oldLines.join('\n'),
+		new_str: Array.from({length: 25}, (_, i) => `NEW_${i + 1}`).join('\n'),
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	t.regex(lastFrame()!, /more lines, \d+ changed/);
+});
+
 test('string_replace formatter: shows normalized indentation for deeply indented code', async t => {
 	const filePath = await createTestFile(
 		'nested.tsx',
@@ -1029,3 +1055,207 @@ test('string_replace formatter: normalizes tabs to 2 spaces', async t => {
 	t.regex(output!, /string_replace/);
 	t.regex(output!, /Path:/);
 });
+
+// ============================================================================
+// Literal Replacement Tests
+// ============================================================================
+
+// `$$`, `$&`, "$`" and `$'` are ordinary characters in shell scripts,
+// Makefiles and CI YAML, but they are substitution tokens to
+// String.prototype.replace. The replacement must land byte for byte.
+const DOLLAR_TOKENS = 'echo "pid=$$ match=$& pre=$` post=$\'"';
+
+test('string_replace: writes $ substitution tokens literally', async t => {
+	const filePath = await createTestFile(
+		'dollars.sh',
+		'#!/bin/sh\necho "old"\nexit 0\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'echo "old"',
+		new_str: DOLLAR_TOKENS,
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		`#!/bin/sh\n${DOLLAR_TOKENS}\nexit 0\n`,
+	);
+});
+
+test('string_replace: $` and $\' do not splice the rest of the file in', async t => {
+	const filePath = await createTestFile(
+		'halves.txt',
+		'BEFORE\nTARGET\nAFTER\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'TARGET',
+		new_str: "$`$'",
+	});
+
+	const newContent = await readFile(filePath, 'utf-8');
+	t.is(newContent, "BEFORE\n$`$'\nAFTER\n");
+	t.false(newContent.includes('BEFORE\nBEFORE'));
+});
+
+test('string_replace: $ tokens in old_str still match and are removable', async t => {
+	const filePath = await createTestFile(
+		'makefile',
+		'all:\n\t@echo $$HOME $(shell pwd)\n',
+	);
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: '@echo $$HOME $(shell pwd)',
+		new_str: '@echo $$PWD',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'all:\n\t@echo $$PWD\n');
+});
+
+// ============================================================================
+// Derived-content Guard Tests (PDF/DOCX)
+// ============================================================================
+
+test('string_replace: refuses a .pdf and leaves the document untouched', async t => {
+	const pdfBytes = '%PDF-1.4 fake document bytes';
+	const filePath = await createTestFile('doc.pdf', pdfBytes);
+
+	await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'wordCount',
+			new_str: 'pageCount',
+		}),
+		{message: /markdown transcript/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), pdfBytes);
+});
+
+test('string_replace: the reported issue repro leaves the PDF intact', async t => {
+	// Verbatim reproduction from #1058: read the PDF, then replace a token that
+	// exists only in the transcript the read returned. Before the fix this
+	// reported success and left 50 bytes of markdown where the document was.
+	const filePath = join(testDir, 'doc.pdf');
+	const originalBytes = buildMinimalPdf('Hello World');
+	await writeFile(filePath, originalBytes);
+
+	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+	const transcript = (await (readFileTool.tool as any).execute(
+		{path: filePath},
+		{toolCallId: 'test', messages: []},
+	)) as string;
+
+	// The read really did hand back a transcript, so the premise holds.
+	t.regex(transcript, /wordCount/);
+	t.false(transcript.startsWith('%PDF-'));
+
+	await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'wordCount',
+			new_str: 'pageCount',
+		}),
+		{message: /markdown transcript/},
+	);
+
+	const afterBytes = await readFile(filePath);
+	t.deepEqual(afterBytes, originalBytes);
+	t.is(afterBytes.subarray(0, 5).toString('latin1'), '%PDF-');
+});
+
+test('string_replace validator: refuses a .docx path', async t => {
+	await createTestFile('spec.docx', 'PK fake docx bytes');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('spec.docx');
+
+		const result = await stringReplaceTool.validator({
+			path: 'spec.docx',
+			old_str: 'fake',
+			new_str: 'real',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /markdown transcript/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace: numbered group tokens stay literal', async t => {
+	const filePath = await createTestFile('groups.sh', 'run "old"\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'run "old"',
+		new_str: 'printf "%s\n" "$1" "$2" "$<" "$@"',
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'printf "%s\n" "$1" "$2" "$<" "$@"\n',
+	);
+});
+
+test('string_replace: formatter renders description when provided', async t => {
+	const filePath = await createTestFile(
+		'desc-test.txt',
+		'line one\nline two\nline three\n',
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'line two',
+		new_str: 'line 2',
+		description: 'Replace two as 2 as user requests using digits for numbers.',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Replace two as 2 as user requests/);
+});
+
+test('string_replace: formatter does not render description when omitted', async t => {
+	const filePath = await createTestFile(
+		'desc-test-omitted.txt',
+		'line one\nline two\nline three\n',
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'line two',
+		new_str: 'line 2',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Description:/);
+});
+

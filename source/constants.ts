@@ -38,8 +38,18 @@ export const MAX_FILE_READ_RETRIES = 3;
 // === SESSION NAMES ===
 export const MAX_SESSION_NAME_LENGTH = 100;
 
+/**
+ * Opening of the synthetic `role: 'user'` turn that carries `!bash` output to
+ * the model. It is protocol, not a request, so title derivation skips it -
+ * shared with the builder so the two cannot drift.
+ */
+export const BASH_OUTPUT_PREFIX = 'Bash command output:';
+
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
+export const MAX_TIMELINE_ENTRIES = 50;
+export const MAX_TIMELINE_SESSIONS = 20;
+export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
@@ -79,9 +89,40 @@ export const TABLE_COLUMN_MIN_WIDTH = 10;
 export const WIZARD_ROW_CHROME_CHARS = 10;
 export const MIN_PATH_BUDGET_CHARS = 10;
 
+// Short, discoverable hints shown on the welcome screen and by `/tip`.
+// Keep these aligned with the documented command and keyboard behaviour.
+export const TIPS = [
+	'Press Ctrl+J to add a new line without sending your prompt.',
+	'Press Shift+Tab to cycle between development modes.',
+	'Press Ctrl+O to toggle compact tool output.',
+	'Run /expand to see one tool result in full.',
+	'Press Ctrl+R to toggle expanded reasoning traces.',
+	'Use @ followed by a file path to add that file to context.',
+	'Use /explorer to browse project files and add them to context.',
+	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /compact --preview to inspect a context compression before applying it.',
+	'Run /copy to copy the last assistant response to your clipboard.',
+	'Run /usage to see how much of the current model context is in use.',
+	'Run /model to switch providers or models without restarting your session.',
+	'Paste an image with Ctrl+V when your selected model supports vision.',
+] as const;
+
 // === TOKEN THRESHOLDS (percentages - useChatHandler) ===
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;
 export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
+
+// === TOOL APPROVAL ===
+// Non-interactive runs can't prompt, so a tool needing approval ends the run.
+// The notice is display-only chrome, but `isNonInteractiveModeComplete` detects
+// it by content to pick exit reason "tool-approval-required" — share the prefix
+// so a reword can't silently break that exit path.
+export const TOOL_APPROVAL_REQUIRED_PREFIX = 'Tool approval required for: ';
+
+// Canonical string literal for the tool-approval-required outcome/exit-reason.
+// Single source of truth — use this constant instead of a bare string in both
+// PlainConversationOutcome.kind and NonInteractiveExitReason so that
+// comparisons and grep patterns never diverge.
+export const TOOL_APPROVAL_REQUIRED_KIND = 'tool-approval-required';
 
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
@@ -90,6 +131,8 @@ export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // reads and search results remain useful while unbounded tools stay bounded.
 export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
+// Rows of tool output shown in the transcript; `/expand <n>` prints the rest.
+export const TOOL_OUTPUT_DISPLAY_LINES = 20;
 
 // === DELAYS ===
 export const DELAY_COMMAND_COMPLETE_MS = 100;
@@ -97,7 +140,6 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
-export const BASH_OUTPUT_DISPLAY_LINES = 20;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
@@ -126,24 +168,37 @@ export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
-// Cap how many consecutive empty assistant turns we'll auto-nudge through
-// before surfacing an error. Some models (notably GPT-5 reasoning models)
-// can produce reasoning-only turns; one or two retries usually clears it,
-// but unbounded recursion would loop forever.
+// Default for `nanocoder.retries.maxEmptyTurns` (see source/config/index.ts):
+// how many consecutive empty assistant turns we'll auto-nudge through before
+// surfacing an error. Some models (notably GPT-5 reasoning models) can produce
+// reasoning-only turns; one or two retries usually clears it, but unbounded
+// recursion would loop forever.
 export const MAX_EMPTY_TURNS = 2;
 // After hitting the empty-turn cap, mechanically compact the context and
 // retry. This many compact-and-retry cycles are allowed before giving up.
 export const MAX_COMPACT_RETRIES = 1;
-// Cap how many consecutive malformed-XML self-correction recursions we'll
-// attempt before surfacing an error. Without this, a model stuck producing
-// bad XML loops async and appends two messages per iteration until Node's
-// heap exhausts (~1.4GB).
+// Default for `nanocoder.retries.maxMalformedRetries` (see
+// source/config/index.ts): how many consecutive malformed-tool-call
+// self-correction recursions we'll attempt before surfacing an error. Without
+// this, a model stuck producing bad XML loops async and appends two messages
+// per iteration until Node's heap exhausts (~1.4GB).
 export const MAX_MALFORMED_RETRIES = 2;
-// Cap how many times the model may emit the exact same tool call(s) on
-// consecutive turns. Small models can get stuck re-issuing an identical failing
-// call forever; once the same signature repeats this many times in a row we
-// stop and surface an actionable error instead of looping.
+// Default for `nanocoder.retries.maxRepeatedToolCalls` (see
+// source/config/index.ts): how many times the model may emit the exact same
+// tool call(s) on consecutive turns. Small models can get stuck re-issuing an
+// identical failing call forever. Once the same signature repeats this many
+// times in a row, interactive sessions pause and ask the user whether to stop
+// or allow another window; non-interactive and headless runs, which have nobody
+// to ask, stop with an actionable error.
 export const MAX_REPEATED_TOOL_CALLS = 3;
+// Default for `nanocoder.retries.maxTruncatedTurns` (see
+// source/config/index.ts): how many consecutive content-only turns cut off at
+// the provider's output-token limit we'll ask the model to continue through
+// before giving up. A truncated turn carries no tool calls, so without this the
+// headless loop reads it as "the model finished talking" and returns success
+// with whatever fragment arrived — the failure mode that silently produced no
+// output at all in runs whose entire deliverable was a tool call.
+export const MAX_TRUNCATED_TURNS = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

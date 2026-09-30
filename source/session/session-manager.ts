@@ -1,14 +1,19 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
-import {getAppDataPath} from '@/config/paths';
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {isValidSessionId} from '@/session/session-id';
+import {getSessionsDirectory} from '@/session/session-paths';
+import {
+	isValidSession,
+	isValidSessionMetadata,
+} from '@/session/session-validation';
 import type {Message} from '@/types/core';
-
-/** UUID v4 pattern for session ID validation (prevents path traversal) */
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface Session {
 	id: string;
@@ -23,6 +28,9 @@ export interface Session {
 	/** True once a user has explicitly renamed this session, so autosave's
 	 * auto-derived title (from the latest message) stops overwriting it. */
 	titleManuallySet?: boolean;
+	/** True once the background titler has named this session, so the
+	 * heuristic title stops overwriting it and we never re-generate. */
+	titleGenerated?: boolean;
 }
 
 export interface SessionMetadata {
@@ -35,33 +43,7 @@ export interface SessionMetadata {
 	model: string;
 	workingDirectory: string;
 	titleManuallySet?: boolean;
-}
-
-function isValidSessionId(id: string): boolean {
-	return SESSION_ID_PATTERN.test(id);
-}
-
-function isRecord(obj: unknown): obj is Record<string, unknown> {
-	return typeof obj === 'object' && obj !== null && !Array.isArray(obj);
-}
-
-function isValidSessionMetadata(obj: unknown): obj is SessionMetadata {
-	if (!isRecord(obj)) return false;
-	return (
-		typeof obj.id === 'string' &&
-		typeof obj.title === 'string' &&
-		typeof obj.createdAt === 'string' &&
-		typeof obj.lastAccessedAt === 'string' &&
-		typeof obj.messageCount === 'number' &&
-		typeof obj.provider === 'string' &&
-		typeof obj.model === 'string' &&
-		typeof obj.workingDirectory === 'string'
-	);
-}
-
-function isValidSession(obj: unknown): obj is Session {
-	if (!isRecord(obj)) return false;
-	return isValidSessionMetadata(obj) && Array.isArray(obj.messages);
+	titleGenerated?: boolean;
 }
 
 /** Write data to a temp file then atomically rename into place. */
@@ -98,7 +80,10 @@ export class SessionManager {
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
 
-	constructor(sessionsDir?: string) {
+	constructor(
+		sessionsDir?: string,
+		private readonly artifacts: ArtifactManager = artifactManager,
+	) {
 		this.overrideDir = sessionsDir;
 	}
 
@@ -109,29 +94,7 @@ export class SessionManager {
 			return;
 		}
 
-		const config = getAppConfig();
-		const sessionConfig = config.sessions;
-		const configuredDir = sessionConfig?.directory;
-
-		if (configuredDir) {
-			// User explicitly configured a directory — expand tilde
-			let sessionDirPath = configuredDir;
-			if (sessionDirPath === '~') {
-				sessionDirPath = path.resolve(
-					process.env.HOME || process.env.USERPROFILE || '.',
-				);
-			} else if (sessionDirPath.startsWith('~/')) {
-				sessionDirPath = path.join(
-					process.env.HOME || process.env.USERPROFILE || '.',
-					sessionDirPath.slice(2),
-				);
-			}
-			this.sessionsDir = sessionDirPath;
-		} else {
-			// Default: use platform-aware app data path
-			this.sessionsDir = path.join(getAppDataPath(), 'sessions');
-		}
-
+		this.sessionsDir = getSessionsDirectory(getAppConfig().sessions?.directory);
 		this.sessionsIndexPath = path.join(this.sessionsDir, 'sessions.json');
 	}
 
@@ -164,9 +127,17 @@ export class SessionManager {
 	}
 
 	async createSession(
-		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
+		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'> & {
+			id?: string;
+		},
 	): Promise<Session> {
-		const sessionId = crypto.randomUUID();
+		// A caller-supplied id is used verbatim as a path segment, so validate it
+		// rather than trusting it. Anything unexpected falls back to a fresh id
+		// instead of reaching path.join().
+		const sessionId =
+			sessionData.id && isValidSessionId(sessionData.id)
+				? sessionData.id
+				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -217,6 +188,7 @@ export class SessionManager {
 				model: session.model,
 				workingDirectory: session.workingDirectory,
 				titleManuallySet: session.titleManuallySet,
+				titleGenerated: session.titleGenerated,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -279,6 +251,7 @@ export class SessionManager {
 							model: parsed.model,
 							workingDirectory: parsed.workingDirectory,
 							titleManuallySet: parsed.titleManuallySet,
+							titleGenerated: parsed.titleGenerated,
 						});
 					}
 				} catch (_fileError) {
@@ -298,6 +271,33 @@ export class SessionManager {
 			return metadata;
 		} catch (_error) {
 			return [];
+		}
+	}
+
+	/**
+	 * Delete artifact directories with no surviving session.
+	 *
+	 * Runs at startup regardless of the autosave setting. With autosave off no
+	 * session file is ever written, so nothing else would ever reclaim these
+	 * directories; with autosave on, every `/clear` retires a session id and
+	 * only the persisted ones are kept.
+	 *
+	 * Best-effort: a missing or unreadable session index means "keep nothing
+	 * known", and any failure is swallowed — reclaiming disk must never block
+	 * or crash startup.
+	 */
+	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
+		try {
+			let known: string[] = [];
+			try {
+				known = (await this.readIndex()).map(session => session.id);
+			} catch {
+				known = [];
+			}
+			if (liveSessionId) known.push(liveSessionId);
+			await this.artifacts.cleanupOrphanedSessions(known);
+		} catch {
+			// Never let artifact housekeeping break startup.
 		}
 	}
 
@@ -398,6 +398,8 @@ export class SessionManager {
 				0o600,
 			);
 		});
+
+		await this.artifacts.deleteSessionArtifacts(sessionId);
 	}
 
 	getSessionDirectory(): string {
@@ -460,6 +462,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}
@@ -501,6 +504,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}

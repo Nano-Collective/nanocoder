@@ -30,6 +30,21 @@ test('NanocoderAcpClient - permission flow', async (t) => {
 	t.false(client.hasPendingPermissions(), 'Pending permissions should be cleared');
 });
 
+test('NanocoderAcpClient - forwards background title notifications', async (t) => {
+	const client = makeClient({});
+	let notified = false;
+	client.onSessionTitleChanged = () => {
+		notified = true;
+	};
+
+	await client.handleExtNotification('_nanocoder/sessionTitleChanged', {
+		sessionId: 'session-1',
+		title: 'Updated title',
+	});
+
+	t.true(notified);
+});
+
 function makeClient(connection: unknown) {
 	const outputChannel = { appendLine: () => {} } as any;
 	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
@@ -100,9 +115,10 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	// Cancel mid-flight, then the agent tears the stream down and prompt rejects.
 	await client.cancel();
 	rejectPrompt(new Error('Operation was cancelled'));
-	await promptPromise;
+	const cancelledResult = await promptPromise;
 
 	t.is(shownError, undefined, 'Cancelling is not a failure the user needs to be told about');
+	t.is(cancelledResult?.stopReason, 'cancelled', 'The webview needs the cancelled terminal state');
 
 	// The flag must not leak into the next turn, or a real failure goes unreported.
 	rejectPrompt = () => {};
@@ -113,13 +129,14 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	t.regex(shownError ?? '', /RequestError/, 'A genuine failure must still surface');
 });
 
+
 test('NanocoderAcpClient - reconnecting clears permissions left by the dead process', async (t) => {
-	const outputChannel = { appendLine: () => {} } as any;
+	const outputChannel = {appendLine: () => {}} as any;
 	const stateManager = new AcpStateManager();
 	const client = new NanocoderAcpClient(outputChannel, stateManager);
 
 	const requestPromise = client.handlePermissionRequest({
-		toolCall: { toolCallId: 'call_456', name: 'test_tool', arguments: {} },
+		toolCall: {toolCallId: 'call_456', name: 'test_tool', arguments: {}},
 	});
 
 	client.setConnection({} as any);
@@ -127,4 +144,106 @@ test('NanocoderAcpClient - reconnecting clears permissions left by the dead proc
 	const result = await requestPromise;
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions());
+});
+test('NanocoderAcpClient - concurrent getOrCreateSession calls share a single newSession', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	let newSessionCalls = 0;
+	let releaseNewSession!: (value: {sessionId: string; modes?: any; configOptions?: any; _meta?: any}) => void;
+	client.setConnection({
+		newSession: () => {
+			newSessionCalls++;
+			return new Promise<any>(resolve => {
+				releaseNewSession = resolve;
+			});
+		},
+	} as any);
+
+	const a = client.getOrCreateSession('/cwd');
+	const b = client.getOrCreateSession('/cwd');
+	const c = client.getOrCreateSession('/cwd');
+
+	t.is(
+		newSessionCalls,
+		1,
+		'overlapping getOrCreateSession() callers must coalesce into a single newSession() call against the shared connection',
+	);
+
+	releaseNewSession({sessionId: 'session-1'});
+	const [sa, sb, sc] = await Promise.all([a, b, c]);
+
+	t.is(sa, 'session-1', 'first caller resolves with the session id');
+	t.is(sb, 'session-1', 'second caller resolves with the same session id');
+	t.is(sc, 'session-1', 'third caller resolves with the same session id');
+	t.is((client as any)._pendingSession, null, 'pending session is cleared after resolution so the next call is a fresh attempt');
+});
+
+test('NanocoderAcpClient - a rejected newSession clears _pendingSession so the next call retries', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	let newSessionCalls = 0;
+	client.setConnection({
+		newSession: () => {
+			newSessionCalls++;
+			return Promise.reject(new Error('backend down'));
+		},
+	} as any);
+
+	// Overlapping callers must share the rejected promise - none of them should
+	// spin up their own newSession retry while the first one is still in flight.
+	const a = client.getOrCreateSession('/cwd');
+	const b = client.getOrCreateSession('/cwd');
+	const c = client.getOrCreateSession('/cwd');
+
+	t.is(newSessionCalls, 1, 'overlapping callers must share a single in-flight newSession even when it will reject');
+
+	const [ra, rb, rc] = await Promise.all([a, b, c]);
+
+	t.is(ra, undefined, 'first caller resolves with undefined on rejection');
+	t.is(rb, undefined, 'second caller resolves with undefined on rejection');
+	t.is(rc, undefined, 'third caller resolves with undefined on rejection');
+	t.is(
+		(client as any)._pendingSession,
+		null,
+		'_pendingSession is cleared in the finally block even when the promise rejects',
+	);
+	t.is((client as any)._sessionId, undefined, '_sessionId must not be set when newSession rejects');
+
+	// The regression the finally block is guarding against: a second call after
+	// rejection must issue a fresh newSession, not reuse the cached rejected
+	// promise (which would make every subsequent prompt fail forever).
+	const next = await client.getOrCreateSession('/cwd');
+	t.is(newSessionCalls, 2, 'a follow-up call after rejection must issue a fresh newSession, proving finally cleared the cache');
+	t.is(next, undefined, 'follow-up call still resolves to undefined on rejection, but only because it actually tried');
+});
+test('NanocoderAcpClient - failed resumeSession does not leave a stale _sessionId', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	let toasts = 0;
+	(vscode.window as any).showErrorMessage = () => {
+		toasts++;
+		return Promise.resolve(undefined);
+	};
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session not found')),
+	} as any);
+
+	await client.resumeSession('session-bogus');
+
+	t.is(
+		(client as any)._sessionId,
+		undefined,
+		'_sessionId must not be set when resumeSession throws; otherwise getOrCreateSession returns it and every subsequent prompt hangs',
+	);
+	t.is(toasts, 1, 'a real failure must still surface as an error toast');
 });

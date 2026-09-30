@@ -1,7 +1,4 @@
-import {readFile} from 'node:fs/promises';
 import net from 'node:net';
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
@@ -16,14 +13,15 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
+import {getConfiguredHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
+import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {getPackageVersion} from '@/utils/package-version';
 import {isLocalURL} from '@/utils/url-utils';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 
 type Section<T> = {status: 'ok'; data: T} | {status: 'error'; error: string};
@@ -46,7 +44,15 @@ export interface DoctorMcpServer {
 	name: string;
 	transport: string;
 	toolCount: number;
+	resourceCount: number;
+	promptCount: number;
 	url?: string;
+}
+
+export interface DoctorHook {
+	event: HookEvent;
+	label: string;
+	matchTools?: string[];
 }
 
 export interface DoctorReport {
@@ -62,6 +68,7 @@ export interface DoctorReport {
 		servers: DoctorLspServer[];
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
+	hooks: Section<DoctorHook[]>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -82,19 +89,6 @@ export interface DoctorDependencies {
 	probeLocalProvider: (
 		baseURL: string,
 	) => Promise<'reachable' | 'unreachable' | 'skipped'>;
-}
-
-async function getPackageVersion(): Promise<string> {
-	try {
-		const content = await readFile(
-			path.join(__dirname, '../../package.json'),
-			'utf8',
-		);
-		const packageJson = JSON.parse(content) as {version?: string};
-		return packageJson.version ?? '0.0.0';
-	} catch {
-		return '0.0.0';
-	}
 }
 
 async function probeLocalProvider(
@@ -151,7 +145,7 @@ async function getDaemonLock(): Promise<DaemonLock | null> {
 function defaultDependencies(): DoctorDependencies {
 	return {
 		now: () => Date.now(),
-		getVersion: getPackageVersion,
+		getVersion: async () => getPackageVersion(),
 		getProviders: loadProviderConfigs,
 		getLspStatus: async () => {
 			const manager = await getLSPManager();
@@ -208,9 +202,25 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			name: serverName,
 			transport: String(serverInfo?.transport ?? 'stdio'),
 			toolCount: serverTools.length,
+			resourceCount: serverInfo?.resourceCount ?? 0,
+			promptCount: serverInfo?.promptCount ?? 0,
 			url: serverInfo?.url,
 		};
 	});
+}
+
+/**
+ * Lifecycle hooks are user-supplied shell commands, so /doctor lists what is
+ * wired up (never a secret — hook commands are config, not credentials).
+ */
+function collectHooks(): DoctorHook[] {
+	return HOOK_EVENTS.flatMap(event =>
+		getConfiguredHooks(event).map(hook => ({
+			event,
+			label: hook.name ?? hook.command,
+			...(hook.matchTools ? {matchTools: hook.matchTools} : {}),
+		})),
+	);
 }
 
 function normalizeDaemon(
@@ -238,13 +248,16 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, daemonLock] = await Promise.all([
-		settle(() => dependencies.getVersion().then(version => ({version}))),
-		settle(() => collectProviders(dependencies)),
-		settle(() => dependencies.getLspStatus()),
-		settle(() => collectMcp(dependencies.getToolManager())),
-		settle(() => dependencies.getDaemonLock()),
-	]);
+	const [nanocoder, providers, lsp, mcp, hooks, daemonLock] = await Promise.all(
+		[
+			settle(() => dependencies.getVersion().then(version => ({version}))),
+			settle(() => collectProviders(dependencies)),
+			settle(() => dependencies.getLspStatus()),
+			settle(() => collectMcp(dependencies.getToolManager())),
+			settle(() => collectHooks()),
+			settle(() => dependencies.getDaemonLock()),
+		],
+	);
 
 	return {
 		system: {
@@ -256,6 +269,7 @@ export async function collectDoctorReport(
 		providers,
 		lsp,
 		mcp,
+		hooks,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -382,7 +396,27 @@ export function Doctor({report}: {report: DoctorReport}) {
 						{ICON_BULLET} {server.name}: {server.transport} {ICON_BULLET}{' '}
 						{server.toolCount} tool
 						{server.toolCount === 1 ? '' : 's'}
+						{server.resourceCount > 0
+							? ` • ${server.resourceCount} resource${server.resourceCount === 1 ? '' : 's'}`
+							: ''}
+						{server.promptCount > 0
+							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
+							: ''}
 						{server.url ? ` • ${server.url}` : ''}
+					</Text>
+				))
+			)}
+
+			<SectionTitle>Hooks</SectionTitle>
+			{report.hooks.status === 'error' ? (
+				<SectionError message={report.hooks.error} />
+			) : report.hooks.data.length === 0 ? (
+				<Text color={colors.secondary}>• No lifecycle hooks configured</Text>
+			) : (
+				report.hooks.data.map(hook => (
+					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
+						• {hook.event}: {hook.label}
+						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
 					</Text>
 				))
 			)}

@@ -1,5 +1,6 @@
 import test from 'ava';
 import {resolveToolApproval} from '../tools/approval-policy';
+import {ToolValidationError} from '../utils/tool-validation';
 import {MCPClient} from './mcp-client';
 
 // ============================================================================
@@ -64,12 +65,39 @@ const mockTransportFactory = {
 
 console.log(`\nmcp-client.spec.ts`);
 
-// Skip integration tests in CI. These tests hit real third-party MCP servers
-// (mcp.deepwiki.com, remote.mcpservers.org, mcp.context7.com) — running them in
-// CI would couple our pipeline to those services' uptime. Run them locally to
-// verify HTTP transport against live servers.
-const isCI = process.env.CI === 'true' || process.env.CI === '1';
-const testOrSkip = isCI ? test.skip : test;
+// Live integration tests are opt-in because they depend on third-party MCP
+// servers and network availability. Run them with RUN_LIVE_MCP_TESTS=true.
+const runLiveMcpTests =
+	process.env.RUN_LIVE_MCP_TESTS === 'true' ||
+	process.env.RUN_LIVE_MCP_TESTS === '1';
+const liveTest = (
+	title: string,
+	impl: (t: any) => Promise<void> | void,
+) => {
+	if (!runLiveMcpTests) {
+		test.skip(title, impl as any);
+		return;
+	}
+
+	test.serial(title, async t => {
+		let lastErr: any;
+		for (let i = 0; i < 3; i++) {
+			const result = await (t as any).try(impl);
+			if (result.passed) {
+				result.commit();
+				return;
+			}
+
+			result.discard();
+			lastErr = result.errors[0] || new Error('Unknown test failure');
+			// These are remote integration tests, so retry transient failures.
+			if (i < 2) {
+				await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+			}
+		}
+		throw lastErr;
+	});
+};
 
 // ============================================================================
 // Tests for MCPClient - Transport Support
@@ -297,10 +325,12 @@ test('MCPClient.getToolMapping: maps tools to servers', t => {
 	t.deepEqual(mapping.get('tool1'), {
 		serverName: 'test-server',
 		originalName: 'tool1',
+		readOnly: false,
 	});
 	t.deepEqual(mapping.get('tool2'), {
 		serverName: 'test-server',
 		originalName: 'tool2',
+		readOnly: false,
 	});
 });
 
@@ -331,10 +361,12 @@ test('MCPClient.getToolMapping: handles multiple servers', t => {
 	t.deepEqual(mapping.get('tool1'), {
 		serverName: 'server1',
 		originalName: 'tool1',
+		readOnly: false,
 	});
 	t.deepEqual(mapping.get('tool2'), {
 		serverName: 'server2',
 		originalName: 'tool2',
+		readOnly: false,
 	});
 });
 
@@ -432,6 +464,46 @@ test('MCPClient.getToolEntries: includes handler that calls callTool', async t =
 	t.is(entries.length, 1);
 	t.is(entries[0].name, 'test_tool');
 	t.is(typeof entries[0].handler, 'function');
+});
+
+test('gets entry handler that passes valid args through but stops wrong-typed args at execution', async t => {
+	const client = new MCPClient();
+
+	(client as any).serverTools.set('typed-server', [
+		{
+			name: 'typed_tool',
+			description: 'Typed tool',
+			inputSchema: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+			serverName: 'typed-server',
+		},
+	]);
+
+	let callsToServer = 0;
+	// The handler closure resolves `this.callTool` at call time, so a shadowing
+	// own property is enough to prove whether the wrapper lets the call through.
+	client.callTool = (async () => {
+		callsToServer++;
+		return 'server result';
+	}) as never;
+
+	const entry = client.getToolEntries()[0];
+	t.truthy(entry);
+
+	// Same lenient schema check the approval prompt renders: an object where a
+	// string is expected is rejected before the server is ever asked.
+	await t.throwsAsync(
+		() => entry.handler({path: {nested: true}}),
+		{instanceOf: ToolValidationError, message: /wrong type/},
+	);
+	t.is(callsToServer, 0, 'wrong-typed args must not reach the server');
+
+	// Scalar-typed args pass through to the server unchanged.
+	const result = await entry.handler({path: 'ok'});
+	t.is(result, 'server result');
+	t.is(callsToServer, 1, 'well-typed args must reach the server');
 });
 
 // ============================================================================
@@ -664,7 +736,7 @@ test('MCPClient.getServerInfo: returns undefined when only tools exist', t => {
 // These tests use real remote MCP servers via HTTP transport
 // They test the actual connection, tool listing, and tool execution flow
 
-testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
+liveTest('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
 	const client = new MCPClient();
 
 	// Use DeepWiki public MCP server (no auth required)
@@ -699,7 +771,7 @@ testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', asyn
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
+liveTest('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
 	// Pair with the DeepWiki test above so a single host going dark doesn't
 	// nuke all HTTP-transport integration coverage. context7 was picked after
 	// remote.mcpservers.org disappeared at DNS level around mid-May 2026.
@@ -735,7 +807,7 @@ testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and exec
 	t.false(client.isServerConnected('test-context7'));
 });
 
-testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
+liveTest('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
 	const client = new MCPClient();
 
 	const servers = [
@@ -771,7 +843,7 @@ testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', asyn
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
+liveTest('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -802,7 +874,7 @@ testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP ser
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
+liveTest('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -833,7 +905,7 @@ testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HT
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t => {
+liveTest('MCPClient.callTool: executes tool on connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -864,7 +936,7 @@ testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
+liveTest('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -886,16 +958,17 @@ testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server
 		const [toolName, mappingInfo] = firstMapping;
 
 		t.is(typeof toolName, 'string');
-		t.deepEqual(mappingInfo, {
-			serverName: 'test-deepwiki',
-			originalName: toolName,
-		});
+		t.is(mappingInfo.serverName, 'test-deepwiki');
+		t.is(mappingInfo.originalName, toolName);
+		// Whether the live server annotates this tool is its business; the
+		// mapping must always resolve the hint to a boolean.
+		t.is(typeof mappingInfo.readOnly, 'boolean');
 	}
 
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
+liveTest('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -925,7 +998,7 @@ testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server
 // Error Handling Tests with Real Servers
 // ============================================================================
 
-testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
+test('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -938,7 +1011,7 @@ testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t 
 	await t.throwsAsync(async () => await client.connectToServer(server));
 });
 
-testOrSkip('MCPClient.connectToServer: validates websocket URL protocol', async t => {
+test('MCPClient.connectToServer: validates websocket URL protocol', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -1012,6 +1085,151 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 		{mode: 'normal'},
 	);
 	t.true(needsApproval);
+});
+
+// ============================================================================
+// Regression: MCP tools must obey the central development-mode policy
+// ----------------------------------------------------------------------------
+// MCP used to hand-roll `isAutoApproved ? false : mode !== 'auto-accept'`,
+// which failed in both directions: an alwaysAllow-ed tool executed in plan
+// mode with no prompt, and an ordinary tool was auto-denied in headless (where
+// the approval slot defaults to "denied" because no user is present).
+// ============================================================================
+
+/**
+ * Build a one-tool MCP client with the given alwaysAllow list / annotation.
+ * Returns both the registered entry (what the approval resolver sees) and the
+ * tool mapping record (what plan-mode filtering sees).
+ */
+function mcpFixtureFor(
+	toolName: string,
+	opts: {alwaysAllow?: string[]; readOnly?: boolean} = {},
+) {
+	const client = new MCPClient();
+	const serverName = 'policy-server';
+
+	(client as any).serverTools.set(serverName, [
+		{
+			name: toolName,
+			description: 'Policy fixture',
+			inputSchema: {type: 'object'},
+			serverName,
+			readOnly: opts.readOnly,
+		},
+	]);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		alwaysAllow: opts.alwaysAllow ?? [],
+	});
+
+	const entry = client.getToolEntries().find(e => e.name === toolName);
+	if (!entry) throw new Error(`fixture tool ${toolName} not registered`);
+	const mapping = client.getToolMapping().get(toolName);
+	if (!mapping) throw new Error(`fixture tool ${toolName} not mapped`);
+	return {entry, mapping};
+}
+
+/** Just the registered entry, for the approval-policy tests. */
+function mcpEntryFor(
+	toolName: string,
+	opts: {alwaysAllow?: string[]; readOnly?: boolean} = {},
+) {
+	return mcpFixtureFor(toolName, opts).entry;
+}
+
+test('MCPClient: plan mode requires approval for an alwaysAllow-ed tool', async t => {
+	const entry = mcpEntryFor('create_issue', {alwaysAllow: ['create_issue']});
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'alwaysAllow still skips the prompt in normal mode',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'plan'}),
+		'a server alwaysAllow entry must not let plan mode execute a mutation',
+	);
+});
+
+test('MCPClient: headless does not require approval for an ordinary tool', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'headless'}),
+		'headless is daemon-driven — no foreground prompt exists to answer',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'normal mode still prompts',
+	);
+});
+
+test('MCPClient: auto-accept and yolo still run tools unattended', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'auto-accept'}),
+	);
+	t.false(await resolveToolApproval('create_issue', entry, {}, {mode: 'yolo'}));
+});
+
+test('MCPClient: readOnlyHint unblocks plan mode but never normal mode', async t => {
+	const annotated = mcpFixtureFor('list_issues', {readOnly: true});
+	const readOnly = annotated.entry;
+	const unannotated = mcpEntryFor('list_issues');
+
+	t.true(annotated.mapping.readOnly);
+	t.false(
+		mcpFixtureFor('list_issues').mapping.readOnly,
+		'an absent readOnlyHint must fail safe to "may mutate"',
+	);
+
+	// The hint lives on the tool mapping, which only plan-mode filtering reads.
+	// It must NOT reach the registered entry: ToolManager.isReadOnly() feeds ACP
+	// checkpoint capture and parallel batching, and a server must not be able to
+	// talk itself out of a restore point.
+	t.is(
+		(readOnly as {readOnly?: boolean}).readOnly,
+		undefined,
+		'a server-supplied readOnlyHint must not become the entry readOnly flag',
+	);
+
+	// A server-annotated reader is the one thing plan mode may run.
+	t.false(
+		await resolveToolApproval('list_issues', readOnly, {}, {mode: 'plan'}),
+		'a read-only MCP tool is safe to run in plan mode',
+	);
+	t.true(
+		await resolveToolApproval('list_issues', unannotated, {}, {mode: 'plan'}),
+		'an unannotated MCP tool must still be gated in plan mode',
+	);
+
+	// `readOnlyHint` comes from the very server being gated, so it must not be
+	// able to silence its own prompt. Only the user's alwaysAllow list can.
+	t.true(
+		await resolveToolApproval('list_issues', readOnly, {}, {mode: 'normal'}),
+		'a server-supplied readOnlyHint must not skip the normal-mode prompt',
+	);
+	t.false(
+		await resolveToolApproval(
+			'list_issues',
+			mcpEntryFor('list_issues', {
+				readOnly: true,
+				alwaysAllow: ['list_issues'],
+			}),
+			{},
+			{mode: 'normal'},
+		),
+		'the user-controlled alwaysAllow list is what skips a normal-mode prompt',
+	);
+
+	// Unattended modes run it either way.
+	for (const mode of ['headless', 'auto-accept'] as const) {
+		t.false(
+			await resolveToolApproval('list_issues', readOnly, {}, {mode}),
+			`read-only MCP tool should not prompt in ${mode} mode`,
+		);
+	}
 });
 
 // ============================================================================
@@ -1130,6 +1348,9 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 				],
 			};
 		},
+		getServerCapabilities() {
+			return undefined;
+		},
 		async close() {},
 	};
 
@@ -1140,4 +1361,604 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.true(client.isServerConnected('seam-server'));
 	t.is(client.getServerTools('seam-server').length, 1);
 	t.is(client.getServerInfo('seam-server')?.connected, true);
+});
+
+test('MCPClient.connectToServer: passes the configured timeout to connect and tools/list', async t => {
+	const seen: unknown[] = [];
+	const timedClient = {
+		async connect(_transport: unknown, options: unknown) {
+			seen.push(options);
+		},
+		async listTools(_params: unknown, options: unknown) {
+			seen.push(options);
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(timedClient);
+	await client.connectToServer({...httpServer, timeout: 1234});
+
+	t.deepEqual(seen, [{timeout: 1234}, {timeout: 1234}]);
+});
+
+// ============================================================================
+// Regression: annotations.readOnlyHint must be read by production code
+// ----------------------------------------------------------------------------
+// Driven through connectToServer() with a stubbed listTools() so the mapping in
+// mcp-client.ts actually runs. A test that re-implements the mapping and writes
+// the result into serverTools would still pass if that line were deleted.
+// ============================================================================
+
+test('MCPClient.connectToServer: carries annotations.readOnlyHint onto discovered tools', async t => {
+	const annotatingClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'reader',
+						description: 'Annotated read-only',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: true},
+					},
+					{
+						name: 'writer',
+						description: 'Annotated as mutating',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: false},
+					},
+					{
+						name: 'unannotated',
+						description: 'No annotations at all',
+						inputSchema: {type: 'object', properties: {}},
+					},
+					{
+						name: 'empty_annotations',
+						description: 'Annotations present but no readOnlyHint',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {title: 'Some title'},
+					},
+					{
+						name: 'truthy_not_true',
+						description: 'readOnlyHint that is truthy but not `true`',
+						inputSchema: {type: 'object', properties: {}},
+						annotations: {readOnlyHint: 'yes'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(annotatingClient);
+	await client.connectToServer(httpServer);
+
+	// The discovered MCPTool records carry the flag...
+	const discovered = new Map(
+		client.getServerTools('seam-server').map(tool => [tool.name, tool.readOnly]),
+	);
+	t.true(discovered.get('reader'), 'readOnlyHint: true must be carried through');
+	t.false(discovered.get('writer'), 'readOnlyHint: false means "may mutate"');
+	t.false(
+		discovered.get('unannotated'),
+		'an absent annotations block must fail safe to "may mutate"',
+	);
+	t.false(
+		discovered.get('empty_annotations'),
+		'annotations without readOnlyHint must fail safe to "may mutate"',
+	);
+	t.false(
+		discovered.get('truthy_not_true'),
+		'only an explicit boolean true counts — no truthiness coercion',
+	);
+
+	// ...and so does the tool mapping plan mode filters on.
+	const mapped = new Map(
+		[...client.getToolMapping()].map(([name, record]) => [
+			name,
+			record.readOnly,
+		]),
+	);
+	t.true(mapped.get('reader'));
+	t.false(mapped.get('writer'));
+	t.false(mapped.get('unannotated'));
+	t.false(mapped.get('empty_annotations'));
+	t.false(mapped.get('truthy_not_true'));
+
+	// But it must stop there. Copying the hint onto the registry entry would
+	// hand it to ToolManager.isReadOnly(), which suppresses ACP checkpoint
+	// capture (acp-timeline.ts) and enables parallel batching
+	// (tool-executor.tsx) — neither of which a server may decide about itself.
+	for (const entry of client.getToolEntries()) {
+		t.is(
+			(entry as {readOnly?: boolean}).readOnly,
+			undefined,
+			`${entry.name} must not carry the server hint as an entry readOnly flag`,
+		);
+	}
+
+	// The annotation must decide plan mode end to end, straight off the wire.
+	t.false(
+		await resolveToolApproval(
+			'reader',
+			client.getToolEntries().find(e => e.name === 'reader'),
+			{},
+			{mode: 'plan'},
+		),
+		'an annotated reader is runnable in plan mode',
+	);
+	t.true(
+		await resolveToolApproval(
+			'writer',
+			client.getToolEntries().find(e => e.name === 'writer'),
+			{},
+			{mode: 'plan'},
+		),
+		'a tool the server did not annotate read-only is gated in plan mode',
+	);
+});
+
+test('MCPClient.getToolMapping: is cached and invalidated on connect/disconnect', async t => {
+	const okClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'ok_tool',
+						description: 'A working tool',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(okClient);
+	await client.connectToServer(httpServer);
+
+	const first = client.getToolMapping();
+	t.is(first, client.getToolMapping(), 'repeat calls reuse the cached Map');
+	t.true(first.has('ok_tool'));
+
+	// Disconnecting must not leave the stale mapping behind.
+	await client.disconnect();
+	const afterDisconnect = client.getToolMapping();
+	t.not(first, afterDisconnect, 'the cache is dropped on disconnect');
+	t.is(afterDisconnect.size, 0);
+});
+
+test('MCPClient.getToolMapping: a mapping taken before connect is not left stale', async t => {
+	const okClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'late_tool',
+						description: 'Discovered after the first mapping call',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(okClient);
+
+	// Anything that asks before the servers are up caches an empty Map. If
+	// connecting did not invalidate it, plan mode would stop recognising these
+	// names as MCP tools and wave every one of them through unfiltered.
+	const beforeConnect = client.getToolMapping();
+	t.is(beforeConnect.size, 0);
+
+	await client.connectToServer(httpServer);
+
+	const afterConnect = client.getToolMapping();
+	t.not(beforeConnect, afterConnect, 'the cache is dropped on connect');
+	t.true(
+		afterConnect.has('late_tool'),
+		'tools discovered after the first call must still be mapped',
+	);
+});
+
+// ============================================================================
+// Tests for MCP Resources Support
+// ============================================================================
+
+test('MCPClient.getAllResources: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const resources = client.getAllResources();
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getAllResources: returns resources from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with resources
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///test/resource1.txt',
+			name: 'resource1',
+			description: 'Test resource 1',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///test/resource2.json',
+			name: 'resource2',
+			description: 'Test resource 2',
+			mimeType: 'application/json',
+			serverName: 'test-server',
+		},
+	]);
+
+	const resources = client.getAllResources();
+
+	t.is(resources.length, 2);
+	t.is(resources[0].name, 'resource1');
+	t.is(resources[0].uri, 'file:///test/resource1.txt');
+	t.is(resources[1].name, 'resource2');
+});
+
+test('MCPClient.getServerResources: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const resources = client.getServerResources('non-existent');
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getServerResources: returns resources for specific server', t => {
+	const client = new MCPClient();
+
+	const testResources = [
+		{
+			uri: 'file:///test/resource.txt',
+			name: 'resource',
+			description: 'Test resource',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverResources.set('test-server', testResources);
+
+	const resources = client.getServerResources('test-server');
+
+	t.is(resources.length, 1);
+	t.deepEqual(resources, testResources);
+});
+
+test('MCPClient.readResource: throws error when server is not connected', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.readResource('non-existent', 'file:///x'),
+		{message: /No MCP client connected for server/},
+	);
+});
+
+test('MCPClient.readResource: discriminates text vs. blob content (neither carries a type field)', async t => {
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {resources: {}};
+		},
+		async listResources() {
+			return {
+				resources: [
+					{uri: 'file:///a.txt', name: 'a', mimeType: 'text/plain'},
+				],
+			};
+		},
+		async readResource({uri}: {uri: string}) {
+			return {
+				contents: [
+					{uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello'},
+					{uri: 'file:///b.png', mimeType: 'image/png', blob: 'YmFzZTY0'},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	const contents = await client.readResource('seam-server', 'file:///a.txt');
+
+	t.is(contents.length, 2);
+	t.is(contents[0].text, 'hello');
+	t.is(contents[0].blob, undefined);
+	t.is(contents[1].blob, 'YmFzZTY0');
+	t.is(contents[1].text, undefined);
+});
+
+test('MCPClient.connectToServer: does not call listResources when the server does not declare the resources capability', async t => {
+	let listResourcesCalled = false;
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {prompts: {}};
+		},
+		async listResources() {
+			listResourcesCalled = true;
+			return {resources: []};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	t.false(
+		listResourcesCalled,
+		'listResources must not be called when capabilities.resources is absent',
+	);
+	t.is(client.getServerResources('seam-server').length, 0);
+});
+
+test('MCPClient.getServerInfo: includes resource count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///resource1.txt',
+			name: 'resource1',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///resource2.txt',
+			name: 'resource2',
+			serverName: 'test-server',
+		},
+	]);
+	(client as any).serverPrompts.set('test-server', []);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.resourceCount, 2);
+});
+
+// ============================================================================
+// Tests for MCP Prompts Support
+// ============================================================================
+
+test('MCPClient.getAllPrompts: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const prompts = client.getAllPrompts();
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getAllPrompts: returns prompts from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with prompts
+	(client as any).serverPrompts.set('test-server', [
+		{
+			name: 'prompt1',
+			description: 'Test prompt 1',
+			arguments: [
+				{name: 'query', description: 'Query parameter', required: true},
+			],
+			serverName: 'test-server',
+		},
+		{
+			name: 'prompt2',
+			description: 'Test prompt 2',
+			serverName: 'test-server',
+		},
+	]);
+
+	const prompts = client.getAllPrompts();
+
+	t.is(prompts.length, 2);
+	t.is(prompts[0].name, 'prompt1');
+	t.is(prompts[0].description, 'Test prompt 1');
+	t.is(prompts[1].name, 'prompt2');
+});
+
+test('MCPClient.getServerPrompts: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const prompts = client.getServerPrompts('non-existent');
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getServerPrompts: returns prompts for specific server', t => {
+	const client = new MCPClient();
+
+	const testPrompts = [
+		{
+			name: 'test-prompt',
+			description: 'Test prompt',
+			arguments: [],
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverPrompts.set('test-server', testPrompts);
+
+	const prompts = client.getServerPrompts('test-server');
+
+	t.is(prompts.length, 1);
+	t.deepEqual(prompts, testPrompts);
+});
+
+test('MCPClient.getPrompt: throws error when server is not connected', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.getPrompt('non-existent', 'prompt', {}),
+		{message: /No MCP client connected for server/},
+	);
+});
+
+test('MCPClient.getPrompt: fetches and normalizes a prompt from its own server', async t => {
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {prompts: {}};
+		},
+		async listPrompts() {
+			return {
+				prompts: [
+					{
+						name: 'greet',
+						description: 'Greets someone',
+						arguments: [{name: 'who', required: true}],
+					},
+				],
+			};
+		},
+		async getPrompt({
+			name,
+			arguments: args,
+		}: {
+			name: string;
+			arguments?: Record<string, string>;
+		}) {
+			return {
+				description: 'A greeting',
+				messages: [
+					{role: 'user', content: {type: 'text', text: `hi ${args?.who}`}},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	const result = await client.getPrompt('seam-server', 'greet', {
+		who: 'world',
+	});
+
+	t.is(result.description, 'A greeting');
+	t.is(result.messages.length, 1);
+	t.is(result.messages[0].content.text, 'hi world');
+});
+
+test('MCPClient.connectToServer: does not call listPrompts when the server does not declare the prompts capability', async t => {
+	let listPromptsCalled = false;
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {resources: {}};
+		},
+		async listPrompts() {
+			listPromptsCalled = true;
+			return {prompts: []};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	t.false(
+		listPromptsCalled,
+		'listPrompts must not be called when capabilities.prompts is absent',
+	);
+	t.is(client.getServerPrompts('seam-server').length, 0);
+});
+
+test('MCPClient.getServerInfo: includes prompt count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', []);
+	(client as any).serverPrompts.set('test-server', [
+		{name: 'prompt1', serverName: 'test-server'},
+		{name: 'prompt2', serverName: 'test-server'},
+		{name: 'prompt3', serverName: 'test-server'},
+	]);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.promptCount, 3);
+});
+
+// ============================================================================
+// Tests for disconnect with resources and prompts
+// ============================================================================
+
+test('MCPClient.disconnect: clears resources and prompts', async t => {
+	const client = new MCPClient();
+
+	// Add some mock state including resources and prompts
+	(client as any).clients.set('mock', {});
+	(client as any).transports.set('mock', {});
+	(client as any).serverTools.set('mock', []);
+	(client as any).serverResources.set('mock', [{uri: 'test', name: 'test', serverName: 'mock'}]);
+	(client as any).serverPrompts.set('mock', [{name: 'test', serverName: 'mock'}]);
+	(client as any).serverConfigs.set('mock', {});
+	(client as any).isConnected = true;
+
+	await client.disconnect();
+
+	// State should be cleared
+	t.is(client.getServerResources('mock').length, 0);
+	t.is(client.getServerPrompts('mock').length, 0);
+	t.is(client.getAllResources().length, 0);
+	t.is(client.getAllPrompts().length, 0);
 });

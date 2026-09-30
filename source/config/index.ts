@@ -12,7 +12,18 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {
+	DEFAULT_SESSION_CONFIG,
+	normalizeSessionConfig,
+} from '@/config/session-config';
 import {defaultTheme, getThemeColors} from '@/config/themes';
+import {
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+	MAX_REPEATED_TOOL_CALLS,
+	MAX_TRUNCATED_TURNS,
+} from '@/constants';
+import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -20,15 +31,22 @@ import type {
 	CompressionMode,
 	CompressionStrategy,
 	DevelopmentMode,
+	HookDefinition,
+	HookEvent,
+	HooksConfig,
 	ModeProviderConfig,
 	NotificationsConfig,
 	PasteConfig,
 	ProviderConfig,
+	RetryLimitsConfig,
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {clampThreshold} from '@/utils/message-compression';
+import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+
+export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -158,15 +176,29 @@ function loadHierarchicalConfig<T>(
 	return tryLoadConfig(join(getConfigPath(), fileName), label, extract); // nosemgrep
 }
 
+/**
+ * Built-in auto-compact defaults. Exported so the effective-config resolver
+ * (`config/effective-config.ts`) can label a value as coming from the
+ * `default` layer without re-declaring the numbers.
+ *
+ * Loaders must return a **copy** of this and of the sibling DEFAULT_* objects,
+ * never the object itself: callers mutate the result of `getAppConfig()` (see
+ * `subagents/subagent-executor.spec.ts`), and handing out the shared constant
+ * lets one such write redefine the built-in default for the whole process —
+ * it even survives `reloadAppConfig()`.
+ * @public
+ */
+export const DEFAULT_AUTO_COMPACT_CONFIG: AutoCompactConfig = {
+	enabled: true,
+	threshold: 60,
+	mode: 'conservative',
+	strategy: 'llm',
+	notifyUser: true,
+};
+
 // Load auto-compact configuration and Returns default config if not specified
 function loadAutoCompactConfig(): AutoCompactConfig {
-	const defaults: AutoCompactConfig = {
-		enabled: true,
-		threshold: 60,
-		mode: 'conservative',
-		strategy: 'llm',
-		notifyUser: true,
-	};
+	const defaults = DEFAULT_AUTO_COMPACT_CONFIG;
 
 	return (
 		loadHierarchicalConfig('agents.config.json', 'auto-compact', config => {
@@ -189,7 +221,7 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 				};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
 }
 
@@ -206,10 +238,10 @@ function loadTuneConfig(): Partial<TuneConfig> | undefined {
 	);
 }
 
-// Validate and clamp threshold to valid range (50-95)
+// Validate and clamp threshold to the configured range
 function validateThreshold(threshold: unknown): number {
 	const num = typeof threshold === 'number' ? threshold : 60;
-	return Math.max(50, Math.min(95, Math.round(num)));
+	return clampThreshold(Math.round(num));
 }
 
 // Validate compression mode
@@ -230,60 +262,10 @@ function validateStrategy(strategy: unknown): CompressionStrategy {
 
 // Load session configuration and Returns default config if not specified
 function loadSessionConfig(): AppConfig['sessions'] {
-	const defaults: NonNullable<AppConfig['sessions']> = {
-		autoSave: true,
-		saveInterval: 30000, // 30 seconds
-		maxSessions: 100,
-		maxMessages: 1000,
-		retentionDays: 30,
-		directory: '',
-	};
-
-	const normalizeSessionNumber = (
-		value: unknown,
-		min: number,
-		fallback: number,
-	): number => {
-		if (typeof value === 'number' && Number.isFinite(value)) {
-			return Math.max(min, value);
-		}
-		return fallback;
-	};
-
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
-			const sessions = config.nanocoder?.sessions;
-			if (sessions && typeof sessions === 'object') {
-				return {
-					autoSave:
-						sessions.autoSave !== undefined
-							? Boolean(sessions.autoSave)
-							: defaults.autoSave,
-					saveInterval: normalizeSessionNumber(
-						sessions.saveInterval,
-						1000, // Minimum 1 second
-						defaults.saveInterval ?? 30000,
-					),
-					maxSessions: normalizeSessionNumber(
-						sessions.maxSessions,
-						1,
-						defaults.maxSessions ?? 100,
-					),
-					maxMessages: normalizeSessionNumber(
-						sessions.maxMessages,
-						1,
-						defaults.maxMessages ?? 1000,
-					),
-					retentionDays: normalizeSessionNumber(
-						sessions.retentionDays,
-						1,
-						defaults.retentionDays ?? 30,
-					),
-					directory: sessions.directory || defaults.directory,
-				};
-			}
-			return null;
-		}) ?? defaults
+		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config =>
+			normalizeSessionConfig(config.nanocoder?.sessions),
+		) ?? {...DEFAULT_SESSION_CONFIG}
 	);
 }
 
@@ -295,10 +277,12 @@ export const DEFAULT_HEADLESS_MAX_TURNS = 200;
 
 // Load headless conversation limits. Env var wins (handy for CI), then
 // agents.config.json, then the default.
+export const DEFAULT_HEADLESS_CONFIG: NonNullable<AppConfig['headless']> = {
+	maxTurns: DEFAULT_HEADLESS_MAX_TURNS,
+};
+
 function loadHeadlessConfig(): AppConfig['headless'] {
-	const defaults: NonNullable<AppConfig['headless']> = {
-		maxTurns: DEFAULT_HEADLESS_MAX_TURNS,
-	};
+	const defaults = DEFAULT_HEADLESS_CONFIG;
 
 	const envValue = process.env['NANOCODER_MAX_TURNS'];
 	if (envValue !== undefined && envValue.trim() !== '') {
@@ -316,18 +300,93 @@ function loadHeadlessConfig(): AppConfig['headless'] {
 				if (typeof value === 'number' && Number.isFinite(value)) {
 					return {maxTurns: Math.max(1, Math.round(value))};
 				}
-				return defaults;
+				return {...defaults};
 			}
 			return null;
-		}) ?? defaults
+		}) ?? {...defaults}
 	);
+}
+
+// Load agent-loop retry limits from `nanocoder.retries` in agents.config.json.
+// Defaults mirror the historical hardcoded caps in constants.ts, so behaviour
+// is unchanged unless the user opts in. Distinct from the per-provider
+// `maxRetries` setting, which caps network request retries.
+export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
+	maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
+	maxEmptyTurns: MAX_EMPTY_TURNS,
+	maxMalformedRetries: MAX_MALFORMED_RETRIES,
+	maxTruncatedTurns: MAX_TRUNCATED_TURNS,
+};
+
+function loadRetryLimitsConfig(): RetryLimitsConfig {
+	const defaults = DEFAULT_RETRY_LIMITS;
+
+	// A fresh tool-call signature already counts as 1 repeat, so a cap below 2
+	// would pause on every single tool call. The nudge/self-correction caps may
+	// go to 0 (= give up on the first failing turn).
+	//
+	// Deliberately unbounded above: a very large value is the supported way to
+	// opt out (a workflow that legitimately polls the same command). That also
+	// means a typo like 1000 silently disables the guard, which is the tradeoff
+	// taken over capping and second-guessing an explicit setting.
+	const normalizeLimit = (
+		value: unknown,
+		min: number,
+		fallback: number,
+	): number => {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return Math.max(min, Math.round(value));
+		}
+		return fallback;
+	};
+
+	return (
+		loadHierarchicalConfig('agents.config.json', 'retries', config => {
+			const retries = config.nanocoder?.retries;
+			if (retries && typeof retries === 'object') {
+				return {
+					maxRepeatedToolCalls: normalizeLimit(
+						retries.maxRepeatedToolCalls,
+						2,
+						defaults.maxRepeatedToolCalls,
+					),
+					maxEmptyTurns: normalizeLimit(
+						retries.maxEmptyTurns,
+						0,
+						defaults.maxEmptyTurns,
+					),
+					maxMalformedRetries: normalizeLimit(
+						retries.maxMalformedRetries,
+						0,
+						defaults.maxMalformedRetries,
+					),
+					maxTruncatedTurns: normalizeLimit(
+						retries.maxTruncatedTurns,
+						0,
+						defaults.maxTruncatedTurns,
+					),
+				};
+			}
+			return null;
+		}) ?? {...defaults}
+	);
+}
+
+/**
+ * Built-in paste defaults. A function rather than a const because
+ * `@/utils/paste-utils` imports this module back, and reading
+ * DEFAULT_SINGLE_LINE_PASTE_THRESHOLD at module-evaluation time hits the
+ * temporal dead zone on whichever side of the cycle loads second. Deferring
+ * the read to call time is what the loader below always did.
+ * @public
+ */
+export function getDefaultPasteConfig(): PasteConfig {
+	return {singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD};
 }
 
 // Load paste configuration and Returns default config if not specified
 function loadPasteConfig(): PasteConfig {
-	const defaults: PasteConfig = {
-		singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD,
-	};
+	const defaults = getDefaultPasteConfig();
 
 	return (
 		loadHierarchicalConfig('nanocoder-preferences.json', 'paste', config => {
@@ -359,6 +418,23 @@ function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
 	);
 }
 
+function loadSandboxConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'sandbox', config => {
+			const value = config.nanocoder?.sandbox;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.sandbox must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+				return false;
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -387,6 +463,47 @@ function loadDisabledToolsConfig(): string[] | undefined {
 	);
 }
 
+// User-defined LSP servers. Entries without a name, command or languages list
+// are dropped rather than handed to the LSP manager half-formed.
+function loadLspServersConfig(): AppConfig['lspServers'] {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'lspServers', config => {
+			const lspServers = config.nanocoder?.lspServers;
+			if (!Array.isArray(lspServers)) {
+				return null;
+			}
+			const valid: NonNullable<AppConfig['lspServers']> = [];
+			for (const server of lspServers) {
+				if (
+					!server ||
+					typeof server.name !== 'string' ||
+					typeof server.command !== 'string' ||
+					!Array.isArray(server.languages)
+				) {
+					continue;
+				}
+				valid.push({
+					name: server.name,
+					command: server.command,
+					args: Array.isArray(server.args)
+						? server.args.filter(
+								(arg: unknown): arg is string => typeof arg === 'string',
+							)
+						: undefined,
+					languages: server.languages.filter(
+						(lang: unknown): lang is string => typeof lang === 'string',
+					),
+					env:
+						server.env && typeof server.env === 'object'
+							? server.env
+							: undefined,
+				});
+			}
+			return valid;
+		}) ?? undefined
+	);
+}
+
 function loadSystemPromptConfig(): SystemPromptConfig | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'systemPrompt', config => {
@@ -411,6 +528,107 @@ function loadSystemPromptConfig(): SystemPromptConfig | undefined {
 			}
 
 			return result;
+		}) ?? undefined
+	);
+}
+
+/**
+ * Parse one hook entry, dropping anything that isn't a usable shell command.
+ * Invalid entries are skipped rather than failing the whole config — a typo in
+ * one hook must not take the session down.
+ */
+function parseHookDefinition(raw: unknown): HookDefinition | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+	const entry = raw as Record<string, unknown>;
+	const command = entry.command;
+	if (typeof command !== 'string' || command.trim() === '') return null;
+
+	const definition: HookDefinition = {command};
+
+	// A bare string is accepted as a one-item list. Dropping it silently would
+	// widen a scoped guard to every tool.
+	const rawMatchTools =
+		typeof entry.matchTools === 'string'
+			? [entry.matchTools]
+			: entry.matchTools;
+	if (Array.isArray(rawMatchTools)) {
+		const matchTools = rawMatchTools.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchTools.length > 0) {
+			definition.matchTools = matchTools;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchTools list, so it runs for every tool. Remove matchTools to make that explicit, or list the tools to scope it.`,
+			);
+		}
+	}
+
+	const rawMatchPaths =
+		typeof entry.matchPaths === 'string'
+			? [entry.matchPaths]
+			: entry.matchPaths;
+	if (Array.isArray(rawMatchPaths)) {
+		const matchPaths = rawMatchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) {
+			definition.matchPaths = matchPaths;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchPaths list, so it is not scoped by path.`,
+			);
+		}
+	}
+
+	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
+		definition.timeout = Math.max(1, Math.round(entry.timeout));
+	}
+
+	if (typeof entry.name === 'string' && entry.name.trim() !== '') {
+		definition.name = entry.name.trim();
+	}
+
+	return definition;
+}
+
+function loadHooksConfig(): HooksConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'hooks', config => {
+			const hooks = config.nanocoder?.hooks;
+			if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+				return null;
+			}
+
+			const result: HooksConfig = {};
+			for (const [event, entries] of Object.entries(hooks)) {
+				if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
+					logError(`Invalid hooks config: unknown lifecycle event '${event}'.`);
+					continue;
+				}
+				if (!Array.isArray(entries)) {
+					logError(`Invalid hooks config: '${event}' must be an array.`);
+					continue;
+				}
+
+				const parsed = entries
+					.map(parseHookDefinition)
+					.filter((hook): hook is HookDefinition => hook !== null);
+				if (parsed.length !== entries.length) {
+					logError(
+						`Invalid hooks config: '${event}' has entries without a 'command' string.`,
+					);
+				}
+				if (parsed.length > 0) result[event as HookEvent] = parsed;
+			}
+
+			// No env substitution here: hook commands are shell strings, so
+			// `$NANOCODER_FILE` and friends must survive to the shell that runs
+			// them rather than being expanded (to nothing) at config-load time.
+			return Object.keys(result).length > 0 ? result : null;
 		}) ?? undefined
 	);
 }
@@ -513,7 +731,12 @@ function loadAppConfig(): AppConfig {
 
 	// Load MCP servers from the new hierarchical configuration system
 	const mcpServersWithSource = loadAllMCPConfigs();
-	const mcpServers = mcpServersWithSource.map(item => item.server);
+	// Keep provenance on the runtime objects: validateProjectConfigSecurity
+	// filters on MCPServerConfig.source, which the loader only tracks on the wrapper.
+	const mcpServers = mcpServersWithSource.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
 
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
@@ -523,6 +746,9 @@ function loadAppConfig(): AppConfig {
 
 	// Load headless conversation limits
 	const headless = loadHeadlessConfig();
+
+	// Load agent-loop retry limits
+	const retries = loadRetryLimitsConfig();
 
 	// Load paste configuration
 	const paste = loadPasteConfig();
@@ -539,6 +765,9 @@ function loadAppConfig(): AppConfig {
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig();
 
+	// Load lifecycle hooks (shell commands run at fixed points in the agent loop)
+	const hooks = loadHooksConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
@@ -547,24 +776,57 @@ function loadAppConfig(): AppConfig {
 	// Load project-level tune defaults from agents.config.json
 	const tune = loadTuneConfig();
 
+	const sandbox = loadSandboxConfig();
+
+	// Load user-defined LSP servers (auto-discovery still runs alongside)
+	const lspServers = loadLspServersConfig();
+
 	return {
 		providers,
 		mcpServers,
+		lspServers,
 		autoCompact,
 		sessions,
 		headless,
+		retries,
 		paste,
 		nanocoderTools,
 		alwaysAllow,
 		disabledTools,
 		systemPrompt,
+		hooks,
 		notifications,
 		modeProviders,
 		tune,
+		sandbox,
 	};
 }
 
 let _appConfig: AppConfig | null = null;
+
+/**
+ * Bumped whenever the cached config is dropped or reloaded.
+ *
+ * Modules that derive something expensive from config (a constructed client,
+ * say) cache it against this number instead of re-deriving on every read. They
+ * cannot simply be reset from here: the interesting ones sit above config in
+ * the import graph, and reaching down to them would give this module - which
+ * everything imports - a cycle back through client-factory.
+ */
+let _configGeneration = 0;
+
+/**
+ * How many times the config has been dropped or reloaded this process.
+ *
+ * Fold it into a cache key to have that cache follow config edits. A key built
+ * only from the config values a module reads misses changes underneath them:
+ * `titleProvider: "ollama"` is the same string before and after its baseURL is
+ * edited, but it no longer names the same endpoint.
+ * @public
+ */
+export function getConfigGeneration(): number {
+	return _configGeneration;
+}
 
 /**
  * Lazy-loaded app config to avoid circular dependencies during module initialization
@@ -577,14 +839,37 @@ export function getAppConfig(): AppConfig {
 	return _appConfig;
 }
 
+/**
+ * Agent-loop retry limits, read live from the current app config so runtime
+ * edits (and tests that mutate `getAppConfig().retries`) are picked up.
+ *
+ * The fallback is applied per field, not to the object as a whole: a `retries`
+ * object missing one key would otherwise hand callers `undefined`, and every
+ * `count >= limit` guard reading it evaluates false, silently disabling the
+ * very cap this feature exists to enforce.
+ * @public
+ */
+export function getRetryLimits(): RetryLimitsConfig {
+	const retries = getAppConfig().retries;
+	return {
+		maxRepeatedToolCalls:
+			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
+		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
+		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+		maxTruncatedTurns: retries?.maxTruncatedTurns ?? MAX_TRUNCATED_TURNS,
+	};
+}
+
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
 	_appConfig = loadAppConfig();
+	_configGeneration++;
 }
 
 // Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
 	_appConfig = null;
+	_configGeneration++;
 }
 
 let cachedColors: Colors | null = null;

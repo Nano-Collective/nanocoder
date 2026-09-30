@@ -35,6 +35,7 @@ import type {
 	SkillMemberKind,
 	SkillMemberRef,
 	SkillPriority,
+	SkillTargetKind,
 	SkillTrigger,
 } from '@/types/skills';
 import {formatError} from '@/utils/error-formatter';
@@ -59,7 +60,7 @@ export interface RegisterResult {
 	subscriptionIds: SubscriptionId[];
 }
 
-const TARGET_REGEX = /^(command|agent|tool):([a-z][a-z0-9_-]*)$/;
+const TARGET_REGEX = /^(command|agent|tool|skill):([a-z][a-z0-9_-]*)$/;
 
 export function registerSkills(
 	skills: Skill[],
@@ -170,16 +171,17 @@ function subscribeSkillTriggers(
 	if (!skill.subscribe) return {subscriptionIds, collisions};
 
 	skill.subscribe.forEach((trig, index) => {
-		const subscription = buildSubscription(skill, trig, index);
-		if (!subscription) {
+		const built = buildSubscription(skill, trig, index);
+		if (!built.ok) {
 			collisions.push({
 				skill: skill.name,
 				kind: 'subscription',
 				name: trig.target ?? `subscribe[${index}]`,
-				message: `subscribe[${index}].target "${trig.target ?? ''}" is malformed.`,
+				message: built.error,
 			});
 			return;
 		}
+		const subscription = built.subscription;
 		try {
 			eventRouter.subscribe(subscription);
 			subscriptionIds.push(subscription.id);
@@ -224,7 +226,9 @@ export function registerSkillSubscriptions(
 function resolveImplicitTarget(skill: Skill): SkillMemberRef | null {
 	if (skill.commands && skill.commands.length === 1) {
 		const only = skill.commands[0];
-		if (only) return {kind: 'command', name: only.command.name};
+		// fullName, so a namespaced command resolves unambiguously at
+		// dispatch time.
+		if (only) return {kind: 'command', name: only.command.fullName};
 	}
 	if (skill.subagent) {
 		return {kind: 'agent', name: skill.subagent.subagent.name};
@@ -251,26 +255,57 @@ function buildSubscription(
 	skill: Skill,
 	trig: SkillTrigger,
 	index: number,
-): Subscription | null {
+): {ok: true; subscription: Subscription} | {ok: false; error: string} {
 	// Manifest-form subscriptions carry an explicit target. Frontmatter-form
 	// subscriptions on single-file skills omit target - we resolve it to the
 	// skill's single member.
 	const explicit = trig.target;
-	let kind: SkillMemberKind;
+	let kind: SkillTargetKind;
 	let name: string;
 
 	if (explicit) {
 		const match = TARGET_REGEX.exec(explicit);
-		if (!match) return null;
+		if (!match) {
+			return {
+				ok: false,
+				error: `subscribe[${index}].target "${explicit}" is malformed.`,
+			};
+		}
+		if (match[1] === 'skill') {
+			return {
+				ok: false,
+				error: `subscribe[${index}].target "${explicit}" is not supported yet; use a command, agent, or tool member target instead.`,
+			};
+		}
 		kind = match[1] as SkillMemberKind;
 		const matched = match[2];
-		if (!matched) return null;
+		if (!matched) {
+			return {
+				ok: false,
+				error: `subscribe[${index}].target "${explicit}" is malformed.`,
+			};
+		}
 		name = matched;
 	} else {
 		const implicit = resolveImplicitTarget(skill);
-		if (!implicit) return null;
+		if (!implicit) {
+			return {
+				ok: false,
+				error: `subscribe[${index}].target is required for bundles and single-file skills with zero or multiple members.`,
+			};
+		}
 		kind = implicit.kind;
 		name = implicit.name;
+	}
+
+	// A triggered tool call has no model to fill in its arguments, so there
+	// is nothing sensible to run. Reject it here rather than let it register
+	// and be skipped silently at dispatch time.
+	if (kind === 'tool') {
+		return {
+			ok: false,
+			error: `subscribe[${index}] targets tool "${name}", but tools cannot be triggered by events. Put the subscription on an agent or command that calls the tool.`,
+		};
 	}
 
 	const source: SubscriptionSource =
@@ -290,18 +325,21 @@ function buildSubscription(
 		if (trig.paths) filter.paths = trig.paths;
 		if (trig.eventKinds) filter.eventKinds = trig.eventKinds;
 		return {
-			...base,
-			kind: 'file.changed',
-			...(Object.keys(filter).length > 0 ? {filter} : {}),
+			ok: true,
+			subscription: {
+				...base,
+				kind: 'file.changed',
+				...(Object.keys(filter).length > 0 ? {filter} : {}),
+			},
 		};
 	}
 	if (trig.kind === 'schedule.cron') {
 		const filter: ScheduleCronFilter = {cron: trig.cron};
-		return {
-			...base,
-			kind: 'schedule.cron',
-			filter,
-		};
+		return {ok: true, subscription: {...base, kind: 'schedule.cron', filter}};
 	}
-	return null;
+	const _exhaustive: never = trig;
+	return {
+		ok: false,
+		error: `subscribe[${index}] has unsupported kind "${String(_exhaustive)}".`,
+	};
 }

@@ -12,14 +12,19 @@
  */
 
 import {type ChildProcess, spawn} from 'node:child_process';
-import {existsSync, mkdirSync, openSync, statSync} from 'node:fs';
-import {readFile} from 'node:fs/promises';
-import {dirname, join} from 'node:path';
+import {
+	createReadStream,
+	existsSync,
+	mkdirSync,
+	openSync,
+	statSync,
+} from 'node:fs';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {ensureDirectoryTrust} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
-	getSocketPath,
 	readLiveLockfile,
 	readLockfile,
 	removeLockfile,
@@ -50,6 +55,14 @@ export interface DaemonCliOptions {
 	 * `defaultLaunchDaemon`.
 	 */
 	launchDaemon?: (projectRoot: string) => ChildProcess | null;
+	/**
+	 * One-shot override for `start`'s directory-trust gate (`--trust-directory`
+	 * on `nanocoder daemon start`), mirroring the `run` command's flag of the
+	 * same name. Never persisted — set `NANOCODER_TRUST_DIRECTORY=1` instead
+	 * to trust the directory for future runs too. Ignored by every other
+	 * subcommand.
+	 */
+	trustDirectory?: boolean;
 }
 
 /**
@@ -124,6 +137,32 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		return {
 			exitCode: 0,
 			output: `Daemon already running (pid ${live.pid}).`,
+		};
+	}
+
+	// The daemon loads every .nanocoder/agents|commands|tools/*.md and
+	// skills/<name>/skill.yaml in the project and runs triggered skills in
+	// headless mode - no confirmation prompts, including for execute_bash.
+	// It must never boot in a directory the user hasn't trusted.
+	const trust = ensureDirectoryTrust(
+		opts.projectRoot,
+		opts.trustDirectory ?? false,
+	);
+	if (trust.persisted) {
+		console.log(
+			`Marked ${resolve(opts.projectRoot)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
+		);
+	}
+	if (!trust.trusted) {
+		return {
+			exitCode: 1,
+			output:
+				`Directory ${resolve(opts.projectRoot)} is not trusted. The daemon runs ` +
+				`triggered skills unattended with no confirmation prompts, so it refuses ` +
+				`to start here. Run \`nanocoder\` interactively in this directory once to ` +
+				`accept the trust disclaimer, then re-run \`nanocoder daemon start\` - or ` +
+				`pass --trust-directory to bypass it for this run only (set ` +
+				`NANOCODER_TRUST_DIRECTORY=1 to persist it instead).`,
 		};
 	}
 
@@ -243,15 +282,62 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	};
 }
 
+const LOG_TAIL_BYTES = 64 * 1024;
+// How far into the window we look for a line break before giving up on
+// realigning. Past this point the partial first line is worth more than the
+// alignment, since realigning would discard most of the tail. Ordinary log
+// lines are far shorter than this.
+const LOG_TAIL_REALIGN_BYTES = 4 * 1024;
+
 async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const logPath = getLogPath(opts.projectRoot);
 	if (!existsSync(logPath)) {
 		return {exitCode: 0, output: 'No daemon log yet.'};
 	}
 	const size = statSync(logPath).size;
-	const start = Math.max(0, size - 64 * 1024);
-	const buf = await readFile(logPath, 'utf-8');
-	return {exitCode: 0, output: buf.slice(start)};
+	if (size === 0) {
+		return {exitCode: 0, output: ''};
+	}
+	const start = Math.max(0, size - LOG_TAIL_BYTES);
+	// Read the byte before the window as well. When it is a newline the window
+	// already opens on a whole line, and skipping past it keeps that line.
+	const readFrom = start === 0 ? 0 : start - 1;
+	const chunks: Buffer[] = [];
+	for await (const chunk of createReadStream(logPath, {
+		start: readFrom,
+		end: size - 1,
+	})) {
+		chunks.push(chunk as Buffer);
+	}
+	let tail = Buffer.concat(chunks);
+
+	if (start > 0) {
+		const newline = tail.indexOf(0x0a);
+		if (
+			newline !== -1 &&
+			newline < tail.length - 1 &&
+			newline <= LOG_TAIL_REALIGN_BYTES
+		) {
+			tail = tail.subarray(newline + 1);
+		} else {
+			// Either the window holds no usable line break, or the first one sits
+			// so far in that realigning to it would throw away most of the tail.
+			// Both cases keep the partial first line: drop the extra leading byte
+			// instead, plus the bytes of a character the window opened part way
+			// through.
+			let partial = 1;
+			while (
+				partial < tail.length &&
+				partial < 4 &&
+				(tail[partial] & 0xc0) === 0x80
+			) {
+				partial++;
+			}
+			tail = tail.subarray(partial);
+		}
+	}
+
+	return {exitCode: 0, output: tail.toString('utf-8')};
 }
 
 function launchSelfHosted(projectRoot: string): ChildProcess {
@@ -267,8 +353,11 @@ async function waitForLockfile(
 	const path = getLockfilePath(projectRoot);
 	while (Date.now() < deadline) {
 		if (existsSync(path)) {
+			// Report the path the daemon actually bound, not a recomputed one:
+			// the socket location can depend on TMPDIR, which need not match
+			// between a launchd/systemd-started daemon and this process.
 			const live = await readLiveLockfile(projectRoot);
-			if (live) return {pid: live.pid, socketPath: getSocketPath(projectRoot)};
+			if (live) return {pid: live.pid, socketPath: live.socketPath};
 		}
 		await new Promise(r => setTimeout(r, 50));
 	}

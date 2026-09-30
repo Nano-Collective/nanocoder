@@ -4,7 +4,7 @@ import TextInput from '@/components/text-input';
 import {ICON_WARNING} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {updateConfigNestedValue} from '@/config/config-writer';
+import {updatePreferencesNestedValue} from '@/config/config-writer';
 import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -15,7 +15,7 @@ type Sessions = NonNullable<AppConfig['sessions']>;
 const DEFAULTS: Sessions = {
 	autoSave: true,
 	saveInterval: 30000,
-	maxSessions: 50,
+	maxSessions: 100,
 	maxMessages: 1000,
 	retentionDays: 30,
 	directory: '',
@@ -30,7 +30,7 @@ const NUM_MIN: Record<string, number> = {
 };
 
 /**
- * Session save/retention settings (agents.config.json nanocoder.sessions).
+ * Session save/retention settings.
  * Each change persists atomically and directly — no keep/discard prompt.
  */
 export function SettingsSessionsPanel({
@@ -85,7 +85,7 @@ export function SettingsSessionsPanel({
 
 	const persist = <K extends keyof Sessions>(key: K, value: Sessions[K]) => {
 		setConfig(prev => ({...prev, [key]: value}));
-		updateConfigNestedValue('sessions', key, value);
+		updatePreferencesNestedValue('sessions', key, value);
 	};
 
 	const handleSelect = (item: {value: string}) => {

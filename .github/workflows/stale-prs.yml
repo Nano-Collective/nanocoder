@@ -1,11 +1,17 @@
 name: Stale PR Escalation
 
 # Three-stage escalation for PRs where the author has gone quiet but a
-# codeowner has already engaged:
-#   Stage 1 (author idle >= 7d, codeowner active more recently): nudge comment
-#   Stage 2 (nudged >= 7d ago, still no author activity):        final warning
-#   Stage 3 (warned >= 7d ago, still no author activity):        close the PR
+# maintainer has already engaged:
+#   Stage 1 (author idle >= 7d, maintainer active more recently): nudge comment
+#   Stage 2 (nudged >= 7d ago, still no author activity):         final warning
+#   Stage 3 (warned >= 7d ago, still no author activity):         close the PR
 # Any new activity from the author at any stage resets the cycle.
+#
+# "Maintainer" is derived from each event's author_association rather than from
+# CODEOWNERS, so this keeps working whether CODEOWNERS names individuals or a
+# team. Parsing CODEOWNERS cannot: team membership is not resolvable with the
+# default GITHUB_TOKEN, so a team-owned file yields zero owners and silently
+# disables the workflow.
 
 on:
   workflow_dispatch:
@@ -33,18 +39,10 @@ jobs:
   escalate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (for CODEOWNERS)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          sparse-checkout: |
-            .github/CODEOWNERS
-          sparse-checkout-cone-mode: false
-
       - name: Process open pull requests
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         with:
           script: |
-            const fs = require('fs');
             const {owner, repo} = context.repo;
 
             const IDLE_MS = Number(process.env.IDLE_DAYS) * 24 * 60 * 60 * 1000;
@@ -52,6 +50,10 @@ jobs:
             const WARN_LABEL = process.env.WARN_LABEL;
             const OPT_OUT_LABEL = process.env.OPT_OUT_LABEL;
             const now = Date.now();
+
+            // Associations that count as maintainer engagement. Everything else
+            // (CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE) does not.
+            const MAINTAINER = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
             // Dry run: the workflow_dispatch input wins if provided, otherwise
             // fall back to the DRY_RUN env default. Scheduled runs use the env.
@@ -76,32 +78,6 @@ jobs:
               if (DRY_RUN) { core.info(`[dry-run] #${pull_number}: would close PR`); return; }
               await github.rest.pulls.update({owner, repo, pull_number, state: 'closed'});
             };
-
-            // --- Parse CODEOWNERS into a set of individual owner logins ---
-            // Teams (containing a slash, e.g. @org/team) are skipped since we
-            // can't cheaply resolve team membership here.
-            const owners = new Set();
-            try {
-              const text = fs.readFileSync('.github/CODEOWNERS', 'utf8');
-              for (const raw of text.split('\n')) {
-                const line = raw.replace(/#.*$/, '').trim();
-                if (!line) continue;
-                for (const tok of line.split(/\s+/)) {
-                  if (tok.startsWith('@') && !tok.includes('/')) {
-                    owners.add(tok.slice(1).toLowerCase());
-                  }
-                }
-              }
-            } catch (e) {
-              core.warning(`Could not read CODEOWNERS: ${e.message}`);
-            }
-            core.info(`Codeowners: ${[...owners].join(', ') || '(none)'}`);
-            if (owners.size === 0) {
-              core.warning('No codeowners parsed; nothing to escalate.');
-              return;
-            }
-
-            const isOwner = (login) => login && owners.has(login.toLowerCase());
 
             const prs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', per_page: 100,
@@ -128,21 +104,27 @@ jobs:
               ]);
 
               const events = [];
-              const push = (login, ts) => {
-                if (login && ts) events.push({login: login.toLowerCase(), ts: new Date(ts).getTime()});
+              const push = (login, ts, assoc) => {
+                if (login && ts) events.push({
+                  login: login.toLowerCase(),
+                  ts: new Date(ts).getTime(),
+                  maintainer: MAINTAINER.has(assoc),
+                });
               };
               // PR creation counts as author activity baseline.
-              push(author, pr.created_at);
-              for (const c of commits) push(c.author?.login, c.commit?.author?.date);
-              for (const c of issueComments) push(c.user?.login, c.created_at);
-              for (const c of reviewComments) push(c.user?.login, c.created_at);
-              for (const r of reviews) push(r.user?.login, r.submitted_at);
+              push(author, pr.created_at, pr.author_association);
+              // Commits carry no author_association; they only ever matter as
+              // author activity, which is matched on login below.
+              for (const c of commits) push(c.author?.login, c.commit?.author?.date, null);
+              for (const c of issueComments) push(c.user?.login, c.created_at, c.author_association);
+              for (const c of reviewComments) push(c.user?.login, c.created_at, c.author_association);
+              for (const r of reviews) push(r.user?.login, r.submitted_at, r.author_association);
 
               let lastAuthor = 0;
-              let lastOwner = 0; // codeowner activity that is NOT the author
+              let lastOwner = 0; // maintainer activity that is NOT the author
               for (const ev of events) {
                 if (ev.login === author) lastAuthor = Math.max(lastAuthor, ev.ts);
-                else if (owners.has(ev.login)) lastOwner = Math.max(lastOwner, ev.ts);
+                else if (ev.maintainer) lastOwner = Math.max(lastOwner, ev.ts);
               }
 
               const authorIdleMs = now - lastAuthor;
@@ -208,10 +190,10 @@ jobs:
 
               // ---------------- Stage 1: first nudge ----------------
               // Fire only when the author has been idle long enough AND a
-              // codeowner engaged more recently than the author's last activity.
+              // maintainer engaged more recently than the author's last activity.
               if (authorIdleMs >= IDLE_MS && lastOwner > lastAuthor) {
                 await comment(n, [
-                  `Hi @${pr.user.login}, thanks for this PR! It looks like a codeowner has left feedback `,
+                  `Hi @${pr.user.login}, thanks for this PR! It looks like a maintainer has left feedback `,
                   `or review activity and there are still some outstanding items to wrap up.`,
                   ``,
                   `Whenever you get a chance, could you take a look at the open comments? `,

@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {DEFAULT_PORT, getVSCodeServer, VSCodeServer} from '@/vscode/index';
+import {getVSCodeServer, VSCodeServer} from '@/vscode/index';
 import type {DiagnosticInfo} from '@/vscode/protocol';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -55,7 +55,7 @@ export function activeEditorKey(
  */
 export function useVSCodeServer({
 	enabled,
-	port = DEFAULT_PORT,
+	port = VSCODE_EPHEMERAL_PORT,
 	currentModel,
 	currentProvider,
 	onPrompt,
@@ -237,7 +237,19 @@ export function isVSCodeModeEnabled(): boolean {
 }
 
 /**
- * Get VS Code server port from CLI args or default
+ * Sentinel port value that asks the kernel for a free port. The resolved
+ * port is published to a per-session discovery file so the VS Code extension
+ * can locate it without guessing.
+ */
+const VSCODE_EPHEMERAL_PORT = 0;
+
+/**
+ * Get VS Code server port from CLI args, defaulting to an ephemeral port.
+ *
+ * Returning 0 (rather than the historical fixed `DEFAULT_PORT`) is what
+ * removes the port-guessing attack surface described in #1059. The resolved
+ * port is written to the discovery file, and the VS Code extension always
+ * reads the port from there.
  */
 export function getVSCodePort(): number {
 	const portArgIndex = process.argv.findIndex(
@@ -249,7 +261,7 @@ export function getVSCodePort(): number {
 			return port;
 		}
 	}
-	return DEFAULT_PORT;
+	return VSCODE_EPHEMERAL_PORT;
 }
 
 /**

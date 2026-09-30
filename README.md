@@ -44,22 +44,28 @@ nanocoder --provider ollama --model llama3.1
 # Flags can appear before or after 'run' command
 nanocoder run --provider openrouter "refactor database module"
 
-# Boot directly into a development mode (normal, auto-accept, yolo, plan)
+# Boot directly into a development mode (normal, auto-accept, yolo, plan, architect)
 nanocoder --mode yolo
 nanocoder --mode plan run "audit the auth module"
 
-# Fullscreen mode with in-app scrolling instead of the inline default
-nanocoder --alt-screen
+# Inline mode (native terminal scrollback) instead of the fullscreen default
+nanocoder --no-alt-screen
+
+# Review a branch or PR for bugs, security issues, and style violations
+nanocoder review main
+nanocoder review 42
 ```
+
+> **Note:** `nanocoder review` is diff-only v1 and requires an interactive terminal (TTY). It cannot be used with pipes or redirection and its output cannot currently be captured to a file — see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287).
 
 ### Screen Modes
 
 Nanocoder supports two rendering modes, mirroring what Claude Code and Codex ship:
 
-- **Inline (default)** — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
-- **Fullscreen** (`--alt-screen` flag, or `"alternateScreen": true` in preferences) — a fixed-height layout on the alternate screen buffer with in-app scrolling: mouse wheel and PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. `--no-alt-screen` forces inline mode even if the preference is set.
+- **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting can be toggled with `--mouse` / `--no-mouse` or in preferences.
+- **Inline** (`--no-alt-screen` flag, or `"alternateScreen": false` in preferences) — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
 
-In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly, leaving the transcript and a farewell instead of a dead input box.
+In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly instead of leaving a dead input box. Inline mode leaves the transcript in your scrollback; fullscreen mode restores the terminal to what it showed before Nanocoder started, so the transcript is not kept on screen (use `/resume` or `/export` to get it back).
 
 ## Documentation
 
@@ -67,7 +73,7 @@ Full documentation is available online at **[docs.nanocollective.org](https://do
 
 - **[Getting Started](docs/getting-started/index.md)** - Installation, setup, and first steps
 - **[Configuration](docs/configuration/index.md)** - AI providers, MCP servers, preferences, logging, timeouts
-- **[Features](docs/features/index.md)** - Skills (commands, subagents, tools, event triggers), the per-project daemon, checkpointing, development modes, task management, and more
+- **[Features](docs/features/index.md)** - Skills (commands, subagents, tools, event triggers), lifecycle hooks, the per-project daemon, checkpointing, development modes, task management, and more
 - **[Commands Reference](docs/features/commands.md)** - Complete list of built-in slash commands
 - **[Keyboard Shortcuts](docs/features/keyboard-shortcuts.md)** - Full shortcut reference
 - **[Community](docs/community.md)** - Contributing, Discord, and how to help

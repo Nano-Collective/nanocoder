@@ -9,7 +9,11 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {useTheme} from '@/hooks/useTheme';
 import {resolveToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	TaskIndicatorInfo,
+} from '@/types/core';
 import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
@@ -27,6 +31,15 @@ interface DevelopmentModeIndicatorProps {
 	tune?: TuneConfig;
 	currentModel?: string;
 	activeEditor?: ActiveEditorState | null;
+	taskInfo?: TaskIndicatorInfo | null;
+	isSaving?: boolean;
+	/**
+	 * Columns the caller's own wrapper indents this row by. The width budget
+	 * below must exclude them: budgeting against the full terminal width
+	 * overflows by exactly this much, and Ink then cuts the row mid-word
+	 * instead of dropping an optional segment.
+	 */
+	indentColumns?: number;
 }
 
 function getContextColor(
@@ -53,9 +66,13 @@ export const DevelopmentModeIndicator = React.memo(
 		tune,
 		currentModel,
 		activeEditor,
+		taskInfo,
+		isSaving,
+		indentColumns = 0,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate, visualWidth} =
 			useResponsiveTerminal();
+		const budgetWidth = Math.max(0, actualWidth - indentColumns);
 		const modeLabel = isNarrow
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
@@ -72,6 +89,28 @@ export const DevelopmentModeIndicator = React.memo(
 				: `tune: ${resolved}`;
 		})();
 
+		// Two forms of the task badge. The base form is the progress readout,
+		// which only exists while the list is collapsed and is the sole trace of
+		// it on screen, so it always renders. The Ctrl-t key hint on top of that
+		// is a help string: worth showing when there is room, first to go when
+		// there isn't (see the drop order below). When the list is expanded there
+		// is no progress to report, so only the hint form exists.
+		const {taskLabelBase, taskLabelWithHint} = (() => {
+			if (!taskInfo || taskInfo.totalCount <= 0) {
+				return {taskLabelBase: '', taskLabelWithHint: ''};
+			}
+			if (!taskInfo.isHidden) {
+				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl-t)'};
+			}
+			const inFlight = taskInfo.inProgressCount > 0 ? '~' : '';
+			const unread = taskInfo.hasUnread ? '*' : '';
+			const progress = `${inFlight}${taskInfo.completedCount}/${taskInfo.totalCount}${unread}`;
+			return {
+				taskLabelBase: `Tasks (${progress})`,
+				taskLabelWithHint: `Tasks (${progress} Ctrl-t)`,
+			};
+		})();
+
 		// Figures with any client-side estimation ('estimate', or 'api+estimate'
 		// where the estimated tail moved the number) render with a leading '~'
 		// (≈); fully API-reported figures render bare. The marker is a single
@@ -79,131 +118,181 @@ export const DevelopmentModeIndicator = React.memo(
 		// truncates.
 		const ctxPrefix = contextSource === 'api' ? '' : '~';
 
-		// Mode, tune, and ctx never truncate. Session name and the filename
-		// portion of the editor pill share whatever room is left, each
-		// truncating with an ellipsis; if both fit fully neither truncates;
-		// if both overflow they split the remaining space evenly.
-		// The line-range suffix and the (Shift+Tab to cycle) hint are
-		// optional — drop them when otherwise the row would wrap. Suffix
-		// drops first (line-range info is more contextual than help text),
-		// then the shift hint.
-		const {sessionLabel, editorLabel, showShiftHint} = (() => {
-			const editorFileName = activeEditor?.fileName;
-			const hasSelection =
-				!!activeEditor?.selection &&
-				!!activeEditor.startLine &&
-				!!activeEditor.endLine;
-			const editorPrefix = editorFileName
-				? hasSelection
-					? `${ICON_EDITOR} `
-					: `${ICON_EDITOR} In `
-				: '';
-			const editorSuffixFull =
-				editorFileName && hasSelection
-					? ` (L${activeEditor.startLine}-${activeEditor.endLine})`
+		// Mode, tune, ctx, and the collapsed-task progress readout never
+		// truncate. Session name and the filename portion of the editor pill
+		// share whatever room is left, each truncating with an ellipsis; if both
+		// fit fully neither truncates; if both overflow they split the remaining
+		// space evenly.
+		// The Ctrl-t hint, the saving indicator, the line-range suffix and
+		// the (Shift+Tab to cycle) hint are optional — drop them when otherwise
+		// the row would wrap. The Ctrl-t hint drops first, then the saving
+		// indicator, then the line-range suffix, then the shift hint.
+		const {sessionLabel, editorLabel, showShiftHint, taskLabel, showSaving} =
+			(() => {
+				const editorFileName = activeEditor?.fileName;
+				const hasSelection =
+					!!activeEditor?.selection &&
+					!!activeEditor.startLine &&
+					!!activeEditor.endLine;
+				const editorPrefix = editorFileName
+					? hasSelection
+						? `${ICON_EDITOR} `
+						: `${ICON_EDITOR} In `
 					: '';
+				const editorSuffixFull =
+					editorFileName && hasSelection
+						? ` (L${activeEditor.startLine}-${activeEditor.endLine})`
+						: '';
 
-			const shiftHintFull =
-				isNarrow && developmentMode !== 'headless'
-					? ' (Shift+Tab to cycle)'
+				const shiftHintFull =
+					isNarrow && developmentMode !== 'headless'
+						? ' (Shift+Tab to cycle)'
+						: '';
+				const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
+				const taskBaseSegment = taskLabelBase ? ` · ${taskLabelBase}` : '';
+				const taskHintSegment = taskLabelWithHint
+					? ` · ${taskLabelWithHint}`
 					: '';
-			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
-			const ctxSegment =
-				contextPercentUsed !== null
-					? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
-					: '';
-			const sessionSeparator = sessionName ? ' · ' : '';
-			const editorSeparator = editorFileName ? ' · ' : '';
+				// Cost of upgrading the badge from its base form to the key-hint
+				// form. With the list expanded there is no base form, so this is the
+				// price of the whole segment.
+				const taskHintExtraFull =
+					taskHintSegment.length - taskBaseSegment.length;
+				const savingSegment = isSaving ? ' · saving' : '';
+				const savingExtraFull = savingSegment.length;
+				const ctxSegment =
+					contextPercentUsed !== null
+						? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
+						: '';
+				const sessionSeparator = sessionName ? ' · ' : '';
+				const editorSeparator = editorFileName ? ' · ' : '';
 
-			const minLen = 6;
-			const minSessionLen = sessionName ? minLen : 0;
-			const minEditorLen = editorFileName ? minLen : 0;
+				const minLen = 6;
+				const minSessionLen = sessionName ? minLen : 0;
+				const minEditorLen = editorFileName ? minLen : 0;
 
-			// Width consumed by parts that always render. Counts VISUAL columns
-			// rather than UTF-16 code units, so mode/editor/session labels
-			// containing non-ASCII glyphs can't silently overflow the budget.
-			const requiredWidth =
-				visualWidth(modeLabel) +
-				visualWidth(tuneSegment) +
-				visualWidth(ctxSegment) +
-				visualWidth(sessionSeparator) +
-				visualWidth(editorSeparator) +
-				visualWidth(editorPrefix) +
-				minSessionLen +
-				minEditorLen;
+				// Width consumed by parts that always render.
+				const requiredWidth =
+					modeLabel.length +
+					visualWidth(tuneSegment) +
+					taskBaseSegment.length +
+					visualWidth(ctxSegment) +
+					visualWidth(sessionSeparator) +
+					visualWidth(editorSeparator) +
+					visualWidth(editorPrefix) +
+					minSessionLen +
+					minEditorLen;
 
-			// Decide which optional segments fit. Drop the suffix first, then
-			// the shift hint, until the row fits within actualWidth.
-			let editorSuffix = editorSuffixFull;
-			let shiftHint = shiftHintFull;
-			if (
-				requiredWidth + visualWidth(editorSuffix) + visualWidth(shiftHint) + 1 >
-				actualWidth
-			) {
-				editorSuffix = '';
-				if (requiredWidth + visualWidth(shiftHint) + 1 > actualWidth) {
-					shiftHint = '';
-				}
-			}
-
-			const fixedWidth =
-				visualWidth(modeLabel) +
-				visualWidth(shiftHint) +
-				visualWidth(tuneSegment) +
-				visualWidth(ctxSegment) +
-				visualWidth(sessionSeparator) +
-				visualWidth(editorSeparator) +
-				visualWidth(editorPrefix) +
-				visualWidth(editorSuffix);
-
-			const remaining = Math.max(0, actualWidth - fixedWidth - 1);
-
-			let sessionMax = 0;
-			let filenameMax = 0;
-			if (sessionName && editorFileName) {
-				const sessionNeed = visualWidth(sessionName);
-				const filenameNeed = visualWidth(editorFileName);
-				if (sessionNeed + filenameNeed <= remaining) {
-					sessionMax = sessionNeed;
-					filenameMax = filenameNeed;
-				} else {
-					const half = Math.floor(remaining / 2);
-					if (sessionNeed <= half) {
-						sessionMax = sessionNeed;
-						filenameMax = remaining - sessionMax;
-					} else if (filenameNeed <= half) {
-						filenameMax = filenameNeed;
-						sessionMax = remaining - filenameMax;
-					} else {
-						sessionMax = half;
-						filenameMax = remaining - half;
+				// Decide which optional segments fit. Drop the Ctrl-t hint first,
+				// then the saving indicator, then the suffix, then the shift hint,
+				// until the row fits within budgetWidth. The hints are measured
+				// against the names at full length, not their truncation floor:
+				// a help string must give way before the session name or file
+				// name it sits next to gets cut.
+				const namesWidth =
+					requiredWidth -
+					minSessionLen -
+					minEditorLen +
+					(sessionName?.length ?? 0) +
+					(editorFileName?.length ?? 0);
+				let editorSuffix = editorSuffixFull;
+				let shiftHint = shiftHintFull;
+				let taskHintExtra = taskHintExtraFull;
+				let savingExtra = savingExtraFull;
+				if (
+					namesWidth +
+						taskHintExtra +
+						savingExtra +
+						editorSuffix.length +
+						visualWidth(shiftHint) +
+						1 >
+					budgetWidth
+				) {
+					taskHintExtra = 0;
+					if (
+						namesWidth +
+							savingExtra +
+							editorSuffix.length +
+							visualWidth(shiftHint) +
+							1 >
+						budgetWidth
+					) {
+						savingExtra = 0;
+						if (
+							namesWidth + editorSuffix.length + shiftHint.length + 1 >
+							budgetWidth
+						) {
+							editorSuffix = '';
+							if (namesWidth + shiftHint.length + 1 > budgetWidth) {
+								shiftHint = '';
+							}
+						}
 					}
 				}
-			} else if (sessionName) {
-				sessionMax = remaining;
-			} else if (editorFileName) {
-				filenameMax = remaining;
-			}
 
-			const session = sessionName
-				? truncate(sessionName, Math.max(minLen, sessionMax))
-				: null;
-			const editor = editorFileName
-				? `${editorPrefix}${truncate(
-						editorFileName,
-						Math.max(minLen, filenameMax),
-					)}${editorSuffix}`
-				: null;
+				const fixedWidth =
+					modeLabel.length +
+					visualWidth(shiftHint) +
+					visualWidth(tuneSegment) +
+					taskBaseSegment.length +
+					taskHintExtra +
+					savingExtra +
+					visualWidth(ctxSegment) +
+					visualWidth(sessionSeparator) +
+					visualWidth(editorSeparator) +
+					visualWidth(editorPrefix) +
+					editorSuffix.length;
 
-			return {
-				sessionLabel: session,
-				editorLabel: editor,
-				showShiftHint: shiftHint.length > 0,
-			};
-		})();
+				const remaining = Math.max(0, budgetWidth - fixedWidth - 1);
+
+				let sessionMax = 0;
+				let filenameMax = 0;
+				if (sessionName && editorFileName) {
+					const sessionNeed = sessionName.length;
+					const filenameNeed = editorFileName.length;
+					if (sessionNeed + filenameNeed <= remaining) {
+						sessionMax = sessionNeed;
+						filenameMax = filenameNeed;
+					} else {
+						const half = Math.floor(remaining / 2);
+						if (sessionNeed <= half) {
+							sessionMax = sessionNeed;
+							filenameMax = remaining - sessionMax;
+						} else if (filenameNeed <= half) {
+							filenameMax = filenameNeed;
+							sessionMax = remaining - filenameMax;
+						} else {
+							sessionMax = half;
+							filenameMax = remaining - half;
+						}
+					}
+				} else if (sessionName) {
+					sessionMax = remaining;
+				} else if (editorFileName) {
+					filenameMax = remaining;
+				}
+
+				const session = sessionName
+					? truncate(sessionName, Math.max(minLen, sessionMax))
+					: null;
+				const editor = editorFileName
+					? `${editorPrefix}${truncate(
+							editorFileName,
+							Math.max(minLen, filenameMax),
+						)}${editorSuffix}`
+					: null;
+
+				return {
+					sessionLabel: session,
+					editorLabel: editor,
+					showShiftHint: shiftHint.length > 0,
+					taskLabel: taskHintExtra > 0 ? taskLabelWithHint : taskLabelBase,
+					showSaving: savingExtra > 0,
+				};
+			})();
 
 		return (
-			<Box marginTop={1}>
+			<Box>
 				<Text
 					color={
 						developmentMode === 'normal'
@@ -229,6 +318,24 @@ export const DevelopmentModeIndicator = React.memo(
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={colors.info}>{tuneLabel}</Text>
+					</>
+				)}
+				{taskLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text
+							color={taskInfo?.hasUnread ? colors.warning : colors.secondary}
+						>
+							{taskLabel}
+						</Text>
+					</>
+				)}
+				{showSaving && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.info} italic>
+							saving
+						</Text>
 					</>
 				)}
 				{contextPercentUsed !== null && (

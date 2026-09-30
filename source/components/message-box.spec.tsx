@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {
 	ErrorMessage,
@@ -337,4 +338,96 @@ test('hideBox renders plain text without border', t => {
 	t.notRegex(output!, /│/);
 	// Content should still be visible
 	t.regex(output!, /Plain text only/);
+});
+
+// ============================================================================
+// Wrapping
+//
+// Ink wraps with wrap-ansi at trim: false. Usually the word-boundary space
+// stays on the end of the previous line and nothing looks wrong — but when
+// that space falls exactly on the wrap column it becomes the first character
+// of the continuation line, and the message renders one column out. Width 59
+// is one such column for the message below.
+// ============================================================================
+
+const WRAPPING_MESSAGE =
+	'chore(release): prepare release tooling, docs and changeset notes for v1.30.0';
+
+/** boxWidth = max(min(columns - 4, 200), 40), so pick columns to hit a width. */
+function withTerminalColumns<T>(columns: number, run: () => T): T {
+	const original = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: columns,
+		configurable: true,
+	});
+	try {
+		return run();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: original,
+			configurable: true,
+		});
+	}
+}
+
+function renderedLines(frame: string): string[] {
+	return stripAnsi(frame)
+		.split('\n')
+		.map(line => line.replace(/\s+$/, ''))
+		.filter(line => line !== '');
+}
+
+test('hideBox does not indent a continuation line that wraps on a space', t => {
+	// boxWidth 59: the space before "notes" lands on the wrap column.
+	const lines = withTerminalColumns(63, () => {
+		const {lastFrame} = renderWithTheme(
+			<SuccessMessage message={WRAPPING_MESSAGE} hideBox />,
+		);
+		return renderedLines(lastFrame()!);
+	});
+
+	t.is(lines.length, 2, 'message must wrap into exactly two lines');
+	t.is(lines[0], 'chore(release): prepare release tooling, docs and changeset');
+	t.is(lines[1], 'notes for v1.30.0', 'continuation line starts at column 0');
+});
+
+test('bordered messages wrap flush against the box padding', t => {
+	// boxWidth 55, so the inner text width is 49 — another artifact column.
+	const contentLines = withTerminalColumns(59, () => {
+		const {lastFrame} = renderWithTheme(
+			<SuccessMessage message={WRAPPING_MESSAGE} hideTitle />,
+		);
+		return stripAnsi(lastFrame()!)
+			.split('\n')
+			.filter(line => line.startsWith('│'))
+			.map(line => line.slice(1).replace(/│\s*$/, ''))
+			.filter(line => line.trim() !== '');
+	});
+
+	t.true(contentLines.length > 1, 'message must be long enough to wrap');
+
+	for (const line of contentLines) {
+		// paddingX={2}, so content starts at exactly two spaces. The trim:false
+		// artifact would push a continuation line out to three.
+		t.regex(
+			line,
+			/^ {2}\S/,
+			`content must start at the padding column: ${JSON.stringify(line)}`,
+		);
+	}
+});
+
+test('wrapping preserves indentation the caller wrote itself', t => {
+	const lines = withTerminalColumns(63, () => {
+		const {lastFrame} = renderWithTheme(
+			<SuccessMessage message={'Summary\n    indented detail'} hideBox />,
+		);
+		return renderedLines(lastFrame()!);
+	});
+
+	t.deepEqual(
+		lines,
+		['Summary', '    indented detail'],
+		'authored leading whitespace is not an artifact and must survive',
+	);
 });

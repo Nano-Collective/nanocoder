@@ -7,7 +7,19 @@ import {
 
 interface TitleShapeContextType {
 	currentTitleShape: TitleShape;
+	/**
+	 * Preview only — updates the in-memory shape (and thus the live app title)
+	 * WITHOUT persisting to preferences. Used to show a live preview while the
+	 * user navigates a shape selector, so an un-committed highlight never
+	 * reaches disk.
+	 */
 	setCurrentTitleShape: (shape: TitleShape) => void;
+	/**
+	 * Commit — persists the shape to preferences and updates the in-memory
+	 * shape. Used when an edit is confirmed (e.g. Enter in the Title Shape
+	 * settings panel).
+	 */
+	commitTitleShape: (shape: TitleShape) => void;
 }
 
 export const TitleShapeContext = createContext<TitleShapeContextType | null>(

@@ -1,6 +1,8 @@
+import clipboard from 'clipboardy';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import React, {useEffect, useState} from 'react';
+import {isOpenRouterProvider} from '@/ai-sdk-client/providers/openrouter';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	COST_SCORE_CHEAP,
@@ -12,14 +14,22 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {modelMatchingEngine} from '@/model-database/model-engine';
 import {Colors, Command, ModelEntry} from '@/types/index';
+import {errorMsg, successMsg} from '@/utils/message-factory';
+import {addToMessageQueue} from '@/utils/message-queue';
 
 type TabType = 'latest' | 'open' | 'proprietary';
 
 interface ModelDatabaseDisplayProps {
 	onCancel?: () => void;
+	currentProvider?: string;
+	onModelSelect?: (provider: string, model: string) => Promise<unknown>;
 }
 
-function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
+function ModelDatabaseDisplay({
+	onCancel,
+	currentProvider,
+	onModelSelect,
+}: ModelDatabaseDisplayProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const [openModels, setOpenModels] = useState<ModelEntry[]>([]);
@@ -82,9 +92,59 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 				}
 			}
 		} else if (key.return) {
-			setClosed(true);
-			if (onCancel) {
-				onCancel();
+			const model = currentTabModels[currentModelIndex];
+			if (!model) {
+				setClosed(true);
+				if (onCancel) {
+					onCancel();
+				}
+				return;
+			}
+
+			const switchProvider =
+				currentProvider &&
+				isOpenRouterProvider(currentProvider) &&
+				onModelSelect
+					? currentProvider
+					: undefined;
+
+			const reportClipboardError = (error: unknown) => {
+				const detail = error instanceof Error ? error.message : String(error);
+				addToMessageQueue(
+					errorMsg(
+						`Failed to copy model ID to clipboard: ${detail}`,
+						'model-database-copy',
+					),
+				);
+			};
+
+			if (switchProvider) {
+				// handleModelSelect (behind onModelSelect) shows its own
+				// "Model changed to: X" toast and exits the mode on success -
+				// don't also setClosed/onCancel here. Pass switchProvider
+				// (the configured currentProvider, not a hardcoded
+				// 'openrouter' literal): handleModelSelect compares it to the
+				// live provider name with strict equality, so a
+				// differently-cased configured name (e.g. "OpenRouter")
+				// would otherwise be misdetected as a provider change.
+				void clipboard.write(model.id).catch(reportClipboardError);
+				void onModelSelect?.(switchProvider, model.id);
+			} else {
+				void clipboard
+					.write(model.id)
+					.then(() => {
+						addToMessageQueue(
+							successMsg(
+								`Copied model ID to clipboard: ${model.id}`,
+								'model-database-copy',
+							),
+						);
+					})
+					.catch(reportClipboardError);
+				setClosed(true);
+				if (onCancel) {
+					onCancel();
+				}
 			}
 		} else if (key.upArrow) {
 			setCurrentModelIndex(prev => Math.max(0, prev - 1));
@@ -218,7 +278,11 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 				<Text color={colors.secondary}>
 					{searchMode
 						? 'Type to search | Backspace to delete | Up/Down: Navigate | Esc: Exit search'
-						: 'Type to search | Up/Down: Navigate | Tab: Switch tabs | Esc: Close'}
+						: `Type to search | Up/Down: Navigate | Enter: ${
+								currentProvider && isOpenRouterProvider(currentProvider)
+									? 'Copy & Switch'
+									: 'Copy ID'
+							} | Tab: Switch tabs | Esc: Close`}
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>

@@ -103,6 +103,7 @@ export function ModalSelectors({
 		return (
 			<TuneSelector
 				currentConfig={tuneConfig}
+				currentModel={currentModel}
 				onSelect={config => void onTuneSelect(config)}
 				onCancel={onTuneCancel}
 			/>
@@ -124,7 +125,13 @@ export function ModalSelectors({
 	}
 
 	if (activeMode === 'modelDatabase') {
-		return <ModelDatabaseDisplay onCancel={onModelDatabaseCancel} />;
+		return (
+			<ModelDatabaseDisplay
+				onCancel={onModelDatabaseCancel}
+				currentProvider={currentProvider}
+				onModelSelect={onModelSelect}
+			/>
+		);
 	}
 
 	if (activeMode === 'configWizard') {

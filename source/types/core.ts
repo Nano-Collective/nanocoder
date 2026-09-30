@@ -7,6 +7,7 @@ import {
 } from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
+import type {ResponseUsage} from '@/types/usage';
 
 export {asSchema, jsonSchema, tool};
 
@@ -36,6 +37,25 @@ export interface Message {
 	reasoning?: string;
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
+	durationMs?: number;
+	outcome?: 'completed' | 'cancelled' | 'failed';
+	/**
+	 * Harness-authored chrome: rendered in chat and persisted with session
+	 * history, but filtered out of the provider payload (see
+	 * `convertToModelMessages`) so the model is never handed nanocoder's own
+	 * UI text as its past output.
+	 *
+	 * Contract: never set this on a message carrying `tool_calls`. The payload
+	 * filter runs before orphan detection, so dropping such a message silently
+	 * drops the tool results that answer it.
+	 */
+	displayOnly?: boolean;
+	/**
+	 * Provider-reported usage for the completed ACP prompt that produced this
+	 * assistant message. Persisted so clients can restore the response footer
+	 * when a saved session is replayed. Older sessions omit this field.
+	 */
+	responseUsage?: ResponseUsage;
 }
 
 export interface ToolCall {
@@ -76,15 +96,27 @@ export interface Tool {
 
 export interface StructuredToolOutput {
 	llmContent: string;
-	structured: JSONValue;
+	structured?: JSONValue;
+	/**
+	 * Set by a handler whose run failed without throwing - a shell command that
+	 * exited non-zero, say - so the result carries the failure instead of every
+	 * caller re-deriving it from the text.
+	 */
+	isError?: boolean;
 }
 
 export type ToolExecuteResult = string | StructuredToolOutput;
 
+export interface ToolExecutionContext {
+	abortSignal?: AbortSignal;
+	sessionId?: string;
+	workingDirectory?: string;
+}
+
 export type ToolHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	input: any,
-	options?: {abortSignal?: AbortSignal},
+	options?: ToolExecutionContext,
 ) => Promise<ToolExecuteResult>;
 
 export type ToolFormatter = (
@@ -153,6 +185,10 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	/** Cached input tokens read from the provider cache. */
+	cacheReadTokens?: number;
+	/** Input tokens written to the provider cache. */
+	cacheWriteTokens?: number;
 }
 
 export interface ApiUsageSnapshot extends ApiUsage {
@@ -171,6 +207,8 @@ export interface ApiCallRecord {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 	timestamp: number;
 }
 
@@ -184,12 +222,33 @@ export interface ApiCallRecord {
  */
 export type ContextSource = 'api' | 'api+estimate' | 'estimate';
 
+/**
+ * Why the provider stopped generating, as reported by the AI SDK.
+ *
+ * `length` is the load-bearing one: it means the response was cut off at the
+ * output-token limit, so what came back is a fragment rather than a finished
+ * turn. A fragment with no tool calls is indistinguishable from a model that
+ * simply finished talking unless the caller checks this, which is why it is
+ * carried out of the client rather than only logged.
+ */
+export type LLMFinishReason =
+	| 'stop'
+	| 'length'
+	| 'content-filter'
+	| 'tool-calls'
+	| 'error'
+	| 'other'
+	| 'unknown';
+
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
 	}>;
 	toolsDisabled?: boolean;
 	usage?: ApiUsage;
+	// Absent when the provider did not report one (e.g. the streamed-fallback
+	// path after a no-output error). Treat absence as "not truncated".
+	finishReason?: LLMFinishReason;
 }
 
 export interface StreamCallbacks {
@@ -232,22 +291,25 @@ export type DevelopmentMode =
 	| 'auto-accept'
 	| 'yolo'
 	| 'plan'
+	| 'architect'
 	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
-	normal: '\u203A normal mode on',
-	'auto-accept': '\u203A\u203A auto-accept mode on',
-	yolo: '\u203A\u203A\u203A yolo mode on',
+	normal: '› normal mode on',
+	'auto-accept': '›› auto-accept mode on',
+	yolo: '››› yolo mode on',
 	plan: '? plan mode on',
-	headless: '\u203A\u203A headless mode on',
+	architect: '◈ architect mode on',
+	headless: '›› headless mode on',
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
-	normal: '\u203A normal',
-	'auto-accept': '\u203A\u203A auto',
-	yolo: '\u203A\u203A\u203A yolo',
+	normal: '› normal',
+	'auto-accept': '›› auto',
+	yolo: '››› yolo',
 	plan: '? plan',
-	headless: '\u203A\u203A headless',
+	architect: '◈ architect',
+	headless: '›› headless',
 };
 
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';
@@ -262,4 +324,15 @@ export interface LSPConnectionStatus {
 	name: string;
 	status: ConnectionStatus;
 	errorMessage?: string;
+}
+
+/** Status-bar summary of the live task list, shown while it is collapsed. */
+export interface TaskIndicatorInfo {
+	totalCount: number;
+	completedCount: number;
+	/** When > 0 the badge prefix '~' is shown (work in flight). */
+	inProgressCount: number;
+	isHidden: boolean;
+	/** The list changed while collapsed - badge renders in the warning colour. */
+	hasUnread: boolean;
 }

@@ -1,11 +1,14 @@
 import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
+import {getAppConfig} from '@/config/index';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {
+	resolveAutoCompactSettings,
 	setAutoCompactEnabled,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
@@ -13,7 +16,11 @@ import {
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {summariseWithLLM} from '@/utils/llm-summariser';
-import {compressMessages} from '@/utils/message-compression';
+import {
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from '@/utils/message-compression';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -40,9 +47,10 @@ export async function handleCompactCommand(
 	}
 
 	const args = commandParts.slice(1);
-	let mode: CompressionMode = 'default';
+	// Explicit flags win; otherwise fall back to the same settings auto-compact
+	// uses (session overrides, tune, then `autoCompact` config).
+	let mode: CompressionMode | null = null;
 	let preview = false;
-	// Strategy: explicit flag wins; otherwise prefer LLM when a client is available.
 	let strategy: CompressionStrategy | null = null;
 
 	for (let i = 0; i < args.length; i++) {
@@ -117,14 +125,10 @@ export async function handleCompactCommand(
 			return true;
 		} else if (arg === '--threshold' && i + 1 < args.length) {
 			const thresholdValue = Number.parseFloat(args[i + 1]);
-			if (
-				Number.isNaN(thresholdValue) ||
-				thresholdValue < 50 ||
-				thresholdValue > 95
-			) {
+			if (Number.isNaN(thresholdValue) || !isThresholdInRange(thresholdValue)) {
 				onAddToChatQueue(
 					errorMsg(
-						'Threshold must be a number between 50 and 95.',
+						`Threshold must be a number between ${COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT} and ${COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT}.`,
 						'compact-threshold-error',
 					),
 				);
@@ -150,14 +154,27 @@ export async function handleCompactCommand(
 			return true;
 		}
 
+		// Same observe-only pre-compact hook the automatic path fires, so a
+		// manual /compact isn't a blind spot for anything archiving context.
+		await runLifecycleHooks('pre-compact', {messageCount: messages.length});
+
 		const tokenizer = createTokenizer(provider, model);
 		const systemPrompt = getLastBuiltPrompt();
 		const systemMessage: Message = {role: 'system', content: systemPrompt};
 		const allMessages = [systemMessage, ...messages];
 
-		// Resolve strategy: explicit flag > LLM default when a client is available > mechanical.
+		// Resolve strategy and mode: explicit flag > session override > tune >
+		// config. An 'llm' strategy without a client runs mechanically.
+		const autoCompactConfig = getAppConfig().autoCompact;
+		const resolved = resolveAutoCompactSettings({
+			enabled: autoCompactConfig?.enabled ?? true,
+			threshold: autoCompactConfig?.threshold ?? 0,
+			mode: autoCompactConfig?.mode ?? 'default',
+			strategy: autoCompactConfig?.strategy,
+		});
 		const effectiveStrategy: CompressionStrategy =
-			strategy ?? (client ? 'llm' : 'mechanical');
+			strategy ?? (client ? resolved.strategy : 'mechanical');
+		const effectiveMode: CompressionMode = mode ?? resolved.mode;
 
 		const originalTokenCount = allMessages.reduce(
 			(sum, msg) => sum + tokenizer.countTokens(msg),
@@ -228,7 +245,9 @@ export async function handleCompactCommand(
 		}
 
 		// Mechanical path (also covers LLM failure / no client)
-		const result = compressMessages(allMessages, tokenizer, {mode});
+		const result = compressMessages(allMessages, tokenizer, {
+			mode: effectiveMode,
+		});
 
 		if (tokenizer.free) {
 			tokenizer.free();

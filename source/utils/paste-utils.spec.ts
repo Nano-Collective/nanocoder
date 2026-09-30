@@ -4,7 +4,8 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {handlePaste} from './paste-utils';
+import {handlePaste, resizePasteDisplayText} from './paste-utils';
+import {assemblePrompt} from './prompt-processor';
 import {clearAppConfig, reloadAppConfig} from '../config';
 
 // Tests for handlePaste utility function
@@ -99,6 +100,27 @@ test('handlePaste replaces pasted text with placeholder in display value', t => 
 	t.true(result!.displayValue.startsWith('prefix [Paste #'));
 	t.true(result!.displayValue.endsWith('802 chars] suffix'));
 	t.false(result!.displayValue.includes('x'.repeat(10))); // Original text should be gone
+});
+
+test('repeated pasted text survives the complete prompt round trip', t => {
+	const pastedText = 'x'.repeat(802);
+	const currentDisplayValue = `prefix ${pastedText} middle ${pastedText} suffix`;
+	const currentPlaceholderContent: Record<string, PlaceholderContent> = {};
+
+	const result = handlePaste(
+		pastedText,
+		currentDisplayValue,
+		currentPlaceholderContent,
+	);
+
+	t.truthy(result);
+	const placeholder = result!.placeholderContent.paste_1.displayText;
+	t.is(
+		result!.displayValue,
+		`prefix ${placeholder} middle ${placeholder} suffix`,
+	);
+	t.false(result!.displayValue.includes(pastedText));
+	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
 test('handlePaste preserves existing pasted content', t => {
@@ -218,4 +240,179 @@ test('handlePaste respects custom threshold - low threshold creates placeholder'
 		process.chdir(originalCwd);
 		clearAppConfig();
 	}
+});
+
+test('handlePaste namespaces paste ids so file mentions cannot collide', t => {
+	const currentPlaceholderContent: Record<string, PlaceholderContent> = {
+		file_1: {
+			type: PlaceholderType.FILE,
+			displayText: '[@src/app.tsx]',
+			filePath: '/repo/src/app.tsx',
+			content: 'file body',
+		},
+	};
+
+	const result = handlePaste(
+		'c'.repeat(801),
+		'[@src/app.tsx] ',
+		currentPlaceholderContent,
+	);
+
+	t.truthy(result);
+	t.deepEqual(Object.keys(result!.placeholderContent).sort(), [
+		'file_1',
+		'paste_1',
+	]);
+	t.truthy(result!.placeholderContent.file_1, 'the file mention survives');
+});
+
+test('handlePaste does not reuse the id of a deleted paste', t => {
+	const first = handlePaste('a'.repeat(801), '', {})!;
+	const second = handlePaste(
+		'b'.repeat(802),
+		first.displayValue,
+		first.placeholderContent,
+	)!;
+
+	t.deepEqual(Object.keys(second.placeholderContent), ['paste_1', 'paste_2']);
+
+	// The user deletes the first paste, then pastes again.
+	const surviving = {paste_2: second.placeholderContent.paste_2};
+	const third = handlePaste(
+		'c'.repeat(803),
+		second.placeholderContent.paste_2.displayText,
+		surviving,
+	)!;
+
+	t.deepEqual(Object.keys(third.placeholderContent), ['paste_2', 'paste_3']);
+	t.is(
+		(third.placeholderContent.paste_2 as PastePlaceholderContent).content,
+		'b'.repeat(802),
+		'the surviving paste keeps its own content',
+	);
+	t.is(
+		(third.placeholderContent.paste_3 as PastePlaceholderContent).content,
+		'c'.repeat(803),
+	);
+});
+
+test('handlePaste continues numbering past legacy bare-numeric paste ids', t => {
+	// Prompt history persists InputState, so pre-namespacing keys can come back.
+	const legacy: Record<string, PlaceholderContent> = {
+		'2': {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #2: 900 chars]',
+			content: 'x'.repeat(900),
+			originalSize: 900,
+		} as PastePlaceholderContent,
+	};
+
+	const result = handlePaste('d'.repeat(801), '[Paste #2: 900 chars]', legacy)!;
+
+	t.deepEqual(Object.keys(result.placeholderContent).sort(), ['2', 'paste_3']);
+	t.true(result.displayValue.includes('[Paste #3: 801 chars]'));
+});
+
+test('handlePaste labels a multi-line paste with its line count', t => {
+	const pastedText = Array.from({length: 7}, (_, i) => `line ${i + 1}`).join(
+		'\n',
+	);
+
+	const result = handlePaste(pastedText, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 7 lines]');
+});
+
+test('handlePaste does not count a trailing line break as a line', t => {
+	const result = handlePaste('first\nsecond\n', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 2 lines]');
+});
+
+test('handlePaste counts CRLF line breaks', t => {
+	const result = handlePaste('a\r\nb\r\nc', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 3 lines]');
+});
+
+test('handlePaste keeps the char count for one long line ending in a line break', t => {
+	const result = handlePaste(`${'a'.repeat(801)}\n`, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 802 chars]');
+});
+
+test('resizePasteDisplayText switches to lines once a chunked paste spans lines', t => {
+	t.is(
+		resizePasteDisplayText('[Paste #4: 900 chars]', `${'a'.repeat(900)}\nmore`),
+		'[Paste #4: 2 lines]',
+	);
+	t.is(
+		resizePasteDisplayText('[Paste #4: 2 lines]', 'one\ntwo\nthree'),
+		'[Paste #4: 3 lines]',
+	);
+});
+
+// ============================================================================
+// Cursor-aware splicing (bracketed paste at the caret, not at end of value)
+// ============================================================================
+
+test('handlePaste with cursorOffset splices a short paste in place', t => {
+	const pasted = 'pasted snippet';
+	const result = handlePaste(pasted, 'hello world', {}, 'bracketed', 5)!;
+
+	t.truthy(result);
+	t.is(result.displayValue, 'hellopasted snippet world');
+	t.deepEqual(result.placeholderContent, {});
+});
+
+test('handlePaste with cursorOffset at start inserts at index 0', t => {
+	const result = handlePaste('x', 'abc', {}, 'bracketed', 0)!;
+	t.is(result.displayValue, 'xabc');
+});
+
+test('handlePaste with cursorOffset at end is equivalent to appending', t => {
+	const value = 'abc';
+	const result = handlePaste('xyz', value, {}, 'bracketed', value.length)!;
+	t.is(result.displayValue, 'abcxyz');
+});
+
+test('handlePaste with cursorOffset clamps out-of-range offsets', t => {
+	const tooSmall = handlePaste('x', 'abc', {}, 'bracketed', -5)!;
+	t.is(tooSmall.displayValue, 'xabc');
+
+	const tooLarge = handlePaste('x', 'abc', {}, 'bracketed', 99)!;
+	t.is(tooLarge.displayValue, 'abcx');
+});
+
+test('handlePaste with cursorOffset creates a placeholder at the caret', t => {
+	const pasted = 'a'.repeat(801);
+	const result = handlePaste(pasted, 'hello world', {}, 'bracketed', 5)!;
+
+	t.truthy(result);
+	// Placeholder lands between "hello" and " world", not at the end.
+	const idx = result.displayValue.indexOf('[Paste #');
+	t.is(result.displayValue.slice(0, idx), 'hello');
+	t.is(result.displayValue.slice(idx).startsWith('[Paste #1: 801 chars]'), true);
+	t.is(result.displayValue.endsWith(' world'), true);
+
+	// Placeholder content is registered.
+	t.is(Object.keys(result.placeholderContent).length, 1);
+});
+
+test('handlePaste with cursorOffset does not trigger the dedup replaceAll', t => {
+	// The legacy path replaced every occurrence of pastedText in the value to
+	// avoid double-pasting. With a known cursor the splice is the source of
+	// truth, so any second copy of pastedText elsewhere in the value is left
+	// alone — only the splice at the caret becomes a placeholder.
+	const marker = 'X'.repeat(801);
+	const value = `prefix ${marker} middle ${marker}`;
+	const cursorBetween = 'prefix '.length + marker.length + ' middle '.length;
+	const result = handlePaste(marker, value, {}, 'bracketed', cursorBetween)!;
+
+	t.truthy(result);
+	// Placeholder spliced between the two markers; both X-runs are preserved.
+	t.true(result.displayValue.startsWith(`prefix ${marker} middle `));
+	t.true(
+		result.displayValue.endsWith(`[Paste #1: 801 chars]${marker}`),
+	);
 });

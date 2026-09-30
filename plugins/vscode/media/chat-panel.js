@@ -5,11 +5,16 @@
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
+	const artifactBar = document.getElementById('artifact-bar');
+	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
+	const contextChipsClearBtn = document.getElementById('context-chips-clear');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
-	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+	// [{path, name, kind: 'file'|'folder', agentEdited?: boolean}]. Entries the
+	// agent contributed are flagged so submitMessage can leave them out.
+	let attachedPaths = [];
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -33,29 +38,83 @@
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
+	let showTokenUsage = false;
+
+	// ── Slash command autocomplete state ────────────────────
+	const slashDropdown = document.getElementById('slash-dropdown');
+	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
+
+	let slashSuggestions = [];
+	let slashSelectedIndex = 0;
+	/**
+	 * Set after a selection lands and after Escape, so the caret move we just
+	 * made doesn't immediately reopen the menu on the name we just completed.
+	 * Cleared by the next real keystroke.
+	 */
+	let slashSuppressed = false;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
+		const formatDropdownLabel = (value, triggerId) => {
+			if (triggerId === 'mode-trigger') {
+				const modeLabels = {
+					normal: 'Normal',
+					'auto-accept': 'Auto-Accept',
+					yolo: 'YOLO',
+					plan: 'Plan',
+					architect: 'Architect',
+				};
+				return modeLabels[value] || value;
+			}
+
+			if (value.includes('/')) {
+				return value.split('/').pop();
+			}
+
+			return value;
+		};
+
 		class CustomDropdown {
 			constructor(triggerId, dropdownId, labelId, onChange) {
+				this.triggerId = triggerId;
 				this.trigger = document.getElementById(triggerId);
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
 
 				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute('aria-haspopup', 'menu');
+				this.trigger.setAttribute('aria-expanded', 'false');
+				this.trigger.setAttribute('aria-controls', dropdownId);
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					// Close all dropdowns
-					closeAllDropdowns();
-					
+					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
+					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
 					}
+					this.syncTriggerExpanded();
 				});
+			}
+
+			syncModeTriggerLabel() {
+				if (this.label?.id !== 'mode-trigger-label') return;
+				if (this.trigger && this.label.textContent) {
+					const accessibleLabel = `Mode: ${this.label.textContent}`;
+					this.trigger.title = accessibleLabel;
+					this.trigger.setAttribute('aria-label', accessibleLabel);
+				}
+			}
+
+			syncTriggerExpanded() {
+				if (!this.trigger || !this.dropdown) return;
+				this.trigger.setAttribute(
+					'aria-expanded',
+					this.dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
 			}
 
 			setOptions(options, selectedValue) {
@@ -65,6 +124,7 @@
 					this.label.textContent = 'None available';
 					this.trigger.disabled = true;
 					this.trigger.classList.add('opacity-50');
+					this.syncModeTriggerLabel();
 					return;
 				}
 
@@ -77,16 +137,12 @@
 					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
 					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
-					item.textContent = opt;
+					const displayValue = formatDropdownLabel(opt, this.triggerId);
+					item.textContent = displayValue;
 					
 					if (opt === selectedValue) {
 						item.classList.add('bg-vscode-list-active');
 						item.classList.add('text-vscode-list-activeFg');
-						
-						let displayValue = opt;
-						if (displayValue.includes('/')) {
-							displayValue = displayValue.split('/').pop();
-						}
 						this.label.textContent = displayValue || 'Loading...';
 						
 						hasSelected = true;
@@ -97,18 +153,17 @@
 					item.addEventListener('click', () => {
 						this.onChange(opt);
 						this.dropdown.classList.add('hidden');
+						this.syncTriggerExpanded();
 					});
 
 					this.dropdown.appendChild(item);
 				});
 
 				if (!hasSelected && options.length > 0) {
-					let displayValue = options[0];
-					if (displayValue.includes('/')) {
-						displayValue = displayValue.split('/').pop();
-					}
+					const displayValue = formatDropdownLabel(options[0], this.triggerId);
 					this.label.textContent = displayValue || 'Loading...';
 				}
+				this.syncModeTriggerLabel();
 			}
 		}
 
@@ -124,6 +179,23 @@
 			vscode.postMessage({ type: 'setModel', model: val });
 		});
 
+		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
+		const composerSettings = document.getElementById('composer-settings');
+		if (composerSettingsTrigger && composerSettings) {
+			composerSettingsTrigger.addEventListener('click', (e) => {
+				e.stopPropagation();
+				const opening = composerSettings.classList.contains('hidden');
+				closeAllDropdowns();
+				if (opening) {
+					composerSettings.classList.remove('hidden');
+					composerSettingsTrigger.setAttribute('aria-expanded', 'true');
+				}
+			});
+			composerSettings.addEventListener('click', (e) => {
+				e.stopPropagation();
+			});
+		}
+
 		document.addEventListener('click', () => {
 			closeAllDropdowns();
 		});
@@ -131,11 +203,33 @@
 
 	initDropdowns();
 
-	function closeAllDropdowns() {
-		document.getElementById('provider-dropdown').classList.add('hidden');
-		document.getElementById('model-dropdown').classList.add('hidden');
-		document.getElementById('mode-dropdown').classList.add('hidden');
+	function closeAllDropdowns(keepId) {
+		['provider-dropdown', 'model-dropdown', 'mode-dropdown', 'composer-settings'].forEach((id) => {
+			if (id !== keepId) {
+				document.getElementById(id)?.classList.add('hidden');
+			}
+		});
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+		[
+			['provider-trigger', 'provider-dropdown'],
+			['model-trigger', 'model-dropdown'],
+			['mode-trigger', 'mode-dropdown'],
+		].forEach(([triggerId, dropdownId]) => {
+			const trigger = document.getElementById(triggerId);
+			const dropdown = document.getElementById(dropdownId);
+			if (trigger && dropdown) {
+				trigger.setAttribute(
+					'aria-expanded',
+					dropdown.classList.contains('hidden') ? 'false' : 'true',
+				);
+			}
+		});
+		const composerSettings = document.getElementById('composer-settings');
+		const composerSettingsTrigger = document.getElementById('composer-settings-trigger');
+		if (composerSettingsTrigger) {
+			const open = composerSettings && !composerSettings.classList.contains('hidden');
+			composerSettingsTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+		}
 	}
 
 	// ── @ mention autocomplete ──────────────────────────────
@@ -329,10 +423,7 @@
 		chatInput.style.height = 'auto';
 		chatInput.style.height = chatInput.scrollHeight + 'px';
 
-		if (!attachedPaths.some(a => a.path === item.path)) {
-			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
-			renderChips();
-		}
+		attachPath(item);
 
 		closeMention();
 		chatInput.focus();
@@ -349,6 +440,9 @@
 			}
 		});
 	}
+
+	const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit', 'file_op']);
+	const EXECUTE_TOOLS = new Set(['execute_bash']);
 
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
@@ -385,11 +479,32 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
-	let currentAggregator = null;
-	let currentThoughtBox = null;
+	// True from the moment Stop/Escape is pressed until the next prompt starts.
+	// Cancellation is a round trip: the agent keeps emitting updates for the
+	// turn it was told to stop (a tool already in flight, the queued calls it
+	// then marks cancelled), and those land after the UI has already closed the
+	// turn. Without this flag they rebuild a second tool card group that looks
+	// like the cancelled work restarting.
+	let turnCancelled = false;
+	// The one collapsible box holding this turn's thoughts, tool groups, edit
+	// cards and plan. Null between turns.
+	let currentWorkSummary = null;
+	// Which summary owns a given tool card / plan card, so a late update lands
+	// back in the turn it belongs to rather than opening a new one. Cleared per
+	// turn, because ids are only unique within a turn.
+	const workSummaryByToolCallId = new Map();
+	const workSummaryByPlanId = new Map();
+	// When the turn started, so the summary reports the whole turn and not just
+	// the stretch from its first thought. Recorded on the user message rather
+	// than in the summary's constructor, which runs later and lazily.
+	let turnStartedAt = 0;
 	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
+	// Absolute paths each tool call touches, kept until the call lands: the
+	// completion update carries a status and nothing else. Same lifetime as
+	// toolKinds, and cleared with it.
+	const toolLocations = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -419,22 +534,12 @@
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
-		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`,
+		refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`
 	};
 
-	function formatRelativeTime(iso) {
-		if (!iso) return '';
-		const date = new Date(iso);
-		if (isNaN(date.getTime())) return '';
-		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
-		if (diffMin < 1) return 'Just now';
-		if (diffMin < 60) return `${diffMin}m ago`;
-		const diffHr = Math.floor(diffMin / 60);
-		if (diffHr < 24) return `${diffHr}h ago`;
-		const diffDay = Math.floor(diffHr / 24);
-		if (diffDay < 7) return `${diffDay}d ago`;
-		return date.toLocaleDateString();
-	}
+	let lastUserPromptText = '';
+	let lastUserPromptImages = undefined;
 
 	function formatRelativeTime(iso) {
 		if (!iso) return '';
@@ -450,20 +555,55 @@
 		return date.toLocaleDateString();
 	}
 
-	function createMessageFooter(getText, role, sentAt) {
+	function createMessageFooter(getText, role, sentAt, promptText = '', promptImages = undefined) {
 		const footer = document.createElement('div');
-		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
-			(role === 'user' ? 'self-end' : 'self-start');
 
-		const btn = document.createElement('button');
-		btn.type = 'button';
-		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
-		btn.title = 'Copy';
-		btn.setAttribute('aria-label', 'Copy message');
-		btn.innerHTML = ICONS.clipboard;
+		const timeEl = document.createElement('span');
+		timeEl.className = 'timestamp leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-end';
+			footer.appendChild(timeEl);
+			return footer;
+		}
+
+		footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-start';
+		footer.dataset.promptText = promptText || '';
+		footer._promptImages = promptImages;
+
+		const actionsGroup = document.createElement('div');
+		actionsGroup.className = 'message-actions flex items-center gap-1.5';
+
+		const retryBtn = document.createElement('button');
+		retryBtn.type = 'button';
+		retryBtn.className = 'retry-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		retryBtn.title = 'Retry';
+		retryBtn.setAttribute('aria-label', 'Retry response');
+		retryBtn.innerHTML = ICONS.refresh;
+
+		if (isProcessing) {
+			footer.style.display = 'none';
+			footer.classList.add('agent-footer-processing');
+		}
+
+		retryBtn.addEventListener('click', () => {
+			if (isProcessing) return;
+			const prompt = footer.dataset.promptText || promptText || lastUserPromptText;
+			const images = footer._promptImages || promptImages || lastUserPromptImages;
+			if (!prompt && !images?.length) return;
+			retryPrompt(prompt, images, footer);
+		});
+
+		const copyBtn = document.createElement('button');
+		copyBtn.type = 'button';
+		copyBtn.className = 'copy-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		copyBtn.title = 'Copy';
+		copyBtn.setAttribute('aria-label', 'Copy message');
+		copyBtn.innerHTML = ICONS.clipboard;
 
 		let resetTimer = null;
-		btn.addEventListener('click', () => {
+		copyBtn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
 			(async () => {
@@ -472,54 +612,51 @@
 				}
 				await navigator.clipboard.writeText(text);
 			})().then(() => {
-				btn.innerHTML = ICONS.success;
-				btn.title = 'Copied!';
+				copyBtn.innerHTML = ICONS.success;
+				copyBtn.title = 'Copied!';
 			}).catch(() => {
-				btn.innerHTML = ICONS.error;
-				btn.title = 'Copy failed';
+				copyBtn.innerHTML = ICONS.error;
+				copyBtn.title = 'Copy failed';
 			}).finally(() => {
 				clearTimeout(resetTimer);
 				resetTimer = setTimeout(() => {
-					btn.innerHTML = ICONS.clipboard;
-					btn.title = 'Copy';
+					copyBtn.innerHTML = ICONS.clipboard;
+					copyBtn.title = 'Copy';
 				}, 1500);
 			});
 		});
 
-		const timeEl = document.createElement('span');
-		timeEl.className = 'leading-none';
-		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-
-		if (role === 'user') {
-			footer.appendChild(timeEl);
-			footer.appendChild(btn);
-		} else {
-			footer.appendChild(btn);
-			footer.appendChild(timeEl);
-		}
-
+		actionsGroup.appendChild(retryBtn);
+		actionsGroup.appendChild(copyBtn);
+		timeEl.className = 'timestamp leading-none ml-1';
+		actionsGroup.appendChild(timeEl);
+		footer.appendChild(actionsGroup);
 		return footer;
 	}
 
 	// --- Send / Stop toggle logic ---
-	function setProcessing(active) {
+	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
 		if (!active) {
-			// Globally cancel any stuck spinners across all tool cards, 
-			// in case multiple aggregators were created in the same session
+			// Globally settle any stuck spinners across all tool cards, in case
+			// several tool groups were created in the same session.
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
 				const status = statusEl.dataset.status;
 				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
+					statusEl.dataset.status = 'cancelled';
 				}
 			});
 			stopVisualLoader();
-
-			if (currentAggregator) {
-				currentAggregator.close();
-			}
-			currentAggregator = null;
+			finishCurrentWorkSummary(outcome);
+			
+			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
+			hiddenFooters.forEach(f => {
+				f.style.display = '';
+				f.classList.remove('agent-footer-processing');
+			});
+			scrollToBottom(true);
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
@@ -527,10 +664,158 @@
 		}
 	}
 
+	function setPlanReviewActive(active) {
+		if (active) {
+			if (typeof closeMention === 'function') closeMention();
+			if (typeof closeAllDropdowns === 'function') closeAllDropdowns();
+		}
+		chatInput.disabled = active;
+		composerBox.classList.toggle('opacity-60', active);
+		composerBox.classList.toggle('pointer-events-none', active);
+	}
+
+	function removePlanReview() {
+		const existing = document.getElementById('plan-review-card');
+		if (existing) existing.remove();
+		setPlanReviewActive(false);
+	}
+	let previousArtifactCount = 0;
+	let userClosedArtifacts = false;
+	let isArtifactsCollapsed = false;
+
+	const artifactToggle = document.getElementById('artifact-toggle');
+	const artifactClose = document.getElementById('artifact-close');
+	const artifactContent = document.getElementById('artifact-content');
+
+	if (artifactToggle && artifactContent) {
+		artifactToggle.addEventListener('click', () => {
+			isArtifactsCollapsed = !isArtifactsCollapsed;
+			artifactContent.classList.toggle('hidden', isArtifactsCollapsed);
+			artifactToggle.querySelector('svg').style.transform = isArtifactsCollapsed ? 'rotate(-90deg)' : '';
+		});
+	}
+
+	if (artifactClose) {
+		artifactClose.addEventListener('click', () => {
+			userClosedArtifacts = true;
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		});
+	}
+
+	function renderArtifacts(artifacts) {
+		if (!artifactBar || !artifactLinks) return;
+
+		const currentCount = Array.isArray(artifacts) ? artifacts.length : 0;
+		if (currentCount > previousArtifactCount) {
+			userClosedArtifacts = false;
+		}
+		previousArtifactCount = currentCount;
+
+		artifactLinks.innerHTML = '';
+		const labels = {
+			implementation_plan: 'Plan',
+			task: 'Tasks',
+			walkthrough: 'Walkthrough',
+		};
+		for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+			if (!artifact || !labels[artifact.kind] || typeof artifact.path !== 'string') continue;
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-2 py-1 cursor-pointer font-vscode text-[0.78em] text-vscode-fg';
+			button.textContent = labels[artifact.kind];
+			button.title = artifact.path;
+			button.onclick = () => {
+				vscode.postMessage({type: 'openPath', path: artifact.path, kind: 'file'});
+			};
+			artifactLinks.appendChild(button);
+		}
+		const hasArtifacts = artifactLinks.childElementCount > 0;
+		if (hasArtifacts && !userClosedArtifacts) {
+			artifactBar.classList.remove('hidden');
+			artifactBar.classList.add('flex');
+		} else {
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		}
+	}
+
+	function renderPlanReview(artifactPath) {
+		removePlanReview();
+		endCurrentTextBlock();
+
+		const card = document.createElement('div');
+		card.id = 'plan-review-card';
+		card.className = 'my-3 border border-vscode-focusBorder rounded-lg bg-vscode-widget-bg overflow-hidden shrink-0';
+
+		const header = document.createElement('div');
+		header.className = 'px-3 py-2 bg-vscode-widget-header border-b border-vscode-widget-border';
+		const title = document.createElement('div');
+		title.className = 'font-vscode text-[0.95em] font-semibold';
+		title.textContent = 'Implementation plan ready';
+		const subtitle = document.createElement('div');
+		subtitle.className = 'font-vscode text-[0.82em] opacity-65 mt-0.5';
+		subtitle.textContent = 'Review the saved plan before implementation begins.';
+		header.appendChild(title);
+		header.appendChild(subtitle);
+
+		const body = document.createElement('div');
+		body.className = 'px-3 py-3 flex flex-col gap-2.5';
+		const openButton = document.createElement('button');
+		openButton.type = 'button';
+		openButton.className = 'w-full text-left bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] transition-colors';
+		openButton.textContent = 'Open implementation_plan.md';
+		openButton.title = artifactPath;
+		openButton.onclick = () => {
+			vscode.postMessage({type: 'openPath', path: artifactPath, kind: 'file'});
+		};
+
+		const actions = document.createElement('div');
+		actions.className = 'flex flex-col gap-1.5';
+		const approveButton = document.createElement('button');
+		approveButton.type = 'button';
+		approveButton.className = 'w-full border-none rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
+		approveButton.textContent = 'Yes, execute this plan';
+		approveButton.onclick = () => {
+			removePlanReview();
+			// Show the approval as a real user turn. The extension host sends the
+			// approved-plan prompt straight through acpClient.prompt(), bypassing
+			// submitMessage(), so nothing else would put a bubble in the
+			// transcript and the turn would appear to start from nowhere.
+			appendMessage('Approved the implementation plan. Proceeding.', 'user');
+			currentTurnEl = null;
+			currentTextEl = null;
+			setProcessing(true);
+			startVisualLoader();
+			vscode.postMessage({type: 'approvePlan'});
+		};
+
+		const reviseButton = document.createElement('button');
+		reviseButton.type = 'button';
+		reviseButton.className = 'w-full bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em]';
+		reviseButton.textContent = 'No, tell Nanocoder what to change';
+		reviseButton.onclick = () => {
+			removePlanReview();
+			vscode.postMessage({type: 'revisePlan'});
+			chatInput.focus();
+		};
+
+		actions.appendChild(approveButton);
+		actions.appendChild(reviseButton);
+		body.appendChild(openButton);
+		body.appendChild(actions);
+		card.appendChild(header);
+		card.appendChild(body);
+		messagesContainer.appendChild(card);
+		setPlanReviewActive(true);
+		scrollToBottomIfFollowing();
+	}
+
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
-		setProcessing(false);
+		turnCancelled = true;
+		setProcessing(false, 'cancelled');
 	}
 
 	if (sendStopBtn) {
@@ -717,14 +1002,174 @@
 		});
 	}
 
+	// ── Slash command functions ──────────────────────────────
+
+	function hideSlashDropdown() {
+		if (!slashDropdown) return;
+		const wasOpen = !slashDropdown.classList.contains('hidden');
+		slashDropdown.classList.add('hidden');
+		slashDropdown.innerHTML = '';
+		slashSuggestions = [];
+		slashSelectedIndex = 0;
+		// The textarea is a single combobox shared with the @-mention listbox,
+		// so only reset its aria state when this dropdown is what set it.
+		// Otherwise every keystroke typed into an open mention list would
+		// announce the list as collapsed.
+		if (wasOpen && !mentionOpen) {
+			chatInput.removeAttribute('aria-activedescendant');
+			chatInput.setAttribute('aria-expanded', 'false');
+		}
+	}
+
+	/** @returns {boolean} whether the command was actually applied. */
+	function applySlashSelection(command) {
+		const result = applySlashCommand(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+			command,
+		);
+		hideSlashDropdown();
+		if (!result) return false;
+
+		// Set before the caret moves, because that move fires selectionchange.
+		// A command with no template completes to its own name, which is itself
+		// a valid token, so without this the menu would reopen on top of it and
+		// swallow the Enter that runs it.
+		slashSuppressed = true;
+		chatInput.value = result.text;
+		chatInput.setSelectionRange(result.cursor, result.cursor);
+		// Resized here rather than by dispatching a synthetic input event: that
+		// would clear the suppression flag and re-run the mention search.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
+		chatInput.focus();
+		return true;
+	}
+
+	function renderSlashDropdown(commands) {
+		if (!slashDropdown) return;
+		slashDropdown.innerHTML = '';
+		slashSuggestions = commands;
+		commands.forEach((command, index) => {
+			const item = document.createElement('button');
+			item.type = 'button';
+			item.id = 'slash-option-' + index;
+			item.setAttribute('role', 'option');
+			item.setAttribute('aria-selected', index === slashSelectedIndex ? 'true' : 'false');
+			item.className = 'w-full text-left bg-transparent border-none px-3 py-2 cursor-pointer transition-colors flex items-start justify-between gap-3';
+			if (index === slashSelectedIndex) {
+				item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+				chatInput.setAttribute('aria-activedescendant', item.id);
+			} else {
+				item.classList.add('hover:bg-vscode-list-hover', 'text-vscode-dropdown-foreground');
+			}
+			const left = document.createElement('span');
+			left.className = 'font-semibold text-[0.9em]';
+			left.textContent = command.name;
+			const right = document.createElement('span');
+			right.className = 'text-[0.8em] opacity-70';
+			right.textContent = command.description;
+			item.appendChild(left);
+			item.appendChild(right);
+			// mousedown rather than click, matching the mention rows: click
+			// would let the textarea blur first, and the blur handler closes
+			// the dropdown before the selection lands.
+			item.addEventListener('mousedown', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				applySlashSelection(command);
+			});
+			slashDropdown.appendChild(item);
+		});
+		slashDropdown.classList.remove('hidden');
+		chatInput.setAttribute('aria-expanded', 'true');
+	}
+
+	function updateSlashAutocomplete() {
+		if (!slashDropdown || slashSuppressed) {
+			hideSlashDropdown();
+			return;
+		}
+		const token = findSlashCommandToken(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+		);
+		if (!token) {
+			hideSlashDropdown();
+			return;
+		}
+		const filtered = SLASH_COMMANDS.filter(command =>
+			command.name.slice(1).toLowerCase().startsWith(token.query)
+		);
+		if (filtered.length === 0) {
+			hideSlashDropdown();
+			return;
+		}
+		slashSelectedIndex = 0;
+		renderSlashDropdown(filtered);
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
+		// Typing is what lifts a dismissal, so this runs before the update.
+		slashSuppressed = false;
+		updateSlashAutocomplete();
 	});
+
+	if (slashDropdown) {
+		chatInput.addEventListener('blur', hideSlashDropdown);
+		// Catches caret moves that fire no input event, which would otherwise
+		// leave the menu open over a token that is no longer under the caret.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				updateSlashAutocomplete();
+			}
+		});
+	}
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Slash command navigation wins before mention navigation.
+		if (slashDropdown && !slashDropdown.classList.contains('hidden') && slashSuggestions.length > 0) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex + 1) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey) {
+				// Only claim the key if the completion actually landed. If the
+				// caret has moved off the token the menu was opened for, this
+				// falls through to submit instead of silently eating the Enter.
+				if (applySlashSelection(slashSuggestions[slashSelectedIndex])) {
+					e.preventDefault();
+					return;
+				}
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				// Same reason as the mention dropdown below: the document-level
+				// handler cancels the in-flight request on Escape whenever
+				// isProcessing, so without this, dismissing the menu mid-stream
+				// would also kill the run.
+				e.stopPropagation();
+				// Stays dismissed until the next keystroke; without this the
+				// caret move from Escape would reopen it via selectionchange.
+				slashSuppressed = true;
+				hideSlashDropdown();
+				return;
+			}
+		}
+
 		// Mention navigation has to win over Enter-to-submit. Handled at the top
 		// of this same listener rather than in a second one, because two
 		// listeners on the same element would race and Enter could submit the
@@ -772,7 +1217,17 @@
 	// streaming response area. Guarded by isProcessing so an idle Escape does
 	// nothing.
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && isProcessing) {
+		if (e.key !== 'Escape') return;
+		const chromeOpen = ['provider-dropdown', 'model-dropdown', 'mode-dropdown', 'composer-settings'].some(
+			(id) => !document.getElementById(id)?.classList.contains('hidden'),
+		) || (addMenuDropdown && !addMenuDropdown.classList.contains('hidden'));
+		if (chromeOpen) {
+			e.preventDefault();
+			e.stopPropagation();
+			closeAllDropdowns();
+			return;
+		}
+		if (isProcessing) {
 			e.preventDefault();
 			e.stopPropagation();
 			requestCancel();
@@ -788,7 +1243,10 @@
 
 	function submitMessage() {
 		let text = chatInput.value.trim();
-		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+		// Files the agent wrote share the chip row but are a review affordance,
+		// not an attachment - only what the user picked is part of the prompt.
+		const attachments = attachedPaths.filter(a => !a.agentEdited);
+		if (!text && attachments.length === 0 && pendingImages.length === 0) return;
 
 		// /copy is handled locally, mirroring the terminal slash command:
 		// copy the previous agent output instead of prompting the agent.
@@ -801,7 +1259,7 @@
 		if (lower === '/copy' || lower === '/copy code') {
 			chatInput.value = '';
 			chatInput.style.height = 'auto';
-			attachedPaths = [];
+			attachedPaths = attachedPaths.filter(a => a.agentEdited);
 			renderChips();
 			pendingImages = [];
 			renderImagePreviews();
@@ -814,8 +1272,8 @@
 		}
 
 		// Append attached paths as context lines
-		if (attachedPaths.length > 0) {
-			const contextText = attachedPaths
+		if (attachments.length > 0) {
+			const contextText = attachments
 				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
 				.join('\n');
 			text = text ? `${text}\n\n${contextText}` : contextText;
@@ -831,8 +1289,9 @@
 		pendingImages = [];
 		renderImagePreviews();
 
-		// Clear chips after sending
-		attachedPaths = [];
+		// Clear the user's chips after sending. The agent's stay: they are a
+		// running list of what it changed, not an outbox.
+		attachedPaths = attachedPaths.filter(a => a.agentEdited);
 		renderChips();
 
 		dispatchPrompt(text, imagesToSubmit);
@@ -843,6 +1302,12 @@
 	// through it would overwrite a draft the user is typing and sweep up chips
 	// and images they staged for a different question.
 	function dispatchPrompt(text, images) {
+		// A new turn re-opens the door to tool updates that the previous
+		// cancel closed.
+		turnCancelled = false;
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
+
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
@@ -863,6 +1328,65 @@
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
 			currentTextEl = null;
+		}
+	}
+
+	function retryPrompt(text, images, footerElement = null) {
+		if (isProcessing) return;
+		if (!text && !images?.length) return;
+		turnCancelled = false;
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
+
+		// Erase the current response (work summaries, thoughts, tool cards, bubbles, footers)
+		if (messagesContainer) {
+			let userIdx = -1;
+			const children = Array.from(messagesContainer.children);
+			let topIdx = -1;
+			if (footerElement) {
+				let topEl = footerElement;
+				while (topEl && topEl.parentElement && topEl.parentElement !== messagesContainer) {
+					topEl = topEl.parentElement;
+				}
+				topIdx = children.indexOf(topEl);
+			}
+			const scanStart = topIdx >= 0 ? topIdx : children.length - 1;
+			for (let i = scanStart; i >= 0; i--) {
+				const child = children[i];
+				if (child.classList?.contains('self-end') || child.dataset?.role === 'user') {
+					userIdx = i;
+					break;
+				}
+			}
+			if (userIdx >= 0) {
+				for (let i = children.length - 1; i > userIdx; i--) {
+					children[i].remove();
+				}
+			}
+		}
+
+		if (currentWorkSummary) {
+			discardCurrentWorkSummary();
+		}
+		currentTurnEl = null;
+		currentTextEl = null;
+		currentTurnText = '';
+		currentTurnFooter = null;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+
+		pendingUserMessageText = null;
+
+		vscode.postMessage({
+			type: 'retryMessage',
+			text: text,
+			images: images
+		});
+
+		if (!isProcessing) {
+			setProcessing(true);
+			startVisualLoader();
+			keepVisualLoaderAtBottom();
 		}
 	}
 
@@ -901,17 +1425,124 @@
 		return svg;
 	}
 
+	/** Last segment of a path, for either separator. */
+	function basename(filePath) {
+		return String(filePath).trim().split(/[/\\]/).pop();
+	}
+
+	/**
+	 * Identity key for a path, for comparing chips only - never for display or
+	 * for anything sent to the host, which both keep the path as it arrived.
+	 *
+	 * The row is fed by two producers that spell the same file differently: the
+	 * agent's chips come from resolve() in the ACP layer, the user's from
+	 * uri.fsPath in the extension host, and on Windows those disagree about the
+	 * case of the drive letter and about separators. Compared raw, one file
+	 * shows up twice - once solid, once dashed - and attaching it fails to
+	 * promote the agent's chip. Only the drive letter is case-folded: the rest
+	 * is left alone so this stays correct on a case-sensitive filesystem, where
+	 * `/a/B.ts` and `/a/b.ts` really are two files.
+	 */
+	function pathKey(filePath) {
+		return String(filePath)
+			.replace(/\\/g, '/')
+			.replace(/^([A-Za-z]):/, (_match, drive) => `${drive.toLowerCase()}:`);
+	}
+
+	/** Whether two paths name the same file. */
+	function samePath(a, b) {
+		return pathKey(a) === pathKey(b);
+	}
+
+	/**
+	 * Attach a path the user picked. A file the agent already put in the row is
+	 * promoted rather than ignored, so attaching it deliberately still sends it
+	 * with the next message.
+	 */
+	function attachPath(item) {
+		const existing = attachedPaths.find(a => samePath(a.path, item.path));
+		if (existing) {
+			existing.agentEdited = false;
+		} else {
+			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
+		}
+		renderChips();
+	}
+
+	/**
+	 * Surface a file the agent created or edited in the context row, so it can
+	 * be opened and reviewed without hunting for it in the explorer. Flagged
+	 * `agentEdited` so it is left out of the next prompt: the agent just wrote
+	 * the file, and re-inlining it would spend context to say nothing new.
+	 */
+	function addChangedFileChip(filePath) {
+		if (attachedPaths.some(a => samePath(a.path, filePath))) return;
+		attachedPaths.push({
+			path: filePath,
+			name: basename(filePath),
+			kind: 'file',
+			agentEdited: true,
+		});
+		renderChips();
+	}
+
+	/**
+	 * Drop a path from the context row because the file behind it is gone. This
+	 * takes the user's own attachments too: a deleted path would otherwise ride
+	 * along on the next prompt and expand to nothing.
+	 */
+	function dropChip(filePath) {
+		const remaining = attachedPaths.filter(a => !samePath(a.path, filePath));
+		if (remaining.length === attachedPaths.length) return;
+		attachedPaths = remaining;
+		renderChips();
+	}
+
+	// Only the agent's chips go: what the user attached is theirs to remove.
+	if (contextChipsClearBtn) {
+		contextChipsClearBtn.addEventListener('click', () => {
+			attachedPaths = attachedPaths.filter(a => !a.agentEdited);
+			renderChips();
+		});
+	}
+
+	/**
+	 * Label the bulk-dismiss control, or hide it when the row holds nothing the
+	 * agent put there. A refactor turn can add dozens of chips, and dismissing
+	 * them one x at a time is not a realistic ask - the row itself is capped and
+	 * scrolls, so this is the way out of a long one.
+	 */
+	function renderChipsClear() {
+		if (!contextChipsClearBtn) return;
+		const changed = attachedPaths.filter(a => a.agentEdited).length;
+		if (changed === 0) {
+			contextChipsClearBtn.classList.add('hidden');
+			contextChipsClearBtn.textContent = '';
+			return;
+		}
+		contextChipsClearBtn.classList.remove('hidden');
+		contextChipsClearBtn.textContent = `Clear ${changed} changed file${changed === 1 ? '' : 's'}`;
+		contextChipsClearBtn.setAttribute(
+			'title',
+			'Dismiss the files Nanocoder changed. Files you attached stay.',
+		);
+	}
+
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
+			renderChipsClear();
 			return;
 		}
 		contextChipsContainer.classList.remove('hidden');
+		renderChipsClear();
 		for (const item of attachedPaths) {
 			const chip = document.createElement('span');
-			chip.className = 'context-chip';
-			
+			chip.className = item.agentEdited
+				? 'context-chip context-chip-edited'
+				: 'context-chip';
+
 			const iconSpan = document.createElement('span');
 			iconSpan.className = 'chip-icon';
 			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
@@ -921,7 +1552,12 @@
 
 			const nameSpan = document.createElement('span');
 			nameSpan.className = 'chip-name';
-			nameSpan.setAttribute('title', item.path);
+			nameSpan.setAttribute(
+				'title',
+				item.agentEdited
+					? `${item.path}\nChanged by Nanocoder - click to open`
+					: item.path,
+			);
 			nameSpan.textContent = item.name;
 
 			const removeSpan = document.createElement('span');
@@ -935,7 +1571,7 @@
 			
 			chip.addEventListener('click', e => {
 				if (e.target.classList.contains('chip-remove')) {
-					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					attachedPaths = attachedPaths.filter(a => !samePath(a.path, item.path));
 					renderChips();
 					return;
 				}
@@ -949,6 +1585,19 @@
 		const handleDrag = (e) => {
 			e.preventDefault();
 			e.stopPropagation();
+		};
+
+		// Editor tab drags carry a JSON array of URI strings under
+		// `ResourceURLs` instead of a uri-list. Flatten it to the same
+		// newline-separated shape so there is one parser downstream.
+		const resourceUrlsToUriList = (raw) => {
+			if (!raw) return '';
+			try {
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter(u => typeof u === 'string').join('\n') : '';
+			} catch {
+				return '';
+			}
 		};
 		
 		// Prevent default on window to stop VS Code's native drop handler
@@ -978,41 +1627,19 @@
 		composerBox.addEventListener('drop', e => {
 			handleDrag(e);
 			composerBox.classList.remove('drag-over');
-			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+
+			// VS Code's explorer publishes text/uri-list; some sources only set
+			// text/plain. resource-urls is what the editor uses for tab drags.
+			const uris =
+				e.dataTransfer.getData('text/uri-list') ||
+				e.dataTransfer.getData('text/plain') ||
+				resourceUrlsToUriList(e.dataTransfer.getData('resourceurls'));
 			if (!uris) return;
-			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
-			const paths = uris.split('\n')
-				.map(u => u.trim())
-				.filter(u => u && !u.startsWith('#'))
-				.map(u => {
-					if (u.startsWith('file://')) {
-						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p.match(/^[a-zA-Z]:/)) {
-							// Already dropped leading slash via the regex above if it had exactly three slashes. 
-							// But if it had two slashes e.g. file://C:/ it would become C:/
-							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
-							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
-							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
-							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
-							// For UNC `file://server/share`, `replace` makes it `server/share`. 
-							// So we need to put `//` back for UNC on Windows? 
-							// Let's implement Will's explicit advice:
-							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
-						}
-						// Let's strictly follow Will's suggestion:
-						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
-							p2 = p2.substring(1);
-						}
-						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
-						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
-						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
-						// If we don't mess with it too much, let's just do exactly what Will said.
-						return p2;
-					}
-					return u;
-				});
+
+			const isWindows =
+				navigator.userAgentData?.platform?.toLowerCase().includes('win') ||
+				navigator.userAgent.includes('Windows');
+			const paths = NanocoderUriUtils.parseDropPayload(uris, isWindows);
 
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -1051,9 +1678,6 @@
 	}
 
 	function appendMessage(content, role, images = undefined) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
@@ -1061,20 +1685,31 @@
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
 		if (role === 'user') {
+			// Close the previous turn's summary before the new message is
+			// inserted, so it can never swallow work from the turn after it.
+			// The ownership maps deliberately survive: a tool the agent was told
+			// to stop still reports back after the next turn has started, and
+			// that update belongs in the turn that ran it. They are cleared with
+			// the transcript instead.
+			finishCurrentWorkSummary('completed');
+			turnStartedAt = Date.now();
 			agentTurnId++;
 			currentTurnFooter = null;
+			lastUserPromptText = content;
+			lastUserPromptImages = images;
 		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
-			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+			(role === 'user' ? 'self-end items-end max-w-[90%]' : 'self-start items-start max-w-full w-full');
+		wrapper.dataset.role = role;
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// No max-w here: the wrapper already caps the turn at 90%. A second
 				// percentage would resolve against the wrapper's shrink-to-fit width,
-				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				// squeezing the bubble to 90% of its own content and wrapping mid-word.
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
@@ -1102,7 +1737,7 @@
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
 			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
-				const name = path.trim().split(/[/\\]/).pop();
+				const name = basename(path);
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -1110,7 +1745,7 @@
 			// Handle post-injected format (from history sync)
 			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
 				const kind = type === 'directory' ? 'folder' : 'file';
-				const name = path.trim().split(/[/\\]/).pop();
+				const name = basename(path);
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -1179,10 +1814,20 @@
 		}
 
 		wrapper.appendChild(msgEl);
-		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+		wrapper.appendChild(createMessageFooter(
+			() => content,
+			role,
+			new Date(),
+			role === 'user' ? '' : lastUserPromptText,
+			role === 'user' ? undefined : lastUserPromptImages
+		));
 
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		if (role === 'user') {
+			scrollToBottom(true);
+		} else {
+			scrollToBottomIfFollowing();
+		}
 
 		if (role === 'agent') {
 			// This opens a fresh container, so whatever block was open is done.
@@ -1206,14 +1851,14 @@
 
 		visualLoader = wrapper;
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function keepVisualLoaderAtBottom() {
 		if (visualLoader && visualLoader.parentElement) {
 			messagesContainer.appendChild(visualLoader);
 		}
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function stopVisualLoader() {
@@ -1224,14 +1869,11 @@
 	}
 
 	function appendChunk(textChunk) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
-
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
 			const wrapper = document.createElement('div');
-			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full w-full';
+			wrapper.dataset.role = 'agent';
 
 			const msgEl = document.createElement('div');
 			msgEl.className = 'message agent min-w-0 w-full';
@@ -1255,16 +1897,25 @@
 				currentTurnFooter.remove();
 			} else {
 				// captures footer, not currentTurnFooter - avoids copying the next turn's text
-				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				const footer = createMessageFooter(
+					() => footer.dataset.rawText || '',
+					'agent',
+					new Date(),
+					lastUserPromptText,
+					lastUserPromptImages
+				);
 				currentTurnFooter = footer;
 			}
 			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			if (!currentTurnFooter.dataset.promptText && lastUserPromptText) {
+				currentTurnFooter.dataset.promptText = lastUserPromptText;
+			}
 			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
@@ -1280,22 +1931,34 @@
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
 						renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
 			} else {
 				currentTextEl.textContent += textChunk; // Fallback
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
 		if (typeof marked === 'undefined') {
-			scrollToBottom();
+			scrollToBottomIfFollowing();
+		}
+	}
+	let userHasScrolledUp = false;
+	messagesContainer.addEventListener('scroll', () => {
+		const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 50;
+		userHasScrolledUp = !isAtBottom;
+	});
+
+	function scrollToBottom(force = false) {
+		if (force || !userHasScrolledUp) {
+			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			userHasScrolledUp = false;
 		}
 	}
 
-	function scrollToBottom() {
-		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	function scrollToBottomIfFollowing() {
+		scrollToBottom(false);
 	}
 
 	// --- Copy last code block ---
@@ -1393,6 +2056,7 @@
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
 	function appendUsageIndicator(usage, cost) {
+		if (!showTokenUsage) return;
 		if (!usage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
@@ -1407,10 +2071,10 @@
 
 		endCurrentTextBlock();
 		const el = document.createElement('div');
-		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Handle messages from extension.
@@ -1438,10 +2102,7 @@
 			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
-				if (!attachedPaths.some(a => a.path === path)) {
-					attachedPaths.push({ path, name, kind });
-					renderChips();
-				}
+				attachPath({ path, name, kind });
 				break;
 			}
 			case 'appendMessage':
@@ -1461,32 +2122,60 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				removePlanReview();
 				currentTurnFooter = null;
 				toolKinds.clear();
+				toolLocations.clear();
+				// A new or resumed conversation has no relationship to the files
+				// the previous one touched.
+				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
+				renderChips();
+				turnCancelled = false;
 				agentTurnId = 0;
+				turnStartedAt = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
 				lastAgentRawText = '';
-				if (currentThoughtBox) {
-					clearInterval(currentThoughtBox.timer);
-					currentThoughtBox = null;
-				}
+				lastUserPromptText = '';
+				lastUserPromptImages = undefined;
+				pendingUserMessageText = null;
+				// The transcript was just wiped, so the summary has no DOM left to
+				// close - drop it rather than stamping a duration on a box the
+				// user can no longer see.
+				discardCurrentWorkSummary();
+				workSummaryByToolCallId.clear();
+				workSummaryByPlanId.clear();
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
-				if (currentThoughtBox) {
-					currentThoughtBox.pause();
-					currentThoughtBox = null;
-				}
+				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
+				pendingUserMessageText = null;
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
-				scrollToBottom();
+				scrollToBottom(true);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
+				break;
+			case 'planReviewRequested':
+				setProcessing(false);
+				renderPlanReview(message.artifactPath);
+				break;
+			case 'planReviewError':
+				setProcessing(false);
+				// Surface it in the transcript too. A toast alone is easy to miss,
+				// and the approval bubble above it would otherwise sit there with
+				// no visible outcome.
+				appendMessage(
+					`Could not approve the plan: ${message.message}`,
+					'assistant',
+				);
+				break;
+			case 'artifactsUpdated':
+				renderArtifacts(message.artifacts);
 				break;
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
@@ -1497,9 +2186,17 @@
 			case 'settingsData':
 				renderSettingsData(message.settings);
 				break;
+			case 'tokenUsageVisibility':
+				renderTokenUsageVisibility(message.showTokenUsage);
+				break;
 			case 'settingsUpdated':
 				if (!message.success) {
 					console.error('Failed to update setting:', message.error);
+				}
+				break;
+			case 'addProviderResult':
+				if (window._handleAddProviderResult) {
+					window._handleAddProviderResult(message);
 				}
 				break;
 			case 'syncState':
@@ -1691,9 +2388,9 @@
 
 	// Close the current streamed-text block: flush any pending throttled
 	// render, then reset so the next agent_message_chunk starts a fresh
-	// markdown block. Called whenever another element (tool card, thought
-	// box, user message) is inserted - without this, text streamed after a
-	// tool call is appended to the block ABOVE the card, fusing pre-tool
+	// markdown block. Called whenever another element (the work summary or a
+	// user message) is inserted - without this, text streamed after a tool
+	// call is appended to the block ABOVE the summary, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
 		flushPendingRender();
@@ -1703,29 +2400,11 @@
 		syncLastAgentRawText();
 	}
 
-	function aggregatorHasPendingTools(aggregator) {
-		for (const item of aggregator.toolItems.values()) {
-			if (item.dataset.pending === 'true') return true;
-		}
-		return false;
-	}
-
-	function closeAggregatorIfIdle() {
-		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
-			currentAggregator.close();
-			currentAggregator = null;
-		}
-	}
-
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1737,40 +2416,46 @@
 				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
-			closeAggregatorIfIdle();
+			// Prose ends the current thought and tool group, so the next thought
+			// or tool starts a fresh activity rather than extending one the
+			// agent has already moved on from.
+			currentWorkSummary?.endActivityGroup();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
+			const replayedUsage = update._meta && update._meta['nanocoder/response-usage'];
+			if (replayedUsage) {
+				appendUsageIndicator(replayedUsage, replayedUsage.cost);
+			}
+			const durationMs = update._meta && update._meta['nanocoder/durationMs'];
+			if (durationMs !== undefined && currentWorkSummary) {
+				currentWorkSummary._overrideDuration = durationMs;
+				currentWorkSummary.updateTimer();
+			}
+			const outcome = update._meta && update._meta['nanocoder/outcome'];
+			if (outcome && currentWorkSummary) {
+				currentWorkSummary._overrideOutcome = outcome;
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
-			if (thoughtText && (currentThoughtBox || thoughtText.trim())) {
-				if (!currentThoughtBox) {
-					endCurrentTextBlock();
-					currentThoughtBox = new ThoughtAggregator();
-					closeAggregatorIfIdle();
-				}
-				currentThoughtBox.append(thoughtText);
+			// Whitespace-only reasoning is not worth a section of its own: it
+			// would reveal an empty summary and split the answer around it. Once
+			// a thought is open, whitespace is real content and keeps flowing.
+			if (thoughtText && (currentWorkSummary?.hasOpenThought() || thoughtText.trim())) {
+				if (!currentWorkSummary?.hasOpenThought()) endCurrentTextBlock();
+				ensureCurrentWorkSummary().appendThought(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
+			pendingUserMessageText = null;
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
-			setProcessing(false);
+			setProcessing(false, update.outcome || 'completed');
 		}
 		keepVisualLoaderAtBottom();
 	}
@@ -1819,7 +2504,10 @@
 	document.querySelectorAll('.settings-action-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
 			const action = btn.dataset.action;
-			if (action === 'edit-providers' || action === 'edit-mcp' || action === 'edit-tools' || action === 'open-agents-config') {
+			if (action === 'edit-mcp') {
+				// MCP servers live in .mcp.json, not agents.config.json.
+				vscode.postMessage({ type: 'openConfigFile', file: '.mcp.json' });
+			} else if (action === 'edit-providers' || action === 'edit-tools' || action === 'open-agents-config') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
 			} else if (action === 'open-preferences') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
@@ -1881,6 +2569,262 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
 			});
 		}
+
+		// Token usage footer
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) {
+			tuToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
+			});
+		}
+
+		// Add Provider logic
+		const toggleAddProviderBtn = document.getElementById('toggle-add-provider-btn');
+		const closeAddProviderBtn = document.getElementById('close-add-provider-btn');
+		const addProviderFormContainer = document.getElementById('add-provider-form-container');
+		const addProviderSubmit = document.getElementById('add-provider-submit-btn');
+
+		const presetSelect = document.getElementById('add-provider-preset-select');
+		const customNameInput = document.getElementById('add-provider-custom-name');
+		const sdkGroup = document.getElementById('add-provider-sdk-group');
+		const sdkSelect = document.getElementById('add-provider-sdk');
+		const urlGroup = document.getElementById('add-provider-url-group');
+		const baseUrlInput = document.getElementById('add-provider-baseurl');
+		const apiKeyGroup = document.getElementById('add-provider-apikey-group');
+		const apiKeyInput = document.getElementById('add-provider-apikey');
+		const modelsContainer = document.getElementById('add-provider-models-container');
+		const addModelBtn = document.getElementById('add-provider-add-model-btn');
+
+		let providerPresets = {}; // Will be populated from settingsData
+		
+		// Expose a function to update presets from settingsData
+		window._updateProviderPresets = (templates) => {
+			if (templates) {
+				providerPresets = templates;
+				
+				// Keep 'custom' at the end or if not present, add it
+				if (!providerPresets['custom']) {
+					providerPresets['custom'] = { name: "Custom...", sdk: "openai-compatible", url: "", requiresKey: false, models: [] };
+				}
+				
+				// Re-populate the preset select dropdown if it exists
+				if (presetSelect && presetSelect.options.length <= 1) { // Only if empty or has just default
+					presetSelect.innerHTML = '';
+					for (const [key, preset] of Object.entries(providerPresets)) {
+						const option = document.createElement('option');
+						option.value = key;
+						option.textContent = preset.name || 'Custom...';
+						presetSelect.appendChild(option);
+					}
+				}
+			}
+		};
+
+		function createModelRow(presetModels) {
+			const row = document.createElement('div');
+			row.className = 'flex gap-2 items-start model-row';
+
+			const inputContainer = document.createElement('div');
+			inputContainer.className = 'flex-grow flex flex-col gap-1';
+
+			const select = document.createElement('select');
+			select.className = 'settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] model-select';
+			
+			presetModels.forEach(model => {
+				const option = document.createElement('option');
+				option.value = option.textContent = model;
+				select.appendChild(option);
+			});
+			const customOption = document.createElement('option');
+			customOption.value = 'custom';
+			customOption.textContent = 'Custom...';
+			select.appendChild(customOption);
+
+			const customInput = document.createElement('input');
+			customInput.type = 'text';
+			customInput.placeholder = 'Model name (e.g. my-model)';
+			customInput.className = 'hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1 custom-model-input';
+
+			select.addEventListener('change', () => {
+				if (select.value === 'custom') {
+					customInput.classList.remove('hidden');
+				} else {
+					customInput.classList.add('hidden');
+				}
+			});
+
+			inputContainer.appendChild(select);
+			inputContainer.appendChild(customInput);
+
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'text-vscode-descriptionForeground hover:text-vscode-error bg-transparent border-none cursor-pointer p-1.5';
+			removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			
+			removeBtn.addEventListener('click', () => {
+				if (modelsContainer.children.length > 1) {
+					row.remove();
+					updateRemoveButtons();
+				}
+			});
+
+			row.appendChild(inputContainer);
+			row.appendChild(removeBtn);
+
+			modelsContainer.appendChild(row);
+
+			// Hide remove button if it's the only row
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			const rows = modelsContainer.querySelectorAll('.model-row');
+			rows.forEach((row, index) => {
+				const removeBtn = row.querySelector('button');
+				removeBtn.style.visibility = '';
+				
+				// Either it's the only row, or we can just always disable the first one
+				// "disable for only for the first model box"
+				if (index === 0) {
+					removeBtn.disabled = true;
+					removeBtn.classList.add('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.remove('hover:text-vscode-error', 'cursor-pointer');
+				} else {
+					removeBtn.disabled = false;
+					removeBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.add('hover:text-vscode-error', 'cursor-pointer');
+				}
+			});
+		}
+
+		function updateProviderForm() {
+			const presetKey = presetSelect.value;
+			const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+			if (presetKey === 'custom') {
+				customNameInput.classList.remove('hidden');
+				sdkGroup.classList.remove('hidden');
+				urlGroup.classList.remove('hidden');
+				apiKeyGroup.classList.remove('hidden');
+			} else {
+				customNameInput.classList.add('hidden');
+				sdkGroup.classList.add('hidden');
+				urlGroup.classList.add('hidden');
+				apiKeyGroup.classList.toggle('hidden', !preset.requiresKey);
+				
+				sdkSelect.value = preset.sdk;
+				baseUrlInput.value = preset.url;
+			}
+
+			// Reset models to single row
+			modelsContainer.innerHTML = '';
+			createModelRow(preset.models);
+		}
+
+		if (addModelBtn) {
+			addModelBtn.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+				createModelRow(preset.models);
+			});
+		}
+
+		if (toggleAddProviderBtn && closeAddProviderBtn && addProviderFormContainer) {
+			toggleAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.remove('hidden');
+				toggleAddProviderBtn.parentElement.classList.add('hidden');
+				updateProviderForm();
+			});
+
+			closeAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.add('hidden');
+				toggleAddProviderBtn.parentElement.classList.remove('hidden');
+			});
+		}
+
+		if (presetSelect) presetSelect.addEventListener('change', updateProviderForm);
+
+		if (addProviderSubmit) {
+			addProviderSubmit.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+				const name = presetKey === 'custom' ? customNameInput.value.trim() : preset.name;
+				const sdkProvider = sdkSelect.value;
+				const baseUrl = baseUrlInput.value.trim();
+				const apiKey = apiKeyInput.value.trim();
+				
+				const models = [];
+				const modelRows = modelsContainer.querySelectorAll('.model-row');
+				modelRows.forEach(row => {
+					const select = row.querySelector('.model-select');
+					const customInput = row.querySelector('.custom-model-input');
+					
+					let modelStr = '';
+					if (select.value === 'custom') {
+						modelStr = customInput.value.trim();
+					} else {
+						modelStr = select.value;
+					}
+
+					// Split in case user pasted comma separated in custom
+					const parsedModels = modelStr ? modelStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+					models.push(...parsedModels);
+				});
+
+				// deduplicate models and check if empty
+				const uniqueModels = [...new Set(models)];
+
+				if (!name) {
+					vscode.postMessage({ type: 'showError', message: 'Provider name is required.' });
+					return;
+				}
+				if (uniqueModels.length === 0) {
+					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
+					return;
+				}
+				if (models.some((m, i) => models.indexOf(m) !== i)) {
+					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
+					return;
+				}
+
+				const provider = {
+					name,
+					sdkProvider,
+					...(baseUrl ? { baseUrl } : {}),
+					...(apiKey ? { apiKey } : {}),
+					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
+				};
+
+				// Disable the submit button and show a spinner or "Saving..." state
+				const originalText = addProviderSubmit.innerHTML;
+				addProviderSubmit.innerHTML = '<span class="codicon codicon-loading codicon-modifier-spin"></span> Saving...';
+				addProviderSubmit.disabled = true;
+
+				vscode.postMessage({ type: 'addProvider', provider });
+
+				// We will wait for 'addProviderResult' message to reset and hide the form, or show an error
+				window._handleAddProviderResult = (msg) => {
+					addProviderSubmit.innerHTML = originalText;
+					addProviderSubmit.disabled = false;
+					
+					if (msg.success) {
+						presetSelect.value = 'custom';
+						presetSelect.dispatchEvent(new Event('change'));
+						customNameInput.value = '';
+						baseUrlInput.value = '';
+						apiKeyInput.value = '';
+						
+						if (addProviderFormContainer) {
+							addProviderFormContainer.classList.add('hidden');
+							toggleAddProviderBtn.parentElement.classList.remove('hidden');
+						}
+					}
+					// On error, we leave the form open so the user can fix it.
+					// The host will show the error via showErrorMessage.
+					window._handleAddProviderResult = null;
+				};
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -1888,6 +2832,10 @@
 	 * Populate the settings UI with data received from the extension host.
 	 */
 	function renderSettingsData(settings) {
+		if (settings.providerTemplates && window._updateProviderPresets) {
+			window._updateProviderPresets(settings.providerTemplates);
+		}
+		
 		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {
@@ -1967,6 +2915,21 @@
 
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+
+		renderTokenUsageVisibility(settings.showTokenUsage === true);
+	}
+
+	function renderTokenUsageVisibility(enabled) {
+		showTokenUsage = enabled === true;
+		updateTokenUsageIndicators();
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) tuToggle.checked = showTokenUsage;
+	}
+
+	function updateTokenUsageIndicators() {
+		document.querySelectorAll('.token-usage-indicator').forEach(el => {
+			el.style.display = showTokenUsage ? '' : 'none';
+		});
 	}
 
 	function escapeHtml(str) {
@@ -1977,18 +2940,113 @@
 
 	// ─── End Settings Panel Logic ───────────────────────────────────
 
-	class ThoughtAggregator {
-		constructor() {
-			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
+	function formatWorkDuration(elapsedMs) {
+		const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+		if (totalSeconds < 60) return `${totalSeconds}s`;
 
-			this.header = document.createElement('div');
-			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
+		const totalMinutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (totalMinutes < 60) {
+			return seconds ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+		}
+
+		const hours = Math.floor(totalMinutes / 60);
+		const minutes = totalMinutes % 60;
+		return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+
+	/**
+	 * Open the turn's work summary, creating it on first use.
+	 *
+	 * Refuses to open one after a cancel: the agent keeps emitting updates for
+	 * the turn it was told to stop (a tool already in flight, the calls queued
+	 * behind it that it then marks cancelled), and those land after the UI has
+	 * closed the turn. Without this they raise a second "Working..." box, with a
+	 * live timer nothing will ever stop, for work the user just stopped.
+	 *
+	 * Deliberately not gated on `isProcessing`: resuming a session replays its
+	 * whole thread as ACP updates with no turn running, and that history still
+	 * has to render.
+	 */
+	function ensureCurrentWorkSummary() {
+		if (!currentWorkSummary) {
+			if (turnCancelled) return NULL_WORK_SUMMARY;
+			currentWorkSummary = new WorkSummary(turnStartedAt || Date.now());
+		}
+		return currentWorkSummary;
+	}
+
+	function finishCurrentWorkSummary(outcome) {
+		if (!currentWorkSummary) return;
+		const summary = currentWorkSummary;
+		// Cleared first: finish() collapses the box, and a collapse must not be
+		// able to route more activity back into the turn it just closed.
+		currentWorkSummary = null;
+		summary.finish(outcome);
+	}
+
+	/** Drop the summary without stamping a duration, for a wiped transcript. */
+	function discardCurrentWorkSummary() {
+		if (!currentWorkSummary) return;
+		currentWorkSummary.dispose();
+		currentWorkSummary = null;
+	}
+
+	/**
+	 * Absorbs activity that arrives with no turn to put it in - trailing updates
+	 * after a cancel, mostly. Every call is a no-op and nothing is rendered.
+	 */
+	const NULL_WORK_SUMMARY = {
+		el: null,
+		hasOpenThought: () => false,
+		appendThought() {},
+		endThought() {},
+		endActivityGroup() {},
+		addOrUpdateTool() {},
+		addStandaloneActivity() {},
+		removeActivity(element) { element.remove(); },
+		openForInteraction() {},
+		finish() {},
+		dispose() {},
+	};
+
+	/**
+	 * One collapsible box per turn holding everything the agent did to answer:
+	 * thoughts, tool groups, edit cards and the plan, in the order they arrived.
+	 * The agent's prose stays outside it, so the answer is never hidden behind a
+	 * collapsed header.
+	 *
+	 * The box is inserted at first activity rather than at turn start, so a turn
+	 * that opens with prose and only then runs a tool keeps its transcript order.
+	 */
+	class WorkSummary {
+		constructor(startedAt) {
+			this.startedAt = startedAt;
+			this.activityCount = 0;
+			this.isOpen = true;
+			this.isFinished = false;
+			this.isAttached = false;
+			// Set by a click on the header. Once the user has taken a view on
+			// whether this box is open, the end of the turn does not overrule it.
+			this.userToggled = false;
+			this.currentThought = null;
+			this.currentToolGroup = null;
+			this.toolGroups = new Map();
+
+			this.el = document.createElement('div');
+			this.el.className = 'my-2 flex flex-col shrink-0 work-summary';
+
+			// A button, not a div: the header is the only control on the box, so
+			// it has to be reachable and toggleable from the keyboard.
+			this.header = document.createElement('button');
+			this.header.type = 'button';
+			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit bg-transparent border-none p-0';
+			this.header.setAttribute('aria-expanded', 'true');
 			this.header.onclick = () => this.toggle();
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.85em] font-medium';
-			this.title.textContent = 'Thinking...';
+			this.title.textContent = 'Working...';
 
 			this.chevron = document.createElement('span');
 			this.chevron.className = 'flex items-center justify-center opacity-70';
@@ -2000,29 +3058,100 @@
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
-			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border opacity-70 text-vscode-fg markdown-body text-[0.95em]';
+			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border flex flex-col gap-2 min-w-0';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
-			this.userToggled = false;
-			this.text = '';
-			this.renderTimeout = null;
-			this.thinkingMs = 0;
-			this.segmentStart = Date.now();
-
 			this.timer = setInterval(() => this.updateTimer(), 1000);
-
-			messagesContainer.appendChild(this.el);
-			scrollToBottom();
 		}
 
-		elapsedSeconds() {
-			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
-			return Math.floor((this.thinkingMs + active) / 1000);
+		elapsedMs() {
+			if (this._overrideDuration !== undefined) return this._overrideDuration;
+			return Date.now() - this.startedAt;
 		}
 
 		updateTimer() {
-			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
+			if (this.isFinished || !this.isAttached) return;
+			this.title.textContent = `Working for ${formatWorkDuration(this.elapsedMs())}`;
+		}
+
+		attach() {
+			if (this.isAttached) return;
+			this.isAttached = true;
+			messagesContainer.appendChild(this.el);
+		}
+
+		addActivity(element) {
+			this.attach();
+			this.activityCount++;
+			// The header stays on 'Working...' until the first tick: a box that
+			// opens on 'Working for 0s' reads worse than one that opens on a
+			// label and grows a duration a second later.
+			this.body.appendChild(element);
+			scrollToBottomIfFollowing();
+		}
+
+		removeActivity(element) {
+			if (element.parentElement !== this.body) return;
+			element.remove();
+			this.activityCount = Math.max(0, this.activityCount - 1);
+			// An emptied box is noise, and finish() would stamp a duration on it.
+			if (this.activityCount === 0 && this.isAttached) {
+				this.isAttached = false;
+				this.el.remove();
+			}
+		}
+
+		hasOpenThought() {
+			return this.currentThought !== null;
+		}
+
+		appendThought(chunk) {
+			this.currentToolGroup = null;
+			if (!this.currentThought) {
+				this.currentThought = new WorkThought();
+				this.addActivity(this.currentThought.el);
+			}
+			this.currentThought.append(chunk);
+		}
+
+		endThought() {
+			if (!this.currentThought) return;
+			this.currentThought.finish();
+			this.currentThought = null;
+		}
+
+		/** Anything that is not another tool ends the run of tools before it. */
+		endActivityGroup() {
+			this.endThought();
+			this.currentToolGroup = null;
+		}
+
+		addOrUpdateTool(toolCallId, update) {
+			this.endThought();
+			let group = this.toolGroups.get(toolCallId);
+			if (!group) {
+				if (!this.currentToolGroup) {
+					this.currentToolGroup = new ToolAggregator();
+					this.addActivity(this.currentToolGroup.el);
+				}
+				group = this.currentToolGroup;
+				this.toolGroups.set(toolCallId, group);
+			}
+			group.addOrUpdateTool(toolCallId, update);
+		}
+
+		/** An edit or plan card: its own row, and it breaks the tool run. */
+		addStandaloneActivity(element) {
+			this.endActivityGroup();
+			this.addActivity(element);
+		}
+
+		/**
+		 * A pending approval is the one thing the user has to act on, so it wins
+		 * over a collapse - including on a turn that has already been closed.
+		 */
+		openForInteraction() {
+			if (this.activityCount > 0) this.toggle(true);
 		}
 
 		toggle(force) {
@@ -2030,12 +3159,71 @@
 				this.userToggled = true;
 			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
-			this.body.style.display = this.isOpen ? 'block' : 'none';
+			this.body.style.display = this.isOpen ? '' : 'none';
+			this.header.setAttribute('aria-expanded', String(this.isOpen));
 
 			const svg = this.chevron.querySelector('svg');
 			if (svg) {
 				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 			}
+		}
+
+		finish(outcome) {
+			if (this.isFinished) return;
+			this.isFinished = true;
+			this.endActivityGroup();
+			clearInterval(this.timer);
+			this.timer = null;
+
+			if (this.activityCount === 0) {
+				if (this.isAttached) this.el.remove();
+				this.isAttached = false;
+				return;
+			}
+
+			const terminalOutcome = outcome === 'cancelled' || outcome === 'failed'
+				? outcome
+				: 'completed';
+			this.el.dataset.outcome = terminalOutcome;
+			const duration = formatWorkDuration(this.elapsedMs());
+			if (terminalOutcome === 'cancelled') {
+				this.title.textContent = `Stopped after ${duration}`;
+			} else if (terminalOutcome === 'failed') {
+				this.title.textContent = `Failed after ${duration}`;
+			} else {
+				this.title.textContent = `Worked for ${duration}`;
+			}
+			if (!this.userToggled) this.toggle(false);
+		}
+
+		dispose() {
+			this.currentThought?.dispose();
+			this.currentThought = null;
+			clearInterval(this.timer);
+			this.timer = null;
+			this.el.remove();
+			this.isAttached = false;
+		}
+	}
+
+	/** One stretch of reasoning inside a work summary. */
+	class WorkThought {
+		constructor() {
+			this.text = '';
+			this.renderTimeout = null;
+
+			this.el = document.createElement('div');
+			this.el.className = 'work-summary-thought py-1 min-w-0';
+
+			this.label = document.createElement('div');
+			this.label.className = 'font-vscode text-[0.78em] font-medium opacity-60 mb-1';
+			this.label.textContent = 'Thought';
+
+			this.body = document.createElement('div');
+			this.body.className = 'markdown-body text-[0.95em] opacity-70 text-vscode-fg min-w-0';
+
+			this.el.appendChild(this.label);
+			this.el.appendChild(this.body);
 		}
 
 		render() {
@@ -2047,101 +3235,67 @@
 		}
 
 		append(chunk) {
-			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
 					this.renderTimeout = setTimeout(() => {
 						this.render();
 						this.renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50);
 				}
 			} else {
 				this.render();
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
-		resume() {
-			if (this.segmentStart) return;
-			if (this.text && !this.text.endsWith('\n\n')) {
-				this.text += '\n\n';
-			}
-			this.segmentStart = Date.now();
-			this.timer = setInterval(() => this.updateTimer(), 1000);
-			this.updateTimer();
-			if (!this.userToggled) {
-				this.toggle(true);
-			}
-		}
-
-		pause() {
-			if (!this.segmentStart) return;
-			this.thinkingMs += Date.now() - this.segmentStart;
-			this.segmentStart = null;
-			clearInterval(this.timer);
-			this.timer = null;
+		/** Flush the throttled render so the last chunk is never dropped. */
+		finish() {
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
 			this.render();
-			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
-			if (!this.userToggled) {
-				this.toggle(false);
-			}
+		}
+
+		dispose() {
+			if (this.renderTimeout) clearTimeout(this.renderTimeout);
+			this.renderTimeout = null;
 		}
 	}
 
+	/**
+	 * One uninterrupted run of tool calls, rendered as a single card inside the
+	 * turn's work summary. Collapse lives on the summary, not here: nesting a
+	 * second collapsible inside a collapsed box gives the user two headers to
+	 * fight with to reach one tool.
+	 */
 	class ToolAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator';
+			this.el.className = 'border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator work-summary-tool-group';
 
 			this.header = document.createElement('div');
-			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2 cursor-pointer select-none';
-			this.header.onclick = () => this.toggle();
+			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2';
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.9em] opacity-80';
-			this.title.textContent = 'Exploring...';
-
-			this.chevron = document.createElement('span');
-			this.chevron.className = 'ml-auto flex items-center justify-center';
-			this.chevron.innerHTML = ICONS.chevron;
+			this.title.textContent = 'Tools';
 
 			this.header.appendChild(this.title);
-			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
 			this.body.className = 'flex flex-col';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
 			this.toolCount = 0;
 			this.toolItems = new Map();
-
-			messagesContainer.appendChild(this.el);
-		}
-
-		toggle(force) {
-			this.isOpen = force !== undefined ? force : !this.isOpen;
-			this.body.style.display = this.isOpen ? '' : 'none';
-
-			const svg = this.chevron.querySelector('svg');
-			if (svg) {
-				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
-			}
-		}
-
-		close() {
-			this.toggle(false);
 		}
 
 		updateTitle() {
-			this.title.textContent = `Exploring ${this.toolCount} tools...`;
+			this.title.textContent = `Tools (${this.toolCount})`;
 		}
 
 		addOrUpdateTool(toolCallId, update) {
@@ -2184,7 +3338,6 @@
 				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
-					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
@@ -2193,22 +3346,17 @@
 					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
-					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
-					item.dataset.pending = 'false';
 				} else if (update.status === 'pending') {
-					// Queued, not yet running - still unfinished, so the
-					// aggregator must stay open for it.
+					// Queued, not yet running.
 					statusEl.innerHTML = ICONS.circle;
-					item.dataset.pending = 'true';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
-					item.dataset.pending = 'true';
 				}
 			}
 
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 	}
 
@@ -2217,18 +3365,26 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById(`plan-card-${agentTurnId}`);
+		const planId = `plan-card-${agentTurnId}`;
+		let card = document.getElementById(planId);
+		const owner = workSummaryByPlanId.get(planId);
 
 		if (entries.length === 0) {
-			if (card) card.remove();
+			if (card) {
+				// Through the owner, so the summary's activity count drops with
+				// the card and an emptied summary can retire itself.
+				if (owner) owner.removeActivity(card);
+				else card.remove();
+			}
+			workSummaryByPlanId.delete(planId);
 			return;
 		}
 
 		if (!card) {
 			endCurrentTextBlock();
-			closeAggregatorIfIdle();
+			const summary = ensureCurrentWorkSummary();
 			card = document.createElement('div');
-			card.id = `plan-card-${agentTurnId}`;
+			card.id = planId;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -2249,8 +3405,8 @@
 			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
-			messagesContainer.appendChild(card);
-			scrollToBottom();
+			summary.addStandaloneActivity(card);
+			workSummaryByPlanId.set(planId, summary);
 		}
 
 		const body = card.querySelector('.plan-body');
@@ -2288,38 +3444,51 @@
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
 
+		const existingCard = document.getElementById(`tool-card-${toolCallId}`);
+		// A card the user can already see keeps taking updates in the turn that
+		// drew it, even after a cancel: that is how a tool still in flight when
+		// Stop was pressed gets to report its real outcome. Only a card that
+		// does not exist yet has to go through ensureCurrentWorkSummary(), which
+		// refuses to open a new turn for work the user just stopped.
+		const summary = workSummaryByToolCallId.get(toolCallId) || ensureCurrentWorkSummary();
+		summary.endThought();
+
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
 		// below the card instead of appending to the paragraph above it.
-		if (!document.getElementById(`tool-card-${toolCallId}`)) {
+		if (!existingCard) {
 			endCurrentTextBlock();
 		}
 
 		if (update.kind) toolKinds.set(toolCallId, update.kind);
+		const kind = toolKinds.get(toolCallId);
+		trackFileChanges(toolCallId, kind, update);
 
-		if (toolKinds.get(toolCallId) === 'edit') {
-			let card = document.getElementById(`tool-card-${toolCallId}`);
+		if (kind === 'edit') {
+			let card = existingCard;
 			if (!card) {
-				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
-				messagesContainer.appendChild(card);
-				scrollToBottom();
+				summary.addStandaloneActivity(card);
 			}
 			updateEditCard(card, update);
 		} else {
-			if (!currentAggregator) {
-				currentAggregator = new ToolAggregator();
-			}
-			currentAggregator.addOrUpdateTool(toolCallId, update);
+			summary.addOrUpdateTool(toolCallId, update);
 		}
+		workSummaryByToolCallId.set(toolCallId, summary);
 	}
 
 	// Verb per tool for the aggregated tool list. An entry only fires when the
 	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
 	// Two families are deliberately absent: fetch_url / web_search take a
-	// url/query rather than a path, so their title is the bare tool name; and
-	// string_replace / write_file report ACP kind 'edit', so they render as edit
-	// cards and never reach this list.
+	// url/query rather than a path, so their title is the bare tool name; and the
+	// file editors (string_replace, write_file, diff_edit) report ACP kind
+	// 'edit', so they render as edit cards and never reach this list.
+	//
+	// file_op is a third case, and an unresolved one: its delete and move do
+	// reach this list, and with no entry here they show their raw ACP title
+	// ("file_op: move /a → /b"). One verb cannot cover four operations sharing
+	// a tool name, so fixing it means humanizing per operation rather than per
+	// tool. Left as it was before the changed-file chips landed.
 	const TOOL_VERBS = {
 		read_file: 'Reading',
 		list_directory: 'Listing',
@@ -2367,17 +3536,89 @@
 		return last.replace(/['"]+$/g, '').trim();
 	}
 
-	// True when this update carries a diff the extension host would have handed
-	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
-	// panel only offers "Open Diff" once the change is actually registered.
+	// Path of the diff the extension host would have handed to DiffManager, or
+	// null when this update carries none. Mirrors handleDiffs in
+	// chat-webview-provider.ts so the panel only offers "Open Diff" once the
+	// change is actually registered.
+	function diffPath(update) {
+		if (!update || !Array.isArray(update.content)) return null;
+		const diff = update.content.find(block => !!block && block.type === 'diff' && !!block.path);
+		return diff ? diff.path : null;
+	}
+
 	function hasDiffContent(update) {
-		if (!update || !Array.isArray(update.content)) return false;
-		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
+		return diffPath(update) !== null;
+	}
+
+	// A path the extension host can actually open: `vscode.Uri.file()` resolves
+	// a relative one against the filesystem root, so a chip built from it would
+	// point at a file that does not exist and reject inside showTextDocument.
+	// Absolute means a POSIX root, a UNC share, or a drive-qualified path.
+	function isAbsolutePath(filePath) {
+		return /^(?:[/\\]|[A-Za-z]:[/\\])/.test(filePath);
+	}
+
+	// Absolute paths an update names, in the order the agent reported them - for
+	// a move that is [source, destination]. `locations` is the ACP field for
+	// them, and the only source on a queued announcement, which withholds its
+	// content until the call is about to run. A tool that reports a relative
+	// location - an MCP or custom tool is under no obligation to resolve one -
+	// contributes nothing rather than an unopenable chip.
+	function updateLocations(update) {
+		const reported =
+			update && Array.isArray(update.locations) ? update.locations : [];
+		const paths = reported
+			.map(location => location && location.path)
+			.filter(path => typeof path === 'string' && isAbsolutePath(path));
+		if (paths.length > 0) return paths;
+
+		const fromDiff = diffPath(update);
+		return fromDiff && isAbsolutePath(fromDiff) ? [fromDiff] : [];
+	}
+
+	/**
+	 * Keep the context row in step with what a finished call did to the
+	 * filesystem: `edit` created or changed a file, `delete` removed one, and
+	 * `move` did both at once, so the chip follows the file to its new path
+	 * rather than being left pointing at one that is no longer there.
+	 *
+	 * Nothing happens until the call completes, so an edit or a delete that was
+	 * denied, cancelled or failed leaves the row exactly as it was. The paths
+	 * are remembered from the announcement because the completion update carries
+	 * a status and nothing else.
+	 */
+	function trackFileChanges(toolCallId, kind, update) {
+		const reported = updateLocations(update);
+		if (reported.length > 0) toolLocations.set(toolCallId, reported);
+
+		// resolveEditCardState is named for the card it was written for, but the
+		// part used here is the status normalisation - 'success' folded into
+		// 'completed', and a denial or a cancel separated back out of 'failed'.
+		// That is the same question for a delete or a move as for an edit.
+		if (resolveEditCardState(update).status !== 'completed') return;
+
+		const paths = toolLocations.get(toolCallId);
+		if (!paths || paths.length === 0) return;
+
+		if (kind === 'edit') {
+			addChangedFileChip(paths[0]);
+		} else if (kind === 'delete') {
+			dropChip(paths[0]);
+		} else if (kind === 'move') {
+			dropChip(paths[0]);
+			// The destination is the half worth keeping. Without one there is
+			// nothing to point at, so the move only takes the old chip away.
+			if (paths.length > 1) addChangedFileChip(paths[paths.length - 1]);
+		}
 	}
 
 	// Resolve an edit card's label and icon from an update. The agent reports a
 	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
 	// separated back out here rather than all reading as an error.
+	//
+	// The `status` it returns is the general normalisation of an update's
+	// outcome, so trackFileChanges reads it for deletes and moves too - only the
+	// label and icon are specific to an edit card.
 	function resolveEditCardState(update) {
 		let status = (update && update.status) || 'pending';
 		if (status === 'success') status = 'completed';
@@ -2506,6 +3747,9 @@
 	function handlePermissionRequested(toolCallId, toolCall, options) {
 		const card = document.getElementById(`tool-card-${toolCallId}`);
 		if (!card) return;
+		// The approval buttons are inside the summary, so a collapsed summary
+		// would hide the one thing the user has to act on.
+		workSummaryByToolCallId.get(toolCallId)?.openForInteraction();
 
 		// Check if actions already exist
 		if (card.querySelector('.tool-actions')) return;
@@ -2571,10 +3815,29 @@
 
 			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
 			const statusEl = card.querySelector('.tool-status, .ml-auto');
-			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+			if (statusEl) {
+				statusEl.innerHTML = ICONS.cancelled;
+				// So the end-of-turn spinner sweep does not treat it as stuck.
+				statusEl.dataset.status = 'cancelled';
+			}
 		}
 	}
 
+	// Setup welcome container visibility observer
+	const welcomeContainer = document.getElementById('welcome-container');
+	if (welcomeContainer && messagesContainer) {
+		const updateWelcomeVisibility = () => {
+			if (messagesContainer.children.length === 0) {
+				welcomeContainer.classList.remove('hidden');
+			} else {
+				welcomeContainer.classList.add('hidden');
+			}
+		};
+		
+		const observer = new MutationObserver(updateWelcomeVisibility);
+		observer.observe(messagesContainer, { childList: true });
+		updateWelcomeVisibility(); // Initial check
+	}
 
 	// Notify extension that webview is ready
 	vscode.postMessage({ type: 'ready' });

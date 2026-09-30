@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import {PromptAttempt} from './prompt-attempt';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -19,12 +20,17 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
+	private _pendingSession: Promise<string | undefined> | null = null;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
 	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
+	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
+	/** Fires when a background title update is received. */
+	public onSessionTitleChanged?: () => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -34,15 +40,7 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
-	/**
-	 * Set while a cancel is in flight for the current turn. A cancelled prompt()
-	 * rejects (the agent throws to abort its stream), but that's the user's own
-	 * request succeeding, not a failure, so we swallow the toast for it here.
-	 * This is a client-side backstop: older/unrelinked CLI builds may not yet
-	 * resolve cancellation cleanly on their end, so we can't rely solely on the
-	 * agent reporting it as a non-error.
-	 */
-	private cancelRequested = false;
+	private activePrompt?: PromptAttempt;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -89,10 +87,21 @@ export class NanocoderAcpClient {
 		return this.pendingPermissions.size > 0;
 	}
 
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
+	}
+
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._clearPendingPermissions();
+	}
+
+	/** Handle custom notifications from the agent. */
+	async handleExtNotification(method: string, _params: unknown): Promise<void> {
+		if (method === '_nanocoder/sessionTitleChanged') {
+			this.onSessionTitleChanged?.();
+		}
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {
@@ -185,22 +194,39 @@ export class NanocoderAcpClient {
 			return this._sessionId;
 		}
 		if (!this.connection) return undefined;
+		// Coalesce overlapping callers. Without this, a click on "Send" racing
+		// the auto-init from `onConnectionReady` would each call newSession()
+		// against the shared connection; the second writer overwrites the
+		// first `_sessionId` and the first session is orphaned with its mode
+		// and configOptions already read into local state.
+		if (this._pendingSession) {
+			return this._pendingSession;
+		}
+		this._pendingSession = this._createSession(cwd);
+		try {
+			return await this._pendingSession;
+		} finally {
+			this._pendingSession = null;
+		}
+	}
 
+	private async _createSession(cwd: string): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
 			const initialModel = config.get<string>('model');
 
-			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
-			
+			this.onSessionArtifacts?.(result._meta);
+
 			// Parse modes and configOptions
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
 			}
-			
+
 			if (result.configOptions) {
 				this._parseConfigOptions(result.configOptions);
 			}
@@ -306,6 +332,7 @@ export class NanocoderAcpClient {
 		// Abandoning the conversation abandons its approval prompts too.
 		this._clearPendingPermissions();
 		this._sessionId = undefined;
+		this.onSessionArtifacts?.(undefined);
 	}
 	/**
 	 * Send a prompt and return the agent's PromptResponse (carries the
@@ -314,7 +341,8 @@ export class NanocoderAcpClient {
 	 */
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<import('@agentclientprotocol/sdk').PromptResponse | undefined> {
 		if (!this.connection || !this._sessionId) return undefined;
-		this.cancelRequested = false;
+		const attempt = new PromptAttempt();
+		this.activePrompt = attempt;
 		try {
 			const promptData: import('@agentclientprotocol/sdk').ContentBlock[] = [{ type: 'text', text }];
 			if (images && images.length > 0) {
@@ -327,18 +355,23 @@ export class NanocoderAcpClient {
 				prompt: promptData
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			if (!this.cancelRequested) {
+			if (attempt.cancelRequested) {
+				this.outputChannel.appendLine('Prompt cancelled by user.');
+				return {stopReason: 'cancelled'};
+			} else {
+				this.outputChannel.appendLine(`Prompt failed: ${error}`);
 				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
 			}
 			return undefined;
 		} finally {
-			this.cancelRequested = false;
+			if (this.activePrompt === attempt) {
+				this.activePrompt = undefined;
+			}
 		}
 	}
 
 	async cancel(): Promise<void> {
-		this.cancelRequested = true;
+		this.activePrompt?.cancel();
 		// Before the notification, so the map is emptied even if cancel() throws.
 		this._clearPendingPermissions();
 		if (!this.connection || !this._sessionId) return;
@@ -427,13 +460,40 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
-			await this.connection.resumeSession({sessionId, cwd});
+			const result = await this.connection.resumeSession({sessionId, cwd});
+			this._sessionId = sessionId;
+			if (result.modes) {
+				this.currentMode = result.modes.currentModeId;
+				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
+			}
+			if (result.configOptions) {
+				this._parseConfigOptions(result.configOptions);
+			}
+			this.onSessionArtifacts?.(result._meta);
+			this.notifyStateSync();
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+		}
+	}
+
+	/**
+	 * Erases the retried turn from session history before resending the prompt,
+	 * preventing duplicate user bubbles and stale assistant responses in history.
+	 */
+	async retryTurn(promptText?: string): Promise<void> {
+		if (!this.connection || !this._sessionId) {
+			return;
+		}
+		try {
+			await this.connection.extMethod('retryTurn', {
+				sessionId: this._sessionId,
+				promptText,
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}
 	}
 

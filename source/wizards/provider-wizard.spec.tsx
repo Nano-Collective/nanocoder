@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
@@ -495,3 +498,118 @@ test('ProviderWizard renders all frames without errors', t => {
 		t.truthy(frame);
 	}
 });
+
+// ============================================================================
+// "Done & Save" must reach the summary, not an intervening step
+// ============================================================================
+
+const DOWN = '\u001B[B';
+
+/**
+ * Walks the wizard to the provider menu with one provider already configured.
+ * The config is written into `dir` so the location step finds and loads it.
+ */
+async function atProviderMenu(
+	dir: string,
+	modeProviders?: Record<string, {provider: string; model: string}>,
+) {
+	writeFileSync(
+		join(dir, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				providers: [
+					{
+						name: 'Groq',
+						baseUrl: 'https://api.groq.com/openai/v1',
+						apiKey: 'test-key',
+						models: ['openai/gpt-oss-120b', 'llama-3.3-70b'],
+					},
+				],
+				...(modeProviders ? {modeProviders} : {}),
+			},
+		}),
+		'utf-8',
+	);
+
+	const harness = renderWithTheme(
+		<ProviderWizard projectDir={dir} onComplete={() => {}} />,
+	);
+	const settle = () => new Promise(r => setTimeout(r, 150));
+
+	// The file exists, so the location step opens on "Edit this configuration".
+	await settle();
+	harness.stdin.write('\r');
+	await settle();
+	await settle();
+
+	return {...harness, settle};
+}
+
+test.serial(
+	'Done & Save goes straight to the summary, not the mode step',
+	async t => {
+		const dir = join(tmpdir(), `nanocoder-wizard-done-${process.pid}`);
+		mkdirSync(dir, {recursive: true});
+		t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+
+		const {lastFrame, stdin, settle} = await atProviderMenu(dir);
+		t.regex(lastFrame()!, /Done & Save/, 'expected the provider menu');
+
+		// Add another / Edit existing / Configure modes / Done & Save
+		for (let i = 0; i < 3; i++) {
+			stdin.write(DOWN);
+			await settle();
+		}
+		stdin.write('\r');
+		await settle();
+		await settle();
+
+		const output = lastFrame()!;
+		t.regex(output, /Configuration Summary/);
+		t.notRegex(output, /Configure Mode-Specific Providers/);
+	},
+);
+
+test.serial('the mode step is reachable as an opt-in menu entry', async t => {
+	const dir = join(tmpdir(), `nanocoder-wizard-modes-${process.pid}`);
+	mkdirSync(dir, {recursive: true});
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+
+	const {lastFrame, stdin, settle} = await atProviderMenu(dir);
+
+	for (let i = 0; i < 2; i++) {
+		stdin.write(DOWN);
+		await settle();
+	}
+	stdin.write('\r');
+	await settle();
+	await settle();
+
+	t.regex(lastFrame()!, /Configure Mode-Specific Providers/);
+});
+
+test.serial(
+	'saving without opening the mode step keeps existing mode providers',
+	async t => {
+		const dir = join(tmpdir(), `nanocoder-wizard-retain-${process.pid}`);
+		mkdirSync(dir, {recursive: true});
+		t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+
+		const {lastFrame, stdin, settle} = await atProviderMenu(dir, {
+			plan: {provider: 'Groq', model: 'llama-3.3-70b'},
+		});
+
+		for (let i = 0; i < 3; i++) {
+			stdin.write(DOWN);
+			await settle();
+		}
+		stdin.write('\r'); // Done & Save
+		await settle();
+		await settle();
+
+		// Mode providers now ride along in state rather than being re-collected
+		// by a forced walk through the mode step, so skipping it must not drop
+		// what the config already had.
+		t.regex(lastFrame()!, /plan: Groq \(llama-3\.3-70b\)/);
+	},
+);

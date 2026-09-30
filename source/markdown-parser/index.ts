@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import {highlight} from 'cli-highlight';
+import {getSyntaxTheme} from '@/config/themes';
 import type {Colors} from '../types/markdown-parser.js';
 import {decodeHtmlEntities} from './html-entities.js';
 import {parseMarkdownTable} from './table-parser.js';
@@ -25,8 +26,11 @@ function _parseMarkdownCore(
 	let result = decodeHtmlEntities(text);
 
 	// Step 1: Parse tables FIRST (before <br> conversion and code extraction)
+	// A row ends at a newline or at the end of the text: replies are trimmed,
+	// so a table that closes the message has no newline after its last row,
+	// and requiring one left that row outside the table as raw `| a | b |`.
 	result = result.replace(
-		/(?:^|\n)((?:\|.+\|\n)+)/gm,
+		/(?:^|\n)((?:\|.+\|[ \t]*(?:\n|(?![\s\S])))+)/gm,
 		(_match, tableText: string) => {
 			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
 		},
@@ -63,7 +67,7 @@ function _parseMarkdownCore(
 				// Apply syntax highlighting with detected language
 				const highlighted = highlight(codeStr, {
 					language: lang || 'plaintext',
-					theme: 'default',
+					theme: getSyntaxTheme(themeColors),
 				});
 				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
 				codeBlocks.push(highlighted);
