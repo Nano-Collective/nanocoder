@@ -54,9 +54,14 @@ nanocoder --no-alt-screen
 # Review a branch or PR for bugs, security issues, and style violations
 nanocoder review main
 nanocoder review 42
+
+# Open a PR in an isolated worktree for an interactive coding session
+nanocoder worktree 42
 ```
 
 > **Note:** `nanocoder review` is diff-only v1 and requires an interactive terminal (TTY). It cannot be used with pipes or redirection and its output cannot currently be captured to a file — see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287).
+
+`nanocoder worktree <PR-number>` requires Git, an authenticated `gh` CLI, and an interactive terminal. It creates a sibling directory named `<repository>-pr-<number>`, checks out the PR head on a local `nanocoder/pr-<number>` branch, and starts Nanocoder there. The original working tree is left alone. Both the worktree and branch remain after Nanocoder exits; remove them with `git worktree remove <path>` and `git branch -d nanocoder/pr-<number>` when finished. An existing directory or branch is never reused or overwritten.
 
 ### Screen Modes
 

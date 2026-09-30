@@ -100,6 +100,44 @@ test('CLI integration: help flag takes precedence over other arguments', t => {
 	t.true(output.includes('--version'));
 });
 
+test('CLI integration: worktree rejects malformed PR numbers before starting', t => {
+	for (const args of [
+		['worktree'],
+		['worktree', '0'],
+		['worktree', 'abc'],
+		['worktree', '42', 'extra'],
+	]) {
+		const result = spawnSync(process.execPath, [cliPath, ...args], {
+			encoding: 'utf8',
+		});
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('Usage: nanocoder worktree <PR-number>'));
+	}
+});
+
+test('CLI integration: worktree requires a TTY before any PR setup', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'worktree', '42'], {
+		encoding: 'utf8',
+	});
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('requires an interactive terminal (TTY)'));
+});
+
+test('CLI integration: help and version remain fast for worktree arguments', t => {
+	const help = runCliCommand(['worktree', 'bad', '--help']);
+	t.true(help.includes('worktree <pr-number>'));
+	const version = runCliCommand(['worktree', 'bad', '--version']);
+	t.regex(version, /^\d+\.\d+\.\d+$/);
+});
+
+test('CLI integration: review PR command retains its interactive guard', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
+		encoding: 'utf8',
+	});
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('`nanocoder review` requires an interactive terminal'));
+});
+
 test('CLI integration: init help exits successfully with preset guidance', t => {
 	const result = spawnSync(process.execPath, [cliPath, 'init', '--help'], {
 		encoding: 'utf8',
