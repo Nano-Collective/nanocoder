@@ -125,7 +125,7 @@ test('CLI integration: worktree requires a TTY before any PR setup', t => {
 
 test('CLI integration: help and version remain fast for worktree arguments', t => {
 	const help = runCliCommand(['worktree', 'bad', '--help']);
-	t.true(help.includes('worktree <pr-number>'));
+	t.true(help.includes('worktree <PR-number>'));
 	const version = runCliCommand(['worktree', 'bad', '--version']);
 	t.regex(version, /^\d+\.\d+\.\d+$/);
 });
