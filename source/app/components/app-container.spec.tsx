@@ -252,7 +252,7 @@ test.serial(
 			const output = lastFrame();
 			t.truthy(output);
 			t.regex(output!, new RegExp(stripAnsi(process.cwd()).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-			t.notRegex(output!, /╲/);
+			t.notRegex(output!, /⎇/);
 			unmount();
 		} finally {
 			process.chdir(originalCwd);

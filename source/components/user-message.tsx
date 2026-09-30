@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo} from 'react';
-import {ICON_IMAGE, ICON_USER} from '@/components/ui/icons';
+import {ICON_IMAGE} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -96,7 +96,7 @@ export default memo(function UserMessage({
 		<>
 			<Box marginBottom={1}>
 				<Text color={colors.primary} bold>
-					{ICON_USER} You
+					You:
 				</Text>
 			</Box>
 

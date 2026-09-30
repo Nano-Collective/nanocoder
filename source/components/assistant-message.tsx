@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
-import {ICON_ASSISTANT, ICON_ELLIPSIS} from '@/components/ui/icons';
+import {ICON_ELLIPSIS} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -111,7 +111,7 @@ export default memo(function AssistantMessage({
 		<>
 			<Box marginBottom={1} marginTop={1}>
 				<Text color={colors.info} bold>
-					{ICON_ASSISTANT} {model}
+					{model}:
 				</Text>
 			</Box>
 			{renderedParts.map((part, index) =>

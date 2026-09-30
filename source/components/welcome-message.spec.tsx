@@ -95,7 +95,7 @@ test('WelcomeMessage shows centered welcome and location in narrow layout', t =>
 	t.regex(output!, /An open coding agent for your terminal/);
 	t.regex(output!, /owe nothing to anyone\./);
 	// Location line centered with branch + dir (no NC shorthand)
-	t.regex(output!, /╲/);
+	t.regex(output!, /⎇/);
 	// Menu present when rows >=24
 	t.regex(output!, /Resume session/);
 	t.regex(output!, /Help/);
@@ -192,7 +192,7 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /╲/);
+	t.regex(output!, /⎇/);
 	t.regex(output!, /\/resume/);
 	t.regex(output!, /\/model/);
 	t.regex(output!, /\/help/);

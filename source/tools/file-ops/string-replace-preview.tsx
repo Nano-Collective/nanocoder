@@ -3,6 +3,7 @@ import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
+import {Icons} from '@/components/ui/icons';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
@@ -57,7 +58,9 @@ export async function formatStringReplacePreview(
 					<ToolMessage
 						message={
 							<Box flexDirection="column" marginBottom={1}>
-								<Text color={themeColors.tool}>› string_replace</Text>
+								<Text color={themeColors.tool}>
+									{Icons.tool} string_replace
+								</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
@@ -66,8 +69,8 @@ export async function formatStringReplacePreview(
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
-										✗ Error: Content not found in file. The file may have
-										changed since you last read it.
+										{Icons.error} Error: Content not found in file. The file may
+										have changed since you last read it.
 									</Text>
 								</Box>
 							</Box>
@@ -82,7 +85,9 @@ export async function formatStringReplacePreview(
 					<ToolMessage
 						message={
 							<Box flexDirection="column">
-								<Text color={themeColors.tool}>› string_replace</Text>
+								<Text color={themeColors.tool}>
+									{Icons.tool} string_replace
+								</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
@@ -91,7 +96,7 @@ export async function formatStringReplacePreview(
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
-										✗ Error: Found {occurrences} matches
+										{Icons.error} Error: Found {occurrences} matches
 									</Text>
 									<Text color={themeColors.secondary}>
 										Add more surrounding context to make the match unique.
@@ -385,7 +390,9 @@ export async function formatStringReplacePreview(
 						</Box>
 						<Box flexDirection="column" marginTop={1} marginBottom={1}>
 							<Text color={themeColors.success}>
-								{isResult ? '✓ Replace completed' : '✓ Replacing'}{' '}
+								{isResult
+									? `${Icons.success} Replace completed`
+									: `${Icons.success} Replacing`}{' '}
 								{oldStrLines.length} line{oldStrLines.length > 1 ? 's' : ''}{' '}
 								with {newStrLines.length} line
 								{newStrLines.length > 1 ? 's' : ''}

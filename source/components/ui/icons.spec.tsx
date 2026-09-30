@@ -1,6 +1,5 @@
 import test from 'ava';
 import {
-	BRAND_MARK,
 	ICON_BULLET,
 	ICON_CONTINUATION,
 	ICON_DIRTY,
@@ -9,7 +8,6 @@ import {
 	ICON_GIT_BRANCH,
 	ICON_GOODBYE,
 	ICON_IMAGE,
-	ICON_INFO,
 	ICON_LSP_NOT_READY,
 	ICON_LSP_READY,
 	ICON_MCP_HTTP,
@@ -38,13 +36,11 @@ import {width} from '@/utils/width';
 // Every icon glyph must render in a single column on a Western
 // monospace terminal — that's the whole point of the vocabulary.
 const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
-	['BRAND_MARK', BRAND_MARK],
 	['ICON_TOOL', ICON_TOOL],
 	['ICON_THOUGHT', ICON_THOUGHT],
 	['ICON_SUCCESS', ICON_SUCCESS],
 	['ICON_ERROR', ICON_ERROR],
 	['ICON_WARNING', ICON_WARNING],
-	['ICON_INFO', ICON_INFO],
 	['ICON_ELLIPSIS', ICON_ELLIPSIS],
 	['ICON_BULLET', ICON_BULLET],
 	['ICON_CONTINUATION', ICON_CONTINUATION],

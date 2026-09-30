@@ -22,25 +22,12 @@
  * existing glyph over introducing a new one.
  */
 
-/** Brand mark used to flank the welcome banner and as Nano Collective's
- *  visual anchor in the terminal. Pure ASCII so it cannot fail to render. */
-export const BRAND_MARK = '*';
-
-/** Forward chevron — the universal "tool happened / action forward" glyph.
- *  Replaces the older `⚒` (U+2692, ambiguous width). */
-export const ICON_TOOL = '\u203A'; // ›
-
-/** User-message marker — mirrors `›` but with left-pointing chevron so the
- *  user row and assistant row read as opposing voices in the transcript. */
-export const ICON_USER = '\u2039'; // ‹
-
-/** Assistant-message marker. Symmetric to `›`; the assistant side of the
- *  conversation reads `<model>:`. */
-export const ICON_ASSISTANT = ICON_TOOL; // ›
+/** Forward chevron — the universal "tool happened / action forward" glyph. */
+export const ICON_TOOL = '\u00BB'; // »
 
 /** Light-bulb-free "thinking" marker. A middle dot is calm and inconspicuous
  *  so it can accompany a streaming spinner without stealing attention. */
-export const ICON_THOUGHT = '\u00B7'; // ·
+export const ICON_THOUGHT = '\u2234'; // ∴
 
 /** Success — already the de-facto codebase standard. */
 export const ICON_SUCCESS = '\u2713'; // ✓
@@ -49,10 +36,7 @@ export const ICON_SUCCESS = '\u2713'; // ✓
 export const ICON_ERROR = '\u2717'; // ✗
 
 /** Warning. ASCII so it never inflates to 2 columns in CJK locales. */
-export const ICON_WARNING = '!';
-
-/** Informational. Lowercase `i` is the typography convention. */
-export const ICON_INFO = 'i';
+export const ICON_WARNING = '\u2298'; // ⊘
 
 /** Ellipsis indicating truncation / continuation. */
 export const ICON_ELLIPSIS = '\u2026'; // …
@@ -61,71 +45,71 @@ export const ICON_ELLIPSIS = '\u2026'; // …
 export const ICON_TRUNCATED = '\u2026'; // …
 
 /** Bullet — used at the start of list rows and inline metadata items. */
-export const ICON_BULLET = '\u2022'; // •
+export const ICON_BULLET = '\u25AA'; // ▪
+
+/** Status dot — used for live agent progress indication. */
+export const ICON_STATUS_DOT = '\u25CF'; // ●
 
 /** Continuation / sub-hint row marker (lines beneath a parent item). */
-export const ICON_CONTINUATION = '\u21B3'; // ↳
+export const ICON_CONTINUATION = '↳';
 
 /** Row marker in command listings (`/commands`, `/skills`, `/agents`,
  *  `/tools`). Same glyph as ICON_TOOL on purpose — both read as
  *  "forward-pointing chevron" — but exported under its own name so the
  *  semantic intent at the call site is obvious. */
-export const ICON_LIST_ROW = ICON_TOOL; // ›
-
+export const ICON_LIST_ROW = '\u203A'; // ›
 /** Selection / highlight marker in pickers and lists. Unifies the previous
  *  mix of `❯` (U+276F) and `▸` (U+25B8). */
-export const ICON_SELECTION = '\u25B8'; // ▸
-
+export const ICON_SELECTION = '\u276F'; // ❯
 /** Tree node: collapsed (click to expand). */
-export const ICON_TREE_COLLAPSED = ICON_SELECTION; // ▸
+export const ICON_TREE_COLLAPSED = '>';
 
 /** Tree node: expanded (click to collapse). */
-export const ICON_TREE_EXPANDED = '\u25BE'; // ▾
+export const ICON_TREE_EXPANDED = 'v';
 
 /** Task list — pending / in-progress / complete. */
 export const ICON_TASK_PENDING = '\u25CB'; // ○
-export const ICON_TASK_IN_PROGRESS = '\u25D0'; // ◐
-export const ICON_TASK_COMPLETE = ICON_SUCCESS; // ✓
+export const ICON_TASK_IN_PROGRESS = '\u25CE'; // ◎
+export const ICON_TASK_COMPLETE = '\u2713'; // ✓
 
-/** Image attachment indicator — solid square (already in use; keep). */
-export const ICON_IMAGE = '\u25A0'; // ■
+export const ICON_IMAGE = '\u29C9'; // ⧉
 
 /** "Modified / unsaved" status (e.g. dirty JSON buffer). Solid black
  *  circle — read as a printed-tape dot. */
-export const ICON_DIRTY = '\u25CF'; // ●
+export const ICON_DIRTY = '\u00B1'; // ±
 
-/** Git branch — replaces the ambiguous `⎇` (U+2387). */
-export const ICON_GIT_BRANCH = '\u2572'; // ╲
+/** Git branch indicator (using the classic alternative branch symbol). */
+export const ICON_GIT_BRANCH = '\u2387'; // ⎇
 
 /** Forward-chevron dev-mode marker (single = neutral). */
-export const ICON_MODE_NORMAL = ICON_TOOL; // ›
+export const ICON_MODE_NORMAL = '\u23F5'; // ⏵
 /** Double chevron — auto-accept (running). */
-export const ICON_MODE_AUTO_ACCEPT = `${ICON_TOOL}${ICON_TOOL}`; // ››
+export const ICON_MODE_AUTO_ACCEPT = '\u23F5\u23F5'; // ⏵⏵
 /** Triple chevron — yolo (full auto). */
-export const ICON_MODE_YOLO = `${ICON_TOOL}${ICON_TOOL}${ICON_TOOL}`; // ›››
+export const ICON_MODE_YOLO = '\u23F5\u23F5\u23F5'; // ⏵⏵⏵
 /** Question mark — plan mode (waiting for plan approval). */
-export const ICON_MODE_PLAN = '?';
+export const ICON_MODE_PLAN = '\u23F8'; // ⏸
 /** Double chevron — headless (scripted; same look as auto-accept, different colour). */
-export const ICON_MODE_HEADLESS = ICON_MODE_AUTO_ACCEPT; // ››
+export const ICON_MODE_HEADLESS = ICON_MODE_AUTO_ACCEPT;
 
 /** MCP transport labels (ASCII brackets — single column). */
-export const ICON_MCP_STDIO = '>';
-export const ICON_MCP_WEBSOCKET = '<>';
-export const ICON_MCP_HTTP = '=';
+export const ICON_MCP_STDIO = '\u21C4'; // ⇄
+export const ICON_MCP_WEBSOCKET = '\u223F'; // ∿
+export const ICON_MCP_HTTP = '\u2B7E'; // ⭾
 export const ICON_MCP_UNKNOWN = '?';
 
 /** LSP status — reuse success/error glyphs (single column, themed by colour). */
-export const ICON_LSP_READY = ICON_SUCCESS; // ✓
-export const ICON_LSP_NOT_READY = ICON_WARNING; // !
+export const ICON_LSP_READY = '\u2713'; // ✓
+export const ICON_LSP_NOT_READY = '\u2298'; // ⊘
 
 /** Editor pill in the development-mode indicator (replaces ambiguous `⊡`). */
-export const ICON_EDITOR = ICON_TOOL; // ›
+export const ICON_EDITOR = '\u22A1'; // ⊡
 
 /** Plan / decision-prompt marker. */
 export const ICON_PLAN = '?';
 
 /** Goodbye / farewell (replaces waving-hand emoji). */
-export const ICON_GOODBYE = '\u00AB'; // «
+export const ICON_GOODBYE = '\u30C4'; // ツ
 
 /** Sentinel prefix for tool-validation errors. The codebase performs string
  *  `startsWith` checks against this prefix in a few places (`isErrorResult`,
@@ -181,16 +165,15 @@ export const MODE_GLYPHS: Record<string, string> = {
 /** Centralised icon vocabulary, exported as a single object for callers that
  *  want to import the whole set under one namespace. */
 export const Icons = {
-	brand: BRAND_MARK,
 	tool: ICON_TOOL,
 	thought: ICON_THOUGHT,
 	success: ICON_SUCCESS,
 	error: ICON_ERROR,
 	warning: ICON_WARNING,
-	info: ICON_INFO,
 	ellipsis: ICON_ELLIPSIS,
 	truncated: ICON_TRUNCATED,
 	bullet: ICON_BULLET,
+	statusDot: ICON_STATUS_DOT,
 	continuation: ICON_CONTINUATION,
 	selection: ICON_SELECTION,
 	treeCollapsed: ICON_TREE_COLLAPSED,
@@ -200,8 +183,6 @@ export const Icons = {
 	taskComplete: ICON_TASK_COMPLETE,
 	image: ICON_IMAGE,
 	dirty: ICON_DIRTY,
-	user: ICON_USER,
-	assistant: ICON_ASSISTANT,
 	gitBranch: ICON_GIT_BRANCH,
 	modeNormal: ICON_MODE_NORMAL,
 	modeAutoAccept: ICON_MODE_AUTO_ACCEPT,

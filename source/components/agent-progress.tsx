@@ -2,7 +2,7 @@ import {Box, Text} from 'ink';
 import {useEffect, useReducer} from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {ICON_CONTINUATION, ICON_TOOL} from '@/components/ui/icons';
+import {ICON_CONTINUATION, ICON_TOOL, Icons} from '@/components/ui/icons';
 import {useTheme} from '@/hooks/useTheme';
 import {
 	getSubagentProgress,
@@ -132,7 +132,7 @@ export default function AgentProgress({
 				<>
 					<Box>
 						<Text color={colors.secondary}>Status: </Text>
-						<Text color={dotColor}>●</Text>
+						<Text color={dotColor}>{Icons.statusDot}</Text>
 					</Box>
 					<Box>
 						<Text color={colors.secondary}>
