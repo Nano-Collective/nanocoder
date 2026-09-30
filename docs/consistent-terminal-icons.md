@@ -22,19 +22,20 @@ introducing the new icon vocabulary on top of `origin/main`, covering:
 
 Single source of truth for every glyph rendered in the TUI. Exports
 **42 named constants** — every icon vocabulary member — plus helpers
-and a bundle object. We now use the industry-standard `figures` package
-which ensures visually-appealing icons on macOS/Linux while gracefully
-falling back to ASCII on Windows and constrained environments.
+and a bundle object. We have completely removed the `figures` package 
+dependency and now explicitly hardcode all of our premium, 
+single-column unicode glyphs to ensure identical, perfect rendering 
+across all environments.
 
-| Constant                  | Figures mapping                 | Description                 | Replaces                                               |
+| Constant                  | Literal mapping                 | Description                 | Replaces                                               |
 | ------------------------- | ------------------------------- | --------------------------- | ------------------------------------------------------ |
 | `ICON_TOOL`               | `»`                             | Universal action marker     | `⚒` (U+2692)                                           |
 | `ICON_THOUGHT`            | `∴`                             | Quiet thinking marker       | `⚙` (U+2699)                                           |
-| `ICON_SUCCESS`            | `✓`                             | Success status              | `✓` (kept via figures)                                 |
-| `ICON_ERROR`              | `✗`                             | Error status                | `✗` (kept via figures)                                 |
+| `ICON_SUCCESS`            | `✓`                             | Success status              | `✓` (kept)                                             |
+| `ICON_ERROR`              | `✗`                             | Error status                | `✗` (kept)                                             |
 | `ICON_WARNING`            | `⊘`                             | Warning status              | `⚠` (U+26A0)                                           |
-| `ICON_ELLIPSIS`           | `…`                             | Truncation / Continuation   | `…` (kept via figures)                                 |
-| `ICON_BULLET`             | `▪`                             | List row start / item       | `•` (kept via figures)                                 |
+| `ICON_ELLIPSIS`           | `…`                             | Truncation / Continuation   | `…` (kept)                                             |
+| `ICON_BULLET`             | `▪`                             | List row start / item       | `•` (kept)                                             |
 | `ICON_CONTINUATION`       | `↳`                             | Sub-hint row marker         | `↳` (kept)                                             |
 | `ICON_LIST_ROW`           | `›`                             | Command listings row marker | (new)                                                  |
 | `ICON_SELECTION`          | `❯`                             | Picker highlight marker     | `❯` (U+276F) and `▸`                                   |
