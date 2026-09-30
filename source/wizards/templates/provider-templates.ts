@@ -439,6 +439,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://api.cheaperinference.com/v1',
 		modelDefault: 'claude-sonnet-5',
 	}),
+	apiKeyTemplate({
+		id: 'api-route',
+		name: 'API Route',
+		baseUrl: 'https://global.api-route.com/v1',
+		modelDefault: 'gpt-5.5',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',

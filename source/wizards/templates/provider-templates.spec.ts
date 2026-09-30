@@ -609,6 +609,31 @@ test('cheaper-inference template: uses default provider name and model default',
 	t.is(config.name, 'Cheaper Inference');
 });
 
+test('api-route template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'API Route',
+		apiKey: 'test-key',
+		model: 'gpt-5.5, claude-sonnet-4-6',
+	});
+
+	t.is(config.baseUrl, 'https://global.api-route.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['gpt-5.5', 'claude-sonnet-4-6']);
+});
+
+test('api-route template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'gpt-5.5');
+	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
