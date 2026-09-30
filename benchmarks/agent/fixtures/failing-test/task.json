@@ -1,0 +1,13 @@
+{
+	"category": "single-file-edit",
+	"prompt": "Run the test suite with `node --test` and fix the source so every test passes. Do not edit the tests.",
+	"assertions": [
+		{"kind": "command", "command": "node", "args": ["--test"]},
+		{"kind": "file-not-contains", "path": "src/cart.js", "text": "* 0.5"},
+		{
+			"kind": "file-contains",
+			"path": "test/cart.test.js",
+			"text": "assert.equal(subtotal(items), 30);"
+		}
+	]
+}

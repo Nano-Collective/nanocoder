@@ -1,0 +1,13 @@
+{
+	"category": "question",
+	"prompt": "List every exported function in src/notifiers/ that sends a notification, by name. Do not modify any file.",
+	"assertions": [
+		{"kind": "final-text-matches", "pattern": "sendEmail"},
+		{"kind": "final-text-matches", "pattern": "sendWebhook"},
+		{"kind": "final-text-matches", "pattern": "sendSlackMessage"},
+		{"kind": "final-text-not-matches", "pattern": "formatAddress"},
+		{"kind": "final-text-not-matches", "pattern": "isValidWebhookUrl"},
+		{"kind": "final-text-not-matches", "pattern": "sendNothing"},
+		{"kind": "files-unchanged"}
+	]
+}

@@ -16,6 +16,7 @@
 			"!agents",
 			"!node_modules",
 			"!plugins",
+			"!benchmarks/agent/fixtures",
 			"!**/*.spec.ts",
 			"!**/*.spec.tsx",
 			"!.husky",
