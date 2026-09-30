@@ -52,9 +52,9 @@ test('MCP command: displays transport type icons', t => {
 	t.truthy(output);
 
 	// Should show transport icons
-	t.regex(output!, />/); // stdio icon (ASCII)
-	t.regex(output!, /<>/); // websocket icon (ASCII)
-	t.regex(output!, /=/); // http icon (ASCII)
+	t.regex(output!, /\u21C4/); // stdio icon (ASCII)
+	t.regex(output!, /\u223F/); // websocket icon (ASCII)
+	t.regex(output!, /\u2B7E/); // http icon (ASCII)
 
 	// Should show transport type names
 	t.regex(output!, /STDIO/);
@@ -287,9 +287,9 @@ test('MCP command: omits resource and prompt lines when a server has none (no ge
 test('MCP command: uses transport type getTransportIcon function correctly', t => {
 	// Test the helper function indirectly through component rendering
 	const testCases = [
-		{transport: 'stdio', expectedIcon: '>'},
-		{transport: 'websocket', expectedIcon: '<>'},
-		{transport: 'http', expectedIcon: '='},
+		{transport: 'stdio', expectedIcon: '\u21C4'},
+		{transport: 'websocket', expectedIcon: '\u223F'},
+		{transport: 'http', expectedIcon: '\u2B7E'},
 		{transport: 'unknown', expectedIcon: '?'},
 	];
 

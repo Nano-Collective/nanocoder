@@ -70,7 +70,7 @@ test('LSP command: displays server status correctly', t => {
 
 	// Should show status icons
 	t.regex(output!, /\u2713/); // Ready servers (success glyph)
-	t.regex(output!, /!/); // Initializing server (warning glyph)
+	t.regex(output!, /\u2298/); // Initializing server (warning glyph)
 
 	// Should show status text
 	t.regex(output!, /\(Ready\)/);
@@ -136,7 +136,7 @@ test('LSP command: handles multiple languages correctly', t => {
 test('LSP command: shows correct status icons', t => {
 	const testCases = [
 		{ready: true, expectedIcon: '\u2713'},
-		{ready: false, expectedIcon: '!'},
+		{ready: false, expectedIcon: '\u2298'},
 	];
 
 	for (const testCase of testCases) {
