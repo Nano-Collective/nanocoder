@@ -53,6 +53,7 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -527,6 +528,7 @@ export class AcpAgent implements Agent {
 			this.initContext.provider = providerId;
 			const {client: newClient} = await createLLMClient(providerId);
 			this.initContext.client = newClient;
+			setAutoCommitClient(newClient);
 
 			const availableModels = await newClient.getAvailableModels();
 			if (availableModels.includes(this.initContext.model)) {

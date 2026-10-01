@@ -435,6 +435,23 @@ function loadSandboxConfig(): boolean {
 	);
 }
 
+function loadAutoCommitConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'autoCommit', config => {
+			const value = config.nanocoder?.autoCommit;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.autoCommit must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+				return false;
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -778,6 +795,8 @@ function loadAppConfig(): AppConfig {
 
 	const sandbox = loadSandboxConfig();
 
+	const autoCommit = loadAutoCommitConfig();
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
@@ -799,6 +818,7 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
+		autoCommit,
 	};
 }
 

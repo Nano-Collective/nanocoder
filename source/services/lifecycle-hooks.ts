@@ -269,7 +269,9 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
  * argument `path`; `file_path` / `filePath` are accepted because weaker models
  * emit them and the formatters already tolerate both.
  */
-function resolveFilePath(args?: Record<string, unknown>): string | undefined {
+export function resolveFilePath(
+	args?: Record<string, unknown>,
+): string | undefined {
 	for (const key of ['path', 'file_path', 'filePath']) {
 		const value = args?.[key];
 		if (typeof value === 'string' && value !== '') return value;
