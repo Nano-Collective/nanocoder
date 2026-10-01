@@ -9,6 +9,7 @@ import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {withPreservedProcess} from '@/utils/preserve-process';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
@@ -104,8 +105,12 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
 		// The redirect chain was validated hop by hop above. Keep redirects off
 		// for the conversion fetch as well, so a changed response cannot escape
-		// validation between the probe and conversion requests.
-		const result = await convertToMarkdown(safeUrl, {followRedirects: false});
+		// validation between the probe and conversion requests. The conversion
+		// runs with `globalThis.process` guarded: happy-dom windows created for
+		// `<iframe>` elements null the global after get-md's own restore (#1553).
+		const result = await withPreservedProcess(() =>
+			convertToMarkdown(safeUrl, {followRedirects: false}),
+		);
 
 		const content = result.markdown;
 

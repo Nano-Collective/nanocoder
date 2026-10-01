@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 import {isDerivedContentPath} from '@/utils/derived-content';
+import {withPreservedProcess} from '@/utils/preserve-process';
 
 /**
  * File content cache to reduce duplicate file reads during tool confirmation flow.
@@ -156,8 +157,12 @@ async function readAndCacheFile(
 	if (derived) {
 		try {
 			const {convertToMarkdown} = await import('@nanocollective/get-md');
-			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
-			const result = await convertToMarkdown(buffer as any);
+			// The conversion can null `globalThis.process` via happy-dom windows
+			// created for `<iframe>` elements (#1553), so it runs guarded.
+			const result = await withPreservedProcess(() =>
+				// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
+				convertToMarkdown(buffer as any),
+			);
 			content = result.markdown;
 		} catch (error) {
 			const errorMessage =
