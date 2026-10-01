@@ -513,6 +513,50 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 	}
 });
 
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput keeps a long CJK queued message on a single row', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 80,
+		configurable: true,
+	});
+
+	try {
+		// Every character here is a CJK ideograph, 2 terminal columns wide -
+		// the exact repro from the bug report. formatQueuedMessage budgeted the
+		// truncation in UTF-16 units, so this ran to roughly twice the terminal
+		// width and wrapped: two full rows plus a dangling row of only "...".
+		const cjkMessage = '请把所有的测试用例都重新运行一遍然后告诉我结果'.repeat(4);
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: cjkMessage, displayValue: cjkMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const lines = stripAnsi(lastFrame() ?? '').split('\n');
+		// Rows are bordered ("│ ... │") and right-padded to the box width, so
+		// isolate each row's content before checking it - a naive trim() leaves
+		// the border character behind and never matches a bare "...".
+		const rowContent = (line: string) =>
+			line.replace(/^\s*│\s?/, '').replace(/\s*│\s*$/, '').trim();
+		t.true(lines.some(line => rowContent(line).includes('...')));
+		t.false(lines.some(line => rowContent(line) === '...'));
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test('UserInput navigates queued messages while busy with empty input', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
