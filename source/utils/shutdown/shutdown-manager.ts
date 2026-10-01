@@ -35,10 +35,7 @@ export class ShutdownManager {
 			void this.gracefulShutdown(0);
 		};
 		this.boundUncaughtException = (err: Error) => {
-			// The logger itself reads the `process` global (env config, fallback
-			// config); when that global has been clobbered by third-party code
-			// (see #1553) building the logger throws and masks the original
-			// error, so the handler must never depend on it succeeding.
+			// Fallback if logger creation fails (e.g., process global corrupted).
 			try {
 				const logger = loggerProvider.getLogger();
 				logger.fatal({err}, 'Uncaught exception');

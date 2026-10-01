@@ -106,8 +106,7 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		// The redirect chain was validated hop by hop above. Keep redirects off
 		// for the conversion fetch as well, so a changed response cannot escape
 		// validation between the probe and conversion requests. The conversion
-		// runs with `globalThis.process` guarded: happy-dom windows created for
-		// `<iframe>` elements null the global after get-md's own restore (#1553).
+		// runs guarded to protect `globalThis.process` from happy-dom overwrites.
 		const result = await withPreservedProcess(() =>
 			convertToMarkdown(safeUrl, {followRedirects: false}),
 		);

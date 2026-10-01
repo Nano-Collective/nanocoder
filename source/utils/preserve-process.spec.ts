@@ -6,11 +6,9 @@ test.serial('withPreservedProcess restores globalThis.process when the conversio
 	t.plan(3);
 
 	const result = await withPreservedProcess(async () => {
-		// What happy-dom's VMGlobalPropertyScript does to the real global on
-		// pages with an <iframe> (see #1553): overwrites it after get-md's own
-		// restore has already run.
+		// Simulates happy-dom overwriting the global on pages with an <iframe>.
 		(globalThis as any).process = null;
-		t.is(globalThis.process, null);
+		t.is(globalThis.process as any, null);
 		return 'markdown';
 	});
 

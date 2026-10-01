@@ -157,8 +157,7 @@ async function readAndCacheFile(
 	if (derived) {
 		try {
 			const {convertToMarkdown} = await import('@nanocollective/get-md');
-			// The conversion can null `globalThis.process` via happy-dom windows
-			// created for `<iframe>` elements (#1553), so it runs guarded.
+			// The conversion runs guarded to protect `globalThis.process`.
 			const result = await withPreservedProcess(() =>
 				// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
 				convertToMarkdown(buffer as any),
