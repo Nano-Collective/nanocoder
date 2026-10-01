@@ -15,7 +15,7 @@ export function validatePath(path: string): ValidationResult {
 	if (!isValidFilePath(path, root)) {
 		return {
 			valid: false,
-			error: `! Invalid file path. Path must be within the project directory.`,
+			error: `! Validation failed: Invalid file path. Path must be within the project directory.`,
 		};
 	}
 
@@ -25,7 +25,7 @@ export function validatePath(path: string): ValidationResult {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `! Path validation failed: ${errorMessage}`,
+			error: `! Validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -44,7 +44,7 @@ export function validateEditableFormat(path: string): ValidationResult {
 
 	return {
 		valid: false,
-		error: `⚒ Cannot write to "${path}": reading a ${extname(path).toLowerCase()} file returns a markdown transcript, not the document itself, so writing an edit back would replace the document with that transcript. Do not retry — edit the document with a tool that understands its format, or save the new text to a separate file.`,
+		error: `! Validation failed: Cannot write to "${path}": reading a ${extname(path).toLowerCase()} file returns a markdown transcript, not the document itself, so writing an edit back would replace the document with that transcript. Do not retry — edit the document with a tool that understands its format, or save the new text to a separate file.`,
 	};
 }
 
@@ -60,14 +60,14 @@ export function validatePathPair(
 	if (!isValidFilePath(source, root)) {
 		return {
 			valid: false,
-			error: `! Invalid source path. Path must be within the project directory.`,
+			error: `! Validation failed: Invalid source path. Path must be within the project directory.`,
 		};
 	}
 
 	if (!isValidFilePath(destination, root)) {
 		return {
 			valid: false,
-			error: `! Invalid destination path. Path must be within the project directory.`,
+			error: `! Validation failed: Invalid destination path. Path must be within the project directory.`,
 		};
 	}
 
@@ -78,7 +78,7 @@ export function validatePathPair(
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `! Path validation failed: ${errorMessage}`,
+			error: `! Validation failed: ${errorMessage}`,
 		};
 	}
 

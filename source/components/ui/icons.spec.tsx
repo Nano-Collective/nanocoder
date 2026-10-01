@@ -58,8 +58,6 @@ const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 	['ICON_LSP_READY', ICON_LSP_READY],
 	['ICON_LSP_NOT_READY', ICON_LSP_NOT_READY],
 	['ICON_MCP_STDIO', ICON_MCP_STDIO],
-	// ICON_MCP_WEBSOCKET is intentionally 2 columns (`<>` reads as a
-	// pair); we still measure and assert the budget on it below.
 	['ICON_MCP_HTTP', ICON_MCP_HTTP],
 	['ICON_MCP_UNKNOWN', ICON_MCP_UNKNOWN],
 ];

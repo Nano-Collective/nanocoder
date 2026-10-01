@@ -47,7 +47,11 @@ function InitSuccess({
 					{ICON_SUCCESS} Nanocoder project initialized successfully!
 				</Text>
 			</Box>
-			{preset && <Text color={colors.secondary}>• Preset: {preset}</Text>}
+			{preset && (
+				<Text color={colors.secondary}>
+					{ICON_BULLET} Preset: {preset}
+				</Text>
+			)}
 
 			{analysis && (
 				<>
@@ -60,15 +64,16 @@ function InitSuccess({
 						{ICON_BULLET} Type: {analysis.projectType}
 					</Text>
 					<Text color={colors.secondary}>
-						• Primary Language: {analysis.primaryLanguage}
+						{ICON_BULLET} Primary Language: {analysis.primaryLanguage}
 					</Text>
 					{analysis.frameworks.length > 0 && (
 						<Text color={colors.secondary}>
-							• Frameworks: {analysis.frameworks.slice(0, 3).join(', ')}
+							{ICON_BULLET} Frameworks:{' '}
+							{analysis.frameworks.slice(0, 3).join(', ')}
 						</Text>
 					)}
 					<Text color={colors.secondary}>
-						• Files Analyzed: {analysis.totalFiles}
+						{ICON_BULLET} Files Analyzed: {analysis.totalFiles}
 					</Text>
 					<Box marginBottom={1} />
 				</>
@@ -82,7 +87,7 @@ function InitSuccess({
 
 			{created.map((item, index) => (
 				<Text key={index} color={colors.secondary}>
-					• {item}
+					{ICON_BULLET} {item}
 				</Text>
 			))}
 
@@ -95,7 +100,7 @@ function InitSuccess({
 					</Box>
 					{preserved.map(item => (
 						<Text key={item} color={colors.secondary}>
-							• {item}
+							{ICON_BULLET} {item}
 						</Text>
 					))}
 				</>

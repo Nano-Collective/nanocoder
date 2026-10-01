@@ -24,11 +24,8 @@ function getTransportIcon(transportType: string): string {
 		case 'stdio':
 			return ICON_MCP_STDIO;
 		case 'websocket':
-		case 'ws':
 			return ICON_MCP_WEBSOCKET;
 		case 'http':
-		case 'https':
-		case 'sse':
 			return ICON_MCP_HTTP;
 		default:
 			return ICON_MCP_UNKNOWN;

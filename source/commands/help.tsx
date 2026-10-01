@@ -91,7 +91,7 @@ function Help({
 			</Text>
 			<Text color={colors.text}>
 				{' '}
-				• Keyboard shortcuts {'>'} press ? in an empty prompt
+				{ICON_BULLET} Keyboard shortcuts {'>'} press ? in an empty prompt
 			</Text>
 
 			{selectedCommand ? (
@@ -120,7 +120,7 @@ function CommandList({commands}: {commands: Command[]}) {
 						{group.commands.map(command => (
 							<Text key={command.name} color={colors.text}>
 								{' '}
-								• /{command.name} - {command.description}
+								{ICON_BULLET} /{command.name} - {command.description}
 							</Text>
 						))}
 					</Box>
@@ -154,7 +154,7 @@ function CommandDetails({command}: {command: Command}) {
 					</Text>
 					{details.options.map(option => (
 						<Text key={option} color={colors.text}>
-							• {option}
+							{ICON_BULLET} {option}
 						</Text>
 					))}
 				</Box>
@@ -166,7 +166,7 @@ function CommandDetails({command}: {command: Command}) {
 					</Text>
 					{details.examples.map(example => (
 						<Text key={example} color={colors.text}>
-							• {example}
+							{ICON_BULLET} {example}
 						</Text>
 					))}
 				</Box>
