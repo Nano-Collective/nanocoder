@@ -81,9 +81,11 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 		case 'fetch_url':
 			return `Fetched ${count} URL${s}`;
 		case 'git_status':
+			return `Checked git status ${count} time${s}`;
 		case 'git_diff':
+			return `Viewed ${count} git diff${s}`;
 		case 'git_log':
-			return `Ran ${count} git command${s}`;
+			return `Checked git log ${count} time${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
 		case 'lsp_format_document':
