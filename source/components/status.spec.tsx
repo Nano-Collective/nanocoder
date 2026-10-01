@@ -258,7 +258,7 @@ test('Status shows update info in narrow layout', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /! v1\.0\.0 → v1\.1\.0/);
+	t.regex(output!, /⊘ v1\.0\.0 → v1\.1\.0/);
 	t.regex(output!, /Run: \/update or/);
 
 	process.stdout.columns = originalColumns;
