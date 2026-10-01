@@ -351,3 +351,4 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 	t.is(valueRef.current, 'xabc');
 	unmount();
 });
+

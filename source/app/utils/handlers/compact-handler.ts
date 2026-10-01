@@ -1,5 +1,6 @@
 import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
+import {getAppConfig} from '@/config/index';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
@@ -7,6 +8,7 @@ import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {
+	resolveAutoCompactSettings,
 	setAutoCompactEnabled,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
@@ -45,9 +47,10 @@ export async function handleCompactCommand(
 	}
 
 	const args = commandParts.slice(1);
-	let mode: CompressionMode = 'default';
+	// Explicit flags win; otherwise fall back to the same settings auto-compact
+	// uses (session overrides, tune, then `autoCompact` config).
+	let mode: CompressionMode | null = null;
 	let preview = false;
-	// Strategy: explicit flag wins; otherwise prefer LLM when a client is available.
 	let strategy: CompressionStrategy | null = null;
 
 	for (let i = 0; i < args.length; i++) {
@@ -160,9 +163,18 @@ export async function handleCompactCommand(
 		const systemMessage: Message = {role: 'system', content: systemPrompt};
 		const allMessages = [systemMessage, ...messages];
 
-		// Resolve strategy: explicit flag > LLM default when a client is available > mechanical.
+		// Resolve strategy and mode: explicit flag > session override > tune >
+		// config. An 'llm' strategy without a client runs mechanically.
+		const autoCompactConfig = getAppConfig().autoCompact;
+		const resolved = resolveAutoCompactSettings({
+			enabled: autoCompactConfig?.enabled ?? true,
+			threshold: autoCompactConfig?.threshold ?? 0,
+			mode: autoCompactConfig?.mode ?? 'default',
+			strategy: autoCompactConfig?.strategy,
+		});
 		const effectiveStrategy: CompressionStrategy =
-			strategy ?? (client ? 'llm' : 'mechanical');
+			strategy ?? (client ? resolved.strategy : 'mechanical');
+		const effectiveMode: CompressionMode = mode ?? resolved.mode;
 
 		const originalTokenCount = allMessages.reduce(
 			(sum, msg) => sum + tokenizer.countTokens(msg),
@@ -233,7 +245,9 @@ export async function handleCompactCommand(
 		}
 
 		// Mechanical path (also covers LLM failure / no client)
-		const result = compressMessages(allMessages, tokenizer, {mode});
+		const result = compressMessages(allMessages, tokenizer, {
+			mode: effectiveMode,
+		});
 
 		if (tokenizer.free) {
 			tokenizer.free();

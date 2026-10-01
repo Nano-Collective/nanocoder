@@ -1,4 +1,4 @@
-import type {LanguageModel} from 'ai';
+import type {LanguageModel, StopCondition, ToolSet} from 'ai';
 import {
 	InvalidToolInputError,
 	NoSuchToolError,
@@ -7,6 +7,28 @@ import {
 	ToolCallRepairError,
 } from 'ai';
 import {MAX_TOOL_STEPS} from '@/constants';
+
+/**
+ * Stop the SDK's step loop at a call to a tool that does not exist.
+ *
+ * Tools reach the SDK with `execute` stripped, so a valid call already ends
+ * the step. An unknown one does not: the SDK answers it with an automatic
+ * error result and runs another step, so a model stuck on a nonexistent tool
+ * looped up to MAX_TOOL_STEPS times inside one chat() call, invisible to the
+ * conversation loop's unknown-tool handling and its repeated-call cap
+ * (`nanocoder.retries.maxRepeatedToolCalls`). Ending the step hands the call
+ * back so both apply.
+ */
+export const stopOnUnknownTool: StopCondition<ToolSet> = ({steps}) =>
+	steps
+		.at(-1)
+		?.toolCalls.some(
+			call =>
+				call?.dynamic === true &&
+				call.invalid === true &&
+				NoSuchToolError.isInstance(call.error),
+		) ?? false;
+
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
@@ -230,7 +252,7 @@ export async function handleChat(
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries,
-				stopWhen: stepCountIs(MAX_TOOL_STEPS),
+				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnUnknownTool],
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {

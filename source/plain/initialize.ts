@@ -2,6 +2,7 @@ import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import {getAppConfig} from '@/config/index';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
 	getLastUsedModel,
 	loadPreferences,
@@ -9,6 +10,7 @@ import {
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {
 	setCommandLoaderGetter,
 	setToolManagerGetter,
@@ -56,7 +58,20 @@ export async function initializePlain(
 	setCommandLoaderGetter(() => customCommandLoader);
 	commandRegistry.registerLazy(lazyCommands);
 
-	const preferredProvider = options.cliProvider || preferences.lastProvider;
+	// Same rule as the TUI: a saved provider that has since been renamed or
+	// removed falls back to the first configured one instead of failing the
+	// run; an explicit --provider stays strict.
+	const {provider: preferredProvider, staleName} = resolveStartupProvider(
+		options.cliProvider,
+		undefined,
+		preferences.lastProvider,
+		loadAllProviderConfigs().map(p => p.name),
+	);
+	if (staleName) {
+		writeStatus(
+			`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`,
+		);
+	}
 	const preferredModel = options.cliModel;
 
 	let client: LLMClient;

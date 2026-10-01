@@ -30,6 +30,7 @@ import {
 import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {BoundedMap} from '@/utils/bounded-map';
 import type {PendingQuestion} from '@/utils/question-queue';
 
@@ -255,6 +256,27 @@ export function useAppState(
 	const [tune, setTune] = useState<TuneConfig>(() => {
 		return resolveTune(getAppConfig(), undefined, preferences);
 	});
+
+	// The provider layer of tune (a `tune` block on the provider entry) is only
+	// known once the client exists, so re-resolve whenever the active provider
+	// changes. Model switches within a provider keep the current tune.
+	const tuneProviderRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (
+			!currentProviderConfig ||
+			tuneProviderRef.current === currentProviderConfig.name
+		) {
+			return;
+		}
+		tuneProviderRef.current = currentProviderConfig.name;
+		const resolved = resolveTune(
+			getAppConfig(),
+			currentProviderConfig,
+			loadPreferences(),
+		);
+		setTune(resolved);
+		applyTuneCompaction(resolved);
+	}, [currentProviderConfig]);
 
 	// Context usage state
 	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(

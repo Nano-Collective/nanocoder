@@ -86,8 +86,16 @@ const executeListDirectory = async (
 					const fullPath = join(currentPath, item.name);
 
 					// Check if this item should be ignored using gitignore patterns.
-					// Match root-relative so the project-root .gitignore applies.
-					if (ig.ignores(relative(root, fullPath))) {
+					// Match root-relative so the project-root .gitignore applies. A
+					// directory is tested with its trailing slash too: a
+					// directory-only pattern (`node_modules/`, `dist/`) matches only
+					// that form, so without it the ignored folder still listed and
+					// then read back as empty.
+					const ignorePath = relative(root, fullPath);
+					if (
+						ig.ignores(ignorePath) ||
+						(item.isDirectory() && ig.ignores(`${ignorePath}/`))
+					) {
 						continue;
 					}
 

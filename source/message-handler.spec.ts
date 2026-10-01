@@ -250,7 +250,9 @@ test('processToolUse - caps oversized LLM content but keeps structured output', 
 
 	const result = await processToolUse(createMockToolCall('large_tool', {}));
 
-	t.is(result.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap: the cut snaps to whitespace so it never splits a token.
+	t.true(result.content.length <= MAX_TOOL_RESULT_CHARS);
+	t.true(result.content.length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(result.content.startsWith('HEAD\n'));
 	t.true(result.content.endsWith('TAIL'));
 	t.true(result.content.includes('Output truncated'));

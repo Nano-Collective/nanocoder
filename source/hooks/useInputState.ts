@@ -323,14 +323,21 @@ export function useInputState() {
 	// 2004). This bypasses updateInput's heuristics entirely: the payload
 	// never reached the keypress parser, so there is nothing to guess at
 	// and no risk of a pasted newline having submitted the prompt first.
-	// The text lands at the end of the input rather than at the cursor —
-	// the payload arrives out of band, so the cursor offset TextInput owns
-	// isn't part of the event. Callers remount TextInput afterwards so the
-	// cursor follows the appended text.
+	//
+	// When `cursorOffset` is supplied (the caller read it off TextInput
+	// before the paste fired) the pasted text lands at the caret, not at the
+	// end of the value. The function then returns the new caret offset so
+	// the caller can place the cursor after the splice. Returns `null` when
+	// nothing was inserted (empty payload) or when no cursor was supplied —
+	// in the latter case the legacy "append and remount TextInput" path takes
+	// over in the caller.
 	const insertPaste = useCallback(
-		(pastedText: string) => {
+		(
+			pastedText: string,
+			cursorOffset?: number,
+		): {cursorOffset: number} | null => {
 			if (!pastedText) {
-				return;
+				return null;
 			}
 
 			const pasteResult = handlePaste(
@@ -338,22 +345,36 @@ export function useInputState() {
 				currentState.displayValue,
 				currentState.placeholderContent,
 				'bracketed',
+				cursorOffset,
 			);
 
-			if (pasteResult) {
-				// Multi-line or over the threshold: collapsed to a placeholder.
-				pushToUndoStack(pasteResult);
-				pasteDetectorRef.current.updateState(pasteResult.displayValue);
-				return;
+			if (!pasteResult) {
+				// Short single-line paste with no cursor supplied — the legacy
+				// path: just append. The caller remounts TextInput so the caret
+				// jumps to end-of-value.
+				const appended = currentState.displayValue + pastedText;
+				pushToUndoStack({
+					displayValue: appended,
+					placeholderContent: currentState.placeholderContent,
+				});
+				pasteDetectorRef.current.updateState(appended);
+				return null;
 			}
 
-			// Short single-line paste: insert it literally.
-			const newDisplayValue = currentState.displayValue + pastedText;
-			pushToUndoStack({
-				displayValue: newDisplayValue,
-				placeholderContent: currentState.placeholderContent,
-			});
-			pasteDetectorRef.current.updateState(newDisplayValue);
+			pushToUndoStack(pasteResult);
+			pasteDetectorRef.current.updateState(pasteResult.displayValue);
+
+			if (cursorOffset === undefined) {
+				return null;
+			}
+
+			// Place the caret at the end of whatever was spliced in. The delta
+			// is the same whether the splice inserted the raw payload (short
+			// paste) or a placeholder label (long paste) — we just measure the
+			// resulting string.
+			const delta =
+				pasteResult.displayValue.length - currentState.displayValue.length;
+			return {cursorOffset: cursorOffset + delta};
 		},
 		[currentState, pushToUndoStack],
 	);

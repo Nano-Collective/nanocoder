@@ -94,13 +94,6 @@
 					},
 					"type": "array"
 				},
-				"mcpServers": {
-					"description": "Model Context Protocol server configurations.",
-					"items": {
-						"$ref": "#/definitions/MCPServerConfig"
-					},
-					"type": "array"
-				},
 				"modeProviders": {
 					"$ref": "#/definitions/DiskModeProviders",
 					"description": "Per-mode provider/model overrides (e.g. use a fast model for plan mode)."
@@ -181,69 +174,6 @@
 			"type": "object",
 			"additionalProperties": false,
 			"required": ["command"]
-		},
-		"MCPServerConfig": {
-			"properties": {
-				"alwaysAllow": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"args": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"command": {
-					"type": "string"
-				},
-				"description": {
-					"type": "string"
-				},
-				"enabled": {
-					"type": "boolean"
-				},
-				"env": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"headers": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"name": {
-					"type": "string"
-				},
-				"rawEnv": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"rawHeaders": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"source": {
-					"enum": ["env", "global", "project"],
-					"type": "string"
-				},
-				"tags": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"timeout": {
-					"type": "number"
-				},
-				"transport": {
-					"enum": ["http", "stdio", "websocket"],
-					"type": "string"
-				},
-				"url": {
-					"type": "string"
-				}
-			},
-			"type": "object",
-			"additionalProperties": false,
-			"required": ["name", "transport"]
 		},
 		"ModeProviderConfig": {
 			"properties": {
@@ -701,6 +631,9 @@
 				},
 				"timeout": {
 					"type": "number"
+				},
+				"tune": {
+					"$ref": "#/definitions/TuneConfig"
 				}
 			},
 			"type": "object",

@@ -100,11 +100,10 @@ File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.
 
 1. `agents.config.json` in working directory (project-level)
 2. Platform config dir: `~/.config/nanocoder/agents.config.json` (Linux), `~/Library/Preferences/nanocoder/` (macOS)
-3. `~/.agents.config.json` (legacy fallback)
 
-If `NANOCODER_CONFIG_DIR` is set, the platform/legacy lookups are skipped and that directory is used directly.
+Providers merge by name across both layers (plus `NANOCODER_PROVIDERS`); each `nanocoder.*` block is taken whole from the highest layer that defines it. If `NANOCODER_CONFIG_DIR` is set, it replaces the platform dir (the project layer still applies, except that `loadPreferences` skips a project `nanocoder-preferences.json`).
 
-Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}`
+Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}` (uppercase names only)
 
 ### LLM Client Architecture
 

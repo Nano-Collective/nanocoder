@@ -12,10 +12,11 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
-import type {ToolManager} from '@/tools/tool-manager';
+import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
+	DevelopmentMode,
 	LLMClient,
 	LLMChatResponse,
 	Message,
@@ -43,10 +44,17 @@ function createMockToolManager(
 			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
+			ownerSkill?: string;
 		}
 	> = {},
 ): ToolManager {
 	return {
+		filterToolNamesForMode: (names: string[], mode: DevelopmentMode) =>
+			filterToolNamesForMode(names, mode, {
+				getCustomToolPolicy: () => undefined,
+				getMcpReadOnly: () => undefined,
+			}),
+		getOwnerSkill: (name: string) => tools[name]?.ownerSkill,
 		getAllTools: () => {
 			const result: Record<string, unknown> = {};
 			for (const name of Object.keys(tools)) {
@@ -448,7 +456,12 @@ test.serial('caps tool output before the next subagent model turn', async t => {
 	t.true(result.success);
 	const toolResult = toolMessages.find(message => message.role === 'tool');
 	t.truthy(toolResult);
-	t.is(toolResult?.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap. The cut snaps back to whitespace so it never splits a
+	// token (a secret fragment would slip past the scrubber), which can leave
+	// the result a little under it.
+	const length = toolResult?.content.length ?? 0;
+	t.true(length <= MAX_TOOL_RESULT_CHARS);
+	t.true(length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(toolResult?.content.startsWith('HEAD\n') ?? false);
 	t.true(toolResult?.content.endsWith('TAIL') ?? false);
 });
@@ -1796,4 +1809,182 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		content.includes('audited'),
 		'an audit-log hook must see the failed delegated call too',
 	);
+});
+
+// Daemon-triggered runs are headless: nobody can answer a question, so a
+// subagent without an explicit tools list must not be offered ask_user.
+test.serial('headless subagents are not offered ask_user', async t => {
+	const root = join(tmpdir(), `nanocoder-headless-ask-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'agents', 'probe.md'),
+		'---\nname: probe\ndescription: probe\n---\nprobe\n',
+		'utf-8',
+	);
+	const noop = async () => '';
+	const toolManager = createMockToolManager({
+		read_file: {handler: noop, readOnly: true},
+		ask_user: {handler: noop, readOnly: true},
+	});
+	const offered: string[][] = [];
+	const client = createMockClient([{content: 'done'}, {content: 'done'}]);
+	const chat = client.chat.bind(client);
+	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
+		offered.push(Object.keys(args[1] ?? {}));
+		return chat(...args);
+	}) as LLMClient['chat'];
+
+	await new SubagentExecutor(toolManager, client, root, 'headless').execute({
+		subagent_type: 'probe',
+		description: 'x',
+	});
+	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
+		subagent_type: 'probe',
+		description: 'x',
+	});
+
+	t.deepEqual(offered[0], ['read_file']);
+	t.true(offered[1]?.includes('ask_user'));
+});
+
+// Capture the tool names offered to a subagent on its first model call.
+function captureOfferedTools(client: LLMClient): string[][] {
+	const offered: string[][] = [];
+	const chat = client.chat.bind(client);
+	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
+		offered.push(Object.keys(args[1] ?? {}));
+		return chat(...args);
+	}) as LLMClient['chat'];
+	return offered;
+}
+
+// Plan mode is read-only exploration: a subagent spawned from it must not be
+// offered the mutation tools the parent can't use either.
+test.serial('plan-mode subagents are not offered mutation tools', async t => {
+	const root = join(tmpdir(), `nanocoder-plan-subagent-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'agents', 'probe.md'),
+		'---\nname: probe\ndescription: probe\n---\nprobe\n',
+		'utf-8',
+	);
+	const noop = async () => '';
+	const toolManager = createMockToolManager({
+		read_file: {handler: noop, readOnly: true},
+		write_file: {handler: noop, readOnly: false},
+		execute_bash: {handler: noop, readOnly: false},
+		git_commit: {handler: noop, readOnly: false},
+	});
+	const client = createMockClient([{content: 'done'}]);
+	const offered = captureOfferedTools(client);
+
+	await new SubagentExecutor(toolManager, client, root, 'plan').execute({
+		subagent_type: 'probe',
+		description: 'x',
+	});
+
+	t.deepEqual(offered[0], ['read_file']);
+});
+
+// Bundle subagents always keep their sibling tools, even with a `tools:`
+// allowlist that doesn't name them.
+test.serial('bundle subagents keep sibling tools when they declare a tools list', async t => {
+	const root = join(tmpdir(), `nanocoder-bundle-subagent-${Date.now()}`);
+	mkdirSync(root, {recursive: true});
+	const loader = getSubagentLoader(root);
+	await loader.initialize();
+	loader.registerExternal({
+		name: 'bundle-probe',
+		description: 'probe',
+		systemPrompt: 'probe',
+		tools: ['read_file'],
+		ownerSkill: 'my-skill',
+		source: {priority: 'project', filePath: join(root, 'x.md'), isBuiltIn: false},
+	} as never);
+	const noop = async () => '';
+	const toolManager = createMockToolManager({
+		read_file: {handler: noop, readOnly: true},
+		write_file: {handler: noop, readOnly: false},
+		sibling_tool: {handler: noop, readOnly: true, ownerSkill: 'my-skill'},
+		other_skill_tool: {handler: noop, readOnly: true, ownerSkill: 'other'},
+	});
+	const client = createMockClient([{content: 'done'}]);
+	const offered = captureOfferedTools(client);
+
+	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
+		subagent_type: 'bundle-probe',
+		description: 'x',
+	});
+
+	t.deepEqual(offered[0]?.sort(), ['read_file', 'sibling_tool']);
+});
+
+// The top-level alwaysAllow list skips approval inside subagents too.
+test.serial('subagent tools in alwaysAllow skip the approval prompt', async t => {
+	const configDir = join(tmpdir(), `nanocoder-always-allow-${Date.now()}`);
+	mkdirSync(configDir, {recursive: true});
+	writeFileSync(
+		join(configDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {alwaysAllow: ['write_file']}}),
+		'utf-8',
+	);
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	const previousCwd = process.cwd();
+	process.env.NANOCODER_CONFIG_DIR = configDir;
+	process.chdir(configDir);
+	reloadAppConfig();
+	let approvalsRequested = 0;
+	setGlobalToolApprovalHandler(async () => {
+		approvalsRequested++;
+		return true;
+	});
+	try {
+		const root = join(configDir, 'project');
+		mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
+		writeFileSync(
+			join(root, '.nanocoder', 'agents', 'probe.md'),
+			'---\nname: probe\ndescription: probe\n---\nprobe\n',
+			'utf-8',
+		);
+		let wrote = false;
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async () => {
+					wrote = true;
+					return 'ok';
+				},
+				readOnly: false,
+				needsApproval: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'w',
+						function: {
+							name: 'write_file',
+							arguments: '{"path":"x.ts","content":"hi"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+
+		await new SubagentExecutor(toolManager, client, root, 'normal').execute({
+			subagent_type: 'probe',
+			description: 'x',
+		});
+
+		t.true(wrote);
+		t.is(approvalsRequested, 0);
+	} finally {
+		setGlobalToolApprovalHandler(async () => true);
+		process.chdir(previousCwd);
+		if (previousDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = previousDir;
+		reloadAppConfig();
+	}
 });

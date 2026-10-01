@@ -6,7 +6,23 @@ import {MAX_CHECKPOINT_FILES} from '@/constants';
 import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
+import {getLogger} from '@/utils/logging';
 import {logWarning} from '@/utils/message-queue';
+
+/**
+ * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
+ * it, git reports all of it as untracked, so every checkpoint snapshotted the
+ * earlier checkpoints (0, 2, 6, 14, 30 files...) until the file cap crowded
+ * out the user's real changes, and restoring one wrote stale checkpoint and
+ * timeline data back over the live store. User content under `.nanocoder/`
+ * (commands, agents, tools, skills) is still captured.
+ */
+const NANOCODER_STATE_PATH =
+	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|daemon\.)/;
+
+function isNanocoderStatePath(file: string): boolean {
+	return NANOCODER_STATE_PATH.test(file.replace(/\\/g, '/'));
+}
 
 /**
  * `git diff --name-only HEAD` lists files deleted in the working tree, so a
@@ -91,21 +107,26 @@ export class FileSnapshotService {
 
 				// A missing file is deliberately not a skip: it lands in
 				// filesMissing instead, and restoring means deleting it again.
-				if (!isMissingFile(error)) {
+				// It is also the normal case for a file the turn is about to
+				// create, so it goes to the log only; posting it to the chat
+				// flashed "Could not capture file" on every new file.
+				if (isMissingFile(error)) {
+					getLogger().debug('File not present at capture', {
+						filePath,
+						error: reason,
+					});
+				} else {
 					skipped.push({
 						path: normalizedPath,
 						reason,
 					});
+					logWarning('Could not capture file', true, {
+						context: {
+							filePath,
+							error: reason,
+						},
+					});
 				}
-
-				// Logged either way: a deleted file is not a gap, but it is still
-				// worth seeing in the log when a capture comes out short.
-				logWarning('Could not capture file', true, {
-					context: {
-						filePath,
-						error: reason,
-					},
-				});
 			}
 		}
 
@@ -255,7 +276,9 @@ export class FileSnapshotService {
 			// user hid from listings must still be snapshotted, or restoring a
 			// checkpoint would silently leave its changes in place.
 			const ig = loadGitignore(this.workspaceRoot, {nanocoderIgnore: false});
-			const filtered = allFiles.filter(file => !ig.ignores(file));
+			const filtered = allFiles.filter(
+				file => !ig.ignores(file) && !isNanocoderStatePath(file),
+			);
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
 				logWarning(

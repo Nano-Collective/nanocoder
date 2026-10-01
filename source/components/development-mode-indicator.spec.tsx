@@ -704,3 +704,22 @@ test('saving indicator renders when there is sufficient width', t => {
 	t.regex(output, /saving/);
 	t.regex(output, /ctx: 40%/);
 });
+
+test('shift hint drops before the session name is truncated', t => {
+	// 60 columns is narrow (shift hint offered) but too tight for the hint
+	// and the full session name together.
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			sessionName="Auth refactor"
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'full'}}
+			indentColumns={4}
+		/>,
+		60,
+	);
+
+	t.regex(output, /Auth refactor/);
+	t.notRegex(output, /Shift\+Tab/);
+});

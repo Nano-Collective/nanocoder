@@ -2,14 +2,22 @@ import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {createTokenizer} from '@/tokenization/index';
-import type {CompressionMode, CompressionStrategy} from '@/types/config';
+import type {
+	CompressionMode,
+	CompressionStrategy,
+	TuneConfig,
+} from '@/types/config';
 import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
-import {clampThreshold, compressMessages} from './message-compression';
+import {
+	COMPRESSION_CONSTANTS,
+	clampThreshold,
+	compressMessages,
+} from './message-compression';
 import {filterModelFacing} from './message-visibility';
 import {createSessionOverride} from './session-override';
 
@@ -49,6 +57,61 @@ export const autoCompactSessionOverrides: AutoCompactSessionOverrides =
 		},
 	});
 
+// Tune's "Aggressive Compact" preset. It sits between the config file and the
+// user's explicit `/compact` session overrides, so turning tune on or off never
+// clobbers a threshold or mode the user set by hand.
+let tuneAggressiveCompact = false;
+
+/** Threshold used by tune's aggressive compact (the lowest supported value). */
+export const AGGRESSIVE_COMPACT_THRESHOLD =
+	COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT;
+
+/**
+ * Apply (or clear) tune's aggressive-compact preset from a resolved tune config.
+ * Call whenever the active tune changes, including at startup.
+ */
+export function applyTuneCompaction(tune: TuneConfig | undefined): void {
+	tuneAggressiveCompact = Boolean(tune?.enabled && tune.aggressiveCompact);
+}
+
+export interface ResolvedAutoCompactSettings {
+	enabled: boolean;
+	threshold: number;
+	mode: CompressionMode;
+	strategy: CompressionStrategy;
+	hasOverrides: boolean;
+}
+
+/**
+ * Resolve the effective auto-compact settings.
+ * Precedence: `/compact` session override > tune aggressive compact > config.
+ */
+export function resolveAutoCompactSettings(config: {
+	enabled: boolean;
+	threshold: number;
+	mode: CompressionMode;
+	strategy?: CompressionStrategy;
+}): ResolvedAutoCompactSettings {
+	const session = autoCompactSessionOverrides;
+	const tuneThreshold = tuneAggressiveCompact
+		? AGGRESSIVE_COMPACT_THRESHOLD
+		: null;
+	const tuneMode: CompressionMode | null = tuneAggressiveCompact
+		? 'aggressive'
+		: null;
+	return {
+		enabled: session.enabled ?? config.enabled,
+		threshold: session.threshold ?? tuneThreshold ?? config.threshold,
+		mode: session.mode ?? tuneMode ?? config.mode,
+		strategy: session.strategy ?? config.strategy ?? 'llm',
+		hasOverrides:
+			session.enabled !== null ||
+			session.threshold !== null ||
+			session.mode !== null ||
+			tuneAggressiveCompact,
+	};
+}
+
 /**
  * Perform auto-compact on messages (async)
  * Returns compressed messages if compression was performed, null otherwise.
@@ -84,33 +147,12 @@ export async function performAutoCompact(
 		return null;
 	}
 
-	// Check if auto compact is enabled
-	const enabled =
-		autoCompactSessionOverrides.enabled !== null
-			? autoCompactSessionOverrides.enabled
-			: config.enabled;
+	const {enabled, threshold, mode, strategy} =
+		resolveAutoCompactSettings(config);
 
 	if (!enabled) {
 		return null;
 	}
-
-	// Get threshold
-	const threshold =
-		autoCompactSessionOverrides.threshold !== null
-			? autoCompactSessionOverrides.threshold
-			: config.threshold;
-
-	// Get mode
-	const mode =
-		autoCompactSessionOverrides.mode !== null
-			? autoCompactSessionOverrides.mode
-			: config.mode;
-
-	// Get strategy — session override wins, then config, then 'llm' default
-	const strategy: CompressionStrategy =
-		autoCompactSessionOverrides.strategy !== null
-			? autoCompactSessionOverrides.strategy
-			: (config.strategy ?? 'llm');
 
 	// Get context limit: session override takes priority
 	let contextLimit: number | null;
@@ -335,4 +377,5 @@ export function resetAutoCompactSession(): void {
 	autoCompactSession.threshold.reset();
 	autoCompactSession.mode.reset();
 	autoCompactSession.strategy.reset();
+	tuneAggressiveCompact = false;
 }

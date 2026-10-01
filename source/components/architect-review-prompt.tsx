@@ -175,11 +175,15 @@ export default function ArchitectReviewPrompt({
 				</Text>
 			</Box>
 
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>
-					↑/↓ to move · Enter to select · Esc to keep
-				</Text>
-			</Box>
+			{/* Menu-only: while typing revise instructions Escape goes back rather
+			    than keeping, and the input carries its own hint for that. */}
+			{!isReviseMode && (
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						↑/↓ to move · Enter to select · Esc to keep
+					</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }

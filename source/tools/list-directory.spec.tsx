@@ -720,3 +720,33 @@ test('list_directory tool has handler function', t => {
 test('list_directory tool has formatter function', t => {
 	t.is(typeof listDirectoryTool.formatter, 'function');
 });
+
+test.serial(
+	'list_directory drops a directory matched by a directory-only ignore pattern',
+	async t => {
+		t.timeout(10000);
+		const originalCwd = process.cwd();
+		const testDir = mkdtempSync(join(tmpdir(), 'listdir-ignore-'));
+		try {
+			mkdirSync(join(testDir, 'hidden'));
+			writeFileSync(join(testDir, 'hidden', 'inside.ts'), 'x');
+			mkdirSync(join(testDir, 'src'));
+			writeFileSync(join(testDir, 'src', 'a.ts'), 'x');
+			writeFileSync(join(testDir, '.nanocoderignore'), 'hidden/\n');
+			process.chdir(testDir);
+
+			const result = await listDirectoryTool.tool.execute!(
+				{},
+				{toolCallId: 'test', messages: []},
+			);
+
+			// `hidden/` matches only the trailing-slash form; the entry used to
+			// list and then read back as an empty directory.
+			t.true(result.includes('src/'));
+			t.false(result.includes('hidden'));
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);

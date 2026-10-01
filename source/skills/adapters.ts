@@ -30,7 +30,10 @@ export function commandToSkill(
 	command: CustomCommand,
 	opts: SingleFileSkillOptions,
 ): Skill {
-	const name = baseName(opts.filePath);
+	// Namespaced commands (`refactor/dry.md`) use their full name
+	// (`refactor:dry`), so two same-named files in different namespaces
+	// stay distinct skills instead of colliding on `dry`.
+	const name = command.fullName || baseName(opts.filePath);
 	return {
 		name,
 		description: command.metadata.description ?? name,

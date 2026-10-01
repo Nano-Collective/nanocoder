@@ -3,6 +3,7 @@ import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 } from '../utils/text-wrapping';
+import * as textInputModule from './text-input';
 
 /**
  * Tests for readline keybind logic in the custom TextInput component.
@@ -576,3 +577,26 @@ test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
 });
 
 
+
+// The value effect can run after a newer keystroke was already emitted (fast
+// typing). Replays the sequence captured from a live repro of "/tune" typed
+// as "/etun": the late echo of "/" must not be read as an external change.
+test('classifyIncomingValue treats a late echo of our own edit as stale', t => {
+	const {classifyIncomingValue} = textInputModule;
+	let pending = ['/', '/t'];
+
+	let r = classifyIncomingValue('/', pending, '/t');
+	t.is(r.kind, 'stale-echo');
+	pending = r.pending;
+	t.deepEqual(pending, ['/t']);
+
+	r = classifyIncomingValue('/t', pending, '/t');
+	t.is(r.kind, 'echo');
+	t.deepEqual(r.pending, []);
+
+	t.is(classifyIncomingValue('/t', [], '/t').kind, 'unchanged');
+	// Undo/redo or a draft restore: a value we never emitted.
+	const ext = classifyIncomingValue('restored', ['/tu'], '/tu');
+	t.is(ext.kind, 'external');
+	t.deepEqual(ext.pending, []);
+});

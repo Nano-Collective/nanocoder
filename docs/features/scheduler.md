@@ -15,16 +15,19 @@ sidebar_order: 6
 
 ## What replaced it
 
-The new model attaches a cron trigger directly to a command or a bundle
-manifest. The [per-project daemon](./skills.md#the-daemon) wakes the
-target when the schedule fires.
+The new model attaches a cron trigger directly to a command, an agent, or a
+bundle manifest. The [per-project daemon](./skills.md#the-daemon) wakes the
+target when the schedule fires. A command target is rendered (with no
+arguments, so parameter defaults apply) and run as an unattended agent run
+in `headless` mode, the same way the old scheduler ran it.
 
 ## What `/schedule` does now
 
 `/schedule` is **read-only** — it lists the cron subscriptions currently
-loaded from skill frontmatter and bundle manifests so you can see what
-will fire and when. There is no longer a `create`, `add`, `remove`,
-`start`, or `logs` subcommand.
+loaded from skill frontmatter and bundle manifests, each with its cron
+expression, a short readable summary of it (for example "Mon at 9:00"), and its
+target. It does not show the next run time. There is no
+longer a `create`, `add`, `remove`, `start`, or `logs` subcommand.
 
 To add, remove, or edit a cron trigger, edit the source `.md` or
 `skill.yaml` file directly. Restart the daemon (`nanocoder daemon stop`

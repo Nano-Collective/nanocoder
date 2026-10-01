@@ -10,6 +10,7 @@ import {
 // Implementation imports
 import {
 	createLoggerWithTransport,
+	createPinoLogger,
 	getLoggerStats,
 } from './pino-logger.js';
 import type {LoggerConfig} from './types.js';
@@ -1116,3 +1117,33 @@ test('createPinoLogger uses determineTransportConfig for file logging', async t 
 
 	logger.info('File transport test');
 });
+
+test.serial(
+	'NANOCODER_LOG_DISABLE_FILE creates no log directory even with NANOCODER_LOG_LEVEL set',
+	t => {
+		const logDir = join(testLogDir, 'disabled-file-logging');
+		const saved = {
+			dir: process.env.NANOCODER_LOG_DIR,
+			disable: process.env.NANOCODER_LOG_DISABLE_FILE,
+			level: process.env.NANOCODER_LOG_LEVEL,
+		};
+		process.env.NANOCODER_LOG_DIR = logDir;
+		process.env.NANOCODER_LOG_DISABLE_FILE = 'true';
+		process.env.NANOCODER_LOG_LEVEL = 'debug';
+		try {
+			const logger = createPinoLogger();
+			logger.info('should not be written');
+			t.false(logger.isLevelEnabled('info'));
+			t.false(existsSync(logDir));
+		} finally {
+			for (const [key, value] of [
+				['NANOCODER_LOG_DIR', saved.dir],
+				['NANOCODER_LOG_DISABLE_FILE', saved.disable],
+				['NANOCODER_LOG_LEVEL', saved.level],
+			] as const) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	},
+);

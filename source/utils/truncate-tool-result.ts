@@ -36,6 +36,42 @@ function snapOutsidePlaceholder(
 	return index;
 }
 
+// How far a cut may move to reach whitespace. Past this the text is one long
+// unbroken run (minified output, base64) and a hard cut is the only option.
+const MAX_TOKEN_SNAP = 256;
+
+/**
+ * Move a cut out of the middle of a whitespace-delimited token: back to the
+ * whitespace before it (`bias: 'before'`) or forward to the whitespace after
+ * it (`bias: 'after'`), into the elided middle either way.
+ *
+ * This runs before scrubbing on tools that bound their own output (bash).
+ * A cut through a secret left a fragment like `sk-live-abcdef1234` that no
+ * detector recognises any more, so part of the key went to the provider even
+ * with scrubbing on. Dropping the token whole means a secret is either kept
+ * intact, where the scrubber catches it, or not sent at all.
+ */
+function snapOutsideToken(
+	content: string,
+	index: number,
+	bias: 'before' | 'after',
+): number {
+	const isSpace = (char: string | undefined) =>
+		char === undefined || /\s/.test(char);
+	if (index <= 0 || index >= content.length) return index;
+	if (isSpace(content[index - 1]) || isSpace(content[index])) return index;
+	if (bias === 'before') {
+		for (let i = index; i > index - MAX_TOKEN_SNAP && i > 0; i--) {
+			if (isSpace(content[i - 1])) return i;
+		}
+	} else {
+		for (let i = index; i < index + MAX_TOKEN_SNAP && i < content.length; i++) {
+			if (isSpace(content[i])) return i;
+		}
+	}
+	return index;
+}
+
 /**
  * Bound text returned by a tool before it is added to model context.
  *
@@ -56,10 +92,18 @@ export function truncateToolResult(
 	const headLength = Math.floor(contentBudget * HEAD_SHARE);
 	const tailLength = contentBudget - headLength;
 
-	const headEnd = snapOutsidePlaceholder(content, headLength, 'before');
+	const headEnd = snapOutsideToken(
+		content,
+		snapOutsidePlaceholder(content, headLength, 'before'),
+		'before',
+	);
 	const tailStart = Math.max(
 		headEnd,
-		snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+		snapOutsideToken(
+			content,
+			snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+			'after',
+		),
 	);
 
 	return content.slice(0, headEnd) + marker + content.slice(tailStart);

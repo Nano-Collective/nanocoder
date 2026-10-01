@@ -64,7 +64,7 @@ Sessions are stored in the platform-specific app data directory:
 | Linux | `~/.local/share/nanocoder/sessions/` |
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
-This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used instead, on every platform. This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
 
 ### Session Artifacts
 
@@ -98,9 +98,12 @@ Customize session behaviour in your `nanocoder-preferences.json` (not `agents.co
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `autoSave` | `true` | Enable/disable automatic saving |
+| `autoSave` | `true` | Enable/disable automatic saving. The status line below the prompt briefly shows `saving` while a save is written |
 | `saveInterval` | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | `100` | Maximum sessions to keep (minimum 1) |
 | `maxMessages` | `1000` | Maximum messages sent to the model (context window capping) — on-disk history is NOT truncated (minimum 1) |
 | `retentionDays` | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | (platform default) | Custom storage directory |
+| `smartTitles` | `true` | Generate a descriptive title once when the opening prompt is too thin to name the session (ACP clients such as the VS Code extension; the CLI keeps its heuristic title). Manual renames are never overwritten |
+| `titleModel` | (session's model) | Model used for title generation |
+| `titleProvider` | (session's provider) | Provider used for title generation |

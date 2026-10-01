@@ -354,8 +354,9 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					toggleFileSelection(selectedNode.path);
 				}
 			}
-		} else if (key.backspace) {
-			// Go up one directory by collapsing current
+		} else if (key.backspace || key.delete) {
+			// Ink reports the usual Backspace byte (\x7f) as `delete`, so accept
+			// both. Collapses the highlighted node's parent directory.
 			handleGoUp();
 		}
 	});

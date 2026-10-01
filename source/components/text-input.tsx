@@ -1,12 +1,47 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
-import {useEffect, useRef, useState} from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
 import {isNewlineKey} from '@/utils/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/utils/text-wrapping';
+
+/**
+ * How the value effect should treat an incoming `value`, given the values
+ * this input emitted that the parent has not echoed back yet (oldest first).
+ *
+ * - `stale-echo`: one of our own emissions, but newer ones are still in
+ *   flight, so this render is behind the user's latest keystroke.
+ * - `echo`: our latest emission came back; the value is current.
+ * - `external`: a value we never emitted (undo/redo, draft restore, clear).
+ * - `unchanged`: the same value we last settled on.
+ */
+export function classifyIncomingValue(
+	value: string,
+	pending: readonly string[],
+	lastEmitted: string,
+): {
+	kind: 'stale-echo' | 'echo' | 'external' | 'unchanged';
+	pending: string[];
+} {
+	const echoIndex = pending.indexOf(value);
+	if (echoIndex !== -1) {
+		const rest = pending.slice(echoIndex + 1);
+		return {kind: rest.length > 0 ? 'stale-echo' : 'echo', pending: rest};
+	}
+	if (value !== lastEmitted) {
+		return {kind: 'external', pending: []};
+	}
+	return {kind: 'unchanged', pending: [...pending]};
+}
 
 export type Props = {
 	readonly placeholder?: string;
@@ -23,26 +58,58 @@ export type Props = {
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
 };
 
-function TextInput({
-	value: originalValue,
-	placeholder = '',
-	focus = true,
-	mask,
-	highlightPastedText = false,
-	showCursor = true,
-	onChange,
-	onSubmit,
-	onEnter,
-	wrapWidth,
-	handleEnter = true,
-	onEdgeArrow,
-}: Props) {
+/**
+ * Imperative handle for TextInput. Exposed so the parent can read the caret
+ * position before a programmatic insert (terminal paste) and restore it after,
+ * without lifting cursor state up the tree.
+ */
+export type TextInputHandle = {
+	getCursorOffset: () => number;
+	setCursorOffset: (offset: number) => void;
+};
+
+const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
+	{
+		value: originalValue,
+		placeholder = '',
+		focus = true,
+		mask,
+		highlightPastedText = false,
+		showCursor = true,
+		onChange,
+		onSubmit,
+		onEnter,
+		wrapWidth,
+		handleEnter = true,
+		onEdgeArrow,
+	}: Props,
+	ref,
+) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
 		cursorWidth: 0,
 	});
 
 	const {cursorOffset, cursorWidth} = state;
+
+	useImperativeHandle(
+		ref,
+		() => ({
+			getCursorOffset: () => cursorOffsetRef.current,
+			setCursorOffset: (offset: number) => {
+				// Don't clamp against originalValueRef.current here: the parent
+				// typically calls this in the same tick it schedules the new
+				// `value`, so the ref is stale. The next render's effect clamps
+				// the offset against the real newValue.length. We trust the
+				// caller to pass a sane offset; out-of-bounds requests are
+				// still corrected, just one render later.
+				cursorOffsetRef.current = offset;
+				skipNextCursorResetRef.current = true;
+				setState({cursorOffset: offset, cursorWidth: 0});
+			},
+		}),
+		[],
+	);
 
 	// Refs so useInput handlers always read the latest values (avoids stale closures)
 	const cursorOffsetRef = useRef(cursorOffset);
@@ -55,16 +122,66 @@ function TextInput({
 	// restore, a programmatic clear) rather than one of our own edits.
 	const lastEmittedValueRef = useRef(originalValue);
 
+	// Values emitted via onChange that the parent has not echoed back yet, in
+	// emission order. React runs the value effect after the commit, so while
+	// the user is typing quickly the effect for an older render can run after
+	// a newer keystroke has already been emitted. Compared only against the
+	// latest emission, that stale echo of our own edit read as an external
+	// replacement and parked the caret at the end of the old, shorter value:
+	// the next keystrokes then landed mid-word ("/tune" typed as "/etun").
+	const pendingEmitsRef = useRef<string[]>([]);
+	const recordEmit = (value: string) => {
+		lastEmittedValueRef.current = value;
+		pendingEmitsRef.current.push(value);
+		// Only a runaway parent that never re-renders could grow this; keep it
+		// bounded regardless.
+		if (pendingEmitsRef.current.length > 64) {
+			pendingEmitsRef.current.shift();
+		}
+	};
+
+	// When the imperative handle moves the caret, the upcoming value change
+	// (already in flight from the parent) would otherwise be misread by the
+	// effect as "external replacement, park at end" and clobber the caret.
+	// Setting this flag tells the effect to respect whatever offset is now in
+	// state — and only clamp it against the new value's bounds.
+	const skipNextCursorResetRef = useRef(false);
+
 	useEffect(() => {
 		if (!focus || !showCursor) {
 			return;
 		}
 
 		const newValue = originalValue || '';
-		const isExternalChange = newValue !== (lastEmittedValueRef.current || '');
+
+		const echo = classifyIncomingValue(
+			newValue,
+			pendingEmitsRef.current,
+			lastEmittedValueRef.current || '',
+		);
+		pendingEmitsRef.current = echo.pending;
+		// A stale echo of our own edit: the caret belongs to the newest edit,
+		// so leave it alone rather than fit it to the old value.
+		if (echo.kind === 'stale-echo') {
+			return;
+		}
+		const isExternalChange = echo.kind === 'external';
+		const skipReset = skipNextCursorResetRef.current;
+		skipNextCursorResetRef.current = false;
 		lastEmittedValueRef.current = originalValue;
 
 		setState(previousState => {
+			// Programmatic cursor move paired with the value change: trust the
+			// offset the parent requested, just clamp it into the new value's
+			// bounds so we never render an out-of-range caret.
+			if (skipReset) {
+				const clamped = Math.max(
+					0,
+					Math.min(previousState.cursorOffset, newValue.length),
+				);
+				return {cursorOffset: clamped, cursorWidth: 0};
+			}
+
 			// An external replacement carries no cursor of its own, so the caret
 			// left over from the previous value is meaningless against the new one.
 			// Park it at the end, the way a fresh mount does. Clamping alone is not
@@ -189,7 +306,7 @@ function TextInput({
 				// the same stdin read block inserts after the first, not over it.
 				cursorOffsetRef.current = offset + 1;
 				originalValueRef.current = withNewline;
-				lastEmittedValueRef.current = withNewline;
+				recordEmit(withNewline);
 				setState({cursorOffset: offset + 1, cursorWidth: 0});
 				onChange(withNewline);
 				return;
@@ -399,7 +516,7 @@ function TextInput({
 
 			if (nextValue !== originalValueRef.current) {
 				originalValueRef.current = nextValue;
-				lastEmittedValueRef.current = nextValue;
+				recordEmit(nextValue);
 				onChange(nextValue);
 			}
 		},
@@ -418,6 +535,6 @@ function TextInput({
 			: finalValue;
 
 	return <Text>{displayValue}</Text>;
-}
+});
 
 export default TextInput;

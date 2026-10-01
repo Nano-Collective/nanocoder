@@ -201,6 +201,44 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
+test('WelcomeMessage centers horizontally and vertically', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	const lines = output.split('\n');
+
+	// Horizontal: version and menu have fixed-width content, so their indents
+	// are stable. The location line's indent varies with the branch name length
+	// (truncateMiddle pulls it left on long branches), so it is not asserted
+	// here — the only behaviour this PR changed vertically is the second half.
+	t.true(
+		indentOf(output, /nanocoder v/) > 15,
+		'version line should be horizontally centered',
+	);
+	t.true(
+		indentOf(output, /Resume session/) > 15,
+		'menu should be horizontally centered',
+	);
+
+	// Vertical: on a 40-row budget the banner content (logo + text) is well
+	// under half the height, so a regression to top-flow leaves row 0 occupied.
+	// The block sitting somewhere in the middle proves justifyContent="center"
+	// is wired up on the outer Box.
+	const firstContentLine = lines.findIndex(l => l.trim().length > 0);
+	t.true(
+		firstContentLine > 0 && firstContentLine < 40,
+		`banner should not start at row 0 on a tall viewport (got row ${firstContentLine})`,
+	);
+	t.true(
+		lines.slice(-2).some(l => l.trim().length === 0),
+		'banner should leave trailing whitespace from vertical centering',
+	);
+
+	process.stdout.columns = originalColumns;
+});
+
 test('WelcomeMessage shows the given tip in full layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
@@ -585,4 +623,14 @@ test('WelcomeMessage sizes the row budget to the chosen font', t => {
 		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
 	);
 	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
+});
+test('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /community collective/);
+	t.regex(output, /rather than a company/);
+	t.notRegex(output, /local-first coding agent/i);
+	process.stdout.columns = originalColumns;
 });

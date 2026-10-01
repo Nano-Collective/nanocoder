@@ -103,6 +103,7 @@ export function ModalSelectors({
 		return (
 			<TuneSelector
 				currentConfig={tuneConfig}
+				currentModel={currentModel}
 				onSelect={config => void onTuneSelect(config)}
 				onCancel={onTuneCancel}
 			/>

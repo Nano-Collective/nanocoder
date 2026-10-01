@@ -738,3 +738,13 @@ test('loadHistory resets currentIndex after loading', async t => {
 	t.truthy(prev, 'Should have a previous item');
 	t.is(prev?.displayValue, 'command 2', 'Should start from most recent after load');
 });
+
+test('loadHistory treats the {} seed file as empty history', async t => {
+	// getClosestConfigFile creates a missing history file as "{}"; that must
+	// not surface as a "{}" prompt in Up-arrow history.
+	const tempFile = join(testDir, `history-seed-${Date.now()}.json`);
+	writeFileSync(tempFile, JSON.stringify({}, null, 2), 'utf8');
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+	t.deepEqual(history.getHistory(), []);
+});

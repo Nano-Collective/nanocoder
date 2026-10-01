@@ -350,6 +350,40 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
+		id: 'serply',
+		name: 'Serply',
+		description:
+			'Serply Google, Bing, News, Scholar, Maps, Jobs and Amazon search plus URL scraping MCP server',
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: 'serply',
+			},
+			{
+				name: 'apiKey',
+				prompt: 'Serply API key (from https://serply.io)',
+				required: true,
+				sensitive: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.serverName || 'serply',
+			transport: 'http' as McpTransportType,
+			url: 'https://api.serply.io/mcp',
+			description: 'Serply web search and URL scraping MCP server',
+			tags: ['serply', 'search', 'web', 'scrape', 'http'],
+			timeout: TIMEOUT_MCP_DEFAULT_MS,
+			// Serply authenticates with an X-API-Key header, not a bearer token.
+			headers: {'X-API-Key': (answers.apiKey || '').trim()},
+			templateId: 'serply',
+		}),
+		category: 'remote',
+		transportType: 'http',
+	},
+	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',

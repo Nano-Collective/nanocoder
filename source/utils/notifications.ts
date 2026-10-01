@@ -23,8 +23,15 @@ const DEFAULT_CONFIG: NotificationsConfig = {
 
 let _config: NotificationsConfig = DEFAULT_CONFIG;
 
+// Merge over the defaults so a partial `events` block (or none at all, or a
+// preferences file saved before a newer event existed) keeps the unlisted
+// events on instead of silently disabling them.
 export function setNotificationsConfig(config: NotificationsConfig): void {
-	_config = config;
+	_config = {
+		...DEFAULT_CONFIG,
+		...config,
+		events: {...DEFAULT_CONFIG.events, ...config.events},
+	};
 }
 
 export function getNotificationsConfig(): NotificationsConfig {
@@ -62,8 +69,12 @@ function getIconPath(): string | null {
 	try {
 		const __filename = fileURLToPath(import.meta.url);
 		const __dirname = dirname(__filename);
-		const iconPath = join(__dirname, '../../plugins/vscode/media/icon.png');
-		_iconPath = existsSync(iconPath) ? iconPath : null;
+		// assets/ ships in the npm package; plugins/ only exists in a checkout.
+		const candidates = [
+			join(__dirname, '../../assets/nanocoder-icon.png'),
+			join(__dirname, '../../plugins/vscode/media/icon.png'),
+		];
+		_iconPath = candidates.find(candidate => existsSync(candidate)) ?? null;
 	} catch {
 		_iconPath = null;
 	}
