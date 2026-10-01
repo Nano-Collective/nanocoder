@@ -5,6 +5,7 @@ import type {JSONValue} from 'ai';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
@@ -317,7 +318,7 @@ const GetDiagnosticsFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ get_diagnostics</Text>
+				<Text color={colors.tool}>{ICON_TOOL} get_diagnostics</Text>
 
 				{args.path ? (
 					<Box>

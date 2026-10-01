@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
+import {ICON_GIT_BRANCH} from '@/components/ui/icons';
 import {
 	getNanocoderShape,
 	getPreferencesVersion,
@@ -198,7 +199,7 @@ export default memo(function WelcomeMessage({
 		}
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
-		const branchPart = `⎇ ${shortBranch} · `;
+		const branchPart = `${ICON_GIT_BRANCH} ${shortBranch} · `;
 		const cwdBudget = Math.max(10, termW - branchPart.length - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
@@ -247,7 +248,7 @@ export default memo(function WelcomeMessage({
 					{locationDisplay.branchLabel ? (
 						<>
 							<Text color={colors.primary}>
-								⎇ {locationDisplay.branchLabel}
+								{ICON_GIT_BRANCH} {locationDisplay.branchLabel}
 							</Text>
 							<Text color={colors.secondary}> · </Text>
 							<Text color={colors.secondary}>{locationDisplay.cwd}</Text>

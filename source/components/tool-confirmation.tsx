@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import React from 'react';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
+import {ICON_ERROR, ICON_SUCCESS} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -174,8 +175,8 @@ export default function ToolConfirmation({
 	}, [hasFormatterError, hasValidationError, onConfirm, answerOnce]);
 
 	const options: ConfirmationOption[] = [
-		{label: '✓ Yes, execute this tool', value: true},
-		{label: '✗ No, cancel execution', value: false},
+		{label: `${ICON_SUCCESS} Yes, execute this tool`, value: true},
+		{label: `${ICON_ERROR} No, cancel execution`, value: false},
 	];
 
 	const handleSelect = (item: ConfirmationOption) => {

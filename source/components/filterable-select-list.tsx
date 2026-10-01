@@ -2,6 +2,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useMemo, useState} from 'react';
 import type {ItemSelectorOption} from '@/components/item-selector';
+import {ICON_SELECTION} from '@/components/ui/icons';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
@@ -159,7 +160,7 @@ export function FilterableSelectList<TValue extends string = string>({
 							color={isHighlighted ? colors.primary : colors.text}
 							bold={isHighlighted}
 						>
-							{isHighlighted ? '❯' : ' '} {item.label}
+							{isHighlighted ? ICON_SELECTION : ' '} {item.label}
 						</Text>
 					);
 				})

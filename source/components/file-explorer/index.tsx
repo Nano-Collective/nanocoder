@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
+import {ICON_ERROR, ICON_SUCCESS} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getSyntaxTheme} from '@/config/themes';
 import {
@@ -395,7 +396,9 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				{/* Selection status */}
 				<Box>
 					<Text color={isSelected ? colors.success : colors.secondary}>
-						{isSelected ? '✓ Selected' : '✗ Not selected'}
+						{isSelected
+							? `${ICON_SUCCESS} Selected`
+							: `${ICON_ERROR} Not selected`}
 					</Text>
 					{selectedFiles.size > 0 && (
 						<Text color={colors.secondary}>

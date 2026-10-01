@@ -6,6 +6,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_SUCCESS} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -202,7 +203,7 @@ function GitCommitFormatter({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ git_commit</Text>
+			<Text color={colors.tool}>› git_commit</Text>
 
 			{!result && stagedCount > 0 && (
 				<Box>
@@ -258,7 +259,9 @@ function GitCommitFormatter({
 
 			{result?.includes('Commit created') && (
 				<Box marginTop={1}>
-					<Text color={colors.success}>✓ Commit created successfully</Text>
+					<Text color={colors.success}>
+						{ICON_SUCCESS} Commit created successfully
+					</Text>
 				</Box>
 			)}
 

@@ -492,8 +492,9 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 		);
 
 		const output = lastFrame() ?? '';
-		// Truncated with the shared ellipsis, and the tail is dropped.
-		t.regex(output, /\.\.\./);
+		// Truncated with the shared single-column ellipsis (`…`), and the
+		// tail is dropped.
+		t.regex(output, /\u2026/);
 		t.notRegex(output, /terminal width available/);
 		// The queued-message line itself fits within the terminal width. Scope to
 		// that line rather than every rendered line: the component truncates the
@@ -531,8 +532,8 @@ test('UserInput navigates queued messages while busy with empty input', async t 
 	await wait(50);
 
 	const output = lastFrame()!;
-	t.regex(output, /▸ first queued/);
-	t.notRegex(output, /▸ second queued/);
+	t.regex(output, /❯ first queued/);
+	t.notRegex(output, /❯ second queued/);
 	unmount();
 });
 
@@ -614,14 +615,14 @@ test('UserInput up arrow returns from the first queued message to the input', as
 	// Enter the queue, then step back up to the input.
 	stdin.write('\u001B[B');
 	await wait(50);
-	t.regex(lastFrame()!, /▸ first queued/);
+	t.regex(lastFrame()!, /❯ first queued/);
 
 	stdin.write('\u001B[A');
 	await wait(50);
 
 	const output = lastFrame()!;
-	t.notRegex(output, /▸ first queued/);
-	t.notRegex(output, /▸ second queued/);
+	t.notRegex(output, /❯ first queued/);
+	t.notRegex(output, /❯ second queued/);
 	unmount();
 });
 
@@ -1123,14 +1124,14 @@ test('arrow key navigation updates the selected completion', async t => {
 
 	const beforeNav = lastFrame()!;
 	t.regex(beforeNav, /Available commands:/);
-	t.regex(beforeNav, /▸ \//);
+	t.regex(beforeNav, /❯ \//);
 
 	stdin.write('\u001B[B');
 	await wait();
 
 	const afterDown = lastFrame()!;
 	t.regex(afterDown, /Available commands:/);
-	t.notRegex(afterDown, /^.*▸ \/.*\n.*▸ \//s);
+	t.notRegex(afterDown, /^.*❯ \/.*\n.*❯ \//s);
 
 	unmount();
 });
@@ -1276,7 +1277,7 @@ test('UserInput windows long slash completion lists', async t => {
 
 	const laterFrame = lastFrame()!;
 	t.notRegex(laterFrame, /\/zz-window-00/);
-	t.regex(laterFrame, /▸ \/zz-window-11/);
+	t.regex(laterFrame, /❯ \/zz-window-11/);
 	t.regex(laterFrame, /Showing 5-14 of 14/);
 
 	unmount();
@@ -1312,7 +1313,7 @@ test('UserInput windows long file mention lists', async t => {
 	for (let i = 0; i < 7; i++) {
 		stdin.write('\u001B[B');
 		await wait(50);
-		t.regex(lastFrame()!, /▸ zzfile\d\.txt/);
+		t.regex(lastFrame()!, /❯ zzfile\d\.txt/);
 	}
 	t.notRegex(lastFrame()!, /Showing 1-5 of 8/);
 

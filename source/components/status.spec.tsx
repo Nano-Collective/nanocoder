@@ -258,7 +258,7 @@ test('Status shows update info in narrow layout', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⚠ v1\.0\.0 → v1\.1\.0/);
+	t.regex(output!, /⊘ v1\.0\.0 → v1\.1\.0/);
 	t.regex(output!, /Run: \/update or/);
 
 	process.stdout.columns = originalColumns;
@@ -423,8 +423,8 @@ test('Status shows failed MCP servers in normal layout', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /MCP: 1\/3 connected/);
-	t.regex(output!, /• server2: Timeout/);
-	t.regex(output!, /• server3: Auth failed/);
+	t.regex(output!, /▪ server2: Timeout/);
+	t.regex(output!, /▪ server3: Auth failed/);
 
 	process.stdout.columns = originalColumns;
 });
@@ -448,7 +448,7 @@ test('Status shows failed LSP servers in normal layout', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /LSP: 1\/2 connected/);
-	t.regex(output!, /• rust: Not found/);
+	t.regex(output!, /▪ rust: Not found/);
 
 	process.stdout.columns = originalColumns;
 });
@@ -730,7 +730,7 @@ test('Status handles server with no error message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /• server1: Connection failed/); // Should show default message
+	t.regex(output!, /▪ server1: Connection failed/); // Should show default message
 
 	process.stdout.columns = originalColumns;
 });

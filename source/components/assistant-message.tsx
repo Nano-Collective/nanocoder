@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
+import {ICON_ELLIPSIS} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -33,7 +34,7 @@ export function AssistantMessageBox({
 			borderBottom={false}
 			borderLeftColor={colors.secondary}
 		>
-			{truncated && <Text>…</Text>}
+			{truncated && <Text>{ICON_ELLIPSIS}</Text>}
 			<Text>{text}</Text>
 		</Box>
 	);

@@ -179,7 +179,7 @@ function FetchUrlFormatterComponent({
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Text color={colors.tool}>⚒ fetch_url</Text>
+			<Text color={colors.tool}>› fetch_url</Text>
 			<Box>
 				<Text color={colors.secondary}>URL: </Text>
 				<Box marginLeft={1}>
@@ -195,7 +195,7 @@ function FetchUrlFormatterComponent({
 					{wasTruncated && (
 						<Box>
 							<Text color={colors.warning}>
-								⚠ Content was truncated to{' '}
+								! Content was truncated to{' '}
 								{MAX_URL_CONTENT_BYTES.toLocaleString()} characters
 							</Text>
 						</Box>

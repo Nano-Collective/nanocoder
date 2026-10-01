@@ -36,7 +36,7 @@ function CustomToolFormatterComponent({
 	const tokens = result ? calculateTokens(result) : 0;
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ {toolName}</Text>
+			<Text color={colors.tool}>› {toolName}</Text>
 			{argEntries.length > 0 && (
 				<Box flexDirection="column">
 					{argEntries.map(([k, v]) => (

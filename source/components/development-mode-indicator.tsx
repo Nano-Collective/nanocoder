@@ -1,6 +1,11 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {
+	DEVELOPMENT_MODE_LABELS,
+	DEVELOPMENT_MODE_LABELS_NARROW,
+	ICON_EDITOR,
+} from '@/components/ui/icons';
+import {
 	TOKEN_THRESHOLD_CRITICAL_PERCENT,
 	TOKEN_THRESHOLD_WARNING_PERCENT,
 } from '@/constants';
@@ -13,10 +18,7 @@ import type {
 	DevelopmentMode,
 	TaskIndicatorInfo,
 } from '@/types/core';
-import {
-	DEVELOPMENT_MODE_LABELS,
-	DEVELOPMENT_MODE_LABELS_NARROW,
-} from '@/types/core';
+import {width} from '@/utils/width';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface DevelopmentModeIndicatorProps {
@@ -134,8 +136,8 @@ export const DevelopmentModeIndicator = React.memo(
 					!!activeEditor.endLine;
 				const editorPrefix = editorFileName
 					? hasSelection
-						? '⊡ '
-						: '⊡ In '
+						? `${ICON_EDITOR} `
+						: `${ICON_EDITOR} In `
 					: '';
 				const editorSuffixFull =
 					editorFileName && hasSelection
@@ -172,12 +174,12 @@ export const DevelopmentModeIndicator = React.memo(
 				// Width consumed by parts that always render.
 				const requiredWidth =
 					modeLabel.length +
-					tuneSegment.length +
+					width(tuneSegment) +
 					taskBaseSegment.length +
-					ctxSegment.length +
-					sessionSeparator.length +
-					editorSeparator.length +
-					editorPrefix.length +
+					width(ctxSegment) +
+					width(sessionSeparator) +
+					width(editorSeparator) +
+					width(editorPrefix) +
 					minSessionLen +
 					minEditorLen;
 
@@ -202,7 +204,7 @@ export const DevelopmentModeIndicator = React.memo(
 						taskHintExtra +
 						savingExtra +
 						editorSuffix.length +
-						shiftHint.length +
+						width(shiftHint) +
 						1 >
 					budgetWidth
 				) {
@@ -211,7 +213,7 @@ export const DevelopmentModeIndicator = React.memo(
 						namesWidth +
 							savingExtra +
 							editorSuffix.length +
-							shiftHint.length +
+							width(shiftHint) +
 							1 >
 						budgetWidth
 					) {
@@ -230,15 +232,15 @@ export const DevelopmentModeIndicator = React.memo(
 
 				const fixedWidth =
 					modeLabel.length +
-					shiftHint.length +
-					tuneSegment.length +
+					width(shiftHint) +
+					width(tuneSegment) +
 					taskBaseSegment.length +
 					taskHintExtra +
 					savingExtra +
-					ctxSegment.length +
-					sessionSeparator.length +
-					editorSeparator.length +
-					editorPrefix.length +
+					width(ctxSegment) +
+					width(sessionSeparator) +
+					width(editorSeparator) +
+					width(editorPrefix) +
 					editorSuffix.length;
 
 				const remaining = Math.max(0, budgetWidth - fixedWidth - 1);

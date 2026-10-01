@@ -166,13 +166,13 @@ export const displayExecutedTool = async (
 		// tool activity in chronological order.
 		//
 		// Failures (generic "Error: …" or the streaming bash path's
-		// "⚒ Validation failed: …") don't fold into the count tally; they
-		// render as a condensed red one-liner ("⚒ write_file failed")
+		// "! Validation failed: …") don't fold into the count tally; they
+		// render as a condensed red one-liner ("› write_file failed")
 		// instead of the full error. The model still receives the full
 		// error in conversation history — mirror displayToolResult's detection.
 		const isError =
 			result.content.startsWith('Error: ') ||
-			result.content.startsWith('⚒ Validation failed');
+			result.content.startsWith('! Validation failed');
 		if (isError) {
 			// Condense failures to a short red one-liner in compact mode.
 			await displayToolResult(

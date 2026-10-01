@@ -1,5 +1,12 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {
+	ICON_BULLET,
+	ICON_MCP_HTTP,
+	ICON_MCP_STDIO,
+	ICON_MCP_UNKNOWN,
+	ICON_MCP_WEBSOCKET,
+} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -8,17 +15,20 @@ import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
 
-// Helper function to get transport icons
+// Helper function to get transport icons. Uses the consistent icon
+// vocabulary (ASCII brackets) rather than full-emoji glyphs so the
+// symbols align cleanly across terminals — emoji transport icons were
+// rendered as 2-column glyphs by string-width and broke MCP-list alignment.
 function getTransportIcon(transportType: string): string {
 	switch (transportType.toLowerCase()) {
 		case 'stdio':
-			return '💻';
+			return ICON_MCP_STDIO;
 		case 'websocket':
-			return '🔄';
+			return ICON_MCP_WEBSOCKET;
 		case 'http':
-			return '🌐';
+			return ICON_MCP_HTTP;
 		default:
-			return '❓';
+			return ICON_MCP_UNKNOWN;
 	}
 }
 
@@ -102,12 +112,12 @@ export function MCP({toolManager}: MCPProps) {
 							<Box key={index} marginBottom={1}>
 								<Box flexDirection="column">
 									<Text color={colors.text}>
-										• {transportIcon}{' '}
+										{ICON_BULLET} {transportIcon}{' '}
 										<Text color={colors.primary}>{serverName}</Text>:{' '}
 										<Text color={colors.secondary}>
 											({serverInfo?.transport?.toUpperCase() || 'STDIO'})
 										</Text>{' '}
-										• {serverTools.length} tool
+										{ICON_BULLET} {serverTools.length} tool
 										{serverTools.length !== 1 ? 's' : ''}
 										{serverResources.length > 0 &&
 											`, ${serverResources.length} resource${serverResources.length !== 1 ? 's' : ''}`}

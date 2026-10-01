@@ -17,6 +17,7 @@ import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import {SubagentView} from '@/components/subagent-view';
+import {ICON_WARNING} from '@/components/ui/icons';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -692,7 +693,7 @@ export default function App({
 			<ThemeContext.Provider value={themeContextValue}>
 				<Box flexDirection="column" padding={1}>
 					<Text color={themeContextValue.colors.error}>
-						⚠️ Error checking directory trust: {isTrustedError}
+						{ICON_WARNING} Error checking directory trust: {isTrustedError}
 					</Text>
 					<Text color={themeContextValue.colors.secondary}>
 						Please restart the application or check your permissions.

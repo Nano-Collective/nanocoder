@@ -313,7 +313,7 @@ const WriteFileFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ write_file</Text>
+				<Text color={colors.tool}>› write_file</Text>
 
 				{args.description && (
 					<Box flexDirection="column">

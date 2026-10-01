@@ -8,6 +8,10 @@ export interface Colors {
 	error: string;
 	info: string;
 	warning: string;
+	// Nano Collective brand colour (used in the welcome banner, version
+	// line, and footer). Defaults to Nano Collective purple (`#8373F7`)
+	// and falls back to the theme's `primary` when absent.
+	brand?: string;
 	// Diff highlight colors
 	diffAdded: string;
 	diffRemoved: string;

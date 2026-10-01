@@ -182,12 +182,13 @@ test('useResponsiveTerminal truncate utility works correctly', t => {
 	const shortText = 'hello';
 	t.is(capturedTerminal!.truncate(shortText, 10), shortText);
 
-	// Test long text (truncation with ellipsis)
+	// Test long text (truncation with single-column ellipsis `…` so the
+	// output is at most `maxColumns` visual columns wide rather than UTF-16
+	// code units — this is the whole point of the string-width upgrade).
 	const longText = 'this is a very long text that should be truncated';
 	const truncated = capturedTerminal!.truncate(longText, 20);
-	t.is(truncated.length, 20);
-	t.true(truncated.endsWith('...'));
-	t.is(truncated, 'this is a very lo...');
+	t.true(truncated.endsWith('\u2026'));
+	t.is(truncated, 'this is a very long\u2026');
 
 	// Test exact length (no truncation)
 	const exactText = 'exact';
@@ -216,11 +217,11 @@ test('useResponsiveTerminal truncatePath utility works correctly', t => {
 	const shortPath = '/home/user';
 	t.is(capturedTerminal!.truncatePath(shortPath, 20), shortPath);
 
-	// Test long path (truncation from beginning with ellipsis)
+	// Test long path (truncation from beginning with single-column ellipsis
+	// `…` so the output is at most `maxColumns` visual columns wide).
 	const longPath = '/home/user/documents/projects/myproject/src/components/Button.tsx';
 	const truncated = capturedTerminal!.truncatePath(longPath, 30);
-	t.is(truncated.length, 30);
-	t.true(truncated.startsWith('...'));
+	t.true(truncated.startsWith('\u2026'));
 	// Should keep the end of the path
 	t.true(truncated.endsWith('Button.tsx'));
 

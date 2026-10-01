@@ -1,5 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import React, {useEffect, useState} from 'react';
+import {ICON_ERROR, ICON_SUCCESS, ICON_WARNING} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {TIMEOUT_VSCODE_EXTENSION_SKIP_MS} from '@/constants';
@@ -239,8 +240,10 @@ export function VSCodeExtensionPrompt({
 						<Text color={colors.secondary}>Detected editors:</Text>
 						{statuses.map(s => (
 							<Text key={s.cli} color={s.extensionInstalled ? 'gray' : 'white'}>
-								{s.extensionInstalled ? '  ✓' : '  !'} {s.cli}{' '}
-								{s.extensionInstalled ? '(Installed)' : '(Missing)'}
+								{s.extensionInstalled
+									? `  ${ICON_SUCCESS}`
+									: `  ${ICON_WARNING}`}{' '}
+								{s.cli} {s.extensionInstalled ? '(Installed)' : '(Missing)'}
 							</Text>
 						))}
 					</Box>
@@ -267,7 +270,9 @@ export function VSCodeExtensionPrompt({
 	if (state === 'success') {
 		return (
 			<Box flexDirection="column" paddingY={1}>
-				<Text color={colors.success}>✓ {message}</Text>
+				<Text color={colors.success}>
+					{ICON_SUCCESS} {message}
+				</Text>
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>Press Enter to continue...</Text>
 				</Box>
@@ -278,7 +283,9 @@ export function VSCodeExtensionPrompt({
 	if (state === 'error') {
 		return (
 			<Box flexDirection="column" paddingY={1}>
-				<Text color={colors.error}>✗ {message}</Text>
+				<Text color={colors.error}>
+					{ICON_ERROR} {message}
+				</Text>
 				<Text color={colors.secondary}>
 					Continuing without VS Code integration...
 				</Text>

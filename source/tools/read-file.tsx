@@ -4,6 +4,7 @@ import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {
 	EMPTY_CONTENT_MARKER,
 	FILE_READ_PREVIEW_LINES,
@@ -239,7 +240,7 @@ const ReadFileFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ read_file</Text>
+				<Text color={colors.tool}>{ICON_TOOL} read_file</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>

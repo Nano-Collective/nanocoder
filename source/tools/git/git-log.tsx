@@ -6,6 +6,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -164,7 +165,7 @@ function GitLogFormatter({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ git_log</Text>
+			<Text color={colors.tool}>{ICON_TOOL} git_log</Text>
 
 			{branch && (
 				<Box>

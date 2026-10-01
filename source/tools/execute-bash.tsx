@@ -128,7 +128,7 @@ function ExecuteBashFormatterComponent({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ execute_bash</Text>
+			<Text color={colors.tool}>› execute_bash</Text>
 			{description && (
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Description:</Text>

@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_LIST_ROW} from '@/components/ui/icons';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {formatParameterUsage} from '@/custom-commands/executor';
@@ -47,7 +48,7 @@ function CommandEntry({cmd, isLast}: {cmd: CustomCommand; isLast: boolean}) {
 		<Box flexDirection="column" marginBottom={isLast ? 0 : 1}>
 			<Box>
 				<Text color={colors.text} bold>
-					› {formatCommandHeader(cmd)}
+					{ICON_LIST_ROW} {formatCommandHeader(cmd)}
 				</Text>
 				{tokenEst && <Text color={colors.secondary}> · {tokenEst}</Text>}
 			</Box>
@@ -240,7 +241,7 @@ function CommandDetail({command}: {command: CustomCommand}) {
 					</Text>
 					{command.metadata.examples.map((ex, i) => (
 						<Text key={i} color={colors.secondary}>
-							› {ex}
+							{ICON_LIST_ROW} {ex}
 						</Text>
 					))}
 				</Box>
@@ -253,7 +254,8 @@ function CommandDetail({command}: {command: CustomCommand}) {
 					</Text>
 					{command.loadedResources.map((r, i) => (
 						<Text key={i} color={colors.secondary}>
-							› {r.name} ({r.type}){r.executable ? ' [executable]' : ''}
+							{ICON_LIST_ROW} {r.name} ({r.type})
+							{r.executable ? ' [executable]' : ''}
 						</Text>
 					))}
 				</Box>

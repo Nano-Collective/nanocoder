@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_WARNING} from '@/components/ui/icons';
 import {getLogger} from '@/utils/logging';
 
 interface RenderErrorBoundaryProps {
@@ -49,7 +50,7 @@ export class RenderErrorBoundary extends React.Component<
 			return (
 				<Box>
 					<Text color="yellow">
-						⚠ Could not render{what} output ({this.state.message})
+						{ICON_WARNING} Could not render{what} output ({this.state.message})
 					</Text>
 				</Box>
 			);

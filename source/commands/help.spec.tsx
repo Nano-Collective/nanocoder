@@ -138,9 +138,9 @@ test('helpCommand renders command options and examples', async t => {
 	t.regex(output!, /Command: \/tasks/);
 	t.regex(output!, /Usage: \/tasks \[add <title>\|remove\|rm <number>\|clear\]/);
 	t.regex(output!, /Options & subcommands:/);
-	t.regex(output!, /• add <title>/);
+	t.regex(output!, /▪ add <title>/);
 	t.regex(output!, /Examples:/);
-	t.regex(output!, /• \/tasks remove 2/);
+	t.regex(output!, /▪ \/tasks remove 2/);
 });
 
 test('helpCommand renders command aliases', async t => {

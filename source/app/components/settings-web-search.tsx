@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import TextInput from '@/components/text-input';
+import {ICON_SUCCESS} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {updateConfigNestedValue} from '@/config/config-writer';
 import {getAppConfig} from '@/config/index';
@@ -102,9 +103,9 @@ export function SettingsWebSearchPanel({
 					<Box marginTop={1}>
 						<Text color={hasApiKey ? colors.success : colors.text}>
 							{justSaved
-								? '✓ API key saved'
+								? `${ICON_SUCCESS} API key saved`
 								: hasApiKey
-									? '✓ API key is configured'
+									? `${ICON_SUCCESS} API key is configured`
 									: 'No API key configured — web search is unavailable'}
 						</Text>
 					</Box>

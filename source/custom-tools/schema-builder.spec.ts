@@ -41,7 +41,7 @@ test('validator: missing required parameter', async t => {
 	const result = await v({});
 	t.deepEqual(result, {
 		valid: false,
-		error: '⚒ Missing required parameter: x',
+		error: '! Missing required parameter: x',
 		details: [{path: 'x', expected: 'required', received: 'undefined'}],
 	});
 });
