@@ -43,6 +43,25 @@ export function classifyIncomingValue(
 	return {kind: 'unchanged', pending: [...pending]};
 }
 
+// Cursor offsets are UTF-16 code-unit indexes into the value. An astral
+// character (every emoji) is a surrogate pair, two units, so a key press has to
+// move over or delete it whole: stepping by one unit strands the caret inside
+// the pair and lets Backspace/Delete leave a lone surrogate behind.
+
+/** Pulls an offset that falls inside a surrogate pair back to the pair's start. */
+function snapToCharBoundary(value: string, offset: number): number {
+	return (value.codePointAt(offset - 1) ?? 0) > 0xffff ? offset - 1 : offset;
+}
+
+function stepBack(value: string, offset: number): number {
+	return snapToCharBoundary(value, Math.max(0, offset - 1));
+}
+
+function stepForward(value: string, offset: number): number {
+	const width = (value.codePointAt(offset) ?? 0) > 0xffff ? 2 : 1;
+	return Math.min(value.length, offset + width);
+}
+
 export type Props = {
 	readonly placeholder?: string;
 	readonly focus?: boolean;
@@ -238,17 +257,23 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 		renderedValue = value.length > 0 ? '' : chalk.inverse(' ');
 
+		// for...of yields code points but cursorOffset counts UTF-16 units, so
+		// advance by each character's unit length. A character is highlighted
+		// when any of its units falls in the caret range.
 		let i = 0;
 
 		for (const char of value) {
-			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+			if (
+				i + char.length > cursorOffset - cursorActualWidth &&
+				i <= cursorOffset
+			) {
 				renderedValue +=
 					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
 			} else {
 				renderedValue += char;
 			}
 
-			i++;
+			i += char.length;
 		}
 
 		if (value.length > 0 && cursorOffset === value.length) {
@@ -279,11 +304,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 
 				const direction = key.upArrow ? 'up' : 'down';
-				const next = moveCursorToVisualLine(segments, cur, direction);
-				if (next === null) {
+				const target = moveCursorToVisualLine(segments, cur, direction);
+				if (target === null) {
 					// First/last visual line — hand off to history navigation
 					onEdgeArrow?.(direction);
 				} else {
+					// A column on the new row can fall inside an emoji's pair.
+					const next = snapToCharBoundary(val, target);
 					cursorOffsetRef.current = next;
 					setState(s => ({...s, cursorOffset: next}));
 				}
@@ -375,7 +402,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'b': {
 							// Move cursor back one character
 							if (showCursor) {
-								nextCursorOffset--;
+								nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -384,7 +411,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'f': {
 							// Move cursor forward one character
 							if (showCursor) {
-								nextCursorOffset++;
+								nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -440,11 +467,11 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
 			} else if (
 				key.backspace ||
@@ -461,13 +488,14 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				// kittyKeyboard — if that changes, this guard needs the
 				// corresponding handling.
 				if (cursorOffsetRef.current > 0) {
+					const start = stepBack(nextValue, cursorOffsetRef.current);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
+						originalValueRef.current.slice(0, start) +
 						originalValueRef.current.slice(
 							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
-					nextCursorOffset--;
+					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
 				// Delete removes the character after the cursor (forward delete).
@@ -478,7 +506,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +
 						originalValueRef.current.slice(
-							cursorOffsetRef.current + 1,
+							stepForward(nextValue, cursorOffsetRef.current),
 							originalValueRef.current.length,
 						);
 					// Cursor stays in place — forward delete doesn't move it.
