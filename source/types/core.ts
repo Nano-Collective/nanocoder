@@ -294,24 +294,6 @@ export type DevelopmentMode =
 	| 'architect'
 	| 'headless';
 
-export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
-	normal: '› normal mode on',
-	'auto-accept': '›› auto-accept mode on',
-	yolo: '››› yolo mode on',
-	plan: '? plan mode on',
-	architect: '◈ architect mode on',
-	headless: '›› headless mode on',
-};
-
-export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
-	normal: '› normal',
-	'auto-accept': '›› auto',
-	yolo: '››› yolo',
-	plan: '? plan',
-	architect: '◈ architect',
-	headless: '›› headless',
-};
-
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';
 
 export interface MCPConnectionStatus {

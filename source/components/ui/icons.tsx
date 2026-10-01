@@ -23,6 +23,8 @@
  * existing glyph over introducing a new one.
  */
 
+import type {DevelopmentMode} from '@/types/core';
+
 /** Forward chevron — the universal "tool happened / action forward" glyph. */
 export const ICON_TOOL = '\u00BB'; // »
 
@@ -92,6 +94,26 @@ const ICON_MODE_YOLO = '\u23F5\u23F5\u23F5'; // ⏵⏵⏵
 const ICON_MODE_PLAN = '\u23F8'; // ⏸
 /** Double chevron — headless (scripted; same look as auto-accept, different colour). */
 const ICON_MODE_HEADLESS = ICON_MODE_AUTO_ACCEPT;
+/** Architect mode marker. */
+const ICON_MODE_ARCHITECT = '\u25C8'; // ◈
+
+export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
+	normal: `${ICON_MODE_NORMAL} normal mode on`,
+	'auto-accept': `${ICON_MODE_AUTO_ACCEPT} auto-accept mode on`,
+	yolo: `${ICON_MODE_YOLO} yolo mode on`,
+	plan: `${ICON_MODE_PLAN} plan mode on`,
+	architect: `${ICON_MODE_ARCHITECT} architect mode on`,
+	headless: `${ICON_MODE_HEADLESS} headless mode on`,
+};
+
+export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
+	normal: `${ICON_MODE_NORMAL} normal`,
+	'auto-accept': `${ICON_MODE_AUTO_ACCEPT} auto`,
+	yolo: `${ICON_MODE_YOLO} yolo`,
+	plan: `${ICON_MODE_PLAN} plan`,
+	architect: `${ICON_MODE_ARCHITECT} architect`,
+	headless: `${ICON_MODE_HEADLESS} headless`,
+};
 
 /** MCP transport labels (ASCII brackets — single column). */
 export const ICON_MCP_STDIO = '\u21C4'; // ⇄
@@ -152,11 +174,12 @@ export const TASK_STATUS_ICONS = {
 } as const;
 
 /** Map a development mode to its marker glyph (e.g. "›› auto-accept mode on"). */
-export const MODE_GLYPHS: Record<string, string> = {
+export const MODE_GLYPHS: Record<DevelopmentMode, string> = {
 	normal: ICON_MODE_NORMAL,
 	'auto-accept': ICON_MODE_AUTO_ACCEPT,
 	yolo: ICON_MODE_YOLO,
 	plan: ICON_MODE_PLAN,
+	architect: ICON_MODE_ARCHITECT,
 	headless: ICON_MODE_HEADLESS,
 };
 

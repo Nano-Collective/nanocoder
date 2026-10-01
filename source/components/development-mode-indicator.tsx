@@ -1,6 +1,10 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-import {ICON_EDITOR} from '@/components/ui/icons';
+import {
+	DEVELOPMENT_MODE_LABELS,
+	DEVELOPMENT_MODE_LABELS_NARROW,
+	ICON_EDITOR,
+} from '@/components/ui/icons';
 import {
 	TOKEN_THRESHOLD_CRITICAL_PERCENT,
 	TOKEN_THRESHOLD_WARNING_PERCENT,
@@ -13,10 +17,6 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	TaskIndicatorInfo,
-} from '@/types/core';
-import {
-	DEVELOPMENT_MODE_LABELS,
-	DEVELOPMENT_MODE_LABELS_NARROW,
 } from '@/types/core';
 import {width} from '@/utils/width';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
