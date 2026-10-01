@@ -42,13 +42,13 @@ export const ICON_WARNING = '\u2298'; // ⊘
 export const ICON_ELLIPSIS = '\u2026'; // …
 
 /** Horizontal ellipsis for inline truncation (single-column, narrower than `…`). */
-export const ICON_TRUNCATED = '\u2026'; // …
+const ICON_TRUNCATED = '\u2026'; // …
 
 /** Bullet — used at the start of list rows and inline metadata items. */
 export const ICON_BULLET = '\u25AA'; // ▪
 
 /** Status dot — used for live agent progress indication. */
-export const ICON_STATUS_DOT = '\u25CF'; // ●
+const ICON_STATUS_DOT = '\u25CF'; // ●
 
 /** Continuation / sub-hint row marker (lines beneath a parent item). */
 export const ICON_CONTINUATION = '↳';
@@ -82,15 +82,15 @@ export const ICON_DIRTY = '\u00B1'; // ±
 export const ICON_GIT_BRANCH = '\u2387'; // ⎇
 
 /** Forward-chevron dev-mode marker (single = neutral). */
-export const ICON_MODE_NORMAL = '\u23F5'; // ⏵
+const ICON_MODE_NORMAL = '\u23F5'; // ⏵
 /** Double chevron — auto-accept (running). */
-export const ICON_MODE_AUTO_ACCEPT = '\u23F5\u23F5'; // ⏵⏵
+const ICON_MODE_AUTO_ACCEPT = '\u23F5\u23F5'; // ⏵⏵
 /** Triple chevron — yolo (full auto). */
-export const ICON_MODE_YOLO = '\u23F5\u23F5\u23F5'; // ⏵⏵⏵
+const ICON_MODE_YOLO = '\u23F5\u23F5\u23F5'; // ⏵⏵⏵
 /** Question mark — plan mode (waiting for plan approval). */
-export const ICON_MODE_PLAN = '\u23F8'; // ⏸
+const ICON_MODE_PLAN = '\u23F8'; // ⏸
 /** Double chevron — headless (scripted; same look as auto-accept, different colour). */
-export const ICON_MODE_HEADLESS = ICON_MODE_AUTO_ACCEPT;
+const ICON_MODE_HEADLESS = ICON_MODE_AUTO_ACCEPT;
 
 /** MCP transport labels (ASCII brackets — single column). */
 export const ICON_MCP_STDIO = '\u21C4'; // ⇄
@@ -106,7 +106,7 @@ export const ICON_LSP_NOT_READY = '\u2298'; // ⊘
 export const ICON_EDITOR = '\u22A1'; // ⊡
 
 /** Plan / decision-prompt marker. */
-export const ICON_PLAN = '?';
+const ICON_PLAN = '?';
 
 /** Goodbye / farewell (replaces waving-hand emoji). */
 export const ICON_GOODBYE = '\u30C4'; // ツ
@@ -116,7 +116,7 @@ export const ICON_GOODBYE = '\u30C4'; // ツ
  *  `displayToolResult`, `tool-executor`, `auto-diagnostics`); changing it
  *  requires updating those checks together. Using `!` keeps it ASCII and
  *  narrow. */
-export const VALIDATION_ERROR_PREFIX = '!';
+const VALIDATION_ERROR_PREFIX = '!';
 
 /** Compose a complete validation-error message in a way that matches the
  *  format the existing startsWith checks expect. */
@@ -199,8 +199,6 @@ export const Icons = {
 	plan: ICON_PLAN,
 	goodbye: ICON_GOODBYE,
 } as const;
-
-export type IconName = keyof typeof Icons;
 
 /** Default Nano Collective brand purple (#8373F7) — exposed so components
  *  can pin the brand colour regardless of active theme. */

@@ -33,8 +33,10 @@ import {
 } from '@/components/ui/icons';
 import {width} from '@/utils/width';
 
-// Every icon glyph must render in a single column on a Western
-// monospace terminal — that's the whole point of the vocabulary.
+// Every icon glyph must measure as a single column under our internal
+// string-width configuration (which uses ambiguousIsNarrow: true).
+// This guarantees internal alignment, even though some glyphs are East-Asian Ambiguous
+// and may render wider in CJK-configured terminals.
 const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 	['ICON_TOOL', ICON_TOOL],
 	['ICON_THOUGHT', ICON_THOUGHT],
@@ -64,8 +66,8 @@ const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 ];
 
 for (const [name, glyph] of singleColumnGlyphs) {
-	test(`icons › ${name} renders as a single column`, t => {
-		t.is(width(glyph), 1, `${name} (${glyph}) must render as 1 column`);
+	test(`icons › ${name} measures as a single column internally`, t => {
+		t.is(width(glyph), 1, `${name} (${glyph}) must measure as 1 column under our string-width config`);
 	});
 }
 
