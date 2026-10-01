@@ -16,7 +16,7 @@ export interface ToolFormatterRow {
 }
 
 /**
- * Build a formatter for the common tool-output shape: a `› <tool_name>` header
+ * Build a formatter for the common tool-output shape: a `» <tool_name>` header
  * followed by a column of `Label: value` rows, wrapped in a borderless
  * `ToolMessage`. Tools whose output needs richer rendering (syntax-highlighted
  * diffs, colour-coded stats, etc.) should keep their bespoke formatter.

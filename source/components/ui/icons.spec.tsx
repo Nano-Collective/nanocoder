@@ -4,6 +4,7 @@ import {
 	ICON_CONTINUATION,
 	ICON_DIRTY,
 	ICON_ELLIPSIS,
+	ICON_EDITOR,
 	ICON_ERROR,
 	ICON_GIT_BRANCH,
 	ICON_GOODBYE,
@@ -58,9 +59,16 @@ const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 	['ICON_LSP_READY', ICON_LSP_READY],
 	['ICON_LSP_NOT_READY', ICON_LSP_NOT_READY],
 	['ICON_MCP_STDIO', ICON_MCP_STDIO],
+	['ICON_MCP_WEBSOCKET', ICON_MCP_WEBSOCKET],
 	['ICON_MCP_HTTP', ICON_MCP_HTTP],
 	['ICON_MCP_UNKNOWN', ICON_MCP_UNKNOWN],
+	['ICON_EDITOR', ICON_EDITOR],
 ];
+
+// Note: ICON_GOODBYE ('ツ', EAW=W) is intentionally excluded from singleColumnGlyphs
+// because it is a Wide glyph that consumes 2 columns regardless of ambiguousIsNarrow.
+// MODE_GLYPHS are also excluded because some modes (like 'auto-accept' and 'yolo')
+// intentionally span multiple columns.
 
 for (const [name, glyph] of singleColumnGlyphs) {
 	test(`icons › ${name} measures as a single column internally`, t => {
@@ -88,10 +96,7 @@ test('icons › TASK_STATUS_ICONS covers every task status', t => {
 test('icons › mcpTransportIcon maps every supported transport', t => {
 	t.is(mcpTransportIcon('stdio'), ICON_MCP_STDIO);
 	t.is(mcpTransportIcon('websocket'), ICON_MCP_WEBSOCKET);
-	t.is(mcpTransportIcon('ws'), ICON_MCP_WEBSOCKET);
 	t.is(mcpTransportIcon('http'), ICON_MCP_HTTP);
-	t.is(mcpTransportIcon('https'), ICON_MCP_HTTP);
-	t.is(mcpTransportIcon('sse'), ICON_MCP_HTTP);
 	t.is(mcpTransportIcon('unknown'), ICON_MCP_UNKNOWN);
 	t.is(mcpTransportIcon(''), ICON_MCP_UNKNOWN);
 });

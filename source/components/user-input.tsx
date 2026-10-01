@@ -1152,7 +1152,7 @@ export default function UserInput({
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
 		// Truncate against the true terminal width like tool result rows do, not
 		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the ICON_SELECTION + ' '/'  ' marker (2),
+		// overhead covers the box border + padding (2), the ICON_SELECTION plus a trailing space (2 columns),
 		// and a right-edge safety margin.
 		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
 		const text = truncate(singleLine, maxLength);

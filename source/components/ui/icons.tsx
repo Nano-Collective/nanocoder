@@ -4,7 +4,8 @@
  * Design principles
  * -----------------
  * 1. Single-column monochrome glyphs — every icon here renders as exactly one
- *    column in a standard Western monospace font. We never depend on emoji fonts,
+ *    column in a standard Western monospace font (with the deliberate exception
+ *    of the wide `ICON_GOODBYE` glyph). We never depend on emoji fonts,
  *    variation selectors, or Powerline/Nerd Fonts private-use codepoints.
  * 2. Ambiguous East-Asian-Width glyphs (e.g. `⚒`, `⚠`, `❯`) are tolerated
  *    here only when paired with `stringWidth(..., {ambiguousIsNarrow: true})`
@@ -135,11 +136,8 @@ export function mcpTransportIcon(transportType: string): string {
 		case 'stdio':
 			return ICON_MCP_STDIO;
 		case 'websocket':
-		case 'ws':
 			return ICON_MCP_WEBSOCKET;
 		case 'http':
-		case 'https':
-		case 'sse':
 			return ICON_MCP_HTTP;
 		default:
 			return ICON_MCP_UNKNOWN;

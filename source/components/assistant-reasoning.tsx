@@ -9,7 +9,7 @@ import type {AssistantReasoningProps} from '@/types/index';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
-// Indent applied to the expanded body so the "· Thought" header acts as a
+// Indent applied to the expanded body so the "∴ Thought" header acts as a
 // section header with its body (and any tool summary that follows) grouped
 // beneath it. Keep in sync with the marginLeft used in
 // displayCompactCountsSummary.

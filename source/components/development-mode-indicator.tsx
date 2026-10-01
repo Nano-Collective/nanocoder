@@ -18,6 +18,7 @@ import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
 } from '@/types/core';
+import {width} from '@/utils/width';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface DevelopmentModeIndicatorProps {
@@ -70,8 +71,7 @@ export const DevelopmentModeIndicator = React.memo(
 		isSaving,
 		indentColumns = 0,
 	}: DevelopmentModeIndicatorProps) => {
-		const {isNarrow, actualWidth, truncate, visualWidth} =
-			useResponsiveTerminal();
+		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 		const budgetWidth = Math.max(0, actualWidth - indentColumns);
 		const modeLabel = isNarrow
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
@@ -174,12 +174,12 @@ export const DevelopmentModeIndicator = React.memo(
 				// Width consumed by parts that always render.
 				const requiredWidth =
 					modeLabel.length +
-					visualWidth(tuneSegment) +
+					width(tuneSegment) +
 					taskBaseSegment.length +
-					visualWidth(ctxSegment) +
-					visualWidth(sessionSeparator) +
-					visualWidth(editorSeparator) +
-					visualWidth(editorPrefix) +
+					width(ctxSegment) +
+					width(sessionSeparator) +
+					width(editorSeparator) +
+					width(editorPrefix) +
 					minSessionLen +
 					minEditorLen;
 
@@ -204,7 +204,7 @@ export const DevelopmentModeIndicator = React.memo(
 						taskHintExtra +
 						savingExtra +
 						editorSuffix.length +
-						visualWidth(shiftHint) +
+						width(shiftHint) +
 						1 >
 					budgetWidth
 				) {
@@ -213,7 +213,7 @@ export const DevelopmentModeIndicator = React.memo(
 						namesWidth +
 							savingExtra +
 							editorSuffix.length +
-							visualWidth(shiftHint) +
+							width(shiftHint) +
 							1 >
 						budgetWidth
 					) {
@@ -232,15 +232,15 @@ export const DevelopmentModeIndicator = React.memo(
 
 				const fixedWidth =
 					modeLabel.length +
-					visualWidth(shiftHint) +
-					visualWidth(tuneSegment) +
+					width(shiftHint) +
+					width(tuneSegment) +
 					taskBaseSegment.length +
 					taskHintExtra +
 					savingExtra +
-					visualWidth(ctxSegment) +
-					visualWidth(sessionSeparator) +
-					visualWidth(editorSeparator) +
-					visualWidth(editorPrefix) +
+					width(ctxSegment) +
+					width(sessionSeparator) +
+					width(editorSeparator) +
+					width(editorPrefix) +
 					editorSuffix.length;
 
 				const remaining = Math.max(0, budgetWidth - fixedWidth - 1);

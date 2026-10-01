@@ -19,7 +19,7 @@ New single source of truth:
   `ICON_LSP_*`, `MODE_GLYPHS`, `TASK_STATUS_ICONS`, helpers
   `mcpTransportIcon`, `toolTitle`, `validationError`, and the
   `BRAND_MARK` plus the Nano Collective brand colour `#8373F7`).
-- Completely uninstalled and removed the `figures` NPM package dependency,
+- Removed dynamic runtime lookups using the `figures` package,
   making the codebase lighter and strictly enforcing our new premium
   hardcoded visual vocabulary.
 - `source/utils/width.ts` exports `width`, `truncateByColumns`, and
