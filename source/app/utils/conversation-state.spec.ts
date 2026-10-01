@@ -463,7 +463,7 @@ test('generateContinuationContext: includes repetition warning', t => {
 
 	const context = manager.generateContinuationContext();
 
-	t.true(context.includes('! Warning'));
+	t.true(context.includes('⊘ Warning'));
 	t.true(context.includes('repeating'));
 });
 

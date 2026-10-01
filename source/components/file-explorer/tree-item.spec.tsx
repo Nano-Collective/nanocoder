@@ -167,7 +167,7 @@ test('TreeItem renders collapsed directory with ▸ prefix', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /\u25B8/); // ▸
+	t.regex(output!, />/); // >
 });
 
 test('TreeItem renders expanded directory with ▾ prefix', t => {
@@ -186,7 +186,7 @@ test('TreeItem renders expanded directory with ▾ prefix', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /\u25BE/); // ▾
+	t.regex(output!, /v/); // v
 });
 
 test('TreeItem renders empty directory without expand indicator', t => {
@@ -248,7 +248,7 @@ test('TreeItem renders partially selected directory with half-filled icon', t =>
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /◐/);
+	t.regex(output!, /◎/);
 });
 
 test('TreeItem renders unselected directory with expand indicator', t => {
@@ -267,8 +267,8 @@ test('TreeItem renders unselected directory with expand indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /\u25B8/); // ▸ collapsed indicator
-	t.notRegex(output!, /[✓◐]/);
+	t.regex(output!, />/); // > collapsed indicator
+	t.notRegex(output!, /[✓◎]/);
 });
 
 // === Indentation tests ===

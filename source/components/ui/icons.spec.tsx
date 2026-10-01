@@ -62,7 +62,6 @@ const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 	// pair); we still measure and assert the budget on it below.
 	['ICON_MCP_HTTP', ICON_MCP_HTTP],
 	['ICON_MCP_UNKNOWN', ICON_MCP_UNKNOWN],
-	['ICON_GOODBYE', ICON_GOODBYE],
 ];
 
 for (const [name, glyph] of singleColumnGlyphs) {

@@ -286,7 +286,7 @@ test('displayToolResult - displays formatted result as ToolMessage when formatte
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.type, ToolMessage);
 	t.is(element.props.message, 'Formatted content');
-	t.is(element.props.title, '› ReadFile');
+	t.is(element.props.title, '» ReadFile');
 });
 
 test('displayToolResult - clones React element when formatter returns element', async t => {
@@ -331,7 +331,7 @@ test('displayToolResult - falls back to raw result when formatter throws', async
 	t.is(queue.length, 1);
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.props.message, 'raw result');
-	t.is(element.props.title, '› BrokenTool');
+	t.is(element.props.title, '» BrokenTool');
 });
 
 test('displayToolResult - displays raw result when no formatter exists', async t => {
@@ -356,7 +356,7 @@ test('displayToolResult - displays raw result when no formatter exists', async t
 	t.is(queue.length, 1);
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
 	t.is(element.props.message, 'raw content');
-	t.is(element.props.title, '› NoFormatterTool');
+	t.is(element.props.title, '» NoFormatterTool');
 });
 
 // ============================================================================
@@ -669,7 +669,7 @@ test('LiveCompactCounts - renders tool glyph for each entry', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	const toolGlyphCount = (output!.match(/\u203A/g) || []).length;
+	const toolGlyphCount = (output!.match(/\u00BB/g) || []).length;
 	t.is(toolGlyphCount, 2);
 	unmount();
 });

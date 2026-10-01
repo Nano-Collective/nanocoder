@@ -860,8 +860,8 @@ test('McpStep displays bullet points for each server', t => {
 
 	const output = lastFrame();
 	// Should show bullet points for each server
-	t.regex(output!, /• alpha/);
-	t.regex(output!, /• beta/);
+	t.regex(output!, /▪ alpha/);
+	t.regex(output!, /▪ beta/);
 });
 
 // ============================================================================
