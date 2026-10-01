@@ -609,6 +609,39 @@ test('cheaper-inference template: uses default provider name and model default',
 	t.is(config.name, 'Cheaper Inference');
 });
 
+test('opper template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Opper',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-4-6, gpt-5.5',
+	});
+
+	t.is(config.name, 'Opper');
+	t.is(config.baseUrl, 'https://api.opper.ai/v3/compat');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['claude-sonnet-4-6', 'gpt-5.5']);
+});
+
+test('opper template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'claude-sonnet-4-6');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-4-6',
+	});
+
+	t.is(config.name, 'Opper');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
