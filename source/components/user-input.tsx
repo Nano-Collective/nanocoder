@@ -7,7 +7,7 @@ import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {type TextInputHandle} from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -234,6 +234,12 @@ export default function UserInput({
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
+	// Caps a huge draft's visual height so its border and the mode line below
+	// it can't scroll off a short terminal. 6 rows of overhead: the box's own
+	// top/bottom border, the marginTop above it, and the mode-line status row
+	// below, plus the app frame's top/bottom padding.
+	const terminalRows = useTerminalRows();
+	const maxComposerLines = Math.max(1, Math.min(10, terminalRows - 6));
 	const [textInputKey, setTextInputKey] = useState(0);
 	// Imperative handle into TextInput so the terminal paste path can read the
 	// caret position before the splice and put it back after. Without this the
@@ -1269,6 +1275,7 @@ export default function UserInput({
 							focus={effectiveFocus}
 							wrapWidth={inputWrapWidth}
 							handleEnter={false}
+							maxVisibleLines={maxComposerLines}
 						/>
 					</Box>
 

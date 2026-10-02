@@ -1418,6 +1418,69 @@ test('UserInput windows long file mention lists', async t => {
 	unmount();
 });
 
+// Regression (#1557): a multi-line draft taller than the terminal grew the
+// composer past the screen instead of capping its height and scrolling to
+// the cursor, pushing the box's bottom border and the mode line off screen.
+test.serial(
+	'UserInput caps a tall multi-line draft and keeps the cursor in view',
+	async t => {
+		const originalRows = process.stdout.rows;
+		process.stdout.rows = 24; // maxComposerLines = min(10, 24 - 6) = 10
+		try {
+			const lineCount = 23;
+			const draft = Array.from(
+				{length: lineCount},
+				(_, i) => `line${i}`,
+			).join('\n');
+			// Preloaded via restoreSubmittedDraft rather than typed: TextInput
+			// mounts cursor-at-end on the restored value, matching a user who
+			// just finished typing it, without stdin simulation (a single
+			// multi-line write reads as a legacy paste and collapses into a
+			// placeholder instead of literal text).
+			const restoreSubmittedDraft = {
+				id: 1,
+				inputState: {displayValue: draft, placeholderContent: {}},
+				attachments: [],
+			};
+
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput
+						forceFocus={true}
+						restoreSubmittedDraft={restoreSubmittedDraft}
+					/>
+				</TestWrapper>,
+			);
+			try {
+				await waitForFrame(lastFrame, /line22/);
+
+				// Rows are bordered ("│ ... │"), so isolate each row's content
+				// before checking it - a naive trim() leaves the border behind.
+				const rowContent = (line: string) =>
+					line
+						.replace(/^\s*│\s?/, '')
+						.replace(/\s*│\s*$/, '')
+						.trim();
+				const shownLines = stripAnsi(lastFrame() ?? '')
+					.split('\n')
+					.map(rowContent)
+					.filter(line => /^line\d+$/.test(line));
+
+				// All 23 lines would overflow a 24-row terminal; only the last 10
+				// (ending on the cursor's line) must render.
+				t.deepEqual(
+					shownLines,
+					Array.from({length: 10}, (_, i) => `line${i + 13}`),
+				);
+			} finally {
+				unmount();
+			}
+		} finally {
+			process.stdout.rows = originalRows;
+		}
+	},
+);
+
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
