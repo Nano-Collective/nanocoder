@@ -117,6 +117,16 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				)
 			: flatList;
 
+	// filteredList swaps between every search match and just the expanded rows
+	// (and shrinks when a directory collapses), but only the arrow handlers
+	// clamp selectedIndex. Leaving a search would strand it past the end of the
+	// shorter list: nothing highlighted, Up and Enter inert.
+	useEffect(() => {
+		setSelectedIndex(prev =>
+			Math.min(prev, Math.max(0, filteredList.length - 1)),
+		);
+	}, [filteredList.length]);
+
 	// Calculate scroll window
 	const scrollStart = Math.max(
 		0,
