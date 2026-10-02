@@ -181,6 +181,12 @@ interface ChatProps {
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	/**
+	 * Centre the prompt box in the terminal. Inline mode turns this off: the
+	 * transcript is printed by Ink's <Static> at column 0, which no wrapper can
+	 * shift, so the box shares that left edge instead of sitting inset from it.
+	 */
+	centered?: boolean;
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
@@ -218,6 +224,7 @@ export default function UserInput({
 	onDismissActiveEditor,
 	taskInfo,
 	forceFocus = false,
+	centered = true,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
@@ -238,6 +245,11 @@ export default function UserInput({
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
+	// One column right of the box's left border, plus 1 more in fullscreen
+	// for the root box's left padding, which inline cancels (see
+	// ChatInput's wrapper). Centred adds the ~2-column inset a box narrower
+	// than its container gets from being centred rather than flush left.
+	const indicatorIndent = (centered ? 3 : 1) + (fullscreen ? 1 : 0);
 	const [textInputKey, setTextInputKey] = useState(0);
 	// Imperative handle into TextInput so the terminal paste path can read the
 	// caret position before the splice and put it back after. Without this the
@@ -1234,7 +1246,11 @@ export default function UserInput({
 
 	return (
 		<>
-			<Box width={actualWidth} alignItems="center" flexDirection="column">
+			<Box
+				width={actualWidth}
+				alignItems={centered ? 'center' : 'flex-start'}
+				flexDirection="column"
+			>
 				{isBashMode && (
 					<Box width={promptWidth}>
 						<Text color={colors.tool} bold>
@@ -1409,16 +1425,15 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible. marginLeft={3} shifts
-			the indicator one step to the right so it aligns cleanly under the
-			input box content. */}
-			<Box marginLeft={3}>
+			{/* Development mode indicator - always visible. The indent puts it one
+			step to the right of the box's left border, so it aligns cleanly under
+			the input box content whether the box is centred or flush left. */}
+			<Box marginLeft={indicatorIndent}>
 				<DevelopmentModeIndicator
-					// Must match the wrapper's marginLeft plus, in fullscreen, the
-					// root box's padding: the indicator budgets its segments against
-					// the width left after this indent, and overflowing it lets Ink
-					// cut the row mid-word.
-					indentColumns={fullscreen ? 4 : 3}
+					// Must match the wrapper's marginLeft: the indicator budgets its
+					// segments against the width left after this indent, and
+					// overflowing it lets Ink cut the row mid-word.
+					indentColumns={indicatorIndent}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
