@@ -23,6 +23,9 @@
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
+				"aliases": {
+					"$ref": "#/definitions/RecordStringString"
+				},
 				"alwaysAllow": {
 					"description": "Tools that run automatically without confirmation in non-interactive mode.",
 					"items": {
