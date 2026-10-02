@@ -96,6 +96,32 @@ export function getVisualLineSegments(
 }
 
 /**
+ * Find the index of the visual line segment containing `cursorOffset`.
+ */
+function findVisualLineIndex(
+	segments: VisualLineSegment[],
+	cursorOffset: number,
+): number {
+	for (let i = 0; i < segments.length; i++) {
+		const end = segments[i].start + segments[i].length;
+		if (cursorOffset < end) {
+			return i;
+		}
+		if (cursorOffset === end) {
+			// At a soft-wrap boundary the same offset is both this row's end and
+			// the next row's start; the renderer shows the cursor at the start of
+			// the next row, so it belongs there. At a \n boundary (gap of 1) the
+			// cursor sits on the newline at this row's end.
+			const next = segments[i + 1];
+			if (!next || next.start > end) {
+				return i;
+			}
+		}
+	}
+	return segments.length - 1;
+}
+
+/**
  * Move a cursor offset one visual line up or down, preserving the column
  * where possible (clamped to the target line's length).
  *
@@ -108,26 +134,7 @@ export function moveCursorToVisualLine(
 	cursorOffset: number,
 	direction: 'up' | 'down',
 ): number | null {
-	let row = segments.length - 1;
-	for (let i = 0; i < segments.length; i++) {
-		const end = segments[i].start + segments[i].length;
-		if (cursorOffset < end) {
-			row = i;
-			break;
-		}
-		if (cursorOffset === end) {
-			// At a soft-wrap boundary the same offset is both this row's end and
-			// the next row's start; the renderer shows the cursor at the start of
-			// the next row, so it belongs there. At a \n boundary (gap of 1) the
-			// cursor sits on the newline at this row's end.
-			const next = segments[i + 1];
-			if (!next || next.start > end) {
-				row = i;
-				break;
-			}
-		}
-	}
-
+	const row = findVisualLineIndex(segments, cursorOffset);
 	const targetRow = direction === 'up' ? row - 1 : row + 1;
 	if (targetRow < 0 || targetRow >= segments.length) {
 		return null;
@@ -136,4 +143,36 @@ export function moveCursorToVisualLine(
 	const col = cursorOffset - segments[row].start;
 	const target = segments[targetRow];
 	return target.start + Math.min(col, target.length);
+}
+
+/**
+ * Clamp a value's rendered visual lines to at most `maxVisibleLines`,
+ * scrolling the window to keep the cursor's line in view. `displayLines` is
+ * the already-wrapped/decorated text split on '\n' (e.g. ANSI-highlighted
+ * output); `plainValue`/`width` recompute the same line boundaries via
+ * `getVisualLineSegments` to locate the cursor's row, since wrap-ansi treats
+ * ANSI codes as zero-width and so produces identical break points either way.
+ *
+ * Returns `displayLines` unchanged when it already fits.
+ */
+export function clampVisibleLines(
+	displayLines: string[],
+	plainValue: string,
+	cursorOffset: number,
+	width: number | undefined,
+	maxVisibleLines: number,
+): string[] {
+	if (maxVisibleLines <= 0 || displayLines.length <= maxVisibleLines) {
+		return displayLines;
+	}
+	const segments = getVisualLineSegments(plainValue, width);
+	const cursorRow = findVisualLineIndex(segments, cursorOffset);
+	const scrollStart = Math.max(
+		0,
+		Math.min(
+			cursorRow - Math.floor(maxVisibleLines / 2),
+			displayLines.length - maxVisibleLines,
+		),
+	);
+	return displayLines.slice(scrollStart, scrollStart + maxVisibleLines);
 }

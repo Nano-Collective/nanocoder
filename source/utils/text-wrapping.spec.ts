@@ -1,5 +1,6 @@
 import test from 'ava';
 import {
+	clampVisibleLines,
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
@@ -149,4 +150,50 @@ test('cursor at end of value navigates up correctly', t => {
 	const segments = getVisualLineSegments('abcdefghij', 4);
 	// Cursor past last char (offset 10, col 2 of 'ij'), up → offset 6
 	t.is(moveCursorToVisualLine(segments, 10, 'up'), 6);
+});
+
+// --- clampVisibleLines ---
+
+function offsetOfLine(lines: string[], lineIndex: number): number {
+	return lines
+		.slice(0, lineIndex)
+		.reduce((sum, line) => sum + line.length + 1, 0);
+}
+
+test('clampVisibleLines returns lines unchanged when they already fit', t => {
+	const lines = ['a', 'b', 'c'];
+	t.deepEqual(clampVisibleLines(lines, 'a\nb\nc', 0, undefined, 5), lines);
+});
+
+test('clampVisibleLines returns lines unchanged when maxVisibleLines is not positive', t => {
+	const lines = ['a', 'b', 'c'];
+	t.deepEqual(clampVisibleLines(lines, 'a\nb\nc', 0, undefined, 0), lines);
+});
+
+test('clampVisibleLines windows to the cap and keeps a cursor at the end in view', t => {
+	// Regression for #1557: a draft taller than the terminal must scroll
+	// to the cursor's line rather than growing (or clipping it) off screen.
+	const lines = Array.from({length: 20}, (_, i) => `line${i}`);
+	const plainValue = lines.join('\n');
+	const cursorOffset = offsetOfLine(lines, 19);
+	const result = clampVisibleLines(lines, plainValue, cursorOffset, undefined, 5);
+	t.is(result.length, 5);
+	t.deepEqual(result, lines.slice(15, 20));
+});
+
+test('clampVisibleLines does not scroll past the start for a cursor near the top', t => {
+	const lines = Array.from({length: 20}, (_, i) => `line${i}`);
+	const plainValue = lines.join('\n');
+	const cursorOffset = offsetOfLine(lines, 0);
+	const result = clampVisibleLines(lines, plainValue, cursorOffset, undefined, 5);
+	t.deepEqual(result, lines.slice(0, 5));
+});
+
+test('clampVisibleLines centers the window on a cursor in the middle', t => {
+	const lines = Array.from({length: 20}, (_, i) => `line${i}`);
+	const plainValue = lines.join('\n');
+	const cursorOffset = offsetOfLine(lines, 10);
+	const result = clampVisibleLines(lines, plainValue, cursorOffset, undefined, 5);
+	t.deepEqual(result, lines.slice(8, 13));
+	t.true(result.includes('line10'));
 });

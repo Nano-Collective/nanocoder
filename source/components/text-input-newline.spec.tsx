@@ -158,3 +158,29 @@ test('the xterm modifyOtherKeys sequence never reaches the value as text', async
 	t.false(valueRef.current.includes('['));
 	unmount();
 });
+
+// Regression (#1557): a multi-line draft taller than the terminal grew the
+// composer past the screen instead of capping its height and scrolling to
+// the cursor, pushing the box's bottom border and the mode line off screen.
+test('maxVisibleLines caps a long draft and scrolls to the cursor at the end', t => {
+	const lineCount = 23;
+	const draft = Array.from({length: lineCount}, (_, i) => `line${i}`).join('\n');
+	const {lastFrame, unmount} = render(
+		<TextInput
+			value={draft}
+			onChange={() => {}}
+			focus={true}
+			showCursor={true}
+			wrapWidth={80}
+			maxVisibleLines={10}
+		/>,
+	);
+
+	const lines = (lastFrame() ?? '').split('\n');
+	// 23 lines would overflow the cap; only the last 10 (ending on the
+	// cursor, which mounts at the end of the value) must render.
+	t.is(lines.length, 10);
+	t.is(lines[0], 'line13');
+	t.is(lines[9], 'line22');
+	unmount();
+});
