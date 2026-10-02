@@ -10,23 +10,24 @@ const RELEVANCE_THRESHOLD = 5;
 const MAX_COMMANDS_IN_CONTEXT = 3;
 
 /**
- * Whether `phrase` appears in `haystack` as whole words, case-insensitive.
- * A plain substring test lets the tag `test` match "latest".
+ * Whether `phrase` appears in `haystackLower` as whole words, case-insensitive.
+ * The caller passes the haystack already lowercased, so it is not lowercased
+ * again here. A plain substring test lets the tag `test` match "latest".
  */
-function containsPhrase(haystack: string, phrase: string): boolean {
+function containsPhrase(haystackLower: string, phrase: string): boolean {
 	const needle = phrase.trim().toLowerCase();
 	if (!needle) return false;
-	const text = haystack.toLowerCase();
-	const wordChar = (char: string | undefined) =>
-		!!char && ((char >= '0' && char <= '9') || (char >= 'a' && char <= 'z'));
-	let from = 0;
-	while (from <= text.length - needle.length) {
-		const at = text.indexOf(needle, from);
-		if (at === -1) return false;
-		const before = at > 0 ? text[at - 1] : undefined;
-		const after = text[at + needle.length];
-		if (!wordChar(before) && !wordChar(after)) return true;
-		from = at + 1;
+	const isWordChar = (c: string | undefined) => !!c && /[a-z0-9]/.test(c);
+	for (
+		let i = haystackLower.indexOf(needle);
+		i !== -1;
+		i = haystackLower.indexOf(needle, i + 1)
+	) {
+		const before = haystackLower[i - 1];
+		const after = haystackLower[i + needle.length];
+		if (!isWordChar(before) && !isWordChar(after)) {
+			return true;
+		}
 	}
 	return false;
 }

@@ -352,3 +352,79 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 	unmount();
 });
 
+
+// --- Ctrl+A/E/U/K stay scoped to the current line in multi-line input ---
+//
+// Each readline shortcut used to compute its offset from the start/end of
+// the whole buffer instead of the current logical line, so on line 2 of a
+// 3-line prompt, Ctrl+K deleted every line after the cursor and Ctrl+U
+// deleted every line before it.
+
+const MULTILINE = 'alpha\nbravo\ncharlie';
+const LEFT = '\u001b[D';
+
+// Moves the cursor from end-of-buffer to index 9: inside "bravo", between
+// the second and third character ("bra|vo").
+async function toMidSecondLine(stdin: ReturnType<typeof render>['stdin']) {
+	for (let i = 0; i < 10; i++) await press(stdin, LEFT);
+}
+
+test('component Ctrl+U in multi-line input deletes only the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	// Cursor starts at the end (end of "charlie"). Ctrl+U should remove only
+	// "charlie", leaving the first two lines untouched.
+	await press(stdin, '\u0015');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbravo\n');
+	t.is(valueRef.current, 'alpha\nbravo\n');
+	unmount();
+});
+
+test('component Ctrl+K in multi-line input deletes only within the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	// Ctrl+K should remove only "vo" (the rest of line 2), leaving line 3 intact.
+	await press(stdin, '\u000b');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbra\ncharlie');
+	t.is(valueRef.current, 'alpha\nbra\ncharlie');
+	unmount();
+});
+
+test('component Ctrl+A in multi-line input moves to the start of the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	await press(stdin, '\u0001'); // Ctrl+A
+	await press(stdin, 'X');
+
+	await waitForValue(valueRef, v => v === 'alpha\nXbravo\ncharlie');
+	t.is(valueRef.current, 'alpha\nXbravo\ncharlie');
+	unmount();
+});
+
+test('component Ctrl+E in multi-line input moves to the end of the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	await press(stdin, '\u0005'); // Ctrl+E
+	await press(stdin, 'X');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbravoX\ncharlie');
+	t.is(valueRef.current, 'alpha\nbravoX\ncharlie');
+	unmount();
+});
