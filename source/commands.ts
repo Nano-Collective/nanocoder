@@ -2,6 +2,7 @@ import React from 'react';
 import type {Command, LazyCommand, Message} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {errorMsg} from '@/utils/message-factory';
+import {logWarning} from '@/utils/message-queue';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();
@@ -9,6 +10,7 @@ class CommandRegistry {
 	// Cached proxy wrappers for lazy commands so `get()` returns a stable
 	// reference across calls and handler resolution only happens once.
 	private lazyProxies = new Map<string, Command>();
+	private aliases = new Map<string, string>();
 
 	register(command: Command | Command[]): void {
 		if (Array.isArray(command)) {
@@ -30,6 +32,19 @@ class CommandRegistry {
 		this.lazyEntries.set(entry.name, entry);
 	}
 
+	setAliases(aliases: Record<string, string>): void {
+		this.aliases.clear();
+		for (const [alias, target] of Object.entries(aliases)) {
+			if (this.commands.has(alias) || this.lazyEntries.has(alias)) {
+				logWarning(
+					`Command alias "${alias}" shadows a built-in command; built-in wins.`,
+				);
+				continue;
+			}
+			this.aliases.set(alias, target);
+		}
+	}
+
 	private proxyForLazy(entry: LazyCommand): Command {
 		const cached = this.lazyProxies.get(entry.name);
 		if (cached) return cached;
@@ -49,11 +64,19 @@ class CommandRegistry {
 		return proxy;
 	}
 
-	get(name: string): Command | undefined {
+	private resolveEager(name: string): Command | undefined {
 		const eager = this.commands.get(name);
 		if (eager) return eager;
 		const lazy = this.lazyEntries.get(name);
 		if (lazy) return this.proxyForLazy(lazy);
+		return undefined;
+	}
+
+	get(name: string): Command | undefined {
+		const direct = this.resolveEager(name);
+		if (direct) return direct;
+		const target = this.aliases.get(name);
+		if (target) return this.resolveEager(target);
 		return undefined;
 	}
 
@@ -67,6 +90,9 @@ class CommandRegistry {
 
 	getCompletions(prefix: string): string[] {
 		const commandNames = [...this.commands.keys(), ...this.lazyEntries.keys()];
+		for (const alias of this.aliases.keys()) {
+			if (!commandNames.includes(alias)) commandNames.push(alias);
+		}
 
 		// No prefix: return all commands alphabetically
 		if (!prefix) {

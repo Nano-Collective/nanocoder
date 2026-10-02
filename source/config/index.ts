@@ -418,6 +418,34 @@ function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
 	);
 }
 
+function loadAliasesConfig(): Record<string, string> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'aliases', config => {
+			const aliases = config.nanocoder?.aliases;
+			if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) {
+				return null;
+			}
+
+			const result: Record<string, string> = {};
+			for (const [alias, target] of Object.entries(aliases)) {
+				if (alias.trim() === '') {
+					logWarning('nanocoder.aliases: skipping empty alias key.');
+					continue;
+				}
+				if (typeof target !== 'string' || target.trim() === '') {
+					logWarning(
+						`nanocoder.aliases["${alias}"]: target command must be a non-empty string.`,
+					);
+					continue;
+				}
+				result[alias] = target;
+			}
+
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
 function loadSandboxConfig(): boolean {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'sandbox', config => {
@@ -781,6 +809,8 @@ function loadAppConfig(): AppConfig {
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
+	const aliases = loadAliasesConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -799,6 +829,7 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
+		aliases,
 	};
 }
 
