@@ -43,6 +43,7 @@ Hosted services using the OpenAI-compatible API format.
 - [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
 - [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
 - [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
+- [Y-API](yapi.md) - OpenAI-compatible gateway for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API

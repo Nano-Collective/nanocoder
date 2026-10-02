@@ -670,6 +670,42 @@ test('futureinfra template: uses default provider name and model default', t => 
 	t.is(config.name, 'FutureInfra');
 });
 
+test('yapi template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'yapi');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Y-API',
+		apiKey: 'test-key',
+		model: 'deepseek/deepseek-v4-flash, anthropic/claude-sonnet-5',
+	});
+
+	t.is(config.name, 'Y-API');
+	t.is(config.baseUrl, 'https://api.y-api.bestvirtualgoods.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'deepseek/deepseek-v4-flash',
+		'anthropic/claude-sonnet-5',
+	]);
+});
+
+test('yapi template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'yapi');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek/deepseek-v4-flash');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek/deepseek-v4-flash',
+	});
+
+	t.is(config.name, 'Y-API');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
