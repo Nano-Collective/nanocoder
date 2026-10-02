@@ -445,6 +445,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://global.api-route.com/v1',
 		modelDefault: 'gpt-5.5',
 	}),
+	apiKeyTemplate({
+		id: 'futureinfra',
+		name: 'FutureInfra',
+		baseUrl: 'https://futureinfra.ai/v1/ai',
+		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
+		modelDefault: 'openai/gpt-4o-mini',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',

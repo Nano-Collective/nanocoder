@@ -62,6 +62,39 @@ export function collectEditedPaths(
 	return paths;
 }
 
+/**
+ * Whether the latest turn — everything after the last prompt the user actually
+ * sent, looking past the synthetic auto-diagnostics prompt — made a successful
+ * edit. Stored tool messages carry the fields `collectEditedPaths` reads.
+ */
+export function lastTurnEditedFiles(messages: Message[]): boolean {
+	let start = messages.length;
+	while (
+		start > 0 &&
+		!(
+			messages[start - 1].role === 'user' &&
+			!isAutoDiagnosticsMessage(messages[start - 1])
+		)
+	) {
+		start--;
+	}
+	const turn = messages.slice(start);
+	const toolCalls = turn.flatMap(message => message.tool_calls ?? []);
+	const results: ToolResult[] = turn.flatMap(message =>
+		message.role === 'tool' && message.tool_call_id
+			? [
+					{
+						tool_call_id: message.tool_call_id,
+						role: 'tool' as const,
+						name: message.name ?? '',
+						content: message.content,
+					},
+				]
+			: [],
+	);
+	return collectEditedPaths(toolCalls, results).length > 0;
+}
+
 function diagnosticsHaveFindings(result: ToolResult): boolean {
 	if (result.name !== DIAGNOSTICS_TOOL_NAME) return true;
 	if (result.content.startsWith('Error: ')) return true;
