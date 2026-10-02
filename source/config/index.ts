@@ -2,6 +2,7 @@ import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
+import {parseChannelsConfig} from '@/channels/config';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -27,6 +28,7 @@ import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	ChannelsConfig,
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
@@ -418,6 +420,40 @@ function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
 	);
 }
 
+let _channelsConfigWarnings: string[] = [];
+
+/**
+ * Problems found in `nanocoder.channels` on the last load. `logWarning` only
+ * reaches the TUI's chat queue; `nanocoder channels start` has no chat queue
+ * and must still be able to say why a platform was skipped.
+ * @public
+ */
+export function getChannelsConfigWarnings(): string[] {
+	getAppConfig();
+	return [..._channelsConfigWarnings];
+}
+
+// Load chat channels from `nanocoder.channels`. Tokens are usually `${VAR}`
+// references, so substitution runs before validation - otherwise a missing
+// variable would pass as a literal token and fail opaquely at the platform.
+function loadChannelsConfig(): ChannelsConfig | undefined {
+	_channelsConfigWarnings = [];
+	return (
+		loadHierarchicalConfig('agents.config.json', 'channels', config => {
+			const channels = config.nanocoder?.channels;
+			if (channels && typeof channels === 'object') {
+				const parsed = parseChannelsConfig(substituteEnvVars(channels));
+				_channelsConfigWarnings = parsed.warnings.map(
+					warning => `nanocoder.channels: ${warning}`,
+				);
+				for (const warning of _channelsConfigWarnings) logWarning(warning);
+				return parsed.config;
+			}
+			return null;
+		}) ?? undefined
+	);
+}
+
 function loadSandboxConfig(): boolean {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'sandbox', config => {
@@ -781,6 +817,9 @@ function loadAppConfig(): AppConfig {
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
+	// Load chat channels bridged to the daemon
+	const channels = loadChannelsConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -799,6 +838,7 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
+		channels,
 	};
 }
 

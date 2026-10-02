@@ -269,6 +269,34 @@ This is not a secrets boundary. Network is blocked, writes outside the project a
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 
+### Chat Channels
+
+`nanocoder.channels` configures the chat platforms `nanocoder channels start` bridges to the per-project daemon. Each platform needs its credentials and a non-empty `allowedUsers` list; a block missing either is skipped with a warning. Full setup for each platform is in [Chat Channels](../features/channels.md).
+
+```json
+{
+  "nanocoder": {
+    "channels": {
+      "telegram": {"token": "${TELEGRAM_BOT_TOKEN}", "allowedUsers": [123456789]},
+      "slack": {"botToken": "${SLACK_BOT_TOKEN}", "appToken": "${SLACK_APP_TOKEN}", "allowedUsers": ["U0123ABCD"]},
+      "discord": {"token": "${DISCORD_BOT_TOKEN}", "allowedUsers": ["987654321098765432"], "mode": "plan"},
+      "historyTurns": 6,
+      "timeoutMs": 600000
+    }
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `<platform>.allowedUsers` | — | Required. Platform user ids that may talk to the agent. Numbers are accepted and stored as strings. |
+| `<platform>.allowedChats` | `[]` | Group chats or channels answered without an @-mention. |
+| `<platform>.mode` | `headless` | `headless` executes tools unattended; `plan` only reports what the agent would do. |
+| `historyTurns` | `6` | Earlier exchanges from the same chat included in the next prompt (0 to disable, max 50). |
+| `timeoutMs` | `600000` | How long the bridge waits for one answer from the daemon. |
+
+Tokens are credentials: keep them in the environment and reference them with `${VAR}`. `nanocoder config show nanocoder.channels` redacts them.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).

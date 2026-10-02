@@ -1,9 +1,12 @@
 /**
  * Daemon IPC: a tiny Unix-socket RPC server that lets a TUI ask the
- * running daemon "what subscriptions are active?".
+ * running daemon "what subscriptions are active?", and lets a remote
+ * client (the chat bridge, `nanocoder channels start`) hand it a prompt.
  *
  * Protocol: newline-delimited JSON. Each request is one line of
  * `{id, method, params?}`; each response is `{id, result | error}`.
+ * Responses are matched by id, not order: a `prompt` can take minutes and
+ * a `ping` sent meanwhile is answered immediately.
  *
  * Kept deliberately small - no msgpack, no schema validation library,
  * no auth. The socket lives inside `.nanocoder/` so it inherits the
@@ -21,10 +24,15 @@ import {
 } from 'node:net';
 import type {Subscription} from '@/events/types';
 import {formatError} from '@/utils/error-formatter';
+import {
+	type PromptRequest,
+	type PromptResult,
+	parsePromptRequest,
+} from './prompt-runner';
 
 export interface IpcRequest {
 	id: number;
-	method: 'listSubscriptions' | 'ping' | 'shutdown';
+	method: 'listSubscriptions' | 'ping' | 'shutdown' | 'prompt';
 	params?: unknown;
 }
 
@@ -43,6 +51,13 @@ export interface IpcHandlers {
 	 * is force-kill on Windows).
 	 */
 	shutdown?: () => void | Promise<void>;
+	/**
+	 * Optional - if supplied, the IPC server exposes a `prompt` method that
+	 * runs a free-form instruction through the daemon's executor and returns
+	 * the result once the run is over. Params are validated here so the
+	 * runner only ever sees a well-formed request.
+	 */
+	prompt?: (request: PromptRequest) => Promise<PromptResult>;
 }
 
 export class DaemonIpcServer {
@@ -153,6 +168,31 @@ export class DaemonIpcServer {
 					this.respond(socket, req.id, {accepted: true});
 					void Promise.resolve(this.handlers.shutdown()).catch(() => {});
 					return;
+				case 'prompt': {
+					if (!this.handlers.prompt) {
+						this.respond(
+							socket,
+							req.id,
+							undefined,
+							'prompt method not enabled on this daemon',
+						);
+						return;
+					}
+					const parsed = parsePromptRequest(req.params);
+					if (parsed.error !== undefined) {
+						this.respond(socket, req.id, undefined, parsed.error);
+						return;
+					}
+					// Async on purpose: the response goes out when the run ends,
+					// while other requests on this socket keep being served.
+					this.handlers
+						.prompt(parsed.request)
+						.then(result => this.respond(socket, req.id, result))
+						.catch(err =>
+							this.respond(socket, req.id, undefined, formatError(err)),
+						);
+					return;
+				}
 				default:
 					this.respond(
 						socket,
@@ -235,6 +275,15 @@ export class DaemonIpcClient {
 	 */
 	async shutdown(): Promise<{accepted: true}> {
 		return (await this.request('shutdown')) as {accepted: true};
+	}
+
+	/**
+	 * Run a prompt on the daemon. Resolves when the run has finished, which
+	 * can be minutes later; callers that need a bound should race it with
+	 * their own timer.
+	 */
+	async prompt(request: PromptRequest): Promise<PromptResult> {
+		return (await this.request('prompt', request)) as PromptResult;
 	}
 
 	private async request(

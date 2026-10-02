@@ -242,6 +242,15 @@ Run Nanocoder as an [Agent Client Protocol server](acp.md) so ACP-compatible edi
 nanocoder --acp
 ```
 
+### Chat Channels (Telegram, Slack, Discord)
+
+Message your local agent from your phone or team chat. [Chat channels](channels.md) are thin bridges from a chat platform to the per-project daemon: each message from an allowed user becomes a checkpointed, headless run, and the agent's summary comes back in the same chat. No ports are opened; the bridge only makes outbound connections.
+
+```bash
+nanocoder daemon start      # host the agent
+nanocoder channels start    # bridge the configured chat platforms to it
+```
+
 ### Language Servers
 
 When a language server is connected (`/lsp` lists them), the AI can read diagnostics with `lsp_get_diagnostics` and format a file with `lsp_format_document`, which formats through the language server, honours `.editorconfig` indent settings, and writes the result to disk. Formatting is a file edit, so it follows the same approval rules as other edits.
@@ -265,6 +274,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
 | [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
+| [Chat Channels](channels.md) | Message the agent from Telegram, Slack, or Discord through the per-project daemon |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |

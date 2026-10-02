@@ -241,6 +241,14 @@ prefers an IPC shutdown request (clean drain of the event loop) and
 falls back to `SIGTERM` only if the daemon is unreachable, so stops are
 graceful on Windows too where `SIGTERM` would otherwise be force-kill.
 
+Besides `ping`, `listSubscriptions`, and `shutdown`, the socket accepts a
+`prompt` method that runs a free-form instruction through the daemon's
+executor and returns the result when the run ends. That is how
+[chat channels](channels.md) relay a message from Telegram, Slack, or
+Discord; any local client can use it the same way. Prompt runs are
+checkpointed first, queue one behind another, and run `headless` unless
+the request asks for `plan`.
+
 Internally, the daemon runs every triggered agent or command in
 **`headless`** mode (no foreground prompts, no `ask_user`, no `agent`,
 and only tools that never need approval). The

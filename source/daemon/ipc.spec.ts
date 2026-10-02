@@ -245,3 +245,121 @@ test.serial(
 		}
 	},
 );
+
+test.serial('prompt runs through the handler and returns its result', async t => {
+	const path = await makeSocketPath();
+	const seen: unknown[] = [];
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+		prompt: async request => {
+			seen.push(request);
+			return {success: true, output: `echo: ${request.prompt}`, durationMs: 3};
+		},
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		const result = await client.prompt({
+			prompt: 'fix the build',
+			mode: 'plan',
+			source: 'telegram:7',
+		});
+		t.deepEqual(result, {success: true, output: 'echo: fix the build', durationMs: 3});
+		t.deepEqual(seen, [{prompt: 'fix the build', mode: 'plan', source: 'telegram:7'}]);
+	} finally {
+		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial('prompt rejects bad params before the handler sees them, and reports a missing handler', async t => {
+	const path = await makeSocketPath();
+	let handlerCalls = 0;
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+		prompt: async () => {
+			handlerCalls++;
+			return {success: true, output: '', durationMs: 0};
+		},
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		await t.throwsAsync(client.prompt({prompt: '   '}), {
+			message: 'prompt must be a non-empty string',
+		});
+		await t.throwsAsync(
+			client.prompt({prompt: 'x', mode: 'yolo' as unknown as 'plan'}),
+			{message: 'mode must be one of: headless, plan'},
+		);
+		t.is(handlerCalls, 0);
+	} finally {
+		await client.disconnect();
+		await server.stop();
+	}
+
+	const bare = new DaemonIpcServer(path, {listSubscriptions: () => []});
+	await bare.start();
+	const client2 = new DaemonIpcClient(path);
+	await client2.connect();
+	try {
+		await t.throwsAsync(client2.prompt({prompt: 'x'}), {
+			message: 'prompt method not enabled on this daemon',
+		});
+	} finally {
+		await client2.disconnect();
+		await bare.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial('a ping sent during a long prompt is answered before the prompt completes', async t => {
+	const path = await makeSocketPath();
+	let release!: () => void;
+	const gate = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+		prompt: async () => {
+			await gate;
+			return {success: true, output: 'late', durationMs: 1};
+		},
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		const slow = client.prompt({prompt: 'slow'});
+		t.is(await client.ping(), 'pong');
+		release();
+		t.is((await slow).output, 'late');
+	} finally {
+		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial('a handler that throws surfaces as an IPC error', async t => {
+	const path = await makeSocketPath();
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+		prompt: async () => {
+			throw new Error('executor exploded');
+		},
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		await t.throwsAsync(client.prompt({prompt: 'x'}), {message: 'executor exploded'});
+	} finally {
+		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});

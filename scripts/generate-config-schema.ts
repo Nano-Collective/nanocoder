@@ -230,6 +230,13 @@ function main(): void {
 	setRequired(definitions, 'OpenRouterPlugin', ['id']);
 	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 	setRequired(definitions, 'HookDefinition', ['command']);
+	setRequired(definitions, 'TelegramChannelConfig', ['token', 'allowedUsers']);
+	setRequired(definitions, 'SlackChannelConfig', [
+		'botToken',
+		'appToken',
+		'allowedUsers',
+	]);
+	setRequired(definitions, 'DiscordChannelConfig', ['token', 'allowedUsers']);
 
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.
