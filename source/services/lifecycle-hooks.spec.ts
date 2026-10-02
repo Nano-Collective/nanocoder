@@ -281,8 +281,43 @@ test.serial('a non-zero exit on an observe-only event never blocks', async t => 
 	});
 
 	t.false(outcome.blocked);
-	// The failing hook contributes nothing; the next one still runs.
+	// The failing hook is reported separately, not mixed into the passing
+	// output, and the next one still runs.
 	t.is(outcome.output, 'still ran');
+	t.deepEqual(outcome.failures, [{exitCode: 1, output: 'warned'}]);
+});
+
+test.serial('a failing observe-only hook reports both stdout and stderr', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"console.log('2 tests failed');console.error('expected 1, got 2');process.exit(2)",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.deepEqual(outcome.failures, [
+		{exitCode: 2, output: '2 tests failed\nexpected 1, got 2'},
+	]);
+});
+
+test.serial('a vetoing event does not report failures', async t => {
+	withHooks({
+		'pre-tool-use': [{command: node("console.log('no');process.exit(1)")}],
+	});
+
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.true(outcome.blocked);
+	t.deepEqual(outcome.failures, []);
 });
 
 test.serial('a hook that times out does not block the action', async t => {
@@ -502,6 +537,71 @@ test.serial('post-tool-use stdout is folded into the tool result', async t => {
 	t.is(
 		result.content,
 		'wrote 1 file\n\n<hook-output event="post-tool-use">\nformatted\n</hook-output>',
+	);
+});
+
+test.serial('a failing post-tool-use hook reaches the model with its exit code', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{
+				matchTools: ['write_file'],
+				command: node("console.error('lint: unused variable x');process.exit(1)"),
+			},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n<hook-output event="post-tool-use" exit="1">\nlint: unused variable x\n</hook-output>',
+	);
+	// The tool itself succeeded; only the check after it failed.
+	t.falsy(result.isError);
+});
+
+test.serial('passing and failing post-tool-use output are both forwarded', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{matchTools: ['write_file'], command: node("console.log('formatted')")},
+			{
+				matchTools: ['write_file'],
+				command: node("console.log('1 test failed');process.exit(1)"),
+			},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n' +
+			'<hook-output event="post-tool-use">\nformatted\n</hook-output>\n\n' +
+			'<hook-output event="post-tool-use" exit="1">\n1 test failed\n</hook-output>',
+	);
+});
+
+test.serial('a silent failing post-tool-use hook still tells the model', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{matchTools: ['write_file'], command: node('process.exit(3)')},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n<hook-output event="post-tool-use" exit="3">\n(no output)\n</hook-output>',
 	);
 });
 

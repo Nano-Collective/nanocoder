@@ -54,6 +54,18 @@ export interface HookOutcome {
 	reason?: string;
 	/** Combined stdout of the hooks that ran, trimmed. Empty when none wrote. */
 	output: string;
+	/**
+	 * Observe-only hooks that exited non-zero, in config order. They are still
+	 * logged for the user; `post-tool-use` also hands them to the model, since a
+	 * failing linter or test run is the output most worth acting on.
+	 */
+	failures: HookFailure[];
+}
+
+export interface HookFailure {
+	exitCode: number;
+	/** stdout and stderr, trimmed and joined. Empty when the hook wrote nothing. */
+	output: string;
 }
 
 /** Events where a non-zero exit vetoes the action instead of just logging. */
@@ -167,7 +179,9 @@ export async function runPreToolUseGate(
 	toolCall: ToolCall,
 	toolArgs: Record<string, unknown>,
 ): Promise<HookOutcome> {
-	if (gatedToolCalls.has(toolCall)) return {blocked: false, output: ''};
+	if (gatedToolCalls.has(toolCall)) {
+		return {blocked: false, output: '', failures: []};
+	}
 
 	const outcome = await runLifecycleHooks('pre-tool-use', {
 		toolName: toolCall.function.name,
@@ -180,29 +194,46 @@ export async function runPreToolUseGate(
 }
 
 /**
- * Run the `post-tool-use` hooks for one tool call and fold any stdout into the
- * result the model reads, so a formatter's output (or a linter's complaint)
- * lands on the same turn instead of a turn later. Shared by every execution
- * path so the tag the model sees is identical whichever one ran the tool.
+ * Run the `post-tool-use` hooks for one tool call and fold their output into
+ * the result the model reads, so a formatter's output (or a linter's complaint)
+ * lands on the same turn instead of a turn later. A hook that fails is folded
+ * in too, tagged with its exit code. Shared by every execution path so the tag
+ * the model sees is identical whichever one ran the tool.
  */
 export async function appendPostToolUseOutput(
 	toolName: string,
 	toolArgs: Record<string, unknown>,
 	content: string,
 ): Promise<string> {
-	const {output} = await runLifecycleHooks('post-tool-use', {
+	const {output, failures} = await runLifecycleHooks('post-tool-use', {
 		toolName,
 		toolArgs,
 		toolResult: content,
 	});
-	if (!output) return content;
+	if (!output && failures.length === 0) return content;
+
+	const blocks: string[] = [];
+	if (output) {
+		blocks.push(
+			`<hook-output event="post-tool-use">\n${output}\n</hook-output>`,
+		);
+	}
+	// A failing hook is still observe-only — the tool itself succeeded — but its
+	// output is what the model most needs to see, so it is forwarded with the
+	// exit code rather than only logged for the user.
+	for (const failure of failures) {
+		blocks.push(
+			`<hook-output event="post-tool-use" exit="${failure.exitCode}">\n${
+				failure.output || '(no output)'
+			}\n</hook-output>`,
+		);
+	}
+
 	// Re-truncate the joined result. The caller already capped `content`, so
 	// appending here without this could push a result past the cap by up to
 	// MAX_HOOK_OUTPUT_CHARS — the cap exists to protect the context window, and
 	// a chatty hook must not be the thing that breaches it.
-	return truncateToolResult(
-		`${content}\n\n<hook-output event="post-tool-use">\n${output}\n</hook-output>`,
-	);
+	return truncateToolResult(`${content}\n\n${blocks.join('\n\n')}`);
 }
 
 /** Human-readable label for transcripts and error messages. */
@@ -581,7 +612,7 @@ export async function runLifecycleHooks(
 	const hooks = getConfiguredHooks(event).filter(hook =>
 		appliesTo(hook, context),
 	);
-	if (hooks.length === 0) return {blocked: false, output: ''};
+	if (hooks.length === 0) return {blocked: false, output: '', failures: []};
 
 	// The project root, not the session cwd: a hook is defined in project
 	// config, so a relative `command` like `.nanocoder/hooks/guard.sh` has to
@@ -591,6 +622,7 @@ export async function runLifecycleHooks(
 	const canVeto = VETOING_EVENTS.has(event);
 	const defaultTimeoutMs = defaultTimeoutFor(event);
 	const collected: string[] = [];
+	const failures: HookFailure[] = [];
 
 	for (const hook of hooks) {
 		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs);
@@ -610,6 +642,7 @@ export async function runLifecycleHooks(
 						? `Blocked by hook "${label}": ${detail}`
 						: `Blocked by hook "${label}" (exit ${run.exitCode}).`,
 					output: collected.join('\n').trim(),
+					failures,
 				};
 			}
 			logError(
@@ -617,6 +650,18 @@ export async function runLifecycleHooks(
 					detail ? `: ${detail}` : ''
 				}`,
 			);
+			// A null exit code means the hook was killed by a signal: a broken
+			// hook, like a timeout, not a check that ran and failed. Log only.
+			if (run.exitCode !== null) {
+				// Both streams, not `detail`: test runners and linters often split
+				// the summary and the failures across stdout and stderr.
+				failures.push({
+					exitCode: run.exitCode,
+					output: [run.stdout.trim(), run.stderr.trim()]
+						.filter(Boolean)
+						.join('\n'),
+				});
+			}
 			continue;
 		}
 
@@ -624,5 +669,5 @@ export async function runLifecycleHooks(
 		if (out) collected.push(out);
 	}
 
-	return {blocked: false, output: collected.join('\n').trim()};
+	return {blocked: false, output: collected.join('\n').trim(), failures};
 }
