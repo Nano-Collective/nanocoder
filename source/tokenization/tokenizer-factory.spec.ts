@@ -5,6 +5,7 @@
 import test from 'ava';
 import {createTokenizer} from './tokenizer-factory.js';
 import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
+import {GeminiTokenizer} from './tokenizers/gemini-tokenizer.js';
 import {GenericTokenizer} from './tokenizers/generic-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
 import {OpenAITokenizer} from './tokenizers/openai-tokenizer.js';
@@ -98,6 +99,17 @@ test('createTokenizer detects Llama from llama.cpp provider', t => {
 test('createTokenizer detects Llama from local provider', t => {
 	const tokenizer = createTokenizer('local', 'custom-model');
 	t.true(tokenizer instanceof LlamaTokenizer);
+});
+
+// Test createTokenizer with Gemini provider detection
+test('createTokenizer detects Gemini from gemini model name', t => {
+	const tokenizer = createTokenizer('custom', 'gemini-1.5-pro');
+	t.true(tokenizer instanceof GeminiTokenizer);
+});
+
+test('createTokenizer detects Gemini from provider name', t => {
+	const tokenizer = createTokenizer('google', 'custom-model');
+	t.true(tokenizer instanceof GeminiTokenizer);
 });
 
 // Test createTokenizer with fallback
