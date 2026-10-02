@@ -854,6 +854,35 @@ test.serial(
 	},
 );
 
+test.serial(
+	'a failing post-tool-use hook survives the cap when the rest is long',
+	async t => {
+		setToolRegistryGetter(() => ({
+			write_file: async () => 'r'.repeat(19_000),
+		}));
+		withHooks({
+			'post-tool-use': [
+				{command: node("console.log('p'.repeat(15000))")},
+				{command: node("console.error('lint: 47 errors');process.exit(1)")},
+			],
+		});
+
+		const result = await processToolUse(writeFileCall());
+		const content = String(result.content);
+		const cap = truncateToolResult('y'.repeat(500_000)).length;
+
+		t.true(content.length <= cap, 'the result is still capped');
+		t.true(content.includes('Output truncated'), 'something was cut');
+		// The long tool result and the chatty passing hook are cut from the
+		// middle; the failure, appended last, sits in the kept tail.
+		t.true(
+			content.endsWith(
+				'<hook-output event="post-tool-use" exit="1">\nlint: 47 errors\n</hook-output>',
+			),
+		);
+	},
+);
+
 test.serial('session-start context waits for a slow hook', async t => {
 	withHooks({
 		'session-start': [

@@ -233,6 +233,12 @@ export async function appendPostToolUseOutput(
 	// appending here without this could push a result past the cap by up to
 	// MAX_HOOK_OUTPUT_CHARS — the cap exists to protect the context window, and
 	// a chatty hook must not be the thing that breaches it.
+	//
+	// Failure blocks go last on purpose: truncateToolResult elides the middle
+	// and gives the larger share to the tail, so a long tool result or a
+	// chatty passing hook is cut before a failure is. Only a failure longer
+	// than the tail budget loses anything, and then it keeps its end, which
+	// is where test runners and linters print their summary.
 	return truncateToolResult(`${content}\n\n${blocks.join('\n\n')}`);
 }
 
@@ -665,6 +671,10 @@ export async function runLifecycleHooks(
 			continue;
 		}
 
+		// stdout only, unlike a failure above. On a passing run stderr is mostly
+		// progress lines and warnings the tool chose not to fail on; forwarding
+		// it would spend context on noise. On a failing run stderr is usually
+		// the reason, so that path keeps both.
 		const out = run.stdout.trim();
 		if (out) collected.push(out);
 	}
