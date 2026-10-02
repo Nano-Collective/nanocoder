@@ -150,6 +150,51 @@ export interface RetryLimitsConfig {
 	// 0 restores that behaviour (accept the first truncated turn as final).
 	// Applies to the --plain/headless runtime.
 	maxTruncatedTurns: number;
+	// Verification results judged, including the first, before the loop stops
+	// asking the model for another fix. `1` means "run it and report, never
+	// retry" - the default, because an unreviewed auto-fix loop that spends
+	// tokens on a repository it cannot fix is worse than no loop at all.
+	// 0 disables the loop while still running the command and reporting the
+	// result, which is the useful middle setting while you are tuning a command.
+	// Only reached when `nanocoder.verification.command` is configured.
+	// Applies to the interactive and --plain/headless runtimes.
+	maxVerificationAttempts: number;
+}
+
+/**
+ * Post-edit verification: run a check after the agent edits files, and offer
+ * its output back to the model so it can fix what it broke.
+ *
+ * Off unless a `command` is set. Nothing about the default session changes.
+ */
+export interface VerificationConfig {
+	/**
+	 * The check to run. The array form is preferred and behaves identically on
+	 * every platform: `"command": ["npm", "run", "test:ci"]`.
+	 *
+	 * The string form is tokenised, and rejected if it contains anything a
+	 * shell would interpret. That is not caution for its own sake: on Windows
+	 * `cmd.exe` has to run `.cmd` shims such as `npm.cmd`, so a command that is
+	 * inert on a Mac can mean something entirely different on Windows. One
+	 * config must not change meaning per platform.
+	 *
+	 * The command is never run through a shell you did not ask for, and the
+	 * whole verification output is capped before it reaches the model.
+	 */
+	command?: string | string[];
+	/**
+	 * Set false to skip verification without deleting the command. Useful for
+	 * turning it off in one profile while keeping it configured.
+	 */
+	enabled?: boolean;
+	/** Wall-clock budget for one run. Default 120000. A run that exceeds it is
+	 *  reported as a timeout and is not retried - there is no failure output to
+	 *  act on. */
+	timeoutMs?: number;
+	/** Bytes of output retained for the model. Default 16000, head and tail
+	 *  kept with the middle elided, since the summary line and the assertion
+	 *  diff are at the end. */
+	maxOutputBytes?: number;
 }
 
 // Custom system prompt configuration
@@ -334,6 +379,16 @@ export interface DiskNanocoderConfig {
 	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
 	 */
 	retries?: Partial<RetryLimitsConfig>;
+	/**
+	 * Run a check after the agent edits files and offer the result back to the
+	 * model. Inert unless `command` is set, so adding this section changes
+	 * nothing until you fill it in.
+	 *
+	 * Project-local, like `hooks` and `mcpServers` above, and therefore covered
+	 * by the same directory-trust prompt - a cloned repository can name a
+	 * command to execute, and that has to be a decision the user makes.
+	 */
+	verification?: VerificationConfig;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
 }
@@ -441,6 +496,14 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Post-edit verification. Present only when configured.
+	verification?: Required<Omit<VerificationConfig, 'command'>> & {
+		// Normalised to argv, or null when no command is configured. Resolved
+		// here rather than parsed at spawn time so a malformed command is
+		// reported once, at load, instead of silently on every edit.
+		command: string[] | null;
+	};
 }
 
 // MCP Server configuration with source tracking

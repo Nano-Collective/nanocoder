@@ -280,7 +280,8 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
       "maxRepeatedToolCalls": 3,
       "maxEmptyTurns": 2,
       "maxMalformedRetries": 2,
-      "maxTruncatedTurns": 2
+      "maxTruncatedTurns": 2,
+      "maxVerificationAttempts": 1
     }
   }
 }
@@ -292,6 +293,7 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
 | `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
 | `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain` runtime only. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
+| `maxVerificationAttempts` | number | `1` | How many [verification](#post-edit-verification) results are judged, counting the first, before the loop stops asking the model for another fix (minimum 0). Only has an effect when a verification command is configured. Applies to the interactive and `--plain` runtimes. |
 
 Choosing "Continue" at the repeated-tool-call prompt runs the paused call and re-checks after `maxRepeatedToolCalls` further identical calls, so a genuinely stuck model is re-prompted rather than left looping.
 
@@ -302,6 +304,58 @@ Setting `maxEmptyTurns` or `maxMalformedRetries` to `0` disables the nudge entir
 > **Warning - CI polling patterns:** in `--plain` runs (`nanocoder run "..."` in CI and non-TTY environments) there is no prompt to answer, so `maxRepeatedToolCalls` is a hard stop. A workflow whose model legitimately repeats the identical command - polling a deploy, re-running the same check while waiting on an external state change - aborts with exit code `1` once the cap is hit, by default on the third consecutive identical call. Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a polling pattern.
 
 Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone. Delegated [subagent](../features/subagents.md) runs apply `maxRepeatedToolCalls` - a stuck subagent stops with an error naming the setting, since there is nobody to ask inside a delegated run - but not the others: a subagent's loop ends on its own after an empty turn, it does not use text-parsed tool calls, and `maxTruncatedTurns` is specific to the `--plain` loop.
+
+### Post-Edit Verification
+
+Run a check after the agent edits files, and hand the result back to the model so it can fix what it broke. Off until you configure a command; nothing about a default session changes.
+
+```json
+{
+  "nanocoder": {
+    "verification": {
+      "command": ["npm", "run", "test:ci"]
+    },
+    "retries": {
+      "maxVerificationAttempts": 1
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `command` | string \| string[] | — | The check to run. Required — this is what turns the feature on. |
+| `enabled` | boolean | `true` | Set `false` to skip verification without deleting the command, so toggling it back on needs no retyping. |
+| `timeoutMs` | number | `120000` | Wall-clock budget for one run. A run that exceeds it is reported as a timeout and **not** retried. |
+| `maxOutputBytes` | number | `16000` | Bytes of output retained for the model. Head and tail are kept with the middle elided, since the summary line and assertion diff are at the end. |
+
+#### Use the array form
+
+```json
+"command": ["npm", "run", "test:ci"]
+```
+
+This is the recommended form and behaves identically on every platform. The string form (`"command": "npm run test:ci"`) is tokenised, and is rejected outright if it contains anything a shell would interpret — `&&`, `|`, `;`, `>`, backticks, `$(…)` and friends.
+
+That rejection is not caution for its own sake. On Windows, `cmd.exe` has to run the `.cmd` shims that `npm` ships, so a command that is inert on a Mac can mean something entirely different on Windows. A single config that changes meaning per platform is worse than a config error you can see, so the string form is checked and the array form is taken literally.
+
+#### What runs, and when
+
+1. The **first** time the agent edits a file, the check runs *before* the edit, to establish whether the repository was already failing. Without that baseline there is no way to tell the agent's breakage from a pre-existing failure, and the agent will happily rewrite unrelated code to chase a test that was red before it started.
+2. After the edit, the check runs again and the result goes back to the model with the baseline as context.
+3. If the failures shrank, the model gets another turn. If nothing changed, or a new failure appeared, the loop stops and says why rather than burning the remaining context re-running a check it cannot satisfy.
+
+The retry count is [`retries.maxVerificationAttempts`](#retry-limits), which defaults to `1` — run it, report it, never retry. Raising it to `2` or `3` is a statement that this check is one your model can actually pass. At `0` the check still runs and is still reported, just never fed back as a fix request, which is the useful setting while you are tuning a command.
+
+A timeout, a command that cannot be found, or a cancelled run is never retried: there is no failure output to act on, so asking the model to fix it would only produce invention.
+
+> **Warning - untrusted repositories:** `verification.command` is project-local configuration, exactly like `hooks` and `mcpServers`, and it names a command to execute. A cloned repository can carry one in its `agents.config.json`. Treat the first-run trust prompt as a real decision, and run `--help` in directories you do not trust before accepting.
+>
+> The gate is the directory-trust prompt, and it is inherited rather than checked separately: no command from the project directory runs until the directory is trusted, because the conversation loop that would spawn it only exists after initialization, which only runs post-trust. `/doctor` lists the command under **Verification** alongside the hook and MCP commands, so you can read what a repository asked to run.
+
+#### Checking a command before trusting it
+
+`/verify` runs the configured check on demand and reports the result without involving the model. Use it to confirm the command resolves, the timeout is generous enough, and the output is useful, before letting it run after every edit. It works even when `enabled` is `false`, since typing the command is the ask.
 
 ### Paste Handling
 

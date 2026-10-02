@@ -216,3 +216,29 @@ test('already-trusted directory initializes on mount', t => {
 	t.is(props.setToolManager.calls.length, 1);
 	t.true(props.setPreferencesLoaded.calls.length > 0);
 });
+
+test('an untrusted directory cannot reach the project verification command', t => {
+	// `nanocoder.verification.command` is documented as covered by the trust
+	// prompt. It is, but not by any check of its own - it inherits this gate,
+	// and the inheritance is the whole mechanism, so it is worth pinning.
+	//
+	// The command is only ever spawned from the conversation loop, which needs a
+	// client and a tool manager. Both are created inside the gated effect, so
+	// "untrusted creates neither" is what stops the project command from
+	// running. A future refactor that hoists either out of the effect would
+	// reopen this, and this is the test that would notice.
+	const {props, setTrust} = setup({isTrusted: false});
+
+	t.is(props.setToolManager.calls.length, 0);
+	t.is(props.setClient.calls.length, 0);
+
+	// Still closed after a re-render: trust is not inferred from anything the
+	// project directory says about itself.
+	setTrust(false);
+	t.is(props.setToolManager.calls.length, 0);
+	t.is(props.setClient.calls.length, 0);
+
+	// Only an explicit confirmation opens it.
+	setTrust(true);
+	t.is(props.setToolManager.calls.length, 1);
+});

@@ -88,9 +88,83 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /LSP/);
 	t.regex(output!, /MCP/);
 	t.regex(output!, /Hooks/);
+	t.regex(output!, /Verification/);
 	t.regex(output!, /Daemon/);
 });
 
+test('Doctor shows the configured verification command', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	// A project-supplied verification command is executed by the agent, so it
+	// has to be readable in the same place as the hook and MCP commands.
+	const withVerification = {
+		...report,
+		verification: {
+			status: 'ok' as const,
+			data: {
+				configured: true as const,
+				command: 'npm run test:ci',
+				enabled: true,
+				timeoutMs: 120000,
+				maxOutputBytes: 16000,
+				maxAttempts: 2,
+			},
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(<Doctor report={withVerification} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /npm run test:ci/);
+	t.regex(output, /timeout 120000ms/);
+	t.regex(output, /2 attempts per turn/);
+});
+
+test('Doctor marks a disabled verification command as disabled', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const withVerification = {
+		...report,
+		verification: {
+			status: 'ok' as const,
+			data: {
+				configured: true as const,
+				command: 'npm test',
+				enabled: false,
+				timeoutMs: 1000,
+				maxOutputBytes: 100,
+				maxAttempts: 1,
+			},
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(<Doctor report={withVerification} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /npm test/);
+	t.regex(output, /disabled/);
+	t.regex(output, /1 attempt per turn/);
+});
+
+test('Doctor says how to configure verification when none is set', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const {lastFrame} = renderWithTheme(
+		<Doctor
+			report={{
+				...report,
+				verification: {
+					status: 'ok',
+					data: {configured: false, maxAttempts: 1},
+				},
+			}}
+		/>,
+	);
+	const output = lastFrame()!;
+
+	t.regex(output, /No post-edit verification command configured/);
+	t.regex(output, /nanocoder\.verification\.command/);
+});
 test('Doctor lists configured lifecycle hooks', async t => {
 	const report = await collectDoctorReport(createDependencies());
 

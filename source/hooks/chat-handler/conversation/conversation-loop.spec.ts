@@ -12,6 +12,11 @@ import {setProjectRoot} from '@/services/session-cwd.js';
 import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
+import {
+	isVerificationMessage,
+	VerificationOrchestrator,
+} from '@/services/verification/orchestrator';
+import type {VerificationTurn} from './verification-turn.js';
 import type {
 	ApiUsageSnapshot,
 	LLMChatResponse,
@@ -3109,3 +3114,217 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+// Post-Edit Verification Integration
+// ============================================================================
+
+	const SETTINGS = {
+		command: ['check'],
+		timeoutMs: 1000,
+		maxOutputBytes: 1000,
+		maxAttempts: 1,
+		cwd: '.',
+	};
+
+test.serial('processAssistantResponse - appends a verification instruction after a failing edit', async t => {
+	const captured: Message[][] = [];
+	const runs: string[] = [];
+	let runIndex = 0;
+	// Baseline green, then a shrinking set of failures. Strict subsets mean the
+	// no-progress and regression stops cannot fire, so the only thing that ends
+	// the run is the attempt budget.
+	const outputs = [
+		'',
+		'FAIL a > one\nFAIL a > two\n',
+		'FAIL a > two\n',
+	];
+
+	const turn: VerificationTurn = {
+		orchestrator: new VerificationOrchestrator(
+			{...SETTINGS, maxAttempts: 3},
+			async () => {
+				const output = outputs[runIndex] ?? '';
+				runs.push(output);
+				runIndex += 1;
+				return {
+					status: output === '' ? 'passed' : 'failed',
+					exitCode: output === '' ? 0 : 1,
+					signal: null,
+					durationMs: 1,
+					output,
+					truncated: false,
+				};
+			},
+		),
+	};
+
+	let chatCalls = 0;
+	const client = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCalls += 1;
+			// Edit, then answer.
+			if (chatCalls === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_1', function: {name: 'write_file', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Fixed.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client,
+		toolManager: createMockToolManager({tools: ['write_file']}),
+		verificationTurn: turn,
+		setMessages: (msgs: Message[]) => captured.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	// Two runs: the pre-edit baseline and one post-edit check. The model then
+	// answered, so the instruction reached it.
+	t.is(runs.length, 2, 'a baseline and exactly one post-edit run');
+	const final = captured[captured.length - 1];
+	const instruction = final.find(m => isVerificationMessage(m));
+	t.truthy(instruction, 'the failing check must be sent back to the model');
+	t.is(instruction?.role, 'user');
+	t.regex(instruction?.content ?? '', /two/);
+});
+
+test.serial('processAssistantResponse - a passing check reports to the user and not the model', async t => {
+	const captured: Message[][] = [];
+	const turn: VerificationTurn = {
+		orchestrator: new VerificationOrchestrator(
+			{...SETTINGS, maxAttempts: 3},
+			async () => ({
+				status: 'passed',
+				exitCode: 0,
+				signal: null,
+				durationMs: 1,
+				output: '',
+				truncated: false,
+			}),
+		),
+	};
+
+	let chatCalls = 0;
+	const client = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCalls += 1;
+			if (chatCalls === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_1', function: {name: 'write_file', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Done.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client,
+		toolManager: createMockToolManager({tools: ['write_file']}),
+		verificationTurn: turn,
+		setMessages: (msgs: Message[]) => captured.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	const final = captured[captured.length - 1];
+	t.false(
+		final.some(m => isVerificationMessage(m)),
+		'a pass must not add anything to the model history',
+	);
+});
+
+test.serial('processAssistantResponse - a read-only turn never runs the check', async t => {
+	const captured: Message[][] = [];
+	let runs = 0;
+	const turn: VerificationTurn = {
+		orchestrator: new VerificationOrchestrator(
+			{...SETTINGS, maxAttempts: 3},
+			async () => {
+				runs += 1;
+				return {
+					status: 'passed',
+					exitCode: 0,
+					signal: null,
+					durationMs: 1,
+					output: '',
+					truncated: false,
+				};
+			},
+		),
+	};
+
+	let chatCalls = 0;
+	const client = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCalls += 1;
+			if (chatCalls === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_1', function: {name: 'read_file', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Read.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client,
+		toolManager: createMockToolManager({tools: ['read_file']}),
+		verificationTurn: turn,
+		setMessages: (msgs: Message[]) => captured.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(runs, 0, 'no baseline, no check');
+});

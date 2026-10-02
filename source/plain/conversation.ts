@@ -10,6 +10,13 @@ import {
 } from '@/config/index';
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
+	postEditHook,
+	preEditHook,
+	prepareForVerificationInstruction,
+	startVerificationTurn,
+	turnEditedFilesSuccessfully,
+} from '@/hooks/chat-handler/conversation/verification-turn';
+import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
 } from '@/hooks/chat-handler/utils/tool-filters';
@@ -270,6 +277,12 @@ async function runPlainConversationBody(
 		malformedRetryCount = 0;
 		return null;
 	};
+
+	// One verification pass per invocation. A headless run is a single request,
+	// so the orchestrator is created here rather than per loop iteration: it
+	// holds the pre-edit baseline, and re-creating it per iteration would
+	// re-baseline against the agent's own edits. `null` when the feature is off.
+	const verificationTurn = startVerificationTurn();
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
@@ -712,6 +725,16 @@ async function runPlainConversationBody(
 			};
 		}
 
+		// Establish whether the repository was already failing *before* the
+		// first edit lands. A baseline taken afterwards would report every
+		// pre-existing failure as new, and the model would go and "fix" code it
+		// never broke.
+		await preEditHook(
+			verificationTurn ?? undefined,
+			toolsToExecute,
+			abortSignal,
+		);
+
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of toolsToExecute) {
 			if (!isJson) {
@@ -755,6 +778,23 @@ async function runPlainConversationBody(
 			});
 		}
 		messages = [...messages, ...toolResults];
+
+		// Post-edit verification. A failure with budget left becomes an
+		// instruction appended to the history; anything else is reported on
+		// stderr, since --json has no channel for it and must stay parseable.
+		const verification = await postEditHook(
+			verificationTurn ?? undefined,
+			turnEditedFilesSuccessfully(toolsToExecute, toolResults),
+			abortSignal,
+		);
+		if (verification.kind === 'instruct') {
+			messages = prepareForVerificationInstruction(
+				messages,
+				verification.message,
+			);
+		} else if (verification.kind === 'report' && !isJson) {
+			writeStatus(`verify: ${verification.text}`);
+		}
 	}
 
 	// Defensive fallback: the final turn forces a tool-free answer above, so the

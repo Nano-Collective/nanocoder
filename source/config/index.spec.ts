@@ -720,17 +720,281 @@ test.serial('getRetryLimits falls back per field, not per object', async t => {
 		getRetryLimits,
 		reloadAppConfig: reload,
 	} = await import('./index.js');
-	const config = getAppConfig();
-	const original = config.retries;
-	config.retries = {maxEmptyTurns: 5} as unknown as typeof original;
+		const config = getAppConfig();
+		const original = config.retries;
+		config.retries = {maxEmptyTurns: 5} as unknown as typeof original;
+		try {
+			const limits = getRetryLimits();
+			t.is(limits.maxEmptyTurns, 5);
+			t.is(limits.maxRepeatedToolCalls, 3);
+			t.is(limits.maxMalformedRetries, 2);
+			t.is(limits.maxVerificationAttempts, 1);
+		} finally {
+			config.retries = original;
+			reload();
+		}
+	}
+);
+
+// Tests for post-edit verification (nanocoder.verification)
+type ResolvedVerification = NonNullable<
+	ReturnType<typeof import('./index.js').getAppConfig>['verification']
+>;
+
+async function withVerificationConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (
+		verification: ResolvedVerification | undefined,
+		config: ReturnType<typeof import('./index.js').getAppConfig>,
+	) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
 	try {
-		const limits = getRetryLimits();
-		t.is(limits.maxEmptyTurns, 5);
-		t.is(limits.maxRepeatedToolCalls, 3);
-		t.is(limits.maxMalformedRetries, 2);
-	} finally {
-		config.retries = original;
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
 		reload();
+		const config = getAppConfig();
+		assertion(config.verification, config);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial('verification is absent when no command is configured', async t => {
+	await withVerificationConfig(
+		'verification-unset',
+		{nanocoder: {retries: {maxVerificationAttempts: 3}}},
+		verification => {
+			// `undefined` is the single "stay out of the way" signal. A
+			// disabled-but-present object would give every caller two ways to
+			// spell "off" and one of them would eventually be missed.
+			t.is(verification, undefined);
+		},
+	);
+});
+
+test.serial('verification is absent when the block carries no command', async t => {
+	await withVerificationConfig(
+		'verification-block-only',
+		{nanocoder: {verification: {timeoutMs: 5000}}},
+		verification => {
+			t.is(verification, undefined);
+		},
+	);
+});
+
+test.serial('verification loads the array command form verbatim', async t => {
+	await withVerificationConfig(
+		'verification-array',
+		{nanocoder: {verification: {command: ['npm', 'run', 'test:ci']}}},
+		verification => {
+			t.deepEqual(verification?.command, ['npm', 'run', 'test:ci']);
+			t.is(verification?.enabled, true);
+			// Defaults for everything not configured.
+			t.is(verification?.timeoutMs, 120_000);
+			t.is(verification?.maxOutputBytes, 16_000);
+		},
+	);
+});
+
+test.serial('verification tokenises the string command form once, at load', async t => {
+	await withVerificationConfig(
+		'verification-string',
+		{nanocoder: {verification: {command: 'npm run test:ci -- --bail'}}},
+		verification => {
+			t.deepEqual(verification?.command, [
+				'npm',
+				'run',
+				'test:ci',
+				'--',
+				'--bail',
+			]);
+		},
+	);
+});
+
+test.serial('verification ignores a string command containing shell syntax', async t => {
+	await withVerificationConfig(
+		'verification-metachar',
+		{nanocoder: {verification: {command: 'npm test && rm -rf /'}}},
+		verification => {
+			// Rejected at load rather than spawned: a project config that can
+			// smuggle a second command past the screen is a bigger hole than
+			// losing the check entirely.
+			t.is(verification, undefined);
+		},
+	);
+});
+
+test.serial('verification rejects a command array holding a non-string', async t => {
+	await withVerificationConfig(
+		'verification-bad-array',
+		// biome-ignore lint/suspicious/noExplicitAny: a hand-written config can hold anything
+		{nanocoder: {verification: {command: ['npm', 5, 'test'] as any}}},
+		verification => {
+			t.is(verification, undefined);
+		},
+	);
+});
+
+test.serial('verification keeps array args verbatim, empty strings included', async t => {
+	await withVerificationConfig(
+		'verification-array-empty-arg',
+		{nanocoder: {verification: {command: ['my-check', '', '--flag=']}}},
+		verification => {
+			// The array form is argv, not prose. An empty argument is a real
+			// argument; dropping or rejecting it would silently change what the
+			// user asked to run.
+			t.deepEqual(verification?.command, ['my-check', '', '--flag=']);
+		},
+	);
+});
+
+test.serial('verification loads custom timeout and output cap', async t => {
+	await withVerificationConfig(
+		'verification-custom',
+		{
+			nanocoder: {
+				verification: {
+					command: ['make', 'test'],
+					timeoutMs: 30_000,
+					maxOutputBytes: 64_000,
+				},
+			},
+		},
+		verification => {
+			t.is(verification?.timeoutMs, 30_000);
+			t.is(verification?.maxOutputBytes, 64_000);
+		},
+	);
+});
+
+test.serial('verification falls back on non-numeric timeout and output cap', async t => {
+	await withVerificationConfig(
+		'verification-bad-numbers',
+		{
+			nanocoder: {
+				verification: {
+					command: ['make', 'test'],
+					timeoutMs: 'soon',
+					maxOutputBytes: -1,
+				},
+			},
+		},
+		verification => {
+			// A 0 or negative budget would either disable the timeout or fail
+			// instantly; neither is what the config author meant.
+			t.is(verification?.timeoutMs, 120_000);
+			t.is(verification?.maxOutputBytes, 16_000);
+		},
+	);
+});
+
+test.serial('verification clamps an output cap too small to carry elision', async t => {
+	await withVerificationConfig(
+		'verification-tiny-cap',
+		{nanocoder: {verification: {command: ['make', 'test'], maxOutputBytes: 64}}},
+		verification => {
+			t.is(verification?.maxOutputBytes, 16_000);
+		},
+	);
+});
+
+test.serial('verification honours enabled false without losing the command', async t => {
+	await withVerificationConfig(
+		'verification-disabled',
+		{nanocoder: {verification: {command: ['make', 'test'], enabled: false}}},
+		verification => {
+			// The command is kept so toggling back on needs no retyping, and
+			// so `/verify` can still report what is configured.
+			t.is(verification?.enabled, false);
+			t.deepEqual(verification?.command, ['make', 'test']);
+		},
+	);
+});
+
+test.serial('maxVerificationAttempts defaults to run-and-report', async t => {
+	await withVerificationConfig(
+		'verification-attempts-default',
+		{nanocoder: {}},
+		(_verification, config) => {
+			t.is(config.retries?.maxVerificationAttempts, 1);
+		},
+	);
+});
+
+test.serial('maxVerificationAttempts is configurable and clamped at zero', async t => {
+	await withVerificationConfig(
+		'verification-attempts-custom',
+		{nanocoder: {retries: {maxVerificationAttempts: 3}}},
+		(_verification, config) => {
+			t.is(config.retries?.maxVerificationAttempts, 3);
+		},
+	);
+	await withVerificationConfig(
+		'verification-attempts-negative',
+		{nanocoder: {retries: {maxVerificationAttempts: -4}}},
+		(_verification, config) => {
+			// 0 is meaningful: run the check, report it, never ask for a fix.
+			t.is(config.retries?.maxVerificationAttempts, 0);
+		},
+	);
+});
+
+test.serial('verification takes project precedence over global', async t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const root = join(headlessTestDir, 'verification-precedence');
+	const globalDir = join(root, 'global');
+	const projectDir = join(root, 'project');
+	mkdirSync(globalDir, {recursive: true});
+	mkdirSync(projectDir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(globalDir, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {verification: {command: ['global-check']}},
+			}),
+			'utf-8',
+		);
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {verification: {command: ['project-check']}},
+			}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.deepEqual(getAppConfig().verification?.command, ['project-check']);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
 	}
 });
 

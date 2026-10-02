@@ -265,4 +265,10 @@ export const lazyCommands: LazyCommand[] = [
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
 	},
+	{
+		name: 'verify',
+		description: 'Run the configured verification check and report the result',
+		progressLabel: 'Running verification',
+		load: () => import('@/commands/verify').then(m => m.verifyCommand),
+	},
 ];
