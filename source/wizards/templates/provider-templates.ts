@@ -440,6 +440,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'claude-sonnet-5',
 	}),
 	apiKeyTemplate({
+		id: 'api-route',
+		name: 'API Route',
+		baseUrl: 'https://global.api-route.com/v1',
+		modelDefault: 'gpt-5.5',
+	}),
+	apiKeyTemplate({
 		id: 'futureinfra',
 		name: 'FutureInfra',
 		baseUrl: 'https://futureinfra.ai/v1/ai',
