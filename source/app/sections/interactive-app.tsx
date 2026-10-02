@@ -473,18 +473,24 @@ export function InteractiveApp({
 					)}
 
 					{appState.architectReviewState?.show && (
-						<ArchitectReviewPrompt
-							filesChanged={appState.architectReviewState.filesChanged}
-							filesMissing={appState.architectReviewState.filesMissing}
-							onKeep={() => void appHandlers.handleArchitectKeep()}
-							onRevert={() => void appHandlers.handleArchitectRevert()}
-							// Forward what the user typed. A zero-arg arrow here silently
-							// dropped it and sent a fixed string instead, so the revise
-							// box collected instructions the model never saw.
-							onRevertAndRevise={instructions =>
-								void appHandlers.handleArchitectRevertAndRevise(instructions)
-							}
-						/>
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<ArchitectReviewPrompt
+								filesChanged={appState.architectReviewState.filesChanged}
+								filesMissing={appState.architectReviewState.filesMissing}
+								onKeep={() => void appHandlers.handleArchitectKeep()}
+								onRevert={() => void appHandlers.handleArchitectRevert()}
+								// Forward what the user typed. A zero-arg arrow here silently
+								// dropped it and sent a fixed string instead, so the revise
+								// box collected instructions the model never saw.
+								onRevertAndRevise={instructions =>
+									void appHandlers.handleArchitectRevertAndRevise(instructions)
+								}
+							/>
+						</Box>
 					)}
 
 					{appState.isExplorerMode && (
