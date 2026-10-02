@@ -392,6 +392,24 @@ Turn off individual tools globally with the top-level `disabledTools` array. Lis
 }
 ```
 
+### Slash Command Aliases
+
+Define short codes for the slash commands you use most. The `aliases` map is keyed by what you type after `/`, with the value being the target command name (built-in or custom). Aliases also appear in the command-picker autocomplete, and any arguments you pass are forwarded to the target.
+
+```json
+{
+  "nanocoder": {
+    "aliases": {
+      "c": "compact",
+      "e": "export",
+      "h": "help"
+    }
+  }
+}
+```
+
+With the above, `/c` runs `/compact`, `/e session.md` runs `/export session.md`, and so on. Built-in command names always win — if you map an alias to a name that's also a built-in command, the alias is ignored and a warning is logged. Non-string or empty values are dropped silently (with a warning).
+
 Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
 
 `fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.

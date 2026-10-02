@@ -628,6 +628,8 @@ export function useAppInitialization({
 
 			commandRegistry.registerLazy(lazyCommands);
 
+			commandRegistry.setAliases(getAppConfig().aliases ?? {});
+
 			// Lifecycle hooks: session-start output is buffered as context for the
 			// next prompt (so `git log -5` reaches the model without the user
 			// asking), and session-end runs through the shutdown manager at
