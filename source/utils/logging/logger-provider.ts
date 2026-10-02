@@ -3,6 +3,7 @@
  * This file provides centralized logger management without circular dependencies
  */
 
+import nodeProcess from 'node:process';
 import {createLogMethods} from './log-method-factory.js';
 import type {Logger, LoggerConfig, LogLevel} from './types.js';
 
@@ -62,7 +63,7 @@ export class LoggerProvider {
 		// Bun's worker threads are incompatible with Pino's transport API (pino/file)
 		// which uses thread-stream and real-require packages
 		if (LoggerProvider.isBunRuntime()) {
-			if (process.env.NODE_ENV === 'development') {
+			if (nodeProcess.env.NODE_ENV === 'development') {
 				// Use console directly since this._config is not yet set,
 				// so createFallbackLogger() would default to 'silent' level
 				console.info(
@@ -105,7 +106,7 @@ export class LoggerProvider {
 		// Skip if already loaded to prevent duplicate loading
 		if (this._realDependenciesLoaded) {
 			// Only log in development mode to avoid noise for end users
-			if (process.env.NODE_ENV === 'development') {
+			if (nodeProcess.env.NODE_ENV === 'development') {
 				this.createFallbackLogger().debug('Real dependencies already loaded', {
 					source: 'logger-provider',
 					status: 'already-loaded',
@@ -116,7 +117,7 @@ export class LoggerProvider {
 
 		const startTime = Date.now();
 		// Only log in development mode to avoid noise for end users
-		if (process.env.NODE_ENV === 'development') {
+		if (nodeProcess.env.NODE_ENV === 'development') {
 			this.createFallbackLogger().info('Loading real Pino dependencies', {
 				source: 'logger-provider',
 				method: 'dynamic-import',
@@ -145,7 +146,7 @@ export class LoggerProvider {
 			// The real Pino logger will be used for new logger instances created after this point
 
 			// Only log in development mode
-			if (process.env.NODE_ENV === 'development') {
+			if (nodeProcess.env.NODE_ENV === 'development') {
 				this.createFallbackLogger().info(
 					'Real dependencies loaded successfully',
 					{
@@ -191,7 +192,7 @@ export class LoggerProvider {
 	 * (which writes to files), it will use 'info' level from config.ts.
 	 */
 	private getDefaultLogLevel(): LogLevel {
-		const envLevel = process.env.NANOCODER_LOG_LEVEL as LogLevel;
+		const envLevel = nodeProcess.env.NANOCODER_LOG_LEVEL as LogLevel;
 		if (envLevel) return envLevel;
 
 		return 'silent';
@@ -204,8 +205,8 @@ export class LoggerProvider {
 	private createFallbackConfig(
 		override: Partial<LoggerConfig> = {},
 	): LoggerConfig {
-		const isDev = process.env.NODE_ENV === 'development';
-		const isTest = process.env.NODE_ENV === 'test';
+		const isDev = nodeProcess.env.NODE_ENV === 'development';
+		const isTest = nodeProcess.env.NODE_ENV === 'test';
 
 		return {
 			level: this.getDefaultLogLevel(),
