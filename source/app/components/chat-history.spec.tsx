@@ -1,4 +1,5 @@
 import test from 'ava';
+import {Text} from 'ink';
 import React from 'react';
 import {wheelEvents} from '@/utils/terminal-mouse';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
@@ -243,5 +244,131 @@ test('fullscreen mode hides welcome banner while liveComponent is active', t => 
 	t.notRegex(output, /WELCOME-BANNER/);
 	t.regex(output, /LIVE-STREAMING/);
 	unmount();
+});
+
+// ============================================================================
+// Regression: inline-mode prompt duplication (#1174, fixed in chat-history.tsx
+// by gating renderLastQueuedComponentLive to fullscreen-only). Ink <Static>
+// appends a trailing newline after each item; the live flow region does not.
+// When renderLastQueuedComponentLive was honoured in inline mode, the last
+// queued component sat in the live flow (no trailing newline), then moved
+// into <Static> as soon as streaming began — Ink wrote it to stdout twice
+// and the user saw the prompt duplicated in scrollback. The gate forces the
+// last queued component through <Static> from the start, so it carries the
+// Static trailing-newline marker in the initial frame and the rendered
+// output is identical regardless of the prop value.
+// ============================================================================
+
+test('inline mode keeps queued components in static queue even if renderLastQueuedComponentLive is passed', t => {
+	const props = createDefaultProps({
+		fullscreen: false,
+		queuedComponents: [
+			<Text key="msg1">Message 1</Text>,
+			<Text key="msg2">Message 2</Text>,
+		],
+		renderLastQueuedComponentLive: true,
+	});
+	const {frames, unmount} = renderWithTheme(<ChatHistory {...props} />);
+	// Assert against the accumulated stdout frames log rather than lastFrame():
+	// the duplication is a scrollback artifact, which lastFrame() structurally
+	// cannot observe. <Static> output carries a trailing newline; live flow
+	// output does not. With the gate active, Message 2 must be rendered via
+	// <Static> in inline mode even when the prop is true, so the initial
+	// frame contains "Message 2\n" rather than "Message 2".
+	t.regex(frames[0] ?? '', /Message 2\n/);
+	unmount();
+});
+
+test('inline mode renders renderLastQueuedComponentLive=true and =false identically to prevent the live->static reprint', t => {
+	const queuedComponents = [
+		<Text key="msg1">Message 1</Text>,
+		<Text key="msg2">Message 2</Text>,
+	];
+	const live = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: true,
+			})}
+		/>,
+	);
+	const staticRender = renderWithTheme(
+		<ChatHistory
+			{...createDefaultProps({
+				fullscreen: false,
+				queuedComponents,
+				renderLastQueuedComponentLive: false,
+			})}
+		/>,
+	);
+	// Two separate mounts exercise the live -> static transition that
+	// triggers the regression: in pre-fix code, mounting one tree with the
+	// prop true and another with the prop false produced different first
+	// frames because the last queued component moved between the flow
+	// region and <Static>; with the gate active chatQueueProps is identical
+	// for both props in inline mode, so Ink writes the same bytes to stdout.
+	t.is(live.frames[0], staticRender.frames[0]);
+	t.regex(live.frames[0] ?? '', /Message 2\n/);
+	live.unmount();
+	staticRender.unmount();
+});
+// Fullscreen tail cap: ChatHistory derives ChatQueue's mounted-tail cap from
+// terminal height (computeFullscreenTailCap) instead of a flat 60, so Yoga
+// layout cost stops scaling with total session length (#1274).
+// ============================================================================
+
+test('fullscreen mode mounts fewer than the flat 60-item tail on a short terminal', t => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = 24; // computeFullscreenTailCap(24) === 12
+
+	try {
+		const components = Array.from({length: 30}, (_, i) => (
+			<div key={`turn-${i}`}>{`turn-${i}`}</div>
+		));
+		const props = createDefaultProps({
+			fullscreen: true,
+			staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+			queuedComponents: components,
+		});
+		const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+		const output = lastFrame() ?? '';
+
+		// Only the last 12 turns (18..29) should be mounted; the flat-60 cap
+		// this replaces would have kept all 30.
+		t.notRegex(output, /\bturn-17\b/);
+		t.regex(output, /\bturn-18\b/);
+		t.regex(output, /\bturn-29\b/);
+		unmount();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
+});
+
+test('inline mode is unaffected by terminal height - still keeps the flat 60-item tail', t => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = 24;
+
+	try {
+		// isFreshInline (disableStatic without fullscreen) keeps ChatQueue's own
+		// default cap rather than the terminal-derived one - only fullscreen
+		// mode has the render-cost problem #1274 reports.
+		const components = Array.from({length: 30}, (_, i) => (
+			<div key={`turn-${i}`}>{`turn-${i}`}</div>
+		));
+		const props = createDefaultProps({
+			fullscreen: false,
+			staticComponents: [<div key="welcome">WELCOME-BANNER</div>],
+			queuedComponents: components,
+		});
+		const {lastFrame, unmount} = renderWithTheme(<ChatHistory {...props} />);
+		const output = lastFrame() ?? '';
+
+		t.regex(output, /\bturn-0\b/);
+		t.regex(output, /\bturn-29\b/);
+		unmount();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
 });
 

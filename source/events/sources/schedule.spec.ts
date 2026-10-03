@@ -168,3 +168,18 @@ test('one tick dispatches to multiple subscriptions sharing the expression', asy
 
 	t.is(events.length, 2);
 });
+
+test('register leaves no phantom reference when the factory throws', t => {
+	const {router} = captureRouter();
+	const source = new ScheduleEventSource(router, () => {
+		throw new Error('bad pattern');
+	});
+	t.throws(() => source.register('bogus'));
+	t.deepEqual(source.listRegistered(), []);
+
+	// A later valid registration of a fresh source is unaffected.
+	const stub = stubFactory();
+	const good = new ScheduleEventSource(router, stub.factory);
+	good.register('*/5 * * * *');
+	t.deepEqual(good.listRegistered(), ['*/5 * * * *']);
+});

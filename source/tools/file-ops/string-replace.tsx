@@ -10,7 +10,11 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -24,6 +28,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
@@ -100,6 +105,7 @@ const executeStringReplace = async (
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -141,6 +147,11 @@ const stringReplaceCoreTool = tool({
 				type: 'string',
 				description:
 					'The replacement string. Can be empty to delete content. Must preserve proper indentation and formatting.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this replacement.',
 			},
 		},
 		required: ['path', 'old_str', 'new_str'],

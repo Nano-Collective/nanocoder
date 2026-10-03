@@ -327,7 +327,9 @@ export async function createProvider(
 		return {
 			kind: 'google',
 			provider: createGoogleGenerativeAI({
+				baseURL: config.baseURL || undefined,
 				apiKey: config.apiKey ?? '',
+				headers: config.headers,
 				fetch: createUndiciFetch(undiciAgent),
 			}),
 		};

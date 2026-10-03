@@ -7,6 +7,17 @@ import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
 import type {CustomCommand} from '@/types/commands';
 import type {AppHandlers} from './useAppHandlers';
 import {useAppHandlers} from './useAppHandlers';
+import {mkdtempSync, rmSync} from 'fs';
+import * as fs from 'fs/promises';
+import {tmpdir} from 'os';
+import {join} from 'path';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+        resetSessionCwd,
+        setProjectRoot,
+        setSessionCwd,
+} from '@/services/session-cwd';
+
 
 import {
 	getKeyGeneratorSessionId,
@@ -40,6 +51,12 @@ interface ProbeOverrides {
 	developmentMode?: DevelopmentMode;
 	client?: LLMClient | null;
 	messages?: Message[];
+	architectReviewState?: {
+		show: boolean;
+		checkpointName: string;
+		filesChanged: string[];
+		filesMissing: string[];
+	} | null;
 }
 
 let captured: AppHandlers | null = null;
@@ -69,7 +86,17 @@ function makeProps(overrides: ProbeOverrides) {
 	const setCurrentModel = spy<[string]>();
 	const setLiveTaskList = spy<[unknown]>();
 	const setPlanReviewState = spy<
-		[{show: boolean; originalMessage: string} | null]
+	    [{show: boolean; originalMessage: string} | null]
+	>();
+	const setArchitectReviewState = spy<
+		[
+			{
+				show: boolean;
+				checkpointName: string;
+				filesChanged: string[];
+				filesMissing: string[];
+			} | null,
+		]
 	>();
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const setChatComponents = spy<[React.ReactNode[]]>();
@@ -82,7 +109,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const enterIdeSelectionMode = spy<[]>();
 	const enterTune = spy<[]>();
 	const enterSchedulerMode = spy<[]>();
-	const handleChatMessage = spy<[string]>();
+	const handleChatMessage = spy<[string, (string | undefined)?]>();
 	const dismissActiveEditor = spy<[]>();
 	const handleModelSelect = spy<[string, string, boolean?]>();
 
@@ -118,6 +145,7 @@ function makeProps(overrides: ProbeOverrides) {
 		setCurrentModel,
 		setLiveTaskList,
 		setPlanReviewState,
+		setArchitectReviewState,
 		addToChatQueue,
 		setChatComponents,
 		setLiveComponent,
@@ -131,11 +159,14 @@ function makeProps(overrides: ProbeOverrides) {
 		enterIdeSelectionMode,
 		enterTune,
 		enterSchedulerMode,
-		handleChatMessage: async (m: string) => {
-			handleChatMessage(m);
+		handleChatMessage: async (m: string, displayValue?: string) => {
+			// Both args: the second is what the transcript shows the user, and
+			// architect's revise path deliberately differs from the first.
+			handleChatMessage(m, displayValue);
 		},
 		dismissActiveEditor: () => dismissActiveEditor(),
 		developmentMode: overrides.developmentMode ?? 'normal',
+		architectReviewState: overrides.architectReviewState ?? null,
 		handleModelSelect: async (provider: string, model: string, isProgrammatic?: boolean) => {
 			handleModelSelect(provider, model, isProgrammatic);
 		},
@@ -159,6 +190,7 @@ function makeProps(overrides: ProbeOverrides) {
 			dismissActiveEditor,
 			handleModelSelect,
 			handleChatMessage,
+			setArchitectReviewState,
 		},
 	};
 }
@@ -198,6 +230,14 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.handleMessageSubmit, 'function');
 });
 
+test('signals slash-command completion so queued work can resume', async t => {
+	const {handlers, spies} = setup();
+
+	await handlers.handleMessageSubmit('/compact');
+
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false], [true]]);
+});
+
 test('handleCancel without an abort controller is a no-op', t => {
 	const { handlers, spies } = setup({ abortController: null });
 
@@ -231,14 +271,144 @@ test('handleToggleDevelopmentMode cycles through modes', t => {
 
 	const { handlers: h4, spies: s4 } = setup({ developmentMode: 'plan' });
 	h4.handleToggleDevelopmentMode();
-	t.deepEqual(s4.setDevelopmentMode.calls, [['normal']]);
+	t.deepEqual(s4.setDevelopmentMode.calls, [['architect']]);
 });
 
+test.serial('handleArchitectRevert restores checkpoint files', async t => {
+        const tempDir = mkdtempSync(
+                join(tmpdir(), 'nanocoder-architect-revert-test-'),
+        );
+
+        const originalContent = 'original content';
+        const changedContent = 'changed content';
+
+        try {
+                setProjectRoot(tempDir);
+                setSessionCwd(tempDir);
+
+                const filePath = join(tempDir, 'test.txt');
+
+                await fs.writeFile(filePath, originalContent, 'utf-8');
+
+                const manager = new CheckpointManager(tempDir);
+
+                const metadata = await manager.saveCheckpoint(
+                        'architect-revert-test',
+                        [],
+                        'TestProvider',
+                        'test-model',
+                        ['test.txt'],
+                );
+
+                await fs.writeFile(filePath, changedContent, 'utf-8');
+
+                const {handlers, spies} = setup({
+                        architectReviewState: {
+                                show: true,
+                                checkpointName: metadata.name,
+                                filesChanged: ['test.txt'],
+                                filesMissing: [],
+                        },
+                });
+
+                await handlers.handleArchitectRevert();
+
+                t.is(
+                        await fs.readFile(filePath, 'utf-8'),
+                        originalContent,
+                );
+                t.deepEqual(spies.setArchitectReviewState.calls, [[null]]);
+        } finally {
+                resetSessionCwd();
+                rmSync(tempDir, {recursive: true, force: true});
+        }
+});
+
+test.serial(
+        'handleArchitectRevertAndRevise restores files and sends revision instructions',
+        async t => {
+                const tempDir = mkdtempSync(
+                        join(tmpdir(), 'nanocoder-architect-revise-test-'),
+                );
+
+                const originalContent = 'original content';
+                const changedContent = 'changed content';
+
+                try {
+                        setProjectRoot(tempDir);
+                        setSessionCwd(tempDir);
+
+                        const filePath = join(tempDir, 'test.txt');
+
+                        await fs.writeFile(filePath, originalContent, 'utf-8');
+
+                        const manager = new CheckpointManager(tempDir);
+
+                        const metadata = await manager.saveCheckpoint(
+                                'architect-revise-test',
+                                [],
+                                'TestProvider',
+                                'test-model',
+                                ['test.txt'],
+                        );
+
+                        await fs.writeFile(filePath, changedContent, 'utf-8');
+
+                        const {handlers, spies} = setup({
+                                architectReviewState: {
+                                        show: true,
+                                        checkpointName: metadata.name,
+                                        filesChanged: ['test.txt'],
+                                        filesMissing: [],
+                                },
+                        });
+
+                        const instructions =
+                                'Please simplify the implementation.';
+
+                        await handlers.handleArchitectRevertAndRevise(
+                                instructions,
+                        );
+
+                        t.is(
+                                await fs.readFile(filePath, 'utf-8'),
+                                originalContent,
+                        );
+                        t.deepEqual(
+                                spies.setArchitectReviewState.calls,
+                                [[null]],
+                        );
+                        // Dismissing the gate opens a render where nothing is
+                        // generating and the turn still reads complete. The revise
+                        // turn goes through handleChatMessage, which never resets
+                        // the flag, so without this a queued prompt drains into
+                        // the gap and runs underneath the revision turn.
+                        t.deepEqual(
+                                spies.setIsConversationComplete.calls,
+                                [[false]],
+                        );
+                        t.deepEqual(spies.handleChatMessage.calls, [
+                                [
+                                        // The prompt must say the changes are gone. The old wording
+					// told the model to "review the changes you just made"
+					// straight after deleting them, pointing it at a disk
+					// state that no longer existed.
+					`Your previous changes were reverted and are no longer on disk. Re-read any file before editing it, then redo the work with these instructions:\n\n${instructions}`,
+					instructions,
+                                ],
+                        ]);
+                } finally {
+                        resetSessionCwd();
+                        rmSync(tempDir, {recursive: true, force: true});
+                }
+        },
+);
 test('declining execution keeps Plan Mode active and asks for revisions', t => {
 	const {handlers, spies} = setup({developmentMode: 'plan'});
 
 	handlers.handlePlanModify();
 
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false]]);
 	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
 	t.deepEqual(spies.setDevelopmentMode.calls, []);
 	const notice = spies.addToChatQueue.calls.at(-1)?.[0];
@@ -254,6 +424,21 @@ test('declining execution keeps Plan Mode active and asks for revisions', t => {
 				'what to change',
 			),
 	);
+});
+
+test('asking for clarification blocks queued prompts until the turn starts', async t => {
+	const {handlers, spies} = setup({developmentMode: 'plan'});
+
+	await handlers.handlePlanAskMore();
+
+	t.deepEqual(spies.setIsConversationComplete.calls, [[false]]);
+	t.deepEqual(spies.setPlanReviewState.calls, [[null]]);
+	t.deepEqual(spies.handleChatMessage.calls, [
+		[
+			'please ask me any additional clarifying questions before proceeding',
+			undefined,
+		],
+	]);
 });
 
 async function withMockConfig(
@@ -571,4 +756,153 @@ test.serial('a prompt with no pending context is passed through intact', async t
 
 	t.is(spies.handleChatMessage.calls.length, 1);
 	t.is(spies.handleChatMessage.calls[0]![0], 'what changed?');
+});
+
+// Architect takes a checkpoint per turn. Every exit from the gate has to
+// release it, or /checkpoint list fills with machine-named entries carrying a
+// full file-and-conversation snapshot each.
+test.serial('handleArchitectKeep releases the turn checkpoint', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-keep-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-keep-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		t.true((await manager.listCheckpoints()).some(c => c.name === metadata.name));
+
+		const {handlers, spies} = setup({
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectKeep();
+
+		t.deepEqual(spies.setArchitectReviewState.calls, [[null]]);
+		t.is(
+			await fs.readFile(join(tempDir, 'test.txt'), 'utf-8'),
+			'original',
+			'keep must not touch the files',
+		);
+		t.false(
+			(await manager.listCheckpoints()).some(c => c.name === metadata.name),
+			'keep must release the checkpoint',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('handleArchitectRevert releases the turn checkpoint', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-rel-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-release-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'changed', 'utf-8');
+
+		const {handlers} = setup({
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectRevert();
+
+		t.is(await fs.readFile(join(tempDir, 'test.txt'), 'utf-8'), 'original');
+		t.false(
+			(await manager.listCheckpoints()).some(c => c.name === metadata.name),
+			'revert must release the checkpoint',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+// Without this the conversation still claims every write succeeded while the
+// files have moved back underneath it, and the model's next string_replace
+// matches old_str against a state that no longer exists.
+test.serial('handleArchitectRevert tells the model the changes are gone', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-architect-notice-'));
+
+	try {
+		setProjectRoot(tempDir);
+		setSessionCwd(tempDir);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'original', 'utf-8');
+
+		const manager = new CheckpointManager(tempDir);
+		const metadata = await manager.saveCheckpoint(
+			'architect-notice-test',
+			[],
+			'TestProvider',
+			'test-model',
+			['test.txt'],
+		);
+
+		await fs.writeFile(join(tempDir, 'test.txt'), 'changed', 'utf-8');
+
+		const priorMessages: Message[] = [
+			{role: 'user', content: 'edit the file'},
+			{role: 'assistant', content: 'done'},
+		];
+
+		const {handlers, spies} = setup({
+			messages: priorMessages,
+			architectReviewState: {
+				show: true,
+				checkpointName: metadata.name,
+				filesChanged: ['test.txt'],
+				filesMissing: [],
+			},
+		});
+
+		await handlers.handleArchitectRevert();
+
+		t.is(spies.updateMessages.calls.length, 1);
+		const appended = spies.updateMessages.calls[0][0];
+		t.is(appended.length, priorMessages.length + 1, 'appends, never replaces');
+
+		const notice = appended[appended.length - 1];
+		t.is(notice.role, 'user');
+		t.true(notice.content.includes('reverted'));
+		t.true(
+			notice.content.includes('test.txt'),
+			'names the files so the model knows what moved',
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(tempDir, {recursive: true, force: true});
+	}
 });

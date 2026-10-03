@@ -1,6 +1,6 @@
 import {Box, measureElement, Text, useInput} from 'ink';
 import React from 'react';
-import ChatQueue from '@/components/chat-queue';
+import ChatQueue, {computeFullscreenTailCap} from '@/components/chat-queue';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -162,9 +162,21 @@ export const ChatHistory = React.memo(function ChatHistory({
 		() => ({
 			staticComponents: frozenComponents,
 			queuedComponents,
-			renderLastQueuedComponentLive,
+			// In inline mode, the transcript is backed by Ink's <Static>. Moving an
+			// in-flight draft from live rendering to Static when streaming begins
+			// causes Ink to reprint the component to stdout, duplicating the prompt.
+			// Only enable live queue rendering in fullscreen (alt-screen) mode.
+			renderLastQueuedComponentLive:
+				fullscreen && Boolean(renderLastQueuedComponentLive),
 			clearKey,
 			disableStatic: fullscreen || isFreshInline,
+			// Only the fullscreen path pays Yoga layout cost for its whole mounted
+			// tail on every render (see computeFullscreenTailCap) - isFreshInline
+			// is a brief pre-Static state with little content, so it keeps
+			// ChatQueue's flat default.
+			fullscreenTailCap: fullscreen
+				? computeFullscreenTailCap(terminalRows)
+				: undefined,
 		}),
 		[
 			frozenComponents,
@@ -173,6 +185,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			clearKey,
 			fullscreen,
 			isFreshInline,
+			terminalRows,
 		],
 	);
 

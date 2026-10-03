@@ -2205,3 +2205,106 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// Trust is global-only: a project-level nanocoder-preferences.json (which
+// ships with a cloned repo) must never be able to mark its own directory
+// trusted, and trust writes must never land in it.
+// ============================================================================
+
+function withProjectPreferences(
+	projectPrefs: UserPreferences,
+	globalPrefs: UserPreferences | null,
+	run: (paths: {projectFile: string; globalFile: string}) => void,
+): void {
+	const root = join(tmpdir(), `nanocoder-trust-${Date.now()}-${Math.random()}`);
+	const home = join(root, 'home');
+	const project = join(root, 'project');
+	mkdirSync(project, {recursive: true});
+	const saved = {
+		configDir: process.env.NANOCODER_CONFIG_DIR,
+		home: process.env.HOME,
+		xdg: process.env.XDG_CONFIG_HOME,
+		appData: process.env.APPDATA,
+		cwd: process.cwd(),
+	};
+	try {
+		delete process.env.NANOCODER_CONFIG_DIR;
+		process.env.HOME = home;
+		process.env.XDG_CONFIG_HOME = join(home, '.config');
+		process.env.APPDATA = join(home, 'AppData');
+		const globalDir =
+			process.platform === 'darwin'
+				? join(home, 'Library', 'Preferences', 'nanocoder')
+				: process.platform === 'win32'
+					? join(home, 'AppData', 'nanocoder')
+					: join(home, '.config', 'nanocoder');
+		mkdirSync(globalDir, {recursive: true});
+		const globalFile = join(globalDir, 'nanocoder-preferences.json');
+		if (globalPrefs) writeFileSync(globalFile, JSON.stringify(globalPrefs));
+		const projectFile = join(project, 'nanocoder-preferences.json');
+		writeFileSync(projectFile, JSON.stringify(projectPrefs));
+		process.chdir(project);
+		resetPreferencesCache();
+		run({projectFile, globalFile});
+	} finally {
+		process.chdir(saved.cwd);
+		process.env.NANOCODER_CONFIG_DIR = saved.configDir;
+		if (saved.home === undefined) delete process.env.HOME;
+		else process.env.HOME = saved.home;
+		if (saved.xdg === undefined) delete process.env.XDG_CONFIG_HOME;
+		else process.env.XDG_CONFIG_HOME = saved.xdg;
+		if (saved.appData === undefined) delete process.env.APPDATA;
+		else process.env.APPDATA = saved.appData;
+		resetPreferencesCache();
+		rmSync(root, {recursive: true, force: true});
+	}
+}
+
+test.serial(
+	'loadPreferences ignores trustedDirectories from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{trustedDirectories: ['.'], selectedTheme: 'tokyo-night' as never},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.trustedDirectories, undefined);
+				t.is(prefs.selectedTheme, 'tokyo-night' as never);
+				t.false(isDirectoryTrusted(process.cwd(), prefs));
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes trustedDirectories from the global file when a project file exists',
+	t => {
+		withProjectPreferences(
+			{trustedDirectories: ['/evil']},
+			{trustedDirectories: ['/trusted/by/user']},
+			() => {
+				t.deepEqual(loadPreferences().trustedDirectories, ['/trusted/by/user']);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes trustedDirectories to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.trustedDirectories = ['/newly/trusted'];
+			prefs.lastProvider = 'ollama';
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.trustedDirectories, undefined);
+			t.is(project.lastProvider, 'ollama');
+			t.deepEqual(global.trustedDirectories, ['/newly/trusted']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);

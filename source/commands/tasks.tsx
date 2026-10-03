@@ -36,6 +36,35 @@ function TasksDisplay({tasks, message, isError}: TasksDisplayProps) {
 	);
 }
 
+function taskNumberError(subcommand: string) {
+	return React.createElement(TaskMessage, {
+		key: generateKey('tasks-error'),
+		message: `Usage: /tasks ${subcommand} <number>`,
+		isError: true,
+	});
+}
+
+function invalidTaskNumberError(subcommand: string) {
+	return React.createElement(TaskMessage, {
+		key: generateKey('tasks-error'),
+		message: `Please provide a valid task number (e.g., /tasks ${subcommand} 1)`,
+		isError: true,
+	});
+}
+
+function taskNotFoundError(taskNumber: number, taskCount: number) {
+	return React.createElement(TaskMessage, {
+		key: generateKey('tasks-error'),
+		message: `Task ${taskNumber} not found. You have ${taskCount} task(s).`,
+		isError: true,
+	});
+}
+
+function parseTaskNumber(value: string): number | null {
+	const taskNumber = Number(value.trim());
+	return Number.isInteger(taskNumber) && taskNumber >= 1 ? taskNumber : null;
+}
+
 export const tasksCommand: Command = {
 	name: 'tasks',
 	description: 'Manage your task list',
@@ -83,32 +112,18 @@ export const tasksCommand: Command = {
 
 		// Remove task
 		if (subcommand === 'remove' || subcommand === 'rm') {
-			if (!rest.trim()) {
-				return React.createElement(TaskMessage, {
-					key: generateKey('tasks-error'),
-					message: 'Usage: /tasks remove <number>',
-					isError: true,
-				});
-			}
+			if (!rest.trim()) return taskNumberError('remove');
 
-			const taskNumber = parseInt(rest.trim(), 10);
-			if (isNaN(taskNumber) || taskNumber < 1) {
-				return React.createElement(TaskMessage, {
-					key: generateKey('tasks-error'),
-					message: 'Please provide a valid task number (e.g., /tasks remove 1)',
-					isError: true,
-				});
+			const taskNumber = parseTaskNumber(rest);
+			if (taskNumber === null) {
+				return invalidTaskNumberError('remove');
 			}
 
 			const tasks = await loadTasks();
 			const taskIndex = taskNumber - 1;
 
 			if (taskIndex >= tasks.length) {
-				return React.createElement(TaskMessage, {
-					key: generateKey('tasks-error'),
-					message: `Task ${taskNumber} not found. You have ${tasks.length} task(s).`,
-					isError: true,
-				});
+				return taskNotFoundError(taskNumber, tasks.length);
 			}
 
 			const removed = tasks.splice(taskIndex, 1)[0];
@@ -118,6 +133,42 @@ export const tasksCommand: Command = {
 				key: generateKey('tasks-removed'),
 				tasks,
 				message: `Removed: ${removed.title}`,
+			});
+		}
+
+		// Update task status
+		if (
+			subcommand === 'done' ||
+			subcommand === 'complete' ||
+			subcommand === 'start'
+		) {
+			if (!rest.trim()) return taskNumberError(subcommand);
+
+			const taskNumber = parseTaskNumber(rest);
+			if (taskNumber === null) {
+				return invalidTaskNumberError(subcommand);
+			}
+
+			const tasks = await loadTasks();
+			const taskIndex = taskNumber - 1;
+			const task = tasks[taskIndex];
+			if (!task) return taskNotFoundError(taskNumber, tasks.length);
+
+			const now = new Date().toISOString();
+			const status = subcommand === 'start' ? 'in_progress' : 'completed';
+			task.status = status;
+			task.updatedAt = now;
+			if (status === 'completed') {
+				task.completedAt = now;
+			} else {
+				delete task.completedAt;
+			}
+			await saveTasks(tasks);
+
+			return React.createElement(TasksDisplay, {
+				key: generateKey('tasks-updated'),
+				tasks,
+				message: `${status === 'completed' ? 'Completed' : 'Started'}: ${task.title}`,
 			});
 		}
 
@@ -131,24 +182,21 @@ export const tasksCommand: Command = {
 			});
 		}
 
-		// Unknown subcommand - treat as task title to add
-		const fullTitle = args.join(' ').trim();
-		const tasks = await loadTasks();
-		const now = new Date().toISOString();
-		const newTask: Task = {
-			id: generateTaskId(),
-			title: fullTitle,
-			status: 'pending',
-			createdAt: now,
-			updatedAt: now,
-		};
-		tasks.push(newTask);
-		await saveTasks(tasks);
+		// Explicit list subcommand
+		if (subcommand === 'list') {
+			const tasks = await loadTasks();
+			return React.createElement(TasksDisplay, {
+				key: generateKey('tasks-list'),
+				tasks,
+			});
+		}
 
-		return React.createElement(TasksDisplay, {
-			key: generateKey('tasks-added'),
-			tasks,
-			message: `Added: ${newTask.title}`,
+		// Unknown subcommand - show usage instead of silently adding a task.
+		return React.createElement(TaskMessage, {
+			key: generateKey('tasks-error'),
+			message:
+				'Unknown subcommand. Usage: /tasks [list|add <title>|remove <number>|done <number>|start <number>|clear]',
+			isError: true,
 		});
 	},
 };

@@ -13,19 +13,6 @@ import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
 import {homeRelative} from '@/utils/path';
 
 /**
- * Format a {@link GitStatusSummary} for inline display next to the
- * provider/model/config segment of the boot summary.
- */
-export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
-	const {branch, marker} = formatGitStatusSummary(status);
-	// The boot summary shares one line with provider/model/config, so only the
-	// detached marker earns its width here. Being on the default branch is the
-	// common case and stays unmarked; the /status panel shows every marker.
-	if (!marker || marker === 'default') return `⎇ ${branch}`;
-	return `⎇ ${branch} (${marker})`;
-}
-
-/**
  * Format the project/workspace segment shown in the startup summary.
  *
  * Keep this compact and user-oriented: show the directory Nanocoder is
@@ -39,7 +26,11 @@ export function formatBootSummaryProjectLabel(
 	if (!status) return workspace;
 
 	const {branch, marker} = formatGitStatusSummary(status);
-	const branchLabel = marker ? `${branch} (${marker})` : branch;
+	// Being on the default branch is the common case and stays unmarked here;
+	// only the detached marker earns its width. The /status panel shows every
+	// marker.
+	const branchLabel =
+		marker && marker !== 'default' ? `${branch} (${marker})` : branch;
 	return `${workspace} · ${branchLabel}`;
 }
 
@@ -58,6 +49,12 @@ export interface AppContainerProps {
 	 * `nonInteractiveMode` is true (interactive mode has a live status bar).
 	 */
 	developmentMode?: DevelopmentMode;
+	/**
+	 * Rows the welcome banner has before the viewport clips it. Fullscreen
+	 * passes the terminal height minus the input footer; inline callers leave
+	 * it unset, since scrollback clips nothing.
+	 */
+	availableRows?: number;
 }
 
 /**
@@ -87,7 +84,9 @@ function BootSummary({
 	// Narrow terminals: provider + model + mode on the first line, with the
 	// workspace/branch underneath so the line doesn't overflow.
 	if (isNarrow) {
-		if (!provider || !model) return <></>;
+		if (!provider || !model) {
+			return <Text color={colors.primary}>{projectLabel}</Text>;
+		}
 		return (
 			<Box flexDirection="column">
 				<Text>
@@ -148,11 +147,14 @@ export function createStaticComponents({
 	currentModel,
 	nonInteractiveMode = false,
 	developmentMode,
+	availableRows,
 }: AppContainerProps): React.ReactNode[] {
 	const components: React.ReactNode[] = [];
 
 	if (shouldShowWelcome) {
-		components.push(<WelcomeMessage key="welcome" />);
+		components.push(
+			<WelcomeMessage key="welcome" availableRows={availableRows} />,
+		);
 	}
 
 	// Boot summary header: only in non-interactive / run mode. The welcome

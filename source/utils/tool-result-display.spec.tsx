@@ -652,6 +652,26 @@ test('LiveCompactCounts - renders single count without plural', t => {
 	unmount();
 });
 
+// Regression (#1556): git_status, git_diff and git_log used to share the
+// same "Ran N git command(s)" phrasing, so a turn mixing them produced
+// indistinguishable rows.
+test('LiveCompactCounts - gives each git tool distinct phrasing', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts
+			counts={{git_status: 1, git_diff: 1, git_log: 1}}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	const lines = output
+		.split('\n')
+		.map(line => line.trim())
+		.filter(Boolean);
+	t.is(lines.length, 3);
+	t.is(new Set(lines).size, 3, 'each git tool row must be distinct');
+	unmount();
+});
+
 test('LiveCompactCounts - renders empty counts without error', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<LiveCompactCounts counts={{}} />,

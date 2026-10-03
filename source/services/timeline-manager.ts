@@ -18,6 +18,12 @@ import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
+import {
+	acquireTimelineLock,
+	isTimelineLockLive,
+	refreshTimelineLock,
+	releaseTimelineLock,
+} from './timeline-lock';
 
 /**
  * Paths the timeline must never treat as workspace content. Snapshotting its
@@ -52,6 +58,9 @@ export class TimelineManager {
 	private readonly timelineRoot: string;
 	private readonly timelineDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
+	private readonly sessionId: string;
+	private readonly sessionStartedAt: number;
+	private lockHeld = false;
 	private index: TimelineIndex | null = null;
 	private prunedStaleSessions = false;
 
@@ -61,6 +70,80 @@ export class TimelineManager {
 		this.timelineRoot = path.join(workspaceRoot, '.nanocoder', 'timeline'); // nosemgrep
 		this.timelineDir = path.join(this.timelineRoot, sessionId); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
+		this.sessionId = sessionId;
+		this.sessionStartedAt = Date.now();
+	}
+
+	/**
+	 * Best-effort: try to acquire the per-session lock so
+	 * pruneStaleSessions will skip this directory while we are still
+	 * writing into it. Failure is non-fatal - we log and continue so a
+	 * crashed sibling cannot block the chat.
+	 */
+	private async tryAcquireSessionLock(): Promise<void> {
+		// Idempotent: once the lock is held by this manager instance, the
+		// on-disk lockfile is ours and a second `ensureDir` call must not
+		// race against itself by observing the file as held and
+		// resetting `lockHeld` to false.
+		if (this.lockHeld) {
+			// Refresh the lock's timestamp so a long-lived session never
+			// trips the MAX_LOCK_AGE_MS guard while it is still running.
+			// Best-effort: a failed refresh must not block the capture.
+			try {
+				if (await refreshTimelineLock(this.timelineDir)) {
+					return;
+				}
+			} catch {
+				// ignore - the live PID probe still protects the session
+				return;
+			}
+			// No lock of ours on disk: another process's prune reaped it
+			// (e.g. after a >24h idle). Drop the stale claim and fall
+			// through to re-acquire, otherwise the session runs unprotected.
+			this.lockHeld = false;
+		}
+		try {
+			// Self-healing: a resumed session may inherit a lockfile left by
+			// a crashed predecessor under the same id. `acquireTimelineLock`
+			// refuses on any present file without probing, so reap a dead
+			// lock first — this is the caller contract documented in
+			// `timeline-lock.spec.ts`. A live lock is left untouched and the
+			// acquire below will correctly return false.
+			await isTimelineLockLive(this.timelineDir);
+			const acquired = await acquireTimelineLock(this.timelineDir, {
+				pid: process.pid,
+				startedAt: this.sessionStartedAt,
+			});
+			this.lockHeld = acquired;
+		} catch (error) {
+			logWarning('Could not acquire timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
+	}
+
+	/**
+	 * Release the per-session lock. Idempotent. A later capture on the
+	 * same manager re-acquires it.
+	 */
+	async dispose(): Promise<void> {
+		if (!this.lockHeld) {
+			return;
+		}
+		this.lockHeld = false;
+		try {
+			await releaseTimelineLock(this.timelineDir);
+		} catch (error) {
+			logWarning('Could not release timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
 	}
 
 	toRelativePath(filePath: string): string | null {
@@ -134,15 +217,19 @@ export class TimelineManager {
 		}
 
 		if (existing.length > 0) {
-			const {snapshots} = await this.fileSnapshotService.captureFiles(existing);
-			for (const [relative, content] of snapshots) {
-				if (isProbablyBinary(content)) {
+			const {snapshots: captured} =
+				await this.fileSnapshotService.captureFiles(existing);
+
+			for (const [relative, snapshot] of captured) {
+				// Checked as bytes, before the decode - see isProbablyBinary.
+				if (isProbablyBinary(snapshot)) {
 					logWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
 				}
-				result.set(relative, content.toString('utf-8'));
+
+				result.set(relative, snapshot.toString('utf-8'));
 			}
 		}
 
@@ -166,6 +253,7 @@ export class TimelineManager {
 
 		const createdFiles: string[] = [];
 		const existing = new Map<string, string>();
+
 		for (const [relative, content] of input.files) {
 			const normalized = this.toRelativePath(relative);
 			if (!normalized) {
@@ -216,6 +304,7 @@ export class TimelineManager {
 	async revertTo(checkpointId: string): Promise<TimelineRevertResult> {
 		const index = await this.loadIndex();
 		const found = index.entries.findIndex(entry => entry.id === checkpointId);
+
 		if (found === -1) {
 			throw new Error(`Timeline checkpoint '${checkpointId}' does not exist`);
 		}
@@ -254,9 +343,17 @@ export class TimelineManager {
 			nextSeq: 1,
 			entries: [],
 		};
+
 		if (existsSync(this.timelineDir)) {
-			await fs.rm(this.timelineDir, {recursive: true, force: true});
+			await fs.rm(this.timelineDir, {
+				recursive: true,
+				force: true,
+			});
 		}
+		// The rm above deleted the `.lock` file along with the directory,
+		// so our in-memory claim is void. Reset it so the next `ensureDir`
+		// re-acquires instead of early-returning into a no-op refresh.
+		this.lockHeld = false;
 	}
 
 	/**
@@ -288,12 +385,14 @@ export class TimelineManager {
 	private expandToTurnStart(index: TimelineIndex, entryIndex: number): number {
 		const turn = index.entries[entryIndex].truncateToMessageIndex;
 		let start = entryIndex;
+
 		while (
 			start > 0 &&
 			index.entries[start - 1].truncateToMessageIndex === turn
 		) {
 			start -= 1;
 		}
+
 		return start;
 	}
 
@@ -333,6 +432,7 @@ export class TimelineManager {
 			try {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const content = await fs.readFile(filePath);
+
 				snapshots.set(relativePath, content);
 			} catch (error) {
 				logWarning('Could not load timeline file snapshot', true, {
@@ -363,8 +463,12 @@ export class TimelineManager {
 
 	private async removeEntryDir(id: string): Promise<void> {
 		const dir = path.join(this.timelineDir, 'entries', id); // nosemgrep
+
 		if (existsSync(dir)) {
-			await fs.rm(dir, {recursive: true, force: true});
+			await fs.rm(dir, {
+				recursive: true,
+				force: true,
+			});
 		}
 	}
 
@@ -387,8 +491,30 @@ export class TimelineManager {
 
 	private async ensureDir(): Promise<void> {
 		await this.pruneStaleSessions();
+
+		// Try to acquire the session lock before any writes land. The
+		// session directory may not exist yet, so mkdir is the safe path.
 		if (!existsSync(this.timelineDir)) {
 			await fs.mkdir(this.timelineDir, {recursive: true});
+		}
+		await this.tryAcquireSessionLock();
+		await this.touchSessionDir();
+	}
+
+	/**
+	 * Refresh the session directory's mtime so it stays out of both the
+	 * age-based and the count-based prune windows. utimes is a single
+	 * syscall and never throws on a directory we just created.
+	 */
+	private async touchSessionDir(): Promise<void> {
+		try {
+			const now = new Date();
+			await fs.utimes(this.timelineDir, now, now);
+		} catch {
+			// Best-effort: a stale mtime may let pruning take this
+			// session out of rotation, but the live-lock check below
+			// still prevents the directory from being deleted out
+			// from under us.
 		}
 	}
 
@@ -407,27 +533,46 @@ export class TimelineManager {
 		try {
 			const names = await fs.readdir(this.timelineRoot);
 			const others: Array<{dir: string; mtimeMs: number}> = [];
+
 			for (const name of names) {
 				const dir = path.join(this.timelineRoot, name); // nosemgrep
+
 				if (dir === this.timelineDir) {
 					continue;
 				}
+
 				const stats = await fs.stat(dir);
+
 				if (stats.isDirectory()) {
-					others.push({dir, mtimeMs: stats.mtimeMs});
+					others.push({
+						dir,
+						mtimeMs: stats.mtimeMs,
+					});
 				}
 			}
 
 			const cutoff = Date.now() - MAX_TIMELINE_SESSION_AGE_MS;
+
 			// Newest first, so the slice past the cap is the oldest sessions.
 			others.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
 			const stale = others.filter(
 				(entry, position) =>
 					entry.mtimeMs < cutoff || position >= MAX_TIMELINE_SESSIONS,
 			);
 
 			for (const entry of stale) {
-				await fs.rm(entry.dir, {recursive: true, force: true});
+				// An active session may have stale mtimeMs (mid-tool-call
+				// with no recent capture) but still be writing. Probe its
+				// lockfile before removing the directory.
+				const lockInfo = await isTimelineLockLive(entry.dir);
+				if (lockInfo.live) {
+					continue;
+				}
+				await fs.rm(entry.dir, {
+					recursive: true,
+					force: true,
+				});
 			}
 		} catch {
 			// The root may not exist yet, or may not be readable. Pruning is
@@ -445,27 +590,40 @@ export class TimelineManager {
 		}
 
 		const indexPath = this.indexPath();
+
 		if (!existsSync(indexPath)) {
-			this.index = {nextSeq: 1, entries: []};
+			this.index = {
+				nextSeq: 1,
+				entries: [],
+			};
 			return this.index;
 		}
 
 		try {
 			const raw = await fs.readFile(indexPath, 'utf-8');
 			const parsed = JSON.parse(raw) as TimelineIndex;
+
 			if (
 				!Array.isArray(parsed.entries) ||
 				typeof parsed.nextSeq !== 'number'
 			) {
 				throw new Error('Invalid timeline index');
 			}
+
 			this.index = parsed;
 			return this.index;
 		} catch (error) {
 			logWarning('Could not read timeline index, starting empty', true, {
-				context: {error: formatError(error)},
+				context: {
+					error: formatError(error),
+				},
 			});
-			this.index = {nextSeq: 1, entries: []};
+
+			this.index = {
+				nextSeq: 1,
+				entries: [],
+			};
+
 			return this.index;
 		}
 	}
@@ -494,6 +652,7 @@ export class TimelineManager {
 		if (!id || id.length > 100 || id.includes('..') || id.startsWith('.')) {
 			throw new Error(`Invalid timeline session id: '${id}'`);
 		}
+
 		if (/[<>:"/\\|?*]/.test(id)) {
 			throw new Error(`Invalid timeline session id: '${id}'`);
 		}

@@ -1,6 +1,7 @@
 import type {CompressionMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
+import {filterModelFacing, isModelFacing} from './message-visibility';
 
 /**
  * Compression configuration constants
@@ -103,6 +104,23 @@ export function compressMessages(
 		COMPRESSION_CONSTANTS.DEFAULT_KEEP_RECENT_MESSAGES;
 	const originalTokenCount = countTotalTokens(messages, tokenizer);
 
+	// Determine where the recent tail begins by walking backward so that
+	// display-only chrome (e.g. trailing cancellation or error notices) doesn't
+	// consume the keepRecent quota of genuine conversation turns.
+	let splitIndex = messages.length;
+	let modelFacingRecentCount = 0;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role === 'system') continue;
+		if (isModelFacing(msg)) {
+			modelFacingRecentCount++;
+		}
+		splitIndex = i;
+		if (modelFacingRecentCount >= keepRecent) {
+			break;
+		}
+	}
+
 	// Separate messages into: system, compressible, and recent (keep full)
 	const systemMessages: Message[] = [];
 	const compressibleMessages: Message[] = [];
@@ -112,7 +130,7 @@ export function compressMessages(
 		const msg = messages[i];
 		if (msg.role === 'system') {
 			systemMessages.push(msg);
-		} else if (i >= messages.length - keepRecent) {
+		} else if (i >= splitIndex) {
 			recentMessages.push(msg);
 		} else {
 			compressibleMessages.push(msg);
@@ -140,7 +158,7 @@ export function compressMessages(
 		keyDecisions: countKeyDecisions(compressed),
 		fileModifications: countFileModifications(compressed),
 		toolResults: countToolResults(compressed),
-		recentMessages: recentMessages.length,
+		recentMessages: recentMessages.filter(isModelFacing).length,
 	};
 
 	return {
@@ -166,6 +184,13 @@ function compressMessageSegment(
 
 	while (i < messages.length) {
 		const msg = messages[i];
+
+		// Pass display-only messages through untouched so scrollback history is preserved
+		if (!isModelFacing(msg)) {
+			compressed.push(msg);
+			i++;
+			continue;
+		}
 
 		// Handle tool messages
 		if (msg.role === 'tool') {
@@ -506,7 +531,7 @@ function summarizeText(text: string, targetLength: number): string {
 // Count total tokens in messages
 function countTotalTokens(messages: Message[], tokenizer: Tokenizer): number {
 	let total = 0;
-	for (const msg of messages) {
+	for (const msg of filterModelFacing(messages)) {
 		total += tokenizer.countTokens(msg);
 	}
 	return total;

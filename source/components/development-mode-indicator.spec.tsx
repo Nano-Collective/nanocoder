@@ -1,6 +1,8 @@
+import {Box} from 'ink';
 import {render} from 'ink-testing-library';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {DevelopmentModeIndicator} from './development-mode-indicator';
 
 void React; // JSX runtime requires React in scope
@@ -433,6 +435,31 @@ function renderWithWidth(
 	}
 }
 
+test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t => {
+	// user-input renders this row inside <Box marginLeft={3}>. Budgeting
+	// against the full terminal width overflowed by exactly those columns, and
+	// the terminal then cut the row mid-word rather than dropping a segment.
+	const output = renderWithWidth(
+		<Box marginLeft={3}>
+			<DevelopmentModeIndicator
+				developmentMode="auto-accept"
+				colors={mockColors}
+				contextPercentUsed={42}
+				sessionName={'s'.repeat(45)}
+				indentColumns={3}
+			/>
+		</Box>,
+		80,
+	);
+
+	for (const line of stripAnsi(output).split('\n')) {
+		t.true(
+			line.length <= 80,
+			`row is ${line.length} columns wide in an 80-column terminal`,
+		);
+	}
+});
+
 test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
@@ -676,4 +703,23 @@ test('saving indicator renders when there is sufficient width', t => {
 	t.regex(output, /my-session/);
 	t.regex(output, /saving/);
 	t.regex(output, /ctx: 40%/);
+});
+
+test('shift hint drops before the session name is truncated', t => {
+	// 60 columns is narrow (shift hint offered) but too tight for the hint
+	// and the full session name together.
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			sessionName="Auth refactor"
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'full'}}
+			indentColumns={4}
+		/>,
+		60,
+	);
+
+	t.regex(output, /Auth refactor/);
+	t.notRegex(output, /Shift\+Tab/);
 });

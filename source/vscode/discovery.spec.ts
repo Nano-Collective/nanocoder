@@ -12,6 +12,7 @@ import {
 	isProcessAlive,
 	readDiscoveryFile,
 	safeEqualToken,
+	VSCODE_DISCOVERY_VERSION,
 	writeDiscoveryFile,
 } from './discovery.js';
 import {VSCodeServer} from './vscode-server.js';
@@ -712,5 +713,56 @@ test('Discovery file failure does not abort server start', async t => {
 			'server should still bind its port even when the discovery file cannot be written',
 		);
 		await server?.stop();
+	});
+});
+
+test('readDiscoveryFile refuses a file from a newer schema version', async t => {
+	await withIsolatedConfigDir(async () => {
+		const filePath = getDiscoveryFilePath();
+		// `version` was read but never checked, so the "bump on breaking
+		// changes" the constant promises did nothing: a v2 file written by a
+		// newer CLI was consumed as if it were v1. An extension and a CLI are
+		// updated separately, so this direction is the one that happens.
+		await writeDiscoveryFile(filePath, {
+			version: VSCODE_DISCOVERY_VERSION + 1,
+			port: 51899,
+			token: 'from-the-future',
+			pid: process.pid,
+			cliVersion: '99.0.0',
+			startedAt: 1_700_000_000_000,
+		});
+
+		t.is(await readDiscoveryFile(filePath), null);
+	});
+});
+
+test('readDiscoveryFile still accepts the current and older schema versions', async t => {
+	await withIsolatedConfigDir(async () => {
+		const filePath = getDiscoveryFilePath();
+		await writeDiscoveryFile(filePath, {
+			version: VSCODE_DISCOVERY_VERSION,
+			port: 51900,
+			token: 'current',
+			pid: process.pid,
+			cliVersion: '1.31.0',
+			startedAt: 1_700_000_000_000,
+		});
+		t.is((await readDiscoveryFile(filePath))?.token, 'current');
+
+		// A file predating the field at all must still load, so an older CLI's
+		// discovery file is not orphaned by a newer extension.
+		const {writeFile} = await import('node:fs/promises');
+		await writeFile(
+			filePath,
+			JSON.stringify({
+				port: 51901,
+				token: 'versionless',
+				pid: process.pid,
+				cliVersion: '1.30.0',
+				startedAt: 1_700_000_000_000,
+			}),
+			'utf-8',
+		);
+		t.is((await readDiscoveryFile(filePath))?.token, 'versionless');
 	});
 });

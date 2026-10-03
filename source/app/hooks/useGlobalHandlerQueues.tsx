@@ -25,6 +25,18 @@ interface GlobalHandlerQueues {
 	handleToolConfirmation: (confirmed: boolean) => void;
 }
 
+/**
+ * How an abandoned request settles, per slot. Module constants rather than
+ * inline arrows so they are stable across renders.
+ *
+ * Both approval slots deny: these mirror the `fallback` each slot already
+ * uses when no handler is installed, and cancelling a turn must never be a
+ * way to approve a tool nobody looked at.
+ */
+const ABANDONED_APPROVAL = (): boolean => false;
+const ABANDONED_QUESTION = (): string =>
+	'Error: The question was cancelled before it was answered.';
+
 /** One waiting caller: what to put on screen, and the resolver that unblocks it. */
 interface QueuedRequest<TInput, TResult> {
 	input: TInput;
@@ -45,8 +57,16 @@ interface QueuedRequest<TInput, TResult> {
  * and none is stranded.
  */
 function useHandlerQueue<TInput, TResult>(
-	install: (handler: (input: TInput) => Promise<TResult>) => unknown,
+	install: (
+		handler: (input: TInput, abortSignal?: AbortSignal) => Promise<TResult>,
+	) => unknown,
 	present: (next: TInput | null) => void,
+	/**
+	 * What a request settles with when its turn is cancelled before anyone
+	 * answered it. Always the slot's own safe default, so an abandoned
+	 * approval is a denial.
+	 */
+	abandoned: (input: TInput) => TResult,
 ): (result: TResult) => void {
 	const queueRef = useRef<QueuedRequest<TInput, TResult>[]>([]);
 
@@ -57,15 +77,43 @@ function useHandlerQueue<TInput, TResult>(
 		presentRef.current = present;
 	}, [present]);
 
+	const abandonedRef = useRef(abandoned);
+	useEffect(() => {
+		abandonedRef.current = abandoned;
+	}, [abandoned]);
+
 	useEffect(() => {
 		install(
-			(input: TInput) =>
+			(input: TInput, abortSignal?: AbortSignal) =>
 				new Promise<TResult>(resolve => {
-					queueRef.current.push({input, resolve});
+					const entry: QueuedRequest<TInput, TResult> = {input, resolve};
+					queueRef.current.push(entry);
 					// Only the head is on screen; later arrivals wait their turn.
 					if (queueRef.current.length === 1) {
 						presentRef.current(input);
 					}
+
+					if (!abortSignal) return;
+					// A cancelled turn has to release its own request. Nothing
+					// else can: the queue only advances when a human answers, so
+					// a caller left here after its turn died waits forever, and
+					// the user is shown a prompt belonging to work that is over.
+					abortSignal.addEventListener(
+						'abort',
+						() => {
+							const index = queueRef.current.indexOf(entry);
+							// Already answered — its result is the user's, not ours.
+							if (index === -1) return;
+							queueRef.current.splice(index, 1);
+							resolve(abandonedRef.current(input));
+							// Only the head is rendered, so only removing the head
+							// changes what is on screen.
+							if (index === 0) {
+								presentRef.current(queueRef.current[0]?.input ?? null);
+							}
+						},
+						{once: true},
+					);
 				}),
 		);
 	}, [install]);
@@ -102,6 +150,7 @@ export function useGlobalHandlerQueues({
 	const handleQuestionAnswer = useHandlerQueue(
 		setGlobalQuestionHandler,
 		presentQuestion,
+		ABANDONED_QUESTION,
 	);
 
 	// The tool-approval queue uses a dedicated state slot so it doesn't conflict
@@ -113,6 +162,7 @@ export function useGlobalHandlerQueues({
 	const handleSubagentToolApproval = useHandlerQueue(
 		setGlobalToolApprovalHandler,
 		setPendingSubagentApproval,
+		ABANDONED_APPROVAL,
 	);
 
 	const [pendingToolConfirmation, setPendingToolConfirmation] =
@@ -120,6 +170,7 @@ export function useGlobalHandlerQueues({
 	const handleToolConfirmation = useHandlerQueue(
 		setGlobalToolConfirmHandler,
 		setPendingToolConfirmation,
+		ABANDONED_APPROVAL,
 	);
 
 	return {

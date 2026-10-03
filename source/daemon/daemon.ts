@@ -18,6 +18,7 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 19.
  */
 
+import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {BackpressureDispatcher} from '@/events/backpressure';
 import {EventRouter} from '@/events/event-router';
@@ -26,6 +27,7 @@ import {ScheduleEventSource} from '@/events/sources/schedule';
 import {bootSkillPipeline} from '@/skills/bootstrap';
 import {
 	type ActivityListener,
+	buildCommandRunnerConfig,
 	type Checkpointer,
 	type ExecutorFactory,
 	SkillDispatcher,
@@ -52,6 +54,14 @@ export interface DaemonOptions {
 	 * standing up an LLM client.
 	 */
 	buildExecutor: ExecutorFactory;
+	/**
+	 * The tool registry triggered runs execute against. Production passes the
+	 * same instance its executor factory closes over: the skill pipeline
+	 * registers bundle and custom tools into this registry, so a separate one
+	 * left a triggered agent unable to call its own bundle's tools. Specs omit
+	 * it and get a fresh registry.
+	 */
+	toolManager?: ToolManager;
 	checkpointer?: Checkpointer;
 	/**
 	 * Override the activity listener. If omitted, the daemon's default
@@ -81,7 +91,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	}
 
 	// Layer 1: registries
-	const toolManager = new ToolManager();
+	const toolManager = opts.toolManager ?? new ToolManager();
 	const commandLoader = new CustomCommandLoader(opts.projectRoot);
 	// Use the global singleton: the SubagentExecutor resolves subagents via
 	// getSubagentLoader(projectRoot), so a fresh instance here would diverge
@@ -121,8 +131,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		sendNotification('triggeredRunComplete');
 	};
 
+	const commandExecutor = new CustomCommandExecutor();
+
 	const skillDispatcher = new SkillDispatcher({
 		buildExecutor: opts.buildExecutor,
+		resolveCommandPrompt: (name, subscription) => {
+			// Frontmatter targets carry the full name. Bundle manifests name the
+			// bare member (`command:status`), which is registered namespaced
+			// under the owning skill (`k8s:status`).
+			const command =
+				commandLoader.getCommand(name) ??
+				commandLoader.getCommand(`${subscription.ownerSkill}:${name}`);
+			return command ? commandExecutor.execute(command, []) : undefined;
+		},
 		checkpointer: opts.checkpointer,
 		onActivity: opts.onActivity ?? defaultOnActivity,
 		onUnsupportedTarget: (subscription, reason) => {
@@ -171,12 +192,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		console.warn(`Deprecation: ${warning}`);
 	}
 
+	// Command targets run under a generic runner subagent. Register it after
+	// the boot pipeline: `registerExternal` marks the loader initialized, so
+	// registering first would stop file-based agents from ever loading. A
+	// user agent that already took the name wins.
+	subagentLoader.registerExternal(buildCommandRunnerConfig());
+
 	const watcher = new FileWatcherSource(router, {root: opts.projectRoot});
 	const cron = new ScheduleEventSource(router);
 
 	for (const sub of router.listByKind('schedule.cron')) {
 		if (sub.kind !== 'schedule.cron' || !sub.filter) continue;
-		cron.register(sub.filter.cron);
+		// One bad expression must not take the whole daemon down with it.
+		try {
+			cron.register(sub.filter.cron);
+		} catch (err) {
+			console.error(
+				`Skipped cron subscription ${sub.id}: invalid expression "${sub.filter.cron}" (${err instanceof Error ? err.message : String(err)})`,
+			);
+		}
 	}
 
 	let stopPromise: Promise<void> | null = null;
@@ -189,6 +223,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			cron.stop();
 			backpressure.dispose();
 			await ipcServer.stop();
+			// MCP stdio servers are child processes with open pipes; left
+			// connected they keep the event loop alive and the daemon never
+			// exits after an IPC `shutdown`.
+			await toolManager.disconnectMCP();
 			await removeLockfile(opts.projectRoot);
 		})();
 		return stopPromise;

@@ -14,6 +14,11 @@ import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
 import {useUserMessageQueue} from '../useUserMessageQueue';
+import {
+        resetSessionCwd,
+        setProjectRoot,
+        setSessionCwd,
+} from '@/services/session-cwd';
 
 // Test component that uses the hook and exposes results
 function TestHookComponent(props: UseChatHandlerProps & {onResult?: (result: ChatHandlerReturn) => void}) {
@@ -204,7 +209,7 @@ test('useChatHandler - handles messages with content', t => {
 });
 
 test('useChatHandler - handles different development modes', t => {
-	const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = ['normal', 'auto-accept', 'yolo', 'plan'];
+	const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 
 	for (const mode of modes) {
 		let hookResult: ChatHandlerReturn | null = null;
@@ -291,6 +296,30 @@ test('useChatHandler - handles null client gracefully', t => {
 	});
 
 	t.truthy(hookResult);
+});
+
+test('useChatHandler - signals completion when chat dependencies are unavailable', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let completionCalls = 0;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				onConversationComplete: () => {
+					completionCalls++;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('queued after unavailable setup');
+
+	t.is(completionCalls, 1);
+	rendered.unmount();
 });
 
 test('useChatHandler - setMessages callback works', t => {
@@ -532,6 +561,125 @@ test('useChatHandler - offers review after write_plan succeeds', async t => {
 	} finally {
 		setToolRegistryGetter(() => ({}));
 	}
+});
+
+test('useChatHandler - offers review after Architect mutation succeeds', async t => {
+        let architectCheckpointName: string | undefined;
+        let hookResult: ChatHandlerReturn | null = null;
+        let callCount = 0;
+
+        const tempProjectRoot = mkdtempSync(
+                join(tmpdir(), 'nanocoder-architect-test-'),
+        );
+
+        setProjectRoot(tempProjectRoot);
+        setSessionCwd(tempProjectRoot);
+
+        const client: LLMClient = {
+                ...createMockClient(),
+                chat: async (_messages, _tools, callbacks) => {
+                        callbacks.onFinish?.();
+                        callCount++;
+
+                        return {
+                                choices: [
+                                        {
+                                                message:
+                                                        callCount === 1
+                                                                ? {
+                                                                        role: 'assistant' as const,
+                                                                        content: '',
+                                                                        tool_calls: [
+                                                                                {
+                                                                                        id: 'write-file',
+                                                                                        function: {
+                                                                                                name: 'write_file',
+                                                                                                arguments: {
+                                                                                                        path: 'test.txt',
+                                                                                                        content:
+                                                                                                                'Architect change',
+                                                                                                },
+                                                                                        },
+                                                                                },
+                                                                        ],
+                                                                }
+                                                                : {
+                                                                        role: 'assistant' as const,
+                                                                        content:
+                                                                                'Changes ready for review',
+                                                                },
+                                        },
+                                ],
+                        };
+                },
+        };
+
+        const toolManager = {
+                ...createMockToolManager(),
+                getAvailableToolNames: () => ['write_file'],
+                getToolNames: () => ['write_file'],
+                hasTool: (name: string) => name === 'write_file',
+                getToolEntry: () => ({
+                        name: 'write_file',
+                        approval: false,
+                        readOnly: false,
+                }),
+                isReadOnly: () => false,
+                getToolFormatter: () => undefined,
+        } as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+
+        const customCommandLoader = {
+                findRelevantCommands: () => [],
+        } as unknown as NonNullable<
+                UseChatHandlerProps['customCommandLoader']
+        >;
+
+        setToolRegistryGetter(() => ({
+                write_file: async (args: {path: string; content: string}) => {
+                        await import('node:fs/promises').then(({writeFile}) =>
+                                writeFile(
+                                        join(tempProjectRoot, args.path),
+                                        args.content,
+                                        'utf-8',
+                                ),
+                        );
+                        return 'File written';
+                },
+        }));
+
+        try {
+                render(
+                        <TestHookComponent
+                                {...createMockProps({
+                                        client,
+                                        toolManager,
+                                        customCommandLoader,
+                                        developmentMode: 'architect',
+                                        ensureCurrentSessionId: () =>
+                                                '11111111-1111-4111-8111-111111111111',
+                                        onArchitectTurnComplete: checkpointName => {
+                                                architectCheckpointName =
+                                                        checkpointName;
+                                        },
+                                })}
+                                onResult={result => {
+                                        hookResult = result;
+                                }}
+                        />,
+                );
+
+                await waitForCondition(() => hookResult !== null);
+                await hookResult!.handleChatMessage(
+                        'make the requested change',
+                );
+
+                t.truthy(architectCheckpointName);
+                t.true(architectCheckpointName!.length > 0);
+        } finally {
+                setToolRegistryGetter(() => ({}));
+                resetSessionCwd();
+                rmSync(tempProjectRoot, {recursive: true, force: true});
+        }
 });
 
 test('useChatHandler - persists a prose plan when write_plan was omitted', async t => {

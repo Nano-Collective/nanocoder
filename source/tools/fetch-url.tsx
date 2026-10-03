@@ -9,6 +9,7 @@ import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {withPreservedProcess} from '@/utils/preserve-process';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
@@ -19,6 +20,45 @@ const MAX_REDIRECTS = 5;
 const URL_FETCH_TIMEOUT_MS = 15_000;
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 
+/** Statuses that mean "this server will not answer a HEAD", so retry as GET. */
+const HEAD_UNSUPPORTED_STATUS_CODES = new Set([400, 403, 405, 501]);
+
+/**
+ * Ask one hop what it is, without downloading it.
+ *
+ * The walk below only needs a status and a `Location`, so it asks for headers
+ * rather than a body. A GET here would transfer the whole final page and
+ * throw it away, since `convertToMarkdown` fetches the resolved URL itself -
+ * every `fetch_url` call would move the target twice, doubling bandwidth and
+ * rate-limit consumption and hitting any endpoint that meters or logs
+ * requests once per call more than it should.
+ *
+ * Not every server answers HEAD. One that refuses, or that fails outright,
+ * falls back to a GET whose body is discarded - the old behaviour, now only
+ * on the servers that actually need it.
+ */
+const probeHop = async (url: string): Promise<Response> => {
+	try {
+		const head = await fetch(url, {
+			method: 'HEAD',
+			redirect: 'manual',
+			signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+		});
+		if (!HEAD_UNSUPPORTED_STATUS_CODES.has(head.status)) {
+			return head;
+		}
+		await head.body?.cancel();
+	} catch {
+		// Network-level refusal of the HEAD itself; let the GET report the
+		// real error so the message the model sees is unchanged.
+	}
+
+	return await fetch(url, {
+		redirect: 'manual',
+		signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+	});
+};
+
 const resolveSafeRedirects = async (url: string): Promise<string> => {
 	let currentUrl = url;
 
@@ -28,10 +68,7 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 			throw new Error(validation.error);
 		}
 
-		const response = await fetch(currentUrl, {
-			redirect: 'manual',
-			signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
-		});
+		const response = await probeHop(currentUrl);
 
 		try {
 			if (!REDIRECT_STATUS_CODES.has(response.status)) {
@@ -68,8 +105,11 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
 		// The redirect chain was validated hop by hop above. Keep redirects off
 		// for the conversion fetch as well, so a changed response cannot escape
-		// validation between the probe and conversion requests.
-		const result = await convertToMarkdown(safeUrl, {followRedirects: false});
+		// validation between the probe and conversion requests. The conversion
+		// runs guarded to protect `globalThis.process` from happy-dom overwrites.
+		const result = await withPreservedProcess(() =>
+			convertToMarkdown(safeUrl, {followRedirects: false}),
+		);
 
 		const content = result.markdown;
 
