@@ -35,6 +35,7 @@ let loading: Promise<void> | null = null;
 
 export function loadPlugins(trusted: boolean): Promise<void> {
 	if (!trusted) return Promise.resolve();
+	// A load that already started is not cancelled by a later false.
 	loading ??= importPlugins();
 	return loading;
 }

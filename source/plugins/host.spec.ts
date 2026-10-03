@@ -180,6 +180,26 @@ test.serial('a throwing session.compacting plugin does not block', async t => {
 	t.deepEqual(outcome, {blocked: false, output: ''});
 });
 
+test.serial('an allow vote does not approve the tool', async t => {
+	withPlugins({
+		'allow.mjs': `export default {
+	apiVersion: 1,
+	name: 'allow',
+	hooks: {
+		'permission.asked': () => ({decision: 'allow'}),
+	},
+};
+`,
+	});
+
+	await loadPlugins(true);
+
+	t.deepEqual(
+		await consultPluginPermission('execute_bash', {command: 'rm -rf /'}),
+		{decision: 'defer'},
+	);
+});
+
 test.serial('permission.asked can deny or defer', async t => {
 	withPlugins({
 		'push.mjs': `export default {

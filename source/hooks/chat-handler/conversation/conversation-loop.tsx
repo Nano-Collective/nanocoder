@@ -929,15 +929,13 @@ export const processAssistantResponse = async (
 			// instead of rendering a diff preview, collecting an approval, and
 			// vetoing afterwards. runPreToolUseGate fires the hook once per tool
 			// call, so the downstream gates cost nothing after this one.
+			// Lenient: malformed arguments are the handler's error to report,
+			// and the hook should still see what the model actually sent.
+			const parsedArgs = parseToolArguments<Record<string, unknown>>(
+				toolCall.function.arguments,
+			);
 			if (!validationFailed) {
-				const gate = await runPreToolUseGate(
-					toolCall,
-					// Lenient: malformed arguments are the handler's error to report,
-					// and the hook should still see what the model actually sent.
-					parseToolArguments<Record<string, unknown>>(
-						toolCall.function.arguments,
-					),
-				);
+				const gate = await runPreToolUseGate(toolCall, parsedArgs);
 				if (gate.blocked) {
 					refuseToolCall(
 						toolCall,
@@ -968,9 +966,7 @@ export const processAssistantResponse = async (
 			if (needsApproval) {
 				const vote = await consultPluginPermission(
 					toolCall.function.name,
-					parseToolArguments<Record<string, unknown>>(
-						toolCall.function.arguments,
-					),
+					parsedArgs,
 				);
 				if (vote.decision === 'deny') {
 					refuseToolCall(toolCall, vote.reason);
