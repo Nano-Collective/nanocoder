@@ -321,7 +321,7 @@ function buildEnv(
 	return env;
 }
 
-interface HookRun {
+export interface HookRun {
 	exitCode: number | null;
 	stdout: string;
 	stderr: string;
@@ -476,7 +476,7 @@ function makeHookCapture(): {
  * timeout resolves with `failure` set and no exit code, which callers treat as
  * "did not veto" so a broken script can't wedge the session.
  */
-function runHookCommand(
+export function runHookCommand(
 	hook: HookDefinition,
 	env: NodeJS.ProcessEnv,
 	cwd: string,

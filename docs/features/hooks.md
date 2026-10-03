@@ -91,6 +91,8 @@ Entries without a usable `command` string are dropped with an error in the log r
 ]
 ```
 
+For plain formatting, [`nanocoder.formatters`](../configuration/index.md#formatters) is the shorter form: it runs only after a successful write, runs before these hooks, and tells the model when the file changed under it.
+
 The patterns use the same dialect as [skill subscriptions](skills.md#event-subscriptions) — `**` across directories, `*` within one, `?` for a single character, and `{a,b}` alternation. The file is whichever of `path`, `file_path`, or `filePath` the tool was called with, which is every file tool.
 
 Two behaviours are worth knowing:

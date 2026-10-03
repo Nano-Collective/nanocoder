@@ -46,6 +46,13 @@
 					},
 					"type": "array"
 				},
+				"formatters": {
+					"description": "Code formatters run on files the agent writes (write_file,\nstring_replace, diff_edit), before the `post-tool-use` hooks fire.",
+					"items": {
+						"$ref": "#/definitions/FormatterDefinition"
+					},
+					"type": "array"
+				},
 				"headless": {
 					"description": "Maximum LLM turns for headless runs (--plain and ACP loops).",
 					"properties": {
@@ -140,6 +147,33 @@
 			},
 			"type": "object",
 			"additionalProperties": false
+		},
+		"FormatterDefinition": {
+			"description": "A code formatter run on every file the agent writes whose path matches\n`match`, after the edit succeeds and before the `post-tool-use` hooks.",
+			"properties": {
+				"command": {
+					"description": "Shell command to run from the project root. The written file's absolute\npath is in `$FILE` (also `$NANOCODER_FILE`) — quote it: `\"$FILE\"`.",
+					"type": "string"
+				},
+				"match": {
+					"description": "Globs the written file must match, relative to the project root. Same\ndialect as `matchPaths` on hooks — e.g. `[\"**\\/*.{ts,tsx}\"]`.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"name": {
+					"description": "Optional label used in messages instead of the command.",
+					"type": "string"
+				},
+				"timeout": {
+					"description": "Milliseconds before the formatter is killed. Defaults to 30s.",
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["match", "command"]
 		},
 		"HookDefinition": {
 			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools and/or the file they acted on (tool events only), with its own timeout.",
