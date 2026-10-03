@@ -16,6 +16,7 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -898,6 +899,22 @@ export const processAssistantResponse = async (
 		// Results for tools a pre-tool-use hook refused. They skip execution
 		// entirely but still need a result to pair with their tool call.
 		const blockedResults: ToolResult[] = [];
+		const refuseToolCall = (toolCall: ToolCall, reason: string) => {
+			blockedResults.push({
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content: `Error: ${reason}`,
+				isError: true,
+			});
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('hook-blocked-tool')}
+					message={reason}
+					hideBox={true}
+				/>,
+			);
+		};
 
 		for (const toolCall of validToolCalls) {
 			// The XML-fallback synthetic error isn't a real tool, so treat it as
@@ -922,20 +939,9 @@ export const processAssistantResponse = async (
 					),
 				);
 				if (gate.blocked) {
-					const reason = gate.reason ?? 'Blocked by a pre-tool-use hook.';
-					blockedResults.push({
-						tool_call_id: toolCall.id,
-						role: 'tool',
-						name: toolCall.function.name,
-						content: `Error: ${reason}`,
-						isError: true,
-					});
-					addToChatQueue(
-						<ErrorMessage
-							key={generateKey('hook-blocked-tool')}
-							message={reason}
-							hideBox={true}
-						/>,
+					refuseToolCall(
+						toolCall,
+						gate.reason ?? 'Blocked by a pre-tool-use hook.',
 					);
 					continue;
 				}
@@ -960,6 +966,16 @@ export const processAssistantResponse = async (
 				));
 
 			if (needsApproval) {
+				const vote = await consultPluginPermission(
+					toolCall.function.name,
+					parseToolArguments<Record<string, unknown>>(
+						toolCall.function.arguments,
+					),
+				);
+				if (vote.decision === 'deny') {
+					refuseToolCall(toolCall, vote.reason);
+					continue;
+				}
 				confirmTools.push(toolCall);
 			} else {
 				autoTools.push(toolCall);

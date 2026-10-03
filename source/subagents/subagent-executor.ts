@@ -15,6 +15,7 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {consultPluginPermission} from '@/plugins/host';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -862,6 +863,11 @@ export class SubagentExecutor {
 			rawArguments,
 		);
 		if (needsApproval) {
+			const vote = await consultPluginPermission(toolName, parsedArgs);
+			if (vote.decision === 'deny') {
+				return `Error: ${vote.reason}`;
+			}
+
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
 			// them and joins with `Promise.allSettled`, so one subagent parked
