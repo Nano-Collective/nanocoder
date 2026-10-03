@@ -180,7 +180,7 @@ The gate is also applied again at each execution boundary (`processToolUse`, the
 
 The first veto ends the chain — later hooks on that event don't run.
 
-Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run.
+Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run; on `post-tool-use` the failing hook's output is also handed to the model (see below).
 
 Killing a hook kills what it started. The command runs under a shell, so signalling that shell alone would leave the grandchildren of a compound command (`a && b`, a pipeline) running after the agent has moved on. Hooks are spawned into their own process group on POSIX and reaped with `taskkill /T` on Windows, so the whole tree goes.
 
@@ -188,7 +188,7 @@ Killing a hook kills what it started. The command runs under a shell, so signall
 
 Anything a hook prints on stdout is put in front of the model:
 
-- `post-tool-use` stdout is appended to that tool's result inside a `<hook-output>` block, so a formatter's complaint lands on the same turn. The combined result is re-capped afterwards, so a chatty hook cannot push a tool result past the usual truncation limit.
+- `post-tool-use` stdout is appended to that tool's result inside a `<hook-output>` block, so a formatter's complaint lands on the same turn. A `post-tool-use` hook that exits non-zero is forwarded too, stdout and stderr both, in a block tagged with its exit code (`<hook-output event="post-tool-use" exit="1">`), so a failing linter or test run reaches the model instead of only your screen. The tool call itself still counts as a success. The combined result is re-capped afterwards, so a chatty hook cannot push a tool result past the usual truncation limit; failures go last, where the cut keeps them.
 - `session-start` and `user-prompt-submit` stdout is buffered and prepended to your next prompt inside a `<hook-context>` block. Your transcript still shows what you typed. `/clear` drops anything undelivered.
 
 A hook that prints nothing injects nothing.
