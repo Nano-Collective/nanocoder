@@ -139,3 +139,11 @@ Pressing Esc before the model has produced any output, and before any tool has s
 | Attach to a running subagent, or cycle to the next one | Ctrl+S |
 
 Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation.
+
+## Voice Mode
+
+| Action | Shortcut | Notes |
+|--------|----------|-------|
+| Push-to-talk / Barge-in | Ctrl+T | Start/stop voice recording; interrupts AI response if speaking or processing |
+
+Voice mode can also be controlled with `/voice`, including `ptt` and `hands-free` activation modes. The shortcut is available when voice mode is enabled in `/settings`.

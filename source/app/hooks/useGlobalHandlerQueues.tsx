@@ -11,6 +11,10 @@ import {
 	type PendingToolConfirmation,
 	setGlobalToolConfirmHandler,
 } from '@/utils/tool-confirm-queue';
+import {
+	type PendingVoiceInstall,
+	setGlobalVoiceInstallHandler,
+} from '@/utils/voice-install-queue';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
@@ -23,6 +27,8 @@ interface GlobalHandlerQueues {
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
+	pendingVoiceInstall: PendingVoiceInstall | null;
+	handleVoiceInstallConfirm: (confirmed: boolean) => void;
 }
 
 /**
@@ -173,11 +179,21 @@ export function useGlobalHandlerQueues({
 		ABANDONED_APPROVAL,
 	);
 
+	const [pendingVoiceInstall, setPendingVoiceInstall] =
+		useState<PendingVoiceInstall | null>(null);
+	const handleVoiceInstallConfirm = useHandlerQueue(
+		setGlobalVoiceInstallHandler,
+		setPendingVoiceInstall,
+		ABANDONED_APPROVAL,
+	);
+
 	return {
 		handleQuestionAnswer,
 		pendingSubagentApproval,
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	};
 }
