@@ -147,15 +147,19 @@ export async function acquireTimelineLock(
 /**
  * Refresh a lock held by this process so a long-lived session never trips
  * the `MAX_LOCK_AGE_MS` guard while it is still running. Only refreshes
- * when the on-disk payload belongs to this process; otherwise a no-op.
- * Called from `TimelineManager.tryAcquireSessionLock` on every `ensureDir`,
- * which already runs on every capture.
+ * when the on-disk payload belongs to this process. Returns `false` when
+ * there is no lock of ours to refresh (another process reaped it, or the
+ * directory was removed), so the caller can re-acquire instead of running
+ * unprotected. Called from `TimelineManager.tryAcquireSessionLock` on every
+ * `ensureDir`, which already runs on every capture.
  */
-export async function refreshTimelineLock(sessionDir: string): Promise<void> {
+export async function refreshTimelineLock(
+	sessionDir: string,
+): Promise<boolean> {
 	const lockPath = getTimelineLockPath(sessionDir);
 	const payload = await readLockPayload(lockPath);
 	if (!payload || payload.pid !== process.pid) {
-		return;
+		return false;
 	}
 	const body: TimelineLockPayload = {
 		pid: payload.pid,
@@ -172,6 +176,7 @@ export async function refreshTimelineLock(sessionDir: string): Promise<void> {
 		// never see a half-written file. Contention is impossible here
 		// because we already hold the lock.
 		await rename(tmpPath, lockPath);
+		return true;
 	} finally {
 		try {
 			await unlink(tmpPath);
@@ -204,6 +209,13 @@ export async function releaseTimelineLock(sessionDir: string): Promise<void> {
  * via `refreshTimelineLock` — rather than the `startedAt` payload field, so
  * a session that stays alive past 24h keeps its protection indefinitely.
  * `startedAt` is still written for debuggability but never read for expiry.
+ *
+ * Known race: the payload is read before the stale lock is unlinked. If a
+ * resumed session under the same id reaps the same dead lock and links its
+ * own in that window, the unlink here removes the new, live lock. It needs
+ * a concurrent resume of the same session id at the same instant, and the
+ * owner re-acquires on its next capture, so it is accepted rather than
+ * guarded.
  */
 export async function isTimelineLockLive(
 	sessionDir: string,

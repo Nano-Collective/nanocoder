@@ -211,11 +211,30 @@ test.serial('refreshTimelineLock re-stamps a lock held by this process', async t
 			pid: process.pid,
 			startedAt: Date.now() - MAX_LOCK_AGE_MS - 1000,
 		});
-		await refreshTimelineLock(sessionDir);
+		t.true(await refreshTimelineLock(sessionDir));
 		const {live} = await isTimelineLockLive(sessionDir);
 		t.true(live, 'a refreshed lock must survive the age guard');
 	} finally {
 		await releaseTimelineLock(sessionDir);
+		await rm(sessionDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('refreshTimelineLock returns false when no lock of ours exists', async t => {
+	const sessionDir = await tempSessionDir();
+	try {
+		t.false(await refreshTimelineLock(sessionDir), 'missing lock');
+		await writeFile(
+			getTimelineLockPath(sessionDir),
+			JSON.stringify({
+				pid: 2_000_000_000,
+				startedAt: Date.now(),
+				purpose: TIMELINE_LOCK_PURPOSE,
+			}),
+			'utf-8',
+		);
+		t.false(await refreshTimelineLock(sessionDir), 'lock held by another pid');
+	} finally {
 		await rm(sessionDir, {recursive: true, force: true});
 	}
 });

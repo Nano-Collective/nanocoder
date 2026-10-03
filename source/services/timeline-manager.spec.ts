@@ -880,3 +880,60 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'TimelineManager re-acquires a lock reaped by another process',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const sessionDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-idle',
+			);
+			const lockPath = path.join(sessionDir, '.lock');
+			const a = new TimelineManager(tempDir, 'session-idle');
+			await a.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+			t.true(existsSync(lockPath), 'lock is acquired on first capture');
+
+			// A goes idle for 8 days: its lock and directory age past both
+			// the lock guard and the session cutoff.
+			const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+			await fs.utimes(lockPath, longAgo, longAgo);
+			await fs.utimes(sessionDir, longAgo, longAgo);
+
+			const b = new TimelineManager(tempDir, 'session-other');
+			await b.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['b.ts', 'y']]),
+			});
+			t.false(existsSync(sessionDir), "B's prune removed A's idle session");
+
+			await a.capture({
+				toolCallId: 'c2',
+				toolName: 'write_file',
+				title: 'step2',
+				truncateToMessageIndex: 1,
+				files: filesMap([['a.ts', 'z']]),
+			});
+			t.true(existsSync(lockPath), 'A re-creates its lock on next capture');
+			const {isTimelineLockLive} = await import('./timeline-lock.js');
+			t.true(
+				(await isTimelineLockLive(sessionDir)).live,
+				'pruner must see the re-acquired lock as live',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

@@ -90,11 +90,17 @@ export class TimelineManager {
 			// trips the MAX_LOCK_AGE_MS guard while it is still running.
 			// Best-effort: a failed refresh must not block the capture.
 			try {
-				await refreshTimelineLock(this.timelineDir);
+				if (await refreshTimelineLock(this.timelineDir)) {
+					return;
+				}
 			} catch {
 				// ignore - the live PID probe still protects the session
+				return;
 			}
-			return;
+			// No lock of ours on disk: another process's prune reaped it
+			// (e.g. after a >24h idle). Drop the stale claim and fall
+			// through to re-acquire, otherwise the session runs unprotected.
+			this.lockHeld = false;
 		}
 		try {
 			// Self-healing: a resumed session may inherit a lockfile left by
@@ -120,8 +126,8 @@ export class TimelineManager {
 	}
 
 	/**
-	 * Release the per-session lock and prevent further writes from
-	 * touching the session directory. Idempotent.
+	 * Release the per-session lock. Idempotent. A later capture on the
+	 * same manager re-acquires it.
 	 */
 	async dispose(): Promise<void> {
 		if (!this.lockHeld) {
