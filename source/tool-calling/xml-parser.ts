@@ -25,11 +25,13 @@ export class XMLToolCallParser {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
-		// Handle content that might be wrapped in markdown code blocks
+		// Handle content that might be wrapped in markdown code blocks. Only
+		// unwrap when the ENTIRE message is a single fenced block: TOOL_CALL_REGEX
+		// matches tool calls inside or outside fences anyway, and unwrapping an
+		// isolated fence would discard every tool call that follows it.
 		let processedContent = ensureString(content);
-		const codeBlockMatch = processedContent.match(
-			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
-		);
+		const trimmed = processedContent.trim();
+		const codeBlockMatch = trimmed.match(/^```(?:\w+)?\s*\n?([\s\S]*?)\n?```$/);
 		if (codeBlockMatch && codeBlockMatch[1]) {
 			processedContent = codeBlockMatch[1].trim();
 		}
@@ -108,8 +110,11 @@ export class XMLToolCallParser {
 			return false;
 		}
 
-		// Check for malformed attribute-style syntax like <function=name> or <parameter=name>
-		if (fullMatch.includes('=')) {
+		// Check for malformed attribute-style syntax like <function=name> or
+		// <parameter=name>. Scoped to tag boundaries, not the whole match:
+		// '=' inside argument values is legitimate (base64, --flag=value,
+		// foo=bar, x == y), and rejecting on it silently drops valid calls.
+		if (/<[A-Za-z0-9_]+=/.test(fullMatch)) {
 			return false;
 		}
 
