@@ -428,6 +428,14 @@ function blockSpecs(): BlockSpec[] {
 			effective: config.nanocoderTools,
 			depth: 3,
 		},
+		{
+			// Depth 2 reaches `channels.<platform>.<field>`; the token fields are
+			// redacted by name like every other credential.
+			path: ['nanocoder', 'channels'],
+			file: agents,
+			effective: config.channels,
+			depth: 2,
+		},
 	];
 }
 

@@ -187,6 +187,57 @@ export interface NotificationsConfig {
 	};
 }
 
+/** Chat platforms `nanocoder channels start` can bridge to the daemon. */
+export type ChannelPlatform = 'telegram' | 'slack' | 'discord';
+
+/** Settings every chat channel shares. */
+export interface ChannelCommonConfig {
+	/**
+	 * Platform user ids allowed to talk to the agent; everyone else is ignored.
+	 * Required - a channel with an empty list is not started, because anyone
+	 * who found the bot could otherwise run tools on this machine.
+	 */
+	allowedUsers: string[];
+	/**
+	 * Group chats or channels where every message from an allowed user is
+	 * handled. Elsewhere the bot only answers direct messages and @-mentions.
+	 */
+	allowedChats?: string[];
+	/**
+	 * Run mode for this channel. `headless` (default) executes tools
+	 * unattended; `plan` only reports what the agent would do.
+	 */
+	mode?: 'headless' | 'plan';
+}
+
+export interface TelegramChannelConfig extends ChannelCommonConfig {
+	/** Bot token from @BotFather. Use `${TELEGRAM_BOT_TOKEN}` to read it from the environment. */
+	token: string;
+}
+
+export interface SlackChannelConfig extends ChannelCommonConfig {
+	/** Bot user OAuth token (`xoxb-...`). */
+	botToken: string;
+	/** App-level token with the `connections:write` scope (`xapp-...`), for Socket Mode. */
+	appToken: string;
+}
+
+export interface DiscordChannelConfig extends ChannelCommonConfig {
+	/** Bot token from the Discord developer portal. */
+	token: string;
+}
+
+/** Chat apps bridged to the per-project daemon by `nanocoder channels start`. */
+export interface ChannelsConfig {
+	telegram?: TelegramChannelConfig;
+	slack?: SlackChannelConfig;
+	discord?: DiscordChannelConfig;
+	/** Earlier exchanges from the same chat carried into the next prompt. Default 6, max 50. */
+	historyTurns?: number;
+	/** How long to wait for the daemon to answer one message, in milliseconds. Default 600000. */
+	timeoutMs?: number;
+}
+
 /**
  * Points in the agent lifecycle a user-defined shell command can be attached
  * to. `pre-tool-use` and `user-prompt-submit` are the vetoing points: a
@@ -336,6 +387,8 @@ export interface DiskNanocoderConfig {
 	retries?: Partial<RetryLimitsConfig>;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
+	/** Chat apps (Telegram, Slack, Discord) bridged to the daemon by `nanocoder channels start`. */
+	channels?: ChannelsConfig;
 }
 
 /**
@@ -441,6 +494,9 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Chat apps bridged to the daemon (`nanocoder channels start`)
+	channels?: ChannelsConfig;
 }
 
 // MCP Server configuration with source tracking
