@@ -200,6 +200,12 @@ All new features and bug fixes should include appropriate tests:
 
    This command runs: Biome formatting checks, type checks, lint checks, AVA tests, Knip, security scans.
 
+   MCP live HTTP integration tests are skipped by default. Run them explicitly with:
+
+   ```bash
+   RUN_LIVE_MCP_TESTS=true pnpm test:ava source/mcp/mcp-client.spec.ts
+   ```
+
 4. **Test Requirements for PRs**:
    - New features **must** include passing tests in `.spec.ts/tsx` files
    - Bug fixes should include regression tests when possible

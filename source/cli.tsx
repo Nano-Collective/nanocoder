@@ -41,6 +41,23 @@ const version = ((): string => {
 // Parse CLI arguments
 const args = process.argv.slice(2);
 
+// Storage diagnostics are independent of chat startup. JSON mode does not load Ink.
+if (args[0] === 'storage') {
+	const {runStorageCli} = await import('@/storage/cli');
+	const exitCode = await runStorageCli(args.slice(1));
+	// process.exit() can discard buffered JSON when stdout is piped. Drain both
+	// streams before terminating; the remaining CLI must not boot after storage.
+	await Promise.all([
+		new Promise<void>(resolve =>
+			process.stdout.write('', 'utf8', () => resolve()),
+		),
+		new Promise<void>(resolve =>
+			process.stderr.write('', 'utf8', () => resolve()),
+		),
+	]);
+	process.exit(exitCode);
+}
+
 // Handle --version/-v flag — fast path, no heavy imports
 if (args.includes('--version') || args.includes('-v')) {
 	console.log(version);
@@ -197,6 +214,8 @@ Commands:
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  storage [--format json]         Inspect session and artifact storage (read-only).
+                                  Interactive by default; JSON works without a TTY.
   completion <shell>              Generate a shell completion script (bash, zsh, or fish).
                                   Example: eval "$(nanocoder completion zsh)"
 
@@ -258,6 +277,8 @@ Examples:
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder storage
+  nanocoder storage --format json | jq .sections
   `);
 	process.exit(0);
 }

@@ -31,8 +31,11 @@ export function computeStreamingTail(
 		// Search backward for a preceding newline so we never start mid-line.
 		// (Searching forward could leave a dangling partial first line when the
 		// message contains very long single lines with no following newline.)
+		// No newline at all (one huge line) must fall back to the unsnapped
+		// rawTailStart, not 0 — snapping to 0 would discard the bound entirely
+		// and render the whole message.
 		const prevNewline = message.lastIndexOf('\n', sliceStart);
-		sliceStart = prevNewline === -1 ? 0 : prevNewline + 1;
+		sliceStart = prevNewline === -1 ? rawTailStart : prevNewline + 1;
 	}
 	const tail = (sliceStart > 0 ? message.slice(sliceStart) : message).trim();
 	return {tail, sliced: sliceStart > 0};
