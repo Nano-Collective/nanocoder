@@ -43,7 +43,6 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
-import {loadPlugins} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
@@ -100,10 +99,6 @@ export default function App({
 	// Bypasses the disclaimer without touching the preferences file.
 	const isEffectivelyTrusted =
 		isTrusted || (nonInteractiveMode && trustDirectory);
-
-	React.useEffect(() => {
-		if (isEffectivelyTrusted) void loadPlugins(true);
-	}, [isEffectivelyTrusted]);
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(

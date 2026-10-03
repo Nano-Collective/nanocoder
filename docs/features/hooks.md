@@ -197,7 +197,7 @@ A hook that prints nothing injects nothing.
 
 ## In-process plugins
 
-A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put it directly in `.nanocoder/plugins/` at the project root, as a `.js` or `.mjs` file. Files load in filename order, and only after you have trusted the directory. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
 
 The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
 
@@ -230,7 +230,7 @@ There are five hooks. Each may return its result directly or as a promise.
 
 Shell hooks for the same event run first. If a shell hook blocks, plugins do not run. A plugin that throws, times out after 30 seconds, or returns something malformed is logged and ignored; it never blocks anything. A file with an unknown hook name, a wrong `apiVersion`, or a `name` already used by an earlier file is skipped.
 
-ACP sessions (editor integrations) do not load project plugins.
+An editor session (ACP) has no trust prompt. It loads plugins only when this directory is already in your trusted list.
 
 ## Security
 

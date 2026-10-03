@@ -13,6 +13,7 @@ import type {ToolCall} from '@/types/core';
 import {
 	consultPluginPermission,
 	loadPlugins,
+	loadTrustedProjectPlugins,
 	resetPluginsForTests,
 } from './host';
 
@@ -28,7 +29,7 @@ let projectCount = 0;
  * A fresh project root per test. Node caches ES modules by URL, so reusing a
  * path across tests would hand back the previous test's plugin.
  */
-function withPlugins(files: Record<string, string>): void {
+function withPlugins(files: Record<string, string>): string {
 	const root = join(testDir, `project-${projectCount++}`);
 	const pluginDir = join(root, '.nanocoder', 'plugins');
 	mkdirSync(pluginDir, {recursive: true});
@@ -36,6 +37,7 @@ function withPlugins(files: Record<string, string>): void {
 		writeFileSync(join(pluginDir, name), source, 'utf-8');
 	}
 	setProjectRoot(root);
+	return root;
 }
 
 function bashCall(command: string): ToolCall {
@@ -109,7 +111,7 @@ test.serial('a trusted plugin blocks a tool before it runs', async t => {
 
 test.serial('tool.execute.after appends to the tool result', async t => {
 	withPlugins({
-		'annotate.js': `export default {
+		'annotate.mjs': `export default {
 	apiVersion: 1,
 	name: 'annotate',
 	hooks: {
@@ -226,6 +228,57 @@ test.serial(
 		t.is(gate.reason, 'Blocked by plugin "guard": bash is disabled here');
 	},
 );
+
+test.serial(
+	'an editor session loads plugins only when the directory is already trusted',
+	async t => {
+		const root = withPlugins({'guard.mjs': BLOCK_BASH});
+		const configDir = join(testDir, 'no-global-config');
+		mkdirSync(configDir, {recursive: true});
+
+		await loadTrustedProjectPlugins();
+		const before = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
+		t.deepEqual(before, {blocked: false, output: ''});
+
+		writeFileSync(
+			join(configDir, 'nanocoder-preferences.json'),
+			JSON.stringify({trustedDirectories: [root]}),
+			'utf-8',
+		);
+		resetPluginsForTests();
+
+		await loadTrustedProjectPlugins();
+		const after = await runPreToolUseGate(bashCall('pwd'), {command: 'pwd'});
+		t.is(after.reason, 'Blocked by plugin "guard": bash is disabled here');
+	},
+);
+
+test.serial('a .js file is left unloaded', async t => {
+	withPlugins({'guard.js': BLOCK_BASH});
+
+	await loadPlugins(true);
+	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
+
+	t.deepEqual(gate, {blocked: false, output: ''});
+});
+
+test.serial('a before hook that returns the wrong shape does not block', async t => {
+	withPlugins({
+		'bad.mjs': `export default {
+	apiVersion: 1,
+	name: 'bad',
+	hooks: {
+		'tool.execute.before': () => ({blocked: 'no'}),
+	},
+};
+`,
+	});
+
+	await loadPlugins(true);
+	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
+
+	t.deepEqual(gate, {blocked: false, output: ''});
+});
 
 test.serial('a duplicate plugin name is skipped', async t => {
 	const blockWith = (message: string) => `export default {

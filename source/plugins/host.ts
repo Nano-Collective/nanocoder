@@ -1,7 +1,8 @@
 import {readdir} from 'node:fs/promises';
-import {join} from 'node:path';
+import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+import {loadPreferences} from '@/config/preferences';
 import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -38,18 +39,31 @@ export function loadPlugins(trusted: boolean): Promise<void> {
 	return loading;
 }
 
+/** ACP has no trust prompt. Load only when this project was trusted before. */
+export function loadTrustedProjectPlugins(): Promise<void> {
+	const root = path.resolve(getProjectRoot());
+	let trusted = false;
+	try {
+		const listed = loadPreferences().trustedDirectories ?? [];
+		trusted = listed.some(dir => path.resolve(dir) === root);
+	} catch (error) {
+		logError(`Could not read directory trust: ${errorMessage(error)}`);
+	}
+	return loadPlugins(trusted);
+}
+
 export function resetPluginsForTests(): void {
 	plugins = [];
 	loading = null;
 }
 
 async function importPlugins(): Promise<void> {
-	const dir = join(getProjectRoot(), '.nanocoder', 'plugins');
+	const dir = path.join(getProjectRoot(), '.nanocoder', 'plugins');
 	let files: string[];
 	try {
 		const entries = await readdir(dir, {withFileTypes: true});
 		files = entries
-			.filter(entry => entry.isFile() && /\.m?js$/.test(entry.name))
+			.filter(entry => entry.isFile() && entry.name.endsWith('.mjs'))
 			.map(entry => entry.name)
 			.sort();
 	} catch (error) {
@@ -62,7 +76,7 @@ async function importPlugins(): Promise<void> {
 	for (const file of files) {
 		let exported: unknown;
 		try {
-			const mod = (await import(pathToFileURL(join(dir, file)).href)) as {
+			const mod = (await import(pathToFileURL(path.join(dir, file)).href)) as {
 				default?: unknown;
 			};
 			exported = mod.default;
@@ -112,6 +126,12 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function logBadReturn(plugin: NanocoderPlugin, event: string): void {
+	logError(
+		`Plugin "${plugin.name}" (${event}) returned an unexpected value, skipping.`,
+	);
+}
+
 async function invoke(
 	plugin: NanocoderPlugin,
 	event: PluginEvent,
@@ -133,7 +153,7 @@ async function invoke(
 		]);
 	} catch (error) {
 		logError(
-			`Plugin "${plugin.name}" (${event}) ${errorMessage(error)} — skipping.`,
+			`Plugin "${plugin.name}" (${event}) ${errorMessage(error)}, skipping.`,
 		);
 		return FAILED;
 	} finally {
@@ -178,24 +198,35 @@ export async function runPluginHooks(
 			buildPluginContext(pluginEvent, context),
 		);
 
+		if (result === FAILED || result == null) continue;
+
 		if (pluginEvent === 'tool.execute.before') {
 			const block = isPlainObject(result) ? result.block : undefined;
-			if (typeof block === 'string' && block.trim() !== '') {
-				return {
-					blocked: true,
-					reason: `Blocked by plugin "${plugin.name}": ${block}`,
-					output: collected.join('\n'),
-				};
+			if (typeof block !== 'string') {
+				logBadReturn(plugin, pluginEvent);
+				continue;
 			}
-		} else if (pluginEvent === 'tool.execute.after') {
+			const reason = block.trim();
+			if (reason === '') continue;
+			return {
+				blocked: true,
+				reason: `Blocked by plugin "${plugin.name}": ${reason}`,
+				output: collected.join('\n'),
+			};
+		}
+		if (pluginEvent === 'tool.execute.after') {
 			const append = isPlainObject(result) ? result.append : undefined;
-			if (typeof append === 'string' && append.trim()) {
-				collected.push(append.trim());
+			if (typeof append !== 'string') {
+				logBadReturn(plugin, pluginEvent);
+				continue;
 			}
+			if (append.trim()) collected.push(append.trim());
 		} else if (pluginEvent === 'tui.prompt.append') {
-			if (typeof result === 'string' && result.trim()) {
-				collected.push(result.trim());
+			if (typeof result !== 'string') {
+				logBadReturn(plugin, pluginEvent);
+				continue;
 			}
+			if (result.trim()) collected.push(result.trim());
 		}
 	}
 
@@ -225,7 +256,7 @@ export async function consultPluginPermission(
 		}
 		if (!isPlainObject(vote) || vote.decision !== 'defer') {
 			logError(
-				`Plugin "${plugin.name}" (permission.asked) returned an invalid vote — treating as defer.`,
+				`Plugin "${plugin.name}" (permission.asked) returned an invalid vote, treating as defer.`,
 			);
 		}
 	}
