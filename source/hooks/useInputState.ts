@@ -37,6 +37,70 @@ function createEmptyInputState(): InputState {
 	};
 }
 
+// Length of the common prefix of `a` and `b`, and of the common suffix that
+// does not overlap it: together they locate the one region `a` -> `b` changed.
+function diffBounds(a: string, b: string): {start: number; suffix: number} {
+	let start = 0;
+	const max = Math.min(a.length, b.length);
+	while (start < max && a[start] === b[start]) start++;
+	let suffix = 0;
+	while (
+		suffix < max - start &&
+		a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+	) {
+		suffix++;
+	}
+	return {start, suffix};
+}
+
+/**
+ * TextInput builds each value it reports from the value it last rendered
+ * (plus its own edits since). When something changes the input out of band
+ * before the next render - a bracketed paste, an undo - that report is based
+ * on a stale value, and committing it as-is erases the change. Replay the
+ * edit TextInput made (`base` -> `edited`) onto `latest` instead, for
+ * insertions and deletions alike.
+ *
+ * An edit at the exact spot the out-of-band change inserted text goes after
+ * it: that is where the cursor sits once the paste is shown.
+ */
+export function reconcileStaleEdit(
+	base: string,
+	edited: string,
+	latest: string,
+): string {
+	if (base === latest) return edited;
+
+	const edit = diffBounds(base, edited);
+	const editEnd = base.length - edit.suffix;
+	const inserted = edited.slice(edit.start, edited.length - edit.suffix);
+
+	// Where base -> latest changed: base[changeStart, changeEnd) became
+	// latest[changeStart, latestChangeEnd).
+	const change = diffBounds(base, latest);
+	const changeStart = change.start;
+	const changeEnd = base.length - change.suffix;
+	const latestChangeEnd = latest.length - change.suffix;
+
+	// Map a base offset into latest. `after` decides which side of the
+	// out-of-band change an offset right at it lands on.
+	const map = (offset: number, after: boolean): number => {
+		if (offset < changeStart) return offset;
+		if (offset > changeEnd) return offset + latestChangeEnd - changeEnd;
+		if (changeStart === changeEnd) {
+			return after ? latestChangeEnd : changeStart;
+		}
+		if (offset === changeStart) return changeStart;
+		// At or inside a region the out-of-band change replaced: whatever the
+		// edit touched there is gone, so land at its end.
+		return latestChangeEnd;
+	};
+
+	const start = map(edit.start, true);
+	const end = Math.max(start, map(editEnd, false));
+	return latest.slice(0, start) + inserted + latest.slice(end);
+}
+
 export function useInputState() {
 	// Core state following the spec
 	const [currentState, setCurrentState] = useState<InputState>(
@@ -53,6 +117,13 @@ export function useInputState() {
 	const currentStateRef = useRef(currentState);
 	const undoStackRef = useRef(undoStack);
 	const redoStackRef = useRef(redoStack);
+
+	// The value TextInput builds its next report from: what it was last
+	// rendered with, then each value it has reported since. Written during
+	// render, the same way TextInput tracks it, so updateInput can tell when
+	// that report is based on a value the input no longer holds.
+	const textInputValueRef = useRef(currentState.displayValue);
+	textInputValueRef.current = currentState.displayValue;
 
 	// Legacy compatibility - these are derived from currentState
 	const [historyIndex, setHistoryIndex] = useState(-1);
@@ -119,8 +190,16 @@ export function useInputState() {
 	// than the closure value so that a burst of updateInput calls within one
 	// stdin batch each see the newest committed state (undo/redo fix #4).
 	const updateInput = useCallback(
-		(newInput: string) => {
+		(reportedInput: string) => {
 			const currentState = currentStateRef.current;
+			// TextInput's report may be built on a value that a paste (or undo)
+			// has since replaced; carry its edit over to the current value.
+			const newInput = reconcileStaleEdit(
+				textInputValueRef.current,
+				reportedInput,
+				currentState.displayValue,
+			);
+			textInputValueRef.current = reportedInput;
 
 			// First, check for atomic deletion (placeholder removal)
 			const atomicDeletionResult = handleAtomicDeletion(currentState, newInput);
@@ -333,6 +412,9 @@ export function useInputState() {
 				return;
 			}
 
+			// The ref, not the render-time state: a paste can land in the same
+			// stdin batch as keys typed just before it.
+			const currentState = currentStateRef.current;
 			const pasteResult = handlePaste(
 				pastedText,
 				currentState.displayValue,
@@ -355,7 +437,7 @@ export function useInputState() {
 			});
 			pasteDetectorRef.current.updateState(newDisplayValue);
 		},
-		[currentState, pushToUndoStack],
+		[pushToUndoStack],
 	);
 
 	// Undo function (Ctrl+_).
@@ -464,7 +546,13 @@ export function useInputState() {
 			debounceTimerRef.current = null;
 		}
 
-		setCurrentState(createEmptyInputState());
+		// Keep the refs in step, so a key typed before the next render builds
+		// on the empty input rather than on what was just submitted.
+		const emptyState = createEmptyInputState();
+		currentStateRef.current = emptyState;
+		undoStackRef.current = [];
+		redoStackRef.current = [];
+		setCurrentState(emptyState);
 		setUndoStack([]);
 		setRedoStack([]);
 		setHasLargeContent(false);
@@ -516,6 +604,9 @@ export function useInputState() {
 		() => ({
 			// New spec-compliant interface
 			currentState,
+			// Latest state, ahead of a re-render - for reads that can run in the
+			// same stdin batch as the edit that changed it (Enter after a paste).
+			currentStateRef,
 			undoStack,
 			redoStack,
 			undo,

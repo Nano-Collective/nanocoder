@@ -1352,3 +1352,99 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	unmount();
 });
 
+
+// A paste lands out of band, while TextInput still holds the value it last
+// rendered. Keys that arrive before the re-render must build on the paste,
+// not on that stale value. No awaits between the paste and the keys: that
+// gap is the race.
+const PASTE = 'line one\nline two\nline three';
+
+test.serial(
+	'UserInput keeps a paste placeholder when typing lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]x/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput keeps a paste and key order when several keys land immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+		stdin.write('y');
+		stdin.write('z');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: \d+ chars\]xyz/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput keeps a paste placeholder when Backspace lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		pasteEvents.emit('paste', PASTE);
+		// TextInput's cursor was still after "abc", so the Backspace removes
+		// the "c" and the placeholder stays whole.
+		stdin.write('\u007F');
+
+		await waitForFrame(lastFrame, /ab\[Paste #\d+: \d+ chars\]/);
+		t.notRegex(lastFrame()!, /abc\[Paste/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput submits a paste when Enter lands immediately after it',
+	async t => {
+		let submittedDisplay: string | undefined;
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={(_message, display) => {
+						submittedDisplay = display;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('\r');
+
+		await waitForCondition(() => submittedDisplay !== undefined);
+		t.regex(submittedDisplay!, /\[Paste #\d+: \d+ chars\]/);
+		t.notRegex(lastFrame()!, /\[Paste #/);
+		unmount();
+	},
+);
