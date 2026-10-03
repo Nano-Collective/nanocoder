@@ -2,6 +2,7 @@ import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
+import {shouldOfferInputClear} from '@/components/composer-clear';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {type TextInputHandle} from '@/components/text-input';
@@ -722,12 +723,16 @@ export default function UserInput({
 			return;
 		}
 		if (showClearMessage) {
+			if (!shouldOfferInputClear(input, attachments.length)) {
+				setShowClearMessage(false);
+				return;
+			}
 			resetInput();
 			resetUIState();
 			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
-		} else {
+		} else if (shouldOfferInputClear(input, attachments.length)) {
 			setShowClearMessage(true);
 		}
 	}, [
@@ -737,6 +742,7 @@ export default function UserInput({
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
+		attachments,
 		setShowCompletions,
 		setSelectedCompletionIndex,
 		resetInput,
