@@ -15,6 +15,7 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -891,11 +892,14 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
-				toolName,
-				parsedArgs,
-				truncateToolResult(content),
-			);
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const formatted =
+				typeof result !== 'string' && result.isError
+					? truncated
+					: await formatWrittenFile(toolName, parsedArgs, truncated);
+			return appendPostToolUseOutput(toolName, parsedArgs, formatted);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use

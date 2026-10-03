@@ -1,4 +1,5 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -98,10 +99,17 @@ export async function processToolUse(
 		const isStructured =
 			result && typeof result === 'object' && 'llmContent' in result;
 		const rawContent = isStructured ? result.llmContent : result;
-		const content =
+		const truncated =
 			typeof rawContent === 'string'
 				? truncateToolResult(rawContent)
 				: (rawContent as string);
+		const failed = isStructured && result.isError;
+		// Formatters run on a successful write only, and before post-tool-use
+		// so its hooks see the formatted file.
+		const content =
+			typeof truncated === 'string' && !failed
+				? await formatWrittenFile(toolCall.function.name, parsedArgs, truncated)
+				: truncated;
 
 		return {
 			tool_call_id: toolCall.id,
@@ -122,7 +130,7 @@ export async function processToolUse(
 				: {}),
 			// A handler can report failure without throwing (a non-zero shell exit
 			// returns normally); surface it so --json and ACP see a failed call.
-			...(isStructured && result.isError ? {isError: true} : {}),
+			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the

@@ -31,6 +31,7 @@ import type {
 	CompressionMode,
 	CompressionStrategy,
 	DevelopmentMode,
+	FormatterDefinition,
 	HookDefinition,
 	HookEvent,
 	HooksConfig,
@@ -633,6 +634,63 @@ function loadHooksConfig(): HooksConfig | undefined {
 	);
 }
 
+/**
+ * Parse one formatter entry. Like hooks, an invalid entry is dropped with an
+ * error rather than failing the whole config.
+ */
+function parseFormatterDefinition(raw: unknown): FormatterDefinition | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+	const entry = raw as Record<string, unknown>;
+	const command = entry.command;
+	if (typeof command !== 'string' || command.trim() === '') return null;
+
+	const rawMatch =
+		typeof entry.match === 'string' ? [entry.match] : entry.match;
+	const match = Array.isArray(rawMatch)
+		? rawMatch.filter(
+				(item: unknown): item is string =>
+					typeof item === 'string' && item.trim() !== '',
+			)
+		: [];
+	// Unlike a hook, a formatter with no `match` is not widened to every file:
+	// running `prettier --write` on a Go file is never what was meant.
+	if (match.length === 0) return null;
+
+	const definition: FormatterDefinition = {match, command};
+	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
+		definition.timeout = Math.max(1, Math.round(entry.timeout));
+	}
+	if (typeof entry.name === 'string' && entry.name.trim() !== '') {
+		definition.name = entry.name.trim();
+	}
+	return definition;
+}
+
+function loadFormattersConfig(): FormatterDefinition[] | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'formatters', config => {
+			const formatters = config.nanocoder?.formatters;
+			if (!Array.isArray(formatters)) return null;
+
+			const parsed = formatters
+				.map(parseFormatterDefinition)
+				.filter(
+					(formatter): formatter is FormatterDefinition => formatter !== null,
+				);
+			if (parsed.length !== formatters.length) {
+				logError(
+					"Invalid formatters config: entries need a 'command' string and a non-empty 'match' glob list.",
+				);
+			}
+
+			// No env substitution, for the same reason as hooks: `$FILE` must
+			// reach the shell rather than being expanded at config-load time.
+			return parsed.length > 0 ? parsed : null;
+		}) ?? undefined
+	);
+}
+
 function loadModeProvidersConfig(
 	providers: ProviderConfig[],
 ): Partial<Record<DevelopmentMode, ModeProviderConfig>> | undefined {
@@ -768,6 +826,9 @@ function loadAppConfig(): AppConfig {
 	// Load lifecycle hooks (shell commands run at fixed points in the agent loop)
 	const hooks = loadHooksConfig();
 
+	// Load formatters (run on files the agent writes, before post-tool-use)
+	const formatters = loadFormattersConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
@@ -795,6 +856,7 @@ function loadAppConfig(): AppConfig {
 		disabledTools,
 		systemPrompt,
 		hooks,
+		formatters,
 		notifications,
 		modeProviders,
 		tune,

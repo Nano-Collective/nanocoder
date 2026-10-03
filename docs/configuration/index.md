@@ -425,6 +425,27 @@ Each entry takes `command` (required), plus optional `matchTools` (tool names th
 
 Hooks are project-local shell commands, so they carry the same code-execution weight as project MCP servers in `.mcp.json` and are gated by the same directory-trust prompt. See [Lifecycle Hooks](../features/hooks.md) for the full event list, environment contract, and blocking semantics.
 
+### Formatters
+
+Run a code formatter on every file the agent writes, so its diffs come out in your project's style instead of the model's:
+
+```json
+{
+  "nanocoder": {
+    "formatters": [
+      {"match": ["**/*.{ts,tsx,js,json}"], "command": "npx biome format --write \"$FILE\""},
+      {"match": "**/*.go", "command": "gofmt -w \"$FILE\"", "name": "gofmt"}
+    ]
+  }
+}
+```
+
+Each entry takes `match` (required; globs relative to the project root, same dialect as hook `matchPaths`; a single string is accepted), `command` (required), plus optional `timeout` (ms, default 30000) and `name` (label used in messages and `/doctor`). `/doctor` lists every formatter that loaded, so you can check your config was picked up. The written file's absolute path is in `$FILE` (also `$NANOCODER_FILE`); quote it, and the command runs from the project root.
+
+Formatters run after a successful `write_file`, `string_replace` or `diff_edit` (in the main agent and in subagents), in config order, and before any `post-tool-use` hooks, so a hook that commits or lints sees the formatted file. If a formatter changes the file, the tool result tells the model to re-read it before its next edit. A formatter that fails or times out is logged and the edit stays as written. Files outside the project root are never formatted.
+
+Formatters are project-local shell commands, so like hooks they are gated by the directory-trust prompt. Like other `nanocoder.*` blocks, a project `formatters` list replaces the global one rather than merging with it.
+
 ### Custom System Prompt
 
 Override or extend the built-in system prompt with your own. Useful when running small or context-constrained models where the default prompt consumes too many tokens, or when you want to specialize Nanocoder for a non-coding workflow.
@@ -535,5 +556,6 @@ Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings i
 - [Preferences](preferences.md) - User preferences and application data
 - [Logging](logging.md) - Structured logging with Pino
 - [Lifecycle Hooks](../features/hooks.md) - Shell commands run at fixed points in the agent loop
+- [Formatters](#formatters) - Format every file the agent writes
 
 See also [Inspecting the Effective Configuration](#inspecting-the-effective-configuration) for debugging which layer supplied a value.
