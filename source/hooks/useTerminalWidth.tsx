@@ -4,7 +4,7 @@ import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
 type TerminalSize = 'narrow' | 'normal' | 'wide';
 
 // Calculate box width (leave some padding and ensure minimum width)
-const calculateBoxWidth = (columns: number) =>
+export const calculateBoxWidth = (columns: number) =>
 	Math.max(Math.min(columns - 4, DEFAULT_TERMINAL_WIDTH), 40);
 
 const computeWidth = () =>

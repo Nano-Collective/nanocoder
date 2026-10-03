@@ -75,6 +75,50 @@ test('/expand truncates over-long arguments', async t => {
 	t.false(output.includes(longPath));
 });
 
+test.serial('/expand pads the id column so tool names stay aligned', async t => {
+	// Ids are global and never reset, so advance to a digit boundary (9 -> 10,
+	// 99 -> 100) and list one result on each side of it.
+	let id = record('read_file', {path: 'warmup.ts'}, 'x') ?? 0;
+	while (String(id + 2).length === String(id + 1).length) {
+		id = record('read_file', {path: 'warmup.ts'}, 'x') ?? 0;
+	}
+	clearExpandableToolResults();
+	const shortId = record('read_file', {path: 'short.ts'}, 'x');
+	const longId = record('read_file', {path: 'long.ts'}, 'x');
+	t.true(String(longId).length > String(shortId).length);
+
+	const lines = (await runExpand([])).split('\n');
+	const shortRow = lines.find(line => line.includes('short.ts')) ?? '';
+	const longRow = lines.find(line => line.includes('long.ts')) ?? '';
+
+	t.true(shortRow.includes(` ${shortId}  read_file`));
+	t.is(shortRow.indexOf('read_file'), longRow.indexOf('read_file'));
+});
+
+function summaryAtColumns(columns: number, longPath: string): Promise<string> {
+	const original = process.stdout.columns;
+	process.stdout.columns = columns;
+	return runExpand([]).finally(() => {
+		process.stdout.columns = original;
+	});
+}
+
+test.serial('/expand cuts the argument to the terminal width', async t => {
+	const longPath = `src/${'deep/'.repeat(40)}file.ts`;
+	const id = record('read_file', {path: longPath}, 'contents');
+
+	const narrow = await summaryAtColumns(60, longPath);
+	const wide = await summaryAtColumns(160, longPath);
+
+	// 60 columns: box 56, text 50. The row prefix "  <id>  read_file" and the
+	// space before the argument leave 50 - 13 - idLength - 1 characters.
+	const room = 50 - 13 - String(id).length - 1;
+	t.true(narrow.includes(`read_file ${longPath.slice(0, room - 1)}…`));
+	t.false(narrow.includes(longPath.slice(0, room)));
+	// A wider terminal shows more of the same argument.
+	t.true(wide.includes(longPath.slice(0, room + 20)));
+});
+
 test('/expand <n> prints the whole result past the line cap', async t => {
 	const content = Array.from({length: 30}, (_, i) => `line ${i + 1}`).join(
 		'\n',
