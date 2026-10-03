@@ -93,6 +93,9 @@ jobs:
             for (const pr of prs) {
               const n = pr.number;
               if (pr.draft) { core.info(`#${n}: draft, skipping`); continue; }
+              // nc-review comments on every PR it opens on, so without this
+              // Dependabot updates would be nudged and then closed.
+              if (pr.user?.type === 'Bot') { core.info(`#${n}: bot author, skipping`); continue; }
 
               const labels = new Set(pr.labels.map((l) => l.name));
               if (labels.has(OPT_OUT_LABEL)) {
