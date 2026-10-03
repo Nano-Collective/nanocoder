@@ -68,6 +68,23 @@ test('truncateMiddle does not cut an emoji in half', t => {
 	);
 });
 
+test('truncateMiddle keeps multi-code-point emoji whole', t => {
+	// ❤️ is a heart plus a variation selector, and a family emoji is several
+	// people joined by ZWJ. Slicing between their code points mismeasures the
+	// row and leaves orphaned selectors or joiners on either side of the
+	// ellipsis.
+	for (const glyph of ['❤️', '👨‍👩‍👧']) {
+		const result = truncateMiddle(glyph.repeat(12), 11);
+		t.true(
+			stringWidth(result) <= 11,
+			`${glyph} result occupies ${stringWidth(result)} columns, budget was 11`,
+		);
+		const [head, tail] = result.split('...');
+		t.is(head.replaceAll(glyph, ''), '', `${glyph} head is whole glyphs`);
+		t.is(tail.replaceAll(glyph, ''), '', `${glyph} tail is whole glyphs`);
+	}
+});
+
 test('truncateMiddle leaves short strings untouched', t => {
 	t.is(truncateMiddle('/short/path', 40), '/short/path');
 });

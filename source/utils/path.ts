@@ -21,14 +21,21 @@ export function homeRelative(path: string, home: string = homedir()): string {
 	return resolved;
 }
 
+const graphemeSegmenter = new Intl.Segmenter();
+
 /**
  * Leading (or, from the end, trailing) characters of `str` that together
  * occupy at most `width` terminal columns. Code units are the wrong unit
- * here: one CJK character or emoji is a single unit but two columns.
+ * here: one CJK character or emoji is a single unit but two columns. Code
+ * points are wrong too: ❤️ and ZWJ emoji are several code points drawn as one
+ * glyph, so the slice walks graphemes.
  */
 function sliceToWidth(str: string, width: number, fromEnd = false): string {
 	if (width <= 0) return '';
-	const characters = [...str];
+	const characters = Array.from(
+		graphemeSegmenter.segment(str),
+		({segment}) => segment,
+	);
 	if (fromEnd) characters.reverse();
 
 	const kept: string[] = [];
