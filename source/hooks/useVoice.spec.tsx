@@ -722,6 +722,89 @@ test.serial('filters [BLANK_AUDIO] markers and does not submit to chat', async t
 	unmount();
 });
 
+test.serial('returns to idle when the TTS handoff watchdog expires', async t => {
+	const triggerRef = {current: null as (() => void) | null};
+	const stateRef = {current: null as VoiceState | null};
+	let watchdog: (() => void) | undefined;
+	const originalSetTimeout = global.setTimeout;
+
+	global.setTimeout = ((callback: any, delay: any, ...args: any[]) => {
+		if (delay === 90_000) {
+			watchdog = callback;
+			return 0 as any;
+		}
+		return originalSetTimeout(callback, delay, ...args);
+	}) as any;
+
+	try {
+		const {unmount} = render(
+			<VoiceHarness
+				handleUserSubmit={async () => {}}
+				messages={[]}
+				addToChatQueue={() => {}}
+				loadPlugin={async () =>
+					makeMockPlugin({
+						transcribeAudio: async () => 'voice prompt',
+					})}
+				triggerRef={triggerRef}
+				stateRef={stateRef}
+			/>,
+		);
+
+		await flush(100);
+		triggerRef.current?.();
+		await flush(100);
+		triggerRef.current?.();
+		await flush(100);
+
+		t.is(stateRef.current, 'processing');
+		t.truthy(watchdog, 'recording completion must arm the TTS handoff watchdog');
+		watchdog?.();
+		await flush();
+
+		t.is(stateRef.current, 'idle');
+		unmount();
+	} finally {
+		global.setTimeout = originalSetTimeout;
+	}
+});
+
+test.serial('reports non-abort recording pipeline failures and resets state', async t => {
+	const triggerRef = {current: null as (() => void) | null};
+	const stateRef = {current: null as VoiceState | null};
+	const queue: React.ReactNode[] = [];
+
+	const {unmount} = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={component => queue.push(component)}
+			loadPlugin={async () =>
+				makeMockPlugin({
+					transcribeAudio: async () => {
+						throw new Error('transcription service unavailable');
+					},
+				})}
+			triggerRef={triggerRef}
+			stateRef={stateRef}
+		/>,
+	);
+
+	await flush(100);
+	triggerRef.current?.();
+	await flush(100);
+	triggerRef.current?.();
+	await flush(100);
+
+	t.is(stateRef.current, 'idle');
+	t.is(queue.length, 1);
+	t.is(
+		(queue[0] as React.ReactElement<{message: string}>).props.message,
+		'Voice pipeline error: transcription service unavailable',
+	);
+	unmount();
+});
+
 test.serial('PR6 - Zero Settings Preservation: local-first default untouched', async t => {
 	let localSTTCalled = false;
 	let localTTSCalled = false;
