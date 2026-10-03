@@ -46,6 +46,10 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Run in non-interactive mode',
 	},
 	{
+		name: 'storage',
+		description: 'Inspect storage (read-only; --format json for scripts)',
+	},
+	{
 		name: 'daemon',
 		description: 'Manage the per-project skill daemon',
 		children: ['start', 'stop', 'status', 'logs', 'install', 'uninstall'],
@@ -97,7 +101,10 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		name: 'mode',
 		takesValue: true,
 		valueName: 'mode',
-		values: ['normal', 'auto-accept', 'yolo', 'plan'],
+		// Keep in step with VALID_MODES in @/app/types. Imported types cannot
+		// reach this spec (it is consumed by the completion generators), so a
+		// new mode has to be added here by hand or it never tab-completes.
+		values: ['normal', 'auto-accept', 'yolo', 'plan', 'architect'],
 		description: 'Start in a specific development mode',
 	},
 	{

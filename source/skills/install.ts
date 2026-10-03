@@ -73,6 +73,63 @@ const GITHUB_SHORTHAND_REGEX = /^[\w.-]+\/[\w.-]+$/;
 
 const CLONE_TIMEOUT_MS = 60_000;
 
+/**
+ * Transports git will accept for a skill repository.
+ *
+ * `git clone -- <repo>` stops git reading a leading dash as a flag, but it
+ * does NOT stop git's remote helpers: `ext::<command>` is a URL, not an
+ * option, and it makes git run that command through a shell. Modern git
+ * defaults `protocol.ext.allow` to `never`, so today that is blocked by
+ * git rather than by us - which is the wrong place for a property this code
+ * claims to own, and it is one `git config` away from being untrue on any
+ * given machine. Enumerate what a skill repo may be instead.
+ */
+const ALLOWED_REPO_SCHEME_REGEX = /^(?:https?|ssh|git|file):\/\//i;
+/** `git@host:owner/repo.git`, the scp-style address git also accepts. */
+const SCP_STYLE_REPO_REGEX = /^[\w.-]+@[\w.-]+:[^\s]+$/;
+
+/**
+ * Reject a repository location that is neither a known-safe transport nor a
+ * plain filesystem path. Applied to the index's `repo` field as well as the
+ * user's own argument, because an index entry is remote JSON: the default
+ * index lives in a git repo, `NANOCODER_SKILLS_INDEX` can point anywhere,
+ * and a clone happens *before* the trust prompt the rest of this flow is
+ * built around.
+ */
+function validateRepoLocation(repo: string): string | null {
+	const value = repo.trim();
+	if (!value) return 'Repository location is empty.';
+	if (value.startsWith('-')) {
+		return `Refusing to clone "${repo}": a repository location cannot start with "-".`;
+	}
+	if (ALLOWED_REPO_SCHEME_REGEX.test(value)) return null;
+	if (SCP_STYLE_REPO_REGEX.test(value)) return null;
+	// A plain filesystem path (absolute, or explicitly relative) is the
+	// "authoring a bundle locally" case the docs promise.
+	if (isAbsolute(value) || /^\.\.?[/\\]/.test(value)) return null;
+	if (value.includes('::')) {
+		return `Refusing to clone "${repo}": git remote-helper transports (name::address) are not allowed for skills.`;
+	}
+	return `Refusing to clone "${repo}": expected an https/ssh/git/file URL, a git@host:owner/repo address, or a local path.`;
+}
+
+/**
+ * Reject a ref that git would parse as an option.
+ *
+ * `git fetch origin <ref>` takes the ref as a positional, and git's option
+ * parser does not stop at the first positional - so a ref of
+ * `--upload-pack=<command>` runs that command. Both callers below now pass
+ * `--` as well; this is the belt to that braces, and it produces an error
+ * naming the real problem instead of git's "invalid refspec".
+ */
+function validateRef(ref: string): string | null {
+	if (!ref.trim()) return 'Ref is empty.';
+	if (ref.startsWith('-')) {
+		return `Refusing to use ref "${ref}": a ref cannot start with "-".`;
+	}
+	return null;
+}
+
 /** One entry in the `skills.json` index. */
 export interface SkillIndexEntry {
 	name: string;
@@ -329,15 +386,22 @@ async function cloneAtRef(
 			timeout: CLONE_TIMEOUT_MS,
 		});
 		try {
-			await execFileAsync('git', ['fetch', '--depth', '1', 'origin', ref], {
-				cwd: destDir,
-				timeout: CLONE_TIMEOUT_MS,
-				env: GIT_ENV,
-			});
+			// `--` matters here: unlike `--branch <ref>` above, the ref is a
+			// positional, and git keeps parsing options after positionals - so
+			// without it a ref of `--upload-pack=<command>` runs that command.
+			await execFileAsync(
+				'git',
+				['fetch', '--depth', '1', 'origin', '--', ref],
+				{
+					cwd: destDir,
+					timeout: CLONE_TIMEOUT_MS,
+					env: GIT_ENV,
+				},
+			);
 		} catch {
 			// Some servers refuse a shallow fetch of an arbitrary commit; a full
 			// fetch is the last resort.
-			await execFileAsync('git', ['fetch', 'origin', ref], {
+			await execFileAsync('git', ['fetch', 'origin', '--', ref], {
 				cwd: destDir,
 				timeout: CLONE_TIMEOUT_MS,
 				env: GIT_ENV,
@@ -361,6 +425,16 @@ async function cloneRepo(
 	spec: InstallSpec,
 	destDir: string,
 ): Promise<CloneResult> {
+	// Validate at the boundary rather than at each call site, so every path
+	// into a `git` invocation - user argument, index entry, `--ref` - is
+	// covered by one check that runs before the clone.
+	const repoError = validateRepoLocation(spec.repo);
+	if (repoError) return {ok: false, error: repoError};
+	if (spec.ref !== undefined) {
+		const refError = validateRef(spec.ref);
+		if (refError) return {ok: false, error: refError};
+	}
+
 	return spec.ref
 		? cloneAtRef(spec.repo, spec.ref, destDir)
 		: simpleClone(spec.repo, destDir);

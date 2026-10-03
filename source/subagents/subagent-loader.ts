@@ -3,14 +3,14 @@
  *
  * Handles loading and discovery of subagent definitions from various sources:
  * - Built-in definitions (explore, plan)
- * - User-level configuration (~/.config/nanocoder/agents/)
+ * - User-level configuration (<config dir>/agents/, see getConfigPath)
  * - Project-level configuration (.nanocoder/agents/)
  */
 
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {getConfigPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logWarning} from '@/utils/message-queue';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
@@ -197,28 +197,9 @@ export class SubagentLoader {
 	 * Get the user-level agents directory path.
 	 */
 	private getUserAgentsPath(): string {
-		const platform = process.platform;
-
-		if (platform === 'darwin') {
-			// macOS: ~/Library/Preferences/nanocoder/agents/
-			return path.join(
-				os.homedir(),
-				'Library',
-				'Preferences',
-				'nanocoder',
-				'agents',
-			);
-		}
-		if (platform === 'win32') {
-			// Windows: %APPDATA%/nanocoder/agents/
-			return path.join(
-				process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-				'nanocoder',
-				'agents',
-			);
-		}
-		// Linux and others: ~/.config/nanocoder/agents/
-		return path.join(os.homedir(), '.config', 'nanocoder', 'agents');
+		// Same base as personal commands, tools and bundles, so
+		// NANOCODER_CONFIG_DIR and XDG_CONFIG_HOME are honoured here too.
+		return path.join(getConfigPath(), 'agents');
 	}
 
 	/**

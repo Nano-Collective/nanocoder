@@ -102,7 +102,7 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 	// A keypress reaches Ink through stdin, so the re-render lands on a later
 	// tick that a fixed sleep cannot bound - on a loaded CI runner the second
 	// arrow press was still unrendered after 20ms. Poll for the frame instead.
-	const waitFor = async (condition: () => boolean, timeoutMs = 2000) => {
+	const waitFor = async (condition: () => boolean, timeoutMs = 5000) => {
 		const startedAt = Date.now();
 		while (Date.now() - startedAt < timeoutMs) {
 			if (condition()) return;
@@ -113,17 +113,27 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 	const frameMatches = (pattern: RegExp) => () =>
 		pattern.test(stripAnsi(lastFrame() ?? ''));
 
+	await new Promise(resolve => setTimeout(resolve, 100)); // Allow Ink to attach input listener
 	stdin.write('\u001B[C');
 	await waitFor(frameMatches(/\[3m\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[3m\]/);
 
+	// Two presses in one tick. Ink re-registers the input handler in a passive
+	// effect that runs after the frame is painted, so the second press is still
+	// dispatched with the previous render's range - stepping from that captured
+	// value lands on 3m again and wedges the tabs there.
 	stdin.write('\u001B[C');
+	stdin.write('\u001B[C');
+	await waitFor(frameMatches(/\[7d\]/));
+	t.regex(stripAnsi(lastFrame() ?? ''), /\[7d\]/);
+
+	stdin.write('\u001B[D');
 	await waitFor(frameMatches(/\[all-time\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[all-time\]/);
 
 	let closed = 0;
 	unmount();
-	renderWithTheme(
+	const nextTest = renderWithTheme(
 		<StatsDisplay
 			ledger={ledger}
 			initialRange="7d"
@@ -132,7 +142,9 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 				closed++;
 			}}
 		/>,
-	).stdin.write('\u001B');
+	);
+	await new Promise(resolve => setTimeout(resolve, 100)); // Allow Ink to attach input listener
+	nextTest.stdin.write('\u001B');
 	await waitFor(() => closed === 1);
 	t.is(closed, 1);
 });

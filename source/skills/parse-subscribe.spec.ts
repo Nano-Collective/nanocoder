@@ -91,6 +91,16 @@ test('rejects schedule.cron without cron', t => {
 	});
 });
 
+test('rejects schedule.cron with an invalid cron expression', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'schedule.cron', cron: 'not a cron'}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /is not a valid cron expression/,
+		},
+	);
+});
+
 test('rejects confirm that is not a boolean', t => {
 	t.throws(
 		() =>

@@ -1101,3 +1101,42 @@ test('write_file formatter: caps a long diff at 20 lines', async t => {
 	t.notRegex(output, /new 30/);
 });
 
+test('write_file formatter: renders description when provided', async t => {
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: 'config.json',
+		content: '{\n  "version": 1\n}',
+		description: 'Create initial configuration file.',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.regex(output, /Description:/);
+	t.regex(output, /Create initial configuration file\./);
+	t.regex(output, /Path:\s*config\.json/);
+});
+
+test('write_file formatter: does not render description when omitted', async t => {
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await writeFileTool.formatter({
+		path: 'config.json',
+		content: '{\n  "version": 1\n}',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = stripAnsi(lastFrame()!);
+
+	t.notRegex(output, /Description:/);
+	t.regex(output, /Path:\s*config\.json/);
+});
+
+

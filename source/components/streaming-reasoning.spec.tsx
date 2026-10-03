@@ -125,6 +125,69 @@ test('StreamingReasoning renders without crashing with empty message', t => {
 	t.regex(output!, /Thinking/);
 });
 
+const buildLines = (count: number) =>
+	Array.from(
+		{length: count},
+		(_, i) => `line-${String(i).padStart(6, '0')} ${'token '.repeat(8)}`,
+	).join('\n');
+
+test('StreamingReasoning strips leading newlines', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<StreamingReasoning reasoning={'\n\n\nHello world'} expand={true} />
+		</MockThemeProvider>,
+	);
+
+	const lines = stripAnsi(lastFrame() ?? '')
+		.split('\n')
+		.map(line => line.trimEnd());
+	t.regex(lines[0], /Thinking/);
+	t.is(lines[1], 'Hello world', 'blank lines must not pad the trace');
+});
+
+test('StreamingReasoning shows only the tail of a huge stream across flushes', t => {
+	// The reasoning string grows for the whole stream, so each flush must stay
+	// bounded to a tail instead of re-wrapping everything accumulated so far.
+	const reasoning = buildLines(5000);
+	t.true(reasoning.length > 100_000);
+
+	const {lastFrame, rerender} = render(
+		<MockThemeProvider>
+			<StreamingReasoning reasoning={reasoning} expand={true} />
+		</MockThemeProvider>,
+	);
+
+	let current = reasoning;
+	for (let i = 0; i < 20; i++) {
+		current += `\nappended-${i} ${'token '.repeat(20)}`;
+		rerender(
+			<MockThemeProvider>
+				<StreamingReasoning reasoning={current} expand={true} />
+			</MockThemeProvider>,
+		);
+	}
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('appended-19'));
+	t.false(output.includes('line-000000'));
+	t.true(output.includes('…'));
+});
+
+test('StreamingReasoning collapsed renders the header only for a huge stream', t => {
+	// Collapsed is the default, so this path runs for most of a stream and must
+	// render nothing from the trace itself.
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<StreamingReasoning reasoning={buildLines(5000)} expand={false} />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /Thinking/);
+	t.false(output.includes('line-004999'));
+	t.notRegex(output, /~[\nd,]+ tokens/);
+});
+
 test.afterEach(() => {
 	cleanup();
 });

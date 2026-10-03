@@ -12,7 +12,11 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -23,6 +27,7 @@ import {
 interface DiffEditArgs {
 	path: string;
 	diff: string;
+	description?: string;
 }
 
 export interface DiffEditBlock {
@@ -266,6 +271,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
 	return capDiffEditResult(
@@ -287,6 +293,11 @@ const diffEditCoreTool = tool({
 				type: 'string',
 				description:
 					'One or more SEARCH/REPLACE blocks using <<<<<<< SEARCH, =======, and >>>>>>> REPLACE markers. Do not wrap the diff in markdown code fences or backticks.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this edit.',
 			},
 		},
 		required: ['path', 'diff'],
@@ -323,6 +334,12 @@ function DiffEditPreview({
 	const messageContent = (
 		<Box flexDirection="column">
 			<Text color={colors.tool}>diff_edit</Text>
+			{args.description && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Description:</Text>
+					<Text color={colors.text}> {args.description}</Text>
+				</Box>
+			)}
 			<Box>
 				<Text color={colors.secondary}>Path: </Text>
 				<Text color={colors.text}>{args.path}</Text>

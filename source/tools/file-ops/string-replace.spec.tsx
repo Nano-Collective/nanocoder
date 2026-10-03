@@ -599,6 +599,39 @@ test('string_replace validator: allows editing after the file is read', async t 
 	}
 });
 
+test.serial('string_replace validator: still allows edit after a stubbed re-read', async t => {
+	await createTestFile('test.txt', 'Hello World\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'test.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+		const stub = await readFileTool.tool.execute!(
+			{path: 'test.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(String(stub).includes('already in context'));
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'Hello',
+			new_str: 'Hi',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
 // ============================================================================
 // Special Character Tests
 // ============================================================================
@@ -1209,3 +1242,53 @@ test('string_replace: numbered group tokens stay literal', async t => {
 		'printf "%s\n" "$1" "$2" "$<" "$@"\n',
 	);
 });
+
+test('string_replace: formatter renders description when provided', async t => {
+	const filePath = await createTestFile(
+		'desc-test.txt',
+		'line one\nline two\nline three\n',
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'line two',
+		new_str: 'line 2',
+		description: 'Replace two as 2 as user requests using digits for numbers.',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Replace two as 2 as user requests/);
+});
+
+test('string_replace: formatter does not render description when omitted', async t => {
+	const filePath = await createTestFile(
+		'desc-test-omitted.txt',
+		'line one\nline two\nline three\n',
+	);
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'line two',
+		new_str: 'line 2',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Description:/);
+});
+

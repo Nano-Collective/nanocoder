@@ -75,7 +75,7 @@ test('getCachedFileContent - mtime change triggers re-read', async t => {
 		t.is(result1.content, 'original content');
 
 		// Modify file (changes mtime)
-		await delay(10); // Ensure different mtime
+		await delay(50); // 50ms ensures different mtime even on filesystems with coarse resolution (e.g. CI runners)
 		await writeFile(filePath, 'modified content', 'utf-8');
 
 		const result2 = await getCachedFileContent(filePath);
@@ -264,7 +264,7 @@ test('getCachedFileContent - concurrent reads with mtime change get consistent r
 		t.is(initial.content, 'original');
 
 		// Modify the file to trigger mtime change
-		await delay(10);
+		await delay(50);
 		await writeFile(filePath, 'modified', 'utf-8');
 
 		// Launch multiple concurrent reads - they should all see the modified content
@@ -415,7 +415,7 @@ test('getCachedFileContent - handles rapid sequential modifications', async t =>
 
 		// Rapidly modify and read multiple times
 		for (let i = 2; i <= 5; i++) {
-			await delay(10); // Ensure different mtime
+			await delay(50); // 50ms ensures different mtime even on filesystems with coarse resolution (e.g. CI runners)
 			await writeFile(filePath, `v${i}`, 'utf-8');
 			const result = await getCachedFileContent(filePath);
 			t.is(result.content, `v${i}`, `Should see version ${i}`);

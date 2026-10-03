@@ -15,6 +15,7 @@ interface FileOpArgs {
 	operation: FileOperation;
 	path?: string;
 	destination?: string;
+	description?: string;
 }
 
 const PAIR_OPS = new Set<FileOperation>(['move', 'copy']);
@@ -84,6 +85,11 @@ const fileOpCoreTool = tool({
 				description:
 					'The destination path. Required for move and copy operations.',
 			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this operation.',
+			},
 		},
 		required: ['operation', 'path'],
 	}),
@@ -96,6 +102,7 @@ const fileOpFormatter = makeSimpleToolFormatter<FileOpArgs>(
 	'file_op',
 	(args, result) => {
 		const rows = [
+			{label: 'Description', value: args.description},
 			{label: 'Operation', value: args.operation},
 			{label: 'Path', value: args.path},
 		];

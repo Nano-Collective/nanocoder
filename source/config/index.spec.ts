@@ -1378,3 +1378,55 @@ test.serial('invalid project sandbox does not fall through to global true', asyn
 		}
 	}
 });
+
+// ============================================================================
+// lspServers
+// ============================================================================
+
+test.serial('lspServers loads user-defined servers and drops invalid ones', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const dir = join(testDir, 'lsp-servers');
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(
+		join(dir, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				lspServers: [
+					{
+						name: 'custom-ts',
+						command: 'my-ts-server',
+						args: ['--stdio'],
+						languages: ['ts', 'tsx'],
+					},
+					{name: 'missing-command', languages: ['py']},
+				],
+			},
+		}),
+		'utf-8',
+	);
+
+	try {
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'nonexistent-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.deepEqual(getAppConfig().lspServers, [
+			{
+				name: 'custom-ts',
+				command: 'my-ts-server',
+				args: ['--stdio'],
+				languages: ['ts', 'tsx'],
+				env: undefined,
+			},
+		]);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		reloadAppConfig();
+	}
+});

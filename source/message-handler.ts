@@ -117,7 +117,12 @@ export async function processToolUse(
 							content,
 						)
 					: content,
-			...(isStructured ? {structuredContent: result.structured} : {}),
+			...(isStructured && result.structured !== undefined
+				? {structuredContent: result.structured}
+				: {}),
+			// A handler can report failure without throwing (a non-zero shell exit
+			// returns normally); surface it so --json and ACP see a failed call.
+			...(isStructured && result.isError ? {isError: true} : {}),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the
