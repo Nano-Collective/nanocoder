@@ -77,6 +77,20 @@ function calculateRms(buffer: Buffer): number {
 
 let remainder: Buffer = Buffer.alloc(0);
 
+function finalizeSpeech(): void {
+	isSpeech = false;
+	silenceStart = 0;
+	speechStartTime = 0;
+
+	const pcmData = Buffer.concat(audioChunks);
+	audioChunks = [];
+	const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
+	const wavBuffer = Buffer.concat([wavHeader, pcmData]);
+	const tempFile = join(tmpdir(), 'nanocoder-vad-' + randomUUID() + '.wav');
+	writeFileSync(tempFile, wavBuffer);
+	parentPort?.postMessage({type: 'speech_final', filePath: tempFile});
+}
+
 proc.stdout.on('data', (chunk: Buffer) => {
 	const data = Buffer.concat([remainder, chunk]);
 	const bytesPerFrame = frameSize * 2;
@@ -100,26 +114,7 @@ proc.stdout.on('data', (chunk: Buffer) => {
 
 			// Cap utterance duration to prevent unbounded memory growth
 			if (Date.now() - speechStartTime >= maxSpeechDurationMs) {
-				isSpeech = false;
-				silenceStart = 0;
-				speechStartTime = 0;
-
-				const pcmData = Buffer.concat(audioChunks);
-				audioChunks = [];
-
-				const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
-				const wavBuffer = Buffer.concat([wavHeader, pcmData]);
-
-				const tempFile = join(
-					tmpdir(),
-					'nanocoder-vad-' + randomUUID() + '.wav',
-				);
-				writeFileSync(tempFile, wavBuffer);
-
-				parentPort?.postMessage({
-					type: 'speech_final',
-					filePath: tempFile,
-				});
+				finalizeSpeech();
 			}
 		} else if (isSpeech) {
 			audioChunks.push(Buffer.from(frame));
@@ -127,50 +122,12 @@ proc.stdout.on('data', (chunk: Buffer) => {
 
 			// Force finalize if max speech duration exceeded
 			if (now - speechStartTime >= maxSpeechDurationMs) {
-				isSpeech = false;
-				silenceStart = 0;
-				speechStartTime = 0;
-
-				const pcmData = Buffer.concat(audioChunks);
-				audioChunks = [];
-
-				const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
-				const wavBuffer = Buffer.concat([wavHeader, pcmData]);
-
-				const tempFile = join(
-					tmpdir(),
-					'nanocoder-vad-' + randomUUID() + '.wav',
-				);
-				writeFileSync(tempFile, wavBuffer);
-
-				parentPort?.postMessage({
-					type: 'speech_final',
-					filePath: tempFile,
-				});
+				finalizeSpeech();
 			} else if (rms < silenceThreshold) {
 				if (silenceStart === 0) {
 					silenceStart = now;
 				} else if (now - silenceStart >= silenceDurationMs) {
-					isSpeech = false;
-					silenceStart = 0;
-					speechStartTime = 0;
-
-					const pcmData = Buffer.concat(audioChunks);
-					audioChunks = [];
-
-					const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
-					const wavBuffer = Buffer.concat([wavHeader, pcmData]);
-
-					const tempFile = join(
-						tmpdir(),
-						'nanocoder-vad-' + randomUUID() + '.wav',
-					);
-					writeFileSync(tempFile, wavBuffer);
-
-					parentPort?.postMessage({
-						type: 'speech_final',
-						filePath: tempFile,
-					});
+					finalizeSpeech();
 				}
 			} else {
 				silenceStart = 0;

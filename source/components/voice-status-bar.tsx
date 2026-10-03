@@ -42,7 +42,7 @@ export const VoiceStatusBar = memo(function VoiceStatusBar({
 				return '[TTS] Speaking...';
 			case 'idle':
 			default:
-				return '[-] Idle (Press Ctrl+T to talk)';
+				return '[-] Idle (Press Ctrl+G to talk)';
 		}
 	};
 

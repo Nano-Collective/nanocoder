@@ -1,7 +1,7 @@
 import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getVoicePreference, updateVoicePreference} from '@/config/preferences';
-import type {VoicePlugin} from '@/hooks/useVoice';
+import {defaultLoadPlugin} from '@/hooks/useVoice';
 import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 
@@ -25,7 +25,7 @@ export const voiceCommand: Command = {
 		} else if (subArg === 'push-to-talk' || subArg === 'ptt') {
 			updatedConfig.activationMode = 'push-to-talk';
 			updatedConfig.enabled = true;
-			messageText = 'Voice mode set to push-to-talk (Ctrl+T enabled).';
+			messageText = 'Voice mode set to push-to-talk (Ctrl+G enabled).';
 		} else if (subArg === 'stt') {
 			if (param === 'cloud' || param === 'local') {
 				updatedConfig.sttBackend = param;
@@ -39,7 +39,10 @@ export const voiceCommand: Command = {
 		} else if (subArg === 'tts') {
 			if (param === 'cloud' || param === 'local') {
 				updatedConfig.ttsBackend = param;
-				messageText = `Voice TTS backend set to: ${param}.`;
+				messageText =
+					param === 'cloud'
+						? 'Voice TTS backend set to: cloud. Generated speech text will be sent to OpenAI for synthesis.'
+						: 'Voice TTS backend set to: local.';
 			} else {
 				messageText = `Current TTS backend: ${updatedConfig.ttsBackend || 'local'}. Use '/voice tts local' or '/voice tts cloud'.`;
 			}
@@ -58,7 +61,7 @@ export const voiceCommand: Command = {
 			} else if (param === 'push-to-talk' || param === 'ptt') {
 				updatedConfig.activationMode = 'push-to-talk';
 				updatedConfig.enabled = true;
-				messageText = 'Voice mode set to push-to-talk (Ctrl+T enabled).';
+				messageText = 'Voice mode set to push-to-talk (Ctrl+G enabled).';
 			} else if (param) {
 				isError = true;
 				messageText = `Invalid voice mode '${param}'. Valid modes: push-to-talk, hands-free.`;
@@ -92,9 +95,7 @@ export const voiceCommand: Command = {
 
 		if (subArg !== 'status' && subArg !== 'stt' && subArg !== 'tts') {
 			try {
-				const plugin = (await import(
-					'@nanocollective/nanocoder-voice'
-				)) as VoicePlugin;
+				const plugin = await defaultLoadPlugin();
 				await plugin.playPhrase(
 					updatedConfig.enabled
 						? 'Voice mode activated'

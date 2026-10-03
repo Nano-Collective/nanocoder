@@ -1,4 +1,5 @@
 import test from 'ava';
+import {readFileSync} from 'node:fs';
 import { BashExecutor } from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -11,6 +12,20 @@ function createExecutor(): BashExecutor {
 	const executor = new BashExecutor();
 	executorsToCleanup.push(executor);
 	return executor;
+}
+
+function isLiveProcess(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		if (process.platform === 'linux') {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+			return state !== 'Z';
+		}
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 // Clean up after each test to prevent event listeners from keeping Node alive
@@ -565,7 +580,9 @@ test('cancel while a decoder is holding a partial character does not throw and l
 
 test('cancel() on a detached process kills a spawned child (process-group assertion)', async t => {
 	const executor = createExecutor();
-	const { promise, executionId } = executor.execute('node -e "setInterval(() => {}, 1000)" & echo $!');
+	const { promise, executionId } = executor.execute(
+		'node -e "setInterval(() => {}, 1000)" & echo $!; wait',
+	);
 
 	// Wait briefly for the output to appear
 	await new Promise(resolve => setTimeout(resolve, 300));
@@ -578,24 +595,21 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	const childPid = parseInt(match![1]!, 10);
 
 	// Verify child is alive
-	try {
-		process.kill(childPid, 0);
-		t.pass('Child is alive before cancel');
-	} catch {
-		t.fail('Child should be alive before cancel');
-	}
+	t.true(isLiveProcess(childPid), 'Child should be alive before cancel');
 
 	// Cancel the execution tree
 	executor.cancel(executionId);
 	await promise;
 
-	// Give the OS a moment to reap the process
-	await new Promise(resolve => setTimeout(resolve, 300));
+	// Allow the terminated group to be reaped before probing the PID. A killed
+	// background child can remain a zombie briefly after its shell leader exits.
+	await new Promise(resolve => setTimeout(resolve, 2300));
 
 	// Verify child is dead
-	t.throws(() => {
-		process.kill(childPid, 0);
-	}, undefined, 'process.kill(pid, 0) should throw because the child was killed by the process-group signal');
+	t.false(
+		isLiveProcess(childPid),
+		'process group cancellation should leave no live child process',
+	);
 });
 
 test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async t => {
@@ -610,7 +624,8 @@ test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async
 	await new Promise(resolve => setTimeout(resolve, 300));
 	const state = executor.getState(executionId);
 	t.truthy(state);
-	const match = state?.output?.match(/PID:(\d+)/);
+	const match = state?.fullOutput.match(/PID:(\d+)/);
+	t.truthy(match, 'Should have captured the child PID');
 	const childPid = match ? Number(match[1]) : undefined;
 
 	const cancelled = executor.cancel(executionId);
@@ -663,7 +678,7 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 	for (let tick = 0; tick < 30 && !childPid; tick++) {
 		await new Promise(resolve => setTimeout(resolve, 100));
 		const state = executor.getState(executionId);
-		const match = state?.output?.match(/PID:(\d+)/);
+		const match = state?.fullOutput.match(/PID:(\d+)/);
 		if (match) childPid = Number(match[1]);
 	}
 	t.truthy(childPid, 'Should have captured child PID');

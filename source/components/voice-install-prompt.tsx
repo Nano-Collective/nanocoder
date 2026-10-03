@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -135,7 +135,7 @@ export function VoiceInstallPrompt({
 						Voice mode requires {missingList} (~150 MB total). Install now?
 					</Text>
 					<Box marginTop={1}>
-						<SelectInput items={items} onSelect={handleSelect} />
+						<StyledSelectInput items={items} onSelect={handleSelect} />
 					</Box>
 					<Box marginTop={1}>
 						<Text color={colors.secondary}>

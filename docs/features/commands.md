@@ -64,10 +64,10 @@ Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, ha
 | Command | Description |
 |---------|-------------|
 | `/voice` | Toggle voice mode on/off |
-| `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+T` to record/submit) |
+| `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+G` to record/submit) |
 | `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
 | `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
-| `/voice tts [local\|cloud]` | Configure text-to-speech backend (local Piper or opt-in cloud) |
+| `/voice tts [local\|cloud]` | Configure text-to-speech backend (local Piper or opt-in cloud; cloud sends generated text to OpenAI) |
 | `/voice status` | Display current voice configuration and backend status |
 | `/voice mode <push-to-talk\|hands-free>` | Set specific activation mode |
 

@@ -117,6 +117,12 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
+	const voiceInputAllowed =
+		!appState.activeMode &&
+		!appState.isToolConfirmationMode &&
+		!appState.isQuestionMode &&
+		pendingSubagentApproval === null &&
+		pendingToolConfirmation === null;
 
 	// Load voice preferences reactively for useVoice via preference store subscription
 	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
@@ -136,6 +142,7 @@ export function InteractiveApp({
 		client: appState.client,
 		isConversationComplete: appState.isConversationComplete,
 		developmentMode: appState.developmentMode,
+		isInputAvailable: voiceInputAllowed,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
 	});
@@ -434,17 +441,12 @@ export function InteractiveApp({
 	);
 
 	const isVoiceInputAppropriate =
-		Boolean(voicePref.enabled) &&
-		!appState.activeMode &&
-		!appState.isToolConfirmationMode &&
-		!appState.isQuestionMode &&
-		pendingSubagentApproval === null &&
-		pendingToolConfirmation === null;
+		Boolean(voicePref.enabled) && voiceInputAllowed;
 
-	// Push-to-talk keybinding (Ctrl+T) for manual voice recording / barge-in
+	// Push-to-talk keybinding (Ctrl+G) avoids the existing Ctrl+T task-list binding.
 	useInput(
 		(input, key) => {
-			if (key.ctrl && input === 't') {
+			if (key.ctrl && input === 'g') {
 				void startStopRecording();
 			}
 		},

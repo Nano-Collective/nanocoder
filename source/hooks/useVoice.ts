@@ -72,6 +72,7 @@ export interface UseVoiceProps {
 	currentModel?: string;
 	developmentMode?: string;
 	isConversationComplete?: boolean;
+	isInputAvailable?: boolean;
 }
 
 export interface UseVoiceReturn {
@@ -79,7 +80,7 @@ export interface UseVoiceReturn {
 	startStopRecording: () => void;
 }
 
-const defaultLoadPlugin = async (): Promise<VoicePlugin> => {
+export const defaultLoadPlugin = async (): Promise<VoicePlugin> => {
 	try {
 		return (await import(
 			'@nanocollective/nanocoder-voice'
@@ -114,6 +115,7 @@ export function useVoice({
 	currentModel: _currentModel,
 	developmentMode,
 	isConversationComplete = true,
+	isInputAvailable = true,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -168,6 +170,10 @@ export function useVoice({
 	const hasCheckedHandsFreeDepsRef = React.useRef(false);
 	const hasEmittedDeclinedSessionNoticeRef = React.useRef(false);
 	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
+	const vadSpeechActiveRef = React.useRef(false);
+	const vadBargeInTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
 
 	const cleanupRecordingFile = React.useCallback((expectedPath?: string) => {
 		const filePath = recordingFileRef.current;
@@ -216,6 +222,11 @@ export function useVoice({
 			clearTimeout(ttsTimeoutRef.current);
 			ttsTimeoutRef.current = null;
 		}
+		if (vadBargeInTimerRef.current) {
+			clearTimeout(vadBargeInTimerRef.current);
+			vadBargeInTimerRef.current = null;
+		}
+		vadSpeechActiveRef.current = false;
 		pendingTTSRef.current = false;
 		pluginRef.current = null;
 
@@ -331,7 +342,12 @@ export function useVoice({
 
 	// Hands-free VAD effect - REACTIVE to enabled and activationMode changes
 	React.useEffect(() => {
-		if (!enabled || activationMode !== 'hands-free') {
+		if (
+			!enabled ||
+			activationMode !== 'hands-free' ||
+			developmentMode === 'yolo' ||
+			!isInputAvailable
+		) {
 			hasCheckedHandsFreeDepsRef.current = false;
 			if (vadEngineRef.current) {
 				const engine = vadEngineRef.current as {
@@ -342,6 +358,11 @@ export function useVoice({
 				}
 				vadEngineRef.current = null;
 			}
+			if (vadBargeInTimerRef.current) {
+				clearTimeout(vadBargeInTimerRef.current);
+				vadBargeInTimerRef.current = null;
+			}
+			vadSpeechActiveRef.current = false;
 			return;
 		}
 
@@ -374,16 +395,35 @@ export function useVoice({
 
 			engine.on('speech_start', () => {
 				const currState = stateRef.current;
-				if (currState === 'processing' || currState === 'speaking') {
-					interrupt();
+				if (currState === 'processing') {
+					vadSpeechActiveRef.current = true;
+					if (vadBargeInTimerRef.current) {
+						clearTimeout(vadBargeInTimerRef.current);
+					}
+					vadBargeInTimerRef.current = setTimeout(() => {
+						vadBargeInTimerRef.current = null;
+						if (
+							vadSpeechActiveRef.current &&
+							stateRef.current === 'processing'
+						) {
+							interrupt();
+						}
+					}, 250);
+				} else if (currState === 'speaking') {
+					// Do not let speaker output trigger a self-interrupt.
 				} else if (currState === 'idle') {
 					setState('listening');
 				}
 			});
 
 			engine.on('speech_final', async (evt: {filePath: string}) => {
+				vadSpeechActiveRef.current = false;
+				if (vadBargeInTimerRef.current) {
+					clearTimeout(vadBargeInTimerRef.current);
+					vadBargeInTimerRef.current = null;
+				}
 				// Prevent WAV leaks on unhandled or non-listening states
-				if (stateRef.current !== 'listening') {
+				if (!isInputAvailable || stateRef.current !== 'listening') {
 					if (evt.filePath && existsSync(evt.filePath)) {
 						try {
 							unlinkSync(evt.filePath);
@@ -394,6 +434,8 @@ export function useVoice({
 
 				setState('processing');
 				recordingFileRef.current = evt.filePath;
+				const vadAbortController = new AbortController();
+				abortControllerRef.current = vadAbortController;
 				try {
 					const pref = voicePreferenceRef.current ?? getVoicePreference();
 					let transcribed = '';
@@ -403,8 +445,10 @@ export function useVoice({
 							transcribed = await transcribeCloudAudio(evt.filePath, {
 								providerConfig: clientRef.current?.getProviderConfig(),
 								timeoutMs: 60_000,
+								signal: vadAbortController.signal,
 							});
 						} catch (cloudErr) {
+							if (vadAbortController.signal.aborted) throw cloudErr;
 							addToChatQueueRef.current(
 								React.createElement(InfoMessage, {
 									key: generateKey('voice-cloud-stt-fallback'),
@@ -418,6 +462,9 @@ export function useVoice({
 					}
 
 					cleanupRecordingFile(evt.filePath);
+					if (abortControllerRef.current === vadAbortController) {
+						abortControllerRef.current = null;
+					}
 
 					if (isBlankAudio(transcribed)) {
 						addToChatQueueRef.current(
@@ -438,7 +485,6 @@ export function useVoice({
 							pendingTTSRef.current = false;
 							pluginRef.current = null;
 							ttsTimeoutRef.current = null;
-							setState('idle');
 						}
 					}, 90_000);
 
@@ -461,6 +507,9 @@ export function useVoice({
 						);
 					}
 				} finally {
+					if (abortControllerRef.current === vadAbortController) {
+						abortControllerRef.current = null;
+					}
 					if (evt.filePath && existsSync(evt.filePath)) {
 						try {
 							unlinkSync(evt.filePath);
@@ -503,10 +552,17 @@ export function useVoice({
 				}
 				vadEngineRef.current = null;
 			}
+			if (vadBargeInTimerRef.current) {
+				clearTimeout(vadBargeInTimerRef.current);
+				vadBargeInTimerRef.current = null;
+			}
+			vadSpeechActiveRef.current = false;
 		};
 	}, [
 		enabled,
 		activationMode,
+		developmentMode,
+		isInputAvailable,
 		ensureDependencies,
 		cleanupRecordingFile,
 		interrupt,
@@ -584,6 +640,7 @@ export function useVoice({
 				return plugin.playAudio(ttsFile, 60_000, ttsAbortController.signal);
 			})
 			.catch(audioErr => {
+				if (ttsAbortController.signal.aborted) return;
 				if (
 					audioErr instanceof Error &&
 					audioErr.message?.includes('AbortError')
@@ -608,10 +665,20 @@ export function useVoice({
 			});
 	}, [messages, isConversationComplete, cleanupTtsFile]);
 
+	React.useEffect(() => {
+		if (isConversationComplete && stateRef.current === 'processing') {
+			setState('idle');
+		}
+	}, [isConversationComplete]);
+
 	// Push-to-talk recording trigger callback
 	const startStopRecording = React.useCallback(async () => {
 		const pref = voicePreferenceRef.current ?? getVoicePreference();
-		if (!pref.enabled) {
+		if (
+			!pref.enabled ||
+			!isInputAvailable ||
+			(pref.activationMode === 'hands-free' && developmentMode === 'yolo')
+		) {
 			return;
 		}
 
@@ -660,6 +727,7 @@ export function useVoice({
 			`nanocoder-recording-${randomUUID()}.wav`,
 		);
 		recordingFileRef.current = recordingFile;
+		let processingAbortController: AbortController | null = null;
 
 		try {
 			const audioPromise = plugin.recordAudio(
@@ -682,6 +750,12 @@ export function useVoice({
 				return;
 			}
 
+			// Stopping the microphone aborts only recording. Transcription and the
+			// subsequent turn need their own controller so a normal stop cannot make
+			// cloud STT look like a cancelled request.
+			abortControllerRef.current = null;
+			processingAbortController = new AbortController();
+			abortControllerRef.current = processingAbortController;
 			setState('processing');
 
 			let transcribedText = '';
@@ -691,8 +765,10 @@ export function useVoice({
 					transcribedText = await transcribeCloudAudio(recordingFile, {
 						providerConfig: clientRef.current?.getProviderConfig(),
 						timeoutMs: 60_000,
+						signal: processingAbortController.signal,
 					});
 				} catch (cloudErr) {
+					if (processingAbortController.signal.aborted) throw cloudErr;
 					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
 							key: generateKey('voice-cloud-stt-fallback'),
@@ -706,6 +782,9 @@ export function useVoice({
 			}
 
 			cleanupRecordingFile();
+			if (abortControllerRef.current === processingAbortController) {
+				abortControllerRef.current = null;
+			}
 
 			if (isBlankAudio(transcribedText)) {
 				addToChatQueueRef.current(
@@ -726,7 +805,6 @@ export function useVoice({
 					pendingTTSRef.current = false;
 					pluginRef.current = null;
 					ttsTimeoutRef.current = null;
-					setState('idle');
 				}
 			}, 90_000);
 
@@ -754,7 +832,13 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [ensureDependencies, cleanupRecordingFile, interrupt]);
+	}, [
+		ensureDependencies,
+		cleanupRecordingFile,
+		interrupt,
+		developmentMode,
+		isInputAvailable,
+	]);
 
 	return {
 		state,

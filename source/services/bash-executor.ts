@@ -377,10 +377,10 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		let exited = false;
-		proc.once('exit', () => {
-			exited = true;
-		});
+		// If the leader is already gone before cancellation starts, do not risk
+		// signalling a recycled PID. Once cancellation begins, the leader may
+		// exit while descendants remain in the detached process group.
+		if (proc.exitCode !== null || proc.signalCode !== null) return;
 
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
@@ -391,17 +391,23 @@ export class BashExecutor extends EventEmitter {
 		// above), so gating on !proc.killed would prevent SIGKILL from ever
 		// firing when the group-kill threw and we fell back to proc.kill().
 		const sigkillTimer = setTimeout(() => {
-			if (!exited) {
+			if (!isWindows) {
+				try {
+					// The shell leader may have exited while a descendant that traps
+					// SIGTERM is still alive in the process group.
+					process.kill(-pid, 0);
+				} catch {
+					return;
+				}
+				sendKillSignal('SIGKILL');
+				return;
+			}
+
+			if (proc.exitCode === null && proc.signalCode === null) {
 				sendKillSignal('SIGKILL');
 			}
 		}, 2000);
 		sigkillTimer.unref();
-
-		const cleanupTimer = () => {
-			clearTimeout(sigkillTimer);
-		};
-		// The exit event is sufficient and avoids stacking two cleanup listeners on repeated cancellation.
-		proc.once('exit', cleanupTimer);
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {
