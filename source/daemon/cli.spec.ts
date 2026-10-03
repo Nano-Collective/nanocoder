@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	ensureDirectoryTrust,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
@@ -299,7 +300,8 @@ test.serial(
 	},
 );
 
-// ============================================================================
+// =====================================================================
+
 // status: no lockfile / stale lockfile / live lockfile. The three states the
 // CLI can encounter at runtime, each with a distinct output line.
 // ============================================================================
@@ -369,7 +371,29 @@ test.serial(
 	},
 );
 
-// ============================================================================
+// `savePreferences` swallows write errors, so `persisted: true` used to be a
+// claim the code could not back: `start` printed "Marked ... as trusted" even
+// when nothing reached disk, and the very next boot refused a directory the
+// user had just been told was trusted.
+test.serial(
+	'ensureDirectoryTrust does not claim a persisted entry when the write fails',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const result = ensureDirectoryTrust('/tmp/untrusted-project', false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: () => false,
+			});
+			t.true(result.trusted, 'the env var still bypasses the gate');
+			t.false(result.persisted, 'a failed write must not report a persisted trust');
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+// =====================================================================
+
 // stop: no live daemon / live daemon. The two states the user actually hits.
 // Stale-lockfile falls out of readLiveLockfile (treats stale as no daemon),
 // so the "no lockfile" test covers the stale case too.
@@ -416,6 +440,23 @@ test.serial(
 		} finally {
 			if (!child.killed) child.kill('SIGKILL');
 			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust still reports a persisted entry when the write succeeds',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const result = ensureDirectoryTrust('/tmp/untrusted-project', false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: () => true,
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
 	},
 );
