@@ -11,6 +11,7 @@ import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {
 	autoCompactSessionOverrides,
 	resetAutoCompactSession as resetAutoCompactSessionOverrides,
@@ -234,6 +235,7 @@ export async function performAutoCompact(
 						);
 					}
 
+					bumpReadContentGeneration();
 					return llmCompressed;
 				}
 			} catch (_error) {
@@ -268,6 +270,7 @@ export async function performAutoCompact(
 		}
 
 		// Return compressed user messages (without system message)
+		bumpReadContentGeneration();
 		return compressedUserMessages;
 	} finally {
 		// Clean up tokenizer

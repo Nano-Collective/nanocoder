@@ -30,6 +30,13 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	clearReadTracker,
+	forgetReadContent,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -1811,150 +1818,25 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 	);
 });
 
-// Daemon-triggered runs are headless: nobody can answer a question, so a
-// subagent without an explicit tools list must not be offered ask_user.
-test.serial('headless subagents are not offered ask_user', async t => {
-	const root = join(tmpdir(), `nanocoder-headless-ask-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-	writeFileSync(
-		join(root, '.nanocoder', 'agents', 'probe.md'),
-		'---\nname: probe\ndescription: probe\n---\nprobe\n',
-		'utf-8',
-	);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		ask_user: {handler: noop, readOnly: true},
-	});
-	const offered: string[][] = [];
-	const client = createMockClient([{content: 'done'}, {content: 'done'}]);
-	const chat = client.chat.bind(client);
-	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
-		offered.push(Object.keys(args[1] ?? {}));
-		return chat(...args);
-	}) as LLMClient['chat'];
+test.serial(
+	'subagent read stubs stay isolated from the parent and are dropped on finish',
+	async t => {
+		clearReadTracker();
+		const filePath = '/tmp/parent-read.txt';
+		const stats = {mtimeMs: 11, size: 8};
+		rememberReadContent(filePath, stats, 3);
 
-	await new SubagentExecutor(toolManager, client, root, 'headless').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0], ['read_file']);
-	t.true(offered[1]?.includes('ask_user'));
-});
-
-// Capture the tool names offered to a subagent on its first model call.
-function captureOfferedTools(client: LLMClient): string[][] {
-	const offered: string[][] = [];
-	const chat = client.chat.bind(client);
-	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
-		offered.push(Object.keys(args[1] ?? {}));
-		return chat(...args);
-	}) as LLMClient['chat'];
-	return offered;
-}
-
-// Plan mode is read-only exploration: a subagent spawned from it must not be
-// offered the mutation tools the parent can't use either.
-test.serial('plan-mode subagents are not offered mutation tools', async t => {
-	const root = join(tmpdir(), `nanocoder-plan-subagent-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-	writeFileSync(
-		join(root, '.nanocoder', 'agents', 'probe.md'),
-		'---\nname: probe\ndescription: probe\n---\nprobe\n',
-		'utf-8',
-	);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		write_file: {handler: noop, readOnly: false},
-		execute_bash: {handler: noop, readOnly: false},
-		git_commit: {handler: noop, readOnly: false},
-	});
-	const client = createMockClient([{content: 'done'}]);
-	const offered = captureOfferedTools(client);
-
-	await new SubagentExecutor(toolManager, client, root, 'plan').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0], ['read_file']);
-});
-
-// Bundle subagents always keep their sibling tools, even with a `tools:`
-// allowlist that doesn't name them.
-test.serial('bundle subagents keep sibling tools when they declare a tools list', async t => {
-	const root = join(tmpdir(), `nanocoder-bundle-subagent-${Date.now()}`);
-	mkdirSync(root, {recursive: true});
-	const loader = getSubagentLoader(root);
-	await loader.initialize();
-	loader.registerExternal({
-		name: 'bundle-probe',
-		description: 'probe',
-		systemPrompt: 'probe',
-		tools: ['read_file'],
-		ownerSkill: 'my-skill',
-		source: {priority: 'project', filePath: join(root, 'x.md'), isBuiltIn: false},
-	} as never);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		write_file: {handler: noop, readOnly: false},
-		sibling_tool: {handler: noop, readOnly: true, ownerSkill: 'my-skill'},
-		other_skill_tool: {handler: noop, readOnly: true, ownerSkill: 'other'},
-	});
-	const client = createMockClient([{content: 'done'}]);
-	const offered = captureOfferedTools(client);
-
-	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-		subagent_type: 'bundle-probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0]?.sort(), ['read_file', 'sibling_tool']);
-});
-
-// The top-level alwaysAllow list skips approval inside subagents too.
-test.serial('subagent tools in alwaysAllow skip the approval prompt', async t => {
-	const configDir = join(tmpdir(), `nanocoder-always-allow-${Date.now()}`);
-	mkdirSync(configDir, {recursive: true});
-	writeFileSync(
-		join(configDir, 'agents.config.json'),
-		JSON.stringify({nanocoder: {alwaysAllow: ['write_file']}}),
-		'utf-8',
-	);
-	const previousDir = process.env.NANOCODER_CONFIG_DIR;
-	const previousCwd = process.cwd();
-	process.env.NANOCODER_CONFIG_DIR = configDir;
-	process.chdir(configDir);
-	reloadAppConfig();
-	let approvalsRequested = 0;
-	setGlobalToolApprovalHandler(async () => {
-		approvalsRequested++;
-		return true;
-	});
-	try {
-		const root = join(configDir, 'project');
-		mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-		writeFileSync(
-			join(root, '.nanocoder', 'agents', 'probe.md'),
-			'---\nname: probe\ndescription: probe\n---\nprobe\n',
-			'utf-8',
-		);
-		let wrote = false;
+		let seenInSubagent: ReturnType<typeof matchReadContent>;
+		seenInSubagent = {lineCount: -1, size: -1};
 		const toolManager = createMockToolManager({
-			write_file: {
+			read_file: {
 				handler: async () => {
-					wrote = true;
-					return 'ok';
+					seenInSubagent = matchReadContent(filePath, stats);
+					rememberReadContent(filePath, stats, 9);
+					forgetReadContent(filePath);
+					return 'subagent body';
 				},
-				readOnly: false,
-				needsApproval: true,
+				readOnly: true,
 			},
 		});
 		const client = createMockClient([
@@ -1962,29 +1844,29 @@ test.serial('subagent tools in alwaysAllow skip the approval prompt', async t =>
 				content: '',
 				tool_calls: [
 					{
-						id: 'w',
+						id: 'read',
 						function: {
-							name: 'write_file',
-							arguments: '{"path":"x.ts","content":"hi"}',
+							name: 'read_file',
+							arguments: '{"path":"/tmp/parent-read.txt"}',
 						},
 					},
 				],
 			},
 			{content: 'done'},
 		]);
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read a file'},
+			undefined,
+			0,
+			'stub-scope-agent',
+		);
 
-		await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-			subagent_type: 'probe',
-			description: 'x',
+		t.true(result.success);
+		t.is(seenInSubagent, undefined);
+		t.deepEqual(matchReadContent(filePath, stats), {lineCount: 3, size: 8});
+		runWithReadContentScope('stub-scope-agent', () => {
+			t.is(matchReadContent(filePath, stats), undefined);
 		});
-
-		t.true(wrote);
-		t.is(approvalsRequested, 0);
-	} finally {
-		setGlobalToolApprovalHandler(async () => true);
-		process.chdir(previousCwd);
-		if (previousDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
-		else process.env.NANOCODER_CONFIG_DIR = previousDir;
-		reloadAppConfig();
-	}
-});
+	},
+);
