@@ -10,7 +10,7 @@ import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {clearFileListCache} from '../utils/file-autocomplete';
-import {pasteEvents} from '../utils/terminal-paste';
+import {emitPaste} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
@@ -1638,7 +1638,9 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 test('UserInput renders completions text when typing /', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput customCommands={['help', 'model']} />
+			{/* forceFocus: Ink 8 settles autoFocus asynchronously, so relying
+			on it races the first keystroke against focus acquisition here. */}
+			<UserInput forceFocus={true} customCommands={['help', 'model']} />
 		</TestWrapper>
 	);
 
@@ -1732,7 +1734,11 @@ test('UserInput windows long file mention lists', async t => {
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+			<UserInput
+				forceFocus={true}
+				developmentMode="normal"
+				customCommands={['help', 'model']}
+			/>
 		</TestWrapper>
 	);
 
@@ -1758,7 +1764,11 @@ test('UserInput renders completions BEFORE the mode indicator (inside the input 
 test('UserInput completions appear on a line above the mode indicator', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+			<UserInput
+				forceFocus={true}
+				developmentMode="normal"
+				customCommands={['help', 'model']}
+			/>
 		</TestWrapper>
 	);
 
@@ -1816,7 +1826,7 @@ test.serial(
 		);
 
 		await wait(50);
-		pasteEvents.emit('paste', 'line one\nline two\nline three');
+		void emitPaste( 'line one\nline two\nline three');
 		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
 
 		t.is(submitted, 0, 'a pasted newline must not submit the prompt');
@@ -1832,7 +1842,7 @@ test.serial('UserInput inserts a short single-line paste literally', async t => 
 	);
 
 	await wait(50);
-	pasteEvents.emit('paste', 'pasted inline');
+	void emitPaste( 'pasted inline');
 	await waitForFrame(lastFrame, /pasted inline/);
 
 	t.notRegex(lastFrame()!, /\[Paste #/, 'short pastes stay visible as text');
@@ -1847,7 +1857,7 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	);
 
 	await wait(50);
-	pasteEvents.emit('paste', 'should not appear');
+	void emitPaste( 'should not appear');
 	await wait(100);
 
 	t.notRegex(lastFrame()!, /should not appear/);
@@ -2017,7 +2027,7 @@ test.serial(
 		stdin.write('\x1B[D');
 		stdin.write('\x1B[D');
 
-		pasteEvents.emit('paste', 'XY');
+		void emitPaste( 'XY');
 		await waitForFrame(lastFrame, /aXYbc/);
 
 		// One more keystroke lands immediately after the splice, not at the end.
@@ -2051,7 +2061,7 @@ test.serial(
 			stdin.write('\x1B[D');
 		}
 
-		pasteEvents.emit('paste', 'line1\nline2\nline3');
+		void emitPaste( 'line1\nline2\nline3');
 		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
 
 		// Next keystroke lands immediately after the placeholder, before ' world'.
