@@ -188,6 +188,18 @@ test('TransportFactory.validateServerConfig: validates http config', t => {
 	t.is(result.errors.length, 0);
 });
 
+test('TransportFactory.validateServerConfig: rejects an invalid health interval', t => {
+	const result = TransportFactory.validateServerConfig({
+		name: 'invalid-health',
+		transport: 'http',
+		url: 'http://localhost:3000/mcp',
+		healthCheckInterval: -1,
+	});
+
+	t.false(result.valid);
+	t.true(result.errors.some(error => error.includes('healthCheckInterval')));
+});
+
 test('TransportFactory.validateServerConfig: detects invalid stdio config', t => {
 	const server: MCPServer = {
 		name: 'test-stdio-invalid',

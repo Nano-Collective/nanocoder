@@ -1385,6 +1385,108 @@ test('MCPClient.connectToServer: passes the configured timeout to connect and to
 	t.deepEqual(seen, [{timeout: 1234}, {timeout: 1234}]);
 });
 
+test('MCPClient health check marks a server unhealthy and removes its tools', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			throw new Error('server stopped responding');
+		},
+	});
+	const serverName = 'health-server';
+	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'health_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPing = () => {
+			if (pingCalls > 0 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPing, 5);
+		};
+		waitForPing();
+	});
+
+	t.true(pingCalls > 0);
+	t.false(client.isServerConnected(serverName));
+	t.deepEqual(client.getServerTools(serverName), []);
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	clearInterval((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient transport close marks a server unhealthy immediately', t => {
+	let previousCloseCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {
+		onclose: () => {
+			previousCloseCalls++;
+		},
+	};
+	const client = new SeamMCPClient({ping: async () => {}});
+	const serverName = 'closed-server';
+	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'closed_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		60_000,
+	);
+
+	transport.onclose?.();
+
+	t.is(previousCloseCalls, 1);
+	t.false(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	t.deepEqual(client.getServerTools(serverName), []);
+	clearInterval((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient rejects calls to an unhealthy server clearly', async t => {
+	const client = new SeamMCPClient({});
+	const serverName = 'unhealthy-server';
+	(client as any).clients.set(serverName, {});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+	});
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).healthErrors.set(serverName, 'connection refused');
+
+	await t.throwsAsync(() => client.callTool(`mcp_${serverName}_tool`, {}), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
+	await t.throwsAsync(() => client.readResource(serverName, 'test://resource'), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
+	await t.throwsAsync(() => client.getPrompt(serverName, 'test-prompt'), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
+});
+
 // ============================================================================
 // Regression: annotations.readOnlyHint must be read by production code
 // ----------------------------------------------------------------------------

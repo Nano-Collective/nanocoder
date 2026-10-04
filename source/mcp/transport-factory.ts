@@ -199,6 +199,13 @@ export class TransportFactory {
 		errors: string[];
 	} {
 		const errors: string[] = [];
+		if (
+			server.healthCheckInterval !== undefined &&
+			(!Number.isFinite(server.healthCheckInterval) ||
+				server.healthCheckInterval < 0)
+		) {
+			errors.push('healthCheckInterval must be a non-negative finite number');
+		}
 
 		switch (server.transport) {
 			case 'stdio':
