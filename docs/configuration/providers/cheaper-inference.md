@@ -22,7 +22,7 @@ sidebar_order: 26
 ## Setup
 
 1. Create an account and generate an API key
-2. Set `CHEAPERINFERENCE_API_KEY`, or paste the key into the wizard
+2. Paste the key into the `/settings providers` wizard, or export `CHEAPERINFERENCE_API_KEY` and reference it as `"${CHEAPERINFERENCE_API_KEY}"` in `apiKey` as shown above. Nanocoder does not read the variable on its own; it is only picked up through that substitution
 
 See the [Cheaper Inference docs](https://cheaperinference.com/docs) for account setup and the current model catalog.
 

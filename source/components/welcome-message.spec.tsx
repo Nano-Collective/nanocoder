@@ -5,6 +5,7 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
+import stringWidth from 'string-width';
 import stripAnsi from 'strip-ansi';
 
 // CRITICAL: redirect preference reads to a temp dir BEFORE the banner (and its
@@ -53,6 +54,109 @@ const VERSION = packageJson.version;
 // ============================================================================
 // Narrow Terminal Tests (width < 90 → text logo per mock ladder)
 // ============================================================================
+
+// The banner reads the branch through getCurrentBranchSync, which parses
+// .git/HEAD rather than shelling out to git — so a couple of ref files are
+// enough to put any branch state on the location line.
+function renderInDir(
+	setUp: (dir: string) => void,
+	columns = 50,
+): string[] {
+	const dir = fs.mkdtempSync(path.join(tmpdir(), 'welcome-location-'));
+	setUp(dir);
+
+	const originalCwd = process.cwd();
+	const originalColumns = process.stdout.columns;
+	process.chdir(dir);
+	process.stdout.columns = columns;
+
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const lines = stripAnsi(lastFrame() ?? '')
+			.split('\n')
+			.map(line => line.trimEnd());
+		unmount();
+		return lines;
+	} finally {
+		process.chdir(originalCwd);
+		process.stdout.columns = originalColumns;
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+function writeHead(dir: string, contents: string): void {
+	fs.mkdirSync(path.join(dir, '.git'), {recursive: true});
+	fs.writeFileSync(path.join(dir, '.git', 'HEAD'), contents);
+}
+
+// Serial: these swap the process cwd, which is global to the worker.
+test.serial('WelcomeMessage shows the path alone outside a git repo', t => {
+	const lines = renderInDir(() => {});
+
+	t.false(
+		lines.some(line => line.includes('⎇')),
+		'no branch marker without a repo',
+	);
+	for (const line of lines) {
+		t.true(stringWidth(line) <= 50);
+	}
+});
+
+test.serial('WelcomeMessage keeps a CJK branch row inside the terminal', t => {
+	// Counting characters rather than columns overflowed the row, which broke
+	// into a branch line ending in a dangling separator with the path stranded
+	// below it.
+	const lines = renderInDir(dir =>
+		writeHead(dir, 'ref: refs/heads/\u{1F680}-功能-branch-名前-x\n'),
+	);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.false(
+		branchLine!.endsWith('·'),
+		'a trailing separator means the path was pushed onto its own row',
+	);
+	for (const line of lines) {
+		t.true(
+			stringWidth(line) <= 50,
+			`row is ${stringWidth(line)} columns wide in a 50-column terminal`,
+		);
+	}
+});
+
+test.serial('WelcomeMessage marks the default branch', t => {
+	// origin/HEAD naming the checked-out branch makes it the default one, which
+	// the banner annotates.
+	const lines = renderInDir(dir => {
+		writeHead(dir, 'ref: refs/heads/main\n');
+		fs.mkdirSync(path.join(dir, '.git', 'refs', 'remotes', 'origin'), {
+			recursive: true,
+		});
+		fs.writeFileSync(
+			path.join(dir, '.git', 'refs', 'remotes', 'origin', 'HEAD'),
+			'ref: refs/remotes/origin/main\n',
+		);
+	}, 80);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.regex(branchLine!, /main \(default\)/);
+});
+
+test.serial('WelcomeMessage marks a detached HEAD', t => {
+	// A bare SHA in HEAD is a detached checkout; the banner shows the short SHA
+	// with the state spelled out rather than a branch name.
+	const lines = renderInDir(
+		dir => writeHead(dir, '9f1c0de4b6a37c5e2d8f4a1b0c9e7d6f5a4b3c2d\n'),
+		80,
+	);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.regex(branchLine!, /9f1c0de \(detached\)/);
+});
 
 test('WelcomeMessage renders compact layout for narrow terminal', t => {
 	const originalColumns = process.stdout.columns;
@@ -197,6 +301,44 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	t.regex(output!, /\/model/);
 	t.regex(output!, /\/help/);
 	t.regex(output!, /\/exit/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage centers horizontally and vertically', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	const lines = output.split('\n');
+
+	// Horizontal: version and menu have fixed-width content, so their indents
+	// are stable. The location line's indent varies with the branch name length
+	// (truncateMiddle pulls it left on long branches), so it is not asserted
+	// here — the only behaviour this PR changed vertically is the second half.
+	t.true(
+		indentOf(output, /nanocoder v/) > 15,
+		'version line should be horizontally centered',
+	);
+	t.true(
+		indentOf(output, /Resume session/) > 15,
+		'menu should be horizontally centered',
+	);
+
+	// Vertical: on a 40-row budget the banner content (logo + text) is well
+	// under half the height, so a regression to top-flow leaves row 0 occupied.
+	// The block sitting somewhere in the middle proves justifyContent="center"
+	// is wired up on the outer Box.
+	const firstContentLine = lines.findIndex(l => l.trim().length > 0);
+	t.true(
+		firstContentLine > 0 && firstContentLine < 40,
+		`banner should not start at row 0 on a tall viewport (got row ${firstContentLine})`,
+	);
+	t.true(
+		lines.slice(-2).some(l => l.trim().length === 0),
+		'banner should leave trailing whitespace from vertical centering',
+	);
 
 	process.stdout.columns = originalColumns;
 });
@@ -585,4 +727,14 @@ test('WelcomeMessage sizes the row budget to the chosen font', t => {
 		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
 	);
 	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
+});
+test('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /community collective/);
+	t.regex(output, /rather than a company/);
+	t.notRegex(output, /local-first coding agent/i);
+	process.stdout.columns = originalColumns;
 });

@@ -41,6 +41,27 @@ test.serial('setNotificationsConfig updates config', (t) => {
 	t.false(config.events?.questionPrompt);
 });
 
+test.serial(
+	'setNotificationsConfig keeps default events missing from the config',
+	(t) => {
+		setNotificationsConfig({enabled: true});
+		const config = getNotificationsConfig();
+		t.true(config.events?.toolConfirmation);
+		t.true(config.events?.questionPrompt);
+		t.true(config.events?.generationComplete);
+		t.true(config.events?.triggeredRunComplete);
+
+		setNotificationsConfig({
+			enabled: true,
+			events: {questionPrompt: false},
+		});
+		const partial = getNotificationsConfig();
+		t.false(partial.events?.questionPrompt);
+		t.true(partial.events?.toolConfirmation);
+		t.true(partial.events?.triggeredRunComplete);
+	},
+);
+
 // ============================================================================
 // sendNotification Tests
 // ============================================================================

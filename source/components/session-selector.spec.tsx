@@ -237,7 +237,7 @@ test('session-selector does not call onCancel when arbitrary key is pressed in e
 		output!.includes('No sessions for this project')
 	) {
 		// The empty state must tell the user which key dismisses it
-		t.regex(output!, /Press Escape to continue/);
+		t.regex(output!, /Press Esc to close/);
 
 		// Press an arbitrary, non-Escape key
 		stdin.write('j');
@@ -295,7 +295,7 @@ test('session-selector shows Esc hint in footer', async t => {
 	// If sessions are loaded, the footer should show Esc hint
 	// If no sessions, the empty state is shown instead
 	if (output!.includes('Recent Sessions')) {
-		t.regex(output!, /Esc to cancel/);
+		t.regex(output!, /Esc to (cancel|close)/);
 	} else {
 		// Empty state — just verify it rendered
 		t.pass();

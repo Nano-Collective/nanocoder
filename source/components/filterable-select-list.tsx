@@ -1,15 +1,19 @@
 // source/components/filterable-select-list.tsx
-import {Box, Text, useInput, useStdout} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import {useMemo, useState} from 'react';
 import type {ItemSelectorOption} from '@/components/item-selector';
+import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 
 const DEFAULT_VISIBLE_COUNT = 12;
-// Ceiling: even at 12 rows we need room for the box border (2) + search
-// affordance row (1) + hint row (1). On terminals shorter than this we clamp
-// so the picker can never reproduce the original "box eats the screen" bug.
-const OVERHEAD_ROWS = 4;
+// Rows around the items that must stay on screen. The list's own: the search
+// row, the blank rows around the items and the hint row (4). Every caller
+// wraps it in the same padded titled box: title, two borders and top/bottom
+// padding (5). The app frame's top and bottom padding (2). Budgeting only the
+// list's own four rows let an 18-row terminal push the hint and the box's
+// bottom border off screen.
+const OVERHEAD_ROWS = 11;
 
 export interface FilterableSelectListProps<TValue extends string = string> {
 	items: ItemSelectorOption<TValue>[];
@@ -27,14 +31,12 @@ export function FilterableSelectList<TValue extends string = string>({
 	onCancel,
 }: FilterableSelectListProps<TValue>) {
 	const {colors} = useTheme();
-	const {stdout} = useStdout();
-	// Height-aware clamp. If the terminal is too short, shrink the
-	// window so box + search row + hint row still fit. Guard on rows
-	// (terminal height); when height is unknown (no TTY), fall back to the
-	// default window. Falls back to the default on normal terminals
-	// (>= 16 rows).
-	const effectiveVisibleCount = stdout?.rows
-		? Math.max(1, Math.min(visibleCount, stdout.rows - OVERHEAD_ROWS))
+	// Height-aware clamp: shrink the window so the whole picker still fits.
+	// useTerminalRows re-renders on resize; reading stdout.rows directly kept
+	// the window it opened with after the terminal was made shorter.
+	const terminalRows = useTerminalRows();
+	const effectiveVisibleCount = terminalRows
+		? Math.max(1, Math.min(visibleCount, terminalRows - OVERHEAD_ROWS))
 		: visibleCount;
 	const initialIndex = Math.max(
 		0,

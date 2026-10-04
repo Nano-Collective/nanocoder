@@ -18,7 +18,7 @@
  */
 
 import * as fs from 'node:fs/promises';
-import {parseSubscribeBlock} from '@/skills/parse-subscribe';
+import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 import type {
@@ -51,8 +51,9 @@ export async function parseSubagentMarkdown(
 		systemPrompt,
 	};
 
-	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlock(
+	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlockOrWarn(
 		raw.subscribe,
+		filePath,
 	);
 
 	return {

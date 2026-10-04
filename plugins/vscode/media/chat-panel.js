@@ -63,6 +63,7 @@
 					'auto-accept': 'Auto-Accept',
 					yolo: 'YOLO',
 					plan: 'Plan',
+					architect: 'Architect',
 				};
 				return modeLabels[value] || value;
 			}

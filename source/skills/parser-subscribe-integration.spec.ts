@@ -96,7 +96,7 @@ echo hello
 	});
 });
 
-test('custom-tool parser rejects malformed subscribe by throwing parser error', async t => {
+test('custom-tool parser drops malformed subscribe but keeps the tool loaded', async t => {
 	await withTempDir(async dir => {
 		const filePath = join(dir, 'broken_tool.md');
 		await writeFile(
@@ -116,10 +116,11 @@ echo hi
 `,
 		);
 
-		t.throws(() => parseCustomToolFile(filePath), {
-			name: 'CustomToolParseError',
-			message: /eventKinds must be an array/,
-		});
+		// Same as commands and agents: the block is logged and dropped, the
+		// tool itself still loads.
+		const parsed = parseCustomToolFile(filePath);
+		t.is(parsed.metadata.name, 'broken_tool');
+		t.is(parsed.subscribe, undefined);
 	});
 });
 
