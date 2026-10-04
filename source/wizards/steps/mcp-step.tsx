@@ -454,13 +454,8 @@ export function McpStep({
 				} else if (key.escape) {
 					// Submit multiline input on Escape
 					handleFieldSubmit();
-				} else if (
-					key.backspace ||
-					(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-				) {
-					// Backspace, told apart from forward Delete the same way
-					// TextInput does. The buffer has no cursor - typing always
-					// appends - so forward Delete has nothing after it to remove.
+				} else if (key.backspace || key.delete) {
+					// Delete/Backspace removes the last line of the multiline buffer.
 					setMultilineBuffer(prev => prev.slice(0, -1));
 				} else if (!key.ctrl && !key.meta && input) {
 					setMultilineBuffer(prev => prev + input);
