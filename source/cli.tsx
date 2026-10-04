@@ -828,9 +828,8 @@ async function main(): Promise<void> {
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
 			} = await import('@/utils/terminal-paste');
-			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
-			);
+			const {splitControlKeypresses, createXtermModifiedEnterRewriter} =
+				await import('@/utils/terminal-keypress');
 
 			// Bracketed paste in both screen modes. Without it the terminal
 			// sends a paste as bare bytes, so the CR at each line break
@@ -873,6 +872,9 @@ async function main(): Promise<void> {
 			const filtered = new PassThrough();
 			const decodeInput = createUtf8InputDecoder();
 			const extractPastes = createPasteExtractor();
+			const rewriteEnter = createXtermModifiedEnterRewriter(text => {
+				queueKeypresses(splitControlKeypresses(text));
+			});
 			let carry = '';
 			const forwardInput = (chunk: Buffer | string) => {
 				const text = decodeInput(chunk);
@@ -886,7 +888,11 @@ async function main(): Promise<void> {
 					wheelEvents.emit('wheel', direction);
 				}
 				if (result.clean) {
-					queueKeypresses(splitControlKeypresses(result.clean));
+					// xterm modifyOtherKeys Enter (VS Code terminal) is unparseable
+					// by Ink and dropped outright in Ink 8 — rewrite it to the
+					// equivalent kitty CSI-u sequence so Shift/Alt+Enter survive,
+					// including when the sequence spans multiple stdin chunks.
+					rewriteEnter.push(result.clean);
 				}
 			};
 			// Ink drains everything buffered on each 'readable', so pieces
@@ -913,6 +919,7 @@ async function main(): Promise<void> {
 			};
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {
+				rewriteEnter.dispose();
 				pendingKeypresses.length = 0;
 				process.stdin.off('data', forwardInput);
 				process.stdin.pause();
