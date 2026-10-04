@@ -1809,8 +1809,9 @@ test('UserInput does not show completions when input is empty', t => {
 	unmount();
 });
 
-// pasteEvents is a module singleton, so these run serially: a concurrently
-// mounted UserInput would also receive the payload and corrupt its frame.
+// The paste-target stack is a module singleton, so these run serially: a
+// concurrently mounted UserInput would also receive the payload and corrupt
+// its frame.
 
 test.serial(
 	'UserInput collapses a multi-line terminal paste into a placeholder without submitting',

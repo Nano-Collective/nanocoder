@@ -1,5 +1,3 @@
-import {EventEmitter} from 'node:events';
-
 /**
  * Bracketed paste (DECSET 2004) support.
  *
@@ -41,13 +39,6 @@ const MAX_PASTE_CHARS = 10_000_000;
  * every partial end marker is held back.
  */
 const MIN_PARTIAL_START = 3;
-
-/**
- * Singleton paste bus: cli.tsx publishes payloads, the focused text field
- * subscribes. Emission is ordered relative to keypresses (see emitPaste),
- * so a paste stays where it was in the input stream.
- */
-export const pasteEvents = new EventEmitter();
 
 /**
  * Deliver one paste payload to the active paste consumer, if any.

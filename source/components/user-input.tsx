@@ -1010,7 +1010,8 @@ export default function UserInput({
 
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
 		// Text pasted into the terminal arrives as a bracketed paste on stdin
-		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
+		// (cli.tsx enables DECSET 2004 and routes payloads to the
+		// registerPasteTarget stack),
 		// never as a Ctrl+V keypress, so this binding is free to mean
 		// "paste image".
 		if (key.ctrl && inputChar === 'v') {
