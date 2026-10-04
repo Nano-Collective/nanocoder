@@ -161,12 +161,12 @@ export class ToolManager {
 		onHealthChange?: (change: MCPHealthChange) => void,
 	): Promise<MCPInitResult[]> {
 		const enabledServers = servers?.filter(server => server.enabled !== false);
+		// Reinitialization must close the previous transports before replacing the client.
 		await this.disconnectMCP();
 
 		if (enabledServers && enabledServers.length > 0) {
 			// Dynamic import — only paid for by sessions with configured MCP servers.
-			const {MCPClient} = await import('@/mcp/mcp-client');
-			this.mcpClient = new MCPClient();
+			this.mcpClient = await this.createMCPClient();
 			const unsubscribeHealth = [
 				onHealthChange && this.mcpClient.onHealthChange(onHealthChange),
 				this.mcpClient.onHealthChange(change => {
@@ -205,6 +205,11 @@ export class ToolManager {
 			return results;
 		}
 		return [];
+	}
+
+	protected async createMCPClient(): Promise<MCPClient> {
+		const {MCPClient} = await import('@/mcp/mcp-client');
+		return new MCPClient();
 	}
 
 	/**

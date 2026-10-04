@@ -132,6 +132,7 @@ export class MCPClient {
 		this.health.set(serverName, status);
 		if (errorMessage) this.healthErrors.set(serverName, errorMessage);
 		else this.healthErrors.delete(serverName);
+		if (previousStatus === undefined && status === 'connected') return;
 		if (previousStatus === status && previousError === errorMessage) return;
 		this.emitHealthChange({serverName, status, error: errorMessage});
 	}

@@ -167,6 +167,19 @@ test('MCPClient: getConnectedServers returns array', t => {
 	t.true(Array.isArray(connectedServers));
 });
 
+test('MCPClient: unhealthy servers are excluded from connected servers', t => {
+	const client = new MCPClient();
+	const healthy = 'healthy-server';
+	const unhealthy = 'unhealthy-server';
+	(client as any).clients.set(healthy, {});
+	(client as any).clients.set(unhealthy, {});
+	(client as any).health.set(healthy, 'connected');
+	(client as any).health.set(unhealthy, 'unhealthy');
+
+	t.deepEqual(client.getConnectedServers(), [healthy]);
+	t.deepEqual(client.getServerNames(), [healthy, unhealthy]);
+});
+
 test('MCPClient: isServerConnected returns false for non-existent servers', t => {
 	const client = new MCPClient();
 
