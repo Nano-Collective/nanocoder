@@ -44,6 +44,31 @@ const OPTIONS: ArchitectOption[] = [
 	},
 ];
 
+// This list sits above the Keep/Revert/Revise choices in a footer that can't
+// shrink, so a turn touching many files must not push those choices off
+// screen. Matches LiveCompactCounts's cap in tool-result-display.tsx.
+const MAX_FILE_LIST_ROWS = 5;
+
+function FileList({files}: {files: string[]}) {
+	const {colors} = useTheme();
+	const hiddenCount = files.length - MAX_FILE_LIST_ROWS;
+	return (
+		<>
+			{files.slice(0, MAX_FILE_LIST_ROWS).map(file => (
+				<Text key={file} color={colors.secondary}>
+					{'  '}
+					{file}
+				</Text>
+			))}
+			{hiddenCount > 0 && (
+				<Text color={colors.secondary}>
+					{'  '}+{hiddenCount} more
+				</Text>
+			)}
+		</>
+	);
+}
+
 export default function ArchitectReviewPrompt({
 	onKeep,
 	onRevert,
@@ -121,12 +146,7 @@ export default function ArchitectReviewPrompt({
 					Changed files: {filesChanged.length}
 				</Text>
 
-				{filesChanged.map(file => (
-					<Text key={file} color={colors.secondary}>
-						{'  '}
-						{file}
-					</Text>
-				))}
+				<FileList files={filesChanged} />
 
 				{filesMissing.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
@@ -134,12 +154,7 @@ export default function ArchitectReviewPrompt({
 							New files: {filesMissing.length}
 						</Text>
 
-						{filesMissing.map(file => (
-							<Text key={file} color={colors.secondary}>
-								{'  '}
-								{file}
-							</Text>
-						))}
+						<FileList files={filesMissing} />
 					</Box>
 				)}
 			</Box>
