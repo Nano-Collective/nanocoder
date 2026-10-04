@@ -926,10 +926,16 @@ async function main(): Promise<void> {
 				if (result.clean) {
 					rewriteEnter.push(result.clean);
 				}
-				// rewriteEnter.push queues this chunk's keys synchronously
-				// (unless it holds back a partial sequence), so queuing the
-				// pastes after it preserves their order relative to keys.
-				queueWork(split.pastes.map(payload => ({kind: 'paste', payload})));
+				if (split.pastes.length > 0) {
+					// rewriteEnter.push queues this chunk's keys synchronously —
+					// except a held-back partial sequence, which would not flush
+					// until its 20ms timer fires, i.e. after a paste that arrived
+					// later in the stream (a paste-only chunk never even reaches
+					// push). Flush the carry first so keys and pastes stay in
+					// original stream order.
+					rewriteEnter.flush();
+					queueWork(split.pastes.map(payload => ({kind: 'paste', payload})));
+				}
 			};
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {

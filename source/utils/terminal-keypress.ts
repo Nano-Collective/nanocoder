@@ -85,6 +85,21 @@ export function createXtermModifiedEnterRewriter(
 			}
 			if (ready) onText(rewriteXtermModifiedEnter(ready));
 		},
+		/**
+		 * Emit any held-back partial sequence now, unrewritten — the same
+		 * bytes the 20ms timeout would have flushed. Callers use this to
+		 * preserve stream order when something else must be emitted
+		 * immediately: a bracketed paste that arrives after a held-back tail
+		 * must not be reordered ahead of it.
+		 */
+		flush(): void {
+			clearTimeout(timeout);
+			timeout = undefined;
+			if (!carry) return;
+			const pending = carry;
+			carry = '';
+			onText(pending);
+		},
 		dispose(): void {
 			clearTimeout(timeout);
 			timeout = undefined;

@@ -386,6 +386,10 @@ export function McpStep({
 			return;
 		}
 		return registerPasteTarget(payload => {
+			// Plain append on purpose: the envVars editor keeps the caret at
+			// the end (key.return and printable input append too) and tracks
+			// no cursor position — splice-at-cursor only matters for fields
+			// that do.
 			setMultilineBuffer(prev => prev + payload);
 			return true;
 		});

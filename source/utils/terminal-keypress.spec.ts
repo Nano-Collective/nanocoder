@@ -73,6 +73,45 @@ test('passes text, other escape sequences and malformed candidates unchanged', t
 	t.is(output.join(''), `${text}\x1b[27;2;14~tail`);
 });
 
+// A partial held back by one push is never dropped: push() clears the
+// pending timer, then merges the carry into the next chunk (text = carry +
+// chunk), so the held-back bytes are re-included and re-examined wholesale.
+for (const [first, second, afterFirst, expected] of [
+	['\x1b[27;', 'q', [], ['\x1b[27;q']],
+	['\x1b[27;', 'ab\r', [], ['\x1b[27;ab\r']],
+	['a\x1b[27;2;13', '\x1b[A', ['a'], ['a', '\x1b[27;2;13\x1b[A']],
+] as const) {
+	test(`re-includes a held-back partial when the next chunk does not extend it (${JSON.stringify(second)})`, t => {
+		const output: string[] = [];
+		const rewriter = createXtermModifiedEnterRewriter(text => output.push(text));
+		t.teardown(() => rewriter.dispose());
+		rewriter.push(first);
+		t.deepEqual(output, afterFirst);
+		rewriter.push(second);
+		t.deepEqual(output, expected);
+	});
+}
+
+
+
+test('flush() emits a held-back partial immediately, unrewritten, and cancels its timer', async t => {
+	const output: string[] = [];
+	const rewriter = createXtermModifiedEnterRewriter(text => output.push(text));
+	t.teardown(() => rewriter.dispose());
+	rewriter.push('before\x1b[27;2;13');
+	t.deepEqual(output, ['before']);
+	rewriter.flush();
+	t.deepEqual(output, ['before', '\x1b[27;2;13']);
+	await new Promise(resolve => setTimeout(resolve, 50));
+	// Timer cancelled: no duplicate emit.
+	t.deepEqual(output, ['before', '\x1b[27;2;13']);
+	// Empty carry: flush is a no-op, not a stray empty emit.
+	rewriter.flush();
+	t.deepEqual(output, ['before', '\x1b[27;2;13']);
+	rewriter.push('after');
+	t.deepEqual(output, ['before', '\x1b[27;2;13', 'after']);
+});
+
 test('bounds incomplete sequence buffering', t => {
 	const output: string[] = [];
 	const rewriter = createXtermModifiedEnterRewriter(text => output.push(text));
