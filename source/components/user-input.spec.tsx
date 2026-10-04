@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -6,6 +9,7 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
@@ -132,6 +136,132 @@ test('UserInput renders with disabled state', t => {
 	unmount();
 });
 
+test('UserInput shows a suggested command in the empty prompt and inserts it on Tab', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/checkpoint create"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		/Try \/checkpoint create · Tab to insert · Esc to dismiss/.test(
+			stripAnsi(lastFrame() ?? ''),
+		),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/checkpoint create') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /checkpoint create'),
+	);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput dismisses the suggested command on Esc in an empty prompt', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\x1B');
+	await waitForCondition(() => dismissed === 1);
+	// The first Esc went to the suggestion, not the clear-input double press.
+	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
+test('UserInput clears the suggested command when a message is submitted', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'hello');
+	await waitForCondition(() => dismissed === 1);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput submits an inserted suggested command on Enter and clears the suggestion', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	// Wait for the inserted value itself, not the "Try /commit" placeholder.
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/commit') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/commit');
+	// Tab dismissed once on insert; submitting dismisses again.
+	await waitForCondition(() => dismissed === 2);
+	t.is(submittedMessage, '/commit');
+	t.is(dismissed, 2);
+	unmount();
+});
+
 test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -202,6 +332,45 @@ test('UserInput renders development mode indicator', t => {
 
 // Serial: this test mutates the global process.stdout.columns. Run alone so the
 // forced width can't leak into a concurrently-rendering sibling test.
+// Inline mode: the transcript is printed by Ink's <Static> at column 0, which
+// no wrapper can shift, so the prompt box drops its centring to share that
+// left edge instead of sitting a couple of columns inside it.
+test.serial('UserInput sits flush left when it is not centered', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 100,
+		configurable: true,
+	});
+
+	try {
+		const indents = (centered: boolean) => {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" centered={centered} />
+				</TestWrapper>,
+			);
+			const lines = stripAnsi(lastFrame() ?? '').split('\n');
+			const border = lines.find(line => line.includes('╭'))!.indexOf('╭');
+			const mode = lines
+				.find(line => line.includes('normal mode on'))!
+				.search(/\S/);
+			unmount();
+			return {border, mode};
+		};
+
+		t.deepEqual(indents(false), {border: 0, mode: 1});
+		// Centred is the default and keeps its inset, one step for the indicator.
+		const centred = indents(true);
+		t.true(centred.border > 0);
+		t.is(centred.mode, centred.border + 1);
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test.serial(
 	'UserInput aligns the mode indicator with the input box left border',
 	t => {
@@ -500,6 +669,50 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 			.find(line => line.includes('this is a very long'));
 		t.truthy(messageLine);
 		t.true(stripAnsi(messageLine ?? '').length <= 40);
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput keeps a long CJK queued message on a single row', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 80,
+		configurable: true,
+	});
+
+	try {
+		// Every character here is a CJK ideograph, 2 terminal columns wide -
+		// the exact repro from the bug report. formatQueuedMessage budgeted the
+		// truncation in UTF-16 units, so this ran to roughly twice the terminal
+		// width and wrapped: two full rows plus a dangling row of only "...".
+		const cjkMessage = '请把所有的测试用例都重新运行一遍然后告诉我结果'.repeat(4);
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: cjkMessage, displayValue: cjkMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const lines = stripAnsi(lastFrame() ?? '').split('\n');
+		// Rows are bordered ("│ ... │") and right-padded to the box width, so
+		// isolate each row's content before checking it - a naive trim() leaves
+		// the border character behind and never matches a bare "...".
+		const rowContent = (line: string) =>
+			line.replace(/^\s*│\s?/, '').replace(/\s*│\s*$/, '').trim();
+		t.true(lines.some(line => rowContent(line).includes('...')));
+		t.false(lines.some(line => rowContent(line) === '...'));
 		unmount();
 	} finally {
 		Object.defineProperty(process.stdout, 'columns', {
@@ -1180,6 +1393,61 @@ test('typing a space after a command hides completions so args submit', async t 
 	unmount();
 });
 
+test('Enter submits a command typed in full on the first press', async t => {
+	// The highlighted completion is exactly what was typed, so there is nothing
+	// to select. Enter used to "select" it anyway, close the menu and stop,
+	// needing a second Enter to run the command.
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-help');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submitted !== null);
+
+	t.is(submitted, '/test-help');
+});
+
+test('Enter on a partly typed command still completes it without submitting', async t => {
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-he');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(
+		() => !/Available commands:/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	await wait(50);
+
+	t.regex(stripAnsi(lastFrame()!), /\/test-help/);
+	t.is(submitted, null);
+});
+
 test('completion menu dismissal/reset after selection or escape', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -1274,6 +1542,43 @@ test('UserInput windows long slash completion lists', async t => {
 	t.notRegex(laterFrame, /\/zz-window-00/);
 	t.regex(laterFrame, /▸ \/zz-window-11/);
 	t.regex(laterFrame, /Showing 5-14 of 14/);
+
+	unmount();
+});
+
+test('UserInput windows long file mention lists', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
+	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('@zzfile');
+	// The file walk is async; wait for the list rather than a fixed delay.
+	for (let i = 0; i < 40 && !/Showing/.test(lastFrame()!); i++) {
+		await wait(50);
+	}
+	t.regex(lastFrame()!, /Showing 1-5 of 8/);
+
+	// Moving past the fifth row scrolls the list, so the highlight stays on a
+	// drawn file instead of moving onto ones that are not shown.
+	for (let i = 0; i < 7; i++) {
+		stdin.write('\u001B[B');
+		await wait(50);
+		t.regex(lastFrame()!, /▸ zzfile\d\.txt/);
+	}
+	t.notRegex(lastFrame()!, /Showing 1-5 of 8/);
 
 	unmount();
 });
@@ -1469,3 +1774,71 @@ test('Enter submits a command once its completion has been selected', async t =>
 	t.deepEqual(submitted, ['/test-help']);
 	unmount();
 });
+
+// Regression for the cursor-mid-paste bug: a terminal paste used to leave the
+// caret at end-of-value regardless of where it started, so any keystroke after
+// the paste landed at the end instead of next to the inserted text. The
+// post-paste caret position is the bug; ink-testing-library strips inverse
+// styling from the frame, so we verify by typing one more character and
+// checking where it lands.
+test.serial(
+	'UserInput parks the caret after the splice when pasting mid-string',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+
+		// Move caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+
+		pasteEvents.emit('paste', 'XY');
+		await waitForFrame(lastFrame, /aXYbc/);
+
+		// One more keystroke lands immediately after the splice, not at the end.
+		stdin.write('Z');
+		await waitForFrame(lastFrame, /aXYZbc/);
+
+		// Match against the stripped frame: inverse ANSI on the cursor
+		// character interleaves with the surrounding text in the raw output,
+		// which makes a contiguous /aXYZbc/ regex miss. waitForFrame strips
+		// before matching for the same reason.
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput parks the caret after a multi-line placeholder splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('hello world');
+		await waitForFrame(lastFrame, /hello world/);
+
+		// Move caret to offset 5 (between 'hello' and ' world').
+		for (let i = 0; i < 6; i++) {
+			stdin.write('\x1B[D');
+		}
+
+		pasteEvents.emit('paste', 'line1\nline2\nline3');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
+
+		// Next keystroke lands immediately after the placeholder, before ' world'.
+		stdin.write('!');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]! world/);
+		t.notRegex(lastFrame()!, /!\[Paste/);
+		unmount();
+	},
+);

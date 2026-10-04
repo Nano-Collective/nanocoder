@@ -1,3 +1,5 @@
+import nodeProcess from 'node:process';
+
 import {loggerProvider} from '@/utils/logging/logger-provider';
 import type {ShutdownHandler, ShutdownManagerOptions} from './types';
 
@@ -18,7 +20,7 @@ export class ShutdownManager {
 	) => void;
 
 	constructor(options?: ShutdownManagerOptions) {
-		const envTimeout = process.env[ENV_SHUTDOWN_TIMEOUT];
+		const envTimeout = nodeProcess.env[ENV_SHUTDOWN_TIMEOUT];
 		const parsedEnvTimeout = envTimeout ? parseInt(envTimeout, 10) : undefined;
 		const isValidTimeout = Number.isFinite(parsedEnvTimeout);
 		this.timeoutMs =
@@ -33,16 +35,33 @@ export class ShutdownManager {
 			void this.gracefulShutdown(0);
 		};
 		this.boundUncaughtException = (err: Error) => {
-			const logger = loggerProvider.getLogger();
-			logger.fatal({err}, 'Uncaught exception');
+			// Fallback if logger creation fails (e.g., process global corrupted).
+			try {
+				const logger = loggerProvider.getLogger();
+				logger.fatal({err}, 'Uncaught exception');
+			} catch {
+				nodeProcess.stderr.write(
+					`Uncaught exception (logger unavailable): ${err.stack ?? err.message}\n`,
+				);
+			}
 			void this.gracefulShutdown(1);
 		};
 		this.boundUnhandledRejection = (
 			reason: unknown,
 			promise: Promise<unknown>,
 		) => {
-			const logger = loggerProvider.getLogger();
-			logger.fatal({reason, promise}, 'Unhandled promise rejection');
+			try {
+				const logger = loggerProvider.getLogger();
+				logger.fatal({reason, promise}, 'Unhandled promise rejection');
+			} catch {
+				const detail =
+					reason instanceof Error
+						? (reason.stack ?? reason.message)
+						: String(reason);
+				nodeProcess.stderr.write(
+					`Unhandled promise rejection (logger unavailable): ${detail}\n`,
+				);
+			}
 			void this.gracefulShutdown(1);
 		};
 
@@ -90,23 +109,29 @@ export class ShutdownManager {
 
 		await Promise.race([shutdownPromise, timeoutPromise]);
 
-		process.exit(exitCode);
+		nodeProcess.exit(exitCode);
 	}
 
 	private setupSignalHandlers(): void {
-		process.once('SIGTERM', this.boundSigterm);
-		process.once('SIGINT', this.boundSigint);
-		process.on('uncaughtException', this.boundUncaughtException);
-		process.on('unhandledRejection', this.boundUnhandledRejection);
+		nodeProcess.once('SIGTERM', this.boundSigterm);
+		nodeProcess.once('SIGINT', this.boundSigint);
+		nodeProcess.on('uncaughtException', this.boundUncaughtException);
+		nodeProcess.on('unhandledRejection', this.boundUnhandledRejection);
 	}
 
 	reset(): void {
 		this.handlers.clear();
 		this.isShuttingDown = false;
-		process.removeListener('SIGTERM', this.boundSigterm);
-		process.removeListener('SIGINT', this.boundSigint);
-		process.removeListener('uncaughtException', this.boundUncaughtException);
-		process.removeListener('unhandledRejection', this.boundUnhandledRejection);
+		nodeProcess.removeListener('SIGTERM', this.boundSigterm);
+		nodeProcess.removeListener('SIGINT', this.boundSigint);
+		nodeProcess.removeListener(
+			'uncaughtException',
+			this.boundUncaughtException,
+		);
+		nodeProcess.removeListener(
+			'unhandledRejection',
+			this.boundUnhandledRejection,
+		);
 	}
 }
 

@@ -1010,3 +1010,34 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'getChangesSince reports only paths that differ from the checkpoint',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempDir, 'edited.txt'), 'before');
+			await fs.writeFile(path.join(tempDir, 'untouched.txt'), 'same');
+			const manager = new CheckpointManager(tempDir);
+			await manager.saveCheckpoint(
+				'changes',
+				createMockMessages(1),
+				'Provider',
+				'model',
+				['edited.txt', 'untouched.txt', 'created.txt', 'never-created.txt'],
+			);
+
+			// A turn that edits one file, creates one, and whose other two
+			// mutations failed or were no-ops.
+			await fs.writeFile(path.join(tempDir, 'edited.txt'), 'after');
+			await fs.writeFile(path.join(tempDir, 'created.txt'), 'new');
+
+			t.deepEqual(await manager.getChangesSince('changes'), {
+				filesChanged: ['edited.txt'],
+				filesMissing: ['created.txt'],
+			});
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

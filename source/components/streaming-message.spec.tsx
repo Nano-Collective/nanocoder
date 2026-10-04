@@ -296,6 +296,24 @@ test('computeStreamingTail bounds wrap input to a small tail', t => {
 	t.regex(tail, /^line-\d{6}/);
 });
 
+test('computeStreamingTail bounds a single huge line with no newlines (#1555)', t => {
+	// Regression test for #1555: one long paragraph has no newline to snap
+	// to, so the backward search found none and fell back to slicing from
+	// 0 — discarding the bound entirely and rendering the full message.
+	const textWidth = 80;
+	const maxLines = 12;
+	const tailCharLimit = textWidth * maxLines * 4;
+	const hugeMessage = 'x'.repeat(tailCharLimit * 3);
+
+	const {tail, sliced} = computeStreamingTail(hugeMessage, textWidth, maxLines);
+
+	t.true(sliced, 'expected the message to be sliced');
+	t.true(
+		tail.length <= tailCharLimit,
+		`tail.length ${tail.length} must be ≤ tailCharLimit ${tailCharLimit}`,
+	);
+});
+
 test('StreamingMessage tail slice snaps to a line boundary', t => {
 	// When the message is large enough to slice, the slice must start at a
 	// newline boundary so we never render a partial leading line.

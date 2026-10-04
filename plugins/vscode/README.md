@@ -111,7 +111,8 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | -------------------------------------- | --------------------------------------------------------- |
 | `Nanocoder: New Chat`                  | Start a fresh conversation (also the `+` view title icon) |
 | `Nanocoder: View Session History`      | Toggle the session history list (also the clock icon)     |
-| `Nanocoder: Open Configuration`        | Open the active `agents.config.json`                      |
+| `Nanocoder: Open Configuration`        | Open the project `agents.config.json`, or the global one if the project has none |
+| `Nanocoder: Restart Nanocoder Agent Process` | Restart the background `nanocoder --acp` process |
 | `Nanocoder: Connect to Nanocoder`      | Connect the legacy companion to a running terminal CLI    |
 | `Nanocoder: Disconnect from Nanocoder` | Disconnect the legacy companion                           |
 | `Nanocoder: Start Nanocoder CLI`       | Open a terminal and run `nanocoder --vscode` (companion)  |
@@ -129,7 +130,6 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show Explain Code / Generate Tests lenses above functions and classes  |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
-| `nanocoder.autoStartCli`    | `false`       | Auto-start the CLI for companion mode if not running                  |
 | `nanocoder.serverPort`      | `51820`       | WebSocket port for the legacy companion mode                          |
 
 ## Legacy Companion Mode

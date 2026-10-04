@@ -11,7 +11,7 @@ const FILENAME = 'codex-credentials.json';
 
 /** Shared message when no Codex credential is found. */
 export function getCodexNoCredentialsMessage(providerName: string): string {
-	return `No Codex credentials for "${providerName}". Type /codex-login in the chat to log in, or run: nanocoder codex login`;
+	return `No Codex credentials for "${providerName}". Type /codex-login ${providerName} in the chat to log in, or run: nanocoder codex login "${providerName}"`;
 }
 
 export interface CodexCredential {

@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
+import stringWidth from 'string-width';
 import {
 	getNanocoderShape,
 	getPreferencesVersion,
@@ -14,7 +15,7 @@ import {
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEFAULT_NANOCODER_SHAPE, type NanocoderShape} from '@/types/ui';
-import {getPackageVersion} from '@/utils/package-version';
+import {getPackageVersion, UNKNOWN_VERSION} from '@/utils/package-version';
 import {homeRelative, truncateMiddle} from '@/utils/path';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {getRandomTip} from '@/utils/tips';
@@ -199,12 +200,21 @@ export default memo(function WelcomeMessage({
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
 		const branchPart = `⎇ ${shortBranch} · `;
-		const cwdBudget = Math.max(10, termW - branchPart.length - 3);
+		// branchPart already includes the separator, so the trailing 3 is not it:
+		// it is slack, kept from the original budget, for fonts that draw ⎇ and ·
+		// wider than string-width reports.
+		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
 
 	return (
-		<Box flexDirection="column" width={termW} marginBottom={1}>
+		<Box
+			flexDirection="column"
+			width={termW}
+			height={Math.max(0, budget - 1)}
+			justifyContent="center"
+			marginBottom={1}
+		>
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
 					<Gradient colors={[colors.primary, colors.tool]}>
@@ -218,7 +228,11 @@ export default memo(function WelcomeMessage({
 					<Text color={colors.text} bold>
 						nanocoder
 					</Text>
-					<Text color={colors.secondary}> v{version}</Text>
+					<Text color={colors.secondary}>
+						{version === UNKNOWN_VERSION
+							? ' (version unknown)'
+							: ` v${version}`}
+					</Text>
 				</Text>
 			</Box>
 			<Box justifyContent={justify} width={termW} marginTop={1}>

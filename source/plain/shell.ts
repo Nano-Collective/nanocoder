@@ -36,6 +36,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -171,7 +172,12 @@ export async function runPlainShell(
 	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
 
-	const tune = resolveTune(getAppConfig(), undefined, deps.loadPreferences());
+	const tune = resolveTune(
+		getAppConfig(),
+		client.getProviderConfig(),
+		deps.loadPreferences(),
+	);
+	applyTuneCompaction(tune);
 	const tuneToolMode = getTuneToolMode(tune);
 	const toolsDisabled =
 		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);

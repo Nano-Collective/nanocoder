@@ -90,7 +90,7 @@ export interface SubagentContext {
 export enum SubagentLoadPriority {
 	/** Built-in defaults (lowest priority) */
 	BuiltIn = 0,
-	/** User-level configuration (~/.config/nanocoder/agents/) */
+	/** User-level configuration (<config dir>/agents/) */
 	User = 1,
 	/** Project-level configuration (.nanocoder/agents/) (highest priority) */
 	Project = 2,

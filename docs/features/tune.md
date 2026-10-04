@@ -6,7 +6,9 @@ sidebar_order: 11
 
 # Tune
 
-The `/tune` command opens a modal UI for adjusting runtime model behaviour. It lets you change tool profiles, compaction strategy, native tool calling, and model parameters — all without restarting your session.
+The `/tune` command opens a modal UI for adjusting runtime model behaviour. It lets you change tool profiles, compaction strategy, native tool calling, and model parameters without restarting Nanocoder.
+
+Applying a change in `/tune` clears the current chat history, because the tool profile changes which tools and prompt the model sees. Save anything you need first.
 
 Settings are persisted to `nanocoder-preferences.json` and restored on next launch.
 
@@ -18,7 +20,7 @@ Type `/tune` in the chat input. Use arrow keys to navigate, **Enter** to select,
 
 ### Enabled / Disabled
 
-The top menu item toggles tune on or off. When disabled, all settings revert to defaults. When enabled, the full settings menu appears.
+The top menu item toggles tune on or off. Tune is **on** by default, with the `auto` tool profile. When disabled, the full tool set, native tool calling and default model parameters are used. When enabled, the full settings menu appears.
 
 ### Tool Profile
 
@@ -54,18 +56,26 @@ Together these reduce the system prompt from ~500–700 tokens (`minimal`) to ro
 Toggles whether `AGENTS.md` from the project root is appended to the system prompt.
 
 - Defaults **ON** for `full` and `minimal` profiles (preserves prior behaviour).
-- Defaults **OFF** for the `nano` profile.
+- Defaults **OFF** for the `nano` profile, including when `auto` resolves to `nano` for the active model.
 - Can be flipped explicitly per session, persisted via preferences, or pinned in `agents.config.json` via `tune.includeAgentsMd`.
 
 Disabling this is useful on tiny models that get crowded out by long project guidelines.
 
 ### Aggressive Compact
 
-When enabled, sets the auto-compact threshold to 40% and mode to `aggressive`. This compresses conversation history more frequently and aggressively — useful for models with small context windows.
+When enabled, sets the auto-compact threshold to 50% (the lowest supported threshold) and mode to `aggressive`. This compresses conversation history earlier and harder, which helps models with small context windows.
+
+It applies whenever the active tune has it on, including tune restored from preferences or config at startup. A threshold or mode you set yourself with `/compact --threshold` or the `/compact` flags for the session takes priority, and toggling tune does not clear it.
 
 ### Native Tool Calling
 
-Toggle native tool calling on or off. When disabled, tools are described in the system prompt and the model uses XML fallback for tool calls instead of the provider's native tool calling API. This can help with models that have unreliable native tool support.
+Cycles through three tool-calling modes:
+
+- **ON** (`toolMode: "native"`, the default) - tools go through the provider's native tool calling API.
+- **OFF (XML fallback)** (`toolMode: "xml"`) - tools are described in the system prompt and the model emits XML tool calls.
+- **OFF (JSON fallback)** (`toolMode: "json"`) - tools are described in the system prompt and the model emits JSON tool calls.
+
+The fallbacks can help with models that have unreliable native tool support.
 
 ### Model Parameters
 
@@ -96,7 +106,7 @@ Three built-in presets are available via **Load Preset**:
 
 | Preset | Settings |
 |--------|----------|
-| **Default** | Resets everything to defaults (tune disabled) |
+| **Default** | Resets everything to defaults (tune enabled, `auto` profile, no aggressive compact) |
 | **Small Model** | Minimal tool profile, aggressive compact, temperature 0.7 |
 | **Nano (low-end hardware)** | Nano profile, aggressive compact, AGENTS.md off, temperature 0.4, max tokens 2048 |
 
@@ -104,13 +114,15 @@ Selecting a preset populates the tune form — you can further adjust settings b
 
 ## Configuration Layers
 
-Tune settings resolve from a 5-layer hierarchy (highest priority wins):
+Tune settings resolve from these layers, lowest priority first (later layers win):
 
-1. **Hardcoded defaults** — `enabled: false`, `toolProfile: 'full'`, `aggressiveCompact: false`
-2. **Top-level config** — `tune` in `agents.config.json`
-3. **Per-provider config** — `tune` within a provider's configuration
-4. **Preferences** — saved via the `/tune` UI to `nanocoder-preferences.json`
-5. **Session override** — runtime changes in the current session
+1. **Hardcoded defaults** - `enabled: true`, `toolProfile: 'auto'`, `aggressiveCompact: false`
+2. **Per-provider config** - `tune` on a provider entry in `nanocoder.providers`
+3. **Preferences** - saved by the `/tune` UI to `nanocoder-preferences.json`
+4. **Top-level config** - `nanocoder.tune` in `agents.config.json`
+5. **Session** - changes made with `/tune` in the current session
+
+Because top-level config sits above preferences, a `nanocoder.tune` block in `agents.config.json` wins over whatever `/tune` saved last time once you restart. Use `/tune` for per-session experiments, or remove `nanocoder.tune` if you want the saved preferences to stick.
 
 ### Example: Per-Provider Config
 
@@ -118,44 +130,43 @@ Set defaults for a specific provider in `agents.config.json`:
 
 ```json
 {
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "type": "ollama",
-      "models": ["qwen2.5-coder:7b"],
-      "tune": {
-        "enabled": true,
-        "toolProfile": "minimal",
-        "aggressiveCompact": true
-      },
-      "config": {
-        "baseURL": "http://localhost:11434/v1"
+  "nanocoder": {
+    "providers": [
+      {
+        "name": "Ollama",
+        "baseUrl": "http://localhost:11434/v1",
+        "models": ["qwen2.5-coder:7b"],
+        "tune": {
+          "enabled": true,
+          "toolProfile": "minimal",
+          "aggressiveCompact": true
+        }
       }
-    }
+    ]
   }
 }
 ```
 
-This automatically activates tune with the minimal profile whenever you switch to the Ollama provider.
+This applies the minimal profile and aggressive compact while the Ollama provider is active, unless your preferences or a top-level `nanocoder.tune` block set those fields.
 
 ## Interaction with Development Modes
 
 Tune works alongside [development modes](development-modes.md):
 
-- **Plan mode + minimal profile** — the model gets 4 exploration tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`), making it practical for small models to plan
-- **Plan mode + nano profile** — the model gets `read_file` and `search_file_contents` for exploration, with the shortened plan-mode prompt
-- **Plan mode + full profile** — all plan-mode tools are available, including read-only git, diagnostics, web, and interaction tools
+- **Plan mode + minimal profile** - the model gets `read_file`, `find_files`, `search_file_contents`, `list_directory` and `agent` for exploration, plus `write_plan`
+- **Plan mode + nano profile** - the model gets `read_file` and `search_file_contents` for exploration, plus `write_plan`, with the shortened plan-mode prompt
+- **Plan mode + full profile** - all plan-mode tools are available, including read-only git, diagnostics, web, and interaction tools
 - Mode exclusions are filtered on top of the tune profile
 
 ## Status Bar
 
-When tune is active, the status bar shows a summary of your settings:
+When tune is enabled, the status bar shows the resolved tool profile. When the profile is `auto`, wide terminals also mark it:
 
 ```
-tune: minimal | compact | temp:0.7
+tune: minimal (auto)
 ```
 
-On narrow terminals, this is shortened to just the profile name.
+On narrow terminals the `(auto)` marker is dropped.
 
 ## Related
 

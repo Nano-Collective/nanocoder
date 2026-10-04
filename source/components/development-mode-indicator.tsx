@@ -183,13 +183,22 @@ export const DevelopmentModeIndicator = React.memo(
 
 				// Decide which optional segments fit. Drop the Ctrl-t hint first,
 				// then the saving indicator, then the suffix, then the shift hint,
-				// until the row fits within budgetWidth.
+				// until the row fits within budgetWidth. The hints are measured
+				// against the names at full length, not their truncation floor:
+				// a help string must give way before the session name or file
+				// name it sits next to gets cut.
+				const namesWidth =
+					requiredWidth -
+					minSessionLen -
+					minEditorLen +
+					(sessionName?.length ?? 0) +
+					(editorFileName?.length ?? 0);
 				let editorSuffix = editorSuffixFull;
 				let shiftHint = shiftHintFull;
 				let taskHintExtra = taskHintExtraFull;
 				let savingExtra = savingExtraFull;
 				if (
-					requiredWidth +
+					namesWidth +
 						taskHintExtra +
 						savingExtra +
 						editorSuffix.length +
@@ -199,7 +208,7 @@ export const DevelopmentModeIndicator = React.memo(
 				) {
 					taskHintExtra = 0;
 					if (
-						requiredWidth +
+						namesWidth +
 							savingExtra +
 							editorSuffix.length +
 							shiftHint.length +
@@ -208,11 +217,11 @@ export const DevelopmentModeIndicator = React.memo(
 					) {
 						savingExtra = 0;
 						if (
-							requiredWidth + editorSuffix.length + shiftHint.length + 1 >
+							namesWidth + editorSuffix.length + shiftHint.length + 1 >
 							budgetWidth
 						) {
 							editorSuffix = '';
-							if (requiredWidth + shiftHint.length + 1 > budgetWidth) {
+							if (namesWidth + shiftHint.length + 1 > budgetWidth) {
 								shiftHint = '';
 							}
 						}

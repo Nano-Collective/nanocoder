@@ -65,8 +65,8 @@ Every hook is one object with:
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `command` | yes | Shell command to run. Runs through `sh -c` (`cmd.exe` on Windows). |
-| `matchTools` | no | Tool names this hook applies to. Omitted means every tool. Ignored by non-tool events. |
-| `matchPaths` | no | Globs the acted-on file must match. Omitted means every file. See [Scoping by file](#scoping-by-file). |
+| `matchTools` | no | Tool names this hook applies to. A single string is accepted as a one-item list. Omitted means every tool; an empty list also means every tool and logs a warning. Ignored by non-tool events. |
+| `matchPaths` | no | Globs the acted-on file must match. A single string is accepted as a one-item list. Omitted means every file. See [Scoping by file](#scoping-by-file). |
 | `timeout` | no | Milliseconds before the hook is killed. Defaults to 30000, except `session-end` (see below). |
 | `name` | no | Label shown in transcripts, error messages, and `/doctor`. Defaults to the command. |
 
@@ -152,7 +152,7 @@ Hooks run in config order, sequentially, **with the project root as their cwd** 
 
 ## Blocking a tool call
 
-On `pre-tool-use` and `user-prompt-submit`, a **non-zero exit denies the action**, and the hook's stdout is handed back to the model as the reason — so it can adapt rather than retry blindly.
+On `pre-tool-use` and `user-prompt-submit`, a **non-zero exit denies the action**, and the hook's stdout is handed back to the model as the reason - so it can adapt rather than retry blindly. If the hook printed nothing on stdout, its stderr is used instead.
 
 `.nanocoder/hooks/guard.sh`:
 
