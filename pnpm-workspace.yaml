@@ -35,6 +35,9 @@ minimumReleaseAgeExclude:
   - '@hono/node-server@1.19.14'
   - fast-uri@3.1.2
   - hono@4.12.18
+  # ink 8.0.0 is a deliberate, reviewed upgrade (2026-10); the 7-day
+  # supply-chain hold would otherwise block installing it for a week.
+  - ink@8.0.0
 
 onlyBuiltDependencies:
   - '@biomejs/biome'
@@ -44,4 +47,4 @@ onlyBuiltDependencies:
 
 patchedDependencies:
   '@ai-sdk/openai@3.0.71': patches/@ai-sdk__openai@3.0.71.patch
-  ink@6.8.0: patches/ink@6.8.0.patch
+  ink@8.0.0: patches/ink@8.0.0.patch

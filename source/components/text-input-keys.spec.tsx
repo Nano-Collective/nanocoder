@@ -118,11 +118,9 @@ test('component Delete with cursor at end does nothing', async t => {
 });
 
 // --- Backspace (\x7f) ---
-// Ink parses the physical Backspace (\x7f — sent by macOS Terminal, iTerm2
-// and essentially all Linux terminals) as `key.delete`, NOT `key.backspace`
-// (which Ink reserves for \b/Ctrl+H). So Backspace must be routed to a
-// backward delete by matching the raw sequence, distinct from forward Delete
-// (\x1b[3~).
+// Since Ink 7 the physical Backspace byte (\x7f — sent by macOS Terminal,
+// iTerm2 and essentially all Linux terminals) sets `key.backspace`, distinct
+// from forward Delete (\x1b[3~) which sets `key.delete`.
 
 test('component Backspace (\x7f) removes the character before the cursor', async t => {
 	const valueRef: ValueRef = {current: ''};
@@ -171,8 +169,8 @@ test('component Backspace (\x7f) with cursor at start does nothing', async t => 
 
 // --- Option/Alt+Backspace (\x1b\x7f) ---
 // On macOS/Linux, Option/Alt+Backspace sends ESC followed by DEL ('\x1b\x7f').
-// Ink parses it as `key.delete`, exactly like forward Delete ('\x1b[3~'), so
-// it must be routed to a backward delete via the raw sequence.
+// Ink parses it as `key.backspace` with meta set — same backward-delete
+// behaviour as bare Backspace.
 
 test('component Alt+Backspace (\x1b\x7f) removes the char before the cursor', async t => {
 	const valueRef: ValueRef = {current: ''};
@@ -198,7 +196,7 @@ test('component Alt+Backspace (\x1b\x7f) removes the char before the cursor', as
 });
 
 // A forward Delete (\x1b[3~) must NOT be treated as a Backspace even when the
-// cursor is mid-line — this pins the raw-sequence disambiguation.
+// cursor is mid-line — this pins the delete/backspace disambiguation.
 test('component Delete (\x1b[3~) still forward-deletes, distinct from Backspace', async t => {
 	const valueRef: ValueRef = {current: ''};
 	const {stdin, unmount} = render(

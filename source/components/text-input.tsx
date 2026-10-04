@@ -482,20 +482,11 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				if (showCursor) {
 					nextCursorOffset++;
 				}
-			} else if (
-				key.backspace ||
-				(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-			) {
-				// Backspace deletes the character before the cursor.
-				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
-				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence: '\x7f' and the Option/Alt+Backspace variant '\x1b\x7f'
-				// (macOS/Linux terminals) are backward deletes, while '\x1b[3~'
-				// is the forward Delete key. Kitty keyboard protocol encodes
-				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
-				// it is dormant here because nanocoder does not enable
-				// kittyKeyboard — if that changes, this guard needs the
-				// corresponding handling.
+			} else if (key.backspace) {
+				// Backspace deletes the character before the cursor. Since Ink 7 the
+				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f) set
+				// `key.backspace`, distinct from forward Delete (\x1b[3~) which sets
+				// `key.delete` — no raw-sequence disambiguation needed anymore.
 				if (cursorOffsetRef.current > 0) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
@@ -506,10 +497,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					nextCursorOffset--;
 				}
 			} else if (key.delete) {
-				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
+				// Delete removes the character after the cursor (forward delete, '\x1b[3~').
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +

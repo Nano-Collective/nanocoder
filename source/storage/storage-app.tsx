@@ -31,19 +31,23 @@ function size(bytes: number): string {
 /** Ink's stdout, not process.stdout, is the surface used by the renderer. */
 function useViewport() {
 	const {stdout} = useStdout();
+	// Ink 8 types stdout as a plain Node.js WritableStream; the TTY-only
+	// `columns`/`rows` are not part of the type, but they exist at runtime when
+	// rendering to a terminal — narrow through NodeJS.WriteStream to read them.
+	const tty = stdout as NodeJS.WriteStream;
 	const [viewport, setViewport] = useState(() => ({
-		columns: stdout.columns || 80,
-		rows: stdout.rows || 24,
+		columns: tty.columns || 80,
+		rows: tty.rows || 24,
 	}));
 	useEffect(() => {
 		const resize = () =>
-			setViewport({columns: stdout.columns || 80, rows: stdout.rows || 24});
+			setViewport({columns: tty.columns || 80, rows: tty.rows || 24});
 		stdout.on('resize', resize);
 		resize();
 		return () => {
 			stdout.off('resize', resize);
 		};
-	}, [stdout]);
+	}, [stdout, tty]);
 	return viewport;
 }
 
