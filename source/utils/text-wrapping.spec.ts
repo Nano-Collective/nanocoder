@@ -197,3 +197,18 @@ test('clampVisibleLines centers the window on a cursor in the middle', t => {
 	t.deepEqual(result, lines.slice(8, 13));
 	t.true(result.includes('line10'));
 });
+
+test('clampVisibleLines windows on soft-wrapped rows, not just logical lines', t => {
+	// One logical line (no \n) that wraps into 10 visual rows at width 10.
+	// The cursor's row is only findable through the soft-wrap segments.
+	const rows = Array.from({length: 10}, (_, i) => String(i).repeat(10));
+	const plainValue = rows.join('');
+	t.is(getVisualLineSegments(plainValue, 10).length, 10);
+
+	const atEnd = clampVisibleLines(rows, plainValue, 95, 10, 4);
+	t.deepEqual(atEnd, rows.slice(6, 10));
+
+	const inMiddle = clampVisibleLines(rows, plainValue, 45, 10, 4);
+	t.deepEqual(inMiddle, rows.slice(2, 6));
+	t.true(inMiddle.includes(rows[4] as string));
+});

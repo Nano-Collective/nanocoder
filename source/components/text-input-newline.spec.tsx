@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
+import stripAnsi from 'strip-ansi';
 import TextInput from './text-input';
 
 /**
@@ -176,7 +177,11 @@ test('maxVisibleLines caps a long draft and scrolls to the cursor at the end', t
 		/>,
 	);
 
-	const lines = (lastFrame() ?? '').split('\n');
+	// The end-of-value cursor is an inverse-video space; with colors on (CI)
+	// it survives Ink's trailing-whitespace trim, so strip it before comparing.
+	const lines = stripAnsi(lastFrame() ?? '')
+		.split('\n')
+		.map(line => line.trimEnd());
 	// 23 lines would overflow the cap; only the last 10 (ending on the
 	// cursor, which mounts at the end of the value) must render.
 	t.is(lines.length, 10);
