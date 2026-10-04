@@ -200,6 +200,7 @@ These fields work with all transport types:
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
 | `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
+| `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable periodic health checks. A failed ping or transport close marks the server unhealthy and removes its tools until the session is restarted. |
 | `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
 ## Auto-Approve Tools
