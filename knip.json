@@ -6,23 +6,13 @@
 		"sonic-boom",
 		"lint-staged"
 	],
-	"ignoreBinaries": [
-		"vsce",
-		"semgrep",
-		"which",
-		"gh",
-		"osascript",
-		"notify-send",
-		"powershell",
-		"taskkill"
-	],
+	"ignoreBinaries": ["vsce", "semgrep", "osascript", "notify-send"],
 	"ignore": [
 		"source/utils/message-queue.tsx",
 		"source/vscode/**/*.ts",
 		"plugins/**/*",
 		"scripts/fetch-models.js",
 		".husky/**",
-		".github/**",
 		"benchmarks/count-loader.mjs",
 		"benchmarks/agent/fixtures/**"
 	],
