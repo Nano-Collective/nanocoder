@@ -43,7 +43,7 @@ import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {handleResourceMention} from '@/utils/resource-mention-handler';
-import {pasteEvents} from '@/utils/terminal-paste';
+import {registerPasteTarget} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -343,7 +343,10 @@ export default function UserInput({
 	// Real pastes, as reported by the terminal via bracketed paste. The
 	// payload is lifted off stdin before Ink's keypress parser sees it, so
 	// a multi-line paste can no longer submit the prompt on its first
-	// newline — it arrives here whole, in one event.
+	// newline — it arrives here whole, in one event. Registration goes on
+	// the paste-target stack: while this input is focused it is the
+	// innermost target and receives pastes; while disabled/unfocused it
+	// unregisters so another focused field can take them.
 	useEffect(() => {
 		if (disabled || !effectiveFocus) {
 			return;
@@ -356,22 +359,18 @@ export default function UserInput({
 			const cursorOffset = textInputRef.current?.getCursorOffset();
 			const result = insertPaste(payload, cursorOffset);
 			if (result && textInputRef.current) {
-				// Hand TextInput the pasted value along with the caret: keys in the
-				// same stdin batch as the paste land before it re-renders, and
-				// must edit the pasted value, not the one it last rendered.
-				textInputRef.current.setCursorOffset(
-					result.cursorOffset,
-					currentStateRef.current.displayValue,
-				);
-			} else if (!result) {
+				textInputRef.current.setCursorOffset(result.cursorOffset);
+				return true;
+			}
+			if (!result) {
 				setTextInputKey(prev => prev + 1);
 			}
+			// Legacy append path (no caret available): the paste still landed
+			// in the value, so report it handled either way.
+			return true;
 		};
-		pasteEvents.on('paste', handleTerminalPaste);
-		return () => {
-			pasteEvents.off('paste', handleTerminalPaste);
-		};
-	}, [disabled, effectiveFocus, insertPaste, currentStateRef]);
+		return registerPasteTarget(handleTerminalPaste);
+	}, [disabled, effectiveFocus, insertPaste]);
 
 	useEffect(() => {
 		if (

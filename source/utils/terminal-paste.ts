@@ -42,8 +42,51 @@ const MAX_PASTE_CHARS = 10_000_000;
  */
 const MIN_PARTIAL_START = 3;
 
-/** Singleton bus: cli.tsx publishes payloads, UserInput subscribes. */
+/**
+ * Singleton paste bus: cli.tsx publishes payloads, the focused text field
+ * subscribes. Emission is ordered relative to keypresses (see emitPaste),
+ * so a paste stays where it was in the input stream.
+ */
 export const pasteEvents = new EventEmitter();
+
+/**
+ * Deliver one paste payload to the active paste consumer, if any.
+ *
+ * Returns true when a consumer handled it. Handled means "accepted": a
+ * disabled or unfocused consumer unregisters and reports false so the
+ * payload can fall through to the next candidate (or be dropped).
+ */
+export function emitPaste(payload: string): boolean {
+	for (const accept of pasteTargets) {
+		if (accept(payload)) return true;
+	}
+	return false;
+}
+
+/**
+ * Stack of paste consumers, innermost (most recently registered) first.
+ * Components with a keyboard-editable field push an accept callback on
+ * mount (when focused) and pop it on unmount/blur. The stack ordering
+ * matches Ink's focus nesting: an open modal or wizard field registers
+ * after the chat input and so receives pastes first while it is focused.
+ */
+const pasteTargets: Array<(payload: string) => boolean> = [];
+
+/**
+ * Register `accept` as the current innermost paste consumer. `accept` must
+ * return true when it consumed the payload; returning false (e.g. because
+ * the component became disabled or lost focus) lets the next candidate
+ * handle it. Returns an unregister function.
+ */
+export function registerPasteTarget(
+	accept: (payload: string) => boolean,
+): () => void {
+	pasteTargets.push(accept);
+	return () => {
+		const index = pasteTargets.lastIndexOf(accept);
+		if (index !== -1) pasteTargets.splice(index, 1);
+	};
+}
 
 /**
  * Length of the longest suffix of `text` that is a proper prefix of

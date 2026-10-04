@@ -5,6 +5,7 @@ import TextInput from '@/components/text-input';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {registerPasteTarget} from '@/utils/terminal-paste';
 import {
 	MCP_TEMPLATES,
 	type McpServerConfig,
@@ -374,6 +375,21 @@ export function McpStep({
 			value: `edit-${key}`,
 		})),
 	];
+
+	// Terminal pastes while the multiline env-vars editor is focused land in
+	// the buffer directly (Enter/Escape editing stays on the keyboard path).
+	const multilineFieldFocused =
+		mode === 'field-input' &&
+		selectedTemplate?.fields[currentFieldIndex]?.name === 'envVars';
+	useEffect(() => {
+		if (!multilineFieldFocused) {
+			return;
+		}
+		return registerPasteTarget(payload => {
+			setMultilineBuffer(prev => prev + payload);
+			return true;
+		});
+	}, [multilineFieldFocused]);
 
 	// Handle keyboard navigation
 	useInput((input, key) => {

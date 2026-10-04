@@ -824,9 +824,9 @@ async function main(): Promise<void> {
 			} = await import('@/utils/terminal-mouse');
 			const {
 				createPasteExtractor,
+				emitPaste,
 				DISABLE_BRACKETED_PASTE,
 				ENABLE_BRACKETED_PASTE,
-				pasteEvents,
 			} = await import('@/utils/terminal-paste');
 			const {splitControlKeypresses, createXtermModifiedEnterRewriter} =
 				await import('@/utils/terminal-keypress');
@@ -865,65 +865,80 @@ async function main(): Promise<void> {
 			// Ink must never see the raw escape sequences (its keypress
 			// parser would leak them into the chat input as text, and a
 			// pasted newline would submit), so it reads from a filtered proxy
-			// stream. Paste payloads are lifted out first and republished on
-			// pasteEvents; mouse reports are then stripped from what's left,
-			// with wheel ticks re-emitted on wheelEvents for the viewport.
+			// stream. Paste payloads are lifted out and delivered to the
+			// focused text field (emitPaste); mouse reports are then stripped
+			// from what's left, with wheel ticks re-emitted on wheelEvents
+			// for the viewport. Keys and pastes share one FIFO so their
+			// original stream order survives.
 			const {PassThrough} = await import('node:stream');
 			const filtered = new PassThrough();
 			const decodeInput = createUtf8InputDecoder();
 			const extractPastes = createPasteExtractor();
+			type InputWork =
+				| {kind: 'key'; text: string}
+				| {kind: 'paste'; payload: string};
+			// Ink drains everything buffered on each 'readable', so pieces
+			// written back to back would merge again. Its 'readable' fires on
+			// a nextTick, so writing one piece per setImmediate hands it each
+			// piece as a separate read, in order.
+			const pendingWork: InputWork[] = [];
+			let drainScheduled = false;
+			const drainWork = () => {
+				const next = pendingWork.shift();
+				if (next === undefined) {
+					drainScheduled = false;
+					return;
+				}
+				if (next.kind === 'paste') {
+					emitPaste(next.payload);
+				} else {
+					filtered.write(next.text);
+				}
+				setImmediate(drainWork);
+			};
+			const queueWork = (items: InputWork[]) => {
+				pendingWork.push(...items);
+				if (!drainScheduled) {
+					drainScheduled = true;
+					drainWork();
+				}
+			};
 			const rewriteEnter = createXtermModifiedEnterRewriter(text => {
-				queueKeypresses(splitControlKeypresses(text));
+				// xterm modifyOtherKeys Enter (VS Code terminal) is unparseable
+				// by Ink and dropped outright in Ink 8 — rewrite it to the
+				// equivalent kitty CSI-u sequence so Shift/Alt+Enter survive,
+				// including when the sequence spans multiple stdin chunks.
+				// splitControlKeypresses keeps a run of control keys coalesced
+				// into one read as distinct events.
+				queueWork(
+					splitControlKeypresses(text).map(text => ({kind: 'key', text})),
+				);
 			});
 			let carry = '';
 			const forwardInput = (chunk: Buffer | string) => {
 				const text = decodeInput(chunk);
 				const split = extractPastes(text);
-				for (const payload of split.pastes) {
-					pasteEvents.emit('paste', payload);
-				}
 				const result = stripMouseSequences(split.clean, carry);
 				carry = result.carry;
 				for (const direction of result.wheel) {
 					wheelEvents.emit('wheel', direction);
 				}
 				if (result.clean) {
-					// xterm modifyOtherKeys Enter (VS Code terminal) is unparseable
-					// by Ink and dropped outright in Ink 8 — rewrite it to the
-					// equivalent kitty CSI-u sequence so Shift/Alt+Enter survive,
-					// including when the sequence spans multiple stdin chunks.
 					rewriteEnter.push(result.clean);
 				}
-			};
-			// Ink drains everything buffered on each 'readable', so pieces
-			// written back to back would merge again. Its 'readable' fires on
-			// a nextTick, so writing one piece per setImmediate hands it each
-			// piece as a separate read, in order.
-			const pendingKeypresses: string[] = [];
-			let drainScheduled = false;
-			const drainKeypresses = () => {
-				const next = pendingKeypresses.shift();
-				if (next === undefined) {
-					drainScheduled = false;
-					return;
-				}
-				filtered.write(next);
-				setImmediate(drainKeypresses);
-			};
-			const queueKeypresses = (pieces: string[]) => {
-				pendingKeypresses.push(...pieces);
-				if (!drainScheduled) {
-					drainScheduled = true;
-					drainKeypresses();
-				}
+				// rewriteEnter.push queues this chunk's keys synchronously
+				// (unless it holds back a partial sequence), so queuing the
+				// pastes after it preserves their order relative to keys.
+				queueWork(split.pastes.map(payload => ({kind: 'paste', payload})));
 			};
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {
 				rewriteEnter.dispose();
-				pendingKeypresses.length = 0;
+				pendingWork.length = 0;
 				process.stdin.off('data', forwardInput);
 				process.stdin.pause();
 			};
+
 			// TTY facade: Ink checks isTTY for raw-mode support and calls
 			// setRawMode/ref/unref — delegate those to the real stdin.
 			inkStdin = Object.assign(filtered, {
