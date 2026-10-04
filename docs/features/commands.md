@@ -71,6 +71,10 @@ Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, ha
 | `/voice status` | Display current voice configuration and backend status |
 | `/voice mode <push-to-talk\|hands-free>` | Set specific activation mode |
 
+Push-to-talk (`Ctrl+G`) can interrupt a response at any point, including while it is being spoken. In hands-free mode, speech has to last about 300 ms before it counts, so a cough or a door does not cancel a run. Speech that starts while a response is being spoken is ignored, so the speakers cannot interrupt themselves; use `Ctrl+G` to cut playback short. Hands-free speech is also ignored while a typed prompt is running or a confirmation is on screen.
+
+Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfirmed tool calls. Cloud STT sends microphone audio to OpenAI, and cloud TTS sends the response text; both are opt-in and local is the default.
+
 ### Exporting a Session
 
 ```bash

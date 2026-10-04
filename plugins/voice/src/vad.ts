@@ -7,6 +7,7 @@ export interface VadEngineOptions {
 	speechThreshold?: number;
 	silenceThreshold?: number;
 	silenceDurationMs?: number;
+	minSpeechDurationMs?: number;
 	workerPath?: string;
 }
 
@@ -46,6 +47,7 @@ export class VadEngine extends EventEmitter<VadEventMap> {
 				speechThreshold: this.options.speechThreshold,
 				silenceThreshold: this.options.silenceThreshold,
 				silenceDurationMs: this.options.silenceDurationMs,
+				minSpeechDurationMs: this.options.minSpeechDurationMs,
 			},
 		});
 

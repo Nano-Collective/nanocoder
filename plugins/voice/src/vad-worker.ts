@@ -5,9 +5,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
 import {parentPort, workerData} from 'node:worker_threads';
+import {SpeechDetector} from './vad-detector.js';
 
 /**
- * Worker thread for Voice Activity Detection (VAD).
+ * Worker thread for Voice Activity Detection (VAD). Owns the `rec` process
+ * and feeds its PCM stream through `SpeechDetector` (see vad-detector.ts).
  *
  * NOTE ON VAD ARCHITECTURE:
  * This uses a frame-based RMS energy detection algorithm over raw PCM 16kHz 16-bit audio.
@@ -16,18 +18,14 @@ import {parentPort, workerData} from 'node:worker_threads';
  * fluctuations than neural / ML-based VAD models.
  */
 
-const speechThreshold = workerData?.speechThreshold ?? 1500;
-const silenceThreshold = workerData?.silenceThreshold ?? 800;
-const silenceDurationMs = workerData?.silenceDurationMs ?? 1000;
-const maxSpeechDurationMs = 30000; // 30s maximum utterance cap to prevent unbounded buffer growth
 const frameSize = 512; // 16kHz 16-bit mono PCM sample frame size (1024 bytes)
 
-let isSpeech = false;
-let silenceStart = 0;
-let speechStartTime = 0;
-let audioChunks: Buffer[] = [];
-const preRollChunks: Buffer[] = [];
-const preRollFrameLimit = 5;
+const detector = new SpeechDetector({
+	speechThreshold: workerData?.speechThreshold,
+	silenceThreshold: workerData?.silenceThreshold,
+	silenceDurationMs: workerData?.silenceDurationMs,
+	minSpeechDurationMs: workerData?.minSpeechDurationMs,
+});
 
 const recCmd = process.env.REC_CMD || (platform === 'win32' ? 'sox' : 'rec');
 const recArgs =
@@ -65,25 +63,9 @@ const recArgs =
 const proc = cp.spawn(recCmd, recArgs, {stdio: ['ignore', 'pipe', 'ignore']});
 let stopping = false;
 
-function calculateRms(buffer: Buffer): number {
-	let sum = 0;
-	const count = buffer.length / 2;
-	for (let i = 0; i < buffer.length; i += 2) {
-		const sample = buffer.readInt16LE(i);
-		sum += sample * sample;
-	}
-	return Math.sqrt(sum / (count || 1));
-}
-
 let remainder: Buffer = Buffer.alloc(0);
 
-function finalizeSpeech(): void {
-	isSpeech = false;
-	silenceStart = 0;
-	speechStartTime = 0;
-
-	const pcmData = Buffer.concat(audioChunks);
-	audioChunks = [];
+function writeUtterance(pcmData: Buffer): void {
 	const wavHeader = createWavHeader(pcmData.length, 16000, 1, 16);
 	const wavBuffer = Buffer.concat([wavHeader, pcmData]);
 	const tempFile = join(tmpdir(), 'nanocoder-vad-' + randomUUID() + '.wav');
@@ -100,41 +82,12 @@ proc.stdout.on('data', (chunk: Buffer) => {
 		const frame = data.subarray(offset, offset + bytesPerFrame);
 		offset += bytesPerFrame;
 
-		const rms = calculateRms(frame);
-
-		if (rms > speechThreshold) {
-			if (!isSpeech) {
-				isSpeech = true;
-				speechStartTime = Date.now();
-				audioChunks.push(...preRollChunks.splice(0));
+		for (const event of detector.process(frame)) {
+			if (event.type === 'speech_start') {
 				parentPort?.postMessage({type: 'speech_start'});
-			}
-			audioChunks.push(Buffer.from(frame));
-			silenceStart = 0;
-
-			// Cap utterance duration to prevent unbounded memory growth
-			if (Date.now() - speechStartTime >= maxSpeechDurationMs) {
-				finalizeSpeech();
-			}
-		} else if (isSpeech) {
-			audioChunks.push(Buffer.from(frame));
-			const now = Date.now();
-
-			// Force finalize if max speech duration exceeded
-			if (now - speechStartTime >= maxSpeechDurationMs) {
-				finalizeSpeech();
-			} else if (rms < silenceThreshold) {
-				if (silenceStart === 0) {
-					silenceStart = now;
-				} else if (now - silenceStart >= silenceDurationMs) {
-					finalizeSpeech();
-				}
 			} else {
-				silenceStart = 0;
+				writeUtterance(event.pcm);
 			}
-		} else {
-			preRollChunks.push(Buffer.from(frame));
-			if (preRollChunks.length > preRollFrameLimit) preRollChunks.shift();
 		}
 	}
 

@@ -377,33 +377,33 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		// If the leader is already gone before cancellation starts, do not risk
-		// signalling a recycled PID. Once cancellation begins, the leader may
-		// exit while descendants remain in the detached process group.
-		if (proc.exitCode !== null || proc.signalCode !== null) return;
+		// On Unix, probe the process group rather than the leader. Every command
+		// runs under a wrapping `sh`, which can exit (on SIGTERM, or on its own
+		// after backgrounding a job) while descendants live on in the group. The
+		// PGID cannot be recycled while any member is alive, so a successful
+		// probe means the signal reaches our own processes.
+		const isAlive = (): boolean => {
+			if (isWindows) {
+				return proc.exitCode === null && proc.signalCode === null;
+			}
+			try {
+				process.kill(-pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		if (!isAlive()) return;
 
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
 
-		// SIGKILL fallback after 2 seconds if process survives SIGTERM.
-		// Gate on exitCode only — NOT proc.killed. Node sets proc.killed = true
-		// on ANY successful proc.kill() call (including the SIGTERM fallback
-		// above), so gating on !proc.killed would prevent SIGKILL from ever
-		// firing when the group-kill threw and we fell back to proc.kill().
+		// SIGKILL fallback after 2 seconds for anything that trapped or ignored
+		// SIGTERM. Gate on liveness only, not proc.killed: Node sets proc.killed
+		// on any successful proc.kill() call, including the SIGTERM above.
 		const sigkillTimer = setTimeout(() => {
-			if (!isWindows) {
-				try {
-					// The shell leader may have exited while a descendant that traps
-					// SIGTERM is still alive in the process group.
-					process.kill(-pid, 0);
-				} catch {
-					return;
-				}
-				sendKillSignal('SIGKILL');
-				return;
-			}
-
-			if (proc.exitCode === null && proc.signalCode === null) {
+			if (isAlive()) {
 				sendKillSignal('SIGKILL');
 			}
 		}, 2000);

@@ -117,12 +117,18 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
+	const {currentTheme} = useTheme();
 	const voiceInputAllowed =
 		!appState.activeMode &&
 		!appState.isToolConfirmationMode &&
 		!appState.isQuestionMode &&
 		pendingSubagentApproval === null &&
 		pendingToolConfirmation === null;
+	const agentBusy =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null;
 
 	// Load voice preferences reactively for useVoice via preference store subscription
 	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
@@ -133,7 +139,11 @@ export function InteractiveApp({
 		});
 	}, []);
 
-	const {state: voiceState, startStopRecording} = useVoice({
+	const {
+		state: voiceState,
+		startStopRecording,
+		unavailableReason: voiceUnavailableReason,
+	} = useVoice({
 		handleUserSubmit,
 		messages: appState.messages,
 		addToChatQueue: appState.addToChatQueue,
@@ -143,6 +153,7 @@ export function InteractiveApp({
 		isConversationComplete: appState.isConversationComplete,
 		developmentMode: appState.developmentMode,
 		isInputAvailable: voiceInputAllowed,
+		isAgentBusy: agentBusy,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
 	});
@@ -417,8 +428,6 @@ export function InteractiveApp({
 		appState.setAbortController,
 		submittedDraft,
 	]);
-
-	const {currentTheme} = useTheme();
 
 	// Single, always-mounted authority for Escape -> cancel. Because this lives
 	// at the section level (never swapped out like the ChatInput children), it
@@ -709,7 +718,16 @@ export function InteractiveApp({
 					!appState.isSettingsMode &&
 					!appState.planReviewState?.show &&
 					voicePref.enabled && (
-						<VoiceStatusBar state={voiceState} theme={currentTheme} />
+						<VoiceStatusBar
+							state={voiceState}
+							theme={currentTheme}
+							idleHint={
+								voiceUnavailableReason ??
+								(voicePref.activationMode === 'hands-free'
+									? 'Waiting for speech'
+									: 'Press Ctrl+G to talk')
+							}
+						/>
 					)}
 			</Box>
 		</UIStateProvider>

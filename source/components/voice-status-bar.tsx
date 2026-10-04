@@ -11,9 +11,11 @@ export type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
 export const VoiceStatusBar = memo(function VoiceStatusBar({
 	state,
 	theme,
+	idleHint = 'Press Ctrl+G to talk',
 }: {
 	state: VoiceState;
 	theme: ThemePreset;
+	idleHint?: string;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -42,7 +44,7 @@ export const VoiceStatusBar = memo(function VoiceStatusBar({
 				return '[TTS] Speaking...';
 			case 'idle':
 			default:
-				return '[-] Idle (Press Ctrl+G to talk)';
+				return `[-] Idle (${idleHint})`;
 		}
 	};
 

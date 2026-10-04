@@ -716,13 +716,14 @@ test.serial('startStopRecording does not record when voicePreference.enabled is 
 	unmount();
 });
 
-test.serial('filters [BLANK_AUDIO] markers and does not submit to chat', async t => {
+test.serial('does not submit an empty transcript to chat', async t => {
 	let submitCalled = false;
 	const queue: React.ReactNode[] = [];
 	const triggerRef = { current: null as (() => void) | null };
 
+	// The plugin's filterSilenceMarkers turns [BLANK_AUDIO] into ''.
 	const mockPlugin = makeMockPlugin({
-		transcribeAudio: async () => '[BLANK_AUDIO]',
+		transcribeAudio: async () => '  ',
 	});
 
 	const { unmount } = render(
@@ -744,12 +745,12 @@ test.serial('filters [BLANK_AUDIO] markers and does not submit to chat', async t
 	triggerRef.current?.();
 	await flush(100);
 
-	t.false(submitCalled, '[BLANK_AUDIO] must not be submitted as user prompt');
+	t.false(submitCalled, 'an empty transcript must not be submitted as user prompt');
 	t.true(queue.length > 0, 'No speech detected message should be queued');
 	unmount();
 });
 
-test.serial('returns to idle when the TTS handoff watchdog expires', async t => {
+test.serial('TTS handoff watchdog clears pending speech without ending the run', async t => {
 	const triggerRef = {current: null as (() => void) | null};
 	const stateRef = {current: null as VoiceState | null};
 	let watchdog: (() => void) | undefined;
@@ -953,5 +954,231 @@ test.serial('PR6 - Cloud STT/TTS Fallback: falls back to local when cloud provid
 	await flush(100);
 	t.true(localTTSFallbackCalled, 'Must gracefully fall back to local TTS when cloud TTS fails');
 
+	unmount();
+});
+
+function makeMockVad() {
+	const listeners: Record<string, ((...args: any[]) => void)[]> = {};
+	let startCount = 0;
+	let stopCount = 0;
+	return {
+		engine: {
+			start: () => {
+				startCount++;
+			},
+			stop: () => {
+				stopCount++;
+			},
+			on: (event: string, cb: (...args: any[]) => void) => {
+				listeners[event] = listeners[event] || [];
+				listeners[event].push(cb);
+			},
+		},
+		emit: (event: string, ...args: any[]) =>
+			listeners[event]?.forEach(cb => cb(...args)),
+		counts: () => ({start: startCount, stop: stopCount}),
+	};
+}
+
+test.serial('stays speaking while TTS plays after a voice run completes', async t => {
+	const triggerRef = { current: null as (() => void) | null };
+	const stateRef = { current: null as VoiceState | null };
+	let resolvePlay: () => void = () => {};
+	let playing = false;
+	const mockPlugin = makeMockPlugin({
+		transcribeAudio: async () => 'question',
+		playAudio: async () => {
+			playing = true;
+			await new Promise<void>(resolve => {
+				resolvePlay = resolve;
+			});
+		},
+	});
+	const harness = (complete: boolean, messages: UseVoiceProps['messages']) => (
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={messages}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			triggerRef={triggerRef}
+			stateRef={stateRef}
+			isConversationComplete={complete}
+		/>
+	);
+
+	const { rerender, unmount } = render(harness(true, []));
+	await flush();
+	triggerRef.current?.();
+	await flush();
+	triggerRef.current?.();
+	await flush(100);
+
+	// The run starts, then completes in the same commit that adds the reply.
+	rerender(harness(false, []));
+	await flush();
+	t.is(stateRef.current, 'processing');
+	rerender(harness(true, [{ role: 'assistant', content: 'Final answer' }]));
+	await flush(100);
+
+	t.true(playing);
+	t.is(stateRef.current, 'speaking');
+
+	resolvePlay();
+	await flush();
+	t.is(stateRef.current, 'idle');
+	unmount();
+});
+
+test.serial('a voice run that completes with nothing to speak returns to idle', async t => {
+	const triggerRef = { current: null as (() => void) | null };
+	const stateRef = { current: null as VoiceState | null };
+	let synthCalled = false;
+	const mockPlugin = makeMockPlugin({
+		transcribeAudio: async () => 'question',
+		synthesizeSpeech: async () => {
+			synthCalled = true;
+		},
+	});
+	const harness = (complete: boolean, messages: UseVoiceProps['messages']) => (
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={messages}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			triggerRef={triggerRef}
+			stateRef={stateRef}
+			isConversationComplete={complete}
+		/>
+	);
+
+	const { rerender, unmount } = render(harness(true, []));
+	await flush();
+	triggerRef.current?.();
+	await flush();
+	triggerRef.current?.();
+	await flush(100);
+	rerender(harness(false, []));
+	await flush();
+	// The run ends on an error: the last message is not an assistant reply.
+	rerender(harness(true, [{ role: 'user', content: 'question' }]));
+	await flush(100);
+	t.is(stateRef.current, 'idle');
+
+	// A later typed run must not be spoken with the stale voice plugin.
+	rerender(harness(false, [{ role: 'user', content: 'question' }]));
+	await flush();
+	rerender(harness(true, [{ role: 'assistant', content: 'typed reply' }]));
+	await flush(100);
+	t.false(synthCalled);
+	unmount();
+});
+
+test.serial('hands-free ignores speech while a typed prompt run is in flight', async t => {
+	const vad = makeMockVad();
+	const stateRef = { current: null as VoiceState | null };
+	let submitted = false;
+	let cancelled = false;
+	const mockPlugin = makeMockPlugin({
+		createVadEngine: () => vad.engine,
+		transcribeAudio: async () => 'ambient chatter',
+	});
+
+	const { unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {
+				submitted = true;
+			}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			voicePreference={{ enabled: true, activationMode: 'hands-free' }}
+			handleCancel={() => {
+				cancelled = true;
+			}}
+			stateRef={stateRef}
+			isAgentBusy={true}
+		/>,
+	);
+	await flush(100);
+
+	vad.emit('speech_start');
+	await flush();
+	t.is(stateRef.current, 'idle');
+	vad.emit('speech_final', { filePath: '/tmp/nanocoder-test-missing.wav' });
+	await flush(100);
+
+	t.false(submitted, 'ambient speech must not be submitted mid-run');
+	t.false(cancelled, 'ambient speech must not cancel a typed run');
+	unmount();
+});
+
+test.serial('hands-free keeps the microphone running while input is unavailable', async t => {
+	const vad = makeMockVad();
+	const stateRef = { current: null as VoiceState | null };
+	let submitted = false;
+	const mockPlugin = makeMockPlugin({
+		createVadEngine: () => vad.engine,
+		transcribeAudio: async () => 'yes do it',
+	});
+	const harness = (available: boolean) => (
+		<VoiceHarness
+			handleUserSubmit={async () => {
+				submitted = true;
+			}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			voicePreference={{ enabled: true, activationMode: 'hands-free' }}
+			stateRef={stateRef}
+			isInputAvailable={available}
+		/>
+	);
+
+	const { rerender, unmount } = render(harness(true));
+	await flush(100);
+	t.deepEqual(vad.counts(), { start: 1, stop: 0 });
+
+	// A tool confirmation appears mid-utterance.
+	vad.emit('speech_start');
+	await flush();
+	t.is(stateRef.current, 'listening');
+	rerender(harness(false));
+	await flush();
+	vad.emit('speech_final', { filePath: '/tmp/nanocoder-test-missing.wav' });
+	await flush(100);
+
+	t.false(submitted, 'speech must not be submitted over a confirmation');
+	t.is(stateRef.current, 'idle');
+	vad.emit('speech_start');
+	await flush();
+	t.is(stateRef.current, 'idle');
+
+	rerender(harness(true));
+	await flush(100);
+	t.deepEqual(vad.counts(), { start: 1, stop: 0 }, 'rec must not be respawned');
+	unmount();
+});
+
+test.serial('hands-free in yolo mode reports why it is paused', async t => {
+	const queue: React.ReactNode[] = [];
+	let reason: string | null | undefined;
+
+	function ReasonProbe() {
+		const { unavailableReason } = useVoice({
+			handleUserSubmit: async () => {},
+			messages: [],
+			addToChatQueue: comp => queue.push(comp),
+			loadPlugin: async () => makeMockPlugin(),
+			voicePreference: { enabled: true, activationMode: 'hands-free' },
+			developmentMode: 'yolo',
+		});
+		reason = unavailableReason;
+		return <></>;
+	}
+
+	const { unmount } = render(<ReasonProbe />);
+	await flush();
+	t.is(reason, 'Hands-free paused in yolo mode');
+	t.is(queue.length, 1, 'a one-time notice explains the pause');
 	unmount();
 });

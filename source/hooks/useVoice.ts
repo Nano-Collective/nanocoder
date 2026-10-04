@@ -72,13 +72,21 @@ export interface UseVoiceProps {
 	currentModel?: string;
 	developmentMode?: string;
 	isConversationComplete?: boolean;
+	/** False while a modal, confirmation or question owns the keyboard. */
 	isInputAvailable?: boolean;
+	/** True while an agent run is in flight, whoever started it. */
+	isAgentBusy?: boolean;
 }
 
 export interface UseVoiceReturn {
 	state: VoiceState;
 	startStopRecording: () => void;
+	/** Set when the configured activation mode cannot run right now. */
+	unavailableReason: string | null;
 }
+
+const HANDS_FREE_YOLO_NOTICE =
+	'Hands-free voice is paused in yolo mode, so ambient speech cannot trigger unconfirmed tool calls. Switch mode with Shift+Tab or use /voice ptt.';
 
 export const defaultLoadPlugin = async (): Promise<VoicePlugin> => {
 	try {
@@ -95,12 +103,10 @@ export const defaultLoadPlugin = async (): Promise<VoicePlugin> => {
 	}
 };
 
+// Whisper's silence markers ([BLANK_AUDIO] etc.) are stripped by the plugin's
+// filterSilenceMarkers, so an empty transcript is all that is left to catch.
 function isBlankAudio(text: string): boolean {
-	const trimmed = text.trim();
-	if (!trimmed) return true;
-	return /^\s*(\[BLANK_AUDIO\]|\[silence\]|\(silence\)|\(_BEG_\)|\(_END_\))\s*$/i.test(
-		trimmed,
-	);
+	return text.trim() === '';
 }
 
 export function useVoice({
@@ -116,13 +122,22 @@ export function useVoice({
 	developmentMode,
 	isConversationComplete = true,
 	isInputAvailable = true,
+	isAgentBusy = false,
 }: UseVoiceProps): UseVoiceReturn {
-	const [state, setState] = React.useState<VoiceState>('idle');
+	const [state, setStateValue] = React.useState<VoiceState>('idle');
 
+	// stateRef is written synchronously alongside the state so effects that run
+	// in the same commit (TTS start vs. run completion) see each other's writes.
 	const stateRef = React.useRef(state);
-	React.useEffect(() => {
-		stateRef.current = state;
-	}, [state]);
+	const setState = React.useCallback((next: VoiceState) => {
+		stateRef.current = next;
+		setStateValue(next);
+	}, []);
+
+	const isInputAvailableRef = React.useRef(isInputAvailable);
+	isInputAvailableRef.current = isInputAvailable;
+	const isAgentBusyRef = React.useRef(isAgentBusy);
+	isAgentBusyRef.current = isAgentBusy;
 
 	const handleCancelRef = React.useRef(handleCancel);
 	React.useEffect(() => {
@@ -170,10 +185,6 @@ export function useVoice({
 	const hasCheckedHandsFreeDepsRef = React.useRef(false);
 	const hasEmittedDeclinedSessionNoticeRef = React.useRef(false);
 	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
-	const vadSpeechActiveRef = React.useRef(false);
-	const vadBargeInTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
-		null,
-	);
 
 	const cleanupRecordingFile = React.useCallback((expectedPath?: string) => {
 		const filePath = recordingFileRef.current;
@@ -210,7 +221,6 @@ export function useVoice({
 
 	// Central interrupt helper — idempotent across mid-generation, mid-tool, mid-synthesis, mid-playback
 	const interrupt = React.useCallback(() => {
-		stateRef.current = 'listening';
 		setState('listening');
 
 		if (ttsAbortControllerRef.current) {
@@ -222,11 +232,6 @@ export function useVoice({
 			clearTimeout(ttsTimeoutRef.current);
 			ttsTimeoutRef.current = null;
 		}
-		if (vadBargeInTimerRef.current) {
-			clearTimeout(vadBargeInTimerRef.current);
-			vadBargeInTimerRef.current = null;
-		}
-		vadSpeechActiveRef.current = false;
 		pendingTTSRef.current = false;
 		pluginRef.current = null;
 
@@ -239,7 +244,7 @@ export function useVoice({
 		cleanupTtsFile();
 
 		handleCancelRef.current?.();
-	}, [cleanupRecordingFile, cleanupTtsFile]);
+	}, [cleanupRecordingFile, cleanupTtsFile, setState]);
 
 	const ensureDependencies = React.useCallback(
 		async (plugin: VoicePlugin): Promise<boolean> => {
@@ -345,8 +350,7 @@ export function useVoice({
 		if (
 			!enabled ||
 			activationMode !== 'hands-free' ||
-			developmentMode === 'yolo' ||
-			!isInputAvailable
+			developmentMode === 'yolo'
 		) {
 			hasCheckedHandsFreeDepsRef.current = false;
 			if (vadEngineRef.current) {
@@ -358,11 +362,6 @@ export function useVoice({
 				}
 				vadEngineRef.current = null;
 			}
-			if (vadBargeInTimerRef.current) {
-				clearTimeout(vadBargeInTimerRef.current);
-				vadBargeInTimerRef.current = null;
-			}
-			vadSpeechActiveRef.current = false;
 			return;
 		}
 
@@ -393,37 +392,31 @@ export function useVoice({
 				on: (event: string, cb: (...args: any[]) => void) => void;
 			};
 
+			// The worker only reports speech_start once an onset has lasted its
+			// minimum speech duration, so a cough or a door does not get here.
+			// The microphone keeps running while input is unavailable; events
+			// are ignored instead, so a tool confirmation does not respawn `rec`.
 			engine.on('speech_start', () => {
+				if (!isInputAvailableRef.current) return;
 				const currState = stateRef.current;
 				if (currState === 'processing') {
-					vadSpeechActiveRef.current = true;
-					if (vadBargeInTimerRef.current) {
-						clearTimeout(vadBargeInTimerRef.current);
-					}
-					vadBargeInTimerRef.current = setTimeout(() => {
-						vadBargeInTimerRef.current = null;
-						if (
-							vadSpeechActiveRef.current &&
-							stateRef.current === 'processing'
-						) {
-							interrupt();
-						}
-					}, 250);
+					interrupt();
 				} else if (currState === 'speaking') {
 					// Do not let speaker output trigger a self-interrupt.
-				} else if (currState === 'idle') {
+				} else if (currState === 'idle' && !isAgentBusyRef.current) {
+					// A typed prompt's run is not voice's to interrupt or append to.
 					setState('listening');
 				}
 			});
 
 			engine.on('speech_final', async (evt: {filePath: string}) => {
-				vadSpeechActiveRef.current = false;
-				if (vadBargeInTimerRef.current) {
-					clearTimeout(vadBargeInTimerRef.current);
-					vadBargeInTimerRef.current = null;
-				}
 				// Prevent WAV leaks on unhandled or non-listening states
-				if (!isInputAvailable || stateRef.current !== 'listening') {
+				if (
+					!isInputAvailableRef.current ||
+					isAgentBusyRef.current ||
+					stateRef.current !== 'listening'
+				) {
+					if (stateRef.current === 'listening') setState('idle');
 					if (evt.filePath && existsSync(evt.filePath)) {
 						try {
 							unlinkSync(evt.filePath);
@@ -552,21 +545,28 @@ export function useVoice({
 				}
 				vadEngineRef.current = null;
 			}
-			if (vadBargeInTimerRef.current) {
-				clearTimeout(vadBargeInTimerRef.current);
-				vadBargeInTimerRef.current = null;
-			}
-			vadSpeechActiveRef.current = false;
 		};
 	}, [
 		enabled,
 		activationMode,
 		developmentMode,
-		isInputAvailable,
 		ensureDependencies,
 		cleanupRecordingFile,
 		interrupt,
+		setState,
 	]);
+
+	const handsFreeBlockedByYolo =
+		enabled && activationMode === 'hands-free' && developmentMode === 'yolo';
+	React.useEffect(() => {
+		if (!handsFreeBlockedByYolo) return;
+		addToChatQueueRef.current(
+			React.createElement(InfoMessage, {
+				key: generateKey('voice-hands-free-yolo'),
+				message: HANDS_FREE_YOLO_NOTICE,
+			}),
+		);
+	}, [handsFreeBlockedByYolo]);
 
 	// TTS response playback effect
 	React.useEffect(() => {
@@ -663,20 +663,28 @@ export function useVoice({
 					setState('idle');
 				}
 			});
-	}, [messages, isConversationComplete, cleanupTtsFile]);
+	}, [messages, isConversationComplete, cleanupTtsFile, setState]);
 
+	// A voice-started run that finished without anything to speak (an error, a
+	// cancelled turn, an empty reply). Declared after the TTS effect so that, in
+	// the commit where the run completes, TTS has already moved to 'speaking'.
 	React.useEffect(() => {
-		if (isConversationComplete && stateRef.current === 'processing') {
-			setState('idle');
+		if (!isConversationComplete || stateRef.current !== 'processing') return;
+		if (ttsTimeoutRef.current) {
+			clearTimeout(ttsTimeoutRef.current);
+			ttsTimeoutRef.current = null;
 		}
-	}, [isConversationComplete]);
+		pendingTTSRef.current = false;
+		pluginRef.current = null;
+		setState('idle');
+	}, [isConversationComplete, setState]);
 
 	// Push-to-talk recording trigger callback
 	const startStopRecording = React.useCallback(async () => {
 		const pref = voicePreferenceRef.current ?? getVoicePreference();
 		if (
 			!pref.enabled ||
-			!isInputAvailable ||
+			!isInputAvailableRef.current ||
 			(pref.activationMode === 'hands-free' && developmentMode === 'yolo')
 		) {
 			return;
@@ -837,11 +845,14 @@ export function useVoice({
 		cleanupRecordingFile,
 		interrupt,
 		developmentMode,
-		isInputAvailable,
+		setState,
 	]);
 
 	return {
 		state,
 		startStopRecording,
+		unavailableReason: handsFreeBlockedByYolo
+			? 'Hands-free paused in yolo mode'
+			: null,
 	};
 }

@@ -57,3 +57,14 @@ test('VoiceStatusBar works in narrow terminal', t => {
 
 	process.stdout.columns = originalColumns;
 });
+
+test('VoiceStatusBar shows the idle hint it is given', t => {
+	const {lastFrame} = renderWithTheme(
+		<VoiceStatusBar
+			{...defaultProps}
+			state="idle"
+			idleHint="Hands-free paused in yolo mode"
+		/>
+	);
+	t.regex(lastFrame()!, /Hands-free paused in yolo mode/);
+});

@@ -612,6 +612,38 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	);
 });
 
+test('cancel() kills a background child after the shell leader has exited', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows - no process groups');
+		return;
+	}
+
+	const executor = createExecutor();
+	// No `wait`: the wrapping shell exits straight away, but the backgrounded
+	// child keeps the output pipe open, so the execution is still active.
+	const {promise, executionId} = executor.execute('sleep 30 & echo PID:$!');
+
+	let childPid: number | undefined;
+	for (let tick = 0; tick < 30 && !childPid; tick++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+		const match = executor.getState(executionId)?.fullOutput.match(/PID:(\d+)/);
+		if (match) childPid = Number(match[1]);
+	}
+	t.truthy(childPid, 'Should have captured the background child PID');
+	// Let the shell leader exit before cancelling.
+	await new Promise(resolve => setTimeout(resolve, 200));
+	t.true(isLiveProcess(childPid!), 'Child should be alive before cancel');
+
+	t.true(executor.cancel(executionId));
+	await promise;
+	await new Promise(resolve => setTimeout(resolve, 300));
+
+	t.false(
+		isLiveProcess(childPid!),
+		'cancel must reach the process group even when its leader is gone',
+	);
+});
+
 test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async t => {
 	const executor = createExecutor();
 

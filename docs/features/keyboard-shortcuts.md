@@ -144,6 +144,6 @@ Ctrl+T works even while the agent is responding, which is when the task list is 
 
 | Action | Shortcut | Notes |
 |--------|----------|-------|
-| Push-to-talk / Barge-in | Ctrl+G | Start/stop voice recording; interrupts AI response if speaking or processing |
+| Push-to-talk / Barge-in | Ctrl+G | Start/stop voice recording; interrupts the AI response while it is processing or speaking |
 
-Voice mode can also be controlled with `/voice`, including `ptt` and `hands-free` activation modes. The shortcut is available when voice mode is enabled in `/settings`.
+Voice mode is controlled with `/voice`, including `ptt` and `hands-free` activation modes. The shortcut is active once voice mode is enabled and no prompt, confirmation or question is on screen.
