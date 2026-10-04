@@ -111,20 +111,42 @@ export function handlePaste(
 	let newDisplayValue: string;
 	if (cursorOffset !== undefined) {
 		const offset = clampCursorOffset(cursorOffset, currentDisplayValue);
-		newDisplayValue =
-			currentDisplayValue.slice(0, offset) +
-			placeholder +
-			currentDisplayValue.slice(offset);
+		newDisplayValue = spliceSeparated(currentDisplayValue, offset, placeholder);
 	} else {
 		newDisplayValue = currentDisplayValue.includes(pastedText)
 			? currentDisplayValue.replaceAll(pastedText, placeholder)
-			: currentDisplayValue + placeholder;
+			: spliceSeparated(
+					currentDisplayValue,
+					currentDisplayValue.length,
+					placeholder,
+				);
 	}
 
 	return {
 		displayValue: newDisplayValue,
 		placeholderContent: newPlaceholderContent,
 	};
+}
+
+/**
+ * Insert a placeholder at `offset`, on its own line where it would otherwise
+ * touch other text. Two placeholders sitting flush against each other look
+ * tidy in the composer but expand back to back at submit, fusing the last
+ * line of one paste to the first line of the next (...AAABBB...). A newline
+ * goes in only on a side where a non-whitespace character is adjacent, so an
+ * empty composer and a deliberate space or newline are left as the user left
+ * them.
+ */
+function spliceSeparated(
+	value: string,
+	offset: number,
+	placeholder: string,
+): string {
+	const before = value.slice(0, offset);
+	const after = value.slice(offset);
+	const leading = before === '' || /\s$/.test(before) ? '' : '\n';
+	const trailing = after === '' || /^\s/.test(after) ? '' : '\n';
+	return before + leading + placeholder + trailing + after;
 }
 
 function clampCursorOffset(offset: number, value: string): number {

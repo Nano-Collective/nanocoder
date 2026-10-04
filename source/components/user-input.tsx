@@ -256,8 +256,8 @@ export default function UserInput({
 	// pasted text would always land at the end of the value.
 	const textInputRef = useRef<TextInputHandle>(null);
 	const completionJustSelectedRef = useRef(false);
-	// Input value for which the user dismissed the completion menu with Escape,
-	// so the auto-show effect doesn't immediately re-open it until they type more.
+	// Input value for which the completion menu was closed, by Escape or by
+	// selecting a completion, so it doesn't re-open until the user types more.
 	const dismissedForInputRef = useRef<string | null>(null);
 	// True while the current input came from history navigation (↑/↓), not typing.
 	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
@@ -516,21 +516,30 @@ export default function UserInput({
 		] as Completion[];
 	}, [input, isCommandMode, isFileAutocompleteMode, customCommands]);
 
+	// The menu opens whenever completions exist, unless it was closed for this
+	// exact input or the input was recalled from history (keep ↑/↓ free to
+	// navigate).
+	const isMenuSuppressedFor = useCallback(
+		(value: string) =>
+			inputFromHistoryRef.current || dismissedForInputRef.current === value,
+		[],
+	);
+
 	// Update UI state for command completions
 	useEffect(() => {
+		// This run can still carry the pre-selection input: selecting sets
+		// `input` and closes the menu together, and the run that the close
+		// schedules gets here first. `dismissedForInputRef` is set at the
+		// selection itself for that reason - reading `input` here would record
+		// the fragment and let the menu re-open on the completed command.
 		if (completionJustSelectedRef.current) {
 			completionJustSelectedRef.current = false;
 			return;
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			// Show the menu as soon as completions exist (typing `/`), not only on
-			// Tab — unless the user dismissed it with Escape for this exact input,
-			// or the input was recalled from history (keep ↑/↓ free to navigate).
-			if (
-				!inputFromHistoryRef.current &&
-				dismissedForInputRef.current !== input
-			) {
+			// Show the menu as soon as completions exist (typing `/`), not only on Tab.
+			if (!isMenuSuppressedFor(input)) {
 				setShowCompletions(true);
 			}
 			setSelectedCompletionIndex(prev =>
@@ -552,6 +561,7 @@ export default function UserInput({
 		setCompletions,
 		setShowCompletions,
 		setSelectedCompletionIndex,
+		isMenuSuppressedFor,
 	]);
 
 	// Helper functions
@@ -1045,6 +1055,7 @@ export default function UserInput({
 						];
 					const completedText = `/${selected.name}`;
 					completionJustSelectedRef.current = true;
+					dismissedForInputRef.current = completedText;
 					setInputState({
 						displayValue: completedText,
 						placeholderContent: {},
@@ -1095,20 +1106,28 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle Enter to select completion
-		if (
-			key.return &&
-			!key.shift &&
-			showCompletions &&
-			completions.length > 0 &&
-			selectedCompletionIndex >= 0
-		) {
-			const selected = completions[selectedCompletionIndex];
+		// Handle Enter to select completion. The effect above opens the menu a
+		// commit after the keystroke that changed `input`, so an Enter landing in
+		// between still sees it closed and would submit the raw command fragment.
+		// When the menu state says closed, fall back to the memoized completions
+		// the effect is about to show.
+		const menuItems =
+			showCompletions && completions.length > 0 && selectedCompletionIndex >= 0
+				? completions
+				: isMenuSuppressedFor(input)
+					? []
+					: commandCompletions;
+		if (key.return && !key.shift && menuItems.length > 0) {
+			const selected =
+				menuItems[
+					Math.min(Math.max(selectedCompletionIndex, 0), menuItems.length - 1)
+				];
 			const completedText = `/${selected.name}`;
 			// Already typed in full, so there is nothing to complete: fall
 			// through and submit instead of needing a second Enter.
 			if (completedText !== input) {
 				completionJustSelectedRef.current = true;
+				dismissedForInputRef.current = completedText;
 				setInputState({
 					displayValue: completedText,
 					placeholderContent: {},

@@ -179,6 +179,29 @@ test('displayToolResult - compact mode condenses a validation failure too', asyn
 	unmount();
 });
 
+test('displayToolResult - compact mode marks a non-zero exit as a failure', async t => {
+	const toolCall = createMockToolCall('call-1', 'execute_bash');
+	// A failed command's output is ordinary stdout/stderr with no "Error: "
+	// prefix, so `isError` is the only thing separating it from a clean run.
+	// Without it this folded into the "Ran 1 command" tally and read as success.
+	const result: ToolResult = {
+		...createMockToolResult(
+			'call-1',
+			'execute_bash',
+			'EXIT_CODE: 1\nSTDERR:\nbuild failed\nSTDOUT:\n',
+		),
+		isError: true,
+	};
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue, true);
+
+	t.is(queue.length, 1);
+	const {lastFrame, unmount} = renderWithTheme(queue[0] as React.ReactElement);
+	t.regex(lastFrame()!, /execute_bash failed/);
+	unmount();
+});
+
 test('displayToolResult - non-compact error still shows full message', async t => {
 	const toolCall = createMockToolCall('call-1', 'write_file');
 	const result = createMockToolResult(

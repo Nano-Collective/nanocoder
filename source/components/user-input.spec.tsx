@@ -1708,6 +1708,146 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	unmount();
 });
 
+// Serial: this sweeps timing-sensitive keystrokes across seven renders, so keep
+// it from starving (or being starved by) the file's concurrent tests.
+test.serial('Enter right after typing a command fragment never submits the fragment', async t => {
+	// The menu opens in an effect that runs a commit after the keystroke, so an
+	// Enter in that gap used to see the previous input's closed menu and submit
+	// the raw fragment (#1327). The gap lasts a few event-loop turns, so sweep
+	// Enter across them rather than betting on one exact timing.
+	const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+	for (let turns = 0; turns <= 6; turns++) {
+		const submitted: string[] = [];
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					customCommands={TEST_COMMANDS}
+					onSubmit={message => {
+						submitted.push(message);
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		stdin.write('/test-h');
+		while (!lastFrame()?.includes('/test-h')) await nextTurn();
+		for (let i = 0; i < turns; i++) await nextTurn();
+		stdin.write('\r');
+		await wait();
+
+		t.false(
+			submitted.includes('/test-h'),
+			`Enter ${turns} turn(s) after the fragment rendered must not submit it`,
+		);
+		unmount();
+	}
+});
+
+test('Enter submits a command once its completion has been selected', async t => {
+	const submitted: string[] = [];
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted.push(message);
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('/test-h');
+	await waitForFrame(lastFrame, /Available commands:/);
+	stdin.write('\r');
+	await waitForCondition(
+		() =>
+			(lastFrame() ?? '').includes('/test-help') &&
+			!(lastFrame() ?? '').includes('Available commands:'),
+	);
+
+	// The completed command still has completions; Enter must submit it rather
+	// than select it again.
+	stdin.write('\r');
+	await waitForCondition(() => submitted.length > 0);
+	t.deepEqual(submitted, ['/test-help']);
+	unmount();
+});
+
+// Shift+Enter used to be appended to the END of the value by UserInput while
+// the caret stayed put, so each following word was spliced in at the stale
+// offset: `one`, `two`, `three` submitted as `onetwothree\n\n`. The insert
+// now happens at the caret, inside TextInput, which owns it.
+test('Shift+Enter inserts a line break instead of scrambling the message', async t => {
+	// CSI-u encoding, which is what kitty/WezTerm/Ghostty/iTerm2 actually send.
+	const SHIFT_ENTER = '\u001b[13;2u';
+	let submittedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	// Each key gets its own settle: a word (or the submit) arriving in the same
+	// stdin batch as the break before it would be applied to the pre-break
+	// value, which is a race in the test, not the behaviour under test.
+	stdin.write('one');
+	await waitForFrame(lastFrame, /one/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('two');
+	await waitForFrame(lastFrame, /two/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('three');
+	await waitForFrame(lastFrame, /three/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage !== '');
+
+	t.is(submittedMessage, 'one\ntwo\nthree');
+});
+
+test('Ctrl+J still inserts a line break in both encodings', async t => {
+	// Most terminals send a literal LF for Ctrl+J; under the kitty keyboard
+	// protocol it arrives as CSI-u instead, which used to be dropped entirely.
+	for (const CTRL_J of ['\n', '\u001b[106;5u']) {
+		let submittedMessage = '';
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={message => {
+						submittedMessage = message;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		stdin.write('one');
+		await waitForFrame(lastFrame, /one/);
+		stdin.write(CTRL_J);
+		await wait(50);
+		stdin.write('two');
+		await waitForFrame(lastFrame, /two/);
+		await wait(50);
+		stdin.write('\r');
+		await waitForCondition(() => submittedMessage !== '');
+
+		t.is(submittedMessage, 'one\ntwo');
+		unmount();
+	}
+});
+
 // Regression for the cursor-mid-paste bug: a terminal paste used to leave the
 // caret at end-of-value regardless of where it started, so any keystroke after
 // the paste landed at the end instead of next to the inserted text. The
