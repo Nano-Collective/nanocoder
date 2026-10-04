@@ -1013,10 +1013,17 @@ async function main(): Promise<void> {
 		});
 
 		// Fallback restore for exit paths that bypass the shutdown manager
-		// (idempotent — the shutdown handler above usually runs first).
-		result.waitUntilExit().then(() => {
-			restoreTerminal();
-		});
+		// (idempotent — the shutdown handler above usually runs first). Ink
+		// rejects this promise when the renderer itself fails, so handle both
+		// settlements: terminal restoration must happen either way.
+		result.waitUntilExit().then(
+			() => {
+				restoreTerminal();
+			},
+			() => {
+				restoreTerminal();
+			},
+		);
 	}
 }
 
