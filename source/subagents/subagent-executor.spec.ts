@@ -12,10 +12,11 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
-import type {ToolManager} from '@/tools/tool-manager';
+import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
+	DevelopmentMode,
 	LLMClient,
 	LLMChatResponse,
 	Message,
@@ -29,6 +30,13 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	clearReadTracker,
+	forgetReadContent,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -43,10 +51,17 @@ function createMockToolManager(
 			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
+			ownerSkill?: string;
 		}
 	> = {},
 ): ToolManager {
 	return {
+		filterToolNamesForMode: (names: string[], mode: DevelopmentMode) =>
+			filterToolNamesForMode(names, mode, {
+				getCustomToolPolicy: () => undefined,
+				getMcpReadOnly: () => undefined,
+			}),
+		getOwnerSkill: (name: string) => tools[name]?.ownerSkill,
 		getAllTools: () => {
 			const result: Record<string, unknown> = {};
 			for (const name of Object.keys(tools)) {
@@ -1803,38 +1818,55 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 	);
 });
 
-// Daemon-triggered runs are headless: nobody can answer a question, so a
-// subagent without an explicit tools list must not be offered ask_user.
-test.serial('headless subagents are not offered ask_user', async t => {
-	const root = join(tmpdir(), `nanocoder-headless-ask-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-	writeFileSync(
-		join(root, '.nanocoder', 'agents', 'probe.md'),
-		'---\nname: probe\ndescription: probe\n---\nprobe\n',
-		'utf-8',
-	);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		ask_user: {handler: noop, readOnly: true},
-	});
-	const offered: string[][] = [];
-	const client = createMockClient([{content: 'done'}, {content: 'done'}]);
-	const chat = client.chat.bind(client);
-	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
-		offered.push(Object.keys(args[1] ?? {}));
-		return chat(...args);
-	}) as LLMClient['chat'];
+test.serial(
+	'subagent read stubs stay isolated from the parent and are dropped on finish',
+	async t => {
+		clearReadTracker();
+		const filePath = '/tmp/parent-read.txt';
+		const stats = {mtimeMs: 11, size: 8};
+		rememberReadContent(filePath, stats, 3);
 
-	await new SubagentExecutor(toolManager, client, root, 'headless').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
+		let seenInSubagent: ReturnType<typeof matchReadContent>;
+		seenInSubagent = {lineCount: -1, size: -1};
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => {
+					seenInSubagent = matchReadContent(filePath, stats);
+					rememberReadContent(filePath, stats, 9);
+					forgetReadContent(filePath);
+					return 'subagent body';
+				},
+				readOnly: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'read',
+						function: {
+							name: 'read_file',
+							arguments: '{"path":"/tmp/parent-read.txt"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read a file'},
+			undefined,
+			0,
+			'stub-scope-agent',
+		);
 
-	t.deepEqual(offered[0], ['read_file']);
-	t.true(offered[1]?.includes('ask_user'));
-});
+		t.true(result.success);
+		t.is(seenInSubagent, undefined);
+		t.deepEqual(matchReadContent(filePath, stats), {lineCount: 3, size: 8});
+		runWithReadContentScope('stub-scope-agent', () => {
+			t.is(matchReadContent(filePath, stats), undefined);
+		});
+	},
+);

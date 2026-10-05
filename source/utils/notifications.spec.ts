@@ -45,6 +45,27 @@ test.serial('setNotificationsConfig updates config', (t) => {
 	t.false(config.events?.questionPrompt);
 });
 
+test.serial(
+	'setNotificationsConfig keeps default events missing from the config',
+	(t) => {
+		setNotificationsConfig({enabled: true});
+		const config = getNotificationsConfig();
+		t.true(config.events?.toolConfirmation);
+		t.true(config.events?.questionPrompt);
+		t.true(config.events?.generationComplete);
+		t.true(config.events?.triggeredRunComplete);
+
+		setNotificationsConfig({
+			enabled: true,
+			events: {questionPrompt: false},
+		});
+		const partial = getNotificationsConfig();
+		t.false(partial.events?.questionPrompt);
+		t.true(partial.events?.toolConfirmation);
+		t.true(partial.events?.triggeredRunComplete);
+	},
+);
+
 // ============================================================================
 // sendNotification Tests
 // ============================================================================
@@ -599,6 +620,15 @@ function makeIconLayout(base: string): {iconPath: string} {
 	return {iconPath};
 }
 
+/** Build a package-shaped tree with assets/nanocoder-icon.png. */
+function makeAssetIconLayout(base: string): {iconPath: string} {
+	const assetsDir = join(base, 'assets');
+	mkdirSync(assetsDir, {recursive: true});
+	const iconPath = join(assetsDir, 'nanocoder-icon.png');
+	writeFileSync(iconPath, 'png');
+	return {iconPath};
+}
+
 test('resolveNotificationIconPath: uses ../../plugins for the nested tsc layout', t => {
 	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-tsc-'));
 	try {
@@ -614,6 +644,37 @@ test('resolveNotificationIconPath: uses ../plugins for the flat rolldown layout'
 	try {
 		const {iconPath} = makeIconLayout(base);
 		t.is(resolveNotificationIconPath(join(base, 'dist')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: uses ../../assets for the nested tsc layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-tsc-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist', 'utils')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: uses ../assets for the flat rolldown layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-rolldown-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: prefers assets over plugins at the same depth', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-pref-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		makeIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist', 'utils')), iconPath);
 	} finally {
 		rmSync(base, {recursive: true, force: true});
 	}

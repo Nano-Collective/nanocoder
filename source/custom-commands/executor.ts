@@ -5,6 +5,21 @@ import {
 import type {CustomCommand} from '@/types/index';
 import {expandSections} from '@/utils/template-sections';
 
+/**
+ * Render declared parameters in conventional usage notation: `<name>` for
+ * an expected argument, `[name=default]` for one with a fallback. Returns
+ * an empty string when there are no parameters.
+ */
+export function formatParameterUsage(parameters?: string[]): string {
+	if (!parameters || parameters.length === 0) return '';
+	return parameters
+		.map(spec => {
+			const {name, defaultValue} = parseCommandParameterSpec(spec);
+			return defaultValue ? `[${name}=${defaultValue}]` : `<${name}>`;
+		})
+		.join(' ');
+}
+
 export class CustomCommandExecutor {
 	/**
 	 * Execute a custom command with given arguments.
@@ -66,18 +81,8 @@ export class CustomCommandExecutor {
 	formatHelp(command: CustomCommand): string {
 		const parts: string[] = [`/${command.fullName}`];
 
-		if (command.metadata.parameters && command.metadata.parameters.length > 0) {
-			parts.push(
-				command.metadata.parameters
-					.map((spec: string) => {
-						const {name, defaultValue} = parseCommandParameterSpec(spec);
-						// Conventional usage notation: <name> expected, [name=default]
-						// optional with a fallback.
-						return defaultValue ? `[${name}=${defaultValue}]` : `<${name}>`;
-					})
-					.join(' '),
-			);
-		}
+		const usage = formatParameterUsage(command.metadata.parameters);
+		if (usage) parts.push(usage);
 
 		if (command.metadata.description) {
 			parts.push(`- ${command.metadata.description}`);

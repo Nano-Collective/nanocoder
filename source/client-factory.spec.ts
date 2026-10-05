@@ -1582,3 +1582,40 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'loadProviderConfigs carries tune and turns organizationId into a header',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenAI',
+						baseUrl: 'https://api.openai.com/v1',
+						apiKey: 'test-key',
+						models: ['gpt-5'],
+						organizationId: 'org-123',
+						headers: {'X-Extra': '1'},
+						tune: {enabled: true, toolProfile: 'minimal'},
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openai = resolved.find(p => p.name === 'OpenAI');
+
+			t.deepEqual(openai?.tune, {enabled: true, toolProfile: 'minimal'});
+			t.deepEqual(openai?.config.headers, {
+				'OpenAI-Organization': 'org-123',
+				'X-Extra': '1',
+			});
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);

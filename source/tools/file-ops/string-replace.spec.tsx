@@ -599,6 +599,39 @@ test('string_replace validator: allows editing after the file is read', async t 
 	}
 });
 
+test.serial('string_replace validator: still allows edit after a stubbed re-read', async t => {
+	await createTestFile('test.txt', 'Hello World\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'test.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+		const stub = await readFileTool.tool.execute!(
+			{path: 'test.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(String(stub).includes('already in context'));
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'Hello',
+			new_str: 'Hi',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
 // ============================================================================
 // Special Character Tests
 // ============================================================================

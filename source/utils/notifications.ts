@@ -23,8 +23,15 @@ const DEFAULT_CONFIG: NotificationsConfig = {
 
 let _config: NotificationsConfig = DEFAULT_CONFIG;
 
+// Merge over the defaults so a partial `events` block (or none at all, or a
+// preferences file saved before a newer event existed) keeps the unlisted
+// events on instead of silently disabling them.
 export function setNotificationsConfig(config: NotificationsConfig): void {
-	_config = config;
+	_config = {
+		...DEFAULT_CONFIG,
+		...config,
+		events: {...DEFAULT_CONFIG.events, ...config.events},
+	};
 }
 
 export function getNotificationsConfig(): NotificationsConfig {
@@ -54,18 +61,22 @@ const EVENT_MESSAGES: Record<
 };
 
 /**
- * Resolve the optional notification icon across both build layouts:
+ * Resolve the optional notification icon across both build layouts and both
+ * package layouts:
  *
- * - tsc:      module in `dist/utils/`    → `../../plugins/vscode/media/icon.png`
- * - rolldown: module in the flat `dist/` → `../plugins/vscode/media/icon.png`
+ * - assets/ ships in the npm package; plugins/ only exists in a checkout.
+ * - tsc:      module in `dist/utils/`    → `../../assets/…` or `../../plugins/…`
+ * - rolldown: module in the flat `dist/` → `../assets/…` or `../plugins/…`
  *
  * The icon is cosmetic, so a miss returns `null` rather than throwing.
  * Exported so tests can drive the candidate logic with a temporary directory.
  */
 export function resolveNotificationIconPath(moduleDir: string): string | null {
 	const candidates = [
-		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc -- nosemgrep: path-join-resolve-traversal
-		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../../assets/nanocoder-icon.png'), // tsc, packaged asset -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../assets/nanocoder-icon.png'), // rolldown flat dist, packaged asset -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc, checkout -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist, checkout -- nosemgrep: path-join-resolve-traversal
 	];
 	return candidates.find(candidate => existsSync(candidate)) ?? null;
 }

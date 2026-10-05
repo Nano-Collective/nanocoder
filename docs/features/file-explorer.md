@@ -24,7 +24,7 @@ Sometimes you want to browse your project and pick files visually rather than ty
 | Enter | Expand/collapse directory or preview file |
 | Space | Toggle file/directory selection |
 | / | Enter search mode (filters all files including nested) |
-| Backspace | Collapse current directory |
+| Backspace | Collapse the directory containing the highlighted item |
 | Esc | Exit explorer (selected files are added to input) |
 
 ### Preview View

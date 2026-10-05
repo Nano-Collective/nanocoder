@@ -100,11 +100,10 @@ File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.
 
 1. `agents.config.json` in working directory (project-level)
 2. Platform config dir: `~/.config/nanocoder/agents.config.json` (Linux), `~/Library/Preferences/nanocoder/` (macOS)
-3. `~/.agents.config.json` (legacy fallback)
 
-If `NANOCODER_CONFIG_DIR` is set, the platform/legacy lookups are skipped and that directory is used directly.
+Providers merge by name across both layers (plus `NANOCODER_PROVIDERS`); each `nanocoder.*` block is taken whole from the highest layer that defines it. If `NANOCODER_CONFIG_DIR` is set, it replaces the platform dir (the project layer still applies, except that `loadPreferences` skips a project `nanocoder-preferences.json`).
 
-Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}`
+Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}` (uppercase names only)
 
 ### LLM Client Architecture
 
@@ -136,6 +135,12 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **Location**: `source/**/*.spec.ts` files alongside source
 - **Serial execution**: Tests run one at a time
 - **Run single test**: `pnpm run test:ava source/path/to/file.spec.ts`
+
+## Voice Plugin
+
+The optional local voice plugin lives in `plugins/voice/`. The root build compiles it before compiling the main app and copies its runtime files into `dist/voice/`; type checks use the committed declaration shim at `source/types/nanocoder-voice.d.ts`. Run `pnpm run test:types:voice` when changing the plugin.
+
+Cloud STT sends microphone audio to the configured OpenAI endpoint only after explicitly selecting `/voice stt cloud`; local STT is the default. Hands-free mode is unavailable in yolo mode.
 
 ## Development Modes
 

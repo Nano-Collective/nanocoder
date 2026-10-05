@@ -1195,9 +1195,11 @@ test('insertPaste with cursorOffset returns the cursor after the placeholder for
 	instance.rerender(<TestComponent />);
 
 	t.truthy(result);
-	// Placeholder label is `[Paste #1: 801 chars]` (24 chars), spliced at offset 5.
-	t.is(result!.cursorOffset, 5 + '[Paste #1: 801 chars]'.length);
-	t.true(currentHook!.input.startsWith('hello[Paste #1: 801 chars] world'));
+	// Placeholder label is `[Paste #1: 801 chars]`, spliced at offset 5 on its
+	// own line so "hello" does not fuse with the paste at submit. The caret
+	// counts the separator too.
+	t.is(result!.cursorOffset, 5 + '\n[Paste #1: 801 chars]'.length);
+	t.true(currentHook!.input.startsWith('hello\n[Paste #1: 801 chars] world'));
 });
 
 test('insertPaste without a cursorOffset appends and returns null (legacy behaviour)', t => {

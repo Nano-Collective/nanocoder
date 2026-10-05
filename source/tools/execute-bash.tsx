@@ -189,7 +189,9 @@ const executeBashValidator = (args: {
 		/rm\s+-rf\s+\/(?!\w)/i, // rm -rf / (but allow /path)
 		/mkfs/i, // Format filesystem
 		/dd\s+if=/i, // Direct disk write
-		/:(){:|:&};:/i, // Fork bomb
+		// Fork bomb: a function that pipes itself into itself in the background,
+		// then is called, e.g. `:(){ :|:& };:` (any name, any spacing).
+		/([^\s(){};|&]+)\s*\(\)\s*\{\s*\1\s*\|\s*\1\s*&\s*\}\s*;\s*\1/,
 		/>\s*\/dev\/sd[a-z]/i, // Writing to raw disk devices
 		/chmod\s+-R\s+000/i, // Remove all permissions recursively
 	];
