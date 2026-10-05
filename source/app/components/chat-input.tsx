@@ -7,6 +7,7 @@ import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
+import {VoiceInstallPrompt} from '@/components/voice-install-prompt';
 import {useTheme} from '@/hooks/useTheme';
 import type {
 	QueuedUserMessage,
@@ -26,6 +27,7 @@ import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
+import type {PendingVoiceInstall} from '@/utils/voice-install-queue';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 export interface ChatInputProps {
@@ -48,6 +50,8 @@ export interface ChatInputProps {
 
 	// Main agent tool confirmation (the unified inline approval gate)
 	pendingToolConfirmation: PendingToolConfirmation | null;
+	pendingVoiceInstall?: PendingVoiceInstall | null;
+	onVoiceInstallConfirm?: (confirmed: boolean) => void;
 	onToolConfirmation: (confirmed: boolean) => void;
 
 	// Client state
@@ -102,6 +106,9 @@ export interface ChatInputProps {
 	 */
 	fullscreen?: boolean;
 	isSaving?: boolean;
+	/** Follow-up command offered in the empty prompt after a turn. */
+	suggestedCommand?: string | null;
+	onDismissSuggestion?: () => void;
 }
 
 /**
@@ -126,6 +133,8 @@ export function ChatInput({
 	pendingSubagentApproval,
 	onSubagentToolApproval,
 	pendingToolConfirmation,
+	pendingVoiceInstall,
+	onVoiceInstallConfirm,
 	onToolConfirmation,
 	mcpInitialized,
 	client,
@@ -157,6 +166,8 @@ export function ChatInput({
 	onDismissActiveEditor,
 	fullscreen = false,
 	isSaving,
+	suggestedCommand,
+	onDismissSuggestion,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -219,8 +230,14 @@ export function ChatInput({
 				</Box>
 			)}
 
-			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
-			{pendingSubagentApproval ? (
+			{pendingVoiceInstall && onVoiceInstallConfirm ? (
+				<VoiceInstallPrompt
+					missing={pendingVoiceInstall.missing}
+					installDependencies={pendingVoiceInstall.installDependencies}
+					onConfirm={() => onVoiceInstallConfirm(true)}
+					onDecline={() => onVoiceInstallConfirm(false)}
+				/>
+			) : pendingSubagentApproval ? (
 				<Box paddingLeft={footerPadding}>
 					<ToolConfirmation
 						// Force a fresh instance per queued request: without a key, React
@@ -254,6 +271,10 @@ export function ChatInput({
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
+					// Inline puts the transcript at column 0 (Ink's <Static>), so the
+					// prompt box drops its centring to share that left edge.
+					centered={fullscreen}
+					fullscreen={fullscreen}
 					customCommands={customCommands}
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
@@ -280,6 +301,8 @@ export function ChatInput({
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 					isSaving={isSaving}
+					suggestedCommand={suggestedCommand}
+					onDismissSuggestion={onDismissSuggestion}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

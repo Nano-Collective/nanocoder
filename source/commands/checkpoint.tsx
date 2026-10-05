@@ -48,18 +48,20 @@ function CheckpointHelp() {
 /checkpoint list - List all available checkpoints
   • Shows checkpoint name, creation time, message count, and files changed
 
-/checkpoint load - Interactive checkpoint selection and restore
-  • Choose from available checkpoints
-  • Shows confirmation before restoring
-  • Optionally creates backup of current session
+/checkpoint load [name] - Restore files from a checkpoint
+  • Without a name, choose from available checkpoints interactively
+  • The interactive selector offers to back up the current session first
+  • With a name, restores immediately (no prompt)
+  • Restores files only; the conversation is not restored
 
 /checkpoint delete <name> - Delete a specific checkpoint
-  • Permanently removes checkpoint and all its data
-  • Shows confirmation before deletion
+  • Permanently removes the checkpoint and all its data, immediately
 
 /checkpoint help - Show this help message
 
-Note: Checkpoints are stored in your nanocoder config directory.`}
+Aliases: save (create), ls (list), restore (load), remove/rm (delete)
+
+Note: Checkpoints are stored in .nanocoder/checkpoints in the project.`}
 			hideBox={false}
 		/>
 	);
@@ -91,14 +93,18 @@ async function createCheckpoint(
 			metadata.model,
 		);
 
+		const captured = checkpointMetadata.filesChanged;
+		const filesLine =
+			captured.length === 0
+				? 'No modified files to capture'
+				: `${captured.length} files captured: ${captured.slice(0, 3).join(', ')}${
+						captured.length > 3 ? '...' : ''
+					}`;
+
 		return successMsg(
 			`Checkpoint '${checkpointMetadata.name}' created successfully
   └─ ${checkpointMetadata.messageCount} messages saved
-  └─ ${
-		checkpointMetadata.filesChanged.length
-	} files captured: ${checkpointMetadata.filesChanged.slice(0, 3).join(', ')}${
-		checkpointMetadata.filesChanged.length > 3 ? '...' : ''
-	}
+  └─ ${filesLine}
   └─ Provider: ${checkpointMetadata.provider.name} (${
 		checkpointMetadata.provider.model
 	})`,

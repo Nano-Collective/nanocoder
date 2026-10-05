@@ -1048,6 +1048,108 @@ test('McpStep editing a custom-named template instance resolves its template', a
 	unmount();
 });
 
+// Regression: templates that store their key in an X-API-Key header (today
+// `serply`) must get the saved key back when edited. The edit flow used to
+// read only env vars and a bearer Authorization header, so the required
+// API key field came back empty and blocked a re-save.
+test('McpStep editing an X-API-Key template instance keeps its saved key', async t => {
+	const serplyServers: Record<
+		string,
+		{
+			name: string;
+			transport: 'http';
+			url: string;
+			headers: {'X-API-Key': string};
+			templateId: string;
+			tags: string[];
+		}
+	> = {
+		'serply-work': {
+			name: 'serply-work',
+			transport: 'http',
+			url: 'https://api.serply.io/mcp',
+			headers: {'X-API-Key': 'serply_test_key_123'},
+			templateId: 'serply',
+			tags: ['serply', 'search', 'web', 'scrape', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={serplyServers}
+			initialEditName="serply-work"
+		/>,
+	);
+
+	await waitTick();
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /Serply Configuration/);
+
+	// Accept the prefilled server name, then the prefilled API key.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /Serply API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved X-API-Key value should prefill the required key field',
+	);
+
+	unmount();
+});
+
+// Regression (#1424): a renamed github-remote saved before the templateId
+// stamp only has a `github` tag, which is the stdio template. Edit opened
+// Custom and saving dropped Authorization. The token field is required, so
+// the saved bearer value has to come back filled in.
+test('McpStep editing a renamed github-remote server keeps its bearer token', async t => {
+	const servers = {
+		'gh-work': {
+			name: 'gh-work',
+			transport: 'http' as const,
+			url: 'https://api.githubcopilot.com/mcp/',
+			headers: {Authorization: 'Bearer ghp_test123'},
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={servers}
+			initialEditName="gh-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /GitHub \(Remote\) Configuration/);
+	t.notRegex(output, /Custom MCP Server Configuration/);
+
+	// Accept the prefilled name, then the prefilled token.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /GitHub Personal Access Token/);
+	stdin.write('\r');
+	await waitTick();
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved bearer token should prefill the required githubToken field',
+	);
+
+	unmount();
+});
+
 test('McpStep falls back to the menu when initialEditName is unknown', t => {
 	const {lastFrame} = render(
 		<McpStep

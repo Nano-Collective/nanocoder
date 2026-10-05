@@ -6,7 +6,11 @@ import {
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {
+	bashRunFailed,
+	executeBashCommand,
+	formatBashResultForLLM,
+} from '@/tools/execute-bash';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -117,6 +121,7 @@ export async function runStreamingBashTool(
 			role: 'tool' as const,
 			name: toolCall.function.name,
 			content,
+			isError: bashRunFailed(bashState),
 		},
 		bashState,
 	};

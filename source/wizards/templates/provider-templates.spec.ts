@@ -337,7 +337,7 @@ test('openai template: handles multiple models', t => {
 	t.deepEqual(config.models, ['gpt-5-codex', 'gpt-4-turbo', 'gpt-4']);
 });
 
-test('custom template: includes timeout', t => {
+test('custom template: writes requestTimeout, the key the client reads', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);
 
@@ -345,10 +345,20 @@ test('custom template: includes timeout', t => {
 		providerName: 'custom-provider',
 		baseUrl: 'http://localhost:8000/v1',
 		model: 'my-model',
-		timeout: '60000',
+		requestTimeout: '60000',
 	});
 
-	t.is(config.timeout, 60000);
+	t.is(config.requestTimeout, 60000);
+	t.is(config.timeout, undefined);
+});
+
+test('chatgpt-codex template: default provider name matches the login default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'chatgpt-codex');
+	t.truthy(template);
+	const field = template!.fields.find(f => f.name === 'providerName');
+	t.is(field?.default, 'ChatGPT');
+	const config = template!.buildConfig({model: 'gpt-5.3-codex'});
+	t.is(config.name, 'ChatGPT');
 });
 
 test('gemini template: sets sdkProvider to google', t => {
@@ -597,6 +607,67 @@ test('cheaper-inference template: uses default provider name and model default',
 	});
 
 	t.is(config.name, 'Cheaper Inference');
+});
+
+test('api-route template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'API Route',
+		apiKey: 'test-key',
+		model: 'gpt-5.5, claude-sonnet-4-6',
+	});
+
+	t.is(config.baseUrl, 'https://global.api-route.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['gpt-5.5', 'claude-sonnet-4-6']);
+});
+
+test('api-route template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'gpt-5.5');
+	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
+});
+
+test('futureinfra template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'FutureInfra',
+		apiKey: 'test-key',
+		model: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4',
+	});
+
+	t.is(config.name, 'FutureInfra');
+	t.is(config.baseUrl, 'https://futureinfra.ai/v1/ai');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'openai/gpt-4o-mini',
+		'anthropic/claude-sonnet-4',
+	]);
+});
+
+test('futureinfra template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'openai/gpt-4o-mini');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'openai/gpt-4o-mini',
+	});
+
+	t.is(config.name, 'FutureInfra');
 });
 
 test('opper template: sets baseUrl, default model, and parses models', t => {

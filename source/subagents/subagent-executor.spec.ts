@@ -12,10 +12,11 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
-import type {ToolManager} from '@/tools/tool-manager';
+import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
+	DevelopmentMode,
 	LLMClient,
 	LLMChatResponse,
 	Message,
@@ -29,6 +30,13 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	clearReadTracker,
+	forgetReadContent,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -43,10 +51,17 @@ function createMockToolManager(
 			) => Promise<unknown>;
 			readOnly: boolean;
 			needsApproval?: boolean;
+			ownerSkill?: string;
 		}
 	> = {},
 ): ToolManager {
 	return {
+		filterToolNamesForMode: (names: string[], mode: DevelopmentMode) =>
+			filterToolNamesForMode(names, mode, {
+				getCustomToolPolicy: () => undefined,
+				getMcpReadOnly: () => undefined,
+			}),
+		getOwnerSkill: (name: string) => tools[name]?.ownerSkill,
 		getAllTools: () => {
 			const result: Record<string, unknown> = {};
 			for (const name of Object.keys(tools)) {
@@ -448,7 +463,12 @@ test.serial('caps tool output before the next subagent model turn', async t => {
 	t.true(result.success);
 	const toolResult = toolMessages.find(message => message.role === 'tool');
 	t.truthy(toolResult);
-	t.is(toolResult?.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap. The cut snaps back to whitespace so it never splits a
+	// token (a secret fragment would slip past the scrubber), which can leave
+	// the result a little under it.
+	const length = toolResult?.content.length ?? 0;
+	t.true(length <= MAX_TOOL_RESULT_CHARS);
+	t.true(length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(toolResult?.content.startsWith('HEAD\n') ?? false);
 	t.true(toolResult?.content.endsWith('TAIL') ?? false);
 });
@@ -1797,3 +1817,56 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		'an audit-log hook must see the failed delegated call too',
 	);
 });
+
+test.serial(
+	'subagent read stubs stay isolated from the parent and are dropped on finish',
+	async t => {
+		clearReadTracker();
+		const filePath = '/tmp/parent-read.txt';
+		const stats = {mtimeMs: 11, size: 8};
+		rememberReadContent(filePath, stats, 3);
+
+		let seenInSubagent: ReturnType<typeof matchReadContent>;
+		seenInSubagent = {lineCount: -1, size: -1};
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => {
+					seenInSubagent = matchReadContent(filePath, stats);
+					rememberReadContent(filePath, stats, 9);
+					forgetReadContent(filePath);
+					return 'subagent body';
+				},
+				readOnly: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'read',
+						function: {
+							name: 'read_file',
+							arguments: '{"path":"/tmp/parent-read.txt"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read a file'},
+			undefined,
+			0,
+			'stub-scope-agent',
+		);
+
+		t.true(result.success);
+		t.is(seenInSubagent, undefined);
+		t.deepEqual(matchReadContent(filePath, stats), {lineCount: 3, size: 8});
+		runWithReadContentScope('stub-scope-agent', () => {
+			t.is(matchReadContent(filePath, stats), undefined);
+		});
+	},
+);

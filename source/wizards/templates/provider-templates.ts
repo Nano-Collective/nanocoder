@@ -268,6 +268,8 @@ function apiKeyTemplate(opts: {
 function oauthProviderTemplate(opts: {
 	id: string;
 	name: string;
+	/** Must match the name the login commands save credentials under. */
+	defaultProviderName: string;
 	baseUrl: string;
 	sdkProvider: ProviderConfig['sdkProvider'];
 	modelDefault?: string;
@@ -276,7 +278,11 @@ function oauthProviderTemplate(opts: {
 		id: opts.id,
 		name: opts.name,
 		fields: [
-			{name: 'providerName', prompt: 'Provider name', default: opts.name},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: opts.defaultProviderName,
+			},
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated).',
@@ -285,7 +291,7 @@ function oauthProviderTemplate(opts: {
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || opts.name,
+			name: answers.providerName || opts.defaultProviderName,
 			baseUrl: opts.baseUrl,
 			models: parseArrayField(answers.model),
 			sdkProvider: opts.sdkProvider,
@@ -434,6 +440,19 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'claude-sonnet-5',
 	}),
 	apiKeyTemplate({
+		id: 'api-route',
+		name: 'API Route',
+		baseUrl: 'https://global.api-route.com/v1',
+		modelDefault: 'gpt-5.5',
+	}),
+	apiKeyTemplate({
+		id: 'futureinfra',
+		name: 'FutureInfra',
+		baseUrl: 'https://futureinfra.ai/v1/ai',
+		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
+		modelDefault: 'openai/gpt-4o-mini',
+	}),
+	apiKeyTemplate({
 		id: 'opper',
 		name: 'Opper',
 		baseUrl: 'https://api.opper.ai/v3/compat',
@@ -524,6 +543,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	oauthProviderTemplate({
 		id: 'chatgpt-codex',
 		name: 'ChatGPT / Codex',
+		defaultProviderName: 'ChatGPT',
 		baseUrl: 'https://chatgpt.com/backend-api/codex',
 		sdkProvider: 'chatgpt-codex',
 		modelDefault: 'gpt-5.3-codex',
@@ -531,6 +551,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	oauthProviderTemplate({
 		id: 'github-copilot',
 		name: 'GitHub Copilot',
+		defaultProviderName: 'GitHub Copilot',
 		baseUrl: 'https://api.githubcopilot.com',
 		sdkProvider: 'github-copilot',
 		modelDefault: 'gpt-5.6-sol',
@@ -606,9 +627,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				required: true,
 			},
 			{
-				name: 'timeout',
-				prompt: 'Request timeout (ms)',
-				default: '30000',
+				name: 'requestTimeout',
+				prompt: 'Request timeout in ms (optional, blank for the default)',
+				required: false,
 				validator: value => {
 					if (!value) return undefined;
 					const num = Number(value);
@@ -628,8 +649,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			if (answers.apiKey) {
 				config.apiKey = answers.apiKey;
 			}
-			if (answers.timeout) {
-				config.timeout = Number(answers.timeout);
+			if (answers.requestTimeout) {
+				config.requestTimeout = Number(answers.requestTimeout);
 			}
 			return config;
 		},

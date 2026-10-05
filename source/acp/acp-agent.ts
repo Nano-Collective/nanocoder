@@ -61,6 +61,7 @@ import {
 	deriveTitleFromFirstMessage,
 } from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -982,7 +983,12 @@ export class AcpAgent implements Agent {
 		const {toolManager} = this.initContext;
 		const {provider, model} = this.initContext;
 
-		const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+		const tune = resolveTune(
+			getAppConfig(),
+			this.initContext.client.getProviderConfig(),
+			loadPreferences(),
+		);
+		applyTuneCompaction(tune);
 		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
