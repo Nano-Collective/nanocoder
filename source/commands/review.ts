@@ -1,5 +1,11 @@
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import React from 'react';
+import AssistantMessage from '@/components/assistant-message';
+import AssistantReasoning from '@/components/assistant-reasoning';
+import {getShowUsageFooter} from '@/config/preferences';
+import {generateKey} from '@/session/key-generator';
+import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
 	execGit,
@@ -10,9 +16,10 @@ import {
 } from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
+import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
+import {errorMsg, infoMsg, warningMsg} from '@/utils/message-factory';
 import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -417,7 +424,8 @@ export function createReviewCommand(
 				];
 
 				const response = await client.chat(messages, {}, {});
-				const review = response?.choices?.[0]?.message?.content?.trim();
+				const reply = response?.choices?.[0]?.message;
+				const review = stripThinkTags(reply?.content ?? '').trim();
 
 				if (!review) {
 					const userFacingNotices = [scopeNotice];
@@ -426,11 +434,31 @@ export function createReviewCommand(
 					return warningMsg(userFacingNotices.join('\n\n'), 'review');
 				}
 
-				const userFacingNotices = [scopeNotice];
-				if (coverageNotice) userFacingNotices.push(coverageNotice);
-				return successMsg(
-					`${userFacingNotices.join('\n\n')}\n\n${review}`,
-					'review',
+				const showUsageFooter = getShowUsageFooter();
+				const usage = showUsageFooter
+					? await buildResponseUsageBounded(response.usage, metadata.model)
+					: undefined;
+				// Rendered like a normal chat reply so the review's Markdown is
+				// parsed instead of being shown as raw text in a status color.
+				return React.createElement(
+					React.Fragment,
+					{key: generateKey('review')},
+					infoMsg(scopeNotice, 'review-scope'),
+					coverageNotice ? warningMsg(coverageNotice, 'review-coverage') : null,
+					reply?.reasoning
+						? React.createElement(AssistantReasoning, {
+								key: generateKey('review-reasoning'),
+								reasoning: reply.reasoning,
+								expand: false,
+							})
+						: null,
+					React.createElement(AssistantMessage, {
+						key: generateKey('review-report'),
+						message: review,
+						model: metadata.model,
+						usage,
+						showUsageFooter,
+					}),
 				);
 			} catch (error) {
 				return errorMsg(formatError(error), 'review');

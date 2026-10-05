@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
@@ -17,6 +18,7 @@ import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
+import {renderWithTheme} from '@/test-utils/render-with-theme';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -1214,9 +1216,9 @@ test.serial(
 				(queued[0] as React.ReactElement<{message: string}>).props.message,
 				'$ /review quick feature',
 			);
-			const resultMessage = (
-				queued[1] as React.ReactElement<{message: string}>
-			).props.message;
+			const resultMessage = stripAnsi(
+				renderWithTheme(queued[1] as React.ReactElement).lastFrame() ?? '',
+			);
 			t.true(
 				resultMessage.includes(
 					'Review scope: branch "feature" against "main".',

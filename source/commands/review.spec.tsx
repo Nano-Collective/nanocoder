@@ -167,6 +167,36 @@ test('review returns an error when no client is available', async t => {
 	t.true(output.includes('No active LLM client available'));
 });
 
+test('review renders the model reply as a parsed Markdown assistant message', async t => {
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse') return '';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		loadPrompt: () => 'review prompt',
+	});
+
+	const result = await command.handler(['feature'], baseMessages, {
+		...testMetadata,
+		client: createClient(
+			'<think>private notes</think>## Findings\n\n**Bug**: `x` is unused.',
+		) as never,
+	});
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '');
+
+	t.true(output.includes('Review scope: branch "feature" against "main".'));
+	t.true(output.includes('test-model'));
+	t.true(output.includes('Findings'));
+	t.true(output.includes('Bug'));
+	t.false(output.includes('## Findings'));
+	t.false(output.includes('**Bug**'));
+	t.false(output.includes('private notes'));
+});
+
 test('review generates a review from the branch diff', async t => {
 	let receivedMessages: Message[] = [];
 
