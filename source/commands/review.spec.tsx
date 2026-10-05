@@ -37,6 +37,12 @@ function createGitHubFixture(options: {
 	pullRequestErrors?: Record<string, string>;
 	/** Old lowercase slug to current slug, like GitHub's rename redirects. */
 	redirects?: Record<string, string>;
+	/** Lowercase slug to the `gh pr list --json` rows it returns. */
+	openPullRequests?: Record<string, unknown[]>;
+	/** Lowercase slug to its GitHub default branch. */
+	defaultBranches?: Record<string, string>;
+	/** Refs `git rev-parse --verify` should treat as missing. */
+	missingRefs?: string[];
 } = {}) {
 	const remoteUrls = options.remoteUrls ?? {
 		origin: 'git@github.com:user/repo.git',
@@ -60,7 +66,15 @@ function createGitHubFixture(options: {
 				if (!url) throw new Error(`unknown remote: ${name}`);
 				return url;
 			}
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse') {
+				if (args.includes('--short')) return '0123abc';
+				const missing = (options.missingRefs ?? []).some(ref =>
+					args.some(arg => arg === ref || arg === `${ref}^{commit}`),
+				);
+				if (missing) throw new Error('fatal: needed a single revision');
+				return '';
+			}
+			if (args[0] === 'symbolic-ref') throw new Error('not a symbolic ref');
 			if (args[0] === 'diff') return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 			throw new Error(`unexpected git command: ${args.join(' ')}`);
 		},
@@ -93,8 +107,18 @@ function createGitHubFixture(options: {
 				const parent = parents[repository.toLowerCase()];
 				return JSON.stringify({
 					full_name: repository,
+					default_branch: options.defaultBranches?.[repository.toLowerCase()],
 					parent: parent ? {full_name: parent} : null,
 				});
+			}
+			if (args[0] === 'pr' && args[1] === 'list') {
+				const repo = args[args.indexOf('--repo') + 1].replace(
+					/^github\.com\//,
+					'',
+				);
+				return JSON.stringify(
+					options.openPullRequests?.[canonicalSlug(repo).toLowerCase()] ?? [],
+				);
 			}
 			if (args[0] === 'pr' && args[1] === 'diff') {
 				return 'diff --git a/pr-file.ts b/pr-file.ts\n+const y = 2;';
@@ -125,7 +149,7 @@ test('review with no args reviews current branch (no usage error)', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -170,7 +194,7 @@ test('review returns an error when no client is available', async t => {
 test('review renders the model reply as a parsed Markdown assistant message', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -202,7 +226,7 @@ test('review generates a review from the branch diff', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -271,7 +295,7 @@ test('review warns when diff is empty', async t => {
 test('review warns when the model returns an empty response', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -294,7 +318,7 @@ test('review warns when the model returns an empty response', async t => {
 test('review returns an error when the LLM request fails', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -347,7 +371,7 @@ test('review uses the review system prompt', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -693,7 +717,7 @@ test('review with no args reviews current branch against default', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -720,7 +744,7 @@ test('review with default branch as target reviews current branch against it', a
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -751,7 +775,7 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return bigDiff;
 		},
 		getCurrentBranch: async () => 'feature',
@@ -812,7 +836,7 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -829,4 +853,152 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 
 	t.truthy(React.isValidElement(result));
 	t.is(systemPrompt, fallbackPrompt);
+});
+
+async function runBaseReview(fixture: ReturnType<typeof createGitHubFixture>) {
+	const command = createReviewCommand({
+		...fixture.dependencies,
+		loadPrompt: () => 'review prompt',
+	});
+	const result = await command.handler(['quick'], baseMessages, {
+		...testMetadata,
+		client: createClient('Base review.') as never,
+	});
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+	const diffCall = fixture.gitCalls.find(args => args[0] === 'diff');
+	return {output, diffRange: diffCall?.at(-1)};
+}
+
+test('current-branch review uses the fork parent remote, not local main', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'owner/repo': 'main', 'user/repo': 'main'},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/main...feature');
+	t.true(
+		output.includes(
+			'Review scope: current branch "feature" against upstream/main (owner/repo) at 0123abc.',
+		),
+	);
+	t.false(output.includes('may be behind'));
+});
+
+test('current-branch review matches a parent remote that still uses the old repository name', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			legacy: 'https://github.com/Old-Owner/repo.git',
+		},
+		parents: {'user/repo': 'New-Owner/repo'},
+		redirects: {'old-owner/repo': 'New-Owner/repo'},
+		defaultBranches: {'new-owner/repo': 'main'},
+	});
+
+	const {diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'legacy/main...feature');
+});
+
+test('current-branch review in a fork without the parent remote warns and uses origin', async t => {
+	const fixture = createGitHubFixture({
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'user/repo': 'main'},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'origin/main...feature');
+	t.true(output.includes('against origin/main (user/repo)'));
+	t.true(output.includes('This is a fork of owner/repo'));
+	t.true(
+		output.includes(
+			'git remote add upstream https://github.com/owner/repo.git && git fetch upstream',
+		),
+	);
+});
+
+test("current-branch review uses the open PR's base branch and ignores other forks' PRs", async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'owner/repo': 'main'},
+		openPullRequests: {
+			'owner/repo': [
+				{
+					number: 3,
+					baseRefName: 'main',
+					headRefName: 'feature',
+					headRepositoryOwner: {login: 'someone-else'},
+				},
+				{
+					number: 7,
+					baseRefName: 'release',
+					headRefName: 'feature',
+					headRepositoryOwner: {login: 'user'},
+				},
+			],
+		},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/release...feature');
+	t.true(
+		output.includes(
+			'against upstream/release, the base of open PR #7 in owner/repo at 0123abc.',
+		),
+	);
+	const prList = fixture.ghCalls.find(args => args[0] === 'pr');
+	t.deepEqual(prList?.slice(0, 4), ['pr', 'list', '--repo', 'github.com/owner/repo']);
+});
+
+test('current-branch review falls back to local main with a fetch hint when the remote branch is missing', async t => {
+	const fixture = createGitHubFixture({
+		defaultBranches: {'user/repo': 'main'},
+		missingRefs: ['origin/main'],
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'main...feature');
+	t.true(output.includes('against "main"'));
+	t.true(output.includes('origin/main has not been fetched'));
+	t.true(output.includes('Run: git fetch origin'));
+});
+
+test('current-branch review without gh still prefers the upstream remote', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+	});
+	fixture.dependencies.isGhAvailable = () => false;
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/main...feature');
+	t.true(output.includes('against upstream/main (owner/repo)'));
+	t.is(fixture.ghCalls.length, 0);
+});
+
+test('current-branch review with no remotes uses the local default branch', async t => {
+	const fixture = createGitHubFixture({remoteUrls: {}});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'main...feature');
+	t.true(output.includes('current branch "feature" against "main".'));
+	t.false(output.includes('may be out of date'));
 });

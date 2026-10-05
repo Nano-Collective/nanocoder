@@ -1189,7 +1189,7 @@ test.serial(
 		commandRegistry.register({
 			...createReviewCommand({
 				execGit: async args => {
-					if (args[0] === 'rev-parse') return '';
+					if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 					return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 				},
 				getCurrentBranch: async () => 'feature',

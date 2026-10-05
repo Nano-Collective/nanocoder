@@ -196,24 +196,34 @@ function isGitHubNotFound(error: unknown): boolean {
 	return /\bHTTP 404\b|\bstatus(?: code)? 404\b/i.test(message);
 }
 
-async function getGitHubRepositoryCandidates(
+type RemoteInfo = {name: string; repository: string | null};
+
+async function listRemotes(
 	dependencies: ReviewDependencies,
-	execGh: (args: string[]) => Promise<string>,
-): Promise<string[]> {
+): Promise<RemoteInfo[]> {
 	const remoteNames = (await dependencies.execGit(['remote']))
 		.split(/\r?\n/)
 		.map(remote => remote.trim())
 		.filter(Boolean);
-	const remoteRepositories = new Map<string, string>();
-
-	for (const remoteName of remoteNames) {
+	const remotes: RemoteInfo[] = [];
+	for (const name of remoteNames) {
 		const remoteUrl = await dependencies.execGit([
 			'remote',
 			'get-url',
 			'--',
-			remoteName,
+			name,
 		]);
-		const repository = parseGitHubRepository(remoteUrl);
+		remotes.push({name, repository: parseGitHubRepository(remoteUrl)});
+	}
+	return remotes;
+}
+
+async function getGitHubRepositoryCandidates(
+	dependencies: ReviewDependencies,
+	execGh: (args: string[]) => Promise<string>,
+): Promise<string[]> {
+	const remoteRepositories = new Map<string, string>();
+	for (const {repository} of await listRemotes(dependencies)) {
 		if (repository) {
 			remoteRepositories.set(repository.toLowerCase(), repository);
 		}
@@ -317,6 +327,297 @@ async function resolvePullRequestRepository(
 	return matches[0];
 }
 
+type RepositoryInfo = {
+	fullName: string;
+	parent: string | null;
+	defaultBranch: string | null;
+};
+
+type ReviewBase = {
+	/** Git revision the diff is taken against, e.g. `upstream/main`. */
+	ref: string;
+	/** Branch name on its own, used to spot `/review main`. */
+	branch: string;
+	description: string;
+	notices: string[];
+};
+
+async function fetchRepositoryInfo(
+	execGh: (args: string[]) => Promise<string>,
+	repository: string,
+): Promise<RepositoryInfo | null> {
+	try {
+		const metadata: unknown = JSON.parse(
+			await execGh(['api', '--hostname', GITHUB_HOST, `repos/${repository}`]),
+		);
+		if (!metadata || typeof metadata !== 'object') return null;
+		const data = metadata as {
+			full_name?: unknown;
+			default_branch?: unknown;
+			parent?: {full_name?: unknown};
+		};
+		return {
+			fullName: parseRepositorySlug(data.full_name) ?? repository,
+			parent: parseRepositorySlug(data.parent?.full_name),
+			defaultBranch:
+				typeof data.default_branch === 'string' ? data.default_branch : null,
+		};
+	} catch {
+		return null;
+	}
+}
+
+async function findOpenPullRequest(
+	execGh: (args: string[]) => Promise<string>,
+	repositories: string[],
+	branch: string,
+	headOwners: Set<string>,
+): Promise<{repository: string; number: number; baseBranch: string} | null> {
+	for (const repository of repositories) {
+		let pullRequests: unknown;
+		try {
+			pullRequests = JSON.parse(
+				await execGh([
+					'pr',
+					'list',
+					'--repo',
+					`${GITHUB_HOST}/${repository}`,
+					'--head',
+					branch,
+					'--state',
+					'open',
+					'--json',
+					'number,baseRefName,headRefName,headRepositoryOwner',
+					'--limit',
+					'20',
+				]),
+			);
+		} catch {
+			continue;
+		}
+		if (!Array.isArray(pullRequests)) continue;
+		// --head matches the branch name in every fork, so another user's
+		// branch with the same name must not decide this review's base.
+		const ours = pullRequests.filter(
+			(pr: {
+				headRefName?: unknown;
+				headRepositoryOwner?: {login?: unknown};
+				baseRefName?: unknown;
+				number?: unknown;
+			}) =>
+				pr.headRefName === branch &&
+				typeof pr.headRepositoryOwner?.login === 'string' &&
+				headOwners.has(pr.headRepositoryOwner.login.toLowerCase()) &&
+				typeof pr.baseRefName === 'string' &&
+				typeof pr.number === 'number',
+		);
+		if (ours.length === 1) {
+			return {
+				repository,
+				number: ours[0].number,
+				baseBranch: ours[0].baseRefName,
+			};
+		}
+	}
+	return null;
+}
+
+async function gitRefExists(
+	dependencies: ReviewDependencies,
+	ref: string,
+): Promise<boolean> {
+	try {
+		await dependencies.execGit([
+			'rev-parse',
+			'--verify',
+			'--quiet',
+			`${ref}^{commit}`,
+		]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function describeRef(
+	dependencies: ReviewDependencies,
+	ref: string,
+	label: string,
+): Promise<string> {
+	try {
+		const sha = (
+			await dependencies.execGit(['rev-parse', '--short', ref])
+		).trim();
+		return /^[0-9a-f]{7,40}$/i.test(sha) ? `${label} at ${sha}` : label;
+	} catch {
+		return label;
+	}
+}
+
+async function remoteDefaultBranch(
+	dependencies: ReviewDependencies,
+	remote: string,
+	reported: string | null | undefined,
+): Promise<string | null> {
+	if (reported) return reported;
+	try {
+		const head = (
+			await dependencies.execGit([
+				'symbolic-ref',
+				'--quiet',
+				'--short',
+				`refs/remotes/${remote}/HEAD`,
+			])
+		).trim();
+		if (head.startsWith(`${remote}/`)) return head.slice(remote.length + 1);
+	} catch {
+		// Clones only set HEAD for origin; probe the usual names below.
+	}
+	for (const candidate of ['main', 'master']) {
+		if (await gitRefExists(dependencies, `${remote}/${candidate}`)) {
+			return candidate;
+		}
+	}
+	return null;
+}
+
+/**
+ * Pick the branch a branch review is diffed against. Local `main` is the last
+ * resort: it goes stale, and in a fork even `origin/main` is only the fork's
+ * copy, so a branch that merged upstream would show every upstream commit.
+ */
+async function resolveReviewBase(
+	dependencies: ReviewDependencies,
+	branch: string,
+): Promise<ReviewBase> {
+	const notices: string[] = [];
+	const localFallback = async (): Promise<ReviewBase> => {
+		const name = await dependencies.getDefaultBranch();
+		return {ref: name, branch: name, description: `"${name}"`, notices};
+	};
+
+	let remotes: RemoteInfo[];
+	try {
+		remotes = await listRemotes(dependencies);
+	} catch {
+		remotes = [];
+	}
+	if (remotes.length === 0) return localFallback();
+
+	const execGh =
+		(dependencies.isGhAvailable?.() ?? false) && dependencies.execGh
+			? dependencies.execGh
+			: null;
+	const infoByRemote = new Map<string, RepositoryInfo>();
+	if (execGh) {
+		for (const remote of remotes) {
+			if (!remote.repository) continue;
+			const info = await fetchRepositoryInfo(execGh, remote.repository);
+			if (info) infoByRemote.set(remote.name, info);
+		}
+	}
+	// GitHub reports the current slug, so a remote still using a renamed
+	// repository's old name matches its new name here.
+	const repositoryOf = (remote: RemoteInfo) =>
+		infoByRemote.get(remote.name)?.fullName ?? remote.repository;
+	const remoteFor = (repository: string) =>
+		remotes.find(
+			remote =>
+				repositoryOf(remote)?.toLowerCase() === repository.toLowerCase(),
+		);
+	const parent =
+		[...infoByRemote.values()].find(info => info.parent)?.parent ?? null;
+
+	if (execGh && branch !== 'HEAD') {
+		const repositories = [
+			...new Set(
+				[parent, ...remotes.map(repositoryOf)].filter(
+					(repository): repository is string => Boolean(repository),
+				),
+			),
+		];
+		const headOwners = new Set(
+			repositories
+				.filter(repository => remoteFor(repository))
+				.map(repository => repository.split('/')[0].toLowerCase()),
+		);
+		const pullRequest = await findOpenPullRequest(
+			execGh,
+			repositories,
+			branch,
+			headOwners,
+		);
+		const prRemote = pullRequest ? remoteFor(pullRequest.repository) : null;
+		if (pullRequest && prRemote) {
+			const ref = `${prRemote.name}/${pullRequest.baseBranch}`;
+			if (await gitRefExists(dependencies, ref)) {
+				return {
+					ref,
+					branch: pullRequest.baseBranch,
+					description: await describeRef(
+						dependencies,
+						ref,
+						`${ref}, the base of open PR #${pullRequest.number} in ${pullRequest.repository}`,
+					),
+					notices,
+				};
+			}
+			notices.push(
+				`Open PR #${pullRequest.number} targets ${ref}, which has not been fetched. Run: git fetch ${prRemote.name}`,
+			);
+		}
+	}
+
+	let remote: RemoteInfo | undefined;
+	if (parent) {
+		remote = remoteFor(parent);
+		if (!remote) {
+			notices.push(
+				`This is a fork of ${parent}, which is not a configured remote, so the review uses your fork's default branch. It may be behind ${parent}. To compare against ${parent}, run: git remote add upstream https://github.com/${parent}.git && git fetch upstream`,
+			);
+		}
+	}
+	remote ??=
+		remotes.find(candidate => candidate.name === 'upstream') ??
+		remotes.find(candidate => candidate.name === 'origin') ??
+		(remotes.length === 1 ? remotes[0] : undefined);
+	if (!remote) {
+		const fallback = await localFallback();
+		notices.push(
+			`Could not tell which remote is the main repository, so the review uses your local "${fallback.branch}" branch, which may be out of date.`,
+		);
+		return fallback;
+	}
+
+	const name = await remoteDefaultBranch(
+		dependencies,
+		remote.name,
+		infoByRemote.get(remote.name)?.defaultBranch,
+	);
+	const ref = name ? `${remote.name}/${name}` : null;
+	if (!name || !ref || !(await gitRefExists(dependencies, ref))) {
+		const fallback = await localFallback();
+		notices.push(
+			ref
+				? `${ref} has not been fetched, so the review uses your local "${fallback.branch}" branch, which may be out of date. Run: git fetch ${remote.name}`
+				: `Could not find the default branch of remote "${remote.name}", so the review uses your local "${fallback.branch}" branch, which may be out of date.`,
+		);
+		return fallback;
+	}
+
+	const repository = repositoryOf(remote);
+	return {
+		ref,
+		branch: name,
+		description: await describeRef(
+			dependencies,
+			ref,
+			repository ? `${ref} (${repository})` : ref,
+		),
+		notices,
+	};
+}
+
 export function createReviewCommand(
 	dependencies: ReviewDependencies = defaultDependencies,
 ): Command {
@@ -336,29 +637,29 @@ export function createReviewCommand(
 				if (!parsed.ok) return errorMsg(parsed.error, 'review');
 				let diff: string;
 				let targetDescription: string;
+				let baseNotices: string[] = [];
 
 				if (parsed.target.kind === 'default') {
-					const defaultBranch = await dependencies.getDefaultBranch();
 					const currentBranch = await dependencies.getCurrentBranch();
-					diff = await getBranchDiff(
-						dependencies,
-						currentBranch,
-						defaultBranch,
-					);
-					targetDescription = `current branch "${currentBranch}" against "${defaultBranch}"`;
+					const base = await resolveReviewBase(dependencies, currentBranch);
+					baseNotices = base.notices;
+					diff = await getBranchDiff(dependencies, currentBranch, base.ref);
+					targetDescription = `current branch "${currentBranch}" against ${base.description}`;
 				} else if (parsed.target.kind === 'branch') {
-					const defaultBranch = await dependencies.getDefaultBranch();
 					const currentBranch = await dependencies.getCurrentBranch();
 					const target = parsed.target.branch;
+					const defaultBranch = await dependencies.getDefaultBranch();
 					// If the user passes the default branch name, they want
 					// to review the current branch against it (not an empty
 					// diff of main...main).
-					const branch = target === defaultBranch ? currentBranch : target;
-					diff = await getBranchDiff(dependencies, branch, defaultBranch);
-					targetDescription =
-						target === defaultBranch
-							? `current branch "${currentBranch}" against "${defaultBranch}"`
-							: `branch "${target}" against "${defaultBranch}"`;
+					const reviewsCurrent = target === defaultBranch;
+					const branch = reviewsCurrent ? currentBranch : target;
+					const base = await resolveReviewBase(dependencies, branch);
+					baseNotices = base.notices;
+					diff = await getBranchDiff(dependencies, branch, base.ref);
+					targetDescription = reviewsCurrent
+						? `current branch "${currentBranch}" against ${base.description}`
+						: `branch "${target}" against ${base.description}`;
 				} else {
 					const {number, repository: explicitRepository} =
 						parsed.target.pullRequest;
@@ -400,7 +701,9 @@ export function createReviewCommand(
 
 				if (!truncated.content.trim()) {
 					return warningMsg(
-						`No changes found in ${targetDescription}.`,
+						[`No changes found in ${targetDescription}.`, ...baseNotices].join(
+							'\n\n',
+						),
 						'review',
 					);
 				}
@@ -428,7 +731,7 @@ export function createReviewCommand(
 				const review = stripThinkTags(reply?.content ?? '').trim();
 
 				if (!review) {
-					const userFacingNotices = [scopeNotice];
+					const userFacingNotices = [scopeNotice, ...baseNotices];
 					if (coverageNotice) userFacingNotices.push(coverageNotice);
 					userFacingNotices.push('Model returned an empty review.');
 					return warningMsg(userFacingNotices.join('\n\n'), 'review');
@@ -444,6 +747,7 @@ export function createReviewCommand(
 					React.Fragment,
 					{key: generateKey('review')},
 					infoMsg(scopeNotice, 'review-scope'),
+					...baseNotices.map(notice => warningMsg(notice, 'review-base')),
 					coverageNotice ? warningMsg(coverageNotice, 'review-coverage') : null,
 					reply?.reasoning
 						? React.createElement(AssistantReasoning, {
