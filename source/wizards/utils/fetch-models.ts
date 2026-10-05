@@ -151,6 +151,12 @@ export function resolveOpenAICompatibleModelsEndpoint(baseUrl: string): string {
 		return 'https://models.github.ai/catalog/models';
 	}
 
+	// Opper's version segment is followed by /compat, and its OpenAI-shaped
+	// model list lives under that path, not next to the version.
+	if (/^https?:\/\/api\.opper\.ai\/v3\/compat(\/|$)/i.test(url)) {
+		return 'https://api.opper.ai/v3/compat/models';
+	}
+
 	const versionSegment = /\/v\d+(?:alpha|beta)?\d*(?=\/|$)/i;
 	const match = versionSegment.exec(url);
 	if (match) {
