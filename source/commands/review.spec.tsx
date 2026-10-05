@@ -35,6 +35,8 @@ function createGitHubFixture(options: {
 	parents?: Record<string, string>;
 	pullRequests?: Record<string, string[]>;
 	pullRequestErrors?: Record<string, string>;
+	/** Old lowercase slug to current slug, like GitHub's rename redirects. */
+	redirects?: Record<string, string>;
 } = {}) {
 	const remoteUrls = options.remoteUrls ?? {
 		origin: 'git@github.com:user/repo.git',
@@ -42,6 +44,8 @@ function createGitHubFixture(options: {
 	const parents = options.parents ?? {};
 	const pullRequests = options.pullRequests ?? {};
 	const pullRequestErrors = options.pullRequestErrors ?? {};
+	const redirects = options.redirects ?? {};
+	const canonicalSlug = (slug: string) => redirects[slug.toLowerCase()] ?? slug;
 	const gitCalls: string[][] = [];
 	const ghCalls: string[][] = [];
 	const dependencies: ReviewDependencies = {
@@ -66,7 +70,9 @@ function createGitHubFixture(options: {
 		execGh: async args => {
 			ghCalls.push(args);
 			if (args[0] === 'api') {
-				const path = args[1]?.replace(/^repos\//, '') ?? '';
+				const path =
+					args.find(arg => arg.startsWith('repos/'))?.replace(/^repos\//, '') ??
+					'';
 				const requestError = pullRequestErrors[path];
 				if (requestError) throw new Error(requestError);
 
@@ -74,7 +80,8 @@ function createGitHubFixture(options: {
 					/^([^/]+\/[^/]+)\/pulls\/(\d+)$/,
 				);
 				if (pullRequestMatch) {
-					const [, repository, number] = pullRequestMatch;
+					const [, requested, number] = pullRequestMatch;
+					const repository = canonicalSlug(requested);
 					const exists = pullRequests[repository.toLowerCase()]?.includes(number);
 					if (!exists) throw new Error('HTTP 404: Not Found');
 					return JSON.stringify({
@@ -82,10 +89,10 @@ function createGitHubFixture(options: {
 					});
 				}
 
-				const repository = path.toLowerCase();
-				const parent = parents[repository];
+				const repository = canonicalSlug(path);
+				const parent = parents[repository.toLowerCase()];
 				return JSON.stringify({
-					full_name: path,
+					full_name: repository,
 					parent: parent ? {full_name: parent} : null,
 				});
 			}
@@ -392,7 +399,49 @@ test('quick review resolves a bare PR number to the unique upstream parent', asy
 		'diff',
 		'42',
 		'--repo',
-		'Nano-Collective/nanocoder',
+		'github.com/Nano-Collective/nanocoder',
+	]);
+	const apiCalls = ghCalls.filter(args => args[0] === 'api');
+	t.true(apiCalls.length > 0);
+	for (const args of apiCalls) {
+		t.deepEqual(args.slice(1, 3), ['--hostname', 'github.com']);
+	}
+});
+
+test('bare PR resolution treats a renamed upstream slug as the same repository', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:puri-adityakumar/nanocoder.git',
+			upstream: 'https://github.com/Mote-Software/nanocoder.git',
+		},
+		parents: {
+			'puri-adityakumar/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		redirects: {
+			'mote-software/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		pullRequests: {
+			'nano-collective/nanocoder': ['42'],
+		},
+	});
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(['quick', '42'], baseMessages, {
+		...testMetadata,
+		client: createClient('Renamed upstream review.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+
+	t.true(output.includes('Review scope: PR #42 in Nano-Collective/nanocoder.'), output);
+	t.deepEqual(ghCalls.at(-1), [
+		'pr',
+		'diff',
+		'42',
+		'--repo',
+		'github.com/Nano-Collective/nanocoder',
 	]);
 });
 
@@ -421,7 +470,13 @@ test('bare PR resolution ignores a stale remote that returns 404', async t => {
 	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
 
 	t.true(output.includes('Review scope: PR #42 in acme/app.'));
-	t.deepEqual(ghCalls.at(-1), ['pr', 'diff', '42', '--repo', 'acme/app']);
+	t.deepEqual(ghCalls.at(-1), [
+		'pr',
+		'diff',
+		'42',
+		'--repo',
+		'github.com/acme/app',
+	]);
 });
 
 test('bare PR number fails clearly when fork and upstream numbers collide', async t => {
@@ -482,7 +537,7 @@ test('explicit GitHub PR URL uses its owner and repository directly', async t =>
 		output.includes('Review scope: PR #42 in other-owner/other-repo.'),
 	);
 	t.deepEqual(ghCalls, [
-		['pr', 'diff', '42', '--repo', 'other-owner/other-repo'],
+		['pr', 'diff', '42', '--repo', 'github.com/other-owner/other-repo'],
 	]);
 	t.deepEqual(gitCalls, []);
 });

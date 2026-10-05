@@ -77,6 +77,11 @@ type ReviewTargetParseResult =
 	| {ok: true; target: ParsedReviewTarget}
 	| {ok: false; error: string};
 
+// Targets are only ever parsed from github.com URLs and remotes. Pass the host
+// to gh explicitly, or a GH_HOST pointing at GitHub Enterprise would redirect
+// these lookups and the diff fetch to another server.
+const GITHUB_HOST = 'github.com';
+
 const REVIEW_USAGE =
 	'Usage: /review [quick] [<branch | PR number | GitHub PR URL>]. Pass exactly one target.';
 
@@ -217,7 +222,12 @@ async function getGitHubRepositoryCandidates(
 	for (const repository of remoteRepositories.values()) {
 		let metadata: unknown;
 		try {
-			const response = await execGh(['api', `repos/${repository}`]);
+			const response = await execGh([
+				'api',
+				'--hostname',
+				GITHUB_HOST,
+				`repos/${repository}`,
+			]);
 			metadata = JSON.parse(response);
 		} catch (error) {
 			if (isGitHubNotFound(error)) continue;
@@ -253,19 +263,29 @@ async function resolvePullRequestRepository(
 		try {
 			const response = await execGh([
 				'api',
+				'--hostname',
+				GITHUB_HOST,
 				`repos/${repository}/pulls/${number}`,
 			]);
 			const pullRequest: unknown = JSON.parse(response);
-			if (
-				!pullRequest ||
-				typeof pullRequest !== 'object' ||
-				typeof (pullRequest as {html_url?: unknown}).html_url !== 'string'
-			) {
+			const htmlUrl =
+				pullRequest && typeof pullRequest === 'object'
+					? (pullRequest as {html_url?: unknown}).html_url
+					: undefined;
+			if (typeof htmlUrl !== 'string') {
 				throw new Error(
 					`GitHub returned invalid pull request data for ${repository}#${number}.`,
 				);
 			}
-			matches.push(repository);
+			// A renamed or transferred repository still answers on its old slug,
+			// so a stale remote and the fork parent can both find the same PR.
+			// Its html_url always carries the current slug.
+			const canonical = parsePullRequestUrl(htmlUrl)?.repository ?? repository;
+			if (
+				!matches.some(match => match.toLowerCase() === canonical.toLowerCase())
+			) {
+				matches.push(canonical);
+			}
 		} catch (error) {
 			if (isGitHubNotFound(error)) continue;
 			throw new Error(
@@ -356,7 +376,7 @@ export function createReviewCommand(
 							'diff',
 							number,
 							'--repo',
-							repository,
+							`${GITHUB_HOST}/${repository}`,
 						]);
 						targetDescription = `PR #${number} in ${repository}`;
 					} catch (error) {
