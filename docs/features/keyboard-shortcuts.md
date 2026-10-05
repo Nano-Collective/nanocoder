@@ -67,8 +67,12 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Navigate file/command suggestions | Up/Down |
 | Close the command menu | Esc |
 | Exit file autocomplete | Space |
+| Insert the suggested next command in an empty prompt | Tab |
+| Dismiss the suggested next command | Esc (empty prompt) |
 
 Typing `/` at the start of the prompt opens the command menu straight away and filters it as you type. Up/Down move the highlight, and Tab or Enter accepts the highlighted command. Typing `@` opens file suggestions the same way.
+
+After a turn that edits files, the empty prompt suggests a follow-up command: `/commit` when changes are already staged, otherwise `/checkpoint create`. Typing replaces the suggestion, Tab inserts it, and Esc dismisses it.
 
 ## Image Attachments
 
@@ -135,3 +139,11 @@ Pressing Esc before the model has produced any output, and before any tool has s
 | Attach to a running subagent, or cycle to the next one | Ctrl+S |
 
 Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation.
+
+## Voice Mode
+
+| Action | Shortcut | Notes |
+|--------|----------|-------|
+| Push-to-talk / Barge-in | Ctrl+G | Start/stop voice recording; interrupts the AI response while it is processing or speaking |
+
+Voice mode is controlled with `/voice`, including `ptt` and `hands-free` activation modes. The shortcut is active once voice mode is enabled and no prompt, confirmation or question is on screen.

@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && mkdir -p dist/voice && cp plugins/voice/dist/*.js plugins/voice/dist/*.d.ts dist/voice/ && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
@@ -60,7 +60,8 @@
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
 		"generate:schema": "tsx scripts/generate-config-schema.ts",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
-		"prepare": "husky"
+		"prepare": "husky",
+		"test:types:voice": "tsc --noEmit -p plugins/voice/tsconfig.json"
 	},
 	"files": [
 		"dist",
@@ -87,6 +88,7 @@
 		"chokidar": "^5.0.0",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
+		"cli-truncate": "^5.2.0",
 		"clipboardy": "^5.3.1",
 		"croner": "^10.0.1",
 		"diff": "^9.0.0",
@@ -105,6 +107,7 @@
 		"pino-roll": "^4.0.0",
 		"react": "^19.0.0",
 		"sonic-boom": "^5.0.0",
+		"string-width": "^8.2.2",
 		"tiktoken": "^1.0.22",
 		"undici": "^8.5.0",
 		"wrap-ansi": "^10.0.0",
@@ -113,6 +116,7 @@
 		"yaml": "^2.8.3"
 	},
 	"devDependencies": {
+		"@nanocollective/nanocoder-voice": "workspace:*",
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
 		"@changesets/cli": "^3.0.0",
