@@ -41,6 +41,7 @@ const executeGitLog = async (args: GitLogInput): Promise<string> => {
 			author: args.author,
 			since: args.since,
 			grep: args.grep,
+			branch,
 		});
 
 		if (commits.length === 0) {

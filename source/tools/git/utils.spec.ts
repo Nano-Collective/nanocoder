@@ -15,6 +15,7 @@ import {
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
 	truncateDiff,
+	getCommits,
 } from './utils';
 
 // ============================================================================
@@ -354,3 +355,75 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// getCommits Tests
+// ============================================================================
+
+test.serial('getCommits returns commits for a specific branch', async t => {
+	if (!isGitAvailable()) {
+		t.pass('git not available; skipping');
+		return;
+	}
+	const originalCwd = process.cwd();
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-test-'));
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync(
+			'git -c user.email=t@t -c user.name=t commit --allow-empty -q -m "main commit"',
+			{cwd: dir},
+		);
+		execSync('git checkout -q -b feature/test', {cwd: dir});
+		execSync(
+			'git -c user.email=t@t -c user.name=t commit --allow-empty -q -m "feature commit"',
+			{cwd: dir},
+		);
+		execSync('git checkout -q main', {cwd: dir});
+
+		// Switch CWD so execGit operates in the test repo
+		process.chdir(dir);
+
+		const commits = await getCommits({branch: 'feature/test'});
+
+		t.truthy(commits);
+		t.is(commits.length, 2);
+		t.is(commits[0]?.subject, 'feature commit');
+		t.is(commits[1]?.subject, 'main commit');
+
+		const mainCommits = await getCommits({branch: 'main'});
+		t.is(mainCommits.length, 1);
+		t.is(mainCommits[0]?.subject, 'main commit');
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('getCommits rejects invalid branch flag injection', async t => {
+	if (!isGitAvailable()) {
+		t.pass('git not available; skipping');
+		return;
+	}
+	const originalCwd = process.cwd();
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-test-'));
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync(
+			'git -c user.email=t@t -c user.name=t commit --allow-empty -q -m "main commit"',
+			{cwd: dir},
+		);
+
+		process.chdir(dir);
+
+		// Attempting to pass a flag as a branch name shouldn't crash with a git error
+		// because the fix filters out branches starting with `-`
+		const commits = await getCommits({branch: '--all'});
+		// Since it filters `--all`, it should just return the current branch (main)
+		// which has 1 commit.
+		t.is(commits.length, 1);
+		t.is(commits[0]?.subject, 'main commit');
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+});

@@ -472,6 +472,7 @@ export async function getCommits(options: {
 	author?: string;
 	since?: string;
 	grep?: string;
+	branch?: string;
 }): Promise<CommitInfo[]> {
 	try {
 		const args = ['log', '--format=%H|%h|%an|%ae|%ad|%ar|%s', '--date=short'];
@@ -481,6 +482,9 @@ export async function getCommits(options: {
 		if (options.author) args.push(`--author=${options.author}`);
 		if (options.since) args.push(`--since=${options.since}`);
 		if (options.grep) args.push(`--grep=${options.grep}`);
+		if (options.branch && !options.branch.startsWith('-')) {
+			args.push(options.branch);
+		}
 		if (options.file) args.push('--', options.file);
 
 		const output = await execGit(args);
