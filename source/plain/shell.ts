@@ -5,6 +5,7 @@ import {
 	type ArtifactManager,
 	artifactManager,
 } from '@/artifacts/artifact-manager';
+import {lazyCommands} from '@/commands/lazy-registry';
 import {getAppConfig} from '@/config/index';
 import {
 	ensureDirectoryTrust,
@@ -111,6 +112,25 @@ export async function runPlainShell(
 
 	const isJson = outputFormat === 'json';
 
+	/** Report a pre-conversation failure in the active output format and exit 1. */
+	const fail = async (message: string) => {
+		if (isJson) {
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				steps: 0,
+				filesChanged: [],
+				message,
+			});
+		} else {
+			writeError(message);
+		}
+		await deps.getShutdownManager().gracefulShutdown(1);
+	};
+
 	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
 		loadPreferences: deps.loadPreferences,
 		savePreferences: deps.savePreferences,
@@ -121,26 +141,21 @@ export async function runPlainShell(
 		);
 	}
 	if (!trust.trusted) {
-		if (isJson) {
-			const cwd = path.resolve(process.cwd());
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			});
-		} else {
-			const cwd = path.resolve(process.cwd());
-			writeError(
-				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
+		await fail(
+			`Directory ${path.resolve(process.cwd())} is not trusted. Pass --trust-directory or set ` +
+				`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+		);
+		return;
+	}
+
+	// Slash commands need the Ink app: their handlers render components or
+	// drive TUI modes, so --plain cannot run them. Say so instead of handing
+	// the text to the model (or letting a stub command silently no-op).
+	const slashName = prompt.trim().match(/^\/(\S+)/)?.[1];
+	if (slashName && lazyCommands.some(c => c.name === slashName)) {
+		await fail(
+			`/${slashName} requires interactive mode. Run nanocoder without --plain to use it.`,
+		);
 		return;
 	}
 
@@ -148,22 +163,7 @@ export async function runPlainShell(
 	try {
 		init = await deps.initializePlain({cliProvider, cliModel});
 	} catch (error) {
-		const formattedErr = formatError(error);
-		if (isJson) {
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message: formattedErr,
-			});
-		} else {
-			writeError(formattedErr);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
+		await fail(formatError(error));
 		return;
 	}
 
@@ -238,22 +238,7 @@ export async function runPlainShell(
 
 	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
 	if (promptGate.blocked) {
-		const message = promptGate.reason ?? 'Prompt blocked by a hook.';
-		if (isJson) {
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message,
-			});
-		} else {
-			writeError(message);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
+		await fail(promptGate.reason ?? 'Prompt blocked by a hook.');
 		return;
 	}
 

@@ -866,6 +866,38 @@ test.serial(
 );
 
 test.serial(
+	"text mode: a built-in slash command is rejected with exit code 1 before init",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		let initCalled = false;
+		try {
+			await runPlainShell({
+				prompt: "/compact --preview",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: async () => {
+						initCalled = true;
+						return makeFakeInitializePlain()();
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.regex(stderr.get(), /\/compact requires interactive mode/);
+		t.is(shutdown.code, 1);
+		t.false(initCalled);
+	},
+);
+
+test.serial(
 	"text mode: initializePlain failure writes the formatted error to stderr with exit code 1",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
