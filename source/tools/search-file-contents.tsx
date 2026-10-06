@@ -18,6 +18,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
 import {isPathInside, isValidFilePath} from '@/utils/path-validation';
+import {registerSpanWithContent} from '@/utils/span-handles';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -100,12 +101,27 @@ const executeSearchFileContents = async (
 		// happens on single-line files and when truncation drops every newline.
 		let output = `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ` (showing first ${maxResults})` : ''}:\n\n`;
 
+		// Span handles are only issued without context: match.content is then
+		// exactly that one line's raw text, so it can be hashed as-is. With
+		// context, match.content is a multi-line block the search already
+		// prefixes with its own line numbers, which would never hash-match the
+		// plain file content replace_span rereads — not worth a second file read
+		// per match just to re-derive the plain text.
 		output += contextLines
 			? matches
 					.map(match => `${match.file}:${match.line}-\n${match.content}`)
 					.join('\n\n')
 			: matches
-					.map(match => `${match.file}:${match.line}:${match.content}`)
+					.map(match => {
+						const absPath = path.resolve(searchRoot, match.file);
+						const handle = registerSpanWithContent(
+							absPath,
+							match.line,
+							match.line,
+							match.content,
+						);
+						return `${match.file}:${match.line}:${match.content} [${handle}]`;
+					})
 					.join('\n');
 
 		return output.trim();

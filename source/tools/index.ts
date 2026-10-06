@@ -4,6 +4,7 @@ import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {getFileOpTools} from '@/tools/file-ops';
 import {diffEditTool} from '@/tools/file-ops/diff-edit';
+import {replaceSpanTool} from '@/tools/file-ops/replace-span';
 import {stringReplaceTool} from '@/tools/file-ops/string-replace';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {findFilesTool} from '@/tools/find-files';
@@ -25,6 +26,7 @@ const staticTools: NanocoderToolExport[] = [
 	readFileTool,
 	writeFileTool,
 	stringReplaceTool,
+	replaceSpanTool,
 	diffEditTool,
 	executeBashTool,
 	webSearchTool,

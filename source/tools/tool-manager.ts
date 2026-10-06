@@ -43,6 +43,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
 		'string_replace',
+		'replace_span',
 		'diff_edit',
 		'file_op',
 		'lsp_format_document',

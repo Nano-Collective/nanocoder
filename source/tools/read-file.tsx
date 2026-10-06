@@ -23,6 +23,7 @@ import {
 	matchReadContent,
 	rememberReadContent,
 } from '@/utils/read-tracker';
+import {registerSpanForRange} from '@/utils/span-handles';
 import {calculateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
@@ -157,8 +158,14 @@ const executeReadFile = async (args: {
 				args.start_line,
 				args.end_line,
 			);
+			const previewHandle = registerSpanForRange(
+				absPath,
+				1,
+				previewEndLine,
+				content,
+			);
 
-			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
+			return `${preview}\n\n[${previewHandle}]\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
 
 		// Line ranges specified - read and return content
@@ -181,8 +188,11 @@ const executeReadFile = async (args: {
 			args.end_line,
 		);
 
-		// Return content without line numbers for clean content-based editing
-		return linesToReturn.join('\n');
+		// Content stays without line numbers for clean content-based editing with
+		// string_replace; the handle on its own trailing line lets replace_span
+		// edit this exact range without retyping it.
+		const handle = registerSpanForRange(absPath, startLine, endLine, content);
+		return `${linesToReturn.join('\n')}\n\n[${handle}]`;
 	} catch (error: unknown) {
 		// Handle file not found and other filesystem errors
 		if (

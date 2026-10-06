@@ -614,6 +614,7 @@ test('isReadOnly - returns false for mutating tools', t => {
 	const mutatingTools = [
 		'write_file',
 		'string_replace',
+		'replace_span',
 		'execute_bash',
 		'lsp_format_document',
 		'create_task',
