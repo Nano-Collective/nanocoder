@@ -2,6 +2,10 @@
  * Git Log Tool Tests
  */
 
+import {execFileSync} from 'node:child_process';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import React from 'react';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -146,3 +150,117 @@ test('git_log formatter shows file filter', t => {
 	t.truthy(output);
 	t.regex(output!, /file.*src\/index\.ts/i);
 });
+
+// ============================================================================
+// Execution Tests
+// ============================================================================
+
+type GitLogArgs = {branch?: string; count?: number};
+
+// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+const executeGitLog = (gitLogTool.tool as any).execute as (
+	args: GitLogArgs,
+) => Promise<string>;
+
+function git(cwd: string, ...args: string[]): void {
+	execFileSync('git', args, {cwd, stdio: 'pipe'});
+}
+
+function commit(cwd: string, file: string, message: string): void {
+	writeFileSync(join(cwd, file), `${message}\n`);
+	git(cwd, 'add', file);
+	git(
+		cwd,
+		'-c',
+		'user.email=test@example.com',
+		'-c',
+		'user.name=Test',
+		'-c',
+		'commit.gpgsign=false',
+		'commit',
+		'-q',
+		'-m',
+		message,
+	);
+}
+
+/**
+ * Runs git_log inside a repo where `feature` has a commit `main` does not,
+ * with `main` checked out.
+ */
+async function runInRepoWithFeatureBranch(
+	args: GitLogArgs,
+): Promise<string> {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-log-test-'));
+	const originalCwd = process.cwd();
+	try {
+		git(dir, 'init', '-q', '-b', 'main');
+		commit(dir, 'base.txt', 'base commit');
+		git(dir, 'checkout', '-q', '-b', 'feature');
+		commit(dir, 'feature.txt', 'feature only commit');
+		git(dir, 'checkout', '-q', 'main');
+		commit(dir, 'main.txt', 'main only commit');
+
+		process.chdir(dir);
+		return await executeGitLog(args);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial(
+	'git_log returns the commits of the requested branch, not HEAD',
+	async t => {
+		const result = await runInRepoWithFeatureBranch({branch: 'feature'});
+
+		t.regex(result, /^Showing 2 commit\(s\) on feature:/);
+		t.regex(result, /feature only commit/);
+		t.regex(result, /base commit/);
+		t.false(result.includes('main only commit'));
+	},
+);
+
+test.serial(
+	'git_log without a branch still returns the checked-out branch',
+	async t => {
+		const result = await runInRepoWithFeatureBranch({});
+
+		t.regex(result, /^Showing 2 commit\(s\) on main:/);
+		t.regex(result, /main only commit/);
+		t.false(result.includes('feature only commit'));
+	},
+);
+
+test.serial(
+	'git_log reports the branch when it has no matching commits',
+	async t => {
+		const result = await runInRepoWithFeatureBranch({
+			branch: 'does-not-exist',
+		});
+
+		t.is(result, 'No commits found matching filters: branch: does-not-exist');
+	},
+);
+
+test.serial(
+	'git_log rejects a branch that git would parse as an option',
+	async t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-log-test-'));
+		const outputFile = join(dir, 'written-by-git.txt');
+		const originalCwd = process.cwd();
+		try {
+			git(dir, 'init', '-q', '-b', 'main');
+			commit(dir, 'base.txt', 'base commit');
+			process.chdir(dir);
+
+			const result = await executeGitLog({branch: `--output=${outputFile}`});
+
+			t.is(result, `Error: Invalid branch name: --output=${outputFile}`);
+			t.false(existsSync(outputFile));
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);

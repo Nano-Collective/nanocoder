@@ -32,11 +32,18 @@ interface GitLogInput {
 
 const executeGitLog = async (args: GitLogInput): Promise<string> => {
 	try {
+		// The branch is passed to git as a positional argument, so a value
+		// starting with "-" would be parsed as an option (e.g. --output=<file>).
+		if (args.branch?.startsWith('-')) {
+			return `Error: Invalid branch name: ${args.branch}`;
+		}
+
 		const count = Math.min(args.count || 10, 50); // Cap at 50
 		const branch = args.branch || (await getCurrentBranch());
 
 		const commits = await getCommits({
 			count,
+			branch: args.branch,
 			file: args.file,
 			author: args.author,
 			since: args.since,
@@ -45,6 +52,7 @@ const executeGitLog = async (args: GitLogInput): Promise<string> => {
 
 		if (commits.length === 0) {
 			const filters: string[] = [];
+			if (args.branch) filters.push(`branch: ${args.branch}`);
 			if (args.author) filters.push(`author: ${args.author}`);
 			if (args.since) filters.push(`since: ${args.since}`);
 			if (args.grep) filters.push(`grep: ${args.grep}`);

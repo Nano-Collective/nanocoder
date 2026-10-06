@@ -511,6 +511,7 @@ export async function isLastCommitPushed(): Promise<boolean> {
 export async function getCommits(options: {
 	count?: number;
 	range?: string;
+	branch?: string;
 	file?: string;
 	author?: string;
 	since?: string;
@@ -521,6 +522,7 @@ export async function getCommits(options: {
 
 		if (options.count) args.push(`-n`, options.count.toString());
 		if (options.range) args.push(options.range);
+		if (options.branch) args.push(options.branch);
 		if (options.author) args.push(`--author=${options.author}`);
 		if (options.since) args.push(`--since=${options.since}`);
 		if (options.grep) args.push(`--grep=${options.grep}`);
