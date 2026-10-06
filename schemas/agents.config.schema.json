@@ -30,6 +30,10 @@
 					},
 					"type": "array"
 				},
+				"autoCommit": {
+					"description": "Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default.",
+					"type": "boolean"
+				},
 				"autoCompact": {
 					"$ref": "#/definitions/AutoCompactConfig",
 					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
@@ -94,13 +98,6 @@
 					},
 					"type": "array"
 				},
-				"mcpServers": {
-					"description": "Model Context Protocol server configurations.",
-					"items": {
-						"$ref": "#/definitions/MCPServerConfig"
-					},
-					"type": "array"
-				},
 				"modeProviders": {
 					"$ref": "#/definitions/DiskModeProviders",
 					"description": "Per-mode provider/model overrides (e.g. use a fast model for plan mode)."
@@ -149,11 +146,18 @@
 			"additionalProperties": false
 		},
 		"HookDefinition": {
-			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools (tool events only) and with its own timeout.",
+			"description": "A single lifecycle hook: one shell command, optionally scoped to a set of\ntools and/or the file they acted on (tool events only), with its own timeout.",
 			"properties": {
 				"command": {
 					"description": "Shell command to run. Receives hook context via NANOCODER_* env vars.",
 					"type": "string"
+				},
+				"matchPaths": {
+					"description": "Globs the acted-on file must match for this hook to run, so a formatter\nor linter can be bound to a language without shell dispatch inside the\ncommand. Omitted means \"every file\". Same dialect as skill subscriptions\n(`**`, `*`, `?`, `{a,b}`) — e.g. `[\"**\\/*.{ts,tsx}\"]`.\n\nUnlike `matchTools`, this excludes tools with no file to match: a hook\nscoped to `**\\/*.ts` is asking about files, so it must not fire for\n`execute_bash`. Ignored by non-tool events, which have no file either.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
 				},
 				"matchTools": {
 					"description": "Tool names this hook applies to. Omitted means \"every tool\".\nIgnored by non-tool events.",
@@ -174,63 +178,6 @@
 			"type": "object",
 			"additionalProperties": false,
 			"required": ["command"]
-		},
-		"MCPServerConfig": {
-			"properties": {
-				"alwaysAllow": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"args": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"command": {
-					"type": "string"
-				},
-				"description": {
-					"type": "string"
-				},
-				"enabled": {
-					"type": "boolean"
-				},
-				"env": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"headers": {
-					"$ref": "#/definitions/RecordStringString"
-				},
-				"name": {
-					"type": "string"
-				},
-				"source": {
-					"enum": ["env", "global", "project"],
-					"type": "string"
-				},
-				"tags": {
-					"items": {
-						"type": "string"
-					},
-					"type": "array"
-				},
-				"timeout": {
-					"type": "number"
-				},
-				"transport": {
-					"enum": ["http", "stdio", "websocket"],
-					"type": "string"
-				},
-				"url": {
-					"type": "string"
-				}
-			},
-			"type": "object",
-			"additionalProperties": false,
-			"required": ["name", "transport"]
 		},
 		"ModeProviderConfig": {
 			"properties": {
@@ -570,6 +517,9 @@
 				},
 				"maxRepeatedToolCalls": {
 					"type": "number"
+				},
+				"maxTruncatedTurns": {
+					"type": "number"
 				}
 			},
 			"type": "object",
@@ -646,6 +596,9 @@
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},
+				"maxOutputTokens": {
+					"type": "number"
+				},
 				"maxRetries": {
 					"type": "number"
 				},
@@ -682,6 +635,9 @@
 				},
 				"timeout": {
 					"type": "number"
+				},
+				"tune": {
+					"$ref": "#/definitions/TuneConfig"
 				}
 			},
 			"type": "object",

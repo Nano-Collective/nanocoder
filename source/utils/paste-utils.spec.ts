@@ -4,7 +4,7 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {handlePaste} from './paste-utils';
+import {handlePaste, resizePasteDisplayText} from './paste-utils';
 import {assemblePrompt} from './prompt-processor';
 import {clearAppConfig, reloadAppConfig} from '../config';
 
@@ -121,6 +121,52 @@ test('repeated pasted text survives the complete prompt round trip', t => {
 	);
 	t.false(result!.displayValue.includes(pastedText));
 	t.is(assemblePrompt(result!), currentDisplayValue);
+});
+
+test('back-to-back pastes stay separated in the assembled prompt', t => {
+	// The composer shows two tidy placeholders, but with nothing between them
+	// they expanded flush against each other at submit, so the last line of the
+	// first paste fused with the first line of the second.
+	const first = 'first line\nAAA';
+	const second = 'BBB\nsecond line';
+
+	const afterFirst = handlePaste(first, '', {});
+	t.truthy(afterFirst);
+	t.false(
+		afterFirst!.displayValue.startsWith('\n'),
+		'an empty composer must not gain a leading newline',
+	);
+
+	const afterSecond = handlePaste(
+		second,
+		afterFirst!.displayValue,
+		afterFirst!.placeholderContent,
+	);
+	t.truthy(afterSecond);
+
+	const assembled = assemblePrompt(afterSecond!);
+	t.false(assembled.includes('AAABBB'), 'the paste boundary must survive');
+	t.true(assembled.includes('AAA\nBBB'));
+});
+
+test('a composer already ending in whitespace gains no extra separator', t => {
+	// The separator exists to keep blocks apart, so whitespace the user typed
+	// is left as it is rather than doubled.
+	const pastedText = 'BBB\nsecond line';
+
+	const afterSpace = handlePaste(pastedText, 'look at this: ', {});
+	t.truthy(afterSpace);
+	t.true(
+		assemblePrompt(afterSpace!).startsWith('look at this: BBB'),
+		'a trailing space must carry the paste on the same line',
+	);
+
+	const afterNewline = handlePaste(pastedText, 'look at this:\n', {});
+	t.truthy(afterNewline);
+	t.true(
+		assemblePrompt(afterNewline!).startsWith('look at this:\nBBB'),
+		'a trailing newline must not be doubled',
+	);
 });
 
 test('handlePaste preserves existing pasted content', t => {
@@ -311,4 +357,147 @@ test('handlePaste continues numbering past legacy bare-numeric paste ids', t => 
 
 	t.deepEqual(Object.keys(result.placeholderContent).sort(), ['2', 'paste_3']);
 	t.true(result.displayValue.includes('[Paste #3: 801 chars]'));
+});
+
+test('handlePaste labels a multi-line paste with its line count', t => {
+	const pastedText = Array.from({length: 7}, (_, i) => `line ${i + 1}`).join(
+		'\n',
+	);
+
+	const result = handlePaste(pastedText, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 7 lines]');
+});
+
+test('handlePaste does not count a trailing line break as a line', t => {
+	const result = handlePaste('first\nsecond\n', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 2 lines]');
+});
+
+test('handlePaste counts CRLF line breaks', t => {
+	const result = handlePaste('a\r\nb\r\nc', '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 3 lines]');
+});
+
+test('handlePaste keeps the char count for one long line ending in a line break', t => {
+	const result = handlePaste(`${'a'.repeat(801)}\n`, '', {})!;
+
+	t.is(result.displayValue, '[Paste #1: 802 chars]');
+});
+
+test('resizePasteDisplayText switches to lines once a chunked paste spans lines', t => {
+	t.is(
+		resizePasteDisplayText('[Paste #4: 900 chars]', `${'a'.repeat(900)}\nmore`),
+		'[Paste #4: 2 lines]',
+	);
+	t.is(
+		resizePasteDisplayText('[Paste #4: 2 lines]', 'one\ntwo\nthree'),
+		'[Paste #4: 3 lines]',
+	);
+});
+
+// ============================================================================
+// Cursor-aware splicing (bracketed paste at the caret, not at end of value)
+// ============================================================================
+
+test('handlePaste with cursorOffset splices a short paste in place', t => {
+	const pasted = 'pasted snippet';
+	const result = handlePaste(pasted, 'hello world', {}, 'bracketed', 5)!;
+
+	t.truthy(result);
+	t.is(result.displayValue, 'hellopasted snippet world');
+	t.deepEqual(result.placeholderContent, {});
+});
+
+test('handlePaste with cursorOffset at start inserts at index 0', t => {
+	const result = handlePaste('x', 'abc', {}, 'bracketed', 0)!;
+	t.is(result.displayValue, 'xabc');
+});
+
+test('handlePaste with cursorOffset at end is equivalent to appending', t => {
+	const value = 'abc';
+	const result = handlePaste('xyz', value, {}, 'bracketed', value.length)!;
+	t.is(result.displayValue, 'abcxyz');
+});
+
+test('handlePaste with cursorOffset clamps out-of-range offsets', t => {
+	const tooSmall = handlePaste('x', 'abc', {}, 'bracketed', -5)!;
+	t.is(tooSmall.displayValue, 'xabc');
+
+	const tooLarge = handlePaste('x', 'abc', {}, 'bracketed', 99)!;
+	t.is(tooLarge.displayValue, 'abcx');
+});
+
+test('handlePaste with cursorOffset creates a placeholder at the caret', t => {
+	const pasted = 'a'.repeat(801);
+	const result = handlePaste(pasted, 'hello world', {}, 'bracketed', 5)!;
+
+	t.truthy(result);
+	// Placeholder lands between "hello" and " world", not at the end, on its
+	// own line because "hello" would otherwise fuse with the paste.
+	const idx = result.displayValue.indexOf('[Paste #');
+	t.is(result.displayValue.slice(0, idx), 'hello\n');
+	t.is(result.displayValue.slice(idx).startsWith('[Paste #1: 801 chars]'), true);
+	t.is(result.displayValue.endsWith(' world'), true);
+
+	// Placeholder content is registered.
+	t.is(Object.keys(result.placeholderContent).length, 1);
+});
+
+test('handlePaste with cursorOffset does not trigger the dedup replaceAll', t => {
+	// The legacy path replaced every occurrence of pastedText in the value to
+	// avoid double-pasting. With a known cursor the splice is the source of
+	// truth, so any second copy of pastedText elsewhere in the value is left
+	// alone — only the splice at the caret becomes a placeholder.
+	const marker = 'X'.repeat(801);
+	const value = `prefix ${marker} middle ${marker}`;
+	const cursorBetween = 'prefix '.length + marker.length + ' middle '.length;
+	const result = handlePaste(marker, value, {}, 'bracketed', cursorBetween)!;
+
+	t.truthy(result);
+	// Placeholder spliced between the two markers; both X-runs are preserved.
+	t.true(result.displayValue.startsWith(`prefix ${marker} middle `));
+	t.true(
+		result.displayValue.endsWith(`[Paste #1: 801 chars]\n${marker}`),
+	);
+});
+
+test('back-to-back pastes at the caret stay separated in the assembled prompt', t => {
+	// Bracketed paste always supplies the caret, so this is the path a real
+	// terminal paste takes.
+	const afterFirst = handlePaste('first line\nAAA', '', {}, 'bracketed', 0)!;
+	t.false(afterFirst.displayValue.startsWith('\n'));
+
+	const afterSecond = handlePaste(
+		'BBB\nsecond line',
+		afterFirst.displayValue,
+		afterFirst.placeholderContent,
+		'bracketed',
+		afterFirst.displayValue.length,
+	)!;
+
+	t.is(assemblePrompt(afterSecond), 'first line\nAAA\nBBB\nsecond line');
+});
+
+test('a paste at the caret before an existing placeholder stays separated', t => {
+	const afterFirst = handlePaste('BBB\nsecond line', '', {}, 'bracketed', 0)!;
+
+	const afterSecond = handlePaste(
+		'first line\nAAA',
+		afterFirst.displayValue,
+		afterFirst.placeholderContent,
+		'bracketed',
+		0,
+	)!;
+
+	t.is(assemblePrompt(afterSecond), 'first line\nAAA\nBBB\nsecond line');
+});
+
+test('a paste at the caret between whitespace gains no separator', t => {
+	const value = 'look at this:  please';
+	const result = handlePaste('AAA\nBBB', value, {}, 'bracketed', 14)!;
+
+	t.is(assemblePrompt(result), 'look at this: AAA\nBBB please');
 });

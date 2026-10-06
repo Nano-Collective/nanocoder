@@ -2,7 +2,7 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
@@ -18,6 +18,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 /** Truncate a plain line to fit terminal width */
@@ -191,6 +192,8 @@ export async function formatStringReplacePreview(
 
 		// Build unified diff
 		const diffLines: React.ReactElement[] = [];
+		// Indexes into diffLines of lines the replacement leaves as they were.
+		const unchangedDiffRows = new Set<number>();
 		let oldIdx = 0;
 		let newIdx = 0;
 		let diffKey = 0;
@@ -205,6 +208,7 @@ export async function formatStringReplacePreview(
 				newIdx < normalizedNewLines.length ? normalizedNewLines[newIdx] : null;
 
 			if (oldLine !== null && newLine !== null && oldLine === newLine) {
+				unchangedDiffRows.add(diffLines.length);
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
 				diffLines.push(
 					<Box key={`diff-${diffKey++}`}>
@@ -363,6 +367,12 @@ export async function formatStringReplacePreview(
 				message={
 					<Box flexDirection="column">
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						{args.description && (
+							<Box flexDirection="column">
+								<Text color={themeColors.secondary}>Description:</Text>
+								<Text color={themeColors.text}> {args.description}</Text>
+							</Box>
+						)}
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
@@ -381,9 +391,18 @@ export async function formatStringReplacePreview(
 								{newStrLines.length > 1 ? 's' : ''}
 							</Text>
 							<Box flexDirection="column">
-								{contextBefore}
-								{diffLines}
-								{contextAfter}
+								<CappedLines
+									items={[...contextBefore, ...diffLines, ...contextAfter]}
+									renderItem={line => line}
+									isChange={(_, index) => {
+										const row = index - contextBefore.length;
+										return (
+											row >= 0 &&
+											row < diffLines.length &&
+											!unchangedDiffRows.has(row)
+										);
+									}}
+								/>
 							</Box>
 						</Box>
 					</Box>

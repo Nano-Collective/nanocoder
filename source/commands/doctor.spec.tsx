@@ -165,6 +165,33 @@ test('Doctor reports LSP MCP and daemon details', async t => {
 	t.regex(output, /uptime 1h/);
 });
 
+test('Doctor reports MCP resource and prompt counts', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['docs-server'],
+					getServerTools: () => [
+						{name: 'search_docs', description: 'Search docs'},
+					],
+					getServerInfo: () => ({
+						name: 'docs-server',
+						transport: 'stdio',
+						connected: true,
+						resourceCount: 2,
+						promptCount: 5,
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /2 resources/);
+	t.regex(output, /5 prompts/);
+});
+
 test('Doctor handles no LSP MCP or daemon data', async t => {
 	const report = await collectDoctorReport(
 		createDependencies({

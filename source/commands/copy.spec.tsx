@@ -131,7 +131,75 @@ test('copyCommand ignores trailing non-assistant messages', async t => {
 	t.is(lastWritten, 'To get to the other side.');
 });
 
-test('copyCommand code is rejected in the terminal', async t => {
+test('copyCommand code copies the code block body only', async t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: 'Here is a helper:\n```js\nconst x = 1;\n```\nHope that helps!',
+		},
+	];
+
+	const result = await copyCommand.handler(['code'], messages, testMetadata);
+	t.is(lastWritten, 'const x = 1;');
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+	t.true(output.includes('Copied code block to clipboard'));
+	t.true(output.includes('1 line'));
+	t.false(output.includes('const x = 1;'));
+});
+
+test('copyCommand code copies the last block when multiple exist', async t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content:
+				'First:\n```js\nconst a = 1;\n```\nSecond:\n```py\nprint("b")\nprint("c")\n```',
+		},
+	];
+
+	const result = await copyCommand.handler(['code'], messages, testMetadata);
+	t.is(lastWritten, 'print("b")\nprint("c")');
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+	t.true(output.includes('Copied code block to clipboard'));
+	t.true(output.includes('2 lines'));
+});
+
+test('copyCommand CODE works case-insensitively', async t => {
+	const messages: Message[] = [
+		{role: 'assistant', content: '```js\nconst x = 1;\n```'},
+	];
+
+	await copyCommand.handler(['CODE'], messages, testMetadata);
+	t.is(lastWritten, 'const x = 1;');
+});
+
+test('copyCommand code warns when no code blocks exist', async t => {
+	const result = await copyCommand.handler(['code'], baseMessages, testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('No code blocks found in the last response'));
+	t.is(lastWritten, null);
+});
+
+test('copyCommand code warns when no assistant response exists', async t => {
+	const messages: Message[] = [{role: 'user', content: 'Hello?'}];
+
+	const result = await copyCommand.handler(['code'], messages, testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('No assistant response to copy yet'));
+	t.is(lastWritten, null);
+});
+
+test('copyCommand code returns an error when clipboard write fails', async t => {
+	writeImpl = async () => {
+		throw new Error('no clipboard tool available');
+	};
 	const messages: Message[] = [
 		{role: 'assistant', content: '```js\nconst x = 1;\n```'},
 	];
@@ -140,19 +208,33 @@ test('copyCommand code is rejected in the terminal', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes("This functionality isn't supported in the terminal."));
-	t.is(lastWritten, null);
+	t.true(output.includes('Failed to copy to clipboard'));
 });
 
-test('copyCommand CODE is rejected case-insensitively', async t => {
-	const result = await copyCommand.handler(
-		['CODE'],
-		baseMessages,
-		testMetadata,
-	);
+test('copyCommand code ignores blockquote fenced code', async t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '> ```js\n> const x = 1;\n> ```\nNo real blocks here.',
+		},
+	];
+
+	const result = await copyCommand.handler(['code'], messages, testMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes("This functionality isn't supported in the terminal."));
+	t.true(output.includes('No code blocks found in the last response'));
 	t.is(lastWritten, null);
+});
+
+test('copyCommand code handles indented fences inside lists', async t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '- item\n  ```js\n  const x = 1;\n  ```',
+		},
+	];
+
+	await copyCommand.handler(['code'], messages, testMetadata);
+	t.is(lastWritten, 'const x = 1;');
 });

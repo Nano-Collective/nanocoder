@@ -12,11 +12,16 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {
+	DEFAULT_SESSION_CONFIG,
+	normalizeSessionConfig,
+} from '@/config/session-config';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
+	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
 import type {
@@ -37,8 +42,11 @@ import type {
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
+import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+
+export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -230,10 +238,10 @@ function loadTuneConfig(): Partial<TuneConfig> | undefined {
 	);
 }
 
-// Validate and clamp threshold to valid range (50-95)
+// Validate and clamp threshold to the configured range
 function validateThreshold(threshold: unknown): number {
 	const num = typeof threshold === 'number' ? threshold : 60;
-	return Math.max(50, Math.min(95, Math.round(num)));
+	return clampThreshold(Math.round(num));
 }
 
 // Validate compression mode
@@ -252,69 +260,12 @@ function validateStrategy(strategy: unknown): CompressionStrategy {
 	return 'llm';
 }
 
-/**
- * Built-in session defaults. See DEFAULT_AUTO_COMPACT_CONFIG for why this is
- * exported rather than inlined.
- * @public
- */
-export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
-	autoSave: true,
-	saveInterval: 30000, // 30 seconds
-	maxSessions: 100,
-	maxMessages: 1000,
-	retentionDays: 30,
-	directory: '',
-};
-
 // Load session configuration and Returns default config if not specified
 function loadSessionConfig(): AppConfig['sessions'] {
-	const defaults = DEFAULT_SESSION_CONFIG;
-
-	const normalizeSessionNumber = (
-		value: unknown,
-		min: number,
-		fallback: number,
-	): number => {
-		if (typeof value === 'number' && Number.isFinite(value)) {
-			return Math.max(min, value);
-		}
-		return fallback;
-	};
-
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
-			const sessions = config.nanocoder?.sessions;
-			if (sessions && typeof sessions === 'object') {
-				return {
-					autoSave:
-						sessions.autoSave !== undefined
-							? Boolean(sessions.autoSave)
-							: defaults.autoSave,
-					saveInterval: normalizeSessionNumber(
-						sessions.saveInterval,
-						1000, // Minimum 1 second
-						defaults.saveInterval ?? 30000,
-					),
-					maxSessions: normalizeSessionNumber(
-						sessions.maxSessions,
-						1,
-						defaults.maxSessions ?? 100,
-					),
-					maxMessages: normalizeSessionNumber(
-						sessions.maxMessages,
-						1,
-						defaults.maxMessages ?? 1000,
-					),
-					retentionDays: normalizeSessionNumber(
-						sessions.retentionDays,
-						1,
-						defaults.retentionDays ?? 30,
-					),
-					directory: sessions.directory || defaults.directory,
-				};
-			}
-			return null;
-		}) ?? {...defaults}
+		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config =>
+			normalizeSessionConfig(config.nanocoder?.sessions),
+		) ?? {...DEFAULT_SESSION_CONFIG}
 	);
 }
 
@@ -364,6 +315,7 @@ export const DEFAULT_RETRY_LIMITS: RetryLimitsConfig = {
 	maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
 	maxEmptyTurns: MAX_EMPTY_TURNS,
 	maxMalformedRetries: MAX_MALFORMED_RETRIES,
+	maxTruncatedTurns: MAX_TRUNCATED_TURNS,
 };
 
 function loadRetryLimitsConfig(): RetryLimitsConfig {
@@ -407,6 +359,11 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 						retries.maxMalformedRetries,
 						0,
 						defaults.maxMalformedRetries,
+					),
+					maxTruncatedTurns: normalizeLimit(
+						retries.maxTruncatedTurns,
+						0,
+						defaults.maxTruncatedTurns,
 					),
 				};
 			}
@@ -478,6 +435,23 @@ function loadSandboxConfig(): boolean {
 	);
 }
 
+function loadAutoCommitConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'autoCommit', config => {
+			const value = config.nanocoder?.autoCommit;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.autoCommit must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+				return false;
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -502,6 +476,47 @@ function loadDisabledToolsConfig(): string[] | undefined {
 				);
 			}
 			return null;
+		}) ?? undefined
+	);
+}
+
+// User-defined LSP servers. Entries without a name, command or languages list
+// are dropped rather than handed to the LSP manager half-formed.
+function loadLspServersConfig(): AppConfig['lspServers'] {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'lspServers', config => {
+			const lspServers = config.nanocoder?.lspServers;
+			if (!Array.isArray(lspServers)) {
+				return null;
+			}
+			const valid: NonNullable<AppConfig['lspServers']> = [];
+			for (const server of lspServers) {
+				if (
+					!server ||
+					typeof server.name !== 'string' ||
+					typeof server.command !== 'string' ||
+					!Array.isArray(server.languages)
+				) {
+					continue;
+				}
+				valid.push({
+					name: server.name,
+					command: server.command,
+					args: Array.isArray(server.args)
+						? server.args.filter(
+								(arg: unknown): arg is string => typeof arg === 'string',
+							)
+						: undefined,
+					languages: server.languages.filter(
+						(lang: unknown): lang is string => typeof lang === 'string',
+					),
+					env:
+						server.env && typeof server.env === 'object'
+							? server.env
+							: undefined,
+				});
+			}
+			return valid;
 		}) ?? undefined
 	);
 }
@@ -548,11 +563,42 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 
 	const definition: HookDefinition = {command};
 
-	if (Array.isArray(entry.matchTools)) {
-		const matchTools = entry.matchTools.filter(
-			(item: unknown): item is string => typeof item === 'string',
+	// A bare string is accepted as a one-item list. Dropping it silently would
+	// widen a scoped guard to every tool.
+	const rawMatchTools =
+		typeof entry.matchTools === 'string'
+			? [entry.matchTools]
+			: entry.matchTools;
+	if (Array.isArray(rawMatchTools)) {
+		const matchTools = rawMatchTools.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
 		);
-		if (matchTools.length > 0) definition.matchTools = matchTools;
+		if (matchTools.length > 0) {
+			definition.matchTools = matchTools;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchTools list, so it runs for every tool. Remove matchTools to make that explicit, or list the tools to scope it.`,
+			);
+		}
+	}
+
+	const rawMatchPaths =
+		typeof entry.matchPaths === 'string'
+			? [entry.matchPaths]
+			: entry.matchPaths;
+	if (Array.isArray(rawMatchPaths)) {
+		const matchPaths = rawMatchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) {
+			definition.matchPaths = matchPaths;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchPaths list, so it is not scoped by path.`,
+			);
+		}
 	}
 
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
@@ -702,7 +748,12 @@ function loadAppConfig(): AppConfig {
 
 	// Load MCP servers from the new hierarchical configuration system
 	const mcpServersWithSource = loadAllMCPConfigs();
-	const mcpServers = mcpServersWithSource.map(item => item.server);
+	// Keep provenance on the runtime objects: validateProjectConfigSecurity
+	// filters on MCPServerConfig.source, which the loader only tracks on the wrapper.
+	const mcpServers = mcpServersWithSource.map(item => ({
+		...item.server,
+		source: item.source,
+	}));
 
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
@@ -744,9 +795,15 @@ function loadAppConfig(): AppConfig {
 
 	const sandbox = loadSandboxConfig();
 
+	const autoCommit = loadAutoCommitConfig();
+
+	// Load user-defined LSP servers (auto-discovery still runs alongside)
+	const lspServers = loadLspServersConfig();
+
 	return {
 		providers,
 		mcpServers,
+		lspServers,
 		autoCompact,
 		sessions,
 		headless,
@@ -761,10 +818,35 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
+		autoCommit,
 	};
 }
 
 let _appConfig: AppConfig | null = null;
+
+/**
+ * Bumped whenever the cached config is dropped or reloaded.
+ *
+ * Modules that derive something expensive from config (a constructed client,
+ * say) cache it against this number instead of re-deriving on every read. They
+ * cannot simply be reset from here: the interesting ones sit above config in
+ * the import graph, and reaching down to them would give this module - which
+ * everything imports - a cycle back through client-factory.
+ */
+let _configGeneration = 0;
+
+/**
+ * How many times the config has been dropped or reloaded this process.
+ *
+ * Fold it into a cache key to have that cache follow config edits. A key built
+ * only from the config values a module reads misses changes underneath them:
+ * `titleProvider: "ollama"` is the same string before and after its baseURL is
+ * edited, but it no longer names the same endpoint.
+ * @public
+ */
+export function getConfigGeneration(): number {
+	return _configGeneration;
+}
 
 /**
  * Lazy-loaded app config to avoid circular dependencies during module initialization
@@ -794,17 +876,20 @@ export function getRetryLimits(): RetryLimitsConfig {
 			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
 		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
 		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+		maxTruncatedTurns: retries?.maxTruncatedTurns ?? MAX_TRUNCATED_TURNS,
 	};
 }
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
 	_appConfig = loadAppConfig();
+	_configGeneration++;
 }
 
 // Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
 	_appConfig = null;
+	_configGeneration++;
 }
 
 let cachedColors: Colors | null = null;

@@ -226,7 +226,9 @@ export function registerSkillSubscriptions(
 function resolveImplicitTarget(skill: Skill): SkillMemberRef | null {
 	if (skill.commands && skill.commands.length === 1) {
 		const only = skill.commands[0];
-		if (only) return {kind: 'command', name: only.command.name};
+		// fullName, so a namespaced command resolves unambiguously at
+		// dispatch time.
+		if (only) return {kind: 'command', name: only.command.fullName};
 	}
 	if (skill.subagent) {
 		return {kind: 'agent', name: skill.subagent.subagent.name};
@@ -294,6 +296,16 @@ function buildSubscription(
 		}
 		kind = implicit.kind;
 		name = implicit.name;
+	}
+
+	// A triggered tool call has no model to fill in its arguments, so there
+	// is nothing sensible to run. Reject it here rather than let it register
+	// and be skipped silently at dispatch time.
+	if (kind === 'tool') {
+		return {
+			ok: false,
+			error: `subscribe[${index}] targets tool "${name}", but tools cannot be triggered by events. Put the subscription on an agent or command that calls the tool.`,
+		};
 	}
 
 	const source: SubscriptionSource =

@@ -53,9 +53,16 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {TimelineManager} from '@/services/timeline-manager';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
+import {
+	ACTIVE_FILE_PREFIX,
+	deriveTitleFromFirstMessage,
+} from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -79,6 +86,13 @@ async function listSessionArtifacts(sessionId: string) {
 }
 
 export class AcpAgent implements Agent {
+	/**
+	 * The in-flight background titling run. Exposed only so tests can await
+	 * work that production deliberately fires and forgets - asserting on it
+	 * with a fixed sleep goes flaky the moment CI is loaded.
+	 */
+	private pendingTitleGeneration: Promise<void> = Promise.resolve();
+
 	private sessions = new Map<string, AcpSession>();
 	private initContext: AcpInitContext;
 	private conn: AgentSideConnection;
@@ -182,15 +196,24 @@ export class AcpAgent implements Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
-		// ACP clients drive one turn per session at a time; reject overlap rather
-		// than letting two turns interleave mutations of session.messages.
-		if (session.turnActive) {
-			throw new Error(
-				`Prompt already in progress for session: ${params.sessionId}`,
-			);
+		// Wait for any in-flight turn. Rejecting overlap made the VS Code
+		// webview toast `RequestError: Internal error` whenever a follow-up
+		// was submitted mid-turn. Acquire before the first await so two
+		// concurrent calls cannot both pass an idle check.
+		const ticket = session.acquireTurn();
+		if (ticket.immediate) {
+			session.beginTurn();
+		}
+		await ticket.ready;
+		if (!ticket.immediate) {
+			session.beginTurn();
 		}
 
-		session.beginTurn();
+		// Both the cancel early-return below and the rethrow after it still run
+		// the finally, so a clean turn has to be tracked explicitly rather than
+		// inferred from getting there.
+		let turnSucceeded = false;
+		const turnStart = Date.now();
 
 		try {
 			const {text: userText, images} = await acpContentToUserMessage(
@@ -221,7 +244,7 @@ export class AcpAgent implements Agent {
 						this.initContext.customCommandLoader?.getCommand(commandName);
 
 					if (command) {
-						// Custom user-defined command â€” expand its instructions into the prompt
+						// Custom user-defined command  expand its instructions into the prompt
 						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
 						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
 					} else {
@@ -269,17 +292,17 @@ export class AcpAgent implements Agent {
 									? customCmds
 											.map(
 												c =>
-													`- \`/${c.fullName}\` â€” ${c.metadata.description || 'custom command'}`,
+													`- \`/${c.fullName}\`  ${c.metadata.description || 'custom command'}`,
 											)
 											.join('\n')
 									: '';
 							const msg = [
 								'**Available slash commands in VS Code GUI:**',
 								'',
-								'- `/clear` â€” Clear the current conversation',
-								'- `/copy` â€” Copy the last assistant response',
-								'- `/copy code` â€” Copy the last code block from the last response',
-								'- `/help` â€” Show this help message',
+								'- `/clear`  Clear the current conversation',
+								'- `/copy`  Copy the last assistant response',
+								'- `/copy code`  Copy the last code block from the last response',
+								'- `/help`  Show this help message',
 								'',
 								'**Not available in VS Code GUI** (CLI-only):',
 								'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
@@ -370,7 +393,14 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
-			this.attachResponseUsage(session, response, previousAssistant);
+			const turnDurationMs = Date.now() - turnStart;
+			this.attachResponseUsage(
+				session,
+				response,
+				previousAssistant,
+				turnDurationMs,
+			);
+			turnSucceeded = true;
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
@@ -392,6 +422,8 @@ export class AcpAgent implements Agent {
 					role: 'assistant',
 					content: cancelNotice,
 					displayOnly: true,
+					durationMs: Date.now() - turnStart,
+					outcome: 'cancelled',
 				});
 				return {stopReason: 'cancelled'};
 			}
@@ -413,14 +445,40 @@ export class AcpAgent implements Agent {
 				role: 'assistant',
 				content: formattedError,
 				displayOnly: true,
+				durationMs: Date.now() - turnStart,
+				outcome: 'failed',
 			});
 
 			throw error;
 		} finally {
-			session.turnActive = false;
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
+
+			// Fire and forget: the turn must return to idle immediately, and a
+			// cosmetic title landing a moment later is fine. The promise is kept
+			// only so tests can await it instead of sleeping; nothing in
+			// production reads it.
+			if (turnSucceeded) {
+				this.pendingTitleGeneration = maybeGenerateTitle({
+					sessionId: session.sessionId,
+					messages: session.messages,
+					client: this.initContext.client,
+					onTitle: title => {
+						// notify(), not the deprecated extNotification() alias.
+						// The client receives it as extNotification(method, params).
+						// Lands after the turn went idle, so the client may already be
+						// gone; an unhandled rejection here would kill the agent.
+						void this.conn
+							.notify('_nanocoder/sessionTitleChanged', {
+								sessionId: session.sessionId,
+								title,
+							})
+							.catch(() => {});
+					},
+				}).catch(() => {});
+			}
+			session.releaseTurn();
 		}
 	}
 
@@ -473,6 +531,7 @@ export class AcpAgent implements Agent {
 			this.initContext.provider = providerId;
 			const {client: newClient} = await createLLMClient(providerId);
 			this.initContext.client = newClient;
+			setAutoCommitClient(newClient);
 
 			const availableModels = await newClient.getAvailableModels();
 			if (availableModels.includes(this.initContext.model)) {
@@ -667,6 +726,51 @@ export class AcpAgent implements Agent {
 			};
 		}
 
+		if (method === 'retryTurn') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('retryTurn requires string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error('Cannot retry turn while a prompt is in progress');
+			}
+			const promptText =
+				typeof params.promptText === 'string'
+					? params.promptText.trim()
+					: undefined;
+			let targetUserIdx = -1;
+			if (promptText) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					const m = session.messages[i];
+					if (m.role !== 'user') continue;
+					const contentStr =
+						typeof m.content === 'string' ? m.content.trim() : '';
+					if (contentStr === promptText) {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx < 0) {
+				for (let i = session.messages.length - 1; i >= 0; i--) {
+					if (session.messages[i].role === 'user') {
+						targetUserIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetUserIdx >= 0) {
+				session.messages = session.messages.slice(0, targetUserIdx);
+				await this.saveAcpSessionToDisk(session);
+				await session.timeline.truncateAfter(targetUserIdx);
+			}
+			logger.info(
+				`ACP extMethod retryTurn: session=${sessionId} truncatedTo=${session.messages.length}`,
+			);
+			return {ok: true, messagesCount: session.messages.length};
+		}
+
 		throw new Error(`Unknown extension method: ${method}`);
 	}
 
@@ -743,7 +847,7 @@ export class AcpAgent implements Agent {
 				}
 			} else if (message.role === 'assistant') {
 				// runAcpConversation no longer stores whitespace-only reasoning, so
-				// this guard is for sessions written before that â€” replaying one
+				// this guard is for sessions written before that  replaying one
 				// would otherwise open a thought section that renders to nothing.
 				if (message.reasoning && message.reasoning.trim().length > 0) {
 					await this.conn.sessionUpdate({
@@ -778,14 +882,22 @@ export class AcpAgent implements Agent {
 						});
 					}
 				}
-				if (message.responseUsage) {
+				if (message.responseUsage || message.durationMs || message.outcome) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {
 							sessionUpdate: 'agent_message_chunk',
 							content: {type: 'text', text: ''},
 							_meta: {
-								'nanocoder/response-usage': message.responseUsage,
+								...(message.responseUsage
+									? {'nanocoder/response-usage': message.responseUsage}
+									: {}),
+								...(message.durationMs
+									? {'nanocoder/durationMs': message.durationMs}
+									: {}),
+								...(message.outcome
+									? {'nanocoder/outcome': message.outcome}
+									: {}),
 							},
 						},
 					});
@@ -798,11 +910,17 @@ export class AcpAgent implements Agent {
 		session: AcpSession,
 		response: PromptResponse,
 		previousAssistant?: (typeof session.messages)[number],
+		turnDurationMs?: number,
 	): void {
-		if (!response.usage) return;
-
 		const assistant = findLastAssistantMessage(session);
 		if (!assistant || assistant === previousAssistant) return;
+
+		if (turnDurationMs !== undefined) {
+			assistant.durationMs = turnDurationMs;
+			assistant.outcome = 'completed';
+		}
+
+		if (!response.usage) return;
 
 		const cost = (
 			response._meta as
@@ -870,7 +988,12 @@ export class AcpAgent implements Agent {
 		const {toolManager} = this.initContext;
 		const {provider, model} = this.initContext;
 
-		const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+		const tune = resolveTune(
+			getAppConfig(),
+			this.initContext.client.getProviderConfig(),
+			loadPreferences(),
+		);
+		applyTuneCompaction(tune);
 		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -924,26 +1047,42 @@ export class AcpAgent implements Agent {
 			);
 
 			if (saveableMessages.length === 0) {
+				if (existingSession) {
+					await sessionManager.saveSession({
+						id: session.sessionId,
+						title: existingSession.title || 'New Session',
+						titleManuallySet: existingSession.titleManuallySet,
+						titleGenerated: existingSession.titleGenerated,
+						createdAt: existingSession.createdAt || timestamp,
+						lastAccessedAt: timestamp,
+						messageCount: 0,
+						provider:
+							this.initContext.client.getProviderConfig().name || 'openai',
+						model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+						workingDirectory: session.cwd,
+						messages: [],
+					});
+				}
 				return;
 			}
 
 			// Simple title generation if it's new. A user-renamed title is never
-			// auto-derived over â€” the flag below is what tells the CLI's autosave
+			// auto-derived over  the flag below is what tells the CLI's autosave
 			// the same thing, so it has to be carried forward on every save.
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
-				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
-					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
-				} else {
-					title = 'New Session';
-				}
+				title =
+					(typeof firstUserMessage?.content === 'string'
+						? deriveTitleFromFirstMessage(firstUserMessage.content)
+						: null) ?? 'New Session';
 			}
 
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
@@ -954,7 +1093,7 @@ export class AcpAgent implements Agent {
 					if (m.role === 'user' && typeof m.content === 'string') {
 						return {
 							...m,
-							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+							content: m.content.replace(ACTIVE_FILE_PREFIX, ''),
 						};
 					}
 					return m;

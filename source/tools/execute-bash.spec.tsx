@@ -3,7 +3,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {executeBashTool} from './execute-bash';
+import {bashRunFailed, executeBashTool} from './execute-bash';
 
 // ============================================================================
 // Test Helpers
@@ -64,6 +64,26 @@ test('ExecuteBashFormatter shows command for confirmation preview', t => {
 	t.regex(output!, /echo test/);
 });
 
+test('ExecuteBashFormatter shows description when provided', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({
+		command: 'git commit -m "feat: add cache" && git push',
+		description: 'Commit the staged files and push to remote repository.',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Commit the staged files and push to remote repository\./);
+	t.regex(output!, /Command:/);
+});
+
 test('ExecuteBashFormatter renders without result', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {
@@ -78,6 +98,49 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.truthy(output);
 	t.regex(output!, /execute_bash/);
 	t.regex(output!, /ls/);
+	t.notRegex(output!, /Description:/);
+});
+
+test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const element = formatter({command});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('dolt version;')));
+	t.true(lines.some(line => line.includes('echo "===";')));
+	t.true(lines.some(line => line.includes('ls -la /usr/local/bin/dolt')));
+	// The whole point: no single rendered line carries two segments
+	t.false(
+		lines.some(
+			line => line.includes('dolt version;') && line.includes('ls -la'),
+		),
+		'Compound segments must not share a line',
+	);
+});
+
+test('ExecuteBashFormatter keeps a quoted semicolon on one line', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({command: 'echo "hello; world"'});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	t.true(lines.some(line => line.includes('echo "hello; world"')));
 });
 
 test('ExecuteBashFormatter handles complex commands', t => {
@@ -120,37 +183,36 @@ test('ExecuteBashFormatter wraps long command instead of truncating', t => {
 	);
 });
 
+// execute_bash returns {llmContent, isError}. These tests assert on the text
+// the model receives, so they read llmContent; isError has its own tests.
+async function runBash(command: string): Promise<string> {
+	const result = await executeBashTool.tool.execute!(
+		{command},
+		{toolCallId: 'test', messages: []},
+	);
+	return result.llmContent;
+}
+
 // ============================================================================
 // Tests for execute_bash Tool Handler - Basic Functionality
 // ============================================================================
 
 test('execute_bash runs simple echo command', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: 'echo "test output"'},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "test output"');
 
 	t.truthy(result);
 	t.true(result.includes('test output'));
 });
 
 test('execute_bash returns output from ls command', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: 'ls'},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('ls');
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
 });
 
 test('execute_bash handles command with pipes', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "line1\nline2\nline3" | grep line2',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "line1\nline2\nline3" | grep line2');
 
 	t.truthy(result);
 	t.true(result.includes('line2'));
@@ -158,24 +220,14 @@ test('execute_bash handles command with pipes', async t => {
 });
 
 test('execute_bash handles command with redirects', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "test" 2>&1',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "test" 2>&1');
 
 	t.truthy(result);
 	t.true(result.includes('test'));
 });
 
 test('execute_bash preserves multiline output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "line1"; echo "line2"; echo "line3"',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "line1"; echo "line2"; echo "line3"');
 
 	t.truthy(result);
 	t.true(result.includes('line1'));
@@ -188,12 +240,7 @@ test('execute_bash preserves multiline output', async t => {
 // ============================================================================
 
 test('execute_bash captures stderr output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "error message" >&2',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "error message" >&2');
 
 	t.truthy(result);
 	// Should include STDERR label when stderr is present
@@ -201,12 +248,7 @@ test('execute_bash captures stderr output', async t => {
 });
 
 test('execute_bash handles command not found', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'nonexistentcommand12345',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('nonexistentcommand12345');
 
 	t.truthy(result);
 	// Should capture the error output
@@ -218,12 +260,7 @@ test('execute_bash handles command not found', async t => {
 });
 
 test('execute_bash handles syntax errors', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "unclosed quote',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "unclosed quote');
 
 	t.truthy(result);
 	// Should capture the syntax error
@@ -239,10 +276,7 @@ test('execute_bash truncates long output to 2000 characters', async t => {
 	// Use POSIX-compatible syntax (seq instead of bash brace expansion)
 	const longCommand =
 		'seq 1 100 | while read i; do echo "This is a long line of text that repeats many times"; done';
-	const result = await executeBashTool.tool.execute!(
-		{command: longCommand},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash(longCommand);
 
 	t.truthy(result);
 	// Should be truncated to around 2000 characters
@@ -255,23 +289,15 @@ test('execute_bash truncates long output to 2000 characters', async t => {
 });
 
 test('execute_bash does not truncate short output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "short output"',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "short output"');
 
 	t.truthy(result);
 	t.false(result.includes('[Output truncated'));
 	t.true(result.includes('short output'));
 });
 
-test('execute_bash returns plain string not JSON', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: 'echo "test"'},
-		{toolCallId: 'test', messages: []},
-	);
+test('execute_bash gives the model plain text, not JSON', async t => {
+	const result = await runBash('echo "test"');
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
@@ -285,36 +311,21 @@ test('execute_bash returns plain string not JSON', async t => {
 // ============================================================================
 
 test('execute_bash handles special characters in output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "special: $@#%^&*()"',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "special: $@#%^&*()"');
 
 	t.truthy(result);
 	t.true(result.includes('special'));
 });
 
 test('execute_bash handles quotes in commands', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "He said \\"hello\\""',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "He said \\"hello\\""');
 
 	t.truthy(result);
 	t.true(result.includes('said'));
 });
 
 test('execute_bash handles newlines in command', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{
-			command: 'echo "line1\nline2"',
-		},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "line1\nline2"');
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
@@ -346,10 +357,7 @@ test('execute_bash tool has formatter function', t => {
 // ============================================================================
 
 test('execute_bash handles empty command output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: 'true'},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('true');
 
 	// Empty output returns empty string, which is falsy but valid
 	t.is(typeof result, 'string');
@@ -358,21 +366,75 @@ test('execute_bash handles empty command output', async t => {
 });
 
 test('execute_bash handles commands with no output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: ':'},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash(':');
 
 	// Empty output returns empty string, which is falsy but valid
 	t.is(typeof result, 'string');
 });
 
 test('execute_bash handles whitespace-only output', async t => {
-	const result = await executeBashTool.tool.execute!(
-		{command: 'echo "   "'},
-		{toolCallId: 'test', messages: []},
-	);
+	const result = await runBash('echo "   "');
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
 });
+
+test('execute_bash reports a non-zero exit as an error', async t => {
+	// A command that exits non-zero returns normally rather than throwing, so
+	// the handler has to say so itself or callers see a successful run.
+	const result = await executeBashTool.tool.execute!(
+		{command: 'exit 7'},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.true(result.isError);
+	t.true(result.llmContent.includes('EXIT_CODE: 7'));
+});
+
+test('execute_bash leaves a clean run unflagged', async t => {
+	const result = await executeBashTool.tool.execute!(
+		{command: 'true'},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.false(result.isError);
+});
+
+test('bashRunFailed: distinguishes a clean run from a failure', t => {
+	const base = {
+		executionId: 'exec-1',
+		command: 'x',
+		outputPreview: '',
+		fullOutput: '',
+		stderr: '',
+		isComplete: true,
+	};
+
+	t.false(bashRunFailed({...base, exitCode: 0, error: null}));
+	t.true(bashRunFailed({...base, exitCode: 1, error: null}));
+	t.true(bashRunFailed({...base, exitCode: null, error: 'spawn ENOENT'}));
+	// No exit code and no error means the run never reported one - not
+	// something to surface as a failed command.
+	t.false(bashRunFailed({...base, exitCode: null, error: null}));
+});
+
+// The fork-bomb pattern used to be an unescaped regex: `|` acted as
+// alternation and `()` as an empty group, so the real bomb slipped through
+// while harmless strings like `echo a:{:b` were blocked.
+for (const command of [
+	':(){ :|:& };:',
+	':(){:|:&};:',
+	'bomb(){ bomb|bomb& };bomb',
+]) {
+	test(`execute_bash validator blocks fork bomb ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
+for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
+	test(`execute_bash validator allows ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}

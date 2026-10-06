@@ -156,7 +156,7 @@ Connects to remote servers using the MCP StreamableHTTP protocol.
 | `transport` | Yes | `"http"` |
 | `url` | Yes | Server endpoint (`http://` or `https://`) |
 | `headers` | No | HTTP headers (useful for authentication) |
-| `timeout` | No | Connection timeout in milliseconds |
+| `timeout` | No | Connection timeout in milliseconds (see [Common Fields](#common-fields)) |
 
 ```json
 {
@@ -179,7 +179,7 @@ Connects to remote servers via persistent WebSocket connections.
 |-------|----------|-------------|
 | `transport` | Yes | `"websocket"` |
 | `url` | Yes | Server endpoint (`ws://` or `wss://`) |
-| `timeout` | No | Connection timeout in milliseconds |
+| `timeout` | No | Connection timeout in milliseconds (see [Common Fields](#common-fields)) |
 
 ```json
 {
@@ -199,7 +199,8 @@ These fields work with all transport types:
 | `description` | Human-readable description shown in `/mcp` output |
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
-| `tags` | Array of tags for categorization |
+| `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
+| `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
 ## Auto-Approve Tools
 
@@ -255,6 +256,15 @@ Two consequences worth calling out:
   `"enabled": false`, or don't configure that server in a project whose skills
   run under the daemon.
 
+## Resources and Prompts
+
+A server can also declare MCP resources and prompts, alongside tools:
+
+- **Resources** join the local file list under the `@` mention trigger — type `@` and fuzzy-search filenames and connected servers' resources together. Selecting one reads it from the server and inlines its content the same way a file mention does — including the same size guard: a resource over the inline line limit is truncated to a head preview instead of being dumped in full, so a single `@`-mention can't flood the conversation.
+- **Prompts** are invoked as `/mcp:<server>:<prompt>`, shown alongside custom commands in the `/` completion menu. Unlike a custom command's static template, the prompt is fetched fresh from the server on every call — arguments are filled in positionally, in the order the server declares them, and the result is sent as the next chat turn.
+
+Both are gated on the server's declared capabilities: a server that doesn't declare `resources` or `prompts` in its `initialize` response is never sent a `resources/list` or `prompts/list` request, and just contributes none — same as a server with no tools.
+
 ## Environment Variables
 
 Use environment variable references to keep credentials out of config files:
@@ -269,7 +279,7 @@ Use environment variable references to keep credentials out of config files:
 }
 ```
 
-Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`
+Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. Variable names must be uppercase (letters, digits and underscores); a lowercase reference such as `$token` is left as literal text.
 
 > **Security:** Project-level `.mcp.json` files are typically version controlled. Always use environment variable references for sensitive values.
 
@@ -277,7 +287,7 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`
 
 Run `/settings mcp` for interactive configuration with:
 
-- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, Context7, DeepWiki, Playwright, etc.)
+- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, Context7, DeepWiki, Playwright, etc.)
 - Custom server setup for stdio, HTTP, and WebSocket
 - Edit or delete existing servers
 - **Ctrl+E** to open the config file in your system editor
@@ -294,6 +304,6 @@ Run `/settings mcp` for interactive configuration with:
 
 **General:**
 - _Transport type mismatch_ — Ensure `transport` matches your server (`stdio` for local commands, `http`/`websocket` for remote URLs).
-- _Environment variables_ — Ensure all `$VAR` references resolve. Unset variables resolve to empty strings.
+- _Environment variables_ - Ensure all `$VAR` references resolve. Unset variables resolve to empty strings (with an error in the log), and lowercase names are not substituted at all.
 
 For more servers and community configurations, see the [MCP servers repository](https://github.com/modelcontextprotocol/servers).

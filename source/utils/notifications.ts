@@ -1,4 +1,4 @@
-import {execFile, execSync} from 'child_process';
+import childProcess, {execSync} from 'child_process';
 import {existsSync} from 'fs';
 import {basename, dirname, join} from 'path';
 import {fileURLToPath} from 'url';
@@ -23,8 +23,15 @@ const DEFAULT_CONFIG: NotificationsConfig = {
 
 let _config: NotificationsConfig = DEFAULT_CONFIG;
 
+// Merge over the defaults so a partial `events` block (or none at all, or a
+// preferences file saved before a newer event existed) keeps the unlisted
+// events on instead of silently disabling them.
 export function setNotificationsConfig(config: NotificationsConfig): void {
-	_config = config;
+	_config = {
+		...DEFAULT_CONFIG,
+		...config,
+		events: {...DEFAULT_CONFIG.events, ...config.events},
+	};
 }
 
 export function getNotificationsConfig(): NotificationsConfig {
@@ -62,8 +69,12 @@ function getIconPath(): string | null {
 	try {
 		const __filename = fileURLToPath(import.meta.url);
 		const __dirname = dirname(__filename);
-		const iconPath = join(__dirname, '../../plugins/vscode/media/icon.png');
-		_iconPath = existsSync(iconPath) ? iconPath : null;
+		// assets/ ships in the npm package; plugins/ only exists in a checkout.
+		const candidates = [
+			join(__dirname, '../../assets/nanocoder-icon.png'),
+			join(__dirname, '../../plugins/vscode/media/icon.png'),
+		];
+		_iconPath = candidates.find(candidate => existsSync(candidate)) ?? null;
 	} catch {
 		_iconPath = null;
 	}
@@ -73,6 +84,13 @@ function getIconPath(): string | null {
 // Check for terminal-notifier in PATH (cached)
 let _terminalNotifierPath: string | null | undefined;
 let _terminalNotifierHinted = false;
+
+/** @internal Test helper to override or reset the cached terminal-notifier path */
+export function setTerminalNotifierPathForTests(
+	path: string | null | undefined,
+): void {
+	_terminalNotifierPath = path;
+}
 
 function getTerminalNotifierPath(): string | null {
 	if (_terminalNotifierPath !== undefined) {
@@ -90,8 +108,14 @@ function getTerminalNotifierPath(): string | null {
 	return _terminalNotifierPath;
 }
 
-function escapeAppleScript(str: string): string {
-	return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+export function buildDarwinNotificationArgs(
+	title: string,
+	message: string,
+	sound = false,
+): string[] {
+	const soundClause = sound ? ' sound name "default"' : '';
+	const script = `on run argv\n  display notification (item 2 of argv) with title (item 1 of argv)${soundClause}\nend run`;
+	return ['-e', script, title, message];
 }
 
 function sendDarwin(title: string, message: string): void {
@@ -106,7 +130,7 @@ function sendDarwin(title: string, message: string): void {
 		if (_config.sound) {
 			args.push('-sound', 'default');
 		}
-		execFile(tnPath, args, () => {});
+		childProcess.execFile(tnPath, args, () => {});
 		return;
 	}
 
@@ -118,12 +142,9 @@ function sendDarwin(title: string, message: string): void {
 		);
 	}
 
-	// Fallback to osascript
-	const escapedTitle = escapeAppleScript(title);
-	const escapedMessage = escapeAppleScript(message);
-	const sound = _config.sound ? ' sound name "default"' : '';
-	const script = `display notification "${escapedMessage}" with title "${escapedTitle}"${sound}`;
-	execFile('osascript', ['-e', script], () => {});
+	// Fallback to osascript with out-of-band arguments
+	const args = buildDarwinNotificationArgs(title, message, _config.sound);
+	childProcess.execFile('osascript', args, () => {});
 }
 
 function sendLinux(title: string, message: string): void {
@@ -133,22 +154,67 @@ function sendLinux(title: string, message: string): void {
 		args.push('-i', iconPath);
 	}
 	args.push(title, message);
-	execFile('notify-send', args, () => {});
+	childProcess.execFile('notify-send', args, () => {});
 }
 
-function sendWindows(title: string, message: string): void {
-	const script = `
+const WINDOWS_NOTIFICATION_SCRIPT = `
 Add-Type -AssemblyName System.Windows.Forms
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = [System.Drawing.SystemIcons]::Information
-$notify.BalloonTipTitle = '${title.replace(/'/g, "''")}'
-$notify.BalloonTipText = '${message.replace(/'/g, "''")}'
+$notify.BalloonTipTitle = $env:NANOCODER_NOTIFICATION_TITLE
+$notify.BalloonTipText = $env:NANOCODER_NOTIFICATION_MESSAGE
 $notify.Visible = $true
 $notify.ShowBalloonTip(5000)
 Start-Sleep -Seconds 1
 $notify.Dispose()
-`;
-	execFile('powershell', ['-NoProfile', '-Command', script], () => {});
+`.trim();
+
+const WINDOWS_NOTIFICATION_ENCODED_COMMAND = Buffer.from(
+	WINDOWS_NOTIFICATION_SCRIPT,
+	'utf16le',
+).toString('base64');
+
+export function buildWindowsNotificationPayload(
+	title: string,
+	message: string,
+): {
+	command: string;
+	args: string[];
+	options: {
+		windowsHide: boolean;
+		env: NodeJS.ProcessEnv;
+	};
+} {
+	return {
+		command: 'powershell',
+		args: [
+			'-NoProfile',
+			'-NonInteractive',
+			'-EncodedCommand',
+			WINDOWS_NOTIFICATION_ENCODED_COMMAND,
+		],
+		options: {
+			windowsHide: true,
+			// Explicitly spread process.env: passing custom `env` disables implicit
+			// environment inheritance in child_process, and powershell.exe needs
+			// standard system vars like SystemRoot, PATH, and TEMP to run.
+			env: {
+				...process.env,
+				NANOCODER_NOTIFICATION_TITLE: title,
+				NANOCODER_NOTIFICATION_MESSAGE: message,
+			},
+		},
+	};
+}
+
+function sendWindows(title: string, message: string): void {
+	const payload = buildWindowsNotificationPayload(title, message);
+	childProcess.execFile(
+		payload.command,
+		payload.args,
+		payload.options,
+		() => {},
+	);
 }
 
 // A terminal bell is delivered by the terminal emulator itself, so it still

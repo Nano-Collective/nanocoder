@@ -1,6 +1,8 @@
-import {readFileSync} from 'fs';
+import path from 'node:path';
+import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
+import {getConfigPath} from '@/config/paths';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -18,6 +20,7 @@ import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
+let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
 
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
@@ -29,16 +32,68 @@ function getPreferencesPath(): string {
 	return PREFERENCES_PATH;
 }
 
-// Export for testing purposes - allows tests to reset the cache
+// Test hook: drops the resolved path cache only. `cachedPreference` values
+// survive, since they key on NANOCODER_CONFIG_DIR + the write counter.
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
+	cachedVoicePreference = undefined;
+}
+
+// Trust is only ever read from, and written to, the global preferences file.
+// A project-level nanocoder-preferences.json ships with the repo, so honouring
+// `trustedDirectories` from it would let a cloned repo trust itself and skip
+// the disclaimer that gates its MCP servers and hooks.
+function getGlobalPreferencesPath(): string {
+	return path.join(getConfigPath(), 'nanocoder-preferences.json');
+}
+
+function isProjectPreferencesPath(preferencesPath: string): boolean {
+	return (
+		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+	);
+}
+
+function readGlobalTrustedDirectories(): string[] | undefined {
+	const globalPath = getGlobalPreferencesPath();
+	if (!existsSync(globalPath)) return undefined;
+	try {
+		const data = JSON.parse(
+			readFileSync(globalPath, 'utf-8'),
+		) as UserPreferences;
+		return data.trustedDirectories;
+	} catch (error) {
+		logError(`Failed to load global preferences: ${String(error)}`);
+		return undefined;
+	}
+}
+
+function writeGlobalTrustedDirectories(trustedDirectories: string[]): void {
+	const globalPath = getGlobalPreferencesPath();
+	let data: UserPreferences = {};
+	if (existsSync(globalPath)) {
+		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+	}
+	data.trustedDirectories = trustedDirectories;
+	mkdirSync(path.dirname(globalPath), {recursive: true});
+	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
 }
 
 export function loadPreferences(): UserPreferences {
 	try {
-		const data = readFileSync(getPreferencesPath(), 'utf-8');
-		return JSON.parse(data) as UserPreferences;
+		const preferencesPath = getPreferencesPath();
+		const data = JSON.parse(
+			readFileSync(preferencesPath, 'utf-8'),
+		) as UserPreferences;
+		if (isProjectPreferencesPath(preferencesPath)) {
+			const trustedDirectories = readGlobalTrustedDirectories();
+			if (trustedDirectories === undefined) {
+				delete data.trustedDirectories;
+			} else {
+				data.trustedDirectories = trustedDirectories;
+			}
+		}
+		return data;
 	} catch (error) {
 		logError(`Failed to load preferences: ${String(error)}`);
 	}
@@ -71,21 +126,108 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
+// Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
+// (bumped on every write), so the value never goes stale after a settings change.
+function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
+	let cache: {dir?: string; version: number; value: T} | null = null;
+	return () => {
+		const dir = process.env.NANOCODER_CONFIG_DIR;
+		const version = getPreferencesVersion();
+		if (!cache || cache.dir !== dir || cache.version !== version) {
+			cache = {dir, version, value: read(loadPreferences())};
+		}
+		return cache.value;
+	};
+}
+
 export function savePreferences(preferences: UserPreferences): void {
 	try {
-		atomicWriteFileSync(
-			getPreferencesPath(),
-			JSON.stringify(preferences, null, 2),
-		);
+		const preferencesPath = getPreferencesPath();
+		if (isProjectPreferencesPath(preferencesPath)) {
+			const {trustedDirectories, ...rest} = preferences;
+			atomicWriteFileSync(preferencesPath, JSON.stringify(rest, null, 2));
+			if (trustedDirectories !== undefined) {
+				writeGlobalTrustedDirectories(trustedDirectories);
+			}
+		} else {
+			atomicWriteFileSync(
+				preferencesPath,
+				JSON.stringify(preferences, null, 2),
+			);
+		}
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
 		return;
 	}
 
 	preferencesVersion++;
+	cachedVoicePreference = preferences.voice;
 	for (const listener of preferencesListeners) {
 		listener();
 	}
+}
+
+/**
+ * True if `directory` (or an equivalent absolute path) is recorded in
+ * `preferences.trustedDirectories`. Shared by every trust-gated entry point
+ * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
+ * and the daemon boot path — so the resolution rule can't drift between them.
+ */
+export function isDirectoryTrusted(
+	directory: string,
+	preferences: UserPreferences,
+): boolean {
+	const resolved = path.resolve(directory); // nosemgrep
+	return (preferences.trustedDirectories ?? []).some(
+		dir => path.resolve(dir) === resolved, // nosemgrep
+	);
+}
+
+export interface DirectoryTrustResult {
+	trusted: boolean;
+	/** True if this call persisted a new trust entry (env-var bypass only). */
+	persisted: boolean;
+}
+
+export interface DirectoryTrustDeps {
+	loadPreferences: typeof loadPreferences;
+	savePreferences: typeof savePreferences;
+}
+
+/**
+ * Resolves directory trust for a non-interactive entry point (`--plain`,
+ * `nanocoder daemon start`) — anywhere that has no disclaimer UI to show.
+ *
+ * `bypass` is the caller's own one-shot override (each entry point's own
+ * `--trust-directory` flag); it never persists, matching the interactive
+ * disclaimer's per-run nature. Absent that, a directory already recorded in
+ * `trustedDirectories` (from a prior interactive run, or a previous
+ * `NANOCODER_TRUST_DIRECTORY=1` run) is trusted as-is. A first-time
+ * `NANOCODER_TRUST_DIRECTORY=1` run persists the directory so later runs
+ * don't need the env var again.
+ */
+export function ensureDirectoryTrust(
+	directory: string,
+	bypass: boolean,
+	deps: DirectoryTrustDeps = {loadPreferences, savePreferences},
+): DirectoryTrustResult {
+	if (bypass) return {trusted: true, persisted: false};
+
+	const preferences = deps.loadPreferences();
+	if (isDirectoryTrusted(directory, preferences)) {
+		return {trusted: true, persisted: false};
+	}
+
+	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
+		const resolved = path.resolve(directory); // nosemgrep
+		deps.savePreferences({
+			...preferences,
+			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
+		});
+		return {trusted: true, persisted: true};
+	}
+
+	return {trusted: false, persisted: false};
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -221,6 +363,27 @@ export function getCompactToolDisplay(): boolean {
 export function updateCompactToolDisplay(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.compactToolDisplay = value;
+	savePreferences(preferences);
+}
+
+// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
+const cachedShowAgentBashOutput = cachedPreference(
+	prefs => prefs.showAgentBashOutput === true,
+);
+
+/**
+ * Get the agent bash output preference. Default false.
+ */
+export function getShowAgentBashOutput(): boolean {
+	return cachedShowAgentBashOutput();
+}
+
+/**
+ * Save the agent bash output preference
+ */
+export function updateShowAgentBashOutput(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.showAgentBashOutput = value;
 	savePreferences(preferences);
 }
 
@@ -395,5 +558,31 @@ export function getProfessionalTone(): boolean {
 export function updateProfessionalTone(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.professionalTone = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the voice configuration from preferences
+ */
+export function getVoicePreference(): import('@/types/config').VoiceConfig {
+	if (cachedVoicePreference) return cachedVoicePreference;
+	const preferences = loadPreferences();
+	cachedVoicePreference = preferences.voice ?? {
+		enabled: false,
+		activationMode: 'push-to-talk',
+		sttBackend: 'local',
+		ttsBackend: 'local',
+	};
+	return cachedVoicePreference;
+}
+
+/**
+ * Save the voice configuration to preferences
+ */
+export function updateVoicePreference(
+	config: import('@/types/config').VoiceConfig,
+): void {
+	const preferences = loadPreferences();
+	preferences.voice = config;
 	savePreferences(preferences);
 }

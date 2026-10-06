@@ -6,15 +6,19 @@ import {
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {
+	AGGRESSIVE_COMPACT_THRESHOLD,
+	applyTuneCompaction,
 	autoCompactSessionOverrides,
 	maybeAutoCompact,
 	performAutoCompact,
 	resetAutoCompactSession,
+	resolveAutoCompactSettings,
 	setAutoCompactEnabled,
 	setAutoCompactMode,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from './auto-compact';
+import {COMPRESSION_CONSTANTS} from './message-compression';
 
 // Reset session overrides before each test
 test.beforeEach(() => {
@@ -51,24 +55,36 @@ test('setAutoCompactThreshold sets threshold value', t => {
 	t.is(autoCompactSessionOverrides.threshold, 75);
 });
 
-test('setAutoCompactThreshold clamps to minimum of 50', t => {
-	setAutoCompactThreshold(30);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold clamps to the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT - 20);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold clamps to maximum of 95', t => {
-	setAutoCompactThreshold(99);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold clamps to the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT + 4);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 50', t => {
-	setAutoCompactThreshold(50);
-	t.is(autoCompactSessionOverrides.threshold, 50);
+test('setAutoCompactThreshold handles the configured minimum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT,
+	);
 });
 
-test('setAutoCompactThreshold handles boundary value 95', t => {
-	setAutoCompactThreshold(95);
-	t.is(autoCompactSessionOverrides.threshold, 95);
+test('setAutoCompactThreshold handles the configured maximum', t => {
+	setAutoCompactThreshold(COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT);
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT,
+	);
 });
 
 test('setAutoCompactThreshold sets threshold to null', t => {
@@ -120,6 +136,74 @@ test('resetAutoCompactSession resets all overrides to null', t => {
 	t.is(autoCompactSessionOverrides.enabled, null);
 	t.is(autoCompactSessionOverrides.threshold, null);
 	t.is(autoCompactSessionOverrides.mode, null);
+});
+
+// ==================== Tune aggressive compact layer ====================
+
+const baseConfig = {
+	enabled: true,
+	threshold: 70,
+	mode: 'conservative' as const,
+	strategy: 'llm' as const,
+};
+
+test('resolveAutoCompactSettings uses config when nothing overrides it', t => {
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, 70);
+	t.is(resolved.mode, 'conservative');
+	t.is(resolved.strategy, 'llm');
+	t.false(resolved.hasOverrides);
+});
+
+test('tune aggressive compact lowers threshold to the minimum and sets aggressive mode', t => {
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, AGGRESSIVE_COMPACT_THRESHOLD);
+	t.is(AGGRESSIVE_COMPACT_THRESHOLD, COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT);
+	t.is(resolved.mode, 'aggressive');
+	t.true(resolved.hasOverrides);
+});
+
+test('tune aggressive compact is ignored when tune is disabled', t => {
+	applyTuneCompaction({
+		enabled: false,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	t.is(resolveAutoCompactSettings(baseConfig).threshold, 70);
+});
+
+test('explicit /compact session overrides beat tune aggressive compact', t => {
+	setAutoCompactThreshold(85);
+	setAutoCompactMode('default');
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	const resolved = resolveAutoCompactSettings(baseConfig);
+	t.is(resolved.threshold, 85);
+	t.is(resolved.mode, 'default');
+});
+
+test('turning tune aggressive compact off keeps a user threshold override', t => {
+	setAutoCompactThreshold(85);
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: false,
+	});
+	t.is(autoCompactSessionOverrides.threshold, 85);
+	t.is(resolveAutoCompactSettings(baseConfig).mode, 'conservative');
 });
 
 // ==================== Proxy compatibility ====================

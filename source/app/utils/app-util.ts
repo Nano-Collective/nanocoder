@@ -10,7 +10,11 @@ import {CopilotLogin} from '@/commands/copilot-login';
 import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
-import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {
+	BASH_OUTPUT_PREFIX,
+	DELAY_COMMAND_COMPLETE_MS,
+	MAX_SESSION_NAME_LENGTH,
+} from '@/constants';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
@@ -20,8 +24,22 @@ import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
+import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -31,6 +49,7 @@ import {
 	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
+import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
@@ -184,7 +203,7 @@ async function handleBashCommand(
 		if (llmContext) {
 			const userMessage: Message = {
 				role: 'user',
-				content: `Bash command output:\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
+				content: `${BASH_OUTPUT_PREFIX}\n\`\`\`\n$ ${bashCommand}\n${llmContext}\n\`\`\``,
 			};
 			setMessages([...messages, userMessage]);
 		}
@@ -224,9 +243,14 @@ async function handleCustomCommand(
 		return false;
 	}
 
-	const args = parseCustomCommandArgs(message.slice(commandName.length + 2));
+	const rawArgs = message.slice(commandName.length + 2).trim();
+	const args = parseCustomCommandArgs(rawArgs);
 
-	const processedPrompt = customCommandExecutor?.execute(customCommand, args);
+	const processedPrompt = customCommandExecutor?.execute(
+		customCommand,
+		args,
+		rawArgs,
+	);
 
 	if (processedPrompt) {
 		await onHandleChatMessage(processedPrompt);
@@ -327,8 +351,8 @@ async function handleSpecialCommand(
 			return true;
 
 		case SPECIAL_COMMANDS.RENAME: {
-			const newName = commandArgs?.join(' ') || '';
-			if (!newName.trim()) {
+			const newName = (commandArgs?.join(' ') || '').trim();
+			if (!newName) {
 				onAddToChatQueue(
 					errorMsg('Usage: /rename <session name>', 'rename-error'),
 				);
@@ -340,12 +364,9 @@ async function handleSpecialCommand(
 					),
 				);
 			} else {
-				onRenameSession(newName.trim());
+				onRenameSession(newName);
 				onAddToChatQueue(
-					successMsg(
-						`Session renamed to "${newName.trim()}".`,
-						'rename-success',
-					),
+					successMsg(`Session renamed to "${newName}".`, 'rename-success'),
 				);
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -544,7 +565,7 @@ function handleCodexLogin(
 		onCommandComplete,
 	} = options;
 
-	const providerName = commandParts[1]?.trim() || 'ChatGPT / Codex';
+	const providerName = commandParts[1]?.trim() || 'ChatGPT';
 
 	setIsToolExecuting(true);
 
@@ -677,34 +698,103 @@ async function handleSlashCommand(
 		return;
 	}
 
-	const commandParts = message.slice(1).trim().split(/\s+/);
-
-	if (await handleCompactCommand(commandParts, options)) return;
-	if (await handleContextMaxCommand(commandParts, options)) return;
-	if (await handleCommandCreate(commandParts, options)) return;
-	if (await handleAgentCreate(commandParts, options)) return;
-	if (await handleAgentCopy(commandParts, options)) return;
-	if (await handleToolCreate(commandParts, options)) return;
-	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleSpecialCommand(commandName, options)) return;
-	if (await handleCheckpointLoad(commandParts, options)) return;
-	// Stateful handlers that replay or resume chat flow live alongside each other.
-	if (await handleResumeCommand(commandParts, options)) return;
+	// #1162 (phase 2) proposed routing MCP prompts through
+	// source/commands/lazy-registry.ts, the same way built-in commands are
+	// dispatched. That registry is a static array of compile-time-known
+	// commands, each with a dynamic-import() thunk - a shape that doesn't fit
+	// prompts, whose entire set only exists at runtime and changes as MCP
+	// servers connect/disconnect, and whose "load" is an RPC (getPrompt) to a
+	// live server, not a module import. Intercepting here instead mirrors how
+	// handleCustomCommand (checked just above) already dispatches the other
+	// runtime-discovered command source - project `.nanocoder/commands/` files.
+	// Both runtime-discovered sources bypass `?key=value` parsing below and
+	// receive the raw message, so free-text `?word` tokens are never stripped.
 	if (
-		await handleRetryCommand(
-			[
-				commandName,
-				...parseCustomCommandArgs(message.slice(commandName.length + 2)),
-			],
+		await handleMCPPromptCommand(
+			commandName,
+			parseCustomCommandArgs(message.slice(commandName.length + 2)),
 			options,
 		)
-	)
+	) {
 		return;
-	if (handleCopilotLogin(commandParts, options)) return;
-	if (handleCodexLogin(commandParts, options)) return;
-	if (handleStatsCommand(commandParts, options)) return;
+	}
 
-	await handleBuiltInCommand(message, options);
+	// ?key=value tokens let a user test a per-session setting for one
+	// command without committing it to the session. Recognised keys are
+	// consumed here: once-scoped settings via the session-override stores
+	// (restored in `finally`), legacy boolean flags by expanding them to
+	// their `--flag` form. Anything else is forwarded to the command
+	// handler verbatim (rebuilt into `commandParts`/`cleanedMessage`) so
+	// each command's own unknown-arg handling runs — and surfaced once as
+	// a warning so a typo like `?threshhold=80` cannot silently no-op.
+	const rawParts = message.slice(1).trim().split(/\s+/);
+	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
+	const recognized = overrides.filter(o => isRecognizedOverrideKey(o.key));
+	const passthrough = overrides
+		.filter(o => !isRecognizedOverrideKey(o.key))
+		.map(formatInlineToken);
+	const expandedFlags = expandOverrideArgs(recognized);
+	const restTokens = [...positional, ...passthrough, ...expandedFlags].join(
+		' ',
+	);
+	const cleanedMessage = restTokens
+		? `/${commandName} ${restTokens}`
+		: `/${commandName}`;
+	const restoreOnce = await applyOnceOverrides(recognized);
+	// Explicit once-context for consumers: unlike the session store (which
+	// cannot tell a once-override apart from a persisted one), this is only
+	// set when the user typed `?threshold=` on this command.
+	const onceThreshold = getOnceThreshold(recognized);
+	try {
+		const commandParts = [
+			commandName,
+			...positional,
+			...passthrough,
+			...expandedFlags,
+		];
+
+		if (passthrough.length > 0) {
+			const keys = [...new Set(passthrough)].join(', ');
+			options.onAddToChatQueue(
+				warningMsg(
+					`Unknown inline override(s): ${keys} — no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
+					'inline-override-unknown',
+				),
+			);
+		}
+
+		if (await handleCompactCommand(commandParts, options, onceThreshold))
+			return;
+		if (await handleContextMaxCommand(commandParts, options)) return;
+		if (await handleCommandCreate(commandParts, options)) return;
+		if (await handleAgentCreate(commandParts, options)) return;
+		if (await handleAgentCopy(commandParts, options)) return;
+		if (await handleToolCreate(commandParts, options)) return;
+		if (await handleSkillsCreate(commandParts, options)) return;
+		if (await handleSpecialCommand(commandName, options)) return;
+		if (await handleCheckpointLoad(commandParts, options)) return;
+		// Stateful handlers that replay or resume chat flow live alongside each other.
+		if (await handleResumeCommand(commandParts, options)) return;
+		if (
+			await handleRetryCommand(
+				[
+					commandName,
+					...parseCustomCommandArgs(
+						cleanedMessage.slice(commandName.length + 2),
+					),
+				],
+				options,
+			)
+		)
+			return;
+		if (handleCopilotLogin(commandParts, options)) return;
+		if (handleCodexLogin(commandParts, options)) return;
+		if (handleStatsCommand(commandParts, options)) return;
+
+		await handleBuiltInCommand(cleanedMessage, options);
+	} finally {
+		restoreOnce();
+	}
 }
 
 /**
@@ -746,6 +836,8 @@ export function createClearMessagesHandler(
 		// Drop read-before-edit history so a stale "seen" from the prior
 		// conversation can't authorize a blind edit/overwrite after /clear.
 		clearReadTracker();
+		// Expandable tool results point into the transcript being cleared.
+		clearExpandableToolResults();
 		// Undelivered session-start hook context belongs to the cleared
 		// conversation — don't graft it onto the next one.
 		clearPendingHookContext();

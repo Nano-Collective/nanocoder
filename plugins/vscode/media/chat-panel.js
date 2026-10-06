@@ -37,7 +37,19 @@
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
 	let pendingImages = [];
-	let pendingUserMessageText = null;
+	/** id → submitted text, so ACP user_message_chunk echoes can be de-duped even when several prompts are queued. */
+	const pendingUserMessages = new Map();
+	const queuedIds = new Set();
+	/** Follow-ups parked locally so we never send a second ACP `prompt()` while one is in flight. */
+	let waitingPrompts = [];
+	/** True from the moment we post (or receive) a turn until it completes or is cancelled. */
+	let turnInFlight = false;
+	/** After Stop, ignore the cancelled turn's `prompt_response` so it cannot flush a fresh submit. */
+	let ignoreNextCompletion = false;
+	let activePromptId = null;
+	let messageIdCounter = 0;
+
+	let showTokenUsage = false;
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -62,6 +74,7 @@
 					'auto-accept': 'Auto-Accept',
 					yolo: 'YOLO',
 					plan: 'Plan',
+					architect: 'Architect',
 				};
 				return modeLabels[value] || value;
 			}
@@ -89,7 +102,7 @@
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
-					const nested = triggerId === 'provider-trigger';
+					const nested = triggerId === 'provider-trigger' || triggerId === 'mode-trigger';
 					closeAllDropdowns(nested ? 'composer-settings' : undefined);
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
@@ -239,7 +252,13 @@
 	// The trigger rules and token arithmetic live in mention-utils.js so they
 	// can be unit tested in Node — this file is one DOM-bound IIFE and none of
 	// it is reachable from a test runner.
-	const { findMentionQuery, removeMentionToken } = globalThis.NanocoderMentionUtils;
+	const mentionUtils = globalThis.NanocoderMentionUtils;
+	const findMentionQuery = mentionUtils && mentionUtils.findMentionQuery
+		? mentionUtils.findMentionQuery
+		: function () { return null; };
+	const removeMentionToken = mentionUtils && mentionUtils.removeMentionToken
+		? mentionUtils.removeMentionToken
+		: function (text, start) { return { text: text || '', cursor: start || 0 }; };
 
 	function closeMention() {
 		mentionOpen = false;
@@ -442,163 +461,6 @@
 	const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit', 'file_op']);
 	const EXECUTE_TOOLS = new Set(['execute_bash']);
 
-	function timelineKind(toolName) {
-		if (EDIT_TOOLS.has(toolName)) return 'edit';
-		if (EXECUTE_TOOLS.has(toolName)) return 'execute';
-		return 'other';
-	}
-
-	function timelineRelativeTime(timestamp) {
-		const diffMs = Date.now() - new Date(timestamp).getTime();
-		const minutes = Math.floor(diffMs / 60000);
-		if (minutes < 1) return 'just now';
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		if (hours < 24) return `${hours}h ago`;
-		return `${Math.floor(hours / 24)}d ago`;
-	}
-
-	const timelineStrip = (function createTimelineStrip() {
-		const root = document.getElementById('timeline-strip');
-		const nodesEl = document.getElementById('timeline-nodes');
-		const trackEl = document.getElementById('timeline-track');
-		const hintEl = document.getElementById('timeline-hint');
-		const confirmEl = document.getElementById('timeline-confirm');
-		if (!root || !nodesEl || !confirmEl) {
-			return {
-				setEntries() {},
-				setDisabled() {},
-				clear() {},
-			};
-		}
-
-		let entries = [];
-
-		function setHint(text) {
-			if (hintEl) hintEl.textContent = text || '';
-		}
-
-		function hideConfirm() {
-			confirmEl.classList.add('hidden');
-			confirmEl.innerHTML = '';
-		}
-
-		function showConfirm(entry) {
-			const files = (entry.filesChanged || []).slice(0, 3).join(', ');
-			const extra = (entry.filesChanged || []).length > 3 ? '…' : '';
-			confirmEl.innerHTML = '';
-
-			const text = document.createElement('div');
-			text.textContent =
-				`Revert workspace and conversation to before step ${entry.seq} (${entry.title || entry.toolName})? ` +
-				`This deletes later chat messages and undoes later file changes.` +
-				(files ? ` Files: ${files}${extra}` : '');
-			confirmEl.appendChild(text);
-
-			const actions = document.createElement('div');
-			actions.className = 'timeline-confirm-actions';
-
-			const revertBtn = document.createElement('button');
-			revertBtn.textContent = 'Revert';
-			revertBtn.style.background = 'var(--vscode-button-background)';
-			revertBtn.style.color = 'var(--vscode-button-foreground)';
-			revertBtn.addEventListener('click', () => {
-				vscode.postMessage({ type: 'revertToCheckpoint', checkpointId: entry.id });
-				hideConfirm();
-			});
-
-			const cancelBtn = document.createElement('button');
-			cancelBtn.textContent = 'Cancel';
-			cancelBtn.style.background = 'var(--vscode-button-secondaryBackground)';
-			cancelBtn.style.color = 'var(--vscode-button-secondaryForeground, inherit)';
-			cancelBtn.addEventListener('click', hideConfirm);
-
-			actions.appendChild(revertBtn);
-			actions.appendChild(cancelBtn);
-			confirmEl.appendChild(actions);
-			confirmEl.classList.remove('hidden');
-		}
-
-		// The label goes in a dedicated line under the strip rather than an
-		// absolutely-positioned bubble: the track has to clip horizontally to
-		// scroll, and a clipping box clips both axes, so a bubble above the dot
-		// would be cut off. A static line also reads on focus, not just hover.
-		function bindHint(el, text) {
-			el.addEventListener('mouseenter', () => setHint(text));
-			el.addEventListener('focus', () => setHint(text));
-			el.addEventListener('mouseleave', () => setHint(''));
-			el.addEventListener('blur', () => setHint(''));
-		}
-
-		function render() {
-			nodesEl.innerHTML = '';
-			setHint('');
-			if (entries.length === 0) {
-				root.classList.add('hidden');
-				hideConfirm();
-				return;
-			}
-			root.classList.remove('hidden');
-
-			const line = document.createElement('div');
-			line.className = 'timeline-line';
-			nodesEl.appendChild(line);
-
-			for (const entry of entries) {
-				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
-				const label = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
-					(files ? ` · ${files}` : '') +
-					` · ${timelineRelativeTime(entry.timestamp)}`;
-
-				const btn = document.createElement('button');
-				btn.type = 'button';
-				btn.className = 'timeline-node';
-				btn.dataset.kind = timelineKind(entry.toolName);
-				btn.dataset.id = entry.id;
-				btn.setAttribute('aria-label', label);
-				btn.title = label;
-
-				const dot = document.createElement('span');
-				dot.className = 'timeline-dot';
-				btn.appendChild(dot);
-
-				bindHint(btn, label);
-				btn.addEventListener('click', () => showConfirm(entry));
-				nodesEl.appendChild(btn);
-			}
-
-			const nowBtn = document.createElement('button');
-			nowBtn.type = 'button';
-			nowBtn.className = 'timeline-node is-selected';
-			nowBtn.dataset.kind = 'now';
-			nowBtn.setAttribute('aria-label', 'Current state');
-			nowBtn.title = 'Current state';
-			const nowDot = document.createElement('span');
-			nowDot.className = 'timeline-dot';
-			nowBtn.appendChild(nowDot);
-			bindHint(nowBtn, 'Now');
-			nowBtn.addEventListener('click', hideConfirm);
-			nodesEl.appendChild(nowBtn);
-
-			// The scroller is the track, not the flex row inside it.
-			if (trackEl) trackEl.scrollLeft = trackEl.scrollWidth;
-		}
-
-		return {
-			setEntries(next) {
-				entries = Array.isArray(next) ? next : [];
-				hideConfirm();
-				render();
-			},
-			setDisabled(disabled) {
-				root.classList.toggle('timeline-disabled', Boolean(disabled));
-			},
-			clear() {
-				this.setEntries([]);
-			},
-		};
-	})();
-
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -689,22 +551,13 @@
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
-		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`,
+		refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`,
+		close: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
 	};
 
-	function formatRelativeTime(iso) {
-		if (!iso) return '';
-		const date = new Date(iso);
-		if (isNaN(date.getTime())) return '';
-		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
-		if (diffMin < 1) return 'Just now';
-		if (diffMin < 60) return `${diffMin}m ago`;
-		const diffHr = Math.floor(diffMin / 60);
-		if (diffHr < 24) return `${diffHr}h ago`;
-		const diffDay = Math.floor(diffHr / 24);
-		if (diffDay < 7) return `${diffDay}d ago`;
-		return date.toLocaleDateString();
-	}
+	let lastUserPromptText = '';
+	let lastUserPromptImages = undefined;
 
 	function formatRelativeTime(iso) {
 		if (!iso) return '';
@@ -720,20 +573,55 @@
 		return date.toLocaleDateString();
 	}
 
-	function createMessageFooter(getText, role, sentAt) {
+	function createMessageFooter(getText, role, sentAt, promptText = '', promptImages = undefined) {
 		const footer = document.createElement('div');
-		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
-			(role === 'user' ? 'self-end' : 'self-start');
 
-		const btn = document.createElement('button');
-		btn.type = 'button';
-		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
-		btn.title = 'Copy';
-		btn.setAttribute('aria-label', 'Copy message');
-		btn.innerHTML = ICONS.clipboard;
+		const timeEl = document.createElement('span');
+		timeEl.className = 'timestamp leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-end';
+			footer.appendChild(timeEl);
+			return footer;
+		}
+
+		footer.className = 'message-footer flex h-5 items-center mt-2.5 text-xs text-vscode-fg opacity-60 self-start';
+		footer.dataset.promptText = promptText || '';
+		footer._promptImages = promptImages;
+
+		const actionsGroup = document.createElement('div');
+		actionsGroup.className = 'message-actions flex items-center gap-1.5';
+
+		const retryBtn = document.createElement('button');
+		retryBtn.type = 'button';
+		retryBtn.className = 'retry-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		retryBtn.title = 'Retry';
+		retryBtn.setAttribute('aria-label', 'Retry response');
+		retryBtn.innerHTML = ICONS.refresh;
+
+		if (isProcessing) {
+			footer.style.display = 'none';
+			footer.classList.add('agent-footer-processing');
+		}
+
+		retryBtn.addEventListener('click', () => {
+			if (isProcessing) return;
+			const prompt = footer.dataset.promptText || promptText || lastUserPromptText;
+			const images = footer._promptImages || promptImages || lastUserPromptImages;
+			if (!prompt && !images?.length) return;
+			retryPrompt(prompt, images, footer);
+		});
+
+		const copyBtn = document.createElement('button');
+		copyBtn.type = 'button';
+		copyBtn.className = 'copy-btn flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		copyBtn.title = 'Copy';
+		copyBtn.setAttribute('aria-label', 'Copy message');
+		copyBtn.innerHTML = ICONS.clipboard;
 
 		let resetTimer = null;
-		btn.addEventListener('click', () => {
+		copyBtn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
 			(async () => {
@@ -742,39 +630,64 @@
 				}
 				await navigator.clipboard.writeText(text);
 			})().then(() => {
-				btn.innerHTML = ICONS.success;
-				btn.title = 'Copied!';
+				copyBtn.innerHTML = ICONS.success;
+				copyBtn.title = 'Copied!';
 			}).catch(() => {
-				btn.innerHTML = ICONS.error;
-				btn.title = 'Copy failed';
+				copyBtn.innerHTML = ICONS.error;
+				copyBtn.title = 'Copy failed';
 			}).finally(() => {
 				clearTimeout(resetTimer);
 				resetTimer = setTimeout(() => {
-					btn.innerHTML = ICONS.clipboard;
-					btn.title = 'Copy';
+					copyBtn.innerHTML = ICONS.clipboard;
+					copyBtn.title = 'Copy';
 				}, 1500);
 			});
 		});
 
-		const timeEl = document.createElement('span');
-		timeEl.className = 'leading-none';
-		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-
-		if (role === 'user') {
-			footer.appendChild(timeEl);
-			footer.appendChild(btn);
-		} else {
-			footer.appendChild(btn);
-			footer.appendChild(timeEl);
-		}
-
+		actionsGroup.appendChild(retryBtn);
+		actionsGroup.appendChild(copyBtn);
+		timeEl.className = 'timestamp leading-none ml-1';
+		actionsGroup.appendChild(timeEl);
+		footer.appendChild(actionsGroup);
 		return footer;
+	}
+
+	// Composer has something that submitMessage() would send. While a turn
+	// is running this is what flips the button from Stop back to Send so a
+	// follow-up can be queued instead of cancelling the agent.
+	function composerHasPayload() {
+		return Boolean(
+			chatInput.value.trim() ||
+			attachedPaths.length > 0 ||
+			pendingImages.length > 0
+		);
+	}
+
+	function shouldCancelTurn() {
+		return isProcessing && !composerHasPayload();
+	}
+
+	function syncSendStopButton() {
+		if (!sendStopBtn) return;
+		const showStop = shouldCancelTurn();
+		sendStopBtn.title = showStop
+			? 'Stop (cancel)'
+			: (isProcessing ? 'Queue (Enter)' : 'Send (Enter)');
+		sendStopBtn.classList.toggle('is-processing', showStop);
+		const hint = document.getElementById('queue-hint');
+		if (hint) {
+			hint.classList.toggle('hidden', !isProcessing);
+		}
+		if (chatInput) {
+			chatInput.placeholder = isProcessing
+				? 'Queue a follow-up (Enter)…'
+				: 'Ask Nanocoder anything...';
+		}
 	}
 
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
-		timelineStrip.setDisabled(active);
 		if (!active) {
 			// Globally settle any stuck spinners across all tool cards, in case
 			// several tool groups were created in the same session.
@@ -788,10 +701,22 @@
 			});
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
+			
+			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
+			hiddenFooters.forEach(f => {
+				f.style.display = '';
+				f.classList.remove('agent-footer-processing');
+			});
+			scrollToBottom(true);
 		}
-		if (sendStopBtn) {
-			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
-			sendStopBtn.classList.toggle('is-processing', active);
+		syncSendStopButton();
+	}
+
+	function discardLocalQueue() {
+		const ids = waitingPrompts.map(entry => entry.id);
+		waitingPrompts = [];
+		if (ids.length > 0) {
+			removeQueuedBubbles(ids);
 		}
 	}
 
@@ -810,9 +735,39 @@
 		if (existing) existing.remove();
 		setPlanReviewActive(false);
 	}
+	let previousArtifactCount = 0;
+	let userClosedArtifacts = false;
+	let isArtifactsCollapsed = false;
+
+	const artifactToggle = document.getElementById('artifact-toggle');
+	const artifactClose = document.getElementById('artifact-close');
+	const artifactContent = document.getElementById('artifact-content');
+
+	if (artifactToggle && artifactContent) {
+		artifactToggle.addEventListener('click', () => {
+			isArtifactsCollapsed = !isArtifactsCollapsed;
+			artifactContent.classList.toggle('hidden', isArtifactsCollapsed);
+			artifactToggle.querySelector('svg').style.transform = isArtifactsCollapsed ? 'rotate(-90deg)' : '';
+		});
+	}
+
+	if (artifactClose) {
+		artifactClose.addEventListener('click', () => {
+			userClosedArtifacts = true;
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		});
+	}
 
 	function renderArtifacts(artifacts) {
 		if (!artifactBar || !artifactLinks) return;
+
+		const currentCount = Array.isArray(artifacts) ? artifacts.length : 0;
+		if (currentCount > previousArtifactCount) {
+			userClosedArtifacts = false;
+		}
+		previousArtifactCount = currentCount;
+
 		artifactLinks.innerHTML = '';
 		const labels = {
 			implementation_plan: 'Plan',
@@ -832,8 +787,13 @@
 			artifactLinks.appendChild(button);
 		}
 		const hasArtifacts = artifactLinks.childElementCount > 0;
-		artifactBar.classList.toggle('hidden', !hasArtifacts);
-		artifactBar.classList.toggle('flex', hasArtifacts);
+		if (hasArtifacts && !userClosedArtifacts) {
+			artifactBar.classList.remove('hidden');
+			artifactBar.classList.add('flex');
+		} else {
+			artifactBar.classList.add('hidden');
+			artifactBar.classList.remove('flex');
+		}
 	}
 
 	function renderPlanReview(artifactPath) {
@@ -881,6 +841,7 @@
 			appendMessage('Approved the implementation plan. Proceeding.', 'user');
 			currentTurnEl = null;
 			currentTextEl = null;
+			turnInFlight = true;
 			setProcessing(true);
 			startVisualLoader();
 			vscode.postMessage({type: 'approvePlan'});
@@ -904,19 +865,135 @@
 		card.appendChild(body);
 		messagesContainer.appendChild(card);
 		setPlanReviewActive(true);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
+	}
+
+	/** Id of a turn this page already opened locally, so promptStarted does not open it again. */
+	let locallyStartedId = null;
+
+	function openTurn() {
+		finishCurrentWorkSummary('completed');
+		turnStartedAt = Date.now();
+		agentTurnId++;
+		currentTurnFooter = null;
+		currentTurnEl = null;
+		currentTextEl = null;
+		setProcessing(true);
+		startVisualLoader();
+	}
+
+	function sendToHost(entry) {
+		turnInFlight = true;
+		activePromptId = entry.id;
+		turnCancelled = false;
+		vscode.postMessage({
+			type: 'submitMessage',
+			id: entry.id,
+			text: entry.text,
+			images: entry.images,
+		});
+	}
+
+	function flushWaitingPrompt(outcome) {
+		if (ignoreNextCompletion) {
+			ignoreNextCompletion = false;
+			if (!turnInFlight) {
+				setProcessing(false, outcome || 'cancelled');
+			}
+			return;
+		}
+		const next = waitingPrompts.shift();
+		if (next) {
+			finishCurrentWorkSummary(outcome || 'completed');
+			stopVisualLoader();
+			setQueuedState(next.id, false);
+			sendToHost(next);
+			return;
+		}
+		turnInFlight = false;
+		activePromptId = null;
+		setProcessing(false, outcome || 'completed');
 	}
 
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
+		ignoreNextCompletion = turnInFlight;
+		discardLocalQueue();
+		turnInFlight = false;
 		vscode.postMessage({ type: 'cancel' });
 		turnCancelled = true;
 		setProcessing(false, 'cancelled');
 	}
 
+	function messageWrapper(id) {
+		return messagesContainer.querySelector(`[data-message-id="${id}"]`);
+	}
+
+	function createQueuedBadge(id) {
+		const row = document.createElement('div');
+		row.className = 'queued-badge flex items-center gap-1.5 mt-1 text-xs';
+
+		const pill = document.createElement('span');
+		pill.className = 'px-1.5 py-0.5 rounded border border-vscode-border bg-vscode-widget-bg text-vscode-fg opacity-80';
+		pill.textContent = 'Queued';
+
+		const removeBtn = document.createElement('button');
+		removeBtn.type = 'button';
+		removeBtn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-vscode-toolbarHover';
+		removeBtn.title = 'Remove from queue';
+		removeBtn.setAttribute('aria-label', 'Remove from queue');
+		removeBtn.innerHTML = ICONS.close;
+		removeBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			waitingPrompts = waitingPrompts.filter(entry => entry.id !== id);
+			removeQueuedBubbles([id]);
+			vscode.postMessage({ type: 'cancelQueuedMessage', id: id });
+		});
+
+		row.appendChild(pill);
+		row.appendChild(removeBtn);
+		return row;
+	}
+
+	function setQueuedState(id, queued) {
+		const wrapper = messageWrapper(id);
+		if (!wrapper) return;
+		const existing = wrapper.querySelector('.queued-badge');
+		if (queued) {
+			queuedIds.add(id);
+			if (!existing) {
+				wrapper.insertBefore(createQueuedBadge(id), wrapper.lastElementChild);
+			}
+		} else {
+			queuedIds.delete(id);
+			if (existing) existing.remove();
+		}
+	}
+
+	function removeQueuedBubbles(ids) {
+		const drop = new Set(ids);
+		waitingPrompts = waitingPrompts.filter(entry => !drop.has(entry.id));
+		for (const id of ids) {
+			queuedIds.delete(id);
+			pendingUserMessages.delete(id);
+			const wrapper = messageWrapper(id);
+			if (wrapper) wrapper.remove();
+		}
+	}
+
+	function consumePendingUserText(text) {
+		for (const [id, pending] of pendingUserMessages) {
+			if (pending === text) {
+				pendingUserMessages.delete(id);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
-			if (isProcessing) {
+			if (shouldCancelTurn()) {
 				requestCancel();
 			} else {
 				submitMessage();
@@ -1069,6 +1146,7 @@
 			wrapper.appendChild(removeBtn);
 			imagePreviewContainer.appendChild(wrapper);
 		});
+		syncSendStopButton();
 	}
 
 	const imageModal = document.getElementById('image-modal');
@@ -1214,6 +1292,7 @@
 		// Typing is what lifts a dismissal, so this runs before the update.
 		slashSuppressed = false;
 		updateSlashAutocomplete();
+		syncSendStopButton();
 	});
 
 	if (slashDropdown) {
@@ -1364,6 +1443,7 @@
 			} else {
 				copyLastResponse();
 			}
+			syncSendStopButton();
 			return;
 		}
 
@@ -1398,30 +1478,86 @@
 	// through it would overwrite a draft the user is typing and sweep up chips
 	// and images they staged for a different question.
 	function dispatchPrompt(text, images) {
-		// A new turn re-opens the door to tool updates that the previous
-		// cancel closed.
-		turnCancelled = false;
+		const id = 'msg-' + (++messageIdCounter);
+		const entry = {id, text, images};
+		appendMessage(text, 'user', images, id);
+		pendingUserMessages.set(id, text);
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
 
-		// Send message to extension host
+		// Park follow-ups here. Posting a second `submitMessage` while a turn
+		// is in flight makes ACP reject it with "RequestError: Internal error"
+		// — the host queue is a backstop, but this gate is what the user feels.
+		if (turnInFlight) {
+			waitingPrompts.push(entry);
+			setQueuedState(id, true);
+			setProcessing(true);
+			syncSendStopButton();
+			return;
+		}
+
+		locallyStartedId = id;
+		openTurn();
+		sendToHost(entry);
+		syncSendStopButton();
+	}
+
+	function retryPrompt(text, images, footerElement = null) {
+		if (isProcessing) return;
+		if (!text && !images?.length) return;
+		turnCancelled = false;
+		lastUserPromptText = text;
+		lastUserPromptImages = images;
+
+		// Erase the current response (work summaries, thoughts, tool cards, bubbles, footers)
+		if (messagesContainer) {
+			let userIdx = -1;
+			const children = Array.from(messagesContainer.children);
+			let topIdx = -1;
+			if (footerElement) {
+				let topEl = footerElement;
+				while (topEl && topEl.parentElement && topEl.parentElement !== messagesContainer) {
+					topEl = topEl.parentElement;
+				}
+				topIdx = children.indexOf(topEl);
+			}
+			const scanStart = topIdx >= 0 ? topIdx : children.length - 1;
+			for (let i = scanStart; i >= 0; i--) {
+				const child = children[i];
+				if (child.classList?.contains('self-end') || child.dataset?.role === 'user') {
+					userIdx = i;
+					break;
+				}
+			}
+			if (userIdx >= 0) {
+				for (let i = children.length - 1; i > userIdx; i--) {
+					children[i].remove();
+				}
+			}
+		}
+
+		if (currentWorkSummary) {
+			discardCurrentWorkSummary();
+		}
+		currentTurnEl = null;
+		currentTextEl = null;
+		currentTurnText = '';
+		currentTurnFooter = null;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+
+		pendingUserMessages.set('retry', text);
+
 		vscode.postMessage({
-			type: 'submitMessage',
+			type: 'retryMessage',
 			text: text,
 			images: images
 		});
 
-		// Optimistically append user message
-		appendMessage(text, 'user', images);
-		pendingUserMessageText = text;
-
 		if (!isProcessing) {
-			// Switch to processing state
 			setProcessing(true);
-
 			startVisualLoader();
-
-			// Reset turn elements so agent starts a fresh block
-			currentTurnEl = null;
-			currentTextEl = null;
+			keepVisualLoaderAtBottom();
 		}
 	}
 
@@ -1568,6 +1704,7 @@
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
 			renderChipsClear();
+			syncSendStopButton();
 			return;
 		}
 		contextChipsContainer.classList.remove('hidden');
@@ -1614,6 +1751,7 @@
 			});
 			contextChipsContainer.appendChild(chip);
 		}
+		syncSendStopButton();
 	}
 
 	if (composerBox) {
@@ -1712,17 +1850,15 @@
 			.join('\n\n');
 	}
 
-	function appendMessage(content, role, images = undefined) {
-		// Remove welcome message and loader if present
+	function appendMessage(content, role, images = undefined, id = undefined) {
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
-		// A user message opens a new turn, so the agent segments that follow get
-		// a fresh id. The raw-text accumulator is handed over lazily, once the
-		// new response produces text.
-		if (role === 'user') {
+		// A locally submitted prompt carries an id and must not open a turn yet:
+		// a Queued bubble is not the next turn. History and ACP echoes have no id.
+		if (role === 'user' && !id) {
 			// Close the previous turn's summary before the new message is
 			// inserted, so it can never swallow work from the turn after it.
 			// The ownership maps deliberately survive: a tool the agent was told
@@ -1733,18 +1869,23 @@
 			turnStartedAt = Date.now();
 			agentTurnId++;
 			currentTurnFooter = null;
+			lastUserPromptText = content;
+			lastUserPromptImages = images;
 		}
 
+
 		const wrapper = document.createElement('div');
+		if (id) wrapper.dataset.messageId = id;
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
-			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+			(role === 'user' ? 'self-end items-end max-w-[90%]' : 'self-start items-start max-w-full w-full');
+		wrapper.dataset.role = role;
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// No max-w here: the wrapper already caps the turn at 90%. A second
 				// percentage would resolve against the wrapper's shrink-to-fit width,
-				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				// squeezing the bubble to 90% of its own content and wrapping mid-word.
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
@@ -1849,10 +1990,20 @@
 		}
 
 		wrapper.appendChild(msgEl);
-		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+		wrapper.appendChild(createMessageFooter(
+			() => content,
+			role,
+			new Date(),
+			role === 'user' ? '' : lastUserPromptText,
+			role === 'user' ? undefined : lastUserPromptImages
+		));
 
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		if (role === 'user') {
+			scrollToBottom(true);
+		} else {
+			scrollToBottomIfFollowing();
+		}
 
 		if (role === 'agent') {
 			// This opens a fresh container, so whatever block was open is done.
@@ -1866,6 +2017,7 @@
 	}
 
 	function startVisualLoader() {
+		stopVisualLoader();
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
 		const span = document.createElement('span');
@@ -1876,14 +2028,14 @@
 
 		visualLoader = wrapper;
 		messagesContainer.appendChild(wrapper);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function keepVisualLoaderAtBottom() {
 		if (visualLoader && visualLoader.parentElement) {
 			messagesContainer.appendChild(visualLoader);
 		}
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	function stopVisualLoader() {
@@ -1894,14 +2046,11 @@
 	}
 
 	function appendChunk(textChunk) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
-
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
 			const wrapper = document.createElement('div');
-			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full w-full';
+			wrapper.dataset.role = 'agent';
 
 			const msgEl = document.createElement('div');
 			msgEl.className = 'message agent min-w-0 w-full';
@@ -1925,16 +2074,25 @@
 				currentTurnFooter.remove();
 			} else {
 				// captures footer, not currentTurnFooter - avoids copying the next turn's text
-				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				const footer = createMessageFooter(
+					() => footer.dataset.rawText || '',
+					'agent',
+					new Date(),
+					lastUserPromptText,
+					lastUserPromptImages
+				);
 				currentTurnFooter = footer;
 			}
 			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			if (!currentTurnFooter.dataset.promptText && lastUserPromptText) {
+				currentTurnFooter.dataset.promptText = lastUserPromptText;
+			}
 			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
@@ -1950,22 +2108,34 @@
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
 						renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
 			} else {
 				currentTextEl.textContent += textChunk; // Fallback
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
 		if (typeof marked === 'undefined') {
-			scrollToBottom();
+			scrollToBottomIfFollowing();
+		}
+	}
+	let userHasScrolledUp = false;
+	messagesContainer.addEventListener('scroll', () => {
+		const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 50;
+		userHasScrolledUp = !isAtBottom;
+	});
+
+	function scrollToBottom(force = false) {
+		if (force || !userHasScrolledUp) {
+			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			userHasScrolledUp = false;
 		}
 	}
 
-	function scrollToBottom() {
-		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	function scrollToBottomIfFollowing() {
+		scrollToBottom(false);
 	}
 
 	// --- Copy last code block ---
@@ -2063,6 +2233,7 @@
 	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
 	// under the finished response. Cost is omitted when unknown (local models).
 	function appendUsageIndicator(usage, cost) {
+		if (!showTokenUsage) return;
 		if (!usage) return;
 		const total = Number.isFinite(usage.totalTokens)
 			? usage.totalTokens
@@ -2077,10 +2248,10 @@
 
 		endCurrentTextBlock();
 		const el = document.createElement('div');
-		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.className = 'token-usage-indicator self-start text-[0.8em] opacity-50 shrink-0 mb-1';
 		el.textContent = text;
 		messagesContainer.appendChild(el);
-		scrollToBottom();
+		scrollToBottomIfFollowing();
 	}
 
 	// Handle messages from extension.
@@ -2142,22 +2313,47 @@
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
 				lastAgentRawText = '';
+				lastUserPromptText = '';
+				lastUserPromptImages = undefined;
+				pendingUserMessages.clear();
+				queuedIds.clear();
+				waitingPrompts = [];
+				turnInFlight = false;
+				activePromptId = null;
+				locallyStartedId = null;
+				ignoreNextCompletion = false;
 				// The transcript was just wiped, so the summary has no DOM left to
 				// close - drop it rather than stamping a duration on a box the
 				// user can no longer see.
 				discardCurrentWorkSummary();
 				workSummaryByToolCallId.clear();
 				workSummaryByPlanId.clear();
-				if (!message.isLoading) {
-					timelineStrip.clear();
-				}
 				setProcessing(false);
 				break;
+			case 'promptQueued':
+				turnInFlight = true;
+				setQueuedState(message.id, true);
+				setProcessing(true);
+				break;
+			case 'promptStarted':
+				turnInFlight = true;
+				activePromptId = message.id;
+				setQueuedState(message.id, false);
+				if (locallyStartedId === message.id) {
+					locallyStartedId = null;
+				} else {
+					openTurn();
+				}
+				break;
+			case 'promptQueueCleared':
+				removeQueuedBubbles(message.ids || []);
+				break;
 			case 'sessionLoaded':
-				finishCurrentWorkSummary('completed');
+				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
+				pendingUserMessages.clear();
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
-				scrollToBottom();
+				scrollToBottom(true);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -2191,20 +2387,28 @@
 			case 'settingsData':
 				renderSettingsData(message.settings);
 				break;
+			case 'tokenUsageVisibility':
+				renderTokenUsageVisibility(message.showTokenUsage);
+				break;
 			case 'settingsUpdated':
 				if (!message.success) {
 					console.error('Failed to update setting:', message.error);
 				}
 				break;
+			case 'addProviderResult':
+				if (window._handleAddProviderResult) {
+					window._handleAddProviderResult(message);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
+				break;
+			case 'connectionStatus':
+				handleConnectionStatus(message);
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
-				break;
-			case 'updateTimeline':
-				timelineStrip.setEntries(message.entries || []);
 				break;
 			case 'runPrompt':
 				if (isHistoryView) showChatView();
@@ -2386,6 +2590,23 @@
 		if (modelDropdown) modelDropdown.setOptions(message.availableModels, message.model);
 	}
 
+	function handleConnectionStatus(message) {
+		if (!messagesContainer) return;
+		let el = document.getElementById('connection-status');
+		if (message.status === 'connected') {
+			if (el) el.remove();
+			return;
+		}
+		if (!el) {
+			el = document.createElement('div');
+			el.id = 'connection-status';
+			el.className = 'flex flex-col items-center justify-center h-full opacity-50 mt-10 text-xs px-4 text-center';
+			messagesContainer.appendChild(el);
+		}
+		el.textContent = message.message
+			|| (message.status === 'connecting' ? 'Connecting to Nanocoder…' : 'Connection failed');
+	}
+
 	// Close the current streamed-text block: flush any pending throttled
 	// render, then reset so the next agent_message_chunk starts a fresh
 	// markdown block. Called whenever another element (the work summary or a
@@ -2408,9 +2629,7 @@
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
-					if (pendingUserMessageText === update.content.text) {
-						pendingUserMessageText = null;
-					} else {
+					if (!consumePendingUserText(update.content.text)) {
 						appendMessage(update.content.text, 'user');
 					}
 				}
@@ -2428,6 +2647,15 @@
 			if (replayedUsage) {
 				appendUsageIndicator(replayedUsage, replayedUsage.cost);
 			}
+			const durationMs = update._meta && update._meta['nanocoder/durationMs'];
+			if (durationMs !== undefined && currentWorkSummary) {
+				currentWorkSummary._overrideDuration = durationMs;
+				currentWorkSummary.updateTimer();
+			}
+			const outcome = update._meta && update._meta['nanocoder/outcome'];
+			if (outcome && currentWorkSummary) {
+				currentWorkSummary._overrideOutcome = outcome;
+			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			const thoughtText = update.content && update.content.text;
 			// Whitespace-only reasoning is not worth a section of its own: it
@@ -2444,8 +2672,8 @@
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
-			// Turn is complete — restore the send button
-			setProcessing(false, update.outcome || 'completed');
+			// Drain one locally parked follow-up, or release the mutex.
+			flushWaitingPrompt(update.outcome || 'completed');
 		}
 		keepVisualLoaderAtBottom();
 	}
@@ -2559,6 +2787,262 @@
 				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
 			});
 		}
+
+		// Token usage footer
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) {
+			tuToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'showTokenUsage', value: tuToggle.checked });
+			});
+		}
+
+		// Add Provider logic
+		const toggleAddProviderBtn = document.getElementById('toggle-add-provider-btn');
+		const closeAddProviderBtn = document.getElementById('close-add-provider-btn');
+		const addProviderFormContainer = document.getElementById('add-provider-form-container');
+		const addProviderSubmit = document.getElementById('add-provider-submit-btn');
+
+		const presetSelect = document.getElementById('add-provider-preset-select');
+		const customNameInput = document.getElementById('add-provider-custom-name');
+		const sdkGroup = document.getElementById('add-provider-sdk-group');
+		const sdkSelect = document.getElementById('add-provider-sdk');
+		const urlGroup = document.getElementById('add-provider-url-group');
+		const baseUrlInput = document.getElementById('add-provider-baseurl');
+		const apiKeyGroup = document.getElementById('add-provider-apikey-group');
+		const apiKeyInput = document.getElementById('add-provider-apikey');
+		const modelsContainer = document.getElementById('add-provider-models-container');
+		const addModelBtn = document.getElementById('add-provider-add-model-btn');
+
+		let providerPresets = {}; // Will be populated from settingsData
+		
+		// Expose a function to update presets from settingsData
+		window._updateProviderPresets = (templates) => {
+			if (templates) {
+				providerPresets = templates;
+				
+				// Keep 'custom' at the end or if not present, add it
+				if (!providerPresets['custom']) {
+					providerPresets['custom'] = { name: "Custom...", sdk: "openai-compatible", url: "", requiresKey: false, models: [] };
+				}
+				
+				// Re-populate the preset select dropdown if it exists
+				if (presetSelect && presetSelect.options.length <= 1) { // Only if empty or has just default
+					presetSelect.innerHTML = '';
+					for (const [key, preset] of Object.entries(providerPresets)) {
+						const option = document.createElement('option');
+						option.value = key;
+						option.textContent = preset.name || 'Custom...';
+						presetSelect.appendChild(option);
+					}
+				}
+			}
+		};
+
+		function createModelRow(presetModels) {
+			const row = document.createElement('div');
+			row.className = 'flex gap-2 items-start model-row';
+
+			const inputContainer = document.createElement('div');
+			inputContainer.className = 'flex-grow flex flex-col gap-1';
+
+			const select = document.createElement('select');
+			select.className = 'settings-select w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] model-select';
+			
+			presetModels.forEach(model => {
+				const option = document.createElement('option');
+				option.value = option.textContent = model;
+				select.appendChild(option);
+			});
+			const customOption = document.createElement('option');
+			customOption.value = 'custom';
+			customOption.textContent = 'Custom...';
+			select.appendChild(customOption);
+
+			const customInput = document.createElement('input');
+			customInput.type = 'text';
+			customInput.placeholder = 'Model name (e.g. my-model)';
+			customInput.className = 'hidden settings-text-input w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-border p-1.5 rounded text-[0.9em] mt-1 custom-model-input';
+
+			select.addEventListener('change', () => {
+				if (select.value === 'custom') {
+					customInput.classList.remove('hidden');
+				} else {
+					customInput.classList.add('hidden');
+				}
+			});
+
+			inputContainer.appendChild(select);
+			inputContainer.appendChild(customInput);
+
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'text-vscode-descriptionForeground hover:text-vscode-error bg-transparent border-none cursor-pointer p-1.5';
+			removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			
+			removeBtn.addEventListener('click', () => {
+				if (modelsContainer.children.length > 1) {
+					row.remove();
+					updateRemoveButtons();
+				}
+			});
+
+			row.appendChild(inputContainer);
+			row.appendChild(removeBtn);
+
+			modelsContainer.appendChild(row);
+
+			// Hide remove button if it's the only row
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			const rows = modelsContainer.querySelectorAll('.model-row');
+			rows.forEach((row, index) => {
+				const removeBtn = row.querySelector('button');
+				removeBtn.style.visibility = '';
+				
+				// Either it's the only row, or we can just always disable the first one
+				// "disable for only for the first model box"
+				if (index === 0) {
+					removeBtn.disabled = true;
+					removeBtn.classList.add('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.remove('hover:text-vscode-error', 'cursor-pointer');
+				} else {
+					removeBtn.disabled = false;
+					removeBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+					removeBtn.classList.add('hover:text-vscode-error', 'cursor-pointer');
+				}
+			});
+		}
+
+		function updateProviderForm() {
+			const presetKey = presetSelect.value;
+			const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+			if (presetKey === 'custom') {
+				customNameInput.classList.remove('hidden');
+				sdkGroup.classList.remove('hidden');
+				urlGroup.classList.remove('hidden');
+				apiKeyGroup.classList.remove('hidden');
+			} else {
+				customNameInput.classList.add('hidden');
+				sdkGroup.classList.add('hidden');
+				urlGroup.classList.add('hidden');
+				apiKeyGroup.classList.toggle('hidden', !preset.requiresKey);
+				
+				sdkSelect.value = preset.sdk;
+				baseUrlInput.value = preset.url;
+			}
+
+			// Reset models to single row
+			modelsContainer.innerHTML = '';
+			createModelRow(preset.models);
+		}
+
+		if (addModelBtn) {
+			addModelBtn.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+				createModelRow(preset.models);
+			});
+		}
+
+		if (toggleAddProviderBtn && closeAddProviderBtn && addProviderFormContainer) {
+			toggleAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.remove('hidden');
+				toggleAddProviderBtn.parentElement.classList.add('hidden');
+				updateProviderForm();
+			});
+
+			closeAddProviderBtn.addEventListener('click', () => {
+				addProviderFormContainer.classList.add('hidden');
+				toggleAddProviderBtn.parentElement.classList.remove('hidden');
+			});
+		}
+
+		if (presetSelect) presetSelect.addEventListener('change', updateProviderForm);
+
+		if (addProviderSubmit) {
+			addProviderSubmit.addEventListener('click', () => {
+				const presetKey = presetSelect.value;
+				const preset = providerPresets[presetKey] || providerPresets['custom'];
+
+				const name = presetKey === 'custom' ? customNameInput.value.trim() : preset.name;
+				const sdkProvider = sdkSelect.value;
+				const baseUrl = baseUrlInput.value.trim();
+				const apiKey = apiKeyInput.value.trim();
+				
+				const models = [];
+				const modelRows = modelsContainer.querySelectorAll('.model-row');
+				modelRows.forEach(row => {
+					const select = row.querySelector('.model-select');
+					const customInput = row.querySelector('.custom-model-input');
+					
+					let modelStr = '';
+					if (select.value === 'custom') {
+						modelStr = customInput.value.trim();
+					} else {
+						modelStr = select.value;
+					}
+
+					// Split in case user pasted comma separated in custom
+					const parsedModels = modelStr ? modelStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+					models.push(...parsedModels);
+				});
+
+				// deduplicate models and check if empty
+				const uniqueModels = [...new Set(models)];
+
+				if (!name) {
+					vscode.postMessage({ type: 'showError', message: 'Provider name is required.' });
+					return;
+				}
+				if (uniqueModels.length === 0) {
+					vscode.postMessage({ type: 'showError', message: 'At least one model must be specified.' });
+					return;
+				}
+				if (models.some((m, i) => models.indexOf(m) !== i)) {
+					vscode.postMessage({ type: 'showError', message: 'Duplicate models are not allowed.' });
+					return;
+				}
+
+				const provider = {
+					name,
+					sdkProvider,
+					...(baseUrl ? { baseUrl } : {}),
+					...(apiKey ? { apiKey } : {}),
+					...(uniqueModels.length > 0 ? { models: uniqueModels } : {})
+				};
+
+				// Disable the submit button and show a spinner or "Saving..." state
+				const originalText = addProviderSubmit.innerHTML;
+				addProviderSubmit.innerHTML = '<span class="codicon codicon-loading codicon-modifier-spin"></span> Saving...';
+				addProviderSubmit.disabled = true;
+
+				vscode.postMessage({ type: 'addProvider', provider });
+
+				// We will wait for 'addProviderResult' message to reset and hide the form, or show an error
+				window._handleAddProviderResult = (msg) => {
+					addProviderSubmit.innerHTML = originalText;
+					addProviderSubmit.disabled = false;
+					
+					if (msg.success) {
+						presetSelect.value = 'custom';
+						presetSelect.dispatchEvent(new Event('change'));
+						customNameInput.value = '';
+						baseUrlInput.value = '';
+						apiKeyInput.value = '';
+						
+						if (addProviderFormContainer) {
+							addProviderFormContainer.classList.add('hidden');
+							toggleAddProviderBtn.parentElement.classList.remove('hidden');
+						}
+					}
+					// On error, we leave the form open so the user can fix it.
+					// The host will show the error via showErrorMessage.
+					window._handleAddProviderResult = null;
+				};
+			});
+		}
 	}
 	initSettingsControls();
 
@@ -2566,6 +3050,10 @@
 	 * Populate the settings UI with data received from the extension host.
 	 */
 	function renderSettingsData(settings) {
+		if (settings.providerTemplates && window._updateProviderPresets) {
+			window._updateProviderPresets(settings.providerTemplates);
+		}
+		
 		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {
@@ -2645,6 +3133,21 @@
 
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+
+		renderTokenUsageVisibility(settings.showTokenUsage === true);
+	}
+
+	function renderTokenUsageVisibility(enabled) {
+		showTokenUsage = enabled === true;
+		updateTokenUsageIndicators();
+		const tuToggle = document.getElementById('setting-showTokenUsage');
+		if (tuToggle) tuToggle.checked = showTokenUsage;
+	}
+
+	function updateTokenUsageIndicators() {
+		document.querySelectorAll('.token-usage-indicator').forEach(el => {
+			el.style.display = showTokenUsage ? '' : 'none';
+		});
 	}
 
 	function escapeHtml(str) {
@@ -2780,6 +3283,7 @@
 		}
 
 		elapsedMs() {
+			if (this._overrideDuration !== undefined) return this._overrideDuration;
 			return Date.now() - this.startedAt;
 		}
 
@@ -2801,7 +3305,7 @@
 			// opens on 'Working for 0s' reads worse than one that opens on a
 			// label and grows a duration a second later.
 			this.body.appendChild(element);
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 
 		removeActivity(element) {
@@ -2955,12 +3459,12 @@
 					this.renderTimeout = setTimeout(() => {
 						this.render();
 						this.renderTimeout = null;
-						scrollToBottom();
+						scrollToBottomIfFollowing();
 					}, 50);
 				}
 			} else {
 				this.render();
-				scrollToBottom();
+				scrollToBottomIfFollowing();
 			}
 		}
 
@@ -3070,7 +3574,7 @@
 				}
 			}
 
-			scrollToBottom();
+			scrollToBottomIfFollowing();
 		}
 	}
 
@@ -3537,6 +4041,21 @@
 		}
 	}
 
+	// Setup welcome container visibility observer
+	const welcomeContainer = document.getElementById('welcome-container');
+	if (welcomeContainer && messagesContainer) {
+		const updateWelcomeVisibility = () => {
+			if (messagesContainer.children.length === 0) {
+				welcomeContainer.classList.remove('hidden');
+			} else {
+				welcomeContainer.classList.add('hidden');
+			}
+		};
+		
+		const observer = new MutationObserver(updateWelcomeVisibility);
+		observer.observe(messagesContainer, { childList: true });
+		updateWelcomeVisibility(); // Initial check
+	}
 
 	// Notify extension that webview is ready
 	vscode.postMessage({ type: 'ready' });

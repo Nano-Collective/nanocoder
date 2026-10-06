@@ -5,18 +5,25 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
+import {VoiceStatusBar} from '@/components/voice-status-bar';
+import {getVoicePreference, subscribeToPreferences} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
+import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
+import {useVoice} from '@/hooks/useVoice';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {hasStagedChanges} from '@/tools/git/utils';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
@@ -34,6 +41,10 @@ interface InteractiveAppProps {
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
+	pendingVoiceInstall?:
+		| import('@/utils/voice-install-queue').PendingVoiceInstall
+		| null;
+	onVoiceInstallConfirm?: (confirmed: boolean) => void;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
 	handleUserSubmit: (
@@ -70,6 +81,8 @@ export function InteractiveApp({
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
 	pendingToolConfirmation,
+	pendingVoiceInstall,
+	onVoiceInstallConfirm,
 	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
@@ -101,6 +114,49 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+	const drainInProgressRef = React.useRef(false);
+	const lastFailedDrainIdRef = React.useRef<string | null>(null);
+	const [drainAttempt, setDrainAttempt] = React.useState(0);
+	const {currentTheme} = useTheme();
+	const voiceInputAllowed =
+		!appState.activeMode &&
+		!appState.isToolConfirmationMode &&
+		!appState.isQuestionMode &&
+		pendingSubagentApproval === null &&
+		pendingToolConfirmation === null;
+	const agentBusy =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null;
+
+	// Load voice preferences reactively for useVoice via preference store subscription
+	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
+
+	React.useEffect(() => {
+		return subscribeToPreferences(() => {
+			setVoicePref(getVoicePreference());
+		});
+	}, []);
+
+	const {
+		state: voiceState,
+		startStopRecording,
+		unavailableReason: voiceUnavailableReason,
+	} = useVoice({
+		handleUserSubmit,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
+		voicePreference: voicePref,
+		handleCancel: appHandlers.handleCancel,
+		client: appState.client,
+		isConversationComplete: appState.isConversationComplete,
+		developmentMode: appState.developmentMode,
+		isInputAvailable: voiceInputAllowed,
+		isAgentBusy: agentBusy,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+	});
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -120,6 +176,30 @@ export function InteractiveApp({
 	const handleToggleReasoningExpanded = () => {
 		appState.setReasoningExpanded(!appState.reasoningExpanded);
 	};
+
+	// After a turn that edited files, suggest a follow-up command in the empty
+	// prompt: /commit when changes are already staged (it only reads the staged
+	// diff), otherwise /checkpoint create. Keyed on the message count, so a slash
+	// command completing - the suggested one included - doesn't bring it back.
+	const [suggestedCommand, setSuggestedCommand] = React.useState<string | null>(
+		null,
+	);
+	const suggestionKeyRef = React.useRef<number | null>(null);
+	React.useEffect(() => {
+		if (!appState.isConversationComplete) return;
+		const key = appState.messages.length;
+		if (suggestionKeyRef.current === key) return;
+		suggestionKeyRef.current = key;
+		if (!lastTurnEditedFiles(appState.messages)) {
+			setSuggestedCommand(null);
+			return;
+		}
+		void hasStagedChanges().then(staged => {
+			if (suggestionKeyRef.current === key) {
+				setSuggestedCommand(staged ? '/commit' : '/checkpoint create');
+			}
+		});
+	}, [appState.isConversationComplete, appState.messages]);
 
 	const showModalSelectors =
 		(appState.activeMode !== null &&
@@ -183,6 +263,100 @@ export function InteractiveApp({
 			appState.abortController !== null) &&
 		!appState.liveComponentCapturesInput;
 
+	// Drain queued prompts only after the previous turn is fully idle and all
+	// modal modes have closed. Command handlers and conversation completion can
+	// both signal completion, so keeping the drain here makes it idempotent and
+	// prevents nested or duplicate turns.
+	const queueDrainBlocked =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null ||
+		appState.isToolConfirmationMode ||
+		appState.isQuestionMode ||
+		pendingSubagentApproval !== null ||
+		pendingToolConfirmation !== null ||
+		appState.planReviewState?.show === true ||
+		appState.architectReviewState?.show === true ||
+		appState.pendingPlanProceed !== null;
+	const queuedMessageCount = userMessageQueue.queuedMessages.length;
+	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
+
+	React.useEffect(() => {
+		// Re-run after a successful dispatch settles, once its queue update has
+		// rendered and the next item can be considered.
+		void drainAttempt;
+		if (
+			queueDrainBlocked ||
+			appState.activeMode !== null ||
+			appState.isSettingsMode ||
+			!appState.client ||
+			!appState.toolManager ||
+			!appState.isConversationComplete ||
+			queuedMessageCount === 0 ||
+			lastFailedDrainIdRef.current === queuedMessageId ||
+			drainInProgressRef.current
+		) {
+			return;
+		}
+
+		drainInProgressRef.current = true;
+		let started = false;
+		const timeout = setTimeout(() => {
+			started = true;
+			let drainedMessageId = queuedMessageId ?? null;
+			void Promise.resolve()
+				.then(() =>
+					userMessageQueue.drainNextMessage(async message => {
+						drainedMessageId = message.id;
+						await handleUserSubmit(
+							message.message,
+							message.displayValue,
+							message.images,
+						);
+						return true;
+					}),
+				)
+				.then(
+					dispatched => {
+						drainInProgressRef.current = false;
+						if (!dispatched) {
+							// Keep a failed head queued, but do not immediately re-enter
+							// the effect while it still has the same identity.
+							lastFailedDrainIdRef.current = drainedMessageId;
+							return;
+						}
+						lastFailedDrainIdRef.current = null;
+						// The queue state update happens before the dispatch resolves. A
+						// separate render is needed to notice and drain the next item after
+						// the dispatched turn returns to idle.
+						setDrainAttempt(attempt => attempt + 1);
+					},
+					() => {
+						drainInProgressRef.current = false;
+						lastFailedDrainIdRef.current = drainedMessageId;
+					},
+				);
+		}, 0);
+
+		return () => {
+			clearTimeout(timeout);
+			if (!started) drainInProgressRef.current = false;
+		};
+	}, [
+		appState.activeMode,
+		appState.client,
+		appState.isConversationComplete,
+		appState.isSettingsMode,
+		appState.toolManager,
+		queueDrainBlocked,
+		handleUserSubmit,
+		userMessageQueue.drainNextMessage,
+		queuedMessageCount,
+		queuedMessageId,
+		drainAttempt,
+	]);
+
 	const recallableSubmittedDraft =
 		cancellable &&
 		chatHandler.isGenerating &&
@@ -222,7 +396,12 @@ export function InteractiveApp({
 		if (appState.messages[appState.messages.length - 1]?.role === 'user') {
 			appState.updateMessages(appState.messages.slice(0, -1));
 
-			if (appState.chatComponents.length > 0) {
+			// In fullscreen (alt-screen) mode, the prompt bubble lives in React
+			// state only — pop it so it disappears from the viewport.  In inline
+			// mode the bubble has already been committed to Ink's <Static>
+			// scrollback and cannot be un-printed, so popping the React element
+			// would just create a mismatch; leave it in place.
+			if (altScreenActive && appState.chatComponents.length > 0) {
 				appState.setChatComponents(appState.chatComponents.slice(0, -1));
 			}
 		}
@@ -240,6 +419,7 @@ export function InteractiveApp({
 		setSubmittedDraft(null);
 	}, [
 		appHandlers,
+		altScreenActive,
 		appState.messages,
 		appState.updateMessages,
 		appState.chatComponents,
@@ -269,6 +449,19 @@ export function InteractiveApp({
 		{isActive: cancellable},
 	);
 
+	const isVoiceInputAppropriate =
+		Boolean(voicePref.enabled) && voiceInputAllowed;
+
+	// Push-to-talk keybinding (Ctrl+G) avoids the existing Ctrl+T task-list binding.
+	useInput(
+		(input, key) => {
+			if (key.ctrl && input === 'g') {
+				void startStopRecording();
+			}
+		},
+		{isActive: isVoiceInputAppropriate},
+	);
+
 	// Fullscreen layout if and only if cli.tsx put us on the alternate
 	// screen. Inline mode (--no-alt-screen / alternateScreen:false pref),
 	// test renderers, and piped stdout all use the classic flow layout
@@ -278,7 +471,6 @@ export function InteractiveApp({
 	const artifactRefreshKey = `${appState.isConversationComplete}:${
 		appState.planReviewState?.show ?? false
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
-
 	return (
 		// One provider for the whole interactive tree, not just the composer.
 		// FileExplorer reads the same context to hand its selection over as
@@ -338,6 +530,27 @@ export function InteractiveApp({
 								onAskMore={() => void appHandlers.handlePlanAskMore()}
 								onModify={appHandlers.handlePlanModify}
 								onDismiss={appHandlers.handlePlanModify}
+							/>
+						</Box>
+					)}
+
+					{appState.architectReviewState?.show && (
+						<Box
+							marginLeft={fullscreen ? 0 : -1}
+							paddingLeft={fullscreen ? 2 : 0}
+							flexDirection="column"
+						>
+							<ArchitectReviewPrompt
+								filesChanged={appState.architectReviewState.filesChanged}
+								filesMissing={appState.architectReviewState.filesMissing}
+								onKeep={() => void appHandlers.handleArchitectKeep()}
+								onRevert={() => void appHandlers.handleArchitectRevert()}
+								// Forward what the user typed. A zero-arg arrow here silently
+								// dropped it and sent a fixed string instead, so the revise
+								// box collected instructions the model never saw.
+								onRevertAndRevise={instructions =>
+									void appHandlers.handleArchitectRevertAndRevise(instructions)
+								}
 							/>
 						</Box>
 					)}
@@ -432,6 +645,11 @@ export function InteractiveApp({
 						appState.activeMode === null &&
 						!appState.isSettingsMode &&
 						!appState.planReviewState?.show &&
+						// The architect gate runs its own useInput. Leaving the composer
+						// mounted alongside it gave every keystroke two live consumers,
+						// and let the user submit a new turn straight past the gate with
+						// the checkpoint still open.
+						!appState.architectReviewState?.show &&
 						// Hide the composer only while a live component explicitly captures input.
 						!appState.liveComponentCapturesInput && (
 							<ChatInput
@@ -466,6 +684,8 @@ export function InteractiveApp({
 								pendingSubagentApproval={pendingSubagentApproval}
 								onSubagentToolApproval={handleSubagentToolApproval}
 								pendingToolConfirmation={pendingToolConfirmation}
+								pendingVoiceInstall={pendingVoiceInstall}
+								onVoiceInstallConfirm={onVoiceInstallConfirm}
 								onToolConfirmation={handleToolConfirmation}
 								onSubmit={handleUserSubmit}
 								activeEditor={vscodeServer.activeEditor}
@@ -476,6 +696,8 @@ export function InteractiveApp({
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
 								isSaving={isSaving}
+								suggestedCommand={suggestedCommand}
+								onDismissSuggestion={() => setSuggestedCommand(null)}
 							/>
 						)}
 
@@ -490,6 +712,23 @@ export function InteractiveApp({
 						/>
 					</Box>
 				</Box>
+
+				{appState.startChat &&
+					appState.activeMode === null &&
+					!appState.isSettingsMode &&
+					!appState.planReviewState?.show &&
+					voicePref.enabled && (
+						<VoiceStatusBar
+							state={voiceState}
+							theme={currentTheme}
+							idleHint={
+								voiceUnavailableReason ??
+								(voicePref.activationMode === 'hands-free'
+									? 'Waiting for speech'
+									: 'Press Ctrl+G to talk')
+							}
+						/>
+					)}
 			</Box>
 		</UIStateProvider>
 	);

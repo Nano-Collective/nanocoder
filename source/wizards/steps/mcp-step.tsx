@@ -9,6 +9,7 @@ import {
 	MCP_TEMPLATES,
 	type McpServerConfig,
 	type McpTemplate,
+	resolveMcpTemplateId,
 } from '../templates/mcp-templates';
 import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
@@ -225,9 +226,16 @@ export function McpStep({
 		if (item.value === 'edit' && editingServerName !== null) {
 			const server = servers[editingServerName];
 			if (server) {
-				// Find matching template by server name or use custom
+				// Resolve the template that built this server. Prefer the stamped
+				// templateId / tags over the server name so a custom-named
+				// instance (e.g. `you-paid`) resolves back to its template
+				// instead of falling through to `custom`, whose buildConfig never
+				// writes headers and would silently drop a saved bearer token.
+				const templateId = resolveMcpTemplateId(server);
 				const template =
-					MCP_TEMPLATES.find(t => t.id === server.name) ||
+					(templateId
+						? MCP_TEMPLATES.find(t => t.id === templateId)
+						: undefined) ||
 					MCP_TEMPLATES.find(t => t.id === editingServerName) ||
 					MCP_TEMPLATES.find(t => t.id === 'custom');
 
@@ -258,14 +266,31 @@ export function McpStep({
 							answers.envVars = Object.entries(server.env)
 								.map(([key, value]) => `${key}=${value}`)
 								.join('\n');
-						} else if (field.name === 'apiKey' && server.env) {
-							// Try to find API key from env vars
-							const apiKeyEntry = Object.entries(server.env).find(
-								([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
-							);
+						} else if (field.name === 'apiKey') {
+							// Try env first, then a bearer Authorization header
+							// or an X-API-Key header. `you` and `serply` use
+							// `apiKey`. `github-remote` uses `githubToken`.
+							const apiKeyEntry = server.env
+								? Object.entries(server.env).find(
+										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
+									)
+								: undefined;
 							if (apiKeyEntry) {
 								answers.apiKey = apiKeyEntry[1];
+							} else if (server.headers?.Authorization?.startsWith('Bearer ')) {
+								answers.apiKey = server.headers.Authorization.slice(
+									'Bearer '.length,
+								);
+							} else if (server.headers?.['X-API-Key']) {
+								answers.apiKey = server.headers['X-API-Key'];
 							}
+						} else if (
+							field.name === 'githubToken' &&
+							server.headers?.Authorization?.startsWith('Bearer ')
+						) {
+							answers.githubToken = server.headers.Authorization.slice(
+								'Bearer '.length,
+							);
 						}
 					}
 
@@ -398,15 +423,27 @@ export function McpStep({
 			const isMultiline = currentField?.name === 'envVars';
 
 			if (isMultiline) {
-				// Handle multiline input
+				// Handle multiline input. Keys can reach this handler faster
+				// than the component re-renders (Ink also fires every key from
+				// one stdin chunk in the same tick), so each update builds on
+				// the previous one rather than on the `multilineBuffer` this
+				// render closed over - otherwise fast typing drops characters.
 				if (key.return) {
 					// Add newline to buffer
-					setMultilineBuffer(multilineBuffer + '\n');
+					setMultilineBuffer(prev => prev + '\n');
 				} else if (key.escape) {
 					// Submit multiline input on Escape
 					handleFieldSubmit();
+				} else if (
+					key.backspace ||
+					(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
+				) {
+					// Backspace, told apart from forward Delete the same way
+					// TextInput does. The buffer has no cursor - typing always
+					// appends - so forward Delete has nothing after it to remove.
+					setMultilineBuffer(prev => prev.slice(0, -1));
 				} else if (!key.ctrl && !key.meta && input) {
-					setMultilineBuffer(multilineBuffer + input);
+					setMultilineBuffer(prev => prev + input);
 				}
 			} else {
 				if (key.return) {

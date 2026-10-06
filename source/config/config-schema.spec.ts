@@ -87,7 +87,6 @@ test('all documented nanocoder fields are accepted together', t => {
 					headers: {Authorization: 'Bearer ${TOKEN}'},
 				},
 			],
-			mcpServers: [{name: 'mcp', transport: 'stdio'}],
 			alwaysAllow: ['execute_bash'],
 			disabledTools: ['web_search'],
 			systemPrompt: {mode: 'append', content: 'Be terse.'},
@@ -96,6 +95,7 @@ test('all documented nanocoder fields are accepted together', t => {
 			nanocoderTools: {webSearch: {apiKey: 'sk-abc'}},
 			headless: {maxTurns: 20},
 			sandbox: true,
+			autoCommit: true,
 		},
 	});
 });
@@ -248,21 +248,12 @@ test('lspServers requires name, command, languages', t => {
 });
 
 // ---------------------------------------------------------------------------
-// mcpServers (MCPServerConfig)
+// mcpServers belong in .mcp.json, not agents.config.json
 // ---------------------------------------------------------------------------
 
-test('mcpServer requires name and transport', t => {
-	assertInvalid(t, 'mcp missing transport', {
-		nanocoder: {mcpServers: [{name: 'm'}]},
-	});
-	assertValid(t, 'mcp minimal', {
+test('mcpServers is rejected in agents.config.json (the loader never reads it)', t => {
+	assertInvalid(t, 'mcpServers in agents.config.json', {
 		nanocoder: {mcpServers: [{name: 'm', transport: 'stdio'}]},
-	});
-});
-
-test('mcpServer transport enum is enforced', t => {
-	assertInvalid(t, 'mcp bad transport', {
-		nanocoder: {mcpServers: [{name: 'm', transport: 'grpc'}]},
 	});
 });
 
@@ -419,7 +410,7 @@ test('retries rejects unknown key', t => {
 	});
 });
 
-test('RetryLimitsConfig requires no fields and exposes all three retry caps', t => {
+test('RetryLimitsConfig requires no fields and exposes every retry cap', t => {
 	const def = schema.definitions.RetryLimitsConfig;
 	t.deepEqual(def.required, undefined);
 	t.false(Object.values(def.properties).some((p: {required?: string[]}) => p.required));
@@ -427,6 +418,7 @@ test('RetryLimitsConfig requires no fields and exposes all three retry caps', t 
 		'maxEmptyTurns',
 		'maxMalformedRetries',
 		'maxRepeatedToolCalls',
+		'maxTruncatedTurns',
 	]);
 });
 
@@ -478,7 +470,6 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'autoCompact',
 		'tune',
 		'headless',
-		'mcpServers',
 		'lspServers',
 		'alwaysAllow',
 		'disabledTools',
@@ -488,6 +479,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'retries',
 		'hooks',
 		'sandbox',
+		'autoCommit',
 	];
 	for (const key of expected) {
 		t.true(
@@ -496,7 +488,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		);
 	}
 	// Preferences-only keys must NOT be advertised on the agents.config.json schema.
-	for (const absent of ['notifications', 'sessions', 'paste']) {
+	for (const absent of ['notifications', 'sessions', 'paste', 'mcpServers']) {
 		t.false(
 			props.includes(absent),
 			`"${absent}" lives in nanocoder-preferences.json and should not appear in the agents.config.json schema`,
@@ -521,9 +513,9 @@ test('ProviderConfig requires name and models in the schema', t => {
 	t.deepEqual([...(def.required ?? [])].sort(), ['models', 'name']);
 });
 
-test('MCPServerConfig requires name and transport in the schema', t => {
-	const def = schema.definitions.MCPServerConfig;
-	t.deepEqual([...(def.required ?? [])].sort(), ['name', 'transport']);
+test('MCPServerConfig is not in the agents.config.json schema', t => {
+	// Including it would also leak the loader-internal rawEnv/rawHeaders/source fields.
+	t.is(schema.definitions.MCPServerConfig, undefined);
 });
 
 test('RecordStringString maps to additionalProperties of type string', t => {
