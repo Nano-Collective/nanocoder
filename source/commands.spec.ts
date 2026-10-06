@@ -434,3 +434,149 @@ test('exported commandRegistry - can register and retrieve commands', t => {
 	// Clean up
 	(commandRegistry as any).commands.clear();
 });
+
+// ============================================================================
+// Tests for setAliases() / alias resolution
+// ============================================================================
+
+test('CommandRegistry.setAliases - resolves alias to the target command', t => {
+	const registry = new CommandRegistry();
+	const target = createTestCommand('compact');
+
+	registry.register(target);
+	registry.setAliases({c: 'compact'});
+
+	t.is(registry.get('c'), target);
+});
+
+test('CommandRegistry.setAliases - alias execution invokes target handler with args', async t => {
+	const registry = new CommandRegistry();
+	let receivedArgs: string[] | null = null;
+
+	const target: Command = {
+		name: 'export',
+		description: 'Export handler',
+		handler: async args => {
+			receivedArgs = args;
+			return React.createElement(React.Fragment, null, 'done');
+		},
+	};
+
+	registry.register(target);
+	registry.setAliases({e: 'export'});
+
+	const messages: Message[] = [];
+	const metadata = {
+		provider: 'test',
+		model: 'test-model',
+		tokens: 0,
+		getMessageTokens: () => 0,
+	};
+
+	await registry.execute('e session.md', messages, metadata);
+
+	t.deepEqual(receivedArgs, ['session.md']);
+});
+
+test('CommandRegistry.setAliases - unknown target returns undefined from get', t => {
+	const registry = new CommandRegistry();
+	registry.setAliases({c: 'does-not-exist'});
+
+	t.is(registry.get('c'), undefined);
+});
+
+test('CommandRegistry.setAliases - drops alias that matches a registered built-in', t => {
+	const registry = new CommandRegistry();
+	const compact = createTestCommand('compact');
+
+	registry.register(compact);
+	registry.setAliases({compact: 'something-else'});
+
+	// The built-in name must still resolve to the original command.
+	t.is(registry.get('compact'), compact);
+});
+
+test('CommandRegistry.setAliases - clears prior aliases on each call', t => {
+	const registry = new CommandRegistry();
+	const first = createTestCommand('first');
+	const second = createTestCommand('second');
+
+	registry.register(first);
+	registry.register(second);
+	registry.setAliases({s: 'first'});
+
+	t.is(registry.get('s'), first);
+
+	registry.setAliases({s: 'second'});
+
+	t.is(registry.get('s'), second);
+});
+
+test('CommandRegistry.setAliases - drops alias that matches a registered lazy entry', async t => {
+	const registry = new CommandRegistry();
+	const lazy = {
+		name: 'help',
+		description: 'help command',
+		load: () => Promise.resolve(createTestCommand('help')),
+	};
+
+	registry.registerLazy(lazy);
+	// Register an unrelated command named 'whatever' so the alias target
+	// could resolve if it slipped through the shadow check.
+	registry.register(createTestCommand('whatever'));
+	registry.setAliases({help: 'whatever'});
+
+	const result = await registry.get('help')?.handler([], [], {
+		provider: 'test',
+		model: 'test-model',
+		tokens: 0,
+		getMessageTokens: () => 0,
+	});
+
+	// The lazy 'help' command is what ran, not 'whatever' — the alias was
+	// dropped because it would have shadowed a built-in name.
+	t.truthy(React.isValidElement(result));
+	t.not((result as React.ReactElement).props.children, 'Handled: whatever');
+});
+
+test('CommandRegistry.getCompletions - includes user aliases', t => {
+	const registry = new CommandRegistry();
+	registry.register([createTestCommand('help'), createTestCommand('test')]);
+	registry.setAliases({h: 'help', t: 'test'});
+
+	const completions = registry.getCompletions('');
+
+	t.true(completions.includes('h'));
+	t.true(completions.includes('t'));
+	t.true(completions.includes('help'));
+	t.true(completions.includes('test'));
+});
+
+test('CommandRegistry.getCompletions - alias is fuzzy-matched on its own key', t => {
+	const registry = new CommandRegistry();
+	registry.register(createTestCommand('compact'));
+	registry.setAliases({c: 'compact'});
+
+	const completions = registry.getCompletions('c');
+
+	t.true(completions.includes('c'));
+});
+
+test('CommandRegistry.execute - returns unknown-command error for unresolved alias', async t => {
+	const registry = new CommandRegistry();
+	registry.setAliases({x: 'no-such-target'});
+
+	const messages: Message[] = [];
+	const metadata = {
+		provider: 'test',
+		model: 'test-model',
+		tokens: 0,
+		getMessageTokens: () => 0,
+	};
+
+	const result = await registry.execute('x', messages, metadata);
+
+	t.truthy(result);
+	const element = result as {props: {message: string}};
+	t.true(element.props.message.includes('Unknown command'));
+});

@@ -336,6 +336,7 @@ export interface DiskNanocoderConfig {
 	retries?: Partial<RetryLimitsConfig>;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
+	aliases?: Record<string, string>;
 }
 
 /**
@@ -441,6 +442,8 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	aliases?: Record<string, string>;
 }
 
 // MCP Server configuration with source tracking

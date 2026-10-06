@@ -990,6 +990,150 @@ test.serial(
 	},
 );
 
+// Tests for command aliases (nanocoder.aliases)
+
+const aliasTestDir = join(tmpdir(), `nanocoder-alias-test-${Date.now()}`);
+
+test.before(() => {
+	mkdirSync(aliasTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(aliasTestDir)) {
+		rmSync(aliasTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withAliasConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (appConfig: AppConfig) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(aliasTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial(
+	'loadAppConfig reads nanocoder.aliases from agents.config.json',
+	async t => {
+		await withAliasConfig(
+			'aliases-basic',
+			{nanocoder: {aliases: {c: 'compact', e: 'export'}}},
+			appConfig => {
+				t.deepEqual(appConfig.aliases, {c: 'compact', e: 'export'});
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig returns no aliases when the key is absent',
+	async t => {
+		await withAliasConfig('aliases-absent', {nanocoder: {}}, appConfig => {
+			t.is(appConfig.aliases, undefined);
+		});
+	},
+);
+
+test.serial(
+	'loadAppConfig drops non-string and empty alias entries',
+	async t => {
+		await withAliasConfig(
+			'aliases-malformed',
+			{
+				nanocoder: {
+					aliases: {
+						c: 'compact',
+						bad: '',
+						wrong: 42,
+						also: '   ',
+						ok: 'export',
+					},
+				},
+			},
+			appConfig => {
+				t.deepEqual(appConfig.aliases, {c: 'compact', ok: 'export'});
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig ignores aliases when the key is the wrong type',
+	async t => {
+		await withAliasConfig(
+			'aliases-wrong-shape',
+			{nanocoder: {aliases: 'compact'}},
+			appConfig => {
+				t.is(appConfig.aliases, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig prefers project aliases over global',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const subdir = join(aliasTestDir, 'aliases-project-overrides-global');
+		const globalDir = join(subdir, 'global');
+		mkdirSync(globalDir, {recursive: true});
+
+		try {
+			writeFileSync(
+				join(globalDir, 'agents.config.json'),
+				JSON.stringify({nanocoder: {aliases: {c: 'compact'}}}),
+				'utf-8',
+			);
+			writeFileSync(
+				join(subdir, 'agents.config.json'),
+				JSON.stringify({nanocoder: {aliases: {c: 'commit'}}}),
+				'utf-8',
+			);
+			process.chdir(subdir);
+			process.env.NANOCODER_CONFIG_DIR = globalDir;
+
+			const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+			reload();
+
+			t.deepEqual(getAppConfig().aliases, {c: 'commit'});
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
 // Sessions and paste are read from nanocoder-preferences.json, not
 // agents.config.json. These tests pin that the loaders read the same file and
 // shape the /settings panels write.
