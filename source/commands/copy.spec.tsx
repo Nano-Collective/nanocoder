@@ -193,6 +193,23 @@ test('copyCommand warns on an unknown argument', async t => {
         t.is(lastWritten, null);
 });
 
+test('copyCommand warns when multiple arguments are provided', async t => {
+        const result = await copyCommand.handler(
+                ['code', 'extra'],
+                baseMessages,
+                testMetadata,
+        );
+
+        t.truthy(React.isValidElement(result));
+
+        const {lastFrame} = renderWithTheme(result as React.ReactElement);
+        const output = lastFrame() || '';
+
+        t.true(output.includes('Unknown option "code"'));
+        t.true(output.includes('Usage: /copy [code]'));
+        t.is(lastWritten, null);
+});
+
 test('copyCommand code warns when no code blocks exist', async t => {
 	const result = await copyCommand.handler(['code'], baseMessages, testMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
