@@ -14,13 +14,16 @@ export function parseContextLimit(value: string): number | null {
 	}
 
 	// The regex only matches digits, so `parseFloat` can never return NaN here.
-	// It can still overflow to Infinity on a very long digit string, and callers
-	// store whatever we hand back without further validation.
 	const parsed = Number.parseFloat(match[1]);
-	if (!Number.isFinite(parsed) || parsed <= 0) {
+	const multiplier = match[2] === 'k' ? 1000 : 1;
+	const result = Math.round(parsed * multiplier);
+
+	// It can overflow to Infinity on a very long digit string + multiplier.
+	// It can also round down to 0 for very small decimal values.
+	// Callers store whatever we hand back without further validation.
+	if (!Number.isFinite(result) || result <= 0) {
 		return null;
 	}
 
-	const multiplier = match[2] === 'k' ? 1000 : 1;
-	return Math.round(parsed * multiplier);
+	return result;
 }
