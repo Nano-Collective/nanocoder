@@ -284,7 +284,15 @@ export function createMemoryCommand(
 						);
 					}
 
-					const index = Number.parseInt(args[1] ?? '', 10);
+					const arg = args[1] ?? '';
+					if (!/^\d+$/.test(arg)) {
+						return errorMsg(
+							`Usage: /memory accept <1-${proposalStore.size}>`,
+							'memory-error',
+						);
+					}
+
+					const index = Number.parseInt(arg, 10);
 					const proposal = proposalStore.at(index);
 					if (!proposal) {
 						return errorMsg(

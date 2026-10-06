@@ -285,6 +285,48 @@ test('memory command rejects accept with an out-of-range index', async t => {
 	t.deepEqual(summarizerService.accepted, []);
 });
 
+test('memory command rejects accept with trailing junk', async t => {
+	const manager = new FakeMemoryManager();
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({memoryManager: manager, summarizerService});
+
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+	const result = await command.handler(['accept', '1oops'], [], testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true((lastFrame() ?? '').includes('Usage: /memory accept <1-1>'));
+	t.deepEqual(summarizerService.accepted, []);
+});
+
+test('memory command rejects accept with decimal', async t => {
+	const manager = new FakeMemoryManager();
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({memoryManager: manager, summarizerService});
+
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+	const result = await command.handler(['accept', '1.5'], [], testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true((lastFrame() ?? '').includes('Usage: /memory accept <1-1>'));
+	t.deepEqual(summarizerService.accepted, []);
+});
+
 test('lazy registry exposes /memory', t => {
 	const memory = lazyCommands.find(command => command.name === 'memory');
 
