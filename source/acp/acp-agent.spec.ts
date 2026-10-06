@@ -664,7 +664,12 @@ test('AcpAgent.prompt - serializes overlapping prompts instead of throwing', asy
 	});
 
 	await firstEnteredAtChat;
-	await Promise.resolve();
+	// Drain multiple microtask cycles. A regression where the second waiter
+	// wakes up before the first turn's `releaseTurn()` would start the second
+	// chat call here; we want started to stay at 1 until release First().
+	for (let i = 0; i < 5; i++) {
+		await Promise.resolve();
+	}
 	t.is(
 		started,
 		1,
