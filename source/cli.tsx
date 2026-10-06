@@ -111,6 +111,24 @@ if (args[0] === 'skills') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder channels <sub>` — fast path. The bridge is a client of
+// the daemon, so it only needs the config module graph and the adapters
+// (no Ink, no providers, no tool registry).
+if (args[0] === 'channels') {
+	const {runChannelsCli, CHANNELS_CLI_USAGE} = await import('@/channels/cli');
+	const sub = args[1];
+	if (sub !== 'start' && sub !== 'status') {
+		console.error(CHANNELS_CLI_USAGE);
+		process.exit(sub ? 1 : 0);
+	}
+	const result = await runChannelsCli(sub, {projectRoot: process.cwd()});
+	if (result.output) {
+		if (result.exitCode === 0) console.log(result.output);
+		else console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
@@ -209,6 +227,10 @@ Commands:
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
+  channels <subcommand>           Bridge chat apps (Telegram, Slack, Discord) to the running daemon
+                                  so you can message your agent from your phone or team chat.
+                                  Subcommands: start (foreground, Ctrl+C to stop), status.
+                                  Configure under nanocoder.channels in agents.config.json.
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.

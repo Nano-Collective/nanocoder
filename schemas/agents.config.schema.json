@@ -20,6 +20,60 @@
 		}
 	},
 	"definitions": {
+		"ChannelsConfig": {
+			"description": "Chat apps bridged to the per-project daemon by `nanocoder channels start`.",
+			"properties": {
+				"discord": {
+					"$ref": "#/definitions/DiscordChannelConfig"
+				},
+				"historyTurns": {
+					"description": "Earlier exchanges from the same chat carried into the next prompt. Default 6, max 50.",
+					"type": "number"
+				},
+				"slack": {
+					"$ref": "#/definitions/SlackChannelConfig"
+				},
+				"telegram": {
+					"$ref": "#/definitions/TelegramChannelConfig"
+				},
+				"timeoutMs": {
+					"description": "How long to wait for the daemon to answer one message, in milliseconds. Default 600000.",
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"DiscordChannelConfig": {
+			"properties": {
+				"allowedChats": {
+					"description": "Group chats or channels where every message from an allowed user is\nhandled. Elsewhere the bot only answers direct messages and",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"allowedUsers": {
+					"description": "Platform user ids allowed to talk to the agent; everyone else is ignored.\nRequired - a channel with an empty list is not started, because anyone\nwho found the bot could otherwise run tools on this machine.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"mode": {
+					"description": "Run mode for this channel. `headless` (default) executes tools\nunattended; `plan` only reports what the agent would do.",
+					"enum": ["headless", "plan"],
+					"type": "string"
+				},
+				"token": {
+					"description": "Bot token from the Discord developer portal.",
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["token", "allowedUsers"]
+		},
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
@@ -33,6 +87,10 @@
 				"autoCompact": {
 					"$ref": "#/definitions/AutoCompactConfig",
 					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
+				},
+				"channels": {
+					"$ref": "#/definitions/ChannelsConfig",
+					"description": "Chat apps (Telegram, Slack, Discord) bridged to the daemon by `nanocoder channels start`."
 				},
 				"defaultMode": {
 					"description": "Default conversation mode when none is specified.",
@@ -655,6 +713,40 @@
 			"type": "object",
 			"additionalProperties": true
 		},
+		"SlackChannelConfig": {
+			"properties": {
+				"allowedChats": {
+					"description": "Group chats or channels where every message from an allowed user is\nhandled. Elsewhere the bot only answers direct messages and",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"allowedUsers": {
+					"description": "Platform user ids allowed to talk to the agent; everyone else is ignored.\nRequired - a channel with an empty list is not started, because anyone\nwho found the bot could otherwise run tools on this machine.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"appToken": {
+					"description": "App-level token with the `connections:write` scope (`xapp-...`), for Socket Mode.",
+					"type": "string"
+				},
+				"botToken": {
+					"description": "Bot user OAuth token (`xoxb-...`).",
+					"type": "string"
+				},
+				"mode": {
+					"description": "Run mode for this channel. `headless` (default) executes tools\nunattended; `plan` only reports what the agent would do.",
+					"enum": ["headless", "plan"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["botToken", "appToken", "allowedUsers"]
+		},
 		"SystemPromptConfig": {
 			"properties": {
 				"content": {
@@ -670,6 +762,36 @@
 			},
 			"type": "object",
 			"additionalProperties": false
+		},
+		"TelegramChannelConfig": {
+			"properties": {
+				"allowedChats": {
+					"description": "Group chats or channels where every message from an allowed user is\nhandled. Elsewhere the bot only answers direct messages and",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"allowedUsers": {
+					"description": "Platform user ids allowed to talk to the agent; everyone else is ignored.\nRequired - a channel with an empty list is not started, because anyone\nwho found the bot could otherwise run tools on this machine.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"mode": {
+					"description": "Run mode for this channel. `headless` (default) executes tools\nunattended; `plan` only reports what the agent would do.",
+					"enum": ["headless", "plan"],
+					"type": "string"
+				},
+				"token": {
+					"description": "Bot token from",
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["token", "allowedUsers"]
 		}
 	},
 	"additionalProperties": false

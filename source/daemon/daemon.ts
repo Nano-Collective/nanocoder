@@ -42,6 +42,7 @@ import {
 	removeLockfile,
 	writeLockfile,
 } from './lockfile';
+import {buildPromptRunnerConfig, createPromptRunner} from './prompt-runner';
 
 export interface DaemonOptions {
 	projectRoot: string;
@@ -106,11 +107,35 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	// server itself). On Windows, where SIGTERM is force-kill, this is the
 	// only way to get a graceful stop.
 	const stopHandler: {fn: (() => Promise<void>) | null} = {fn: null};
+
+	// Remote prompts (chat bridge, scripts) share the triggered runs'
+	// executor and checkpointer, but queue behind each other in their own
+	// lane: the backpressure dispatcher only serializes per subscription.
+	const promptRunner = createPromptRunner({
+		buildExecutor: opts.buildExecutor,
+		checkpointer: opts.checkpointer,
+		onActivity: activity => {
+			const status = activity.result.success ? 'ok' : 'error';
+			const checkpoint = activity.checkpointId
+				? ` checkpoint=${activity.checkpointId}`
+				: '';
+			const errSuffix =
+				!activity.result.success && activity.result.error
+					? ` error="${activity.result.error}"`
+					: '';
+			console.log(
+				`Prompt run ${status}: source=${activity.request.source ?? 'ipc'} ` +
+					`mode=${activity.mode} duration=${activity.durationMs}ms${checkpoint}${errSuffix}`,
+			);
+		},
+	});
+
 	const ipcServer = new DaemonIpcServer(getSocketPath(opts.projectRoot), {
 		listSubscriptions: () => router.all(),
 		shutdown: async () => {
 			if (stopHandler.fn) await stopHandler.fn();
 		},
+		prompt: request => promptRunner.run(request),
 	});
 
 	const defaultOnActivity: ActivityListener = activity => {
@@ -197,6 +222,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	// registering first would stop file-based agents from ever loading. A
 	// user agent that already took the name wins.
 	subagentLoader.registerExternal(buildCommandRunnerConfig());
+	// Same ordering rule for the agent remote prompts run under.
+	subagentLoader.registerExternal(buildPromptRunnerConfig());
 
 	const watcher = new FileWatcherSource(router, {root: opts.projectRoot});
 	const cron = new ScheduleEventSource(router);
