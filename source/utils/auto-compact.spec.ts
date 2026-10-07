@@ -678,6 +678,47 @@ test('performAutoCompact falls back to mechanical when LLM throws', async t => {
 	);
 });
 
+test('performAutoCompact reports degraded fallback when LLM returns an empty summary', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const notifications: string[] = [];
+	const client = makeStubClient(() => '   ');
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 1, 'the LLM was called and returned an empty summary');
+	t.false(
+		(result || []).some(m => (m.content || '').includes('<conversation-summary>')),
+		'output is mechanical (no LLM summary marker)',
+	);
+	t.true(
+		notifications.at(-1)?.includes('(summary degraded: LLM call failed)'),
+		'fallback notification identifies the failed LLM summary',
+	);
+});
+
 test('performAutoCompact uses provider-configured context limit', async t => {
 	const messages: Message[] = [
 		{role: 'user', content: 'x'.repeat(3000)},
