@@ -116,7 +116,7 @@ test('formats content with path header', async t => {
 	t.true(result.success);
 	t.truthy(result.content);
 	// Should have path header and content without line numbers
-	t.true(result.content!.startsWith(`Path: ${testFilePath}`));
+	t.true(result.content!.startsWith(`Path: ${testFilePath} (lines 2-3)`));
 	t.true(result.content!.includes('Line 2'));
 	t.true(result.content!.includes('Line 3'));
 });
