@@ -414,6 +414,54 @@ test('reports and blocks a queued prompt when draining rejects before dispatch s
 	t.is(notices.length, 1);
 });
 
+test('reports and blocks a queued prompt when draining rejects after dispatch starts', async t => {
+	let drainAttempts = 0;
+	let dispatchAttempts = 0;
+	const notices: React.ReactNode[] = [];
+	const {unmount} = renderWithTheme(
+		<QueuedPromptHarness
+			overrides={{
+				startChat: true,
+				client: {},
+				toolManager: {},
+				isConversationComplete: true,
+				addToChatQueue: notice => {
+					notices.push(notice);
+				},
+				handleUserSubmit: async () => {
+					dispatchAttempts++;
+				},
+				drainNextMessage: async dispatch => {
+					drainAttempts++;
+					await dispatch({
+						id: 'queued-user-0',
+						message: 'queued prompt',
+						displayValue: 'queued prompt',
+					});
+					throw new Error('drain failed after dispatch');
+				},
+			}}
+		/>,
+	);
+
+	t.teardown(unmount);
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(drainAttempts, 1);
+	t.is(dispatchAttempts, 1);
+	t.is(notices.length, 1);
+	const notice = notices[0];
+	t.true(React.isValidElement(notice));
+	t.regex(
+		String((notice as React.ReactElement<{message: string}>).props.message),
+		/Queued prompt failed.*Enter to edit/,
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.is(drainAttempts, 1);
+	t.is(dispatchAttempts, 1);
+	t.is(notices.length, 1);
+});
+
 test('does not drain queued prompts while conversation is incomplete', async t => {
 	let dispatchAttempts = 0;
 	const {unmount} = renderWithTheme(

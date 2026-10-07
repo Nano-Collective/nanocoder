@@ -237,7 +237,7 @@ export function InteractiveApp({
 		let started = false;
 		const timeout = setTimeout(() => {
 			started = true;
-			let drainedMessageId = queuedMessageId ?? null;
+			let drainedMessageId: string | null = null;
 			void Promise.resolve()
 				.then(() =>
 					userMessageQueue.drainNextMessage(async message => {
