@@ -7,6 +7,11 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
+import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	buildFailureCapsule,
+	type RerunCommand,
+} from '@/tools/bash-failure-capsule';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {splitCommandForDisplay} from '@/utils/shell-command-display';
@@ -39,10 +44,7 @@ export function bashRunFailed(result: BashExecutionState): boolean {
 	return result.error !== null || (result.exitCode ?? 0) !== 0;
 }
 
-/**
- * Format bash execution result for LLM context
- */
-export function formatBashResultForLLM(result: BashExecutionState): string {
+function composeBashResult(result: BashExecutionState): string {
 	let fullOutput = '';
 	const exitCodeInfo =
 		result.exitCode !== null ? `EXIT_CODE: ${result.exitCode}\n` : '';
@@ -57,11 +59,46 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
 	if (result.error) {
 		fullOutput = `Error: ${result.error}\n${fullOutput}`;
 	}
+	return fullOutput;
+}
 
+/**
+ * Format bash execution result for LLM context
+ */
+export function formatBashResultForLLM(result: BashExecutionState): string {
 	// Limit the context for LLM to prevent overwhelming the model. Keeps both
 	// head and tail, since build/test tooling puts the actionable part (error
 	// list, failure summary, exit status) at the end.
-	return truncateToolResult(fullOutput, TRUNCATION_OUTPUT_LIMIT);
+	return truncateToolResult(composeBashResult(result), TRUNCATION_OUTPUT_LIMIT);
+}
+
+/**
+ * What the model gets for a finished run. A failed run whose output is too
+ * long to pass whole - so the head-and-tail cut would drop the failure detail
+ * in the middle - becomes a failure capsule when its runner's format is
+ * recognised. Everything else is `formatBashResultForLLM`.
+ *
+ * `rerun` lets the capsule confirm the failure with the narrowed command;
+ * without it the output is only distilled.
+ */
+export async function distillBashResultForLLM(
+	result: BashExecutionState,
+	options: {rerun?: RerunCommand} = {},
+): Promise<string> {
+	const composed = composeBashResult(result);
+	if (
+		result.error === null &&
+		bashRunFailed(result) &&
+		composed.length > TRUNCATION_OUTPUT_LIMIT
+	) {
+		const capsule = await buildFailureCapsule(result, {
+			cwd: getSafeSessionCwd(),
+			originalLength: composed.length,
+			rerun: options.rerun,
+		});
+		if (capsule) return capsule;
+	}
+	return truncateToolResult(composed, TRUNCATION_OUTPUT_LIMIT);
 }
 
 /**
@@ -85,7 +122,13 @@ const executeExecuteBash = async (
 	// The model still gets plain text; isError carries the exit status to
 	// processToolUse, which is how --json and ACP learn the command failed.
 	return {
-		llmContent: formatBashResultForLLM(result),
+		llmContent: await distillBashResultForLLM(result, {
+			rerun: command =>
+				options?.abortSignal?.aborted
+					? Promise.resolve(null)
+					: bashExecutor.execute(command, {signal: options?.abortSignal})
+							.promise,
+		}),
 		isError: bashRunFailed(result),
 	};
 };
