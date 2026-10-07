@@ -19,6 +19,8 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+In the selector, start typing to filter sessions by title; Backspace edits the filter, arrow keys and Enter pick a result, and Esc cancels.
+
 ### From the Command Line
 
 You can resume a session directly at launch instead of using a slash command:
@@ -48,6 +50,7 @@ Each session captures:
 - Provider and model used
 - Working directory
 - Timestamps and message count
+- Its artifacts: the implementation plan, the task list, and the completion walkthrough
 
 Sessions are saved every 30 seconds by default and retained for 30 days.
 
@@ -61,11 +64,22 @@ Sessions are stored in the platform-specific app data directory:
 | Linux | `~/.local/share/nanocoder/sessions/` |
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
-This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used instead, on every platform. This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+
+### Session Artifacts
+
+Alongside `sessions/`, each session gets an `artifacts/<session id>/` directory holding the files behind the **Plan**, **Tasks**, and **Walkthrough** shortcuts above the prompt. They are written with owner-only permissions and never placed in your project directory.
+
+- Resuming a session restores its artifact shortcuts
+- Deleting a session, or letting retention expire it, deletes its artifacts too
+- Directories belonging to sessions that were never saved — because `autoSave` is off, or because `/clear` retired the session id — are swept at startup once they are more than a day old
+- `nanocoder --plain` runs get a session for the duration of the run and delete their artifacts on exit, so headless runs leave nothing behind
+
+See [Development Modes](development-modes.md) for how the artifacts are produced and [Task Management](task-management.md) for the task list specifically.
 
 ## Configuration
 
-Customize session behaviour in your `agents.config.json`:
+Customize session behaviour in your `nanocoder-preferences.json` (not `agents.config.json`):
 
 ```json
 {
@@ -84,9 +98,12 @@ Customize session behaviour in your `agents.config.json`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `autoSave` | `true` | Enable/disable automatic saving |
+| `autoSave` | `true` | Enable/disable automatic saving. The status line below the prompt briefly shows `saving` while a save is written |
 | `saveInterval` | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | `100` | Maximum sessions to keep (minimum 1) |
 | `maxMessages` | `1000` | Maximum messages sent to the model (context window capping) — on-disk history is NOT truncated (minimum 1) |
 | `retentionDays` | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | (platform default) | Custom storage directory |
+| `smartTitles` | `true` | Generate a descriptive title once when the opening prompt is too thin to name the session (ACP clients such as the VS Code extension; the CLI keeps its heuristic title). Manual renames are never overwritten |
+| `titleModel` | (session's model) | Model used for title generation |
+| `titleProvider` | (session's provider) | Provider used for title generation |

@@ -185,6 +185,11 @@ test('hasCommandFailed: does not false positive on "no errors found"', t => {
 	t.false(hasCommandFailed(output));
 });
 
+test('hasCommandFailed: detects an error before a later "0 errors" summary', t => {
+	const output = 'EXIT_CODE: 0\nerror: update failed\nBuild completed with 0 errors';
+	t.true(hasCommandFailed(output));
+});
+
 test('hasCommandFailed: detects "error:" at start of line', t => {
 	const output = 'EXIT_CODE: 1\nSTDERR:\nerror: something went wrong';
 	t.true(hasCommandFailed(output));
@@ -227,6 +232,42 @@ test('hasCommandFailed: handles null/undefined output', t => {
 test('hasCommandFailed: exit code takes precedence over success messages', t => {
 	// Even if output looks successful, exit code 1 means failure
 	const output = 'EXIT_CODE: 1\nAll tests passed successfully!';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: does not false positive on "0 failed" summary with exit code 0', t => {
+	// A package manager can exit 0 and print a benign summary containing "failed"
+	const output = 'EXIT_CODE: 0\nadded 1 package, removed 2 packages, 0 failed';
+	t.false(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: does not false positive on "0 cannot" with exit code 0', t => {
+	const output = 'EXIT_CODE: 0\n0 cannot be updated';
+	t.false(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with a real "error:" line is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nerror: update failed';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "command not found" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\nbash: foobar: command not found';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "no such file or directory" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\nls: no such file or directory';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "permission denied" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nSTDERR:\npermission denied';
+	t.true(hasCommandFailed(output));
+});
+
+test('hasCommandFailed: exit code 0 with "fatal" is still a failure', t => {
+	const output = 'EXIT_CODE: 0\nfatal: not a git repository';
 	t.true(hasCommandFailed(output));
 });
 

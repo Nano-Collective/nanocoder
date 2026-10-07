@@ -3,24 +3,49 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	DEFAULT_MEMORY_LIMIT,
+	DEFAULT_TOKEN_BUDGET,
+	MAX_MEMORY_LIMIT,
+	MAX_TOKEN_BUDGET,
+	MIN_MEMORY_LIMIT,
+	MIN_TOKEN_BUDGET,
+} from '@/memory/project-context';
+import {
+	ensureDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
+	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
+	getSemanticMemoryEnabled,
+	isDirectoryTrusted,
 	loadPreferences,
+	resolveProjectContextPreferences,
 	resetPreferencesCache,
 	savePreferences,
+	getShowAgentBashOutput,
+	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateLastUsed,
 	updateNanocoderShape,
 	updateNotificationsPreference,
 	updatePasteThreshold,
+	updateProfessionalTone,
 	updateReasoningExpanded,
+	updateSemanticMemoryEnabled,
+	updateSemanticMemoryLimit,
+	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
+	getMouseReporting,
+	updateMouseReporting,
+	updateShowAgentBashOutput,
+	updateShowUsageFooter,
 } from './preferences';
+import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
 
 console.log('\npreferences.spec.ts');
@@ -749,12 +774,14 @@ test.serial('full workflow: update and retrieve nanocoder shape', t => {
 // getPasteThreshold Tests
 // ============================================================================
 
-test.serial('getPasteThreshold returns threshold from paste.singleLineThreshold', t => {
+test.serial('getPasteThreshold returns threshold from nanocoder.paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
 		lastProvider: 'openrouter',
-		paste: {
-			singleLineThreshold: 1500,
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 1500,
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -796,8 +823,10 @@ test.serial('getPasteThreshold returns undefined when file does not exist', t =>
 test.serial('getPasteThreshold returns undefined for non-positive threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
-		paste: {
-			singleLineThreshold: -100,
+		nanocoder: {
+			paste: {
+				singleLineThreshold: -100,
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -815,8 +844,10 @@ test.serial('getPasteThreshold returns undefined for non-positive threshold', t 
 test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data: UserPreferences = {
-		paste: {
-			singleLineThreshold: 0,
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 0,
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -834,8 +865,10 @@ test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		paste: {
-			singleLineThreshold: 1234.7,
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 1234.7,
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -853,8 +886,10 @@ test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 test.serial('getPasteThreshold returns undefined for non-number threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		paste: {
-			singleLineThreshold: 'not-a-number',
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 'not-a-number',
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -873,7 +908,7 @@ test.serial('getPasteThreshold returns undefined for non-number threshold', t =>
 // updatePasteThreshold Tests
 // ============================================================================
 
-test.serial('updatePasteThreshold saves threshold to paste.singleLineThreshold', t => {
+test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
 		rmSync(preferencesPath, {force: true});
@@ -887,7 +922,7 @@ test.serial('updatePasteThreshold saves threshold to paste.singleLineThreshold',
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.paste?.singleLineThreshold, 2000);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 2000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -913,7 +948,7 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 		t.is(parsed.lastProvider, 'openrouter');
 		t.is(parsed.lastModel, 'claude-3-opus');
 		t.is(parsed.selectedTheme, 'tokyo-night');
-		t.is(parsed.paste?.singleLineThreshold, 1500);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -924,8 +959,10 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 test.serial('updatePasteThreshold overwrites existing paste threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const existingData: UserPreferences = {
-		paste: {
-			singleLineThreshold: 800,
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 800,
+			},
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
@@ -936,7 +973,7 @@ test.serial('updatePasteThreshold overwrites existing paste threshold', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.paste?.singleLineThreshold, 1000);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -956,7 +993,7 @@ test.serial('updatePasteThreshold rounds non-integer values', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.paste?.singleLineThreshold, 1235);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 1235);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -978,7 +1015,7 @@ test.serial('updatePasteThreshold creates file if it does not exist', t => {
 		const content = readFileSync(preferencesPath, 'utf-8');
 		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(parsed.paste?.singleLineThreshold, 500);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1026,7 +1063,7 @@ test.serial('updatePasteThreshold does not overwrite other preferences saved via
 
 		t.is(parsed.lastProvider, 'ollama');
 		t.is(parsed.lastModel, 'llama3');
-		t.is(parsed.paste?.singleLineThreshold, 400);
+		t.is(parsed.nanocoder?.paste?.singleLineThreshold, 400);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1562,3 +1599,712 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 		}
 	}
 });
+
+// ============================================================================
+// Mouse Reporting Tests
+// ============================================================================
+
+test.serial('getMouseReporting returns true by default when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getMouseReporting();
+	t.is(result, true);
+});
+
+test.serial('updateMouseReporting saves and retrieves preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateMouseReporting(true);
+		t.is(getMouseReporting(), true);
+
+		updateMouseReporting(false);
+		t.is(getMouseReporting(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Usage Footer Tests
+// ============================================================================
+
+test.serial('getShowUsageFooter defaults to true when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+test.serial('getShowUsageFooter defaults to true when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	t.is(getShowUsageFooter(), true);
+});
+
+test.serial('getShowUsageFooter returns false when explicitly disabled', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {showUsageFooter: false};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		t.is(getShowUsageFooter(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateShowUsageFooter preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existing: UserPreferences = {
+		lastProvider: 'ollama',
+		lastModel: 'qwen',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existing, null, 2), 'utf-8');
+
+	try {
+		updateShowUsageFooter(false);
+
+		const parsed = JSON.parse(
+			readFileSync(preferencesPath, 'utf-8'),
+		) as UserPreferences;
+		t.is(parsed.showUsageFooter, false);
+		t.is(parsed.lastProvider, 'ollama');
+		t.is(parsed.lastModel, 'qwen');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: toggle usage footer off and back on', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateShowUsageFooter(false);
+		t.is(getShowUsageFooter(), false);
+
+		updateShowUsageFooter(true);
+		t.is(getShowUsageFooter(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// showAgentBashOutput Tests
+// ============================================================================
+
+test.serial('getShowAgentBashOutput defaults to false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput defaults to false when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	t.is(getShowAgentBashOutput(), false);
+});
+
+test.serial('updateShowAgentBashOutput round-trips and preserves others', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'ollama'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+		t.is(loadPreferences().lastProvider, 'ollama');
+
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput reflects a write, not a stale cached value', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		// Self-priming, so the result does not depend on what earlier serial
+		// tests left in the cache. Without version-based invalidation the final
+		// read would still serve the primed `false`.
+		updateShowAgentBashOutput(false);
+		t.is(getShowAgentBashOutput(), false);
+
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getShowAgentBashOutput serves the cached value without re-reading', t => {
+	const preferencesPath = getTestPreferencesPath();
+
+	try {
+		updateShowAgentBashOutput(true);
+		t.is(getShowAgentBashOutput(), true);
+
+		// Remove the file behind the cache's back. A getter that re-read per call
+		// would fall back to the default (false); the cached one keeps serving
+		// true, which is what keeps a bash card render off the disk.
+		rmSync(preferencesPath, {force: true});
+		t.is(getShowAgentBashOutput(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// professionalTone Tests
+// ============================================================================
+
+test.serial('getProfessionalTone returns false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastProvider: 'test'}, null, 2),
+		'utf-8',
+	);
+
+	try {
+		t.is(getProfessionalTone(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateProfessionalTone persists the value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateProfessionalTone(true);
+		t.is(getProfessionalTone(), true);
+		t.is(loadPreferences().professionalTone, true);
+
+		updateProfessionalTone(false);
+		t.is(getProfessionalTone(), false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateProfessionalTone preserves other preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	savePreferences({lastProvider: 'ollama', lastModel: 'qwen'});
+
+	try {
+		updateProfessionalTone(true);
+		const preferences = loadPreferences();
+		t.is(preferences.lastProvider, 'ollama');
+		t.is(preferences.lastModel, 'qwen');
+		t.is(preferences.professionalTone, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// Cross-writer non-clobbering: updatePreferencesNestedValue (sessions) and
+// updatePasteThreshold (paste) share the same file but write via different code
+// paths. Verify that writing one does not erase the other.
+
+test.serial(
+	'sessions writer does not clobber paste written by savePreferences',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+
+		try {
+			updatePasteThreshold(1500);
+			updatePreferencesNestedValue('sessions', 'maxMessages', 50);
+
+			const content = JSON.parse(
+				readFileSync(preferencesPath, 'utf-8'),
+			) as UserPreferences;
+
+			t.is(content.nanocoder?.paste?.singleLineThreshold, 1500);
+			t.is(content.nanocoder?.sessions?.maxMessages, 50);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'paste writer via savePreferences does not clobber sessions',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+
+		try {
+			updatePreferencesNestedValue('sessions', 'retentionDays', 14);
+			updatePasteThreshold(2000);
+
+			const content = JSON.parse(
+				readFileSync(preferencesPath, 'utf-8'),
+			) as UserPreferences;
+
+			t.is(content.nanocoder?.sessions?.retentionDays, 14);
+			t.is(content.nanocoder?.paste?.singleLineThreshold, 2000);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial('getSemanticMemoryEnabled returns true when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getSemanticMemoryEnabled();
+		t.is(result, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getSemanticMemoryEnabled returns false when disabled', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {semanticMemoryEnabled: false};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getSemanticMemoryEnabled();
+		t.is(result, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryEnabled saves the preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryEnabled(false);
+
+		t.true(existsSync(preferencesPath));
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryEnabled, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Project Context Preferences Tests (token budget + memory limit, round-4 review)
+// ============================================================================
+
+test('resolveProjectContextPreferences falls back to the shipped defaults', t => {
+	t.deepEqual(resolveProjectContextPreferences({} as UserPreferences), {
+		semanticMemoryEnabled: true,
+		memoryLimit: DEFAULT_MEMORY_LIMIT,
+		tokenBudget: DEFAULT_TOKEN_BUDGET,
+	});
+});
+
+test('resolveProjectContextPreferences honours configured values', t => {
+	t.deepEqual(
+		resolveProjectContextPreferences({
+			semanticMemoryEnabled: false,
+			semanticMemoryLimit: 3,
+			semanticMemoryTokenBudget: 120,
+		} as UserPreferences),
+		{semanticMemoryEnabled: false, memoryLimit: 3, tokenBudget: 120},
+	);
+});
+
+test('resolveProjectContextPreferences clamps out-of-range values', t => {
+	const tooLow = resolveProjectContextPreferences({
+		semanticMemoryLimit: 0,
+		semanticMemoryTokenBudget: 1,
+	} as UserPreferences);
+	t.is(tooLow.memoryLimit, MIN_MEMORY_LIMIT);
+	t.is(tooLow.tokenBudget, MIN_TOKEN_BUDGET);
+
+	const tooHigh = resolveProjectContextPreferences({
+		semanticMemoryLimit: 10_000,
+		semanticMemoryTokenBudget: 10_000,
+	} as UserPreferences);
+	t.is(tooHigh.memoryLimit, MAX_MEMORY_LIMIT);
+	t.is(tooHigh.tokenBudget, MAX_TOKEN_BUDGET);
+});
+
+test.serial('getProjectContextPreferences reads token budget and memory limit from disk', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		semanticMemoryEnabled: true,
+		semanticMemoryLimit: 12,
+		semanticMemoryTokenBudget: 480,
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		t.deepEqual(getProjectContextPreferences(), {
+			semanticMemoryEnabled: true,
+			memoryLimit: 12,
+			tokenBudget: 480,
+		});
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryLimit saves a clamped value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryLimit(500);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryLimit, MAX_MEMORY_LIMIT);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryTokenBudget saves a clamped value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryTokenBudget(1);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryTokenBudget, MIN_TOKEN_BUDGET);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve project context preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryLimit(5);
+		updateSemanticMemoryTokenBudget(960);
+
+		t.deepEqual(getProjectContextPreferences(), {
+			semanticMemoryEnabled: true,
+			memoryLimit: 5,
+			tokenBudget: 960,
+		});
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Directory Trust Tests — shared by the interactive TUI, --plain, and the
+// daemon boot path (see source/daemon/cli.ts's `start`).
+// ============================================================================
+
+test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
+	t.false(isDirectoryTrusted('/some/project', {}));
+});
+
+test('isDirectoryTrusted matches an exact entry', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted resolves relative entries before comparing', t => {
+	const dir = process.cwd();
+	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+});
+
+test('isDirectoryTrusted does not match an unrelated directory', t => {
+	t.false(
+		isDirectoryTrusted(process.cwd(), {
+			trustedDirectories: ['/some/other/project'],
+		}),
+	);
+});
+
+test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
+	let saveCalled = false;
+	const result = ensureDirectoryTrust('/untrusted/project', true, {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
+	const dir = process.cwd();
+	let saveCalled = false;
+	const result = ensureDirectoryTrust(dir, false, {
+		loadPreferences: () => ({trustedDirectories: [dir]}),
+		savePreferences: () => {
+			saveCalled = true;
+		},
+	});
+	t.deepEqual(result, {trusted: true, persisted: false});
+	t.false(saveCalled);
+});
+
+test.serial(
+	'ensureDirectoryTrust refuses an unrecorded directory when NANOCODER_TRUST_DIRECTORY is unset',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const result = ensureDirectoryTrust('/untrusted/project', false, {
+			loadPreferences: () => ({trustedDirectories: []}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const target = join(tmpdir(), 'nanocoder-untrusted-project');
+			const result = ensureDirectoryTrust(target, false, {
+				loadPreferences: () => ({trustedDirectories: []}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 does not duplicate an already-trusted directory',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			const dir = process.cwd();
+			let saveCalled = false;
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: () => {
+					saveCalled = true;
+				},
+			});
+			t.deepEqual(result, {trusted: true, persisted: false});
+			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+// ============================================================================
+// Trust is global-only: a project-level nanocoder-preferences.json (which
+// ships with a cloned repo) must never be able to mark its own directory
+// trusted, and trust writes must never land in it.
+// ============================================================================
+
+function withProjectPreferences(
+	projectPrefs: UserPreferences,
+	globalPrefs: UserPreferences | null,
+	run: (paths: {projectFile: string; globalFile: string}) => void,
+): void {
+	const root = join(tmpdir(), `nanocoder-trust-${Date.now()}-${Math.random()}`);
+	const home = join(root, 'home');
+	const project = join(root, 'project');
+	mkdirSync(project, {recursive: true});
+	const saved = {
+		configDir: process.env.NANOCODER_CONFIG_DIR,
+		home: process.env.HOME,
+		xdg: process.env.XDG_CONFIG_HOME,
+		appData: process.env.APPDATA,
+		cwd: process.cwd(),
+	};
+	try {
+		delete process.env.NANOCODER_CONFIG_DIR;
+		process.env.HOME = home;
+		process.env.XDG_CONFIG_HOME = join(home, '.config');
+		process.env.APPDATA = join(home, 'AppData');
+		const globalDir =
+			process.platform === 'darwin'
+				? join(home, 'Library', 'Preferences', 'nanocoder')
+				: process.platform === 'win32'
+					? join(home, 'AppData', 'nanocoder')
+					: join(home, '.config', 'nanocoder');
+		mkdirSync(globalDir, {recursive: true});
+		const globalFile = join(globalDir, 'nanocoder-preferences.json');
+		if (globalPrefs) writeFileSync(globalFile, JSON.stringify(globalPrefs));
+		const projectFile = join(project, 'nanocoder-preferences.json');
+		writeFileSync(projectFile, JSON.stringify(projectPrefs));
+		process.chdir(project);
+		resetPreferencesCache();
+		run({projectFile, globalFile});
+	} finally {
+		process.chdir(saved.cwd);
+		process.env.NANOCODER_CONFIG_DIR = saved.configDir;
+		if (saved.home === undefined) delete process.env.HOME;
+		else process.env.HOME = saved.home;
+		if (saved.xdg === undefined) delete process.env.XDG_CONFIG_HOME;
+		else process.env.XDG_CONFIG_HOME = saved.xdg;
+		if (saved.appData === undefined) delete process.env.APPDATA;
+		else process.env.APPDATA = saved.appData;
+		resetPreferencesCache();
+		rmSync(root, {recursive: true, force: true});
+	}
+}
+
+test.serial(
+	'loadPreferences ignores trustedDirectories from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{trustedDirectories: ['.'], selectedTheme: 'tokyo-night' as never},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.trustedDirectories, undefined);
+				t.is(prefs.selectedTheme, 'tokyo-night' as never);
+				t.false(isDirectoryTrusted(process.cwd(), prefs));
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes trustedDirectories from the global file when a project file exists',
+	t => {
+		withProjectPreferences(
+			{trustedDirectories: ['/evil']},
+			{trustedDirectories: ['/trusted/by/user']},
+			() => {
+				t.deepEqual(loadPreferences().trustedDirectories, ['/trusted/by/user']);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes trustedDirectories to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.trustedDirectories = ['/newly/trusted'];
+			prefs.lastProvider = 'ollama';
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.trustedDirectories, undefined);
+			t.is(project.lastProvider, 'ollama');
+			t.deepEqual(global.trustedDirectories, ['/newly/trusted']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);

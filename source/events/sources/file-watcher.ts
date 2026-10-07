@@ -1,5 +1,5 @@
 import {type FSWatcher, watch} from 'chokidar';
-import type {EventRouter} from '@/events/event-router';
+import {type EventRouter, toPosixPath} from '@/events/event-router';
 import type {FileChangeEventKind} from '@/types/skills';
 
 export interface FileWatcherOptions {
@@ -68,7 +68,10 @@ export class FileWatcherSource {
 	private emit(file: string, eventKind: FileChangeEventKind): void {
 		void this.router.emit({
 			kind: 'file.changed',
-			payload: {file, eventKind},
+			// Normalized at the boundary, not just in the matcher, so the router,
+			// activity reports and the payload handed to a triggered agent all
+			// speak one path shape rather than the platform's.
+			payload: {file: toPosixPath(file), eventKind},
 			at: Date.now(),
 		});
 	}

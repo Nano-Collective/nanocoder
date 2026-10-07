@@ -1,30 +1,80 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, WebviewMessageAddProvider, ExtensionMessageSettingsData } from './webview-protocol';
+
+
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {ArtifactController} from './artifact-controller';
+import {PlanReviewController} from './plan-review-controller';
+import { SettingsData, SettingsManager } from './settings-manager';
+import { searchMentions, MentionSearchDeps } from './mention-search';
+import { readCappedFile, readCappedDirectory } from './context-attachment';
+import { PromptQueue, type QueuedPrompt } from './prompt-queue';
+import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
 
-export class ChatWebviewProvider implements vscode.WebviewViewProvider {
+/**
+ * Excluded from `@` search regardless of user settings — never useful context.
+ * Merged with the user's own excludes in `_mentionExcludeGlob`.
+ */
+const MENTION_ALWAYS_EXCLUDE = [
+	'**/node_modules/**',
+	'**/.git/**',
+	'**/dist/**',
+	'**/out/**',
+	'**/build/**',
+	'**/.next/**',
+	'**/coverage/**',
+];
+
+/**
+ * How long an editor-driven prompt waits for the webview shell and the ACP
+ * session before it is dropped. Without a bound, a prompt queued while the CLI
+ * is down would fire whenever the connection eventually came up - long after
+ * the user moved on from the code they clicked.
+ */
+const PENDING_PROMPT_TIMEOUT_MS = 30_000;
+
+export class ChatWebviewProvider
+	implements vscode.WebviewViewProvider, vscode.Disposable {
 	public static readonly viewType = 'nanocoder.chatView';
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private readonly _planReview = new PlanReviewController();
+	private readonly _artifacts = new ArtifactController();
+	/** Code lens prompt waiting on the webview shell and the ACP session. */
+	private _pendingPrompt: string | null = null;
+	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
+	private readonly _queue = new PromptQueue();
+
+	private readonly _settingsManager: SettingsManager;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
 		private readonly _outputChannel: vscode.OutputChannel,
 		private readonly _acpClient: NanocoderAcpClient,
 		private readonly _diffManager: DiffManager
-	) { 
+	) {
+		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			this._planReview.observeSessionUpdate(update);
+			if (this._artifacts.observeSessionUpdate(update)) {
+				this.postArtifacts();
+			}
 			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			});
+		};
+
+		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			this._artifacts.replaceFromMeta(meta);
+			this.postArtifacts();
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -51,6 +101,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 		};
 
+		// Refresh the history list after a background title update.
+		this._acpClient.onSessionTitleChanged = () => {
+			void this._broadcastSessions();
+		};
+
 		this._acpClient.onConnectionReady = () => {
 			this._initializeSessionIfReady();
 		};
@@ -63,7 +118,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				if (block.type === 'diff' && block.path) {
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: payload.toolCallId || block.path, // fallback id
+						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -73,6 +128,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Reveal the chat view and run `text` as a prompt. An editor code lens can
+	 * fire long before the sidebar has ever been opened, so the prompt is held
+	 * until the shell reports ready and a session exists.
+	 */
+	public async sendPrompt(text: string) {
+		this._queuePendingPrompt(text);
+		await vscode.commands.executeCommand(`${ChatWebviewProvider.viewType}.focus`);
+		await this._initializeSessionIfReady();
+	}
+
+	private _queuePendingPrompt(text: string) {
+		this._clearPendingPrompt();
+		this._pendingPrompt = text;
+		this._pendingPromptTimer = setTimeout(() => {
+			this._pendingPromptTimer = null;
+			this._pendingPrompt = null;
+			vscode.window.showWarningMessage(
+				'Nanocoder: the agent did not start in time, so your editor request was not sent. Try again once the chat view is connected.',
+			);
+		}, PENDING_PROMPT_TIMEOUT_MS);
+	}
+
+	private _clearPendingPrompt() {
+		if (this._pendingPromptTimer) {
+			clearTimeout(this._pendingPromptTimer);
+			this._pendingPromptTimer = null;
+		}
+		this._pendingPrompt = null;
+	}
+
+	/**
+	 * Hand a queued prompt to the webview. Cleared before posting so a failed
+	 * delivery can't be retried into a half-loaded shell.
+	 */
+	private _flushPendingPrompt() {
+		const text = this._pendingPrompt;
+		if (text === null) {
+			return;
+		}
+		this._clearPendingPrompt();
+		this.postMessage({type: 'runPrompt', text});
+	}
+
+	/**
+	 * Registered with the extension's subscriptions so a deactivate cannot
+	 * leave the pending-prompt timer running against a disposed view.
+	 */
+	public dispose() {
+		this._clearPendingPrompt();
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -89,12 +196,81 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	public resetPlanReview(): void {
+		this._planReview.reset();
+	}
+
+	public resetSessionState(): void {
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+	}
+
+	private postArtifacts(): void {
+		this.postMessage({
+			type: 'artifactsUpdated',
+			artifacts: this._artifacts.artifacts,
+		});
+	}
+
+	/**
+	 * Signal turn completion so the webview can flip back to the send button.
+	 * Forwards the per-turn token usage and estimated cost so the webview can
+	 * render the usage indicator under the response. `outcome` distinguishes a
+	 * user cancel from a real failure; pass 'failed' explicitly when the turn
+	 * threw before a response existed.
+	 */
+	private postPromptResponse(
+		response?: import('@agentclientprotocol/sdk').PromptResponse,
+		outcomeOverride?: 'completed' | 'cancelled' | 'failed',
+	): void {
+		const outcome =
+			outcomeOverride ??
+			(response?.stopReason === 'cancelled'
+				? 'cancelled'
+				: response
+					? 'completed'
+					: 'failed');
+		this.postMessage({
+			type: 'acpUpdate',
+			update: {
+				sessionUpdate: 'prompt_response',
+				outcome,
+				usage: response?.usage,
+				cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+			},
+		});
+	}
+
+	public toggleSettings() {
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'toggleSettings' });
+		}
+	}
+
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
 		context: vscode.WebviewViewResolveContext,
 		_token: vscode.CancellationToken,
 	) {
 		this._view = webviewView;
+		// A re-resolve means a brand new shell that has not run its script yet.
+		// Leaving the flag set from the previous one would let a queued prompt
+		// post into a webview with no message listener attached, dropping it.
+		this._isWebviewReady = false;
+		webviewView.onDidDispose(() => {
+			// A disposal can land after a newer view has already been resolved
+			// (VS Code tears the old one down late). Without this guard that
+			// stale event would null out the live view and drop its state.
+			if (this._view !== webviewView) {
+				return;
+			}
+			this._view = undefined;
+			this._isWebviewReady = false;
+			// A queued prompt is deliberately kept: a disposal is usually a
+			// re-reveal in progress, and the next resolve is what delivers it.
+			// The timeout is what bounds the wait if no view comes back.
+		});
 
 		webviewView.webview.options = {
 			enableScripts: true,
@@ -111,20 +287,29 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
 		webviewView.webview.onDidReceiveMessage(
-			(message: WebviewToExtensionMessage) => {
+			async (message: WebviewToExtensionMessage) => {
 				switch (message.type) {
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
+						this._handleTokenUsageVisibility();
 						this._initializeSessionIfReady();
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
-						this._handlePrompt(message.text, message.images);
+						this._handleSubmit(message.id, message.text, message.images);
+						break;
+					case 'retryMessage':
+						this._outputChannel.appendLine(`[Webview] User retried message: ${message.text}`);
+						await this._acpClient.retryTurn(message.text);
+						this._handleSubmit(undefined, message.text, message.images);
 						break;
 					case 'cancel':
 						this._outputChannel.appendLine('[Webview] User cancelled operation.');
-						this._acpClient.cancel();
+						this.cancel();
+						break;
+					case 'cancelQueuedMessage':
+						this._removeQueuedPrompt(message.id);
 						break;
 					case 'approveTool':
 						this._outputChannel.appendLine(`[Webview] User approved tool: ${message.toolCallId}`);
@@ -145,7 +330,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 					case 'setMode':
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
+						if (message.mode !== 'plan') {
+							this._planReview.revise();
+						}
 						this._acpClient.setSessionMode(message.mode);
+						break;
+					case 'approvePlan':
+						this._outputChannel.appendLine('[Webview] User approved the implementation plan.');
+						this._approvePlan();
+						break;
+					case 'revisePlan':
+						this._outputChannel.appendLine('[Webview] User requested plan revisions.');
+						this._planReview.revise();
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
@@ -164,6 +360,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
+						this._planReview.reset();
+						this._artifacts.reset();
+						this.postArtifacts();
+						this._discardQueuedPrompts('resume session');
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
@@ -181,15 +381,42 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'requestSettings':
+						this._outputChannel.appendLine('[Webview] Settings data requested.');
+						this._handleRequestSettings();
+						break;
+					case 'updateSetting':
+						this._outputChannel.appendLine(`[Webview] Update setting: ${message.key}`);
+						void this._handleUpdateSetting(message.key, message.value).catch(error => {
+							this._outputChannel.appendLine(`[Webview] Failed to update setting: ${error}`);
+						});
+						break;
+					case 'openConfigFile':
+						this._outputChannel.appendLine(`[Webview] Open config file: ${message.file}`);
+						this._handleOpenConfigFile(message.file);
+						break;
+					case 'restartAcp':
+						this._outputChannel.appendLine('[Webview] Restart ACP requested.');
+						vscode.commands.executeCommand('nanocoder.restartAcp');
+						break;
 					case 'requestPathInfo': {
 						try {
 							const stat = fs.statSync(message.path);
 							const kind = stat.isDirectory() ? 'folder' : 'file';
 							const name = path.basename(message.path);
 							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
-						} catch {
-							// path doesn't exist or access denied — silently ignore
+						} catch (err) {
+							// Path doesn't exist or access denied. Nothing to attach, but
+							// log it — a drop that resolves to a bad path is otherwise a
+							// completely silent no-op with no way to diagnose it.
+							this._outputChannel.appendLine(
+								`[Webview] Could not resolve dropped path "${message.path}": ${err}`,
+							);
 						}
+						break;
+					}
+					case 'requestMentionCompletions': {
+						this._handleMentionCompletions(message.query, message.requestId);
 						break;
 					}
 					case 'requestOpenDialog': {
@@ -230,6 +457,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
 						break;
+					case 'addProvider':
+						this._outputChannel.appendLine(`[Webview] Add provider requested: ${message.provider.name}`);
+						void this._handleAddProvider(message.provider);
+						break;
 				}
 			}
 		);
@@ -241,8 +472,40 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	public refreshSettings(): void {
+		this._handleRequestSettings();
+	}
+
+	/**
+	 * Stop the in-flight turn and discard every waiting follow-up.
+	 * Shared by the webview Stop/Escape path and the `nanocoder.cancel` command.
+	 */
+	public cancel(): void {
+		this._discardQueuedPrompts('cancel');
+		void this._acpClient.cancel();
+	}
+
+	/**
+	 * Drop waiting prompts without talking to ACP. The in-flight mutex stays
+	 * held until that turn's `finally` drains. Used by New Chat so a stale
+	 * follow-up cannot fire into the empty session.
+	 */
+	public discardQueuedPrompts(reason: string): string[] {
+		return this._discardQueuedPrompts(reason);
+	}
+
 	private async _initializeSessionIfReady() {
-		if (!this._isWebviewReady || !this._acpClient.connection) {
+		if (!this._isWebviewReady) {
+			this._outputChannel.appendLine('[Extension] ACP ready; waiting for webview before creating session.');
+			return;
+		}
+		if (!this._acpClient.isHandshakeComplete) {
+			this._outputChannel.appendLine('[Extension] Webview ready; waiting for ACP handshake.');
+			this.postMessage({
+				type: 'connectionStatus',
+				status: 'connecting',
+				message: 'Connecting to Nanocoder…',
+			});
 			return;
 		}
 		try {
@@ -251,11 +514,25 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (sessionId) {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
+				this.postMessage({type: 'connectionStatus', status: 'connected'});
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				this._flushPendingPrompt();
+			} else {
+				this._outputChannel.appendLine('Failed to initialize session on ready: no session id.');
+				this.postMessage({
+					type: 'connectionStatus',
+					status: 'error',
+					message: 'Failed to create ACP session. Check the Nanocoder output channel.',
+				});
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
+			this.postMessage({
+				type: 'connectionStatus',
+				status: 'error',
+				message: `Failed to initialize session: ${error}`,
+			});
 		}
 	}
 
@@ -276,6 +553,238 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
+	private _handleRequestSettings() {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const settings = this._readWebviewSettings(cwd);
+		this.postMessage({type: 'settingsData', settings});
+	}
+
+	private _handleTokenUsageVisibility() {
+		this.postMessage({
+			type: 'tokenUsageVisibility',
+			showTokenUsage: this._readShowTokenUsage(),
+		});
+	}
+
+	private async _handleUpdateSetting(key: string, value: unknown) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		try {
+			const result =
+				key === 'showTokenUsage'
+					? await this._updateShowTokenUsage(value)
+					: this._settingsManager.updateSetting(cwd, key, value);
+			this.postMessage({
+				type: 'settingsUpdated',
+				key,
+				success: result.success,
+				error: result.error,
+			});
+
+			// If successful, send refreshed settings so the UI stays in sync
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+			} else {
+				vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to update ${key}: ${message}`);
+			this.postMessage({
+				type: 'settingsUpdated',
+				key,
+				success: false,
+				error: message,
+			});
+			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${message}`);
+		}
+	}
+
+	private async _handleAddProvider(provider: WebviewMessageAddProvider['provider']): Promise<void> {
+		try {
+			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const result = this._settingsManager.addProvider(cwd, provider);
+
+			if (result.success) {
+				const settings = this._readWebviewSettings(cwd);
+				this.postMessage({type: 'settingsData', settings});
+				this.postMessage({type: 'addProviderResult', success: true});
+				
+				try {
+					await vscode.commands.executeCommand('nanocoder.restartAcp');
+				} catch (cmdError) {
+					this._outputChannel.appendLine(`[Settings] nanocoder.restartAcp command failed: ${cmdError}`);
+				}
+			} else {
+				this.postMessage({type: 'addProviderResult', success: false, error: result.error});
+				vscode.window.showErrorMessage(`Failed to add provider '${provider.name}': ${result.error}`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`[Settings] Failed to add provider: ${message}`);
+			this.postMessage({type: 'addProviderResult', success: false, error: message});
+			vscode.window.showErrorMessage(`Failed to add provider: ${message}`);
+		}
+	}
+
+	private _readWebviewSettings(cwd: string): ExtensionMessageSettingsData['settings'] {
+		const providerTemplates: Record<string, {name: string, sdk: string, url: string, requiresKey: boolean, models: string[]}> = {};
+		for (const t of PROVIDER_TEMPLATES) {
+			const dummyConfig = t.buildConfig({});
+			const modelField = t.fields.find((f: TemplateField) => f.name === 'model');
+			const requiresKey = t.fields.some((f: TemplateField) => f.name === 'apiKey' && f.required);
+			
+			providerTemplates[t.id] = {
+				name: t.name,
+				sdk: dummyConfig.sdkProvider || 'openai-compatible',
+				url: dummyConfig.baseUrl || '',
+				requiresKey: !!requiresKey,
+				models: modelField?.default ? modelField.default.split(',').map((m: string) => m.trim()) : []
+			};
+		}
+
+		return {
+			...this._settingsManager.readSettings(cwd),
+			showTokenUsage: this._readShowTokenUsage(),
+			providerTemplates
+		};
+	}
+
+	private _readShowTokenUsage(): boolean {
+		return vscode.workspace
+			.getConfiguration('nanocoder')
+			.get<boolean>('showTokenUsage', false);
+	}
+
+	private async _updateShowTokenUsage(value: unknown): Promise<{ success: boolean; error?: string }> {
+		if (typeof value !== 'boolean') {
+			return {success: false, error: 'showTokenUsage must be a boolean'};
+		}
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const scope = workspaceFolder?.uri;
+		const config = vscode.workspace.getConfiguration('nanocoder', scope);
+		const inspected = config.inspect<boolean>('showTokenUsage');
+		const target =
+			inspected?.workspaceFolderValue !== undefined && workspaceFolder
+				? vscode.ConfigurationTarget.WorkspaceFolder
+				: inspected?.workspaceValue !== undefined
+					? vscode.ConfigurationTarget.Workspace
+					: vscode.ConfigurationTarget.Global;
+
+		await config.update('showTokenUsage', value, target);
+		return {success: true};
+	}
+
+	private async _handleOpenConfigFile(file: string) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const paths = this._settingsManager.getConfigPaths(cwd);
+		const filePath =
+			file === 'agents.config.json' ? paths.agentsConfig
+			: file === '.mcp.json' ? paths.mcpConfig
+			: paths.preferences;
+
+		try {
+			if (!fs.existsSync(filePath)) {
+				fs.mkdirSync(path.dirname(filePath), {recursive: true});
+				// Seed .mcp.json with the wrapper the loader expects, so an empty
+				// file is still a usable starting point. Matches the CLI's
+				// settings-json-config.tsx.
+				const seed = file === '.mcp.json' ? '{\n\t"mcpServers": {}\n}\n' : '{}\n';
+				fs.writeFileSync(filePath, seed, 'utf-8');
+			}
+			const doc = await vscode.workspace.openTextDocument(filePath);
+			await vscode.window.showTextDocument(doc);
+		} catch {
+			vscode.window.showErrorMessage(
+				`Could not open ${file} at ${filePath}. Ensure the file exists.`,
+			);
+		}
+	}
+
+	/**
+	 * Exclude glob for `@` search.
+	 *
+	 * VS Code *replaces* its default excludes when `findFiles` is given an
+	 * explicit exclude rather than merging with them, so passing only the list
+	 * below would put `.env`, secrets and anything else the user hid via
+	 * `files.exclude` into the dropdown. Both settings are folded in by hand.
+	 * `search.exclude` is included too: it never applies to `findFiles`, but a
+	 * file picker honouring it is what users expect.
+	 */
+	private _mentionExcludeGlob(scope?: vscode.Uri): string {
+		const globs = new Set(MENTION_ALWAYS_EXCLUDE);
+
+		for (const section of ['files.exclude', 'search.exclude']) {
+			// Scoped to the folder being searched: both settings are
+			// folder-overridable, and reading them unscoped would miss that.
+			const patterns = vscode.workspace
+				.getConfiguration(undefined, scope)
+				.get<Record<string, boolean>>(section);
+			if (!patterns) {
+				continue;
+			}
+			for (const [glob, enabled] of Object.entries(patterns)) {
+				// A `when` clause resolves to a non-boolean; those are sibling
+				// conditions we cannot evaluate here, so we leave them alone.
+				if (enabled === true) {
+					globs.add(glob);
+				}
+			}
+		}
+
+		// A single-element brace list is invalid in some glob parsers, and the set
+		// can never be empty here, but the guard keeps that assumption local.
+		const list = [...globs];
+		return list.length === 1 ? list[0] : `{${list.join(',')}}`;
+	}
+
+	/**
+	 * Bind the workspace-search primitives that `searchMentions` needs. Kept
+	 * separate from the search itself so the ranking and matching logic stays
+	 * unit-testable without an extension host.
+	 */
+	private _mentionSearchDeps(): MentionSearchDeps {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
+		const exclude = this._mentionExcludeGlob(workspaceFolder?.uri);
+
+		return {
+			workspaceRoot,
+			openEditors: () => {
+				const paths: string[] = [];
+				for (const group of vscode.window.tabGroups.all) {
+					for (const tab of group.tabs) {
+						const input = tab.input;
+						if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+							paths.push(input.uri.fsPath);
+						}
+					}
+				}
+				return paths;
+			},
+			findFiles: async (glob, limit) => {
+				const uris = await vscode.workspace.findFiles(
+					workspaceFolder ? new vscode.RelativePattern(workspaceFolder, glob) : glob,
+					exclude,
+					limit,
+				);
+				return uris.map(uri => uri.fsPath);
+			},
+		};
+	}
+
+	private async _handleMentionCompletions(query: string, requestId: number) {
+		let items: MentionItem[] = [];
+		try {
+			items = await searchMentions(query, this._mentionSearchDeps());
+		} catch (error) {
+			this._outputChannel.appendLine(`[Mention] Search failed for "${query}": ${error}`);
+		}
+		// Answer even on failure, so the webview clears its in-flight state and
+		// the dropdown closes instead of hanging on a stale result set.
+		this.postMessage({ type: 'mentionCompletions', requestId, items });
+	}
+
 	/**
 	 * Expand @[file] and @[folder] references injected by the webview into
 	 * file/directory contents. This resolves attached context inline so the LLM
@@ -292,13 +801,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				try {
 					if (kind === 'folder') {
 						// Emit a compact directory listing (names only, one per line)
-						const entries = fs.readdirSync(filePath, { withFileTypes: true });
-						const listing = entries
-							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-							.join('\n');
+						const listing = readCappedDirectory(filePath);
 						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
 					} else {
-						const content = fs.readFileSync(filePath, 'utf8');
+						// Capped rather than a bare readFileSync: `@` makes attaching
+						// a lockfile or a minified bundle one keystroke, and an
+						// uncapped read would silently eat the whole context window.
+						const content = readCappedFile(filePath);
+						if (content === null) {
+							this._outputChannel.appendLine(`[Context] Skipped unreadable or binary file ${filePath}`);
+							return `<!-- skipped ${filePath}: unreadable or binary -->`;
+						}
 						return `<context path="${filePath}">\n${content}\n</context>`;
 					}
 				} catch (err) {
@@ -311,17 +824,53 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
-	private async _handlePrompt(text: string, images?: { data: string, mimeType: string }[]) {
+	private _handleSubmit(id: string | undefined, text: string, images?: { data: string, mimeType: string }[]) {
+		const entry: QueuedPrompt = {
+			id: id || `msg-fallback-${Date.now()}`,
+			text,
+			images,
+		};
+
+		// Only block when idle: a follow-up typed behind an approval card
+		// belongs in the queue and runs after that turn ends. Blocking it
+		// here would bounce the text back into the composer.
+		if (!this._queue.turnActive && this._acpClient.hasPendingPermissions()) {
+			vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
+			return;
+		}
+
+		const status = this._queue.submit(entry);
+		if (status === 'queued') {
+			this._outputChannel.appendLine(`[Queue] Queued prompt ${entry.id}`);
+			this.postMessage({type: 'promptQueued', id: entry.id});
+			return;
+		}
+
+		void this._runTurn(entry);
+	}
+
+	private async _runTurn(entry: QueuedPrompt) {
 		try {
-			if (this._acpClient.hasPendingPermissions()) {
-				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
+			this.postMessage({type: 'promptStarted', id: entry.id});
+
+			// A second turn would overwrite acpClient.activePrompt mid-flight,
+			// making cancel() target the new attempt instead of the one running.
+			if (this._acpClient.hasActivePrompt()) {
+				vscode.window.showWarningMessage('Nanocoder: a turn is already in progress. Wait for it to finish or cancel it before sending a new message.');
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 				return;
 			}
 
 			// /clear resets the server-side conversation; wipe the visible
 			// transcript too so the UI matches (the server's confirmation
-			// message then streams into the fresh view).
-			if (text.trim() === '/clear') {
+			// message then streams into the fresh view). Drop any follow-ups
+			// that were queued against the conversation being erased — they
+			// must not run after the reset. Do this when /clear *runs*, not
+			// when it was typed.
+			if (entry.text.trim() === '/clear') {
+				this._planReview.reset();
+				this._dropWaitingPrompts('/clear');
 				this.postMessage({type: 'clear'});
 			}
 
@@ -329,18 +878,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			// before handing the prompt to the ACP client. This prevents
 			// providers that reject tool-result messages (e.g. Atlas Cloud)
 			// from returning 400 errors on every file-attached message.
-			const expandedText = this._expandContextAttachments(text);
+			const expandedText = this._expandContextAttachments(entry.text);
 
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
-			
+
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (!sessionId) {
 				vscode.window.showErrorMessage('Nanocoder: Failed to create ACP session.');
+				this.postPromptResponse(undefined, 'failed');
 				return;
 			}
-			
+
 			// Let the webview know we started thinking
 			this.postMessage({
 				type: 'acpUpdate',
@@ -350,23 +900,98 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			const response = await this._acpClient.prompt(expandedText, images);
-			// Signal turn completion so the Webview can flip back to the send
-			// button. Forward the per-turn token usage and estimated cost so
-			// the webview can render the usage indicator under the response.
-			this.postMessage({
-				type: 'acpUpdate',
-				update: {
-					sessionUpdate: 'prompt_response',
-					usage: response?.usage,
-					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
-				},
-			});
+			const response = await this._acpClient.prompt(expandedText, entry.images);
+			// A cancelled turn never produced a plan for review.
+			const review =
+				response?.stopReason === 'cancelled'
+					? undefined
+					: this._planReview.completeTurn(this._acpClient.currentMode);
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postPromptResponse(response);
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
-			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			// Always reset the button even on error (drain may immediately
+			// start the next queued prompt).
+			this.postPromptResponse(undefined, 'failed');
+		} finally {
+			this._drain();
+		}
+	}
+
+	private _drain() {
+		const next = this._queue.completeAndDequeue();
+		if (next) {
+			this._outputChannel.appendLine(`[Queue] Starting queued prompt ${next.id}`);
+			void this._runTurn(next);
+		}
+	}
+
+	private _removeQueuedPrompt(id: string) {
+		if (this._queue.remove(id)) {
+			this.postMessage({type: 'promptQueueCleared', ids: [id]});
+		}
+	}
+
+	/** Drop waiting follow-ups without releasing the in-flight turn mutex. */
+	private _dropWaitingPrompts(reason: string) {
+		const ids = [...this._queue.ids];
+		for (const id of ids) {
+			this._queue.remove(id);
+		}
+		if (ids.length > 0) {
+			this.postMessage({type: 'promptQueueCleared', ids});
+		}
+		this._outputChannel.appendLine(`[Queue] Dropped ${ids.length} waiting prompt(s) (${reason}).`);
+	}
+
+	/** Stop / Escape / New Chat: drop waiting prompts. Mutex stays held. */
+	private _discardQueuedPrompts(reason: string): string[] {
+		const ids = this._queue.clear();
+		if (ids.length > 0) {
+			this.postMessage({type: 'promptQueueCleared', ids});
+		}
+		this._outputChannel.appendLine(`[Queue] Discarded ${ids.length} queued prompt(s) (${reason}).`);
+		return ids;
+	}
+
+	private async _approvePlan(): Promise<void> {
+		try {
+			let response: import('@agentclientprotocol/sdk').PromptResponse | undefined;
+			await this._planReview.approve({
+				readFile: async artifactPath => fs.promises.readFile(artifactPath, 'utf8'),
+				setMode: async mode => {
+					await this._acpClient.setSessionMode(mode);
+					if (this._acpClient.currentMode !== mode) {
+						throw new Error('Unable to exit Plan Mode');
+					}
+				},
+				prompt: async message => {
+					response = await this._acpClient.prompt(message);
+					if (!response) {
+						throw new Error('Failed to execute the approved plan');
+					}
+				},
+			});
+			this.postPromptResponse(response);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`Plan approval failed: ${message}`);
+			const review = this._planReview.pendingReview;
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postMessage({type: 'planReviewError', message});
+			this.postPromptResponse(undefined, 'failed');
+			vscode.window.showErrorMessage(`Nanocoder: Unable to approve plan: ${message}`);
 		}
 	}
 
@@ -375,9 +1000,38 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
 		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
+		// Bust the webview cache per asset rather than per extension version, so
+		// editing a media file in the dev host shows up on reload. Never let a
+		// missing asset take the whole panel down with it: chat-panel.css is a
+		// build output, and before this existed an unbuilt one merely rendered
+		// the panel unstyled instead of throwing out of getHtml.
+		const assetVersion = (fileName: string) => {
+			try {
+				// fileName is never user input — every call site passes a media/
+				// filename literal. Basename keeps the join inside media/.
+				const safeName = path.basename(fileName);
+				const assetPath = path.join(this._extensionUri.fsPath, 'media', safeName); // nosemgrep
+				return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
+			} catch {
+				return extVersion;
+			}
+		};
+		const scriptUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'))
+			.with({query: `v=${assetVersion('chat-panel.js')}`});
+		const styleUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'))
+			.with({query: `v=${assetVersion('chat-panel.css')}`});
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const mentionUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
+			.with({query: `v=${assetVersion('mention-utils.js')}`});
+		const uriUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'uri-utils.js'))
+			.with({query: `v=${assetVersion('uri-utils.js')}`});
+		const slashCommandUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'slash-command-utils.js'))
+			.with({query: `v=${assetVersion('slash-command-utils.js')}`});
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -385,6 +1039,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
+		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
+		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());
 
 		return html;
 	}

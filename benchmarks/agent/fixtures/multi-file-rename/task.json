@@ -1,0 +1,24 @@
+{
+	"category": "multi-file",
+	"prompt": "Rename the exported function log in src/logger.js to logInfo, and update every call site so the project still runs. Do not rename logError.",
+	"assertions": [
+		{
+			"kind": "file-contains",
+			"path": "src/logger.js",
+			"text": "export function logInfo("
+		},
+		{
+			"kind": "file-not-contains",
+			"path": "src/logger.js",
+			"text": "export function log("
+		},
+		{"kind": "file-contains", "path": "src/app.js", "text": "logInfo("},
+		{"kind": "file-contains", "path": "src/worker.js", "text": "logInfo("},
+		{
+			"kind": "file-contains",
+			"path": "src/logger.js",
+			"text": "export function logError("
+		},
+		{"kind": "command", "command": "node", "args": ["src/app.js"]}
+	]
+}

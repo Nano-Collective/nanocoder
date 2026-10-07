@@ -1,9 +1,13 @@
 import React from 'react';
-import {isNonInteractiveModeComplete} from '@/app/helpers';
+import {
+	getExitCodeForReason,
+	isNonInteractiveModeComplete,
+} from '@/app/helpers';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import type {DevelopmentMode, LLMClient} from '@/types';
 import {getLogger} from '@/utils/logging';
+import {getRunFailure} from '@/utils/run-outcome';
 import {getShutdownManager} from '@/utils/shutdown';
 
 interface UseNonInteractiveModeProps {
@@ -112,11 +116,18 @@ export function useNonInteractiveMode({
 			// Calculate timeout based on provider config if available
 			const effectiveTimeout = calculateEffectiveTimeout(client);
 
-			const {shouldExit, reason} = isNonInteractiveModeComplete(
+			const completion = isNonInteractiveModeComplete(
 				appState,
 				startTime,
 				effectiveTimeout,
 			);
+			const {shouldExit} = completion;
+			// A run that finished on a recorded failure exits non-zero even
+			// though the conversation itself completed normally.
+			const reason =
+				completion.reason === 'complete' && getRunFailure() !== null
+					? 'error'
+					: completion.reason;
 
 			if (shouldExit) {
 				const logger = getLogger();
@@ -124,12 +135,9 @@ export function useNonInteractiveMode({
 					logger.error('Non-interactive mode timed out');
 				} else if (reason === 'error') {
 					logger.error('Non-interactive mode encountered errors');
-				} else if (reason === 'tool-approval') {
-					// Exit with error code when tool approval is required
-					// Error message already printed by useChatHandler
 				}
 				// Wait a bit to ensure all output is flushed
-				const code = reason === 'error' || reason === 'tool-approval' ? 1 : 0;
+				const code = getExitCodeForReason(reason);
 				const timer = setTimeout(() => {
 					void getShutdownManager().gracefulShutdown(code);
 				}, TIMEOUT_OUTPUT_FLUSH_MS);

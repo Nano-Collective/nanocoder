@@ -1,0 +1,28 @@
+area:tools:
+  - changed-files:
+      - any-glob-to-any-file:
+          - source/tools/**
+          - source/custom-tools/**
+
+area:tui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - source/hooks/**
+          - source/components/**
+          - source/app/**
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+
+area:vscode:
+  - changed-files:
+      - any-glob-to-any-file:
+          - plugins/vscode/**
+          - source/vscode/**

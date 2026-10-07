@@ -1,16 +1,32 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
-	parseContextLimit,
 	parseCustomCommandArgs,
 } from './app-util.js';
+import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {parseInput} from '@/command-parser';
+import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
-import type {MessageSubmissionOptions} from '@/types/index';
+import CommandProgress from '@/components/command-progress';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
+import type {Message, MessageSubmissionOptions} from '@/types/index';
+import {
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -143,19 +159,6 @@ test('checkpoint load detection - other checkpoint subcommand', t => {
 	t.false(isCheckpointLoad);
 });
 
-// Test setup-mcp command parsing
-test('setup-mcp command parsing - extracts command name correctly', t => {
-	const message = '/setup-mcp';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
-test('setup-mcp command parsing - handles command with extra whitespace', t => {
-	const message = '/setup-mcp   ';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
 // Test /commands create detection
 test('commands create detection - matches commands create', t => {
 	const message = '/commands create my-tool';
@@ -217,51 +220,6 @@ test('commands create - preserves .md extension when present', t => {
 	t.is(safeName, 'my-tool.md');
 });
 
-// Test parseContextLimit
-test('parseContextLimit - plain number', t => {
-	t.is(parseContextLimit('8192'), 8192);
-});
-
-test('parseContextLimit - k suffix lowercase', t => {
-	t.is(parseContextLimit('128k'), 128000);
-});
-
-test('parseContextLimit - K suffix uppercase', t => {
-	t.is(parseContextLimit('128K'), 128000);
-});
-
-test('parseContextLimit - fractional k value', t => {
-	t.is(parseContextLimit('4.5k'), 4500);
-});
-
-test('parseContextLimit - zero returns null', t => {
-	t.is(parseContextLimit('0'), null);
-});
-
-test('parseContextLimit - negative returns null', t => {
-	t.is(parseContextLimit('-5'), null);
-});
-
-test('parseContextLimit - non-numeric returns null', t => {
-	t.is(parseContextLimit('abc'), null);
-});
-
-test('parseContextLimit - just k returns null', t => {
-	t.is(parseContextLimit('k'), null);
-});
-
-test('parseContextLimit - whitespace is trimmed', t => {
-	t.is(parseContextLimit('  8192  '), 8192);
-});
-
-test('parseContextLimit - large value with k suffix', t => {
-	t.is(parseContextLimit('256k'), 256000);
-});
-
-test('parseContextLimit - decimal without k suffix', t => {
-	t.is(parseContextLimit('1024.5'), 1025);
-});
-
 // Test /ide command parsing
 test('ide command parsing - extracts command name correctly', t => {
 	const message = '/ide';
@@ -274,8 +232,6 @@ test('ide command parsing - recognized as special command', t => {
 		CLEAR: 'clear',
 		MODEL: 'model',
 		MODEL_DATABASE: 'model-database',
-		SETUP_PROVIDERS: 'setup-providers',
-		SETUP_MCP: 'setup-mcp',
 		SETTINGS: 'settings',
 		STATUS: 'status',
 		CHECKPOINT: 'checkpoint',
@@ -306,9 +262,7 @@ function createResumeTestOptions(overrides: {
 		onClearMessages: async () => {},
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -316,6 +270,7 @@ function createResumeTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -331,6 +286,84 @@ function createResumeTestOptions(overrides: {
 }
 
 // --- Direct !command handling ---
+
+test.serial('stats command captures input and releases it on close', async t => {
+	let liveComponent: React.ReactNode = null;
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('/stats all-time', options);
+
+	t.deepEqual(captureStates, [true]);
+	t.true(React.isValidElement(liveComponent));
+	const onClose = (liveComponent as React.ReactElement<{onClose: () => void}>).props
+		.onClose;
+	t.truthy(onClose);
+	onClose();
+	t.deepEqual(captureStates, [true, false]);
+});
+
+test.serial('stats reset command clears the ledger and reports success', async t => {
+	const previousDataDir = process.env.NANOCODER_DATA_DIR;
+	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-stats-reset-'));
+	process.env.NANOCODER_DATA_DIR = dataDir;
+
+	try {
+		const {flushStatsLedgerSync, recordTokenUsage} = await import('@/stats/record');
+		recordTokenUsage({
+			provider: 'OpenRouter',
+			model: 'gpt-5',
+			tokens: 100,
+		});
+		flushStatsLedgerSync();
+
+		let queued: React.ReactNode = null;
+		let completed = 0;
+		const options = createResumeTestOptions({
+			onAddToChatQueue: component => {
+				queued = component;
+			},
+			onCommandComplete: () => {
+				completed++;
+			},
+		});
+
+		await handleMessageSubmission('/stats reset', options);
+
+		t.false(fs.existsSync(path.join(dataDir, 'stats.json')));
+		t.true(React.isValidElement(queued));
+		t.is(
+			(queued as React.ReactElement<{message: string}>).props.message,
+			'Lifetime stats reset.',
+		);
+		t.is(completed, 1);
+	} finally {
+		if (previousDataDir === undefined) {
+			delete process.env.NANOCODER_DATA_DIR;
+		} else {
+			process.env.NANOCODER_DATA_DIR = previousDataDir;
+		}
+		fs.rmSync(dataDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('bash command does not capture input', async t => {
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.deepEqual(captureStates, []);
+});
 
 test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
 	let queued: React.ReactNode = null;
@@ -377,6 +410,25 @@ test.serial('chat message - forwards displayValue to onHandleChatMessage so the 
 	);
 });
 
+test.serial('slash command - leading whitespace still dispatches as a command', async t => {
+	// parseInput trims before testing for `/`, so routing has to trim too —
+	// dispatching on the raw string sent `  /stats` to the model as chat.
+	let chatMessage: string | undefined;
+	let liveComponent: React.ReactNode = null;
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async message => {
+		chatMessage = message;
+	};
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+
+	await handleMessageSubmission('  /stats all-time', options);
+
+	t.is(chatMessage, undefined, 'a slash command must not reach the model');
+	t.true(React.isValidElement(liveComponent));
+});
+
 test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
 	let received: {message?: string; displayValue?: string} = {};
 	const options = createResumeTestOptions({});
@@ -388,6 +440,22 @@ test.serial('chat message - displayValue is optional (callers without a placehol
 
 	t.is(received.message, 'plain message');
 	t.is(received.displayValue, undefined);
+});
+
+test.serial('delayed slash-command completion is delivered after the handler returns', async t => {
+	let completed = false;
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {
+			completed = true;
+		},
+	});
+	options.onShowStatus = () => {};
+
+	await handleMessageSubmission('/status', options);
+
+	t.false(completed);
+	await new Promise(resolve => setTimeout(resolve, 125));
+	t.true(completed);
 });
 
 test.serial('retry command - /retry without a prior user turn shows an error', async t => {
@@ -513,6 +581,39 @@ test('retry command - lazy registry exposes /retry', t => {
 		retry?.description,
 		'Re-run the last user turn (use --model <id> to switch models first)',
 	);
+});
+
+test.serial('/plan is rejected and cannot bypass the Shift+Tab mode cycle', async t => {
+	const modeChanges: string[] = [];
+	let queued: React.ReactNode = null;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: component => {
+			queued = component;
+		},
+	});
+	options.developmentMode = 'normal';
+	Object.assign(options, {
+		onSetDevelopmentMode: (mode: string) => {
+			modeChanges.push(mode);
+		},
+	});
+
+	await handleMessageSubmission('/plan', options);
+	await Promise.resolve();
+
+	t.deepEqual(modeChanges, []);
+	t.true(
+		React.isValidElement(queued) &&
+			String((queued.props as {message?: string}).message).includes(
+				'Unknown command: plan',
+			),
+	);
+});
+
+test('/plan is not discoverable because Shift+Tab is the only mode switch', t => {
+	const plan = lazyCommands.find(command => command.name === 'plan');
+
+	t.is(plan, undefined);
 });
 
 test.serial('resume command - /resume with no args enters session selector mode', async t => {
@@ -744,9 +845,7 @@ function createRenameTestOptions(overrides: {
 		commandArgs: overrides.commandArgs,
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -754,6 +853,7 @@ function createRenameTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -787,6 +887,19 @@ test('rename command - valid name calls onRenameSession with trimmed value', asy
 	});
 	await handleMessageSubmission('/rename my-session', options);
 	t.is(capturedName, 'my-session');
+});
+
+test('rename command - surrounding spaces do not count toward the length limit', async t => {
+	let capturedName: string | undefined;
+	const name = 'a'.repeat(100);
+	const options = createRenameTestOptions({
+		onRenameSession: value => {
+			capturedName = value;
+		},
+		commandArgs: ['', '', name, '', ''],
+	});
+	await handleMessageSubmission(`/rename   ${name}  `, options);
+	t.is(capturedName, name);
 });
 
 test('rename command - multi-word name is joined with spaces', async t => {
@@ -886,4 +999,420 @@ test('createClearMessagesHandler - calls client.clearContext when client exists'
 test('createClearMessagesHandler - does not throw when client is null', async t => {
 	const handler = createClearMessagesHandler(() => {}, null);
 	await t.notThrowsAsync(() => handler());
+});
+
+// --- /settings tabs and retired /setup-* commands ---
+
+function createSettingsTestOptions(overrides: {
+	onEnterSettingsMode?: (tab?: string) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+	commandArgs?: string[];
+}): MessageSubmissionOptions {
+	return {
+		customCommandCache: new Map(),
+		customCommandLoader: null,
+		customCommandExecutor: null,
+		onClearMessages: async () => {},
+		onRenameSession: () => {},
+		commandArgs: overrides.commandArgs,
+		onEnterModelSelectionMode: () => {},
+		onEnterModelDatabaseMode: () => {},
+		onEnterSettingsMode: overrides.onEnterSettingsMode ?? (() => {}),
+		onEnterExplorerMode: () => {},
+		onEnterIdeSelectionMode: () => {},
+		onEnterTune: () => {},
+		onEnterCheckpointLoadMode: () => {},
+		onShowStatus: () => {},
+		onHandleChatMessage: async () => {},
+		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
+		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
+		setIsToolExecuting: () => {},
+		setMessages: () => {},
+		messages: [],
+		provider: 'test',
+		model: 'test',
+		theme: 'dark',
+		updateInfo: null,
+		getMessageTokens: () => 0,
+	} as unknown as MessageSubmissionOptions;
+}
+
+test('settings command - no argument leaves the tab unset', async t => {
+	let captured: string | undefined | symbol = Symbol('uncalled');
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+	});
+	await handleMessageSubmission('/settings', options);
+	t.is(captured, undefined);
+});
+
+test('settings command - known tab argument opens that tab', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['mcp'],
+	});
+	await handleMessageSubmission('/settings mcp', options);
+	t.is(captured, 'mcp');
+});
+
+test('settings command - tab argument is case-insensitive', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['Providers'],
+	});
+	await handleMessageSubmission('/settings Providers', options);
+	t.is(captured, 'providers');
+});
+
+test('settings command - unknown tab reports an error instead of opening', async t => {
+	let called = false;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: () => {
+			called = true;
+		},
+		onAddToChatQueue: c => queue.push(c),
+		commandArgs: ['bogus'],
+	});
+	await handleMessageSubmission('/settings bogus', options);
+	t.false(called, 'an unknown tab should not silently open the default tab');
+	t.true(
+		findMessageInQueue(queue, m => m.includes('Unknown settings tab: "bogus"')),
+		'the error names the offending argument',
+	);
+});
+
+test('settings command - unknown tab error lists the valid tabs', async t => {
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onAddToChatQueue: c => queue.push(c),
+		commandArgs: ['providrs'],
+	});
+	await handleMessageSubmission('/settings providrs', options);
+	t.true(
+		findMessageInQueue(queue, m =>
+			SETTINGS_TAB_IDS.every(tab => m.includes(tab)),
+		),
+		'the error lists every valid tab so the typo is recoverable',
+	);
+});
+
+test('retired setup-providers - forwards to the settings providers tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-providers', options);
+	t.is(captured, 'providers');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings providers')));
+});
+
+test('retired setup-mcp - forwards to the settings mcp tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-mcp', options);
+	t.is(captured, 'mcp');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings mcp')));
+});
+
+test('retired setup commands - no longer registered in the slash menu', t => {
+	const names = lazyCommands.map(c => c.name);
+	t.false(names.includes('setup-providers'));
+	t.false(names.includes('setup-mcp'));
+	t.true(names.includes('settings'));
+	t.true(names.includes('setup-config'), 'unrelated /setup-config stays');
+});
+
+// --- Command progress spinner (Command.progressLabel) ---
+
+// The registry is populated at app init, not at module load, so the spec has
+// to register the lazy entries itself before driving a built-in command.
+commandRegistry.registerLazy(lazyCommands);
+
+function createProgressTestOptions(overrides: {
+	setLiveComponent?: (component: React.ReactNode) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+}): MessageSubmissionOptions {
+	return {
+		...createResumeTestOptions({
+			onAddToChatQueue: overrides.onAddToChatQueue,
+		}),
+		setLiveComponent: overrides.setLiveComponent ?? (() => {}),
+	};
+}
+
+test.serial(
+	'progress spinner - /commit mounts CommandProgress then clears it',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/commit', options);
+
+		t.is(live.length, 2, 'spinner is mounted once and cleared once');
+
+		const spinner = live[0] as React.ReactElement<{label?: string}>;
+		t.true(React.isValidElement(spinner));
+		t.is(spinner.type, CommandProgress);
+		t.is(spinner.props.label, 'Generating commit message');
+
+		t.is(live[1], null, 'live slot is released after the handler settles');
+	},
+);
+
+test.serial(
+	'progress spinner - cleared even when the command handler throws',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		// getMessageTokens runs after the spinner is mounted, so throwing there
+		// aborts the command with a spinner already on screen.
+		const boom = {
+			...options,
+			messages: [{role: 'user' as const, content: 'x'}],
+			getMessageTokens: () => {
+				throw new Error('boom');
+			},
+		};
+
+		await t.throwsAsync(() => handleMessageSubmission('/commit', boom));
+
+		t.is(live.length, 2);
+		t.is(live[1], null, 'a throwing handler must not strand the spinner');
+	},
+);
+
+test.serial(
+	'progress spinner - commands without progressLabel leave the live slot alone',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/help', options);
+
+		t.deepEqual(live, [], '/help is instant and declares no progressLabel');
+	},
+);
+
+test('progress spinner - only slow commands opt in', t => {
+	const commit = lazyCommands.find(c => c.name === 'commit');
+	t.is(commit?.progressLabel, 'Generating commit message');
+
+	const help = lazyCommands.find(c => c.name === 'help');
+	t.is(help?.progressLabel, undefined);
+});
+
+// --- Inline `?key=value` overrides (issue #1151) ---
+
+test('inline overrides - /usage ?context-max=200k is parsed into a session-override', t => {
+	// ?context-max is a session-override key (handled by applyOnceOverrides),
+	// not a legacy --flag, so expandOverrideArgs leaves it alone and the
+	// dispatcher applies it through the existing session-override stores.
+	// /usage reads getSessionContextLimit() inside its awaited handler, so
+	// the override is observable for that command's run.
+	const trimmed = '/usage ?context-max=200k'.slice(1).trim().split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, []);
+	t.deepEqual(overrides, [{key: 'context-max', value: '200k'}]);
+	t.deepEqual(expandOverrideArgs(overrides), []);
+});
+
+test('inline overrides - mixed positional args survive the split', t => {
+	const trimmed = '/compact --mechanical ?preview --llm'
+		.slice(1)
+		.trim()
+		.split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, ['--mechanical', '--llm']);
+	t.deepEqual(overrides, [{key: 'preview', value: true}]);
+});
+
+test('inline overrides - applyOnceOverrides restore function is idempotent and safe', async t => {
+	const restore = await applyOnceOverrides([]);
+	t.notThrows(() => restore());
+	t.notThrows(() => restore());
+});
+
+function queuedText(node: React.ReactNode): string {
+	if (React.isValidElement(node)) {
+		const {message} = node.props as {message?: unknown};
+		return typeof message === 'string' ? message : '';
+	}
+	return typeof node === 'string' ? node : '';
+}
+
+test.serial('inline overrides - unknown ?keys warn and reach the handler unchanged', async t => {
+	// Regression: an unrecognised `?key=value` token must neither vanish
+	// silently nor pollute the override stores. The dispatcher forwards it
+	// verbatim (so `/context-max` reports its usual "invalid limit" error
+	// for the `?bogus=1` positional) and queues one warning naming the key.
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/context-max ?bogus=1', options);
+
+	t.true(
+		texts.some(text => text.includes('?bogus')),
+		`expected an unknown-override warning naming ?bogus, got: ${JSON.stringify(texts)}`,
+	);
+	t.true(
+		texts.some(text => text.includes('Invalid context limit')),
+		`expected the handler's normal invalid-limit error, got: ${JSON.stringify(texts)}`,
+	);
+});
+
+test.serial('inline overrides - dispatcher applies a ?context-max override and restores the prior value', async t => {
+	// Regression: a once-scoped override must write the new value into the
+	// session-override store for the duration of the command, and restore the
+	// **prior** value (not null) afterwards so a pre-existing session setting
+	// survives the override. /usage is exercised end-to-end via
+	// handleMessageSubmission because it is the one built-in that reads
+	// getSessionContextLimit() synchronously inside its handler.
+	const {getSessionContextLimit, setSessionContextLimit, resetSessionContextLimit} =
+		await import('@/models/index.js');
+	resetSessionContextLimit();
+	setSessionContextLimit(8192);
+
+	let limitDuringCall: number | null | undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: () => {
+			limitDuringCall = getSessionContextLimit();
+		},
+	});
+
+	await handleMessageSubmission('/usage ?context-max=200k', options);
+
+	t.is(
+		limitDuringCall,
+		200000,
+		'applyOnceOverrides should have written 200000 before the usage handler ran',
+	);
+	t.is(
+		getSessionContextLimit(),
+		8192,
+		'restoreOnce should have put the prior 8192 back after the command',
+	);
+
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold skips compaction below the threshold', async t => {
+	// End-to-end for the headline example: the once-threshold gates the
+	// manual compaction (mirroring the automatic path's gate). A tiny
+	// transcript against a huge once-limit sits near 0%, so the command
+	// reports the skip instead of compacting — and restores both stores.
+	const {
+		getSessionContextLimit,
+		resetSessionContextLimit,
+	} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+	setAutoCompactThreshold(50);
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	options.messages = messages;
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission(
+		'/compact ?threshold=80 ?context-max=999999999',
+		options,
+	);
+
+	t.true(
+		texts.some(text => text.includes('below') && text.includes('80%')),
+		`expected a below-threshold skip message, got: ${JSON.stringify(texts)}`,
+	);
+	t.is(rewritten, null, 'skipped compaction must not rewrite messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		50,
+		'prior threshold is restored after the gated command',
+	);
+	t.is(
+		getSessionContextLimit(),
+		null,
+		'once context limit is restored after the gated command',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold proceeds at or above the threshold', async t => {
+	// Mirror image: a 1-token once-limit puts any transcript at hundreds of
+	// percent, so the gate passes and the normal mechanical compaction runs.
+	const {resetSessionContextLimit} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	options.messages = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission('/compact ?threshold=80 ?context-max=1', options);
+
+	t.true(
+		texts.some(text => text.includes('Compacted')),
+		`expected a compaction success message, got: ${JSON.stringify(texts)}`,
+	);
+	t.not(rewritten, null, 'compaction above the threshold rewrites messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		null,
+		'no prior threshold means null after restore',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
 });

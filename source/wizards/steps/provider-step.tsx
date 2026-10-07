@@ -23,8 +23,31 @@ interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
 	onBack?: () => void;
 	onDelete?: () => void;
+	/**
+	 * Opens the mode-specific provider step. When omitted, that entry is left
+	 * out of the menu entirely — it is an advanced option, so callers that
+	 * don't support it (or don't want it) simply don't pass a handler.
+	 */
+	onConfigureModes?: (providers: ProviderConfig[]) => void;
 	existingProviders?: ProviderConfig[];
 	configExists?: boolean;
+	/**
+	 * Open straight into the edit/delete choice for this provider instead of the
+	 * template menu. Matched by name rather than index: the caller (the settings
+	 * panel) lists the resolved config, while this step lists whichever config
+	 * file the wizard loaded, so positions need not line up. An unknown name
+	 * falls back to the normal menu.
+	 */
+	initialEditName?: string;
+}
+
+function findProviderIndex(
+	providers: ProviderConfig[] | undefined,
+	name: string | undefined,
+): number | null {
+	if (!name || !providers) return null;
+	const index = providers.findIndex(provider => provider.name === name);
+	return index === -1 ? null : index;
 }
 
 type Mode =
@@ -80,8 +103,10 @@ export function ProviderStep({
 	onComplete,
 	onBack,
 	onDelete,
+	onConfigureModes,
 	existingProviders,
 	configExists = false,
+	initialEditName,
 }: ProviderStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
@@ -98,7 +123,11 @@ export function ProviderStep({
 		}
 	}, [existingProviders]);
 
-	const [mode, setMode] = useState<Mode>('select-template-or-custom');
+	const [mode, setMode] = useState<Mode>(() =>
+		findProviderIndex(existingProviders, initialEditName) === null
+			? 'select-template-or-custom'
+			: 'edit-or-delete',
+	);
 	const {
 		selectedTemplate,
 		currentFieldIndex,
@@ -115,7 +144,9 @@ export function ProviderStep({
 		bumpInputKey,
 	} = useWizardForm<ProviderTemplate>();
 	const [cameFromCustom, setCameFromCustom] = useState(false);
-	const [editingIndex, setEditingIndex] = useState<number | null>(null);
+	const [editingIndex, setEditingIndex] = useState<number | null>(() =>
+		findProviderIndex(existingProviders, initialEditName),
+	);
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
 	const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
 		new Set(),
@@ -147,6 +178,14 @@ export function ProviderStep({
 			? [
 					{label: 'Add another provider', value: 'templates'},
 					{label: 'Edit existing providers', value: 'edit'},
+					...(onConfigureModes
+						? [
+								{
+									label: 'Configure mode-specific providers',
+									value: 'modes',
+								},
+							]
+						: []),
 					{label: 'Done & Save', value: 'done'},
 					...(configExists && onDelete
 						? [{label: 'Delete config file', value: 'delete'}]
@@ -184,6 +223,8 @@ export function ProviderStep({
 			}
 		} else if (item.value === 'edit') {
 			setMode('edit-selection');
+		} else if (item.value === 'modes' && onConfigureModes) {
+			onConfigureModes(providers);
 		} else if (item.value === 'done') {
 			onComplete(providers);
 		} else if (item.value === 'delete' && onDelete) {

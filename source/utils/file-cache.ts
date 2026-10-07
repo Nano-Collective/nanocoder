@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
-import {extname} from 'node:path';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
+import {isDerivedContentPath} from '@/utils/derived-content';
+import {withPreservedProcess} from '@/utils/preserve-process';
 
 /**
  * File content cache to reduce duplicate file reads during tool confirmation flow.
@@ -17,6 +18,12 @@ export interface CachedFile {
 	lines: string[];
 	mtime: number;
 	cachedAt: number;
+	/**
+	 * True when `content` is a derived representation of the file (the markdown
+	 * transcript of a PDF/DOCX) rather than the bytes on disk. Callers that write
+	 * content back must refuse these paths: the transcript is not the document.
+	 */
+	derived: boolean;
 }
 
 interface CacheEntry {
@@ -145,13 +152,16 @@ async function readAndCacheFile(
 	}
 
 	let content: string;
-	const ext = extname(absPath).toLowerCase();
+	const derived = isDerivedContentPath(absPath);
 
-	if (ext === '.pdf' || ext === '.docx') {
+	if (derived) {
 		try {
 			const {convertToMarkdown} = await import('@nanocollective/get-md');
-			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
-			const result = await convertToMarkdown(buffer as any);
+			// The conversion runs guarded to protect `globalThis.process`.
+			const result = await withPreservedProcess(() =>
+				// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
+				convertToMarkdown(buffer as any),
+			);
 			content = result.markdown;
 		} catch (error) {
 			const errorMessage =
@@ -167,6 +177,7 @@ async function readAndCacheFile(
 		lines: content.split('\n'),
 		mtime: mtimeAfter,
 		cachedAt: now,
+		derived,
 	};
 
 	// Enforce max cache size with LRU eviction

@@ -1,5 +1,9 @@
 import test from 'ava';
-import {filterValidToolCalls} from './tool-filters.js';
+import {
+	buildAbandonedTurnMessages,
+	filterValidToolCalls,
+	partitionUnknownToolCalls,
+} from './tool-filters.js';
 import type {ToolCall} from '@/types/core';
 import type {ToolManager} from '@/tools/tool-manager';
 
@@ -134,4 +138,79 @@ test('filterValidToolCalls - allows different tool calls', t => {
 	const {validToolCalls} = filterValidToolCalls(toolCalls, null);
 
 	t.is(validToolCalls.length, 3);
+});
+
+// ============================================================================
+// partitionUnknownToolCalls / buildAbandonedTurnMessages
+// ============================================================================
+
+const managerWith = (knownTools: string[]) =>
+	({
+		hasTool: (name: string) => knownTools.includes(name),
+	}) as unknown as ToolManager;
+
+test('partitionUnknownToolCalls - treats the XML validation marker as unknown', t => {
+	const {validToolCalls, unknownToolCalls, errorResults} =
+		partitionUnknownToolCalls(
+			[
+				{id: 'call_1', function: {name: 'known_tool', arguments: {}}},
+				{id: 'call_2', function: {name: '__xml_validation_error__', arguments: {}}},
+				{id: 'call_3', function: {name: 'ghost_tool', arguments: {}}},
+			],
+			managerWith(['known_tool', '__xml_validation_error__']),
+		);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(
+		unknownToolCalls.map(c => c.id),
+		['call_2', 'call_3'],
+	);
+	t.deepEqual(
+		errorResults.map(r => r.content),
+		['Unknown tool: __xml_validation_error__', 'Unknown tool: ghost_tool'],
+	);
+});
+
+test('buildAbandonedTurnMessages - every emitted call has a matching result', t => {
+	// The invariant: a result whose tool_call is missing from the assistant
+	// message is orphaned and pruned before the request goes out.
+	const partition = partitionUnknownToolCalls(
+		[
+			{id: 'call_good', function: {name: 'known_tool', arguments: {}}},
+			{id: 'call_ghost', function: {name: 'ghost_tool', arguments: {}}},
+		],
+		managerWith(['known_tool']),
+	);
+
+	const {emittedToolCalls, resultsForAbandonedTurn} =
+		buildAbandonedTurnMessages(partition);
+
+	t.deepEqual(
+		emittedToolCalls.map(c => c.id),
+		['call_good', 'call_ghost'],
+	);
+	const resultIds = new Set(resultsForAbandonedTurn.map(r => r.tool_call_id));
+	for (const toolCall of emittedToolCalls) {
+		t.true(resultIds.has(toolCall.id), `${toolCall.id} must be paired`);
+	}
+	const aborted = resultsForAbandonedTurn.find(
+		r => r.tool_call_id === 'call_good',
+	);
+	t.regex(String(aborted?.content), /Execution aborted/);
+});
+
+test('buildAbandonedTurnMessages - a clean turn produces no abandoned results', t => {
+	const partition = partitionUnknownToolCalls(
+		[{id: 'call_good', function: {name: 'known_tool', arguments: {}}}],
+		managerWith(['known_tool']),
+	);
+
+	const {emittedToolCalls, resultsForAbandonedTurn} =
+		buildAbandonedTurnMessages(partition);
+
+	t.is(emittedToolCalls.length, 1);
+	t.is(resultsForAbandonedTurn.length, 0);
 });

@@ -23,6 +23,7 @@ const createMockToolManager = (tools: string[], approval: boolean = false) => ({
 	getFilteredTools: () => tools.reduce((acc, t) => ({...acc, [t]: {}}), {}),
 	hasTool: (name: string) => tools.includes(name),
 	getToolEntry: () => ({approval}),
+	isReadOnly: (name: string) => name === 'read_file',
 });
 
 const createMockClient = (toolCalls: ToolCall[]) => ({

@@ -1,4 +1,4 @@
-import type {LanguageModel} from 'ai';
+import type {LanguageModel, StopCondition, ToolSet} from 'ai';
 import {
 	InvalidToolInputError,
 	NoSuchToolError,
@@ -7,10 +7,33 @@ import {
 	ToolCallRepairError,
 } from 'ai';
 import {MAX_TOOL_STEPS} from '@/constants';
+
+/**
+ * Stop the SDK's step loop at a call to a tool that does not exist.
+ *
+ * Tools reach the SDK with `execute` stripped, so a valid call already ends
+ * the step. An unknown one does not: the SDK answers it with an automatic
+ * error result and runs another step, so a model stuck on a nonexistent tool
+ * looped up to MAX_TOOL_STEPS times inside one chat() call, invisible to the
+ * conversation loop's unknown-tool handling and its repeated-call cap
+ * (`nanocoder.retries.maxRepeatedToolCalls`). Ending the step hands the call
+ * back so both apply.
+ */
+export const stopOnUnknownTool: StopCondition<ToolSet> = ({steps}) =>
+	steps
+		.at(-1)
+		?.toolCalls.some(
+			call =>
+				call?.dynamic === true &&
+				call.invalid === true &&
+				NoSuchToolError.isInstance(call.error),
+		) ?? false;
+
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	LLMChatResponse,
+	LLMFinishReason,
 	Message,
 	ModeOverrides,
 	StreamCallbacks,
@@ -28,12 +51,19 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
-import {convertToModelMessages} from '../converters/message-converter.js';
+import {
+	convertToModelMessages,
+	withCacheBreakpoints,
+} from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
-import {buildProviderOptions} from './provider-options.js';
+import {rehydrateResponse, scrubOutgoing} from './privacy.js';
+import {
+	buildProviderOptions,
+	isPromptCachingEnabled,
+} from './provider-options.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -157,37 +187,24 @@ export async function handleChat(
 			let finalSystemContent = systemContent;
 			let finalNonSystemMessages = nonSystemMessages;
 			if (privacyEnabled && privacySessionMapRef) {
-				const {scrub} = await import('@nanocollective/prompt-scrub');
-
-				const prevCount = Object.keys(privacySessionMapRef.current).length;
-
-				finalSystemContent = scrub({
-					content: systemContent,
-					sessionMap: privacySessionMapRef.current,
-					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-				}).scrubbedContent as string;
-
-				finalNonSystemMessages = nonSystemMessages.map(m => {
-					if (m.role === 'tool') return m;
-					return {
-						...m,
-						content: scrub({
-							content: m.content,
-							sessionMap: privacySessionMapRef.current,
-							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-						}).scrubbedContent as string,
-					};
-				});
-
-				const newCount = Object.keys(privacySessionMapRef.current).length;
-				const delta = newCount - prevCount;
-				if (delta > 0 && onPrivacyEvent) {
-					onPrivacyEvent(delta);
+				const scrubbed = await scrubOutgoing(
+					systemContent,
+					nonSystemMessages,
+					privacySessionMapRef.current,
+				);
+				finalSystemContent = scrubbed.systemContent;
+				finalNonSystemMessages = scrubbed.messages;
+				if (scrubbed.newPlaceholders > 0 && onPrivacyEvent) {
+					onPrivacyEvent(scrubbed.newPlaceholders);
 				}
 			}
 
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(finalNonSystemMessages);
+			const promptCaching = isPromptCachingEnabled(providerConfig);
+			const convertedMessages = convertToModelMessages(finalNonSystemMessages);
+			const modelMessages = promptCaching
+				? withCacheBreakpoints(convertedMessages, finalSystemContent)
+				: convertedMessages;
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -211,14 +228,31 @@ export async function handleChat(
 				modeOverrides?.modelParameters,
 			);
 
+			// Resolved out here, not inside the `modelParameters` spread below,
+			// because that spread is skipped entirely when nothing has been tuned
+			// — which is every headless and CI run, exactly the ones that need a
+			// working ceiling. `/tune` wins when set; the provider entry is the
+			// baseline.
+			//
+			// ModelParameters keeps the user-facing name `maxTokens`: it is
+			// persisted in tune preferences, so renaming it would silently drop
+			// what existing users have configured. The AI SDK name is applied at
+			// this boundary instead.
+			const resolvedMaxOutputTokens =
+				modeOverrides?.modelParameters?.maxTokens ??
+				providerConfig.maxOutputTokens;
+
 			const result = streamText({
 				model,
-				...(finalSystemContent ? {system: finalSystemContent} : {}),
+				...(finalSystemContent && !promptCaching
+					? {system: finalSystemContent}
+					: {}),
+				...(promptCaching ? {allowSystemInMessages: true} : {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries,
-				stopWhen: stepCountIs(MAX_TOOL_STEPS),
+				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnUnknownTool],
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {
@@ -250,12 +284,21 @@ export async function handleChat(
 				// buildProviderOptions are all JSON-serialisable, but TypeScript
 				// can't infer that through our looser internal shape.
 				providerOptions: providerOptions as SDKProviderOptions,
+				// The AI SDK calls this `maxOutputTokens`. It was previously sent
+				// as `maxTokens`, the v4 name, which v5+ does not read — and
+				// because object spreads bypass excess-property checking it was
+				// dropped silently rather than failing to compile, so every run
+				// fell back to whatever ceiling the provider inferred from the
+				// model id. Keep the key spelled the way the installed SDK spells
+				// it.
+				...(resolvedMaxOutputTokens != null && {
+					maxOutputTokens: resolvedMaxOutputTokens,
+				}),
 				// Model parameters from /tune — passed directly to AI SDK
 				...(modeOverrides?.modelParameters && {
 					temperature: modeOverrides.modelParameters.temperature,
 					topP: modeOverrides.modelParameters.topP,
 					topK: modeOverrides.modelParameters.topK,
-					maxTokens: modeOverrides.modelParameters.maxTokens,
 					frequencyPenalty: modeOverrides.modelParameters.frequencyPenalty,
 					presencePenalty: modeOverrides.modelParameters.presencePenalty,
 					...(modeOverrides.modelParameters.stop && {
@@ -269,6 +312,12 @@ export async function handleChat(
 			const FLUSH_INTERVAL_MS = 150;
 			let tokenBuffer = '';
 			let flushTimer: ReturnType<typeof setTimeout> | null = null;
+			// Which callback the buffered run belongs to. Derived from the delta
+			// that filled the buffer, never from the start/end markers around it —
+			// providers disagree on those (the Responses API defers reasoning-end
+			// until the reasoning item completes, openai-compatible reopens
+			// reasoning without closing text, and some emit deltas with no start
+			// at all), so routing on them puts reasoning on the text callback.
 			let isReasoning = false;
 
 			const flushBuffer = () => {
@@ -283,10 +332,24 @@ export async function handleChat(
 				flushTimer = null;
 			};
 
+			const flushPending = () => {
+				if (flushTimer) {
+					clearTimeout(flushTimer);
+				}
+				flushBuffer();
+			};
+
 			let lastYield = Date.now();
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
+					// The delta type is the source of truth for routing: switching
+					// streams flushes what the previous one buffered before the flag
+					// moves, so a batch always leaves on the callback it was filled for.
 					case 'reasoning-delta':
+						if (!isReasoning) {
+							flushPending();
+							isReasoning = true;
+						}
 						accumulatedReasoning += chunk.text;
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
@@ -294,6 +357,10 @@ export async function handleChat(
 						}
 						break;
 					case 'text-delta':
+						if (isReasoning) {
+							flushPending();
+							isReasoning = false;
+						}
 						accumulatedText += chunk.text;
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
@@ -301,22 +368,13 @@ export async function handleChat(
 						}
 						break;
 
-					// Determine which stream to write tokens to
+					// Pure flush points: they end a batch so each part reaches the UI
+					// as its own chunk, but they never decide where the next one goes.
 					case 'reasoning-start':
-						isReasoning = true;
-						break;
 					case 'text-start':
-						isReasoning = false;
-						break;
-
-					// Flush remaining tokens in given stream
-					case 'text-end':
 					case 'reasoning-end':
-						if (flushTimer) {
-							clearTimeout(flushTimer);
-						}
-						flushBuffer();
-						isReasoning = false;
+					case 'text-end':
+						flushPending();
 						break;
 				}
 				// Periodically yield to the event loop so timers and Ink renders
@@ -330,10 +388,7 @@ export async function handleChat(
 
 			// Safety net: flush any tokens still buffered if the stream ended
 			// without emitting a matching text-end / reasoning-end event.
-			if (flushTimer) {
-				clearTimeout(flushTimer);
-			}
-			flushBuffer();
+			flushPending();
 
 			// After streaming completes, collect final results.
 			// `result.usage` is the FINAL step's usage (not `totalUsage`, which
@@ -383,64 +438,17 @@ export async function handleChat(
 			let finalToolCalls = toolCalls;
 
 			if (privacyEnabled && privacySessionMapRef) {
-				const {rehydrate} = await import('@nanocollective/prompt-scrub');
-
-				if (finalContent) {
-					const result = rehydrate({
+				const rehydrated = await rehydrateResponse(
+					{
 						content: finalContent,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalContent = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (content)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalReasoning) {
-					const result = rehydrate({
-						content: finalReasoning,
-						sessionMap: privacySessionMapRef.current,
-					});
-					finalReasoning = result.content as string;
-					if (result.warnings && result.warnings.length > 0) {
-						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
-							warnings: result.warnings,
-						});
-					}
-				}
-
-				if (finalToolCalls.length > 0) {
-					finalToolCalls = finalToolCalls.map(tc => {
-						try {
-							const argsStr = JSON.stringify(tc.function.arguments);
-							const result = rehydrate({
-								content: argsStr,
-								sessionMap: privacySessionMapRef.current,
-							});
-							if (result.warnings && result.warnings.length > 0) {
-								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
-									toolName: tc.function.name,
-									warnings: result.warnings,
-								});
-							}
-							return {
-								...tc,
-								function: {
-									...tc.function,
-									arguments: JSON.parse(result.content as string),
-								},
-							};
-						} catch (e) {
-							logger.error('Failed to rehydrate tool call', {
-								toolName: tc.function.name,
-								error: e,
-							});
-							return tc;
-						}
-					});
-				}
+						reasoning: finalReasoning,
+						toolCalls: finalToolCalls,
+					},
+					privacySessionMapRef.current,
+				);
+				finalContent = rehydrated.content;
+				finalReasoning = rehydrated.reasoning;
+				finalToolCalls = rehydrated.toolCalls;
 			}
 
 			// Calculate performance metrics
@@ -474,10 +482,18 @@ export async function handleChat(
 					},
 				],
 				toolsDisabled: shouldDisableTools,
+				// Carried out of the client, not just logged: a `length` finish with
+				// no tool calls is a response truncated at the output-token limit,
+				// and the conversation loop cannot tell that from a model that
+				// finished talking unless it can see this.
+				finishReason: finishReason as LLMFinishReason,
 				usage: {
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,
 					totalTokens: usage.totalTokens,
+					cacheReadTokens:
+						usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+					cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
 				},
 			};
 		} catch (error) {

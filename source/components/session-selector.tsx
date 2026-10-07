@@ -1,7 +1,12 @@
 import {Box, Text, useInput} from 'ink';
 import React, {useEffect, useState} from 'react';
-import {StyledSelectInput} from '@/components/ui/styled-select-input';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {FilterableSelectList} from '@/components/filterable-select-list';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {
+	useResponsiveTerminal,
+	useTerminalWidth,
+} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import type {SessionMetadata} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 
@@ -48,6 +53,8 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [hasOtherSessions, setHasOtherSessions] = useState(false);
+	const {colors} = useTheme();
+	const boxWidth = useTerminalWidth();
 	const {actualWidth, truncate} = useResponsiveTerminal();
 
 	useEffect(() => {
@@ -78,39 +85,59 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		loadSessions();
 	}, [showAll]);
 
-	useInput((_input, key) => {
-		if (key.escape) {
-			if (!loading) {
+	// Escape is ignored while loading, and once sessions are listed
+	// FilterableSelectList owns it (Ink useInput is broadcast, so a second
+	// active handler would fire onCancel twice). Only the empty state needs this.
+	useInput(
+		(_input, key) => {
+			if (key.escape) {
 				onCancel();
 			}
-			return;
-		}
-		if (!loading && sessions.length === 0) {
-			onCancel();
-		}
-	});
+		},
+		{isActive: !loading && sessions.length === 0},
+	);
 
 	if (loading) {
 		return (
-			<Box flexDirection="column" marginY={1}>
-				<Text>Loading sessions...</Text>
-			</Box>
+			<TitledBoxWithPreferences
+				title="Recent Sessions"
+				width={boxWidth}
+				borderColor={colors.primary}
+				paddingX={2}
+				paddingY={1}
+				marginBottom={1}
+			>
+				<Text color={colors.secondary}>Loading sessions...</Text>
+			</TitledBoxWithPreferences>
 		);
 	}
 
 	if (sessions.length === 0) {
 		return (
-			<Box flexDirection="column" marginY={1}>
-				{hasOtherSessions ? (
-					<>
-						<Text>No sessions for this project.</Text>
-						<Text>Use /resume --all to see all sessions.</Text>
-					</>
-				) : (
-					<Text>No saved sessions found.</Text>
-				)}
-				<Text>Press any key to continue...</Text>
-			</Box>
+			<TitledBoxWithPreferences
+				title="Recent Sessions"
+				width={boxWidth}
+				borderColor={colors.secondary}
+				paddingX={2}
+				paddingY={1}
+				marginBottom={1}
+			>
+				<Box flexDirection="column">
+					{hasOtherSessions ? (
+						<>
+							<Text>No sessions for this project.</Text>
+							<Text color={colors.secondary}>
+								Use /resume --all to see all sessions.
+							</Text>
+						</>
+					) : (
+						<Text>No saved sessions found.</Text>
+					)}
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>Press Esc to close</Text>
+					</Box>
+				</Box>
+			</TitledBoxWithPreferences>
 		);
 	}
 
@@ -118,7 +145,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		const prefix = `[${index + 1}] `;
 		const suffix = ` (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`;
 		// 4 accounts for the `> ` selector indicator + margin
-		const maxTitleLength = actualWidth - prefix.length - suffix.length - 4;
+		const maxTitleLength = actualWidth - prefix.length - suffix.length - 8;
 		const truncatedTitle =
 			maxTitleLength > 10
 				? truncate(session.title, maxTitleLength)
@@ -127,11 +154,13 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		return {
 			label: `${prefix}${truncatedTitle}${suffix}`,
 			value: session.id,
+			// Filter on the title alone: the count/age suffix would match most queries.
+			searchText: session.title,
 		};
 	});
 
-	const handleSelect = (item: {value: string}) => {
-		const selectedSession = sessions.find(s => s.id === item.value);
+	const handleSelect = (value: string) => {
+		const selectedSession = sessions.find(s => s.id === value);
 		if (selectedSession) {
 			onSelect(selectedSession);
 		} else {
@@ -140,19 +169,28 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	};
 
 	return (
-		<Box flexDirection="column" marginY={1}>
-			<Text bold>Recent Sessions:</Text>
-			<Box marginTop={1}>
-				<StyledSelectInput
+		<TitledBoxWithPreferences
+			title="Recent Sessions"
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			marginBottom={1}
+		>
+			<Box flexDirection="column">
+				<FilterableSelectList
 					items={items}
 					onSelect={handleSelect}
-					limit={Math.min(items.length, 10)}
+					onCancel={onCancel}
+					visibleCount={10}
 				/>
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						Type to filter • ↑/↓ to navigate • Enter to select • Esc to cancel
+					</Text>
+				</Box>
 			</Box>
-			<Box marginTop={1}>
-				<Text>↑/↓ to navigate • Enter to select • Esc to cancel</Text>
-			</Box>
-		</Box>
+		</TitledBoxWithPreferences>
 	);
 };
 

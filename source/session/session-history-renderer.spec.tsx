@@ -48,6 +48,20 @@ test('renders user prompts and assistant replies', t => {
 	t.notRegex(output, /system prompt that should not appear/);
 });
 
+test('does not replay internal walkthrough fallback messages', t => {
+	const output = renderHistory([
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>call write_walkthrough</nanocoder-internal-walkthrough>',
+		},
+		{role: 'assistant', content: 'Walkthrough saved.'},
+	]);
+
+	t.notRegex(output, /nanocoder-internal-walkthrough|call write_walkthrough/);
+	t.regex(output, /Walkthrough saved/);
+});
+
 test('renders tool calls as compact summaries paired with results', t => {
 	const messages: Message[] = [
 		{role: 'user', content: 'read the config'},

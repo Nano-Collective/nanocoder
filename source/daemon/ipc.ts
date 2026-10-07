@@ -241,13 +241,19 @@ export class DaemonIpcClient {
 		method: IpcRequest['method'],
 		params?: unknown,
 	): Promise<unknown> {
-		if (!this.socket) throw new Error('IPC client not connected');
+		const socket = this.socket;
+		if (!socket) throw new Error('IPC client not connected');
 		const id = this.nextId++;
 		return new Promise((resolve, reject) => {
 			this.pending.set(id, {resolve, reject});
-			this.socket?.write(
-				`${JSON.stringify({id, method, params} satisfies IpcRequest)}\n`,
-			);
+			try {
+				socket.write(
+					`${JSON.stringify({id, method, params} satisfies IpcRequest)}\n`,
+				);
+			} catch (error) {
+				this.pending.delete(id);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			}
 		});
 	}
 

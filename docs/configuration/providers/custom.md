@@ -24,18 +24,18 @@ Any service that exposes an OpenAI-compatible API can be added as a custom provi
 
 Custom providers support all [provider configuration fields](index.md#provider-configuration-fields), including:
 
-- `requestTimeout` - Overall request timeout in milliseconds
-- `socketTimeout` - Socket-level timeout (use `-1` for no timeout)
+- `requestTimeout` - Timeout in milliseconds, used when `socketTimeout` is not set
+- `socketTimeout` - Connect, header and body timeout (use `-1` for no timeout). See [Timeouts](index.md#timeouts--connection-pooling)
 - `disableTools` - Disable tool calling for this provider
 - `disableToolModels` - Disable tool calling for specific models
 - `caCertPath` - Path to a PEM CA bundle for self-signed or privately issued TLS certificates
 
 ## Setup via Wizard
 
-Select "Custom Provider" in the `/setup-providers` wizard to add one interactively. The wizard will prompt for:
+Select "Custom Provider" in the `/settings providers` wizard to add one interactively. The wizard will prompt for:
 
 1. Provider name
 2. Base URL
 3. API key (optional)
 4. Model names
-5. Request timeout
+5. Request timeout (optional, saved as `requestTimeout`; leave blank to keep the default)

@@ -630,7 +630,7 @@ function renderRowContent(
 	);
 }
 
-function HelpRow({
+export function HelpRow({
 	label,
 	keybind,
 	colors,

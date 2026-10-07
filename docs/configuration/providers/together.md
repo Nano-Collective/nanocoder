@@ -29,4 +29,4 @@ Together AI model IDs are namespaced (e.g. `deepseek-ai/DeepSeek-V3`, `meta-llam
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your Together AI account.
+The `/settings providers` wizard can automatically fetch available models from your Together AI account.

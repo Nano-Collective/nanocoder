@@ -5,7 +5,7 @@
 
 一個純終端驅動的開源程式設計 Agent，由社群共同打造，不受商業公司控制。模型隨意選擇，程式碼留在本地，告別平台綁定。
 
-Nanocoder 由非營利性 AI 開發者社群 [Nano Collective](https://nanocollective.org) 打造。它能透過你指定的模型來實現 Agentic Coding（智能體程式設計）：既能用 Ollama 跑本地模型，也能接入 OpenRouter、Anthropic、Google 以及各類相容 OpenAI 格式的 API。誰來處理你的程式碼？資料傳送到哪裡？全由你自己決定。這裡沒有閉源黑盒，也沒有把關鍵能力鎖在付費牆後面：**尊重隱私**、**本地優先**、**面向所有人免費開放**。
+Nanocoder 由非營利性 AI 開發者社群 [Nano Collective](https://nanocollective.org) 打造。它能透過你指定的模型來實現 Agentic Coding（智能體程式設計）：既能用 Ollama 跑本地模型，也能接入 OpenRouter、Requesty、Anthropic、Google 以及各類相容 OpenAI 格式的 API。誰來處理你的程式碼？資料傳送到哪裡？全由你自己決定。這裡沒有閉源黑盒，也沒有把關鍵能力鎖在付費牆後面：**尊重隱私**、**本地優先**、**面向所有人免費開放**。
 
 ![Example](./.github/assets/example-preview.gif)
 

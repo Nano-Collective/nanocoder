@@ -11,5 +11,6 @@ export * from '@/types/hooks';
 export * from '@/types/mcp';
 export * from '@/types/skills';
 export * from '@/types/system';
+export * from '@/types/timeline';
 export * from '@/types/ui';
 export * from '@/types/utils';

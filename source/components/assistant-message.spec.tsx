@@ -918,6 +918,56 @@ test('AssistantMessage displays usage without cost when pricing is unknown', t =
 	t.false(output.includes('$'));
 });
 
+test('AssistantMessage hides the usage footer when showUsageFooter is false', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				usage={{inputTokens: 4100, outputTokens: 100, cost: 0.012}}
+				showUsageFooter={false}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Message content still renders, footer does not
+	t.true(output.includes('Hello world'));
+	t.false(output.includes('Tokens:'));
+	t.false(output.includes('$'));
+});
+
+test('AssistantMessage hides the estimate footer too when showUsageFooter is false', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				showUsageFooter={false}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('Hello world'));
+	t.notRegex(output, /~\d+ tokens/);
+});
+
+test('AssistantMessage shows the usage footer by default', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				usage={{totalTokens: 900}}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('Tokens: 900'));
+});
+
 test('AssistantMessage falls back to estimate when usage has no token counts', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>

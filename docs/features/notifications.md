@@ -15,8 +15,16 @@ Open `/settings` and select **Notifications** to enable them. Toggle which event
 - **Tool Confirmation** — a tool call needs your approval
 - **Question Prompt** — the AI has asked you a question
 - **Generation Complete** — the AI has finished responding and is ready for your next message
+- **Triggered Run Complete** — a daemon-triggered skill run has finished
 
-You can also enable notification **sound**.
+You can also enable notification **sound**, and a **Terminal Bell** that writes a BEL character to stdout. The bell is rendered by the terminal emulator itself, so it still reaches you over SSH or inside tmux, where the desktop notifiers cannot land.
+
+The bell rides along with the desktop notification, so it needs the master **Notifications** toggle on as well - Terminal Bell on its own does nothing. If you are inside tmux and hear nothing, tmux swallows the bell unless it is configured to pass it through:
+
+```
+set -g monitor-bell on
+set -g bell-action any
+```
 
 ## How It Works
 
@@ -27,7 +35,7 @@ Nanocoder uses native OS notification APIs — no bundled binaries or external d
 | **macOS** | `terminal-notifier` (if installed) | Yes |
 | **macOS** | `osascript` (fallback) | No |
 | **Linux** | `notify-send` | Yes |
-| **Windows** | PowerShell toast | No |
+| **Windows** | PowerShell (system tray balloon notification) | No |
 
 ### macOS — Getting the Best Experience
 
@@ -41,28 +49,27 @@ Nanocoder will automatically detect and use it. You may need to allow notificati
 
 ### Linux
 
-Notifications use `notify-send`, which is included with most desktop environments (GNOME, KDE, etc.). The Nanocoder icon is included automatically when available.
+Notifications use `notify-send`, which is included with most desktop environments (GNOME, KDE, etc.). The Nanocoder icon ships with the package and is included automatically.
 
 ## Configuration
 
-Notification preferences are stored in `nanocoder-preferences.json` under the `nanocoder.notifications` namespace. You can configure them via `/settings` or by editing the file directly:
+Notification preferences are stored in `nanocoder-preferences.json` under the top-level `notifications` key. You can configure them via `/settings` or by editing the file directly:
 
 ```json
 {
-  "nanocoder": {
-    "notifications": {
-      "enabled": true,
-      "sound": true,
-      "events": {
-        "toolConfirmation": true,
-        "questionPrompt": true,
-        "generationComplete": false
-      },
-      "customMessages": {
-        "toolConfirmation": {
-          "title": "Action Required",
-          "message": "Nanocoder needs your approval"
-        }
+  "notifications": {
+    "enabled": true,
+    "sound": true,
+    "bell": true,
+    "events": {
+      "toolConfirmation": true,
+      "questionPrompt": true,
+      "generationComplete": false
+    },
+    "customMessages": {
+      "toolConfirmation": {
+        "title": "Action Required",
+        "message": "Nanocoder needs your approval"
       }
     }
   }
@@ -72,10 +79,14 @@ Notification preferences are stored in `nanocoder-preferences.json` under the `n
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `false` | Master toggle for all notifications |
-| `sound` | boolean | `false` | Play a sound with each notification |
+| `sound` | boolean | `false` | Play a sound with each notification (macOS only; Linux and Windows use the system's default notification behaviour) |
+| `bell` | boolean | `false` | Also write a terminal bell (BEL) to stdout — skipped when stdout is not a TTY |
 | `events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
 | `events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
 | `events.generationComplete` | boolean | `true` | Notify when a response is ready |
+| `events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
 | `customMessages.<event>` | object | — | Override the default title and message for an event |
+
+Events you leave out of `events` keep their default of `true`, so `{"notifications": {"enabled": true}}` is enough to turn every event on.
 
 Notification titles include the current project directory name, e.g. "Tool Confirmation Required in my-project".

@@ -1,11 +1,12 @@
 import {Box, Text, useInput} from 'ink';
-import React, {useEffect, useReducer} from 'react';
+import React, {useEffect, useMemo, useReducer} from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import ChatQueue from '@/components/chat-queue';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import ToolMessage from '@/components/tool-message';
 import UserMessage from '@/components/user-message';
+import {getShowUsageFooter} from '@/config/preferences';
 import {useTheme} from '@/hooks/useTheme';
 import {getSubagentSession} from '@/services/subagent-session-store';
 
@@ -37,6 +38,10 @@ export function SubagentView({
 		}
 	});
 
+	// Read once on mount: this view force-renders on a 100ms interval, so
+	// hitting the preferences file every frame would be pure waste.
+	const showUsageFooter = useMemo(() => getShowUsageFooter(), []);
+
 	const session = getSubagentSession(agentId);
 
 	// Automatically detach if session cleans up or completes
@@ -62,6 +67,7 @@ export function SubagentView({
 						key={`assistant-${index}`}
 						message={msg.content}
 						model="subagent"
+						showUsageFooter={showUsageFooter}
 					/>
 				);
 			}
@@ -69,7 +75,11 @@ export function SubagentView({
 				return (
 					<ToolMessage
 						key={`tool-${index}`}
-						message={`⚒ ${msg.name}: ${msg.content.slice(0, 100)}...`}
+						message={`⚒ ${msg.name}: ${
+							msg.content.length > 100
+								? `${msg.content.slice(0, 100)}...`
+								: msg.content
+						}`}
 						hideBox={true}
 					/>
 				);
@@ -91,6 +101,7 @@ export function SubagentView({
 					<AssistantMessage
 						message={`[Reasoning complete]\n${session.streamingReasoning}`}
 						model="subagent"
+						showUsageFooter={showUsageFooter}
 					/>
 				)}
 				{session.streamingText && (

@@ -19,6 +19,8 @@ export interface ResponseUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 	/** Estimated cost of this API call in USD; omitted when pricing is unknown. */
 	cost?: number;
 }

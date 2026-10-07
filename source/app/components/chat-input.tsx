@@ -1,12 +1,13 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
-import React from 'react';
+import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
 import QuestionPrompt from '@/components/question-prompt';
 import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
+import {VoiceInstallPrompt} from '@/components/voice-install-prompt';
 import {useTheme} from '@/hooks/useTheme';
 import type {
 	QueuedUserMessage,
@@ -17,6 +18,7 @@ import type {
 	ContextSource,
 	DevelopmentMode,
 	ImageAttachment,
+	TaskIndicatorInfo,
 	ToolCall,
 	TuneConfig,
 } from '@/types';
@@ -25,6 +27,7 @@ import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
+import type {PendingVoiceInstall} from '@/utils/voice-install-queue';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 export interface ChatInputProps {
@@ -47,6 +50,8 @@ export interface ChatInputProps {
 
 	// Main agent tool confirmation (the unified inline approval gate)
 	pendingToolConfirmation: PendingToolConfirmation | null;
+	pendingVoiceInstall?: PendingVoiceInstall | null;
+	onVoiceInstallConfirm?: (confirmed: boolean) => void;
 	onToolConfirmation: (confirmed: boolean) => void;
 
 	// Client state
@@ -74,6 +79,9 @@ export interface ChatInputProps {
 	onToggleCompactDisplay?: () => void;
 	compactToolDisplay?: boolean;
 	liveTaskList?: Task[] | null;
+	showTaskList?: boolean;
+	taskListHasUnread?: boolean;
+	onToggleTaskList?: () => void;
 
 	// Handlers
 	onSubmit: (
@@ -97,6 +105,10 @@ export interface ChatInputProps {
 	 * transcript and isn't clipped by the scroll viewport's overflow="hidden".
 	 */
 	fullscreen?: boolean;
+	isSaving?: boolean;
+	/** Follow-up command offered in the empty prompt after a turn. */
+	suggestedCommand?: string | null;
+	onDismissSuggestion?: () => void;
 }
 
 /**
@@ -121,6 +133,8 @@ export function ChatInput({
 	pendingSubagentApproval,
 	onSubagentToolApproval,
 	pendingToolConfirmation,
+	pendingVoiceInstall,
+	onVoiceInstallConfirm,
 	onToolConfirmation,
 	mcpInitialized,
 	client,
@@ -140,6 +154,9 @@ export function ChatInput({
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
+	showTaskList = true,
+	taskListHasUnread = false,
+	onToggleTaskList,
 	onSubmit,
 	onToggleMode,
 	onToggleReasoningExpanded,
@@ -148,6 +165,9 @@ export function ChatInput({
 	activeEditor,
 	onDismissActiveEditor,
 	fullscreen = false,
+	isSaving,
+	suggestedCommand,
+	onDismissSuggestion,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -157,51 +177,104 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
+	const footerPadding = fullscreen ? 2 : 0;
+
+	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
+	// object on every keystroke would re-render it for nothing.
+	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
+		if (!liveTaskList || liveTaskList.length === 0) return null;
+		let completedCount = 0;
+		let inProgressCount = 0;
+		for (const task of liveTaskList) {
+			if (task.status === 'completed') completedCount++;
+			else if (task.status === 'in_progress') inProgressCount++;
+		}
+		return {
+			totalCount: liveTaskList.length,
+			completedCount,
+			inProgressCount,
+			isHidden: !showTaskList,
+			hasUnread: taskListHasUnread,
+		};
+	}, [liveTaskList, showTaskList, taskListHasUnread]);
+
 	return (
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
-				<LiveCompactCounts counts={compactToolCounts} />
+				<Box paddingLeft={footerPadding}>
+					<LiveCompactCounts counts={compactToolCounts} />
+				</Box>
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
-			{liveTaskList && liveTaskList.length > 0 && (
-				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
+				<Box paddingLeft={footerPadding}>
+					<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+				</Box>
 			)}
 
-			{isCancelling && <CancellingIndicator />}
+			{isCancelling && (
+				<Box paddingLeft={footerPadding}>
+					<CancellingIndicator />
+				</Box>
+			)}
 
 			{showToolExecutionIndicator && (
-				<ToolExecutionIndicator
-					toolName={activeToolCall.function.name}
-					currentIndex={currentToolIndex}
-					totalTools={pendingToolCalls.length}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolExecutionIndicator
+						toolName={activeToolCall.function.name}
+						currentIndex={currentToolIndex}
+						totalTools={pendingToolCalls.length}
+					/>
+				</Box>
 			)}
 
-			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
-			{pendingSubagentApproval ? (
-				<ToolConfirmation
-					toolCall={pendingSubagentApproval.toolCall}
-					onConfirm={onSubagentToolApproval}
-					onCancel={() => onSubagentToolApproval(false)}
+			{pendingVoiceInstall && onVoiceInstallConfirm ? (
+				<VoiceInstallPrompt
+					missing={pendingVoiceInstall.missing}
+					installDependencies={pendingVoiceInstall.installDependencies}
+					onConfirm={() => onVoiceInstallConfirm(true)}
+					onDecline={() => onVoiceInstallConfirm(false)}
 				/>
+			) : pendingSubagentApproval ? (
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						// Force a fresh instance per queued request: without a key, React
+						// reconciles the same component across queue advances and carries
+						// over state (formatterPreview, hasValidationError, ...) from the
+						// previous request onto the new one.
+						key={pendingSubagentApproval.toolCall.id}
+						toolCall={pendingSubagentApproval.toolCall}
+						onConfirm={onSubagentToolApproval}
+						onCancel={() => onSubagentToolApproval(false)}
+					/>
+				</Box>
 			) : /* Main agent tool confirmation (unified inline approval gate) */
 			pendingToolConfirmation ? (
-				<ToolConfirmation
-					toolCall={pendingToolConfirmation.toolCall}
-					onConfirm={onToolConfirmation}
-					onCancel={() => onToolConfirmation(false)}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<ToolConfirmation
+						key={pendingToolConfirmation.toolCall.id}
+						toolCall={pendingToolConfirmation.toolCall}
+						onConfirm={onToolConfirmation}
+						onCancel={() => onToolConfirmation(false)}
+					/>
+				</Box>
 			) : /* Question Prompt (ask_question tool) */
 			isQuestionMode && pendingQuestion ? (
-				<QuestionPrompt
-					question={pendingQuestion}
-					onAnswer={onQuestionAnswer}
-				/>
+				<Box paddingLeft={footerPadding}>
+					<QuestionPrompt
+						question={pendingQuestion}
+						onAnswer={onQuestionAnswer}
+					/>
+				</Box>
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
+					// Inline puts the transcript at column 0 (Ink's <Static>), so the
+					// prompt box drops its centring to share that left edge.
+					centered={fullscreen}
+					fullscreen={fullscreen}
 					customCommands={customCommands}
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
@@ -216,6 +289,8 @@ export function ChatInput({
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
+					onToggleTaskList={onToggleTaskList}
+					taskInfo={taskInfo}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
@@ -225,6 +300,9 @@ export function ChatInput({
 					currentModel={currentModel}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
+					isSaving={isSaving}
+					suggestedCommand={suggestedCommand}
+					onDismissSuggestion={onDismissSuggestion}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

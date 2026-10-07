@@ -68,9 +68,24 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'expand',
+		description:
+			'Show one tool result in full (/expand <n>); run without a number to list recent results',
+		load: () => import('@/commands/expand').then(m => m.expandCommand),
+	},
+	{
 		name: 'commit',
-		description: 'Generate a conventional commit message from staged changes',
+		description:
+			'Generate a conventional commit message from staged changes (--copy)',
+		progressLabel: 'Generating commit message',
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
+	},
+	{
+		name: 'review',
+		description:
+			'Review a branch or PR diff for bugs, security issues, and style violations',
+		progressLabel: 'Reviewing code',
+		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
 	{
 		name: 'doctor',
@@ -102,7 +117,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'init',
 		description:
-			'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md.',
+			'Initialize nanocoder configuration and analyze project structure. Use --preset <react|nextjs|rust>, --force to regenerate AGENTS.md, or --lean to skip CLAUDE.md.',
 		load: () => import('@/commands/init').then(m => m.initCommand),
 	},
 	{
@@ -117,7 +132,7 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'export',
-		description: 'Export the chat history to a markdown file',
+		description: 'Export the chat history to a markdown or JSON file',
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{
@@ -143,20 +158,20 @@ export const lazyCommands: LazyCommand[] = [
 			import('@/commands/setup-config').then(m => m.setupConfigCommand),
 	},
 	{
-		name: 'setup-providers',
-		description: 'Launch interactive configuration wizard',
-		load: () =>
-			import('@/commands/setup-providers').then(m => m.setupProvidersCommand),
-	},
-	{
-		name: 'setup-mcp',
-		description: 'Launch interactive MCP server configuration wizard',
-		load: () => import('@/commands/setup-mcp').then(m => m.setupMcpCommand),
-	},
-	{
 		name: 'usage',
 		description: 'Display token usage statistics',
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
+	},
+	{
+		name: 'stats',
+		description:
+			'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
+		load: () => import('@/commands/stats').then(m => m.statsCommand),
+	},
+	{
+		name: 'tip',
+		description: 'Show a random Nanocoder usage tip',
+		load: () => import('@/commands/tip').then(m => m.tipCommand),
 	},
 	{
 		name: 'checkpoint',
@@ -182,6 +197,16 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/retry').then(m => m.retryCommand),
 	},
 	{
+		name: 'remember',
+		description: 'Save a durable project memory',
+		load: () => import('@/commands/remember').then(m => m.rememberCommand),
+	},
+	{
+		name: 'memory',
+		description: 'Manage project memories',
+		load: () => import('@/commands/memory').then(m => m.memoryCommand),
+	},
+	{
 		name: 'tasks',
 		description: 'Manage your task list',
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
@@ -189,7 +214,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'settings',
 		description:
-			'Configure UI settings (theme, shapes, branding, paste threshold)',
+			'Configure settings (providers, MCP, theme, shapes, paste threshold). Accepts a tab: /settings providers',
 		load: () => import('@/commands/settings').then(m => m.settingsCommand),
 	},
 	{
@@ -228,9 +253,21 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 	{
+		name: 'repomap',
+		description:
+			'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+		progressLabel: 'Building repo map',
+		load: () => import('@/commands/repomap').then(m => m.repomapCommand),
+	},
+	{
 		name: 'privacy',
 		description:
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
+	},
+	{
+		name: 'voice',
+		description: 'Toggle voice mode and configure voice settings',
+		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
 ];

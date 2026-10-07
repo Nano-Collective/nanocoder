@@ -6,19 +6,26 @@ import {StyledTitle} from '@/components/ui/styled-title';
 import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
+	getMouseReporting,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProfessionalTone,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
+	updateMouseReporting,
+	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
+import {SETTINGS_TAB_IDS, type SettingsTabId} from './settings-constants';
 import {SettingsDefaultModePanel} from './settings-default-mode';
 import {SettingsEnvironmentPanel} from './settings-environment';
 import {SettingsJsonConfigPanel} from './settings-json-config';
@@ -35,6 +42,7 @@ import {
 	SettingsNotificationsPanel,
 	SettingsPasteThresholdPanel,
 	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
@@ -48,25 +56,29 @@ import {SettingsWebSearchPanel} from './settings-web-search';
  * Every existing preference must be reachable from exactly one of these
  * its tabs.
  */
-export type SettingsTabId =
-	| 'appearance'
-	| 'input'
-	| 'behavior'
-	| 'providers'
-	| 'advanced';
 
 interface TabDefinition {
 	id: SettingsTabId;
 	label: string;
 }
 
-const TABS: TabDefinition[] = [
-	{id: 'appearance', label: 'Appearance'},
-	{id: 'input', label: 'Input'},
-	{id: 'behavior', label: 'Behavior'},
-	{id: 'providers', label: 'Providers'},
-	{id: 'advanced', label: 'Advanced'},
-];
+/**
+ * Labels for each tab. Keyed by `SettingsTabId`, so adding an id to
+ * settings-constants.ts without a label here is a compile error.
+ */
+const TAB_LABELS: Record<SettingsTabId, string> = {
+	appearance: 'Appearance',
+	input: 'Input',
+	behavior: 'Behavior',
+	providers: 'Providers',
+	mcp: 'MCP',
+	advanced: 'Advanced',
+};
+
+const TABS: TabDefinition[] = SETTINGS_TAB_IDS.map(id => ({
+	id,
+	label: TAB_LABELS[id],
+}));
 
 type SettingRow =
 	| {
@@ -135,7 +147,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'nanocoder-shape',
 					label: 'Nanocoder Shape',
-					value: getNanocoderShape() ?? 'tiny',
+					value: getNanocoderShape() ?? DEFAULT_NANOCODER_SHAPE,
 					panel: 'nanocoder-shape',
 				},
 				{
@@ -144,6 +156,13 @@ function buildRowsForTab(
 					label: 'Alternate Screen',
 					value: getAlternateScreen(),
 					onToggle: () => updateAlternateScreen(!getAlternateScreen()),
+				},
+				{
+					kind: 'boolean',
+					id: 'mouse-reporting',
+					label: 'Mouse Wheel Reporting',
+					value: getMouseReporting(),
+					onToggle: () => updateMouseReporting(!getMouseReporting()),
 				},
 			];
 		}
@@ -185,6 +204,13 @@ function buildRowsForTab(
 					panel: 'reasoning-traces',
 				},
 				{
+					kind: 'boolean',
+					id: 'professional-tone',
+					label: 'Professional Tone',
+					value: getProfessionalTone(),
+					onToggle: () => updateProfessionalTone(!getProfessionalTone()),
+				},
+				{
 					kind: 'managed',
 					id: 'default-mode',
 					label: 'Default Mode',
@@ -218,13 +244,6 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
-					id: 'mcp-config',
-					label: 'Configure MCP Servers',
-					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
-					panel: 'mcp-config',
-				},
-				{
-					kind: 'managed',
 					id: 'web-search',
 					label: 'Web Search',
 					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
@@ -240,8 +259,27 @@ function buildRowsForTab(
 					panel: 'tool-approval',
 				},
 			];
+		case 'mcp':
+			return [
+				{
+					kind: 'managed',
+					id: 'mcp-config',
+					label: 'Configure MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
+					panel: 'mcp-config',
+				},
+			];
 		case 'advanced': {
 			const rows: SettingRow[] = [
+				{
+					kind: 'managed',
+					id: 'semantic-memory',
+					label: 'Semantic Memory',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
+					panel: 'semantic-memory',
+				},
 				{
 					kind: 'managed',
 					id: 'privacy',
@@ -376,6 +414,7 @@ function renderManagedPanel(
 	panel: ManagedSettingsPanel,
 	onBack: () => void,
 	onMcpChanged?: () => void | Promise<void>,
+	onProvidersChanged?: () => void | Promise<void>,
 ): ReactElement {
 	switch (panel) {
 		case 'theme':
@@ -390,6 +429,8 @@ function renderManagedPanel(
 			return <SettingsNotificationsPanel onBack={onBack} onCancel={onBack} />;
 		case 'display-settings':
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
+		case 'semantic-memory':
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':
@@ -409,7 +450,13 @@ function renderManagedPanel(
 		case 'environment':
 			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
-			return <SettingsProvidersListPanel onBack={onBack} onCancel={onBack} />;
+			return (
+				<SettingsProvidersListPanel
+					onBack={onBack}
+					onCancel={onBack}
+					onProvidersChanged={onProvidersChanged}
+				/>
+			);
 		case 'mcp-config':
 			return (
 				<SettingsMcpListPanel
@@ -486,11 +533,24 @@ export function SettingsSelector({
 	onLaunchTune,
 	onLaunchIde,
 	onMcpChanged,
+	onProvidersChanged,
+	initialTab,
+	onTabChange,
 }: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
-	const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
+	const [activeTab, setActiveTabState] = useState<SettingsTabId>(
+		initialTab ?? 'appearance',
+	);
+
+	// The only sanctioned way to change tabs: keeps the parent's tracked tab in
+	// step so returning from Tune/IDE lands back where the user was. Nothing
+	// should call setActiveTabState directly.
+	const updateActiveTab = (tab: SettingsTabId) => {
+		setActiveTabState(tab);
+		onTabChange?.(tab);
+	};
 	const [focus, setFocus] = useState<TabFocus>('header');
 	const [openPanel, setOpenPanel] = useState<ManagedSettingsPanel | null>(null);
 
@@ -576,7 +636,7 @@ export function SettingsSelector({
 	const goToTab = (direction: 1 | -1) => {
 		const idx = TABS.findIndex(t => t.id === activeTab);
 		const next = TABS[(idx + direction + TABS.length) % TABS.length];
-		if (next) setActiveTab(next.id);
+		if (next) updateActiveTab(next.id);
 	};
 
 	const activateRow = (row: SettingRow) => {
@@ -731,7 +791,12 @@ export function SettingsSelector({
 			setVersion(v => v + 1);
 			setOpenPanel(null);
 		};
-		return renderManagedPanel(openPanel, onBack, onMcpChanged);
+		return renderManagedPanel(
+			openPanel,
+			onBack,
+			onMcpChanged,
+			onProvidersChanged,
+		);
 	}
 
 	const width = isNarrow ? '100%' : boxWidth;

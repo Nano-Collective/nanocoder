@@ -15,14 +15,30 @@ import {isOpenRouterProvider} from '../providers/openrouter.js';
 export type ProviderOptions = Record<string, Record<string, unknown>>;
 
 /**
+ * Whether to mark this provider's requests with Anthropic cache breakpoints.
+ *
+ * Anthropic-only and on by default there. `promptCaching: true` on any other
+ * SDK provider is deliberately inert rather than an error: OpenAI and
+ * OpenRouter prefix-cache on their own, and local models have no cache.
+ */
+export function isPromptCachingEnabled(
+	providerConfig: AIProviderConfig,
+): boolean {
+	return (
+		providerConfig.sdkProvider === 'anthropic' &&
+		providerConfig.promptCaching !== false
+	);
+}
+
+/**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
  * Currently handles two providers:
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
- *     `service_tier`, `route`, and `user` into the request body via the
- *     `openrouter` provider key. The top-level `reasoningEffort` (from
+ *     `service_tier`, `route`, and `user` into the request body, keyed by
+ *     the provider's configured name (see openAICompatibleOptionsKey). The top-level `reasoningEffort` (from
  *     ModelParameters / `/tune`) is mapped to `reasoning.effort` when the
  *     user has not provided a more specific `openrouter.reasoning` block.
  *
@@ -83,10 +99,20 @@ export function buildProviderOptions(
 		if (Object.keys(payload).length === 0) {
 			return undefined;
 		}
-		return {openrouter: payload};
+		return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
 	}
 
 	return undefined;
+}
+
+/**
+ * The `providerOptions` key `@ai-sdk/openai-compatible` reads for a provider
+ * created with `createOpenAICompatible({name})`. The SDK uses the exact
+ * provider name (up to the first dot, trimmed), not a lowercased id, so a
+ * provider named "OpenRouter" must receive its options under "OpenRouter".
+ */
+function openAICompatibleOptionsKey(providerName: string): string {
+	return providerName.split('.')[0].trim();
 }
 
 /**

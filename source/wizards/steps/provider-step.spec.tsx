@@ -913,3 +913,109 @@ test.serial(
 		unmount();
 	},
 );
+
+// ============================================================================
+// Deep-linking straight into one provider's edit/delete choice
+// ============================================================================
+
+const deepLinkProviders = [
+	{name: 'ollama', baseUrl: 'http://localhost:11434/v1', models: ['llama2']},
+	{name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', models: ['x']},
+];
+
+test('ProviderStep with initialEditName opens that provider edit/delete choice', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Edit this provider/);
+	t.regex(output, /Delete this provider/);
+	t.notRegex(
+		output,
+		/Let's add AI providers/,
+		'should skip the template menu entirely',
+	);
+});
+
+test('ProviderStep initialEditName targets the named provider, not the first', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	t.regex(lastFrame()!, /openrouter/);
+});
+
+test('ProviderStep falls back to the menu when initialEditName is unknown', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="not-a-configured-provider"
+		/>,
+	);
+
+	// The settings panel lists the resolved config while the wizard loads a
+	// single file, so a name it cannot find must not strand the user.
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
+
+test('ProviderStep without initialEditName still opens the template menu', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
+
+test('ProviderStep omits the mode entry when no handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	// Mode-specific providers are advanced and opt-in: a caller that doesn't
+	// support them must not show a menu row that goes nowhere.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
+	t.regex(lastFrame()!, /Done & Save/);
+});
+
+test('ProviderStep offers the mode entry when a handler is supplied', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			onConfigureModes={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Configure mode-specific providers/);
+	// It sits above Done & Save so the save action stays the last row.
+	t.true(
+		output.indexOf('Configure mode-specific providers') <
+			output.indexOf('Done & Save'),
+	);
+});
+
+test('ProviderStep hides the mode entry until a provider exists', t => {
+	const {lastFrame} = render(
+		<ProviderStep onComplete={() => {}} onConfigureModes={() => {}} />,
+	);
+
+	// Nothing to assign a mode to yet.
+	t.notRegex(lastFrame()!, /Configure mode-specific providers/);
+});

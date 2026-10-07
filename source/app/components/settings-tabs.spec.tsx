@@ -1,16 +1,27 @@
 import {mkdtempSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 // CRITICAL: force chalk/ink to emit real ANSI escapes (inverse-video cursor,
-// border colors) even though the AVA worker has no TTY. Setting FORCE_COLOR
-// from here cannot work: chalk pins its level at import time and AVA's worker
-// bootstrap has already imported it, so the env var is read long before this
-// file runs. Re-level the shared chalk singleton instead — settings-tabs.tsx
-// imports that same instance — before ink or the component are loaded.
+// background colors, border colors) even though the AVA worker has no TTY.
+// Setting FORCE_COLOR from here cannot work: chalk pins its level at import
+// time and AVA's worker bootstrap has already imported it, so the env var is
+// read long before this file runs. Re-level the chalk singletons instead,
+// before ink or the component are loaded.
+//
+// There are TWO of them: the repo depends on chalk 6 (what settings-tabs.tsx
+// imports for its inverse-video cursor) while ink depends on chalk 5 (what
+// paints backgrounds and borders), so pnpm installs two copies with
+// independent levels. Levelling only one leaves half the assertions below
+// running against uncolored output. Resolve ink's copy through ink's own
+// resolution paths so this keeps working whichever versions the two land on.
 const {default: chalk} = await import('chalk');
 chalk.level = 1;
+const inkChalkPath = createRequire(import.meta.resolve('ink')).resolve('chalk');
+const {default: inkChalk} = await import(inkChalkPath);
+inkChalk.level = 1;
 
 const {render} = await import('ink-testing-library');
 // CRITICAL: redirect preference reads to a temp dir BEFORE settings-tabs (and
@@ -18,9 +29,8 @@ const {render} = await import('ink-testing-library');
 process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
 	join(tmpdir(), 'nanocoder-spec-'),
 );
-const {resetPreferencesCache, getAlternateScreen} = await import(
-	'@/config/preferences'
-);
+const {resetPreferencesCache, getAlternateScreen, getMouseReporting} =
+	await import('@/config/preferences');
 resetPreferencesCache();
 
 const {renderWithTheme} = await import('../../test-utils/render-with-theme');
@@ -46,6 +56,7 @@ function renderWithTitleShape(shape: TitleShape) {
 	const titleShapeValue = {
 		currentTitleShape: shape,
 		setCurrentTitleShape: () => {},
+		commitTitleShape: () => {},
 	};
 	return render(
 		<ThemeContext.Provider value={themeValue}>
@@ -259,6 +270,7 @@ test('each tab lists its expected setting rows', async t => {
 	stdin.write(RIGHT);
 	await tick();
 	await expectRow('Tool Results and Thinking');
+	await expectRow('Professional Tone');
 
 	// Advanced.
 	stdin.write(RIGHT);
@@ -329,7 +341,7 @@ test('typing that arrives in the same stdin chunk as the down-arrow still reache
 });
 
 test('Enter on the Alternate Screen boolean row flips the persisted preference', async t => {
-	t.is(getAlternateScreen(), false);
+	t.is(getAlternateScreen(), true);
 
 	const {stdin, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
@@ -346,7 +358,30 @@ test('Enter on the Alternate Screen boolean row flips the persisted preference',
 	stdin.write(ENTER);
 	await tick();
 
-	t.is(getAlternateScreen(), true);
+	t.is(getAlternateScreen(), false);
+
+	unmount();
+});
+
+test('Enter on the Mouse Wheel Reporting boolean row flips the persisted preference', async t => {
+	t.is(getMouseReporting(), true);
+
+	const {stdin, unmount} = renderWithTheme(
+		<SettingsSelector onCancel={() => {}} />,
+	);
+	await tick();
+
+	// Filter down to the single boolean row so index 0 is deterministic.
+	stdin.write(DOWN);
+	await tick();
+	stdin.write('Mouse');
+	await tick();
+	stdin.write(DOWN);
+	await tick();
+	stdin.write(ENTER);
+	await tick();
+
+	t.is(getMouseReporting(), false);
 
 	unmount();
 });
@@ -563,13 +598,12 @@ test('Enter on the Theme managed row opens the sub-panel, Esc returns to the lis
 	unmount();
 });
 
-// On this branch the Appearance tab (the tab with the most rows) has exactly
-// MAX_VISIBLE_ROWS (4) entries — Status Line lives on a separate, not-yet-
-// upstream fork feature and is out of scope for this branch, so no tab
-// currently overflows the visible window and the indicator can't be
-// organically triggered here. Skipped rather than deleted: restore once any
-// tab exceeds 4 rows (e.g. when Status Line lands on main).
-test.skip('scroll indicator appears when items exceed the visible window', async t => {
+// This was skipped on the grounds that no tab exceeded MAX_VISIBLE_ROWS (4),
+// so the indicator could not be triggered organically. That is no longer
+// true: Appearance gained Alternate Screen and Mouse Wheel Reporting with the
+// fullscreen TUI and now has 5 rows, and Behavior and Advanced have 6 each.
+// Appearance is the default tab, so the indicator renders on the first frame.
+test('scroll indicator appears when items exceed the visible window', async t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);
@@ -577,7 +611,10 @@ test.skip('scroll indicator appears when items exceed the visible window', async
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.truthy(output!.includes('more below'));
+	t.regex(output!, /more below/);
+	// The count, not just the label: a window showing 4 of 5 rows has exactly
+	// one hidden below it, so an off-by-one in the arithmetic still fails.
+	t.regex(output!, /1 more below/);
 
 	unmount();
 });

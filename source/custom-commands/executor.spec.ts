@@ -78,6 +78,15 @@ test('execute includes args variable with all arguments', t => {
 	t.true(result.includes('hello world'));
 });
 
+test('execute includes args variable without declared parameters', t => {
+	const command = createTestCommand({
+		content: 'All args: {{args}}',
+	});
+
+	const result = executor.execute(command, ['hello', 'world']);
+	t.true(result.includes('All args: hello world'));
+});
+
 test('execute wraps the prompt with the command name', t => {
 	const command = createTestCommand();
 
@@ -192,4 +201,14 @@ test('formatHelp includes aliases without namespace', t => {
 
 	const result = executor.formatHelp(command);
 	t.true(result.includes('t, testy'));
+});
+
+test('args variable keeps the raw text: apostrophes, quotes and $ patterns', t => {
+	const command = createTestCommand({
+		content: 'All args: {{args}} END',
+	});
+	const raw = `don't touch $' $\` $& $$ 'q' "dq"  two`;
+
+	const result = executor.execute(command, ['ignored'], raw);
+	t.true(result.includes(`All args: ${raw} END`));
 });

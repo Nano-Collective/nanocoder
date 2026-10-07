@@ -65,6 +65,30 @@ test('withValidation type-checks args against the schema before the handler', as
 	t.is(await wrapped({path: 'src/index.ts'}), 'ran');
 });
 
+test('withValidation forwards the abort signal to the handler', async t => {
+	let seen: AbortSignal | undefined;
+	const handler: ToolHandler = async (_args, options) => {
+		seen = options?.abortSignal;
+		return 'ran';
+	};
+	const controller = new AbortController();
+
+	// Validator-only wrapper.
+	const validated = withValidation(handler, async () => ({valid: true}));
+	await validated({}, {abortSignal: controller.signal});
+	t.is(seen, controller.signal, 'a validator must not swallow the signal');
+
+	// Schema-only wrapper — the path every tool built from a NanocoderToolExport
+	// takes, so a dropped signal here makes Stop/Escape a no-op for running tools.
+	seen = undefined;
+	const schemaValidated = withValidation(handler, undefined, {
+		type: 'object',
+		properties: {path: {type: 'string'}},
+	});
+	await schemaValidated({path: 'a.ts'}, {abortSignal: controller.signal});
+	t.is(seen, controller.signal, 'schema validation must not swallow the signal');
+});
+
 test('formatValidationError renders structured details as lines', t => {
 	const out = formatValidationError('bad args', [
 		{path: 'command', expected: 'string', received: 'undefined'},

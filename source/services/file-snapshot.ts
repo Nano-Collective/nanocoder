@@ -1,11 +1,43 @@
-import {execSync} from 'child_process';
+import {execFileSync} from 'child_process';
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
+import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
+import {getLogger} from '@/utils/logging';
 import {logWarning} from '@/utils/message-queue';
+
+/**
+ * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
+ * it, git reports all of it as untracked, so every checkpoint snapshotted the
+ * earlier checkpoints (0, 2, 6, 14, 30 files...) until the file cap crowded
+ * out the user's real changes, and restoring one wrote stale checkpoint and
+ * timeline data back over the live store. User content under `.nanocoder/`
+ * (commands, agents, tools, skills) is still captured.
+ */
+const NANOCODER_STATE_PATH =
+	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|daemon\.)/;
+
+function isNanocoderStatePath(file: string): boolean {
+	return NANOCODER_STATE_PATH.test(file.replace(/\\/g, '/'));
+}
+
+/**
+ * `git diff --name-only HEAD` lists files deleted in the working tree, so a
+ * deleted path reaches captureFiles and fails with ENOENT. That is ordinary
+ * work - delete a file, take a checkpoint - and recording it as a gap would
+ * make every later restore of that checkpoint warn about something that is
+ * not missing at all.
+ */
+function isMissingFile(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOENT'
+	);
+}
 
 /**
  * Service for capturing and restoring file snapshots for checkpoints
@@ -18,44 +50,111 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Capture the contents of specified files
+	 * Is `absolutePath` inside the workspace?
+	 *
+	 * Snapshot keys are `path.relative(workspaceRoot, file)`, so anything
+	 * outside the workspace is keyed `../..` and would escape the checkpoint's
+	 * files directory when joined onto it. The same rule guards capture,
+	 * restore and delete, which is why it lives here rather than at each of
+	 * the three call sites.
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, string>> {
-		const snapshots = new Map<string, string>();
+	private isInsideWorkspace(absolutePath: string): boolean {
+		const relative = path.relative(this.workspaceRoot, absolutePath);
+		return !relative.startsWith('..') && !path.isAbsolute(relative);
+	}
+
+	/**
+	 * Capture the contents of specified files.
+	 *
+	 * Read as bytes, never as text. Snapshots cover whatever git reports as
+	 * modified, which includes images, .vsix bundles and any other binary a
+	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
+	 * with U+FFFD, and since the checkpoint copy is written from this map the
+	 * original bytes would be gone at save time with nothing left to recover.
+	 *
+	 * Files that cannot be read are reported alongside the ones that could, not
+	 * just logged: the caller records them so a later restore can say what it
+	 * did not put back. A file that is simply gone is not one of them - see
+	 * {@link isMissingFile} - so `skipped` means "existed but would not read".
+	 */
+	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
+		const snapshots = new Map<string, Buffer>();
+		const skipped: {path: string; reason: string}[] = [];
 
 		for (const filePath of filePaths) {
+			// Normalized up front so a skipped file is keyed the same way a
+			// captured one is; filesChanged and skippedFiles are read side by side.
+			const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
+			const relativePath = path.relative(this.workspaceRoot, absolutePath);
+			const normalizedPath = relativePath.split(path.sep).join('/');
+
+			if (!this.isInsideWorkspace(absolutePath)) {
+				skipped.push({
+					path: normalizedPath,
+					reason: 'Outside the workspace',
+				});
+				logWarning('Refusing to capture a file outside the workspace', true, {
+					context: {filePath},
+				});
+				continue;
+			}
+
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
-				const content = await fs.readFile(absolutePath, 'utf-8');
-				const relativePath = path.relative(this.workspaceRoot, absolutePath);
-				const normalizedPath = relativePath.split(path.sep).join('/');
+				const content = await fs.readFile(absolutePath);
 				snapshots.set(normalizedPath, content);
 			} catch (error) {
-				logWarning('Could not capture file', true, {
-					context: {
+				const reason = formatError(error);
+
+				// A missing file is deliberately not a skip: it lands in
+				// filesMissing instead, and restoring means deleting it again.
+				// It is also the normal case for a file the turn is about to
+				// create, so it goes to the log only; posting it to the chat
+				// flashed "Could not capture file" on every new file.
+				if (isMissingFile(error)) {
+					getLogger().debug('File not present at capture', {
 						filePath,
-						error: formatError(error),
-					},
-				});
+						error: reason,
+					});
+				} else {
+					skipped.push({
+						path: normalizedPath,
+						reason,
+					});
+					logWarning('Could not capture file', true, {
+						context: {
+							filePath,
+							error: reason,
+						},
+					});
+				}
 			}
 		}
 
-		return snapshots;
+		return {snapshots, skipped};
 	}
 
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, string>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
 		const errors: string[] = [];
 
-		for (const [relativePath, content] of snapshots) {
+		for (const [relativePath, snapshot] of snapshots) {
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, relativePath);
+				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+				// Snapshot keys are read back from user-writable metadata on disk
+				// (checkpoint / timeline index files), so a corrupted or tampered
+				// index must not be able to write outside the workspace.
+				if (!this.isInsideWorkspace(absolutePath)) {
+					throw new Error(
+						`Refusing to restore path outside workspace: ${relativePath}`,
+					);
+				}
+
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content, 'utf-8');
+				await fs.writeFile(absolutePath, snapshot);
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -67,19 +166,96 @@ export class FileSnapshotService {
 	}
 
 	/**
+	 * Delete files that did not exist when the snapshot was taken, so restoring
+	 * to that state also undoes file *creation* rather than only file edits.
+	 *
+	 * A path that is already gone is a success, not an error - the caller wants
+	 * the file absent and it is. Only real failures (permissions, a directory
+	 * in the way) are collected and thrown together, matching `restoreFiles`.
+	 */
+	async removeFiles(relativePaths: string[]): Promise<void> {
+		const errors: string[] = [];
+
+		for (const relativePath of relativePaths) {
+			try {
+				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+				// Same reasoning as restoreFiles, and it matters more here: these
+				// paths drive a delete, so a tampered index must not be able to
+				// reach outside the workspace.
+				if (!this.isInsideWorkspace(absolutePath)) {
+					throw new Error(
+						`Refusing to remove path outside workspace: ${relativePath}`,
+					);
+				}
+
+				await fs.rm(absolutePath, {force: true});
+			} catch (error) {
+				errors.push(`Failed to remove ${relativePath}: ${formatError(error)}`);
+			}
+		}
+
+		if (errors.length > 0) {
+			throw new Error(`Failed to remove some files:\n${errors.join('\n')}`);
+		}
+	}
+
+	/**
 	 * Get list of modified files in the workspace
 	 * Uses git to detect modified files if available, otherwise returns empty array
 	 */
 	getModifiedFiles(): string[] {
-		try {
-			const modifiedOutput = execSync('git diff --name-only HEAD', {
-				cwd: this.workspaceRoot,
-				encoding: 'utf-8',
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
+		return this.getModifiedFilesResult().files;
+	}
 
-			const untrackedOutput = execSync(
-				'git ls-files --others --exclude-standard',
+	/**
+	 * Same scan as {@link getModifiedFiles}, but reports whether the result was
+	 * cut short. Callers that infer a file's *previous* content from the scan
+	 * (the action timeline) must not trust a truncated list: a dirty file that
+	 * fell outside the cap looks untouched, and its before-image would be taken
+	 * from HEAD, discarding the user's uncommitted work on restore.
+	 *
+	 * `truncatedCount` reports how many the cap dropped rather than only that it
+	 * fired, so the number reaches the checkpoint's metadata and, from there, a
+	 * later restore. `available` is false when git could not answer at all.
+	 */
+	getModifiedFilesResult(): {
+		files: string[];
+		truncated: boolean;
+		truncatedCount: number;
+		available: boolean;
+	} {
+		try {
+			// This scan runs on every checkpoint and twice per ACP tool call, so
+			// the common path - HEAD exists - must cost a single spawn. Rather
+			// than probing with `git rev-parse --verify HEAD` first, ask for the
+			// diff and let the unborn case fail.
+			let modifiedOutput = '';
+			try {
+				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
+					cwd: this.workspaceRoot,
+					encoding: 'utf-8',
+					stdio: ['pipe', 'pipe', 'pipe'],
+				}).trim();
+			} catch {
+				// Unborn HEAD: nothing to diff against, but the index can still be
+				// full (`git init && git add .`, or `git checkout --orphan`, which
+				// starts fully populated), and `git ls-files --others` excludes
+				// anything already staged. Diff the index so a staged tree is
+				// captured rather than silently skipped.
+				modifiedOutput = execFileSync(
+					'git',
+					['diff', '--name-only', '--cached'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+					},
+				).trim();
+			}
+
+			const untrackedOutput = execFileSync(
+				'git',
+				['ls-files', '--others', '--exclude-standard'],
 				{
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
@@ -96,8 +272,13 @@ export class FileSnapshotService {
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];
 
-			const ig = loadGitignore(this.workspaceRoot);
-			const filtered = allFiles.filter(file => !ig.ignores(file));
+			// .nanocoderignore only hides files from the model's view; a file the
+			// user hid from listings must still be snapshotted, or restoring a
+			// checkpoint would silently leave its changes in place.
+			const ig = loadGitignore(this.workspaceRoot, {nanocoderIgnore: false});
+			const filtered = allFiles.filter(
+				file => !ig.ignores(file) && !isNanocoderStatePath(file),
+			);
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
 				logWarning(
@@ -110,28 +291,76 @@ export class FileSnapshotService {
 						},
 					},
 				);
-				return filtered.slice(0, MAX_CHECKPOINT_FILES);
+				return {
+					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
+					truncated: true,
+					truncatedCount: filtered.length - MAX_CHECKPOINT_FILES,
+					available: true,
+				};
 			}
 
-			return filtered;
+			return {
+				files: filtered,
+				truncated: false,
+				truncatedCount: 0,
+				available: true,
+			};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return [];
+			return {
+				files: [],
+				truncated: false,
+				truncatedCount: 0,
+				available: false,
+			};
+		}
+	}
+
+	/**
+	 * Return HEAD contents of a tracked file, or null if git is unavailable
+	 * or the path is not in HEAD (untracked / unknown).
+	 */
+	getHeadContent(relativePath: string): string | null {
+		try {
+			return execFileSync('git', ['show', `HEAD:${relativePath}`], {
+				cwd: this.workspaceRoot,
+				encoding: 'utf-8',
+				stdio: ['pipe', 'pipe', 'pipe'],
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Delete a file inside the workspace. Refuses paths that escape the root.
+	 */
+	async deleteFile(relativePath: string): Promise<void> {
+		const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+		if (!this.isInsideWorkspace(absolutePath)) {
+			throw new Error(
+				`Refusing to delete path outside workspace: ${relativePath}`,
+			);
+		}
+		if (existsSync(absolutePath)) {
+			await fs.unlink(absolutePath);
 		}
 	}
 
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, string>): number {
+	getSnapshotSize(snapshots: Map<string, Buffer>): number {
 		let totalSize = 0;
-		for (const content of snapshots.values()) {
-			totalSize += Buffer.byteLength(content, 'utf-8');
+
+		for (const snapshot of snapshots.values()) {
+			totalSize += snapshot.length;
 		}
+
 		return totalSize;
 	}
 
@@ -139,7 +368,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, string>,
+		snapshots: Map<string, Buffer>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 
@@ -162,6 +391,7 @@ export class FileSnapshotService {
 						try {
 							const parentStats = await fs.stat(parentDir);
 							const parentMode = parentStats.mode;
+
 							// Check if any write permission bit is set - owner: 0o200, group: 0o020, others: 0o002
 							const parentHasWritePermission =
 								(parentMode & 0o200) !== 0 ||
@@ -183,6 +413,7 @@ export class FileSnapshotService {
 					if (parentWritable) {
 						try {
 							await fs.mkdir(directory, {recursive: true});
+
 							try {
 								const verifyStats = await fs.stat(directory);
 								directoryExists = verifyStats.isDirectory();
@@ -209,6 +440,7 @@ export class FileSnapshotService {
 					try {
 						const dirStats = await fs.stat(directory);
 						const mode = dirStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -237,6 +469,7 @@ export class FileSnapshotService {
 					try {
 						const fileStats = await fs.stat(absolutePath);
 						const mode = fileStats.mode;
+
 						const hasWritePermission =
 							(mode & 0o200) !== 0 ||
 							(mode & 0o020) !== 0 ||
@@ -259,6 +492,7 @@ export class FileSnapshotService {
 				);
 			}
 		}
+
 		return {valid: errors.length === 0, errors};
 	}
 }

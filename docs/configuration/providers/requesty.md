@@ -29,6 +29,6 @@ Model names follow the `provider/model-name` format, e.g. `openai/gpt-4o-mini` o
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your Requesty account.
+The `/settings providers` wizard can automatically fetch available models from your Requesty account.
 
 See the [Requesty documentation](https://docs.requesty.ai) for the full model catalog and routing options.

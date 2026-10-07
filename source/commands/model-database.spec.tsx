@@ -1,10 +1,32 @@
 import test from 'ava';
+import clipboard from 'clipboardy';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {clearModelCache} from '../model-database/model-fetcher.js';
 import {ModelDatabaseDisplay, modelDatabaseCommand} from './model-database.js';
 
 console.log(`\nmodel-database.spec.tsx – ${React.version}`);
+
+// clipboardy shells out to a platform clipboard tool that may not be present
+// in CI/sandboxes — stub `write` directly, same approach copy.spec.tsx uses.
+const originalWrite = clipboard.write;
+let lastWritten: string | null = null;
+let writeImpl: (text: string) => Promise<void> = async text => {
+	lastWritten = text;
+};
+
+test.beforeEach(() => {
+	lastWritten = null;
+	writeImpl = async text => {
+		lastWritten = text;
+	};
+	(clipboard as {write: (text: string) => Promise<void>}).write = text =>
+		writeImpl(text);
+});
+
+test.afterEach(() => {
+	(clipboard as {write: (text: string) => Promise<void>}).write = originalWrite;
+});
 
 // Helper to create mock OpenRouter API response
 function createMockOpenRouterResponse() {
@@ -602,6 +624,42 @@ test.serial('ModelDatabaseDisplay: handles empty model list', async t => {
 	}
 });
 
+test.serial(
+	'ModelDatabaseDisplay: Enter still closes the panel when no model is highlighted',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => ({data: []}),
+			} as Response;
+		};
+
+		let cancelCalled = false;
+		const onCancel = () => {
+			cancelCalled = true;
+		};
+
+		try {
+			const {stdin} = renderWithTheme(<ModelDatabaseDisplay onCancel={onCancel} />);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			stdin.write('\r');
+
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			t.true(cancelCalled);
+			t.is(lastWritten, null);
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
 // ============================================================================
 // Tab Switching Tests
 // ============================================================================
@@ -669,3 +727,235 @@ test.serial('ModelDatabaseDisplay: displays command title', async t => {
 		clearModelCache();
 	}
 });
+
+// ============================================================================
+// Copy/Switch on Enter Tests
+// ============================================================================
+
+// Mock data is sorted by `created` descending for the "latest" tab, so
+// meta-llama/llama-3.1-70b (created 1710000000) is the highlighted model
+// by default.
+const HIGHLIGHTED_MODEL_ID = 'meta-llama/llama-3.1-70b';
+
+test.serial(
+	'ModelDatabaseDisplay: Enter copies the highlighted model ID to the clipboard',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		try {
+			const {stdin} = renderWithTheme(<ModelDatabaseDisplay />);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			stdin.write('\r');
+
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			t.is(lastWritten, HIGHLIGHTED_MODEL_ID);
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
+test.serial(
+	'ModelDatabaseDisplay: Enter shows a copy confirmation and closes when not on OpenRouter',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		let cancelCalled = false;
+		const onCancel = () => {
+			cancelCalled = true;
+		};
+
+		try {
+			const {stdin} = renderWithTheme(
+				<ModelDatabaseDisplay onCancel={onCancel} currentProvider="ollama" />,
+			);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			stdin.write('\r');
+
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			t.is(lastWritten, HIGHLIGHTED_MODEL_ID);
+			t.true(cancelCalled);
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
+test.serial(
+	'ModelDatabaseDisplay: Enter switches the model when the active provider is OpenRouter',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		let cancelCalled = false;
+		const onCancel = () => {
+			cancelCalled = true;
+		};
+
+		const selectCalls: Array<[string, string]> = [];
+		const onModelSelect = async (provider: string, model: string) => {
+			selectCalls.push([provider, model]);
+			return undefined;
+		};
+
+		try {
+			const {stdin} = renderWithTheme(
+				<ModelDatabaseDisplay
+					onCancel={onCancel}
+					currentProvider="openrouter"
+					onModelSelect={onModelSelect}
+				/>,
+			);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			stdin.write('\r');
+
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			t.is(lastWritten, HIGHLIGHTED_MODEL_ID);
+			t.deepEqual(selectCalls, [['openrouter', HIGHLIGHTED_MODEL_ID]]);
+			// Switching delegates closing to onModelSelect's own exitMode() —
+			// the component itself must not also call onCancel.
+			t.false(cancelCalled);
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
+test.serial(
+	'ModelDatabaseDisplay: Enter passes through the configured provider casing, not a hardcoded literal',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		const selectCalls: Array<[string, string]> = [];
+		const onModelSelect = async (provider: string, model: string) => {
+			selectCalls.push([provider, model]);
+			return undefined;
+		};
+
+		try {
+			// isOpenRouterProvider() matches "OpenRouter" case-insensitively,
+			// but the app's downstream handleModelSelect compares provider
+			// names with strict equality — so onModelSelect must receive the
+			// same casing that was configured, not a hardcoded 'openrouter'.
+			const {stdin} = renderWithTheme(
+				<ModelDatabaseDisplay
+					currentProvider="OpenRouter"
+					onModelSelect={onModelSelect}
+				/>,
+			);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			stdin.write('\r');
+
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			t.deepEqual(selectCalls, [['OpenRouter', HIGHLIGHTED_MODEL_ID]]);
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
+test.serial(
+	'ModelDatabaseDisplay: footer hint mentions "Copy & Switch" when on OpenRouter',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		try {
+			const {lastFrame} = renderWithTheme(
+				<ModelDatabaseDisplay currentProvider="openrouter" />,
+			);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			const output = lastFrame();
+			t.truthy(output);
+			t.true(output!.includes('Copy & Switch'));
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);
+
+test.serial(
+	'ModelDatabaseDisplay: footer hint says "Copy ID" when not on OpenRouter',
+	async t => {
+		clearModelCache();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () => {
+			return {
+				ok: true,
+				json: async () => createMockOpenRouterResponse(),
+			} as Response;
+		};
+
+		try {
+			const {lastFrame} = renderWithTheme(<ModelDatabaseDisplay />);
+
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			const output = lastFrame();
+			t.truthy(output);
+			t.true(output!.includes('Copy ID'));
+			t.false(output!.includes('Copy & Switch'));
+		} finally {
+			globalThis.fetch = originalFetch;
+			clearModelCache();
+		}
+	},
+);

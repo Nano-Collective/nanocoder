@@ -40,4 +40,4 @@ If your API key is associated with multiple organizations, specify which one to 
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your OpenAI account.
+The `/settings providers` wizard can automatically fetch available models from your OpenAI account.

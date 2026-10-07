@@ -1,12 +1,15 @@
 import test from 'ava';
 import type {AIProviderConfig, OpenRouterParameters} from '@/types/index';
-import {buildProviderOptions} from './provider-options.js';
+import {
+	buildProviderOptions,
+	isPromptCachingEnabled,
+} from './provider-options.js';
 
 function makeProvider(
 	overrides: Partial<AIProviderConfig> = {},
 ): AIProviderConfig {
 	return {
-		name: 'OpenRouter',
+		name: 'openrouter',
 		type: 'openai-compatible',
 		models: ['x-ai/grok-4'],
 		config: {
@@ -210,13 +213,62 @@ test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow throug
 	});
 });
 
-test('OpenRouter detection is case-insensitive on provider name', t => {
+test('OpenRouter options are keyed by the exact provider name', t => {
+	// @ai-sdk/openai-compatible reads providerOptions[<provider name>], so a
+	// provider named "OpenRouter" (the wizard default) must get its options
+	// under "OpenRouter", not "openrouter".
 	const provider = withOpenRouter(
 		{service_tier: 'flex'},
-		{name: 'openrouter'},
+		{name: 'OpenRouter'},
 	);
 	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {openrouter: {service_tier: 'flex'}});
+	t.deepEqual(result, {OpenRouter: {service_tier: 'flex'}});
+});
+
+test('OpenRouter options reach the request body for a capitalised provider name', async t => {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const {generateText} = await import('ai');
+	let body: Record<string, unknown> = {};
+	const provider = createOpenAICompatible({
+		name: 'OpenRouter',
+		baseURL: 'https://openrouter.ai/api/v1',
+		apiKey: 'test-key',
+		fetch: async (_input, init) => {
+			body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			return new Response(
+				JSON.stringify({
+					id: '1',
+					created: 0,
+					model: 'x',
+					choices: [
+						{
+							index: 0,
+							message: {role: 'assistant', content: 'ok'},
+							finish_reason: 'stop',
+						},
+					],
+				}),
+				{headers: {'content-type': 'application/json'}},
+			);
+		},
+	});
+	const providerOptions = buildProviderOptions(
+		withOpenRouter(
+			{service_tier: 'flex', provider: {sort: 'price'}},
+			{name: 'OpenRouter'},
+		),
+		'',
+		undefined,
+	);
+	await generateText({
+		model: provider.chatModel('x'),
+		prompt: 'hi',
+		providerOptions: providerOptions as Parameters<
+			typeof generateText
+		>[0]['providerOptions'],
+	});
+	t.is(body['service_tier'], 'flex');
+	t.deepEqual(body['provider'], {sort: 'price'});
 });
 
 test('OpenRouter combines provider, reasoning, plugins, models, service_tier', t => {
@@ -275,4 +327,44 @@ test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
 	});
 	const result = buildProviderOptions(provider, '', undefined);
 	t.deepEqual(result, {openrouter: {experimental_flag: true}});
+});
+
+test('isPromptCachingEnabled is on by default for the anthropic SDK', t => {
+	t.true(
+		isPromptCachingEnabled(makeProvider({sdkProvider: 'anthropic'})),
+	);
+});
+
+test('isPromptCachingEnabled honours an explicit opt-out', t => {
+	t.false(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'anthropic', promptCaching: false}),
+		),
+	);
+});
+
+test('isPromptCachingEnabled honours an explicit opt-in', t => {
+	t.true(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'anthropic', promptCaching: true}),
+		),
+	);
+});
+
+test('isPromptCachingEnabled is off for every non-anthropic SDK', t => {
+	t.false(isPromptCachingEnabled(makeProvider()));
+	t.false(
+		isPromptCachingEnabled(makeProvider({sdkProvider: 'openai-compatible'})),
+	);
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'google'})));
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'chatgpt-codex'})));
+	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'github-copilot'})));
+});
+
+test('isPromptCachingEnabled stays off for non-anthropic providers that opt in', t => {
+	t.false(
+		isPromptCachingEnabled(
+			makeProvider({sdkProvider: 'openai-compatible', promptCaching: true}),
+		),
+	);
 });

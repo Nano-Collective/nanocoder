@@ -1,4 +1,5 @@
 import test from 'ava';
+import {TOOL_APPROVAL_REQUIRED_KIND, TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {isNonInteractiveModeComplete} from './helpers';
 import type {NonInteractiveModeState} from './types';
 
@@ -18,12 +19,18 @@ test('isNonInteractiveModeComplete returns timeout when time exceeded', t => {
 	t.is(result.reason, 'timeout');
 });
 
-test('isNonInteractiveModeComplete returns tool-approval when tool approval required', t => {
+test('isNonInteractiveModeComplete returns tool-approval-required when tool approval required', t => {
 	const state: NonInteractiveModeState = {
 		isToolExecuting: false,
 		isToolConfirmationMode: false,
 		isConversationComplete: false,
-		messages: [{role: 'assistant', content: 'Tool approval required'}],
+		// Exactly what conversation-loop emits, prefix and all.
+		messages: [
+			{
+				role: 'assistant',
+				content: `${TOOL_APPROVAL_REQUIRED_PREFIX}execute_bash. Exiting non-interactive mode`,
+			},
+		],
 	};
 
 	const startTime = Date.now();
@@ -31,7 +38,7 @@ test('isNonInteractiveModeComplete returns tool-approval when tool approval requ
 
 	const result = isNonInteractiveModeComplete(state, startTime, maxTime);
 	t.true(result.shouldExit);
-	t.is(result.reason, 'tool-approval');
+	t.is(result.reason, TOOL_APPROVAL_REQUIRED_KIND);
 });
 
 test('isNonInteractiveModeComplete returns error when error messages present', t => {
