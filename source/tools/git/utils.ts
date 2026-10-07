@@ -506,17 +506,25 @@ export async function isLastCommitPushed(): Promise<boolean> {
 }
 
 /**
+ * Which commits to walk: a revision range (`main..HEAD`) or a single branch.
+ * Not both - git would read them as two separate revisions and log the union.
+ */
+type CommitSelection =
+	| {range?: string; branch?: never}
+	| {branch?: string; range?: never};
+
+/**
  * Get commits with various filters
  */
-export async function getCommits(options: {
-	count?: number;
-	range?: string;
-	branch?: string;
-	file?: string;
-	author?: string;
-	since?: string;
-	grep?: string;
-}): Promise<CommitInfo[]> {
+export async function getCommits(
+	options: CommitSelection & {
+		count?: number;
+		file?: string;
+		author?: string;
+		since?: string;
+		grep?: string;
+	},
+): Promise<CommitInfo[]> {
 	try {
 		const args = ['log', '--format=%H|%h|%an|%ae|%ad|%ar|%s', '--date=short'];
 
