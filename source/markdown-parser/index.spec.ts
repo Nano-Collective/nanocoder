@@ -5,7 +5,7 @@ import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
-import {parseMarkdown} from './index.js';
+import {parseMarkdown, parseMarkdownParts} from './index.js';
 
 console.log(`\nindex.spec.ts`);
 
@@ -328,4 +328,42 @@ test('parseMarkdown restores inline code placeholders correctly', t => {
 	t.false(result.includes('__INLINE_CODE'));
 	t.false(result.includes('_INLINE'));
 	t.false(result.includes('CODE_'));
+});
+
+// Literal placeholder preservation tests
+test('parseMarkdown preserves literal __CODE_BLOCK_0__ and __INLINE_CODE_0__ strings', t => {
+	const text = 'Here is a literal __CODE_BLOCK_0__ and __INLINE_CODE_0__ token.';
+	const result = parseMarkdown(text, mockColors);
+	t.true(result.includes('__CODE_BLOCK_0__'));
+	t.true(result.includes('__INLINE_CODE_0__'));
+});
+
+test('parseMarkdown preserves literal tokens even when real code blocks are present', t => {
+	const text = 'Literal __CODE_BLOCK_0__\n\`\`\`\nreal code\n\`\`\`\nLiteral __INLINE_CODE_0__ with `inline`';
+	const result = parseMarkdown(text, mockColors);
+	t.true(result.includes('__CODE_BLOCK_0__'));
+	t.true(result.includes('__INLINE_CODE_0__'));
+	t.true(result.includes('real code'));
+	t.true(result.includes('inline'));
+});
+
+test('parseMarkdownParts preserves literal __CODE_BLOCK_0__ and __INLINE_CODE_0__ strings', t => {
+	const text = 'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__';
+	const result = parseMarkdownParts(text, mockColors);
+	t.is(result.length, 1);
+	t.is(result[0]?.type, 'text');
+	t.true(result[0]?.content.includes('__CODE_BLOCK_0__'));
+	t.true(result[0]?.content.includes('__INLINE_CODE_0__'));
+});
+
+test('parseMarkdownParts preserves literal tokens when real code blocks are present', t => {
+	const text = 'Literal __CODE_BLOCK_0__\n\`\`\`\nreal code\n\`\`\`\nLiteral __INLINE_CODE_0__';
+	const result = parseMarkdownParts(text, mockColors);
+	t.is(result.length, 3);
+	t.is(result[0]?.type, 'text');
+	t.true(result[0]?.content.includes('__CODE_BLOCK_0__'));
+	t.is(result[1]?.type, 'code');
+	t.true(result[1]?.content.includes('real code'));
+	t.is(result[2]?.type, 'text');
+	t.true(result[2]?.content.includes('__INLINE_CODE_0__'));
 });

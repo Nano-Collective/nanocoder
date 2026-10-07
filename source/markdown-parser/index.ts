@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import chalk from 'chalk';
 import {highlight} from 'cli-highlight';
 import {getSyntaxTheme} from '@/config/themes';
@@ -21,7 +22,22 @@ function _parseMarkdownCore(
 	text: string,
 	themeColors: Colors,
 	width?: number,
-): {text: string; codeBlocks: string[]; inlineCodes: string[]} {
+): {
+	text: string;
+	codeBlocks: string[];
+	inlineCodes: string[];
+	codePrefix: string;
+	inlinePrefix: string;
+} {
+	let namespace = randomBytes(4).toString('hex');
+	while (
+		text.includes(`__CODE_BLOCK_${namespace}_`) ||
+		text.includes(`__INLINE_CODE_${namespace}_`)
+	) {
+		namespace = randomBytes(4).toString('hex');
+	}
+	const codePrefix = `__CODE_BLOCK_${namespace}_`;
+	const inlinePrefix = `__INLINE_CODE_${namespace}_`;
 	// First decode HTML entities
 	let result = decodeHtmlEntities(text);
 
@@ -66,7 +82,7 @@ function _parseMarkdownCore(
 					language: lang || 'plaintext',
 					theme: getSyntaxTheme(themeColors),
 				});
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+				const placeholder = `${codePrefix}${codeBlocks.length}__`;
 				codeBlocks.push(highlighted);
 				return placeholder;
 			} catch {
@@ -74,7 +90,7 @@ function _parseMarkdownCore(
 				const formatted = chalk.hex(themeColors.tool)(
 					dedented.trim().replace(/\t/g, '  '),
 				);
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+				const placeholder = `${codePrefix}${codeBlocks.length}__`;
 				codeBlocks.push(formatted);
 				return placeholder;
 			}
@@ -85,7 +101,7 @@ function _parseMarkdownCore(
 	// unextracted fenced blocks (e.g. inside a blockquote) don't form a span.
 	result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {
 		const formatted = chalk.hex(themeColors.tool)(String(code).trim());
-		const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
+		const placeholder = `${inlinePrefix}${inlineCodes.length}__`;
 		inlineCodes.push(formatted);
 		return placeholder;
 	});
@@ -134,7 +150,7 @@ function _parseMarkdownCore(
 		return chalk.hex(themeColors.secondary).italic(`> ${text}`);
 	});
 
-	return {text: result, codeBlocks, inlineCodes};
+	return {text: result, codeBlocks, inlineCodes, codePrefix, inlinePrefix};
 }
 
 // Basic markdown parser for terminal — returns a single flat string
@@ -147,14 +163,22 @@ export function parseMarkdown(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
+		codePrefix,
+		inlinePrefix,
 	} = _parseMarkdownCore(text, themeColors, width);
 	let result = processed;
-	result = result.replace(/__CODE_BLOCK_(\d+)__/g, (_match, index: string) => {
-		return codeBlocks[parseInt(index, 10)] || '';
-	});
-	result = result.replace(/__INLINE_CODE_(\d+)__/g, (_match, index: string) => {
-		return inlineCodes[parseInt(index, 10)] || '';
-	});
+	result = result.replace(
+		new RegExp(`${codePrefix}(\\d+)__`, 'g'),
+		(_match, index: string) => {
+			return codeBlocks[parseInt(index, 10)] || '';
+		},
+	);
+	result = result.replace(
+		new RegExp(`${inlinePrefix}(\\d+)__`, 'g'),
+		(_match, index: string) => {
+			return inlineCodes[parseInt(index, 10)] || '';
+		},
+	);
 	return result;
 }
 
@@ -169,17 +193,19 @@ export function parseMarkdownParts(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
+		codePrefix,
+		inlinePrefix,
 	} = _parseMarkdownCore(text, themeColors, width);
 
 	// Restore inline code inside text segments (they stay with the text)
 	const withInline = processed.replace(
-		/__INLINE_CODE_(\d+)__/g,
+		new RegExp(`${inlinePrefix}(\\d+)__`, 'g'),
 		(_match, index: string) => inlineCodes[parseInt(index, 10)] || '',
 	);
 
 	// Split on code block markers; split() with a capture group interleaves
 	// text and index strings: [text, idx, text, idx, ...]
-	const segments = withInline.split(/__CODE_BLOCK_(\d+)__/);
+	const segments = withInline.split(new RegExp(`${codePrefix}(\\d+)__`));
 	const parts: MarkdownPart[] = [];
 
 	for (let i = 0; i < segments.length; i++) {
