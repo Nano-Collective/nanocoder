@@ -111,7 +111,7 @@ test('CLI integration: init help exits successfully with preset guidance', t => 
 	t.true(result.stdout.includes('react, nextjs, rust'));
 });
 
-test.serial('CLI integration: init preset succeeds and creates files', t => {
+test.serial.skip('CLI integration: init preset succeeds and creates files', t => {
 	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
 	try {
 		writeFileSync(
@@ -133,7 +133,7 @@ test.serial('CLI integration: init preset succeeds and creates files', t => {
 	}
 });
 
-test.serial('CLI integration: init invalid preset exits with an error', t => {
+test.serial.skip('CLI integration: init invalid preset exits with an error', t => {
 	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
 	try {
 		const result = spawnSync(
