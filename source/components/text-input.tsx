@@ -65,7 +65,14 @@ export type Props = {
  */
 export type TextInputHandle = {
 	getCursorOffset: () => number;
-	setCursorOffset: (offset: number) => void;
+	/**
+	 * Move the caret. Pass `value` when the parent has just changed the value
+	 * out of band (a terminal paste) and `offset` is in that new value's
+	 * coordinates: keys arriving before the next render then edit the new
+	 * value at the new caret, instead of the old value at an offset that does
+	 * not fit it.
+	 */
+	setCursorOffset: (offset: number, value?: string) => void;
 };
 
 const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
@@ -96,13 +103,16 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		ref,
 		() => ({
 			getCursorOffset: () => cursorOffsetRef.current,
-			setCursorOffset: (offset: number) => {
+			setCursorOffset: (offset: number, value?: string) => {
 				// Don't clamp against originalValueRef.current here: the parent
 				// typically calls this in the same tick it schedules the new
 				// `value`, so the ref is stale. The next render's effect clamps
 				// the offset against the real newValue.length. We trust the
 				// caller to pass a sane offset; out-of-bounds requests are
 				// still corrected, just one render later.
+				if (value !== undefined) {
+					originalValueRef.current = value;
+				}
 				cursorOffsetRef.current = offset;
 				skipNextCursorResetRef.current = true;
 				setState({cursorOffset: offset, cursorWidth: 0});
