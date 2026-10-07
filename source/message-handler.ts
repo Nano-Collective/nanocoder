@@ -1,5 +1,6 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -99,11 +100,17 @@ export async function processToolUse(
 		const isStructured =
 			result && typeof result === 'object' && 'llmContent' in result;
 		const rawContent = isStructured ? result.llmContent : result;
-		const content =
+		const truncated =
 			typeof rawContent === 'string'
 				? truncateToolResult(rawContent)
 				: (rawContent as string);
 		const failed = isStructured && result.isError;
+		// Formatters run on a successful write only, and before post-tool-use
+		// so its hooks see the formatted file.
+		const content =
+			typeof truncated === 'string' && !failed
+				? await formatWrittenFile(toolCall.function.name, parsedArgs, truncated)
+				: truncated;
 
 		// Only string content is extended; a structured payload passes through
 		// untouched.

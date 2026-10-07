@@ -43,6 +43,17 @@ test('empty config file is valid', t => {
 	assertValid(t, 'empty object', {});
 });
 
+test('formatter match accepts a single glob or an array and requires a command', t => {
+	for (const match of ['**/*.ts', ['**/*.ts', '**/*.tsx']]) {
+		assertValid(t, 'formatter match', {nanocoder: {formatters: [
+			{match, command: 'biome format --write "$FILE"'},
+		]}});
+	}
+	assertInvalid(t, 'formatter missing command', {nanocoder: {formatters: [
+		{match: '**/*.ts'},
+	]}});
+});
+
 test('config with only $schema is valid', t => {
 	assertValid(t, '$schema only', {
 		$schema: 'https://raw.githubusercontent.com/Nano-Collective/nanocoder/main/schemas/agents.config.schema.json',

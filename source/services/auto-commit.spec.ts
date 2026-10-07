@@ -11,6 +11,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
+import {getProjectRoot, setProjectRoot} from './session-cwd';
 import {
 	cleanMessage,
 	formatCommitNote,
@@ -258,10 +259,16 @@ test.serial('commits what a post-tool-use formatter hook wrote', async t => {
 	const dir = makeRepo();
 	const config = getAppConfig();
 	const previousHooks = config.hooks;
+	const previousFormatters = config.formatters;
+	const previousRoot = getProjectRoot();
 	const {processToolUse, setToolRegistryGetter} = await import(
 		'../message-handler'
 	);
 	try {
+		setProjectRoot(dir);
+		config.formatters = [{match: ['**/*.ts'], command:
+			`node -e "require('fs').appendFileSync(process.env.FILE, 'formatter\\n')"`,
+		}];
 		// Stands in for `prettier --write "$NANOCODER_FILE"`.
 		config.hooks = {
 			'post-tool-use': [
@@ -284,10 +291,12 @@ test.serial('commits what a post-tool-use formatter hook wrote', async t => {
 		});
 
 		t.regex(String(result.content), /\[auto-commit\] [a-f0-9]{7,} /);
-		t.is(git(dir, 'show HEAD:fmt.ts'), 'agent\nformatted');
+		t.is(git(dir, 'show HEAD:fmt.ts'), 'agent\nformatter\nformatted');
 		t.is(git(dir, 'status --porcelain'), '');
 	} finally {
 		config.hooks = previousHooks;
+		config.formatters = previousFormatters;
+		setProjectRoot(previousRoot);
 		setToolRegistryGetter(() => ({}));
 		rmSync(dir, {recursive: true, force: true});
 	}

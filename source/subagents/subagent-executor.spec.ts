@@ -2005,6 +2005,10 @@ test.serial(
 			],
 		});
 		getAppConfig().autoCommit = true;
+		getAppConfig().formatters = [{match: ['**/*.ts'], command: subagentHookNode(
+			"require('fs').appendFileSync(process.env.FILE, 'formatter\\n')",
+		)}];
+		setProjectRoot(repo);
 		let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
 		let committed: string;
 		let status: string;
@@ -2025,7 +2029,7 @@ test.serial(
 
 		t.true(result.success, result.error);
 		t.regex(String(toolResults[0]?.content), /\[auto-commit\] [a-f0-9]{7,} /);
-		t.is(committed, 'agent\nformatted');
+		t.is(committed, 'agent\nformatter\nformatted');
 		t.is(status, '', 'nothing the edit or the hook wrote is left behind');
 	},
 );

@@ -17,6 +17,7 @@ import {
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {consultPluginPermission} from '@/plugins/host';
 import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -911,10 +912,17 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const formatted =
+				typeof result !== 'string' && result.isError
+					? truncated
+					: await formatWrittenFile(toolName, parsedArgs, truncated);
 			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
-				truncateToolResult(content),
+				formatted,
 			);
 			// After the hooks, so a formatter hook's rewrite is committed too.
 			const failed = typeof result !== 'string' && result.isError;
