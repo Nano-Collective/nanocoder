@@ -5,7 +5,7 @@ import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
-import {parseMarkdown} from './index.js';
+import {parseMarkdown, parseMarkdownParts} from './index.js';
 
 console.log(`\nindex.spec.ts`);
 
@@ -328,4 +328,27 @@ test('parseMarkdown restores inline code placeholders correctly', t => {
 	t.false(result.includes('__INLINE_CODE'));
 	t.false(result.includes('_INLINE'));
 	t.false(result.includes('CODE_'));
+});
+
+test('parseMarkdown does not decode HTML entities or convert <br> tags inside code blocks', t => {
+	const markdown = 'Here is code:\n```html\n<div>\n  &lt;span&gt;Hello&lt;/span&gt;<br>\n</div>\n```';
+	const result = parseMarkdownParts(markdown, mockColors);
+
+	// Check that the code part preserves entities and <br> tags
+	const codePart = result.find(part => part.type === 'code');
+	t.truthy(codePart);
+	t.true(codePart!.content.includes('&lt;span&gt;'));
+	t.true(codePart!.content.includes('<br>'));
+});
+
+test('parseMarkdown does not decode HTML entities or convert <br> tags inside inline code', t => {
+	const markdown = 'Inline: `&lt;div&gt;` and `<br>`';
+	const result = parseMarkdownParts(markdown, mockColors);
+
+	// Since parseMarkdownParts restores inline code to the text parts
+	// it should be present in the text content
+	const textPart = result.find(part => part.type === 'text');
+	t.truthy(textPart);
+	t.true(textPart!.content.includes('&lt;div&gt;'));
+	t.true(textPart!.content.includes('<br>'));
 });

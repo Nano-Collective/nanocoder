@@ -22,8 +22,7 @@ function _parseMarkdownCore(
 	themeColors: Colors,
 	width?: number,
 ): {text: string; codeBlocks: string[]; inlineCodes: string[]} {
-	// First decode HTML entities
-	let result = decodeHtmlEntities(text);
+	let result = text;
 
 	// Step 1: Parse tables FIRST (before <br> conversion and code extraction)
 	result = result.replace(
@@ -33,8 +32,7 @@ function _parseMarkdownCore(
 		},
 	);
 
-	// Step 2: Convert <br> and <br/> tags to newlines (AFTER table parsing)
-	result = result.replace(/<br\s*\/?>/gi, '\n');
+	// Step 2 has been moved to Step 3.5 to protect code blocks
 
 	// Step 3: Extract and protect code blocks and inline code with placeholders
 	const codeBlocks: string[] = [];
@@ -89,6 +87,9 @@ function _parseMarkdownCore(
 		inlineCodes.push(formatted);
 		return placeholder;
 	});
+	// Step 3.5: Decode HTML entities and process <br> on the non-code text
+	result = decodeHtmlEntities(result);
+	result = result.replace(/<br\s*\/?>/gi, '\n');
 
 	// Step 4: Process markdown formatting (now safe from code interference)
 	// Process lists FIRST before italic, since * at start of line is a list, not italic
