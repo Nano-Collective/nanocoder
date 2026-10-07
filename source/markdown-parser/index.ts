@@ -22,21 +22,9 @@ function _parseMarkdownCore(
 	themeColors: Colors,
 	width?: number,
 ): {text: string; codeBlocks: string[]; inlineCodes: string[]} {
-	// First decode HTML entities
+	// Initialize markdown processing
 	let result = text;
 
-	// Step 1: Parse tables FIRST (before <br> conversion and code extraction)
-	result = result.replace(
-		/(?:^|\n)((?:\|.+\|\n)+)/gm,
-		(_match, tableText: string) => {
-			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
-		},
-	);
-
-	// Step 2: Convert <br> and <br/> tags to newlines (AFTER table parsing)
-	result = result.replace(/<br\s*\/?>/gi, '\n');
-
-	// Step 3: Extract and protect code blocks and inline code with placeholders
 	const codeBlocks: string[] = [];
 	const inlineCodes: string[] = [];
 
@@ -75,18 +63,18 @@ function _parseMarkdownCore(
 		},
 	);
 
-	// Decode HTML entities after code blocks are protected
+	// Decode HTML entities AFTER code blocks are protected
 	result = decodeHtmlEntities(result);
 
-	// Step 1: Parse tables FIRST (before <br> conversion)
+	// Parse tables
 	result = result.replace(
-		/(?:^|\n)((?:\|.+\|\n)+)/gm,
+		/(?:^|\n)((?:\|.+\|[ \t]*(?:\n|(?![\s\S])))+)/gm,
 		(_match, tableText: string) => {
 			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
 		},
 	);
 
-	// Step 2: Convert <br> and <br/> tags to newlines
+	// Convert <br> and <br/> tags to newlines (AFTER table parsing)
 	result = result.replace(/<br\s*\/?>/gi, '\n');
 	// Extract inline code (`code`) — single-line only, so stray backticks from
 	// unextracted fenced blocks (e.g. inside a blockquote) don't form a span.
