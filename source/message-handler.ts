@@ -68,6 +68,20 @@ export async function processToolUse(
 			{strict: true},
 		);
 		const result = await handler(parsedArgs, options);
+		// Image bytes stay off `content` so truncation cannot chew them up
+		// and the model receives them as image parts, not a base64 blob.
+		if (result && typeof result === 'object' && 'images' in result) {
+			return {
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content:
+					typeof result.llmContent === 'string'
+						? truncateToolResult(result.llmContent)
+						: result.llmContent,
+				...(result.images.length > 0 ? {images: result.images} : {}),
+			};
+		}
 		// Handlers may return a plain string or structured output. Only an
 		// object carrying `llmContent` is treated as structured; anything else
 		// (string, or a legacy undefined) passes through as the content.
@@ -83,6 +97,7 @@ export async function processToolUse(
 				structuredContent: result.structured,
 			};
 		}
+
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',

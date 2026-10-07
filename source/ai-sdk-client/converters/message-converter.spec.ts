@@ -260,6 +260,38 @@ test('convertToModelMessages converts tool message', t => {
 	t.is(content[0].output?.value, 'Tool result');
 });
 
+test('convertToModelMessages emits image-data parts for tool screenshots', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot of http://localhost:3000/',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	const content = result[1].content as Array<{
+		output?: {
+			type: string;
+			value: Array<{type: string; text?: string; data?: string; mediaType?: string}>;
+		};
+	}>;
+	t.is(content[0].output?.type, 'content');
+	t.deepEqual(content[0].output?.value, [
+		{type: 'text', text: 'Screenshot of http://localhost:3000/'},
+		{type: 'image-data', data: 'abc', mediaType: 'image/jpeg'},
+	]);
+});
+
 test('convertToModelMessages emits a json output for structured tool results', t => {
 	const messages: Message[] = [
 		{

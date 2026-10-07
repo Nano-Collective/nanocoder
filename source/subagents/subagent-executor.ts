@@ -538,11 +538,12 @@ export class SubagentExecutor {
 				);
 
 				// Count tokens from tool results
-				totalTokens += estimateTokens(toolResult);
+				totalTokens += estimateTokens(toolResult.content);
 
 				messages.push({
 					role: 'tool',
-					content: toolResult,
+					content: toolResult.content,
+					...(toolResult.images ? {images: toolResult.images} : {}),
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
@@ -582,14 +583,14 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
-	): Promise<string> {
+	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
-			return 'Error: Execution was cancelled';
+			return {content: 'Error: Execution was cancelled'};
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
-			return `Error: Tool '${toolName}' not found`;
+			return {content: `Error: Tool '${toolName}' not found`};
 		}
 
 		// Check if this tool needs user approval
@@ -613,21 +614,29 @@ export class SubagentExecutor {
 			});
 
 			if (!approved) {
-				return 'Tool execution was denied by the user.';
+				return {content: 'Tool execution was denied by the user.'};
 			}
 		}
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
 			const result = await toolHandler(parsedArgs);
-			// Subagents converse in text, so collapse structured output to its
-			// text representation.
 			const content = typeof result === 'string' ? result : result.llmContent;
-			return truncateToolResult(content);
+			const images =
+				typeof result === 'object' &&
+				result !== null &&
+				'images' in result &&
+				Array.isArray(result.images)
+					? result.images
+					: undefined;
+			return {
+				content: truncateToolResult(content),
+				...(images && images.length > 0 ? {images} : {}),
+			};
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail.
-			return truncateToolResult(toolErrorToContent(error));
+			return {content: truncateToolResult(toolErrorToContent(error))};
 		}
 	}
 }

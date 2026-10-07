@@ -52,6 +52,8 @@ export interface ToolResult {
 	name: string;
 	content: string;
 	structuredContent?: JSONValue;
+	/** Raw base64. Sent as image parts, not copied into `content`. */
+	images?: ImageAttachment[];
 	isError?: boolean;
 }
 
@@ -79,7 +81,15 @@ export interface StructuredToolOutput {
 	structured: JSONValue;
 }
 
-export type ToolExecuteResult = string | StructuredToolOutput;
+export interface VisualToolOutput {
+	llmContent: string;
+	images: ImageAttachment[];
+}
+
+export type ToolExecuteResult =
+	| string
+	| StructuredToolOutput
+	| VisualToolOutput;
 
 export type ToolHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed

@@ -154,6 +154,25 @@ test('processToolUse - executes tool successfully with object arguments', async 
 	t.is(result.structuredContent, undefined);
 });
 
+test('processToolUse - carries screenshot images beside the caption', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			browser: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+		}),
+	);
+
+	const result = await processToolUse(
+		createMockToolCall('browser', {action: 'screenshot'}),
+	);
+
+	t.is(result.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(result.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+	t.false(result.content.includes('abc'));
+});
+
 test('processToolUse - carries structured handler output onto the result', async t => {
 	const mockHandler: ToolHandler = async () => ({
 		llmContent: '1 error found',

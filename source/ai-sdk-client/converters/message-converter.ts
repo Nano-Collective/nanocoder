@@ -78,6 +78,31 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
 			// Structured tool results travel as JSON so the model can reason over
 			// the typed shape; everything else falls back to the text content.
+			// Screenshot tools set `images`. Those become image-data parts inside
+			// a content output so a vision model sees pixels, not a base64 string.
+			if (msg.images && msg.images.length > 0) {
+				return {
+					role: 'tool',
+					content: [
+						{
+							type: 'tool-result',
+							toolCallId: msg.tool_call_id || '',
+							toolName: msg.name || '',
+							output: {
+								type: 'content',
+								value: [
+									{type: 'text', text: truncateToolResult(msg.content)},
+									...msg.images.map(image => ({
+										type: 'image-data' as const,
+										data: image.data,
+										mediaType: image.mediaType,
+									})),
+								],
+							},
+						},
+					],
+				};
+			}
 			let output;
 			if (msg.structuredContent === undefined) {
 				output = {
