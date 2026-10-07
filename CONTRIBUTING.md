@@ -295,6 +295,17 @@ Comparing `help_module_count` and `interactive_module_count` is also a useful si
 - **`audit_high_vulns` increased** → Check whether it's a new vulnerability or the known pre-existing `minimatch` transitive dep from AVA. Investigate before updating the baseline.
 - **`help_hash` changed unexpectedly** → Something altered `--help` output. Compare against the previous build to confirm it's intentional.
 
+### Agent evaluation harness
+
+`benchmarks/agent/` is a separate suite from the CLI quality report above: it measures **pass/fail, steps, tokens and cost per task** for the agent loop itself, by driving the built CLI against a set of vendored fixtures. It exists to judge changes to the agent loop (context handling, tool use, prompt design) with numbers instead of impressions.
+
+```bash
+pnpm run build             # the harness measures dist/cli.js
+pnpm run test:agent-eval   # every fixture, five runs each
+```
+
+It needs a real model (a local Ollama tier is required so any contributor can reproduce a run; a cloud provider is optional) and takes minutes to complete, so like `test:benchmark` it is **not** part of `pnpm test:all`. See `benchmarks/agent/README.md` for the fixture format, the assertion kinds, and the full flag list.
+
 ### Writing Tests
 
 When adding tests:

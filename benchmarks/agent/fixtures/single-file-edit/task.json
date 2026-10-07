@@ -1,0 +1,22 @@
+{
+	"category": "single-file-edit",
+	"prompt": "In src/config.js, change the DEFAULT_TIMEOUT_MS value to 5000. Do not change any other file.",
+	"assertions": [
+		{
+			"kind": "file-contains",
+			"path": "src/config.js",
+			"text": "DEFAULT_TIMEOUT_MS = 5000"
+		},
+		{"kind": "file-not-contains", "path": "src/config.js", "text": "3000"},
+		{
+			"kind": "file-contains",
+			"path": "src/legacy-config.js",
+			"text": "LEGACY_TIMEOUT_MS = 3000"
+		},
+		{
+			"kind": "file-contains",
+			"path": "src/http/retry.js",
+			"text": "RETRY_BACKOFF_MS = 3000"
+		}
+	]
+}
