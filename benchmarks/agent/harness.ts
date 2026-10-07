@@ -164,12 +164,25 @@ export function parseJsonReport(stdout: string): JsonReport {
 	}
 
 	const report = parsed as Partial<JsonReport>;
+	if (!report || typeof report !== 'object') {
+		throw new Error('JSON report must be an object');
+	}
 	if (typeof report.kind !== 'string' || typeof report.exitCode !== 'number') {
 		throw new Error('JSON report is missing kind/exitCode');
 	}
+	if (
+		!['success', 'error', 'tool-approval-required'].includes(report.kind) ||
+		!Number.isInteger(report.exitCode)
+	) {
+		throw new Error('JSON report has invalid kind/exitCode');
+	}
 	// The step count is the measurement this harness exists for: a report
 	// without it is a CLI too old to measure, not a zero-step run.
-	if (typeof report.steps !== 'number') {
+	if (
+		typeof report.steps !== 'number' ||
+		!Number.isInteger(report.steps) ||
+		report.steps < 0
+	) {
 		throw new Error(
 			'JSON report has no numeric steps field — measure a CLI that reports it',
 		);
@@ -306,6 +319,8 @@ export async function checkAssertions(
 				}
 				break;
 			}
+			default:
+				return `unknown assertion kind: ${String((assertion as {kind: string}).kind)}`;
 		}
 	}
 	return null;
@@ -363,6 +378,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		const startedAt = Date.now();
 		let stdout = '';
 		let spawnFailure: string | undefined;
+		let processFailed = false;
 		try {
 			const result = await execFileAsync('node', args, {
 				cwd: workspace,
@@ -372,6 +388,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 			});
 			stdout = result.stdout;
 		} catch (error) {
+			processFailed = true;
 			// An error report exits non-zero but still measures the run, so only a
 			// missing report counts as a harness failure.
 			const failed = error as {stdout?: string; message?: string};
@@ -392,12 +409,18 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		}
 
 		const after = await hashTree(workspace);
-		const failure = await checkAssertions(
+		const assertionFailure = await checkAssertions(
 			workspace,
 			fixture.assertions,
 			report,
 			{before, after},
 		);
+		// Completion is part of pass/fail: a crash or approval exit must not
+		// pass merely because it left files untouched or made a partial edit.
+		const failure =
+			report.kind !== 'success' || report.exitCode !== 0 || processFailed
+				? `CLI run failed (${report.kind}, reported exit ${report.exitCode}${processFailed ? ', process exited unsuccessfully' : ''})`
+				: assertionFailure;
 
 		const usage = report.usage ?? {};
 		let costUsd: number | null = null;

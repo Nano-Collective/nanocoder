@@ -54,11 +54,16 @@ merely finishing cheaper. A token count alone cannot catch that.
 | --- | --- |
 | `file-contains` / `file-not-contains` | A path's contents after the run. |
 | `final-text-matches` | The model's answer, as a case-insensitive regex. |
+| `final-text-not-matches` | The model's answer does not match a distractor pattern. |
 | `files-unchanged` | Nothing was written during a read-only task. |
 | `command` | A command (`node --test`, a verify script) exits 0 in the workspace. |
 
 Runs happen in a throwaway copy of the tree, so a task can edit freely and the
 vendored fixture is never touched.
+
+A task passes only when the CLI reports success, exits successfully, and every
+assertion holds. Error and approval-required runs retain reported measurements
+but count as failures, even if their partial edits satisfy the assertions.
 
 Every result records `fixturePackId` and a content hash of the whole fixture
 set, so a fixture edit can never be mistaken for a change in the agent. Bump

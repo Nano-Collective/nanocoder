@@ -195,6 +195,45 @@ A hook that prints nothing injects nothing.
 
 `session-start` does not hold up the UI — it runs in the background while the session finishes initializing. It is only waited on at the point it matters, which is the first prompt you submit: if the hook is still running, that submission waits for it rather than letting the context slip to prompt two. So keep `session-start` hooks fast, and give anything genuinely slow its own short `timeout` — the default is 30 seconds, and it is your first prompt that pays for it.
 
+## In-process plugins
+
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+
+The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
+
+```js
+/** @type {import('@nanocollective/nanocoder/dist/sdk/plugin.js').NanocoderPlugin} */
+export default {
+	apiVersion: 1,
+	name: 'guard',
+	hooks: {
+		'tool.execute.before': ({toolName, toolArgs}) => {
+			if (toolName === 'execute_bash' && String(toolArgs.command).includes('rm -rf')) {
+				return {block: 'rm -rf is not allowed in this repo'};
+			}
+		},
+		'permission.asked': ({toolArgs}) =>
+			String(toolArgs.command).includes('--force')
+				? {decision: 'deny', reason: 'no force push'}
+				: {decision: 'defer'},
+	},
+};
+```
+
+There are five hooks. Each may return its result directly or as a promise.
+
+- `tool.execute.before` runs with `pre-tool-use`. Return `{block: 'reason'}` to refuse the tool call.
+- `tool.execute.after` runs with `post-tool-use`. Return `{append: 'text'}` to add text to the tool result inside the same `<hook-output>` block a shell hook uses.
+- `session.compacting` runs with `pre-compact`. It is observe-only.
+- `tui.prompt.append` runs with `user-prompt-submit`. Return a string to add it to the prompt context. It cannot block the prompt.
+- `permission.asked` runs when a tool is about to ask for your approval. Return `{decision: 'deny', reason: '...'}` to refuse without asking, or `{decision: 'defer'}` to let the prompt appear. A plugin cannot approve a tool.
+
+Shell hooks for the same event run first. If a shell hook blocks, plugins do not run. A plugin that throws, times out after 30 seconds, or returns something malformed is logged and ignored; it never blocks anything. A file with an unknown hook name, a wrong `apiVersion`, or a `name` already used by an earlier file is skipped.
+
+An editor session (ACP) has no trust prompt. It loads plugins from the session's workspace only when that directory is already in your trusted list. Plugins are isolated between workspaces, including when sessions run concurrently.
+
+This is the initial in-process plugin API. Its types ship with the CLI; a separately published, independently versioned SDK package and custom UI component APIs are not provided yet.
+
 ## Security
 
 Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface — exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt you accept the first time Nanocoder runs in a directory. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.

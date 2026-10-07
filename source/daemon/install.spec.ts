@@ -3,6 +3,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	resetPreferencesCache,
+	savePreferences,
+} from '@/config/preferences';
+import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,
 	buildSystemdUnit,
@@ -29,6 +33,27 @@ async function withTempHome(
 		await fn(home, project);
 	} finally {
 		await rm(dir, {recursive: true, force: true});
+	}
+}
+
+/**
+ * installAutoStart's trust check reads/writes preferences through the real
+ * `@/config/preferences` module, so point NANOCODER_CONFIG_DIR at a scratch
+ * directory rather than touching whatever preferences file the machine
+ * running the suite already has (mirrors cli.spec.ts's own helper).
+ */
+async function withIsolatedPreferences<T>(fn: () => Promise<T>): Promise<T> {
+	const configDir = await mkdtemp(join(tmpdir(), 'nanocoder-install-prefs-'));
+	const previous = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = configDir;
+	resetPreferencesCache();
+	try {
+		return await fn();
+	} finally {
+		if (previous === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = previous;
+		resetPreferencesCache();
+		await rm(configDir, {recursive: true, force: true});
 	}
 }
 
@@ -86,6 +111,47 @@ test.serial('installAutoStart on linux writes service at expected path', async t
 		t.regex(contents, /\[Service\]/);
 	});
 });
+
+test.serial(
+	'installAutoStart warns when the project is not trusted',
+	async t => {
+		await withIsolatedPreferences(async () => {
+			await withTempHome(async (home, project) => {
+				const result = await installAutoStart({
+					projectRoot: project,
+					platform: 'linux',
+					home,
+					loadService: false,
+				});
+				// Install still succeeds - the file is written either way - but
+				// names both remedies so the service doesn't just fail forever
+				// with no explanation.
+				t.regex(result.message, /not trusted/);
+				t.regex(result.message, /--trust-directory/);
+				t.true(await isAutoStartInstalled({projectRoot: project, platform: 'linux', home}));
+			});
+		});
+	},
+);
+
+test.serial(
+	'installAutoStart carries no trust warning once the project is trusted',
+	async t => {
+		await withIsolatedPreferences(async () => {
+			await withTempHome(async (home, project) => {
+				savePreferences({trustedDirectories: [project]});
+				const result = await installAutoStart({
+					projectRoot: project,
+					platform: 'linux',
+					home,
+					loadService: false,
+				});
+				t.notRegex(result.message, /not trusted/);
+				t.notRegex(result.message, /--trust-directory/);
+			});
+		});
+	},
+);
 
 test.serial('install is idempotent: running twice keeps a single file', async t => {
 	await withTempHome(async (home, project) => {

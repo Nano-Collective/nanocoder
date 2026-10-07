@@ -4,6 +4,7 @@ import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
 import {matchGlob} from '@/events/event-router';
+import {runPluginHooks} from '@/plugins/host';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -269,7 +270,9 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
  * argument `path`; `file_path` / `filePath` are accepted because weaker models
  * emit them and the formatters already tolerate both.
  */
-function resolveFilePath(args?: Record<string, unknown>): string | undefined {
+export function resolveFilePath(
+	args?: Record<string, unknown>,
+): string | undefined {
 	for (const key of ['path', 'file_path', 'filePath']) {
 		const value = args?.[key];
 		if (typeof value === 'string' && value !== '') return value;
@@ -577,6 +580,18 @@ function runHookCommand(
 export async function runLifecycleHooks(
 	event: HookEvent,
 	context: HookContext = {},
+): Promise<HookOutcome> {
+	const shell = await runShellHooks(event, context);
+	if (shell.blocked) return shell;
+
+	const plugin = await runPluginHooks(event, context);
+	const output = [shell.output, plugin.output].filter(Boolean).join('\n');
+	return plugin.blocked ? {...plugin, output} : {blocked: false, output};
+}
+
+async function runShellHooks(
+	event: HookEvent,
+	context: HookContext,
 ): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
 		appliesTo(hook, context),

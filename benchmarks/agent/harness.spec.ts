@@ -253,6 +253,13 @@ test('files-unchanged fails when a read-only task wrote something', async t => {
 	);
 });
 
+test('unknown assertion kinds fail instead of silently passing', async t => {
+	t.regex(
+		String(await check(tempRoot, [{kind: 'file-contians'} as unknown as Assertion])),
+		/unknown assertion kind/,
+	);
+});
+
 test('command passes on exit 0 and fails otherwise', async t => {
 	await fs.writeFile(
 		path.join(tempRoot, 'ok.js'),
@@ -369,7 +376,8 @@ test('runOnce still measures a run that exits non-zero with a report', async t =
 	});
 
 	t.is(run.steps, 2);
-	t.true(run.pass, 'the error report left the tree untouched');
+	t.false(run.pass, 'an error cannot pass merely by leaving the tree untouched');
+	t.regex(run.failure ?? '', /CLI run failed/);
 });
 
 test('runOnce reports a harness failure when the CLI prints nothing', async t => {
@@ -385,6 +393,26 @@ test('runOnce reports a harness failure when the CLI prints nothing', async t =>
 	t.truthy(run.failure);
 	t.is(run.steps, 0);
 });
+
+for (const [kind, exitCode, processExit] of [
+	['tool-approval-required', 2, 2],
+	['success', 0, 9],
+] as const) {
+	test(`runOnce rejects ${kind} with process exit ${processExit} even when assertions pass`, async t => {
+		const cliPath = await stubCli(`
+			process.stdout.write(JSON.stringify({kind: '${kind}', exitCode: ${exitCode}, steps: 4}));
+			process.exit(${processExit});
+		`);
+		const run = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			workspaceRoot: tempRoot,
+		});
+		t.false(run.pass);
+		t.is(run.steps, 4);
+		t.regex(run.failure ?? '', /CLI run failed/);
+	});
+}
 
 test('runOnce leaves the vendored fixture untouched', async t => {
 	const cliPath = await stubCli(`

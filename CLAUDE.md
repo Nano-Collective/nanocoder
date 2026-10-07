@@ -137,6 +137,12 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **Serial execution**: Tests run one at a time
 - **Run single test**: `pnpm run test:ava source/path/to/file.spec.ts`
 
+## Voice Plugin
+
+The optional local voice plugin lives in `plugins/voice/`. The root build compiles it before compiling the main app and copies its runtime files into `dist/voice/`; type checks use the committed declaration shim at `source/types/nanocoder-voice.d.ts`. Run `pnpm run test:types:voice` when changing the plugin.
+
+Cloud STT sends microphone audio to the configured OpenAI endpoint only after explicitly selecting `/voice stt cloud`; local STT is the default. Hands-free mode is unavailable in yolo mode.
+
 ## Development Modes
 
 Four user-facing modes (toggle with Shift+Tab during chat):
