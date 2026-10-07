@@ -19,6 +19,7 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
@@ -1615,6 +1616,54 @@ function enterSubagentHookFixture(hooks: HooksConfig): () => void {
 
 // Portable hook body: `sh -c` on POSIX, `cmd /c` on Windows.
 const subagentHookNode = (script: string) => `node -e "${script}"`;
+
+test.serial('a plugin permission denial prevents delegated tool execution and approval', async t => {
+	const leave = enterSubagentHookFixture({});
+	resetPluginsForTests();
+	let approvalPrompts = 0;
+	let executions = 0;
+	const results: string[] = [];
+	setGlobalToolApprovalHandler(async () => {
+		approvalPrompts++;
+		return true;
+	});
+	try {
+		const dir = join(SUBAGENT_HOOK_DIR, '.nanocoder', 'plugins');
+		mkdirSync(dir, {recursive: true});
+		writeFileSync(join(dir, 'deny.mjs'), `export default {
+			apiVersion: 1, name: 'deny',
+			hooks: {'permission.asked': () => ({decision: 'deny', reason: 'delegated policy'})},
+		};`);
+		await loadPlugins(true);
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => { executions++; return 'contents'; },
+				readOnly: true,
+				needsApproval: true,
+			},
+		});
+		const client = createMockClient([
+			{content: '', tool_calls: [{
+				id: 'plugin-deny', function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+			}]},
+			{content: 'Understood.'},
+		], messages => {
+			for (const message of messages) {
+				if (message.role === 'tool') results.push(message.content);
+			}
+		});
+		await new SubagentExecutor(toolManager, client).execute({
+			subagent_type: 'explore', description: 'Read a.ts',
+		});
+		t.is(approvalPrompts, 0);
+		t.is(executions, 0);
+		t.true(results.includes('Error: delegated policy'));
+	} finally {
+		resetPluginsForTests();
+		leave();
+		setGlobalToolApprovalHandler(async () => true);
+	}
+});
 
 test.serial('a pre-tool-use veto stops a subagent tool call', async t => {
 	let handlerRan = false;

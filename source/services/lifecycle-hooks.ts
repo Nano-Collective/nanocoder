@@ -4,6 +4,7 @@ import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
 import {matchGlob} from '@/events/event-router';
+import {runPluginHooks} from '@/plugins/host';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -579,6 +580,18 @@ function runHookCommand(
 export async function runLifecycleHooks(
 	event: HookEvent,
 	context: HookContext = {},
+): Promise<HookOutcome> {
+	const shell = await runShellHooks(event, context);
+	if (shell.blocked) return shell;
+
+	const plugin = await runPluginHooks(event, context);
+	const output = [shell.output, plugin.output].filter(Boolean).join('\n');
+	return plugin.blocked ? {...plugin, output} : {blocked: false, output};
+}
+
+async function runShellHooks(
+	event: HookEvent,
+	context: HookContext,
 ): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
 		appliesTo(hook, context),
