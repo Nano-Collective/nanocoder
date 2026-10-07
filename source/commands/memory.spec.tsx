@@ -285,6 +285,32 @@ test('memory command rejects accept with an out-of-range index', async t => {
 	t.deepEqual(summarizerService.accepted, []);
 });
 
+test('memory command rejects malformed accept indices', async t => {
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({
+		memoryManager: new FakeMemoryManager(),
+		summarizerService,
+	});
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+
+	for (const index of ['1oops', '1.5']) {
+		const result = await command.handler(['accept', index], [], testMetadata);
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+		t.true((lastFrame() ?? '').includes('Usage: /memory accept <1-1>'));
+	}
+
+	t.deepEqual(summarizerService.accepted, []);
+});
+
 test('lazy registry exposes /memory', t => {
 	const memory = lazyCommands.find(command => command.name === 'memory');
 
