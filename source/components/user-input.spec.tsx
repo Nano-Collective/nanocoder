@@ -414,6 +414,82 @@ test.serial(
 	},
 );
 
+// Serial: these mutate the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+test.serial(
+	'UserInput keeps the left border, prompt marker, and placeholder start visible below the 40-col width floor',
+	t => {
+		const originalColumns = process.stdout.columns;
+		// Narrower than PROMPT_WIDTH_MIN (40): before the fix, the box's width
+		// floor exceeded the terminal it was centered in, so Ink gave it a
+		// negative left offset and clipped the border/marker/placeholder start.
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 30,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			t.regex(output, /╭/, 'left border must be on-screen, not clipped');
+			t.regex(output, />\s/, 'prompt marker must be on-screen, not clipped');
+			t.regex(
+				output,
+				/Ask/,
+				'the start of the placeholder must be visible, not cut off from the left',
+			);
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test.serial(
+	'UserInput input box never exceeds the terminal width it is centered in',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 20,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const borderLine = output.split('\n').find(line => line.includes('╭'));
+			t.truthy(borderLine, 'left border must be on-screen, not clipped');
+			// The old unclamped floor (40) would have pushed this line's rendered
+			// content well past the 20-column terminal; every line must fit.
+			for (const line of output.split('\n')) {
+				t.true(
+					line.length <= 20,
+					`line exceeds the 20-column terminal width: ${JSON.stringify(line)}`,
+				);
+			}
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
 test('UserInput renders auto-accept mode indicator', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
@@ -1982,6 +2058,134 @@ test.serial(
 		stdin.write('!');
 		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]! world/);
 		t.notRegex(lastFrame()!, /!\[Paste/);
+		unmount();
+	},
+);
+
+// A paste lands out of band, while TextInput still holds the value it last
+// rendered. Keys that arrive before the re-render must build on the paste,
+// not on that stale value. No awaits between the paste and the keys: that
+// gap is the race.
+const PASTE = 'line one\nline two\nline three';
+
+test.serial(
+	'UserInput keeps a paste placeholder when typing lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]x/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput keeps a paste and key order when several keys land immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+		stdin.write('y');
+		stdin.write('z');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]xyz/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput applies a Backspace that lands immediately after a paste at the post-paste caret',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		pasteEvents.emit('paste', PASTE);
+		// The caret is parked after the placeholder, so the Backspace removes
+		// it whole - as it would once the paste is shown - and "abc" survives.
+		// It must not be swallowed (placeholder left behind) or applied to the
+		// pre-paste value.
+		stdin.write('\u007F');
+
+		await waitForCondition(() => !(lastFrame() ?? '').includes('[Paste #'));
+		await wait(50);
+		const frame = stripAnsi(lastFrame()!);
+		t.notRegex(frame, /\[Paste #/);
+		t.regex(frame, /abc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput puts a key that lands immediately after a mid-string paste right after the splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		// Caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+		await wait(50);
+
+		// No await between the paste and the key.
+		pasteEvents.emit('paste', 'XY');
+		stdin.write('Z');
+
+		await waitForFrame(lastFrame, /aXYZbc/);
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput submits a paste when Enter lands immediately after it',
+	async t => {
+		let submittedDisplay: string | undefined;
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={(_message, display) => {
+						submittedDisplay = display;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('\r');
+
+		await waitForCondition(() => submittedDisplay !== undefined);
+		t.regex(submittedDisplay!, /\[Paste #\d+: [^\]]+\]/);
+		t.notRegex(lastFrame()!, /\[Paste #/);
 		unmount();
 	},
 );
