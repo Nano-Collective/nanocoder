@@ -197,6 +197,25 @@ test('processToolUse - carries structured handler output onto the result', async
 	});
 });
 
+test('processToolUse - carries isError on a visual tool result', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			browser: async () => ({
+				llmContent: 'Screenshot failed',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+				isError: true,
+			}),
+		}),
+	);
+
+	const result = await processToolUse(
+		createMockToolCall('browser', {action: 'screenshot'}),
+	);
+
+	t.true(result.isError);
+	t.deepEqual(result.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+});
+
 test('processToolUse - carries a handler-reported failure onto the result', async t => {
 	// Handlers that fail without throwing report it on their output; the
 	// result must carry it, since --json and ACP read isError and nothing else.

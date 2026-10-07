@@ -154,13 +154,10 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 	}
 	return dropOrphanedToolResults(modelFacing).map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
-			// Convert to AI SDK tool-result format
-			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }
-			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
-			// Structured tool results travel as JSON so the model can reason over
-			// the typed shape; everything else falls back to the text content.
-			// Screenshot tools set `images`. Those become image-data parts inside
-			// a content output so a vision model sees pixels, not a base64 string.
+			// Convert to AI SDK tool-result format.
+			// output is text, json, or content. content is the SDK's multimodal
+			// tool result: text parts plus image-data. Anthropic, OpenAI, and
+			// Google each map image-data onto their own image block.
 			if (msg.images && msg.images.length > 0) {
 				return {
 					role: 'tool',

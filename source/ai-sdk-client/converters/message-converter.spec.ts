@@ -281,14 +281,18 @@ test('convertToModelMessages emits image-data parts for tool screenshots', t => 
 	];
 
 	const result = convertToModelMessages(messages);
-	const content = result[1].content as Array<{
-		output?: {
-			type: string;
-			value: Array<{type: string; text?: string; data?: string; mediaType?: string}>;
-		};
-	}>;
-	t.is(content[0].output?.type, 'content');
-	t.deepEqual(content[0].output?.value, [
+	const toolMsg = result[1];
+	t.is(toolMsg.role, 'tool');
+	if (toolMsg.role !== 'tool' || !Array.isArray(toolMsg.content)) {
+		t.fail('screenshot tool result must be a tool message');
+		return;
+	}
+	const part = toolMsg.content[0];
+	if (!part || part.type !== 'tool-result' || part.output.type !== 'content') {
+		t.fail('screenshot must use the SDK content tool-result output');
+		return;
+	}
+	t.deepEqual(part.output.value, [
 		{type: 'text', text: 'Screenshot of http://localhost:3000/'},
 		{type: 'image-data', data: 'abc', mediaType: 'image/jpeg'},
 	]);

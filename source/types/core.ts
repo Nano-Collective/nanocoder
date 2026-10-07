@@ -110,6 +110,8 @@ export interface StructuredToolOutput {
 export interface VisualToolOutput {
 	llmContent: string;
 	images: ImageAttachment[];
+	/** Same failure flag as `StructuredToolOutput`. A throw still becomes `isError` in the catch path. */
+	isError?: boolean;
 }
 
 export type ToolExecuteResult =

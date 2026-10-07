@@ -110,7 +110,11 @@ export async function processToolUse(
 			typeof rawContent === 'string'
 				? truncateToolResult(rawContent)
 				: (rawContent as string);
-		const failed = isStructured && result.isError;
+		const failed =
+			typeof result === 'object' &&
+			result !== null &&
+			'isError' in result &&
+			result.isError === true;
 		// Formatters run on a successful write only, and before post-tool-use
 		// so its hooks see the formatted file.
 		const content =
