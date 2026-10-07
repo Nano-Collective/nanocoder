@@ -23,6 +23,7 @@ export interface LocalWebServerOptions {
 	openBrowser?: boolean;
 	onClientEvent?: (event: WebClientEvent) => void | Promise<void>;
 	onAllClientsDisconnected?: () => void;
+	getStateEvents?: () => WebServerEvent[];
 }
 
 export interface LocalWebServer {
@@ -118,6 +119,9 @@ export async function startLocalWebServer(
 			type: 'ready',
 			protocolVersion: WEB_PROTOCOL_VERSION,
 		});
+		for (const event of options.getStateEvents?.() ?? []) {
+			sendServerEvent(clientSocket, event);
+		}
 
 		clientSocket.on('message', message => {
 			void handleClientMessage(

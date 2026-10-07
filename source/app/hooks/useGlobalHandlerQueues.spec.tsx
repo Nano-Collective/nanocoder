@@ -418,3 +418,17 @@ test('browser turns route questions and both approval slots to the browser, then
 	captured!.handleQuestionAnswer('terminal');
 	t.is(await terminalAnswer, 'terminal');
 });
+
+test('browser routing forwards cancellation to the pending approval', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers({submitMessage: () => new Promise<void>(() => {}), cancel: () => {}, resetSession: () => {}});
+	setup(bridge);
+	await bridge.handleClientEvent({type: 'user_message', id: 'turn', text: 'hello'});
+	const controller = new AbortController();
+	const approval = signalToolApproval(approvalFrom('agent'), controller.signal);
+	const event = events.at(-1)!;
+	controller.abort();
+	t.false(await approval);
+	await t.throwsAsync(bridge.handleClientEvent({type: 'approval_response', id: event.id!, approved: true}));
+});

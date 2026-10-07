@@ -9,21 +9,16 @@ export function createPageNonce(): string {
 	return randomBytes(16).toString('base64');
 }
 
-export const IconSidebar = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>`;
-export const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-export const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
-export const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
-export const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
-export const IconTrash = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
-export const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
-export const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
-export const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
-export const IconMoon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>`;
-export const IconTheme = IconSun;
-export const IconCreate = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>`;
-export const IconExplore = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
-export const IconCode = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
-export const IconLearn = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>`;
+const IconSidebar = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>`;
+const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+const IconTrash = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
+const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+const IconMoon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>`;
 
 export function renderWebModePage(nonce: string = createPageNonce()): string {
 	return `<!doctype html>
@@ -85,6 +80,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.app-shell.sidebar-collapsed .brand-row {
 			justify-content: center;
+			width: 100%;
+		}
+		.app-shell.sidebar-collapsed .brand-actions {
+			flex-direction: column;
 			width: 100%;
 		}
 		.app-shell.sidebar-collapsed .brand {
@@ -232,28 +231,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border-color: var(--primary);
 			color: var(--primary);
 			transform: translateY(-1px);
-		}
-		.search-box {
-			display: flex;
-			align-items: center;
-			gap: 10px;
-			min-height: 36px;
-			padding: 0 10px;
-			border: 1px solid transparent;
-			border-radius: 8px;
-			color: var(--muted-foreground);
-			font-size: 13px;
-		}
-		.search-box input {
-			width: 100%;
-			border: 0;
-			background: transparent;
-			color: var(--foreground);
-			font: inherit;
-			outline: 0;
-		}
-		.search-box input::placeholder {
-			color: var(--muted-foreground);
 		}
 		.thread-list {
 			display: flex;
@@ -1073,7 +1050,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: var(--text);
 		}
 	</style>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js" nonce="${nonce}"></script>
 </head>
 <body>
 	<div class="app-shell">
@@ -1084,6 +1060,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				</div>
 				<div class="brand-actions">
 					<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
+					<button class="icon-button" id="historyButton" type="button" aria-label="Refresh history">${IconHistory}</button>
+					<button class="icon-button" id="settingsButton" type="button" aria-label="Settings">${IconSettings}</button>
 					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">${IconSidebar}</button>
 				</div>
 			</div>
@@ -1155,7 +1133,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const historyButton = document.querySelector('#historyButton');
 			const settingsButton = document.querySelector('#settingsButton');
 			const composerNote = document.querySelector('#composerNote');
-			const threadSearchInput = document.querySelector('#threadSearchInput');
 			const threadList = document.querySelector('#threadList');
 			
 			const settingsModal = document.querySelector('#settingsModal');
@@ -1170,10 +1147,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			eventsUrl.searchParams.set('token', token ?? '');
 			const storageKey = 'nanocoder.webMode.localSession.v1';
 			const pendingMessages = new Map();
+			const pendingDrafts = new Map();
 			const assistantMessages = new Map();
 			let messageCounter = 0;
 			let storedMessages = [];
 			let activeTurnId = null;
+			let sessionBusy = false;
+			let sessionRevision = null;
+			const pendingSessionActions = new Map();
 			let isConnected = false;
 			let socket = null;
 			let reconnectTimer = null;
@@ -1181,14 +1162,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const maxReconnectDelayMs = 15000;
 
 			// Initial load animation
-			gsap.from('.sidebar', { opacity: 0, x: -20, duration: 0.6, ease: 'power2.out' });
-			gsap.from('.topbar', { opacity: 0, y: -10, duration: 0.5, ease: 'power2.out', delay: 0.1 });
-			gsap.from('.composer-wrap', { opacity: 0, duration: 0.6, ease: 'power2.out', delay: 0.2 });
 
 
 			// Custom helper to animate elements in
 			function animateIn(element) {
-				gsap.fromTo(element, { opacity: 0, y: 15 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' });
+				if (element.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+					element.animate([{opacity: 0, transform: 'translateY(15px)'}, {opacity: 1, transform: 'translateY(0)'}], {duration: 250, easing: 'ease-out'});
+				}
 			}
 
 
@@ -1235,15 +1215,19 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			function setComposerEnabled(isEnabled) {
 				isConnected = isEnabled;
-				messageInput.disabled = !isEnabled || activeTurnId !== null;
-				sendButton.disabled = !isEnabled;
+				updateComposer();
+			}
+
+			function updateComposer() {
+				messageInput.disabled = !isConnected || sessionBusy || activeTurnId !== null;
+				sendButton.disabled = !isConnected || sessionBusy || (activeTurnId === null && messageInput.value.trim().length === 0 && pendingImages.length === 0);
+				newChatButton.disabled = !isConnected || sessionBusy || activeTurnId !== null;
+				uploadImageButton.disabled = !isConnected || sessionBusy || activeTurnId !== null;
 			}
 
 			function setActiveTurn(id) {
 				activeTurnId = id;
 				const isActive = id !== null;
-				messageInput.disabled = !isConnected || isActive;
-				sendButton.disabled = !isConnected;
 				sendButton.classList.toggle('is-cancel', isActive);
 				sendButton.textContent = isActive ? '■' : '↑';
 				sendButton.setAttribute(
@@ -1253,7 +1237,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				composerNote.textContent = isActive
 					? 'Nanocoder is working. Use the stop button to cancel.'
 					: 'Enter sends. Shift+Enter creates a new line.';
-				newChatButton.disabled = isActive;
+				updateComposer();
 			}
 
 			function readStoredMessages() {
@@ -1280,7 +1264,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function writeStoredMessages() {
-				window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
+				try {
+					window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
+				} catch {
+					// Browser storage is optional; a full quota must not stop chat.
+				}
 			}
 
 			function setEmptyState(title, detail) {
@@ -1455,10 +1443,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 			}
 
-			function appendMessage(role, text, metaText, shouldStore = true, images = []) {
+			function appendMessage(role, text, metaText, shouldStore = true, images = [], id) {
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message ' + role;
+				if (id) messageElement.dataset.messageId = id;
 
 				if (images && images.length > 0) {
 					const imageContainer = document.createElement('div');
@@ -1496,7 +1485,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				animateIn(messageElement);
 
 				if (shouldStore) {
-					storedMessages.push({role, text, metaText: metaText ?? ''});
+					storedMessages.push({id, role, text, metaText: metaText ?? '', images});
 					writeStoredMessages();
 				}
 
@@ -1504,6 +1493,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function updateMessageMeta(messageElement, metaText) {
+				const stored = storedMessages.find(message => message.id === messageElement.dataset.messageId);
+				if (stored) {
+					stored.metaText = metaText;
+					writeStoredMessages();
+				}
 				let metaElement = messageElement.querySelector('.meta');
 				if (!metaElement) {
 					metaElement = document.createElement('div');
@@ -1520,7 +1514,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				for (const message of storedMessages) {
-					appendMessage(message.role, message.text, message.metaText, false);
+					const element = appendMessage(message.role, message.text, message.metaText, false, message.images ?? [], message.id);
+					if (message.role === 'assistant' && message.id) assistantMessages.set(message.id, element);
 				}
 			}
 
@@ -1534,6 +1529,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageInput.value = '';
 				messageInput.focus();
 				activeSessionId = null;
+				pendingImages = [];
+				renderImagePreviews();
 				renderThreadList(currentSessions);
 			}
 
@@ -1605,12 +1602,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 							sessionId: session.id,
 						});
 						
-						const updatedSessions = currentSessions.filter(s => s.id !== session.id);
-						renderThreadList(updatedSessions);
-						
-						if (session.id === activeSessionId) {
-							newChatButton.click();
-						}
 					});
 
 					item.append(textSpan, deleteBtn);
@@ -1624,19 +1615,21 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				pendingMessages.clear();
 				assistantMessages.clear();
 				messageList.replaceChildren();
+				pendingImages = [];
+				renderImagePreviews();
 
 				if (messages.length === 0) {
 					setEmptyState('How can I help you?', '');
 				} else {
 					hideEmptyState();
 					for (const message of messages) {
-						appendMessage(message.role, message.content);
+						const element = appendMessage(message.role, message.content, '', true, message.images ?? [], message.id);
+						if (message.role === 'assistant' && message.id) assistantMessages.set(message.id, element);
 					}
 				}
 
 				messageInput.value = '';
 				renderThreadList(currentSessions);
-				addSystemNotice('Resumed session: ' + sessionSummary.title, 'Session switch');
 			}
 
 			function setPromptText(text) {
@@ -1653,22 +1646,25 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				appendMessage('system', text, metaText);
 			}
 
-			function appendAssistantDelta(id, text) {
+			function appendAssistantDelta(id, text, replace = false) {
 				let messageElement = assistantMessages.get(id);
 				if (!messageElement) {
-					messageElement = appendMessage('assistant', '');
+					messageElement = appendMessage('assistant', '', '', true, [], id);
 					assistantMessages.set(id, messageElement);
 				}
 
-				const textElement = messageElement.firstElementChild;
-				const nextText = (textElement.dataset.rawText ?? '') + text;
+				const textElement = messageElement.querySelector('.message-content');
+				const nextText = replace ? text : (textElement.dataset.rawText ?? '') + text;
 				textElement.dataset.rawText = nextText;
 				renderAssistantText(textElement, nextText);
+				const stored = storedMessages.find(message => message.id === id && message.role === 'assistant');
+				if (stored) stored.text = nextText;
+				writeStoredMessages();
 				messageList.scrollTop = messageList.scrollHeight;
 			}
 
 			function sendClientEvent(event) {
-				if (socket.readyState !== WebSocket.OPEN) {
+				if (!socket || socket.readyState !== WebSocket.OPEN) {
 					appendMessage('system error', 'The local session is not connected.');
 					return false;
 				}
@@ -1692,11 +1688,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function renderApprovalCard(message) {
+				if (document.querySelector('[data-interaction-id="' + message.id + '"]')) return;
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message system interaction';
 				const card = document.createElement('div');
 				card.className = 'interaction-card';
+				card.dataset.interactionId = message.id;
 
 				const title = document.createElement('strong');
 				title.textContent = 'Approve tool: ' + message.toolName;
@@ -1747,11 +1745,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function renderQuestionCard(message) {
+				if (document.querySelector('[data-interaction-id="' + message.id + '"]')) return;
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message system interaction';
 				const card = document.createElement('div');
 				card.className = 'interaction-card';
+				card.dataset.interactionId = message.id;
 
 				const title = document.createElement('strong');
 				title.textContent = message.question;
@@ -1822,6 +1822,35 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function handleServerEvent(message) {
+				if (message.type === 'state') {
+					const previousSession = activeSessionId;
+					const sessionChanged = sessionRevision !== null && sessionRevision !== message.sessionRevision;
+					sessionRevision = message.sessionRevision;
+					activeSessionId = message.session?.id ?? null;
+					sessionBusy = message.busy;
+					storedMessages = [];
+					assistantMessages.clear();
+					messageList.replaceChildren();
+					for (const item of message.messages) {
+						const element = appendMessage(item.role, item.content, item.role === 'user' ? 'Delivered to local session' : '', true, item.images ?? [], item.id);
+						if (item.role === 'assistant' && item.id) assistantMessages.set(item.id, element);
+					}
+					writeStoredMessages();
+					if (message.messages.length === 0) setEmptyState('How can I help you?', '');
+					if (sessionChanged || previousSession !== activeSessionId) {
+						pendingImages = [];
+						messageInput.value = '';
+						renderImagePreviews();
+					}
+					setActiveTurn(message.activeTurnId);
+					renderThreadList(currentSessions);
+					return;
+				}
+				if (message.type === 'interaction_closed') {
+					const card = document.querySelector('[data-interaction-id="' + message.id + '"]');
+					if (card) disableInteractionCard(card);
+					return;
+				}
 				if (message.type === 'ready') {
 					setStatus('Connected', 'connected');
 					setComposerEnabled(true);
@@ -1834,6 +1863,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				if (message.type === 'ack') {
+					pendingDrafts.delete(message.id);
+					const action = pendingSessionActions.get(message.id);
+					if (action) {
+						pendingSessionActions.delete(message.id);
+						pendingImages = [];
+						messageInput.value = '';
+						renderImagePreviews();
+					}
 					const messageElement = pendingMessages.get(message.id);
 					if (messageElement) {
 						updateMessageMeta(messageElement, 'Delivered to local session');
@@ -1844,6 +1881,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 				if (message.type === 'assistant_delta') {
 					appendAssistantDelta(message.id, message.text);
+					return;
+				}
+				if (message.type === 'assistant_content') {
+					appendAssistantDelta(message.id, message.text, true);
 					return;
 				}
 
@@ -1880,7 +1921,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				if (message.type === 'error') {
-					setActiveTurn(null);
+					if (message.id === activeTurnId) setActiveTurn(null);
+					pendingSessionActions.delete(message.id);
+					const draft = pendingDrafts.get(message.id);
+					if (draft) {
+						setPromptText(draft.text);
+						pendingImages = draft.images;
+						pendingDrafts.delete(message.id);
+						renderImagePreviews();
+					}
 					const pendingMessageElement = message.id
 						? pendingMessages.get(message.id)
 						: undefined;
@@ -1890,6 +1939,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						updateMessageMeta(pendingMessageElement, 'Not sent — ' + message.message);
 						pendingMessages.delete(message.id);
 						setPromptText(failedText);
+						pendingImages = storedMessages.find(item => item.id === message.id)?.images ?? [];
+						renderImagePreviews();
 					} else {
 						appendMessage('system error', message.message);
 					}
@@ -1910,7 +1961,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function submitUserMessage(text) {
-				if (activeTurnId) {
+				if (!isConnected || sessionBusy || activeTurnId) {
 					return;
 				}
 
@@ -1920,8 +1971,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				const id = 'browser-message-' + Date.now() + '-' + messageCounter++;
-				const messageElement = appendMessage('user', trimmedText, 'Sending...', true, pendingImages);
+				const messageElement = appendMessage('user', trimmedText, 'Sending...', true, pendingImages, id);
 				pendingMessages.set(id, messageElement);
+				pendingDrafts.set(id, {text: trimmedText, images: pendingImages});
 				messageInput.value = '';
 				setActiveTurn(id);
 
@@ -1952,18 +2004,22 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				} else {
 					imagePreviewContainer.hidden = true;
 				}
+				updateComposer();
 			}
 
 			function handleFiles(files) {
+				if (activeTurnId || sessionBusy || !isConnected) return;
 				for (const file of files) {
 					if (!file.type.startsWith('image/')) continue;
 					const reader = new FileReader();
 					reader.onload = e => {
+						if (activeTurnId || sessionBusy || !isConnected) return;
 						pendingImages.push({ data: e.target.result, mediaType: file.type });
 						renderImagePreviews();
 					};
 					reader.readAsDataURL(file);
 				}
+				imageUploadInput.value = '';
 			}
 
 			emptyState.addEventListener('click', event => {
@@ -2046,9 +2102,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			messageInput.addEventListener('input', () => {
 				adjustMessageInputHeight();
-				if (!activeTurnId) {
-					sendButton.disabled = messageInput.value.trim().length === 0 && pendingImages.length === 0;
-				}
+					updateComposer();
 			});
 
 			messageInput.addEventListener('keydown', event => {
@@ -2082,9 +2136,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			});
 
 			newChatButton.addEventListener('click', () => {
-				sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});
-				clearLocalSession();
-				addSystemNotice('Started a fresh local browser session.', 'Stored only in this browser');
+				if (!isConnected || activeTurnId || sessionBusy) return;
+				const id = 'browser-reset-' + Date.now();
+				if (sendClientEvent({type: 'reset_session', id})) pendingSessionActions.set(id, 'reset');
 			});
 
 			themeToggleButton.addEventListener('click', () => {
@@ -2110,7 +2164,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					type: 'list_sessions',
 					id: 'browser-sessions-' + Date.now(),
 				});
-				if (threadSearchInput) threadSearchInput.focus();
 			});
 
 			if (settingsButton) settingsButton.addEventListener('click', () => {
@@ -2122,14 +2175,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			settingsModal.addEventListener('click', event => {
 				if (event.target === settingsModal) {
 					settingsModal.classList.add('hidden');
-				}
-			});
-
-			if (threadSearchInput) threadSearchInput.addEventListener('input', () => {
-				const query = threadSearchInput.value.trim().toLowerCase();
-				for (const threadButton of threadList.querySelectorAll('.thread-item')) {
-					const label = (threadButton.dataset.threadLabel || '').toLowerCase();
-					threadButton.hidden = query.length > 0 && !label.includes(query);
 				}
 			});
 

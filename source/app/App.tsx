@@ -289,10 +289,12 @@ export default function App({
 			appState.setCompactToolCounts(null);
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
-			webRuntimeBridge?.completeTurn();
 		},
 		onError: error => {
 			webRuntimeBridge?.failTurn(error);
+		},
+		onAssistantContent: content => {
+			webRuntimeBridge?.publishAssistantContent(content);
 		},
 		// A turn that started in plan mode finished uninterrupted — a plan was
 		// produced. Flag it so the interactive UI can show the plan review bar.
@@ -675,11 +677,13 @@ export default function App({
 						.filter(
 							message =>
 								(message.role === 'user' || message.role === 'assistant') &&
-								message.content.trim().length > 0,
+								(message.content.trim().length > 0 ||
+									(message.images?.length ?? 0) > 0),
 						)
 						.map(message => ({
 							role: message.role as 'user' | 'assistant',
 							content: message.content,
+							images: message.images,
 						})),
 				};
 			},
@@ -690,10 +694,6 @@ export default function App({
 		appState.client,
 		appState.toolManager,
 	]);
-
-	React.useEffect(() => {
-		webRuntimeBridge?.publishAssistantContent(chatHandler.streamingContent);
-	}, [webRuntimeBridge, chatHandler.streamingContent]);
 
 	React.useEffect(() => {
 		if (!webRuntimeBridge) {

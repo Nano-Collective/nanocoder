@@ -1,10 +1,8 @@
 import test from 'ava';
-import {createPageNonce, nanocoderLogoSvg, renderWebModePage} from './page.js';
+import {createPageNonce, nanocoderLogoPngBuffer, renderWebModePage} from './page.js';
 
 test('web mode page renders the Nanocoder logo asset markup', t => {
-	t.true(nanocoderLogoSvg.includes('aria-label="Nanocoder"'));
-	t.true(nanocoderLogoSvg.includes('viewBox="0 0 64 64"'));
-	t.true(nanocoderLogoSvg.includes('#7dcfff'));
+	t.deepEqual([...nanocoderLogoPngBuffer.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 });
 
 test('web mode page gives icon, thread, and send buttons a visible keyboard focus state', t => {
@@ -24,7 +22,7 @@ test('web mode page styles the sidebar and message scrollbars instead of using t
 
 	t.true(page.includes('.thread-list::-webkit-scrollbar {'));
 	t.true(page.includes('.messages::-webkit-scrollbar {'));
-	t.true(page.includes('scrollbar-width: thin;'));
+	t.true(page.includes('scrollbar-width: none;'));
 });
 
 test('web mode page snaps the message list to the newest content instead of animating every scroll', t => {
@@ -43,7 +41,7 @@ test('web mode page tells the backend to reset the session when starting a new c
 
 	t.true(
 		page.includes(
-			"sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});",
+			"sendClientEvent({type: 'reset_session', id})",
 		),
 	);
 	const newChatHandlerIndex = page.indexOf("newChatButton.addEventListener('click'");
@@ -78,24 +76,18 @@ test('web mode page links the favicon and scopes inline style/script to the give
 
 	t.true(
 		page.includes(
-			'<link rel="icon" type="image/svg+xml" href="/assets/nanocoder-icon.svg">',
+			'<link rel="icon" type="image/png" href="/assets/nanocoder-icon.png">',
 		),
 	);
 	t.true(page.includes(`<style nonce="${nonce}">`));
 	t.true(page.includes(`<script nonce="${nonce}">`));
 });
 
-test('web mode page renders prompt controls as real buttons', t => {
+test('web mode page renders the composer controls as real buttons', t => {
 	const page = renderWebModePage();
 
-	t.true(page.includes("pill.className = 'mode-pill'"));
-	t.true(page.includes("pill.type = 'button'"));
-	t.true(page.includes("promptButton.className = 'prompt-button'"));
-	t.true(page.includes("promptButton.type = 'button'"));
-	t.true(
-		page.includes('Summarize this repository and suggest the next clean change'),
-	);
-	t.true(page.includes('Find the safest place to wire browser chat into the CLI'));
+	t.true(page.includes('id="sendButton" type="submit"'));
+	t.true(page.includes('id="uploadImageButton" type="button"'));
 	t.false(page.includes('Phase 4'));
 });
 
@@ -166,13 +158,13 @@ test('web mode page ships a light theme that cannot affect the dark default', t 
 	const page = renderWebModePage();
 
 	t.true(page.includes(':root[data-theme="light"] {'));
-	t.true(page.includes(':root[data-theme="light"] body {'));
-	t.true(page.includes(':root[data-theme="light"] .message.user {'));
 	// Every light rule is scoped by the attribute selector, so it can only ever
 	// apply once <html data-theme="light"> is set; it never edits an existing
 	// dark rule.
 	const lightRuleCount = (page.match(/:root\[data-theme="light"\]/gu) ?? []).length;
-	t.true(lightRuleCount > 20);
+	t.true(lightRuleCount >= 1);
+	t.true(page.includes('background: var(--background)'));
+	t.true(page.includes('--foreground: #000000'));
 });
 
 test('web mode page toggles and persists the theme', t => {
@@ -214,7 +206,7 @@ test('web mode page reduces metadata label weight so it does not compete with pr
 	const page = renderWebModePage();
 
 	t.true(
-		page.includes('.meta {\n\t\t\tcolor: rgba(245, 242, 235, 0.5);\n\t\t\tfont-size: 11px;'),
+		page.includes('.meta {\n\t\t\tcolor: var(--muted-foreground);\n\t\t\tfont-size: 11px;'),
 	);
 	t.false(page.includes('font-size: 12px;\n\t\t}\n\t\t.message.user .meta'));
 });

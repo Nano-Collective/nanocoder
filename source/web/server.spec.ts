@@ -56,11 +56,11 @@ test('local web server binds to localhost and serves token-protected browser cha
 
 	const response = await readText(webServer.url);
 	t.is(response.status, 200);
-	t.true(response.body.includes('Nanocoder web mode'));
+	t.true(response.body.includes('Nanocoder Web Mode'));
 	t.true(response.body.includes('id="messageForm"'));
 	t.true(response.body.includes('id="messageInput"'));
 	t.true(response.body.includes('id="newChatButton"'));
-	t.true(response.body.includes('id="threadSearchInput"'));
+	t.true(response.body.includes('id="threadList"'));
 	t.true(response.body.includes('window.localStorage'));
 	t.true(response.body.includes('/assets/nanocoder-icon.png'));
 	t.true(response.body.includes("type: 'user_message'"));

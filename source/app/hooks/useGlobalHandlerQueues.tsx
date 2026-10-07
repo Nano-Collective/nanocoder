@@ -75,7 +75,7 @@ function useHandlerQueue<TInput, TResult>(
 	 * approval is a denial.
 	 */
 	abandoned: (input: TInput) => TResult,
-	route?: (input: TInput) => Promise<TResult> | undefined,
+	route?: (input: TInput, signal?: AbortSignal) => Promise<TResult> | undefined,
 ): (result: TResult) => void {
 	const queueRef = useRef<QueuedRequest<TInput, TResult>[]>([]);
 
@@ -97,7 +97,7 @@ function useHandlerQueue<TInput, TResult>(
 
 	useEffect(() => {
 		install((input: TInput, abortSignal?: AbortSignal) => {
-			const routed = routeRef.current?.(input);
+			const routed = routeRef.current?.(input, abortSignal);
 			if (routed) return routed;
 			return new Promise<TResult>(resolve => {
 				const entry: QueuedRequest<TInput, TResult> = {input, resolve};
@@ -169,13 +169,16 @@ export function useGlobalHandlerQueues({
 		setGlobalQuestionHandler,
 		presentQuestion,
 		ABANDONED_QUESTION,
-		question => {
+		(question, signal) => {
 			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
-				return webRuntimeBridge.requestQuestion({
-					question: question.question,
-					options: question.options,
-					allowFreeform: question.allowFreeform,
-				});
+				return webRuntimeBridge.requestQuestion(
+					{
+						question: question.question,
+						options: question.options,
+						allowFreeform: question.allowFreeform,
+					},
+					signal,
+				);
 			}
 			return undefined;
 		},
@@ -191,13 +194,16 @@ export function useGlobalHandlerQueues({
 		setGlobalToolApprovalHandler,
 		setPendingSubagentApproval,
 		ABANDONED_APPROVAL,
-		approval => {
+		(approval, signal) => {
 			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
-				return webRuntimeBridge.requestApproval({
-					toolName: approval.toolCall.function.name,
-					arguments: approval.toolCall.function.arguments,
-					context: `Subagent: ${approval.subagentName}`,
-				});
+				return webRuntimeBridge.requestApproval(
+					{
+						toolName: approval.toolCall.function.name,
+						arguments: approval.toolCall.function.arguments,
+						context: `Subagent: ${approval.subagentName}`,
+					},
+					signal,
+				);
 			}
 			return undefined;
 		},
@@ -209,12 +215,15 @@ export function useGlobalHandlerQueues({
 		setGlobalToolConfirmHandler,
 		setPendingToolConfirmation,
 		ABANDONED_APPROVAL,
-		confirmation => {
+		(confirmation, signal) => {
 			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
-				return webRuntimeBridge.requestApproval({
-					toolName: confirmation.toolCall.function.name,
-					arguments: confirmation.toolCall.function.arguments,
-				});
+				return webRuntimeBridge.requestApproval(
+					{
+						toolName: confirmation.toolCall.function.name,
+						arguments: confirmation.toolCall.function.arguments,
+					},
+					signal,
+				);
 			}
 			return undefined;
 		},

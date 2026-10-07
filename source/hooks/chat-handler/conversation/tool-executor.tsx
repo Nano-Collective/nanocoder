@@ -52,7 +52,7 @@ const executeOne = async (
 		publishWebToolFinished(
 			toolCall.id,
 			toolCall.function.name,
-			!result.content.startsWith('Error: '),
+			!isToolResultError(result),
 		);
 		return {toolCall, result};
 	} catch (error) {
@@ -127,8 +127,7 @@ export const executeApprovedTool = async (
 			publishWebToolFinished(
 				toolCall.id,
 				toolCall.function.name,
-				!execution.result.content.startsWith('Error: ') &&
-					!execution.result.content.startsWith('⚒ Validation failed'),
+				!isToolResultError(execution.result),
 			);
 			return execution;
 		} catch (error) {

@@ -128,6 +128,7 @@ interface ProcessAssistantResponseParams {
 	setIsGenerating: (generating: boolean) => void;
 	setStreamingReasoning: (content: string) => void;
 	setStreamingContent: (content: string) => void;
+	onAssistantContent?: (content: string) => void;
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -243,6 +244,7 @@ export const processAssistantResponse = async (
 		setIsGenerating,
 		setStreamingReasoning,
 		setStreamingContent,
+		onAssistantContent,
 		setTokenCount,
 		setMessages,
 		addToChatQueue,
@@ -344,6 +346,7 @@ export const processAssistantResponse = async (
 	// Use streaming with callbacks
 	setIsGenerating(true);
 	setStreamingContent('');
+	onAssistantContent?.('');
 	setStreamingReasoning('');
 	setTokenCount(0);
 	// Drop any prior empty-response retry counter from the live area so the
@@ -402,6 +405,7 @@ export const processAssistantResponse = async (
 			onToken: (token: string) => {
 				streamedContent += token;
 				setStreamingContent(streamedContent);
+				onAssistantContent?.(stripThinkTags(streamedContent));
 				// Feed the in-flight reply into the context-usage estimate so the
 				// `~%` indicator climbs as the model writes, instead of only
 				// stepping up once the finished message is committed to history.
@@ -540,6 +544,7 @@ export const processAssistantResponse = async (
 
 	const parsedToolCalls = parseResult.toolCalls;
 	const cleanedContent = parseResult.cleanedContent;
+	onAssistantContent?.(cleanedContent);
 
 	// Combine native tool calls with any parsed from content (XML fallback path)
 	// Native and parsed are mutually exclusive: native comes from tool-calling models,

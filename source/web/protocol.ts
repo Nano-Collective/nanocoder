@@ -8,6 +8,7 @@ export interface WebSessionSummary {
 }
 
 export interface WebSessionMessage {
+	id?: string;
 	role: 'user' | 'assistant';
 	content: string;
 	images?: {data: string; mediaType: string}[];
@@ -30,9 +31,19 @@ export type WebClientEvent =
 	| {type: 'delete_session'; id: string; sessionId: string};
 
 export type WebServerEvent =
+	| {
+			type: 'state';
+			activeTurnId: string | null;
+			messages: WebSessionMessage[];
+			session: WebSessionSummary | null;
+			busy: boolean;
+			sessionRevision: number;
+	  }
+	| {type: 'interaction_closed'; id: string}
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
 	| {type: 'ack'; id: string}
 	| {type: 'assistant_delta'; id: string; text: string}
+	| {type: 'assistant_content'; id: string; text: string}
 	| {type: 'tool_started'; id: string; name: string}
 	| {type: 'tool_finished'; id: string; name: string; ok: boolean}
 	| {

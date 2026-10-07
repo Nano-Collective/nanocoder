@@ -728,7 +728,7 @@ async function main(): Promise<void> {
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now.
-		const [{render}, {default: App}] = await Promise.all([
+		const [{render, Box, Text}, {default: App}] = await Promise.all([
 			import('ink'),
 			import('@/app'),
 		]);
@@ -790,7 +790,10 @@ async function main(): Promise<void> {
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
-			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+			process.stdout.isTTY &&
+			!nonInteractiveMode &&
+			!webMode &&
+			altScreenAllowed;
 		const mouseReportingAllowed =
 			!args.includes('--no-mouse') &&
 			(args.includes('--mouse') || getMouseReporting());
@@ -933,6 +936,7 @@ async function main(): Promise<void> {
 		}
 
 		let webRuntimeBridge: WebRuntimeBridge | undefined;
+		let webUrl: string | undefined;
 		if (webMode) {
 			const [
 				{createWebRuntimeBridge},
@@ -950,11 +954,13 @@ async function main(): Promise<void> {
 			});
 			const webServer = await startLocalWebServer({
 				onClientEvent: webRuntimeBridge.handleClientEvent,
+				getStateEvents: webRuntimeBridge.getStateEvents,
 				onAllClientsDisconnected: () => {
 					webRuntimeBridge?.handleDisconnect();
 				},
 			});
 			broadcastEvent = webServer.broadcastEvent;
+			webUrl = webServer.url;
 
 			getShutdownManager().register({
 				name: 'web-server',
@@ -968,20 +974,30 @@ async function main(): Promise<void> {
 		}
 
 		const result = render(
-			<App
-				vscodeMode={vscodeMode}
-				vscodePort={vscodePort}
-				nonInteractivePrompt={nonInteractivePrompt}
-				nonInteractiveMode={nonInteractiveMode}
-				cliProvider={cliProvider}
-				cliModel={cliModel}
-				cliMode={cliMode}
-				trustDirectory={trustDirectory}
-				altScreenActive={useAltScreen}
-				initialSession={initialSession}
-				openSessionSelectorOnStart={openSessionSelectorOnStart}
-				webRuntimeBridge={webRuntimeBridge}
-			/>,
+			<Box flexDirection="column">
+				<App
+					vscodeMode={vscodeMode}
+					vscodePort={vscodePort}
+					nonInteractivePrompt={nonInteractivePrompt}
+					nonInteractiveMode={nonInteractiveMode}
+					cliProvider={cliProvider}
+					cliModel={cliModel}
+					cliMode={cliMode}
+					trustDirectory={trustDirectory}
+					altScreenActive={useAltScreen}
+					initialSession={initialSession}
+					openSessionSelectorOnStart={openSessionSelectorOnStart}
+					webRuntimeBridge={webRuntimeBridge}
+				/>
+				{webUrl && (
+					<Box flexDirection="column" paddingX={1}>
+						<Text>Web mode: {webUrl}</Text>
+						<Text dimColor>
+							Open this URL in your browser. Ctrl+C stops the server.
+						</Text>
+					</Box>
+				)}
+			</Box>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
 				// manager) so the exit-render handler below can paint the
