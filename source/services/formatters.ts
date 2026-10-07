@@ -1,4 +1,4 @@
-import {readFile} from 'node:fs/promises';
+import {readFile, realpath} from 'node:fs/promises';
 import {relative, resolve} from 'node:path';
 
 import {getAppConfig} from '@/config/index';
@@ -8,6 +8,7 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {FormatterDefinition} from '@/types/config';
 import {invalidateCache} from '@/utils/file-cache';
 import {logError} from '@/utils/message-queue';
+import {isPathInside} from '@/utils/path-validation';
 
 /** Ceiling on a single formatter's runtime. Overridable via `timeout`. */
 const DEFAULT_FORMATTER_TIMEOUT_MS = 30_000;
@@ -62,7 +63,15 @@ export async function formatWrittenFile(
 	const cwd = getProjectRoot();
 	const absPath = resolve(getSafeSessionCwd(), rawPath);
 	const relativePath = relative(cwd, absPath);
-	if (!relativePath || relativePath.startsWith('..')) return content;
+	if (!relativePath || !isPathInside(absPath, cwd)) return content;
+	// A formatter or hook can replace the written path with a symlink. Check
+	// its real target as well before giving a shell command that path.
+	try {
+		if (!isPathInside(await realpath(absPath), await realpath(cwd)))
+			return content;
+	} catch {
+		return content;
+	}
 
 	const matching = formatters.filter(formatter =>
 		formatter.match.some(pattern => matchGlob(pattern, relativePath)),
@@ -81,8 +90,10 @@ export async function formatWrittenFile(
 
 	const before = await readOrNull(absPath);
 	const applied: string[] = [];
+	const attempted: string[] = [];
 	for (const formatter of matching) {
 		const label = formatter.name ?? formatter.command;
+		attempted.push(label);
 		const run = await runHookCommand(
 			formatter,
 			env,
@@ -103,10 +114,13 @@ export async function formatWrittenFile(
 	}
 
 	const after = await readOrNull(absPath);
-	if (applied.length === 0 || after === before) return content;
+	if (after === before) return content;
 
 	// The tools read through a content cache; drop the pre-format entry so the
 	// next read_file or edit sees what is actually on disk.
 	invalidateCache(absPath);
+	if (applied.length === 0) {
+		return `${content}\n\nNote: ${relativePath} changed while running formatter ${attempted.join(', ')}, despite formatter failure. Re-read it before editing it again.`;
+	}
 	return `${content}\n\nNote: ${relativePath} was reformatted by ${applied.join(', ')}. Re-read it before editing it again.`;
 }

@@ -57,7 +57,15 @@ export const copyCommand: Command = {
 	name: 'copy',
 	description: 'Copy the last assistant response to the clipboard',
 	handler: async (args, messages) => {
-		if (args[0]?.toLowerCase() === 'code') {
+		const argument = args[0]?.toLowerCase();
+
+		if (args.length > 1 || (args.length === 1 && argument !== 'code')) {
+			return warningMsg(
+				`Unknown option "${args[0]}". Usage: /copy [code]`,
+				'copy',
+			);
+		}
+		if (argument === 'code') {
 			const content = findLastAssistantContent(messages);
 
 			if (!content) {

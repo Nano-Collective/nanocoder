@@ -1,4 +1,5 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
@@ -111,20 +112,31 @@ export async function processToolUse(
 				? await formatWrittenFile(toolCall.function.name, parsedArgs, truncated)
 				: truncated;
 
+		// Only string content is extended; a structured payload passes through
+		// untouched.
+		const withHooks =
+			typeof content === 'string'
+				? await appendPostToolUseOutput(
+						toolCall.function.name,
+						parsedArgs,
+						content,
+					)
+				: content;
+
+		// Commit after post-tool-use hooks, so a formatter hook's rewrite of the
+		// file lands in the same commit instead of being left behind.
+		const commitNote = failed
+			? null
+			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
+
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			// Only string content is extended; a structured payload passes
-			// through untouched.
 			content:
-				typeof content === 'string'
-					? await appendPostToolUseOutput(
-							toolCall.function.name,
-							parsedArgs,
-							content,
-						)
-					: content,
+				commitNote && typeof withHooks === 'string'
+					? `${withHooks}\n\n${commitNote}`
+					: withHooks,
 			...(isStructured && result.structured !== undefined
 				? {structuredContent: result.structured}
 				: {}),

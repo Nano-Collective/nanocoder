@@ -12,7 +12,11 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -267,6 +271,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
 	return capDiffEditResult(

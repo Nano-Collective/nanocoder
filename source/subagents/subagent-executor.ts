@@ -15,6 +15,7 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
@@ -48,6 +49,10 @@ import type {
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -265,15 +270,19 @@ export class SubagentExecutor {
 			};
 
 			try {
-				const output = await this.runSubagentConversation(
-					client,
-					messages,
-					filteredTools,
-					config,
-					signal,
-					agentId,
-					executionContext,
-					recordUsage,
+				const output = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.runSubagentConversation(
+							client,
+							messages,
+							filteredTools,
+							config,
+							signal,
+							agentId,
+							executionContext,
+							recordUsage,
+						),
 				);
 
 				// Read the final estimated progress count. Provider-reported usage is
@@ -293,6 +302,7 @@ export class SubagentExecutor {
 				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
+					clearReadContentScope(agentId);
 				}
 				restoreParent();
 			}
@@ -754,13 +764,17 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				const toolResult = await this.executeToolCall(
-					toolName,
-					toolCall.function.arguments,
-					toolCall.id,
-					config,
-					signal,
-					executionContext,
+				const toolResult = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.executeToolCall(
+							toolName,
+							toolCall.function.arguments,
+							toolCall.id,
+							config,
+							signal,
+							executionContext,
+						),
 				);
 
 				// Count tokens from tool results
@@ -899,7 +913,17 @@ export class SubagentExecutor {
 				typeof result !== 'string' && result.isError
 					? truncated
 					: await formatWrittenFile(toolName, parsedArgs, truncated);
-			return appendPostToolUseOutput(toolName, parsedArgs, formatted);
+			const withHooks = await appendPostToolUseOutput(
+				toolName,
+				parsedArgs,
+				formatted,
+			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const failed = typeof result !== 'string' && result.isError;
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return commitNote ? `${withHooks}\n\n${commitNote}` : withHooks;
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use

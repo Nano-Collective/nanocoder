@@ -5,6 +5,7 @@ import {
 	realpathSync,
 	rmSync,
 	writeFileSync,
+	symlinkSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -142,6 +143,66 @@ test.serial('drops entries without a command or a match list', t => {
 	]);
 });
 
+test.serial('an empty or invalid project list overrides global formatters', t => {
+	const globalDir = join(testDir, 'no-global-config');
+	mkdirSync(globalDir, {recursive: true});
+	const globalPath = join(globalDir, 'agents.config.json');
+	writeFileSync(globalPath, JSON.stringify({nanocoder: {
+		formatters: [{match: '**/*.ts', command: UPPERCASE}],
+	}}));
+	try {
+		withConfig({});
+		t.is(getConfiguredFormatters().length, 1);
+		withConfig({formatters: []});
+		t.deepEqual(getConfiguredFormatters(), []);
+		withConfig({formatters: [{command: 'bad'}]});
+		t.deepEqual(getConfiguredFormatters(), []);
+	} finally {
+		rmSync(globalPath);
+	}
+});
+
+test.serial('a formatter that edits then fails still tells the model', async t => {
+	withConfig({formatters: [{name: 'partial', match: '**/*.ts', command: node(
+		"require('fs').writeFileSync(process.env.FILE,'changed\\n');process.exit(2)",
+	)}]});
+	const path = writeSource('partial.ts', 'original\n');
+	const content = await formatWrittenFile('write_file', {path}, 'ok');
+	t.is(readFileSync(path, 'utf8'), 'changed\n');
+	t.regex(content, /changed while running formatter partial/);
+	t.regex(content, /Re-read it/);
+});
+
+test.serial('a timed out formatter leaves the write successful', async t => {
+	withConfig({formatters: [{match: '**/*.ts', timeout: 50,
+		command: node('setInterval(()=>{},1000)'),
+	}]});
+	const path = writeSource('timeout.ts', 'written\n');
+	t.is(await formatWrittenFile('write_file', {path}, 'ok'), 'ok');
+	t.is(readFileSync(path, 'utf8'), 'written\n');
+});
+
+test.serial('formats valid dot-prefixed names and skips outside paths', async t => {
+	withConfig({formatters: [{match: '**/*.ts', command: UPPERCASE}]});
+	const inside = writeSource('..valid.ts', 'inside\n');
+	t.regex(await formatWrittenFile('write_file', {path: inside}, 'ok'), /reformatted/);
+	t.is(readFileSync(inside, 'utf8'), 'INSIDE\n');
+	const outside = `${testDir}-outside.ts`;
+	writeFileSync(outside, 'outside\n');
+	try {
+		t.is(await formatWrittenFile('write_file', {path: outside}, 'ok'), 'ok');
+		t.is(readFileSync(outside, 'utf8'), 'outside\n');
+		if (process.platform !== 'win32') {
+			const link = join(testDir, 'external.ts');
+			symlinkSync(outside, link);
+			t.is(await formatWrittenFile('write_file', {path: link}, 'ok'), 'ok');
+			t.is(readFileSync(outside, 'utf8'), 'outside\n');
+		}
+	} finally {
+		rmSync(outside);
+	}
+});
+
 const writeCall = (path: string): ToolCall => ({
 	id: 'call-1',
 	function: {name: 'write_file', arguments: {path, content: 'x'}},
@@ -184,4 +245,15 @@ test.serial('processToolUse does not format after a failed write', async t => {
 
 	t.true(result.isError);
 	t.is(readFileSync(path, 'utf-8'), 'untouched\n');
+});
+
+test.serial('processToolUse does not format a structured write failure', async t => {
+	const path = writeSource('structured.ts', 'untouched\n');
+	setToolRegistryGetter(() => ({
+		write_file: async () => ({llmContent: 'write failed', isError: true}),
+	}));
+	withConfig({formatters: [{match: '**/*.ts', command: UPPERCASE}]});
+	const result = await processToolUse(writeCall(path));
+	t.true(result.isError);
+	t.is(readFileSync(path, 'utf8'), 'untouched\n');
 });
