@@ -1,4 +1,5 @@
 import test from 'ava';
+import {readFileSync} from 'node:fs';
 import { BashExecutor } from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -11,6 +12,20 @@ function createExecutor(): BashExecutor {
 	const executor = new BashExecutor();
 	executorsToCleanup.push(executor);
 	return executor;
+}
+
+function isLiveProcess(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		if (process.platform === 'linux') {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+			return state !== 'Z';
+		}
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 // Clean up after each test to prevent event listeners from keeping Node alive
@@ -449,9 +464,125 @@ test('output cap trips and appends the truncation marker exactly once', async t 
 	);
 });
 
+const STDOUT_TRUNCATION_MARKER = '... [Output truncated to prevent memory exhaustion]';
+const STDERR_TRUNCATION_MARKER = '... [Stderr truncated to prevent memory exhaustion]';
+
+test('flooding stderr past the cap does not truncate stdout - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stderr.write('E' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stderr.flush(); sys.stdout.write('important stdout data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.fullOutput.includes('important stdout data'),
+		'stdout should be fully intact - stderr flooding its own budget must not affect stdout at all',
+	);
+	t.false(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
+test('flooding stdout past the cap does not truncate stderr - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stdout.write('O' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stdout.flush(); sys.stderr.write('important stderr data')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.includes(STDOUT_TRUNCATION_MARKER),
+		'stdout should be marked truncated - it exceeded its own budget',
+	);
+	t.true(
+		result.stderr.includes('important stderr data'),
+		'stderr should be fully intact - stdout flooding its own budget must not affect stderr at all',
+	);
+	t.false(
+		result.stderr.includes(STDERR_TRUNCATION_MARKER),
+		'stderr should not be marked truncated - it never exceeded its own independent budget',
+	);
+});
+
+test('stdout chunk split across two writes does not corrupt a multi-byte UTF-8 character', async t => {
+	const executor = createExecutor();
+
+	// em dash is 3 bytes; splitting the write forces two separate chunks
+	const { promise } = executor.execute(
+		`python3 -c "import sys, time; b = '\\u2014'.encode('utf-8'); o = sys.stdout.buffer; o.write(b[:1]); o.flush(); time.sleep(0.05); o.write(b[1:]); o.flush()"`,
+	);
+	const result = await promise;
+
+	t.is(
+		result.fullOutput,
+		'—',
+		'the split character should decode correctly instead of as replacement characters',
+	);
+});
+
+test('a trailing incomplete multi-byte sequence is flushed at stream end, not dropped', async t => {
+	const executor = createExecutor();
+
+	// 'a', 'b', then only the first byte of a 2-byte UTF-8 char
+	const { promise } = executor.execute(
+		`node -e "process.stdout.write(Buffer.from([0x61, 0x62, 0xc3]))"`,
+	);
+	const result = await promise;
+
+	t.is(result.fullOutput.length, 3, 'the dangling byte should be flushed, not silently dropped');
+	t.true(result.fullOutput.startsWith('ab'));
+});
+
+test('truncation cut landing mid-character does not leak a replacement char after the marker', async t => {
+	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+	const padLen = BASH_MAX_OUTPUT_BYTES - 1;
+
+	// pads to one byte short of the cap, cutting the char that follows
+	const { promise } = executor.execute(
+		`python3 -c "import sys; o = sys.stdout.buffer; o.write(b'A' * ${padLen}); o.write('\\u2014'.encode('utf-8')); o.flush()"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.endsWith(STDOUT_TRUNCATION_MARKER),
+		'output should end with the truncation marker, not a stray decoded byte',
+	);
+	t.false(
+		result.fullOutput.includes('�'),
+		'no replacement character should leak into the output',
+	);
+});
+
+test('cancel while a decoder is holding a partial character does not throw and leaves stable output', async t => {
+	const executor = createExecutor();
+
+	const { executionId, promise } = executor.execute(
+		`python3 -c "import sys, time; sys.stdout.buffer.write(b'\\xc3'); sys.stdout.buffer.flush(); time.sleep(10)"`,
+	);
+	await new Promise(resolve => setTimeout(resolve, 200));
+	executor.cancel(executionId);
+	const result = await promise;
+
+	t.is(result.error, 'Cancelled by user');
+	t.is(typeof result.fullOutput, 'string');
+	t.is(typeof result.stderr, 'string');
+});
+
 test('cancel() on a detached process kills a spawned child (process-group assertion)', async t => {
 	const executor = createExecutor();
-	const { promise, executionId } = executor.execute('node -e "setInterval(() => {}, 1000)" & echo $!');
+	const { promise, executionId } = executor.execute(
+		'node -e "setInterval(() => {}, 1000)" & echo $!; wait',
+	);
 
 	// Wait briefly for the output to appear
 	await new Promise(resolve => setTimeout(resolve, 300));
@@ -464,22 +595,155 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	const childPid = parseInt(match![1]!, 10);
 
 	// Verify child is alive
-	try {
-		process.kill(childPid, 0);
-		t.pass('Child is alive before cancel');
-	} catch {
-		t.fail('Child should be alive before cancel');
-	}
+	t.true(isLiveProcess(childPid), 'Child should be alive before cancel');
 
 	// Cancel the execution tree
 	executor.cancel(executionId);
 	await promise;
 
-	// Give the OS a moment to reap the process
-	await new Promise(resolve => setTimeout(resolve, 300));
+	// Allow the terminated group to be reaped before probing the PID. A killed
+	// background child can remain a zombie briefly after its shell leader exits.
+	await new Promise(resolve => setTimeout(resolve, 2300));
 
 	// Verify child is dead
-	t.throws(() => {
-		process.kill(childPid, 0);
-	}, undefined, 'process.kill(pid, 0) should throw because the child was killed by the process-group signal');
+	t.false(
+		isLiveProcess(childPid),
+		'process group cancellation should leave no live child process',
+	);
+});
+
+test('cancel() kills a background child after the shell leader has exited', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows - no process groups');
+		return;
+	}
+
+	const executor = createExecutor();
+	// No `wait`: the wrapping shell exits straight away, but the backgrounded
+	// child keeps the output pipe open, so the execution is still active.
+	const {promise, executionId} = executor.execute('sleep 30 & echo PID:$!');
+
+	let childPid: number | undefined;
+	for (let tick = 0; tick < 30 && !childPid; tick++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+		const match = executor.getState(executionId)?.fullOutput.match(/PID:(\d+)/);
+		if (match) childPid = Number(match[1]);
+	}
+	t.truthy(childPid, 'Should have captured the background child PID');
+	// Let the shell leader exit before cancelling.
+	await new Promise(resolve => setTimeout(resolve, 200));
+	t.true(isLiveProcess(childPid!), 'Child should be alive before cancel');
+
+	t.true(executor.cancel(executionId));
+	await promise;
+	await new Promise(resolve => setTimeout(resolve, 300));
+
+	t.false(
+		isLiveProcess(childPid!),
+		'cancel must reach the process group even when its leader is gone',
+	);
+});
+
+test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async t => {
+	const executor = createExecutor();
+
+	// Spawn a node process that traps/ignores SIGTERM and outputs its PID
+	const { executionId, promise } = executor.execute(
+		`node -e "process.on('SIGTERM', () => {}); console.log('PID:' + process.pid); setInterval(() => {}, 1000)"`,
+	);
+
+	// Wait for process to spawn and capture its output
+	await new Promise(resolve => setTimeout(resolve, 300));
+	const state = executor.getState(executionId);
+	t.truthy(state);
+	const match = state?.fullOutput.match(/PID:(\d+)/);
+	t.truthy(match, 'Should have captured the child PID');
+	const childPid = match ? Number(match[1]) : undefined;
+
+	const cancelled = executor.cancel(executionId);
+	t.true(cancelled, 'cancel() should return true for active execution');
+
+	const result = await promise;
+	t.true(result.isComplete, 'Execution should be marked complete');
+	t.is(result.error, 'Cancelled by user');
+
+	if (childPid && process.platform !== 'win32') {
+		// Immediately after cancel(), the process should still be alive because it ignores SIGTERM
+		let isAliveBefore = false;
+		try {
+			process.kill(childPid, 0);
+			isAliveBefore = true;
+		} catch {
+			isAliveBefore = false;
+		}
+		t.true(isAliveBefore, 'Process should still be alive immediately after SIGTERM since it traps SIGTERM');
+
+		// Wait past the 2000ms SIGKILL timeout
+		await new Promise(resolve => setTimeout(resolve, 2300));
+
+		// Now process MUST be dead via SIGKILL
+		let isAliveAfter = false;
+		try {
+			process.kill(childPid, 0);
+			isAliveAfter = true;
+		} catch {
+			isAliveAfter = false;
+		}
+		t.false(isAliveAfter, 'Process must be killed by SIGKILL fallback after 2 seconds');
+	}
+});
+
+test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback (group-kill throws)', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows — no process groups');
+		return;
+	}
+
+	const executor = createExecutor();
+
+	// Spawn a process that traps SIGTERM and prints its PID on a single line.
+	const cmd = "node -e \"process.on('SIGTERM',()=>{});console.log('PID:'+process.pid);setInterval(()=>{},1000)\"";
+	const { executionId, promise } = executor.execute(cmd);
+
+	// Wait for process to spawn and capture PID from output
+	let childPid: number | undefined;
+	for (let tick = 0; tick < 30 && !childPid; tick++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+		const state = executor.getState(executionId);
+		const match = state?.fullOutput.match(/PID:(\d+)/);
+		if (match) childPid = Number(match[1]);
+	}
+	t.truthy(childPid, 'Should have captured child PID');
+
+	// Kill the process group BEFORE calling cancel(), so that when
+	// killProcessTree tries process.kill(-pid, 'SIGTERM') it throws ESRCH,
+	// forcing the fallback to proc.kill('SIGTERM') — which sets proc.killed = true.
+	try {
+		process.kill(-childPid!, 'SIGTERM');
+	} catch {
+		// Group may already be gone — fine
+	}
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	// Now cancel. killProcessTree will:
+	// 1. Try process.kill(-pid, 'SIGTERM') — throws (group already signalled)
+	// 2. Fall back to proc.kill('SIGTERM') — sets proc.killed = true
+	// 3. Timer fires after 2s: gate must be exitCode-only, NOT !proc.killed
+	const cancelled = executor.cancel(executionId);
+	t.true(cancelled, 'cancel() should return true');
+
+	// Wait past the 2000ms SIGKILL timeout
+	await new Promise(resolve => setTimeout(resolve, 2500));
+
+	// Process MUST be dead — SIGKILL cannot be trapped
+	let isAliveAfter = false;
+	try {
+		process.kill(childPid!, 0);
+		isAliveAfter = true;
+	} catch {
+		isAliveAfter = false;
+	}
+	t.false(isAliveAfter, 'Process must be killed by SIGKILL even when proc.killed was set by SIGTERM fallback');
+
+	await promise;
 });

@@ -3,7 +3,7 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -11,8 +11,12 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -23,6 +27,7 @@ import {
 interface DiffEditArgs {
 	path: string;
 	diff: string;
+	description?: string;
 }
 
 export interface DiffEditBlock {
@@ -250,6 +255,11 @@ function formatUpdatedFileContext(
 
 const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const {path, diff} = args;
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
+	}
+
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
@@ -261,6 +271,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
 	return capDiffEditResult(
@@ -282,6 +293,11 @@ const diffEditCoreTool = tool({
 				type: 'string',
 				description:
 					'One or more SEARCH/REPLACE blocks using <<<<<<< SEARCH, =======, and >>>>>>> REPLACE markers. Do not wrap the diff in markdown code fences or backticks.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this edit.',
 			},
 		},
 		required: ['path', 'diff'],
@@ -318,6 +334,12 @@ function DiffEditPreview({
 	const messageContent = (
 		<Box flexDirection="column">
 			<Text color={colors.tool}>diff_edit</Text>
+			{args.description && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Description:</Text>
+					<Text color={colors.text}> {args.description}</Text>
+				</Box>
+			)}
 			<Box>
 				<Text color={colors.secondary}>Path: </Text>
 				<Text color={colors.text}>{args.path}</Text>
@@ -328,13 +350,31 @@ function DiffEditPreview({
 				<Text color={colors.error}>{parseError}</Text>
 			) : (
 				<Box flexDirection="column" marginTop={1}>
-					{blocks.map((block, index) => (
-						<Box key={index} flexDirection="column" marginBottom={1}>
-							<Text color={colors.secondary}>Block {index + 1}</Text>
-							<Text color={colors.error}>- {block.search}</Text>
-							<Text color={colors.success}>+ {block.replace}</Text>
-						</Box>
-					))}
+					<CappedLines
+						items={blocks.flatMap((block, index) => [
+							{
+								text: `Block ${index + 1}`,
+								color: colors.secondary,
+								changed: false,
+							},
+							...block.search.split('\n').map(line => ({
+								text: `- ${line}`,
+								color: colors.error,
+								changed: true,
+							})),
+							...block.replace.split('\n').map(line => ({
+								text: `+ ${line}`,
+								color: colors.success,
+								changed: true,
+							})),
+						])}
+						isChange={row => row.changed}
+						renderItem={(row, index) => (
+							<Text key={index} color={row.color}>
+								{row.text}
+							</Text>
+						)}
+					/>
 				</Box>
 			)}
 		</Box>
@@ -392,6 +432,9 @@ const diffEditValidator = async (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
+
+	const formatResult = validateEditableFormat(args.path);
+	if (!formatResult.valid) return formatResult;
 
 	let blocks: DiffEditBlock[];
 	try {

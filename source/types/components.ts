@@ -34,6 +34,13 @@ export interface ChatQueueProps {
 	 * to print into. Only a bounded tail of components is rendered.
 	 */
 	disableStatic?: boolean;
+	/**
+	 * Overrides the default fullscreen tail cap (see FULLSCREEN_TAIL_CAP in
+	 * chat-queue.tsx). ChatHistory derives this from terminal height via
+	 * computeFullscreenTailCap so the mounted tail tracks what can actually
+	 * be visible instead of a flat worst-case constant.
+	 */
+	fullscreenTailCap?: number;
 }
 
 export type Completion = {name: string; isCustom: boolean};

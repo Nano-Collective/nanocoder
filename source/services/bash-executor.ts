@@ -1,18 +1,34 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
-import {existsSync, readFileSync, unlinkSync} from 'node:fs';
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	unlinkSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
 
+import {getAppConfig} from '@/config/index';
 import {
-	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
-import {getSafeSessionCwd, setSessionCwd} from './session-cwd.js';
+import {
+	makeStreamCollector,
+	STDERR_TRUNCATION_NOTICE,
+	STDOUT_TRUNCATION_NOTICE,
+} from '@/utils/stream-collector';
+import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
+import {
+	getProjectRoot,
+	getSafeSessionCwd,
+	setSessionCwd,
+} from './session-cwd.js';
 
 const isWindows = platform === 'win32';
 
@@ -36,6 +52,7 @@ interface ExecutionEntry {
 	signal?: AbortSignal;
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
+	jailTmp?: string;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -63,26 +80,75 @@ export class BashExecutor extends EventEmitter {
 
 		// Share the session cwd so bash and the file tools agree on relative paths.
 		const cwd = getSafeSessionCwd();
+		const sandbox = getAppConfig().sandbox === true;
+		const projectRoot = sandbox
+			? resolveJailRoot(getProjectRoot())
+			: getProjectRoot();
 
-		// Capture the shell's final dir to a temp file (not stdout, keeping output
-		// clean) so `cd` persists to later commands and the file tools. Unix only.
+		// Per-execution temp dir the jail can write to (compilers, mktemp, npm).
+		// Cwd capture lives here too so it is not interpolated into `sh -c` and
+		// does not land in the user's repo.
+		let jailTmp: string | undefined;
+		if (sandbox && !isWindows) {
+			jailTmp = resolveJailRoot(mkdtempSync(join(tmpdir(), 'nc-sbx-')));
+		}
 		const cwdCaptureFile = isWindows
 			? undefined
-			: join(tmpdir(), `nanocoder-cwd-${executionId}`);
+			: join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`);
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
 				: // Blank line before the epilogue: a command ending in a trailing
 					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
+					// Capture path is $NC_CWD_FILE so positional args stay empty.
+					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
+		const childEnv = {
+			...process.env,
+			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
+			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
+		};
 
-		const proc = isWindows
-			? spawn('cmd', ['/c', command], {cwd})
-			: // `detached` makes the child a process-group leader so cancel() can
-				// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
-				// not just the `sh` wrapper. Without it a cancelled command's
-				// children keep running in the background.
-				spawn('sh', ['-c', spawnCommand], {cwd, detached: true});
+		const cleanupJailTmp = () => {
+			if (!jailTmp) return;
+			try {
+				rmSync(jailTmp, {recursive: true, force: true});
+			} catch {
+				// best-effort cleanup
+			}
+		};
+
+		let proc: ChildProcess;
+		if (sandbox) {
+			const planned = planBashSpawn({
+				platform,
+				sandbox: true,
+				command,
+				spawnCommand,
+				cwd,
+				projectRoot,
+				tmpDir: jailTmp,
+				hostTmp: resolveJailRoot(tmpdir()),
+			});
+			if ('error' in planned) {
+				cleanupJailTmp();
+				state.isComplete = true;
+				state.error = planned.error;
+				this.emit('start', {...state});
+				this.emit('complete', {...state});
+				return {executionId, promise: Promise.resolve({...state})};
+			}
+			proc = spawnPlanned(planned, {cwd, env: childEnv});
+		} else if (cwdCaptureFile === undefined) {
+			proc = spawn('cmd', ['/c', command], {cwd});
+		} else {
+			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
+			// codeql[js/shell-command-constructed-from-input]
+			proc = spawn('sh', ['-c', spawnCommand], {
+				cwd,
+				detached: true,
+				env: childEnv,
+			});
+		}
 
 		// Best-effort: a missed capture just leaves the cwd where it was.
 		const applyCapturedCwd = () => {
@@ -102,45 +168,39 @@ export class BashExecutor extends EventEmitter {
 				} catch {
 					// best-effort cleanup
 				}
+				cleanupJailTmp();
 			}
 		};
 
-		let outputBytes = 0;
-		let outputTruncated = false;
+		const stdoutCollector = makeStreamCollector(text => {
+			state.fullOutput += text;
+		}, STDOUT_TRUNCATION_NOTICE);
+		const stderrCollector = makeStreamCollector(text => {
+			state.stderr += text;
+		}, STDERR_TRUNCATION_NOTICE);
+
+		// Both streams are finished by the time `close`/`error` runs, so release
+		// whatever the decoders were holding back mid-character. `cancel()`
+		// resolves and unregisters the execution before either handler gets
+		// here, so a cancelled run never flushes: its pending partial character
+		// is dropped along with the rest of the output it never produced.
+		const flushStreams = () => {
+			stdoutCollector.flush();
+			stderrCollector.flush();
+			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
+		};
 
 		// Collect output
-		proc.stdout.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.fullOutput += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.fullOutput +=
-						'\n... [Output truncated to prevent memory exhaustion]';
-				}
-			}
+		proc.stdout?.on('data', (data: Buffer) => {
+			stdoutCollector.collect(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
 			this.emit('progress', {...state});
 		});
 
-		proc.stderr.on('data', (data: Buffer) => {
-			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
-				const limitedChunk = data.subarray(0, remaining);
-				state.stderr += limitedChunk.toString();
-				outputBytes += limitedChunk.length;
-
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
-					outputTruncated = true;
-					state.stderr +=
-						'\n... [Stderr truncated to prevent memory exhaustion]';
-				}
-			}
+		proc.stderr?.on('data', (data: Buffer) => {
+			stderrCollector.collect(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});
@@ -161,6 +221,7 @@ export class BashExecutor extends EventEmitter {
 				resolve,
 				signal: options?.signal,
 				cwdCaptureFile,
+				jailTmp,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -195,6 +256,8 @@ export class BashExecutor extends EventEmitter {
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
+				flushStreams();
+
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
 				clearInterval(intervalId);
@@ -213,6 +276,8 @@ export class BashExecutor extends EventEmitter {
 
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
+
+				flushStreams();
 
 				applyCapturedCwd();
 				clearInterval(intervalId);
@@ -256,6 +321,13 @@ export class BashExecutor extends EventEmitter {
 				// best-effort cleanup
 			}
 		}
+		if (execution.jailTmp) {
+			try {
+				rmSync(execution.jailTmp, {recursive: true, force: true});
+			} catch {
+				// best-effort cleanup
+			}
+		}
 		execution.state.isComplete = true;
 		execution.state.error = reason;
 		this.emit('complete', {...execution.state});
@@ -274,26 +346,68 @@ export class BashExecutor extends EventEmitter {
 	 * group; signalling the negative PID reaches the whole group (the command
 	 * plus anything it spawned). Windows has no process groups here, so we fall
 	 * back to killing the single process.
+	 *
+	 * Sends SIGTERM first. If the process has not exited after a grace period
+	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
+	 * trapped or ignored.
 	 */
 	private killProcessTree(proc: ChildProcess): void {
 		const pid = proc.pid;
 		if (pid === undefined) return;
 
-		if (isWindows) {
-			proc.kill('SIGTERM');
-			return;
-		}
-
-		try {
-			process.kill(-pid, 'SIGTERM');
-		} catch {
-			// Group already gone (or never formed) - fall back to the lone process.
-			try {
-				proc.kill('SIGTERM');
-			} catch {
-				// Process already exited; nothing to terminate.
+		const sendKillSignal = (sig: 'SIGTERM' | 'SIGKILL') => {
+			if (isWindows) {
+				try {
+					proc.kill(sig);
+				} catch {
+					// Ignore if already dead
+				}
+				return;
 			}
-		}
+
+			try {
+				process.kill(-pid, sig);
+			} catch {
+				// Group already gone (or never formed) - fall back to the lone process.
+				try {
+					proc.kill(sig);
+				} catch {
+					// Process already exited; nothing to terminate.
+				}
+			}
+		};
+
+		// On Unix, probe the process group rather than the leader. Every command
+		// runs under a wrapping `sh`, which can exit (on SIGTERM, or on its own
+		// after backgrounding a job) while descendants live on in the group. The
+		// PGID cannot be recycled while any member is alive, so a successful
+		// probe means the signal reaches our own processes.
+		const isAlive = (): boolean => {
+			if (isWindows) {
+				return proc.exitCode === null && proc.signalCode === null;
+			}
+			try {
+				process.kill(-pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		if (!isAlive()) return;
+
+		// Initial SIGTERM
+		sendKillSignal('SIGTERM');
+
+		// SIGKILL fallback after 2 seconds for anything that trapped or ignored
+		// SIGTERM. Gate on liveness only, not proc.killed: Node sets proc.killed
+		// on any successful proc.kill() call, including the SIGTERM above.
+		const sigkillTimer = setTimeout(() => {
+			if (isAlive()) {
+				sendKillSignal('SIGKILL');
+			}
+		}, 2000);
+		sigkillTimer.unref();
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {

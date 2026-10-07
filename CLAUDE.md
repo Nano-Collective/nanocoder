@@ -23,6 +23,7 @@ pnpm run test:lint                              # Biome lint check
 pnpm run test:lint:fix                          # Auto-fix lint/format issues
 pnpm run test:knip                              # Unused code detection
 pnpm run test:benchmark                         # Run model benchmarks
+pnpm run test:agent-eval                        # Agent evaluation harness (steps/tokens/cost per task; needs a model, not part of test:all)
 
 # VS Code extension
 pnpm run build:vscode   # Build extension to assets/nanocoder-vscode.vsix
@@ -55,7 +56,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`
 - `source/mcp/` - Model Context Protocol server integration
 - `source/tool-calling/` - XML/text tool-call parsers for the fallback path (non-native-tool models)
-- `source/services/` - Checkpoint manager, bash executor, file snapshots
+- `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop)
 - `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, session usage storage
 - `source/session/` - Chat session persistence (autosave / resume)
 - `source/schedule/` - Cron-based scheduled agent runs (`scheduler` mode)
@@ -100,11 +101,10 @@ File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.
 
 1. `agents.config.json` in working directory (project-level)
 2. Platform config dir: `~/.config/nanocoder/agents.config.json` (Linux), `~/Library/Preferences/nanocoder/` (macOS)
-3. `~/.agents.config.json` (legacy fallback)
 
-If `NANOCODER_CONFIG_DIR` is set, the platform/legacy lookups are skipped and that directory is used directly.
+Providers merge by name across both layers (plus `NANOCODER_PROVIDERS`); each `nanocoder.*` block is taken whole from the highest layer that defines it. If `NANOCODER_CONFIG_DIR` is set, it replaces the platform dir (the project layer still applies, except that `loadPreferences` skips a project `nanocoder-preferences.json`).
 
-Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}`
+Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-default}` (uppercase names only)
 
 ### LLM Client Architecture
 
@@ -136,6 +136,12 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **Location**: `source/**/*.spec.ts` files alongside source
 - **Serial execution**: Tests run one at a time
 - **Run single test**: `pnpm run test:ava source/path/to/file.spec.ts`
+
+## Voice Plugin
+
+The optional local voice plugin lives in `plugins/voice/`. The root build compiles it before compiling the main app and copies its runtime files into `dist/voice/`; type checks use the committed declaration shim at `source/types/nanocoder-voice.d.ts`. Run `pnpm run test:types:voice` when changing the plugin.
+
+Cloud STT sends microphone audio to the configured OpenAI endpoint only after explicitly selecting `/voice stt cloud`; local STT is the default. Hands-free mode is unavailable in yolo mode.
 
 ## Development Modes
 

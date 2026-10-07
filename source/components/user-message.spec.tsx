@@ -368,3 +368,111 @@ code2
 	t.false(output!.includes('code1'));
 	t.false(output!.includes('code2'));
 });
+// ============================================================================
+// Long message collapse tests
+// ============================================================================
+
+test('UserMessage does not collapse a message at 40 words', t => {
+	const message = Array.from({length: 40}, (_, index) => `word${index + 1}`).join(
+		' ',
+	);
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('word40'));
+	t.false(output.includes('Full prompt: ↑ history'));
+	t.false(output.includes('...'));
+});
+
+test('UserMessage collapses a message over 40 words and points to history', t => {
+	const message = Array.from({length: 41}, (_, index) => `word${index + 1}`).join(
+		' ',
+	);
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('word40'));
+	t.false(output.includes('word41'));
+	t.true(output.includes('Full prompt: ↑ history'));
+});
+
+test('UserMessage does not collapse a message at 300 characters', t => {
+	const message = `hello ${'a'.repeat(294)}`;
+	t.is(message.length, 300);
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	t.false((lastFrame() ?? '').includes('Full prompt: ↑ history'));
+});
+
+test('UserMessage collapses a message over 300 characters', t => {
+	const message = `hello ${'a'.repeat(301)}`;
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('...'));
+	t.true(output.includes('Full prompt: ↑ history'));
+	t.false(output.includes(message));
+});
+
+test('UserMessage enforces the character limit for long words', t => {
+	const message = Array.from(
+		{length: 41},
+		(_, index) => `word${String(index + 1).padStart(2, '0')}-${'x'.repeat(12)}`,
+	).join(' ');
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('word01-'));
+	// The first 40 words exceed 300 characters, so the character cap must
+	// truncate before word20 rather than merely hiding word41.
+	t.false(output.includes('word20-'));
+	t.false(output.includes('word41-'));
+	t.true(output.includes('...'));
+});
+
+test('UserMessage collapses long unbroken strings', t => {
+	const message = `hello ${'s'.repeat(500)}`;
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('...'));
+	t.false(output.includes(message));
+});
+
+test('UserMessage ignores inline VS Code context when deciding to collapse', t => {
+	const message = `hello world\n\n[@App.tsx]<!--vscode-context-->\n\`\`\`\n${'x'.repeat(500)}\n\`\`\`<!--/vscode-context-->`;
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+	const output = lastFrame() ?? '';
+
+	t.true(output.includes('hello world'));
+	t.false(output.includes('Full prompt: ↑ history'));
+	t.false(output.includes('x'.repeat(100)));
+});

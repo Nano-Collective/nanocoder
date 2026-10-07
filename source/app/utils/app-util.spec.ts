@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {
@@ -6,13 +9,24 @@ import {
 	parseCustomCommandArgs,
 } from './app-util.js';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
-import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
+import type {Message, MessageSubmissionOptions} from '@/types/index';
+import {
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -256,6 +270,7 @@ function createResumeTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -271,6 +286,84 @@ function createResumeTestOptions(overrides: {
 }
 
 // --- Direct !command handling ---
+
+test.serial('stats command captures input and releases it on close', async t => {
+	let liveComponent: React.ReactNode = null;
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('/stats all-time', options);
+
+	t.deepEqual(captureStates, [true]);
+	t.true(React.isValidElement(liveComponent));
+	const onClose = (liveComponent as React.ReactElement<{onClose: () => void}>).props
+		.onClose;
+	t.truthy(onClose);
+	onClose();
+	t.deepEqual(captureStates, [true, false]);
+});
+
+test.serial('stats reset command clears the ledger and reports success', async t => {
+	const previousDataDir = process.env.NANOCODER_DATA_DIR;
+	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-stats-reset-'));
+	process.env.NANOCODER_DATA_DIR = dataDir;
+
+	try {
+		const {flushStatsLedgerSync, recordTokenUsage} = await import('@/stats/record');
+		recordTokenUsage({
+			provider: 'OpenRouter',
+			model: 'gpt-5',
+			tokens: 100,
+		});
+		flushStatsLedgerSync();
+
+		let queued: React.ReactNode = null;
+		let completed = 0;
+		const options = createResumeTestOptions({
+			onAddToChatQueue: component => {
+				queued = component;
+			},
+			onCommandComplete: () => {
+				completed++;
+			},
+		});
+
+		await handleMessageSubmission('/stats reset', options);
+
+		t.false(fs.existsSync(path.join(dataDir, 'stats.json')));
+		t.true(React.isValidElement(queued));
+		t.is(
+			(queued as React.ReactElement<{message: string}>).props.message,
+			'Lifetime stats reset.',
+		);
+		t.is(completed, 1);
+	} finally {
+		if (previousDataDir === undefined) {
+			delete process.env.NANOCODER_DATA_DIR;
+		} else {
+			process.env.NANOCODER_DATA_DIR = previousDataDir;
+		}
+		fs.rmSync(dataDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('bash command does not capture input', async t => {
+	const captureStates: boolean[] = [];
+	const options = createResumeTestOptions({});
+	options.setLiveComponentCapturesInput = value => {
+		captureStates.push(value);
+	};
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.deepEqual(captureStates, []);
+});
 
 test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
 	let queued: React.ReactNode = null;
@@ -317,6 +410,25 @@ test.serial('chat message - forwards displayValue to onHandleChatMessage so the 
 	);
 });
 
+test.serial('slash command - leading whitespace still dispatches as a command', async t => {
+	// parseInput trims before testing for `/`, so routing has to trim too —
+	// dispatching on the raw string sent `  /stats` to the model as chat.
+	let chatMessage: string | undefined;
+	let liveComponent: React.ReactNode = null;
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async message => {
+		chatMessage = message;
+	};
+	options.setLiveComponent = component => {
+		liveComponent = component;
+	};
+
+	await handleMessageSubmission('  /stats all-time', options);
+
+	t.is(chatMessage, undefined, 'a slash command must not reach the model');
+	t.true(React.isValidElement(liveComponent));
+});
+
 test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
 	let received: {message?: string; displayValue?: string} = {};
 	const options = createResumeTestOptions({});
@@ -328,6 +440,22 @@ test.serial('chat message - displayValue is optional (callers without a placehol
 
 	t.is(received.message, 'plain message');
 	t.is(received.displayValue, undefined);
+});
+
+test.serial('delayed slash-command completion is delivered after the handler returns', async t => {
+	let completed = false;
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {
+			completed = true;
+		},
+	});
+	options.onShowStatus = () => {};
+
+	await handleMessageSubmission('/status', options);
+
+	t.false(completed);
+	await new Promise(resolve => setTimeout(resolve, 125));
+	t.true(completed);
 });
 
 test.serial('retry command - /retry without a prior user turn shows an error', async t => {
@@ -725,6 +853,7 @@ function createRenameTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -758,6 +887,19 @@ test('rename command - valid name calls onRenameSession with trimmed value', asy
 	});
 	await handleMessageSubmission('/rename my-session', options);
 	t.is(capturedName, 'my-session');
+});
+
+test('rename command - surrounding spaces do not count toward the length limit', async t => {
+	let capturedName: string | undefined;
+	const name = 'a'.repeat(100);
+	const options = createRenameTestOptions({
+		onRenameSession: value => {
+			capturedName = value;
+		},
+		commandArgs: ['', '', name, '', ''],
+	});
+	await handleMessageSubmission(`/rename   ${name}  `, options);
+	t.is(capturedName, name);
 });
 
 test('rename command - multi-word name is joined with spaces', async t => {
@@ -884,6 +1026,7 @@ function createSettingsTestOptions(overrides: {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
+		setLiveComponentCapturesInput: () => {},
 		setIsToolExecuting: () => {},
 		setMessages: () => {},
 		messages: [],
@@ -1083,4 +1226,193 @@ test('progress spinner - only slow commands opt in', t => {
 
 	const help = lazyCommands.find(c => c.name === 'help');
 	t.is(help?.progressLabel, undefined);
+});
+
+// --- Inline `?key=value` overrides (issue #1151) ---
+
+test('inline overrides - /usage ?context-max=200k is parsed into a session-override', t => {
+	// ?context-max is a session-override key (handled by applyOnceOverrides),
+	// not a legacy --flag, so expandOverrideArgs leaves it alone and the
+	// dispatcher applies it through the existing session-override stores.
+	// /usage reads getSessionContextLimit() inside its awaited handler, so
+	// the override is observable for that command's run.
+	const trimmed = '/usage ?context-max=200k'.slice(1).trim().split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, []);
+	t.deepEqual(overrides, [{key: 'context-max', value: '200k'}]);
+	t.deepEqual(expandOverrideArgs(overrides), []);
+});
+
+test('inline overrides - mixed positional args survive the split', t => {
+	const trimmed = '/compact --mechanical ?preview --llm'
+		.slice(1)
+		.trim()
+		.split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, ['--mechanical', '--llm']);
+	t.deepEqual(overrides, [{key: 'preview', value: true}]);
+});
+
+test('inline overrides - applyOnceOverrides restore function is idempotent and safe', async t => {
+	const restore = await applyOnceOverrides([]);
+	t.notThrows(() => restore());
+	t.notThrows(() => restore());
+});
+
+function queuedText(node: React.ReactNode): string {
+	if (React.isValidElement(node)) {
+		const {message} = node.props as {message?: unknown};
+		return typeof message === 'string' ? message : '';
+	}
+	return typeof node === 'string' ? node : '';
+}
+
+test.serial('inline overrides - unknown ?keys warn and reach the handler unchanged', async t => {
+	// Regression: an unrecognised `?key=value` token must neither vanish
+	// silently nor pollute the override stores. The dispatcher forwards it
+	// verbatim (so `/context-max` reports its usual "invalid limit" error
+	// for the `?bogus=1` positional) and queues one warning naming the key.
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/context-max ?bogus=1', options);
+
+	t.true(
+		texts.some(text => text.includes('?bogus')),
+		`expected an unknown-override warning naming ?bogus, got: ${JSON.stringify(texts)}`,
+	);
+	t.true(
+		texts.some(text => text.includes('Invalid context limit')),
+		`expected the handler's normal invalid-limit error, got: ${JSON.stringify(texts)}`,
+	);
+});
+
+test.serial('inline overrides - dispatcher applies a ?context-max override and restores the prior value', async t => {
+	// Regression: a once-scoped override must write the new value into the
+	// session-override store for the duration of the command, and restore the
+	// **prior** value (not null) afterwards so a pre-existing session setting
+	// survives the override. /usage is exercised end-to-end via
+	// handleMessageSubmission because it is the one built-in that reads
+	// getSessionContextLimit() synchronously inside its handler.
+	const {getSessionContextLimit, setSessionContextLimit, resetSessionContextLimit} =
+		await import('@/models/index.js');
+	resetSessionContextLimit();
+	setSessionContextLimit(8192);
+
+	let limitDuringCall: number | null | undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: () => {
+			limitDuringCall = getSessionContextLimit();
+		},
+	});
+
+	await handleMessageSubmission('/usage ?context-max=200k', options);
+
+	t.is(
+		limitDuringCall,
+		200000,
+		'applyOnceOverrides should have written 200000 before the usage handler ran',
+	);
+	t.is(
+		getSessionContextLimit(),
+		8192,
+		'restoreOnce should have put the prior 8192 back after the command',
+	);
+
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold skips compaction below the threshold', async t => {
+	// End-to-end for the headline example: the once-threshold gates the
+	// manual compaction (mirroring the automatic path's gate). A tiny
+	// transcript against a huge once-limit sits near 0%, so the command
+	// reports the skip instead of compacting — and restores both stores.
+	const {
+		getSessionContextLimit,
+		resetSessionContextLimit,
+	} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+	setAutoCompactThreshold(50);
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	options.messages = messages;
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission(
+		'/compact ?threshold=80 ?context-max=999999999',
+		options,
+	);
+
+	t.true(
+		texts.some(text => text.includes('below') && text.includes('80%')),
+		`expected a below-threshold skip message, got: ${JSON.stringify(texts)}`,
+	);
+	t.is(rewritten, null, 'skipped compaction must not rewrite messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		50,
+		'prior threshold is restored after the gated command',
+	);
+	t.is(
+		getSessionContextLimit(),
+		null,
+		'once context limit is restored after the gated command',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold proceeds at or above the threshold', async t => {
+	// Mirror image: a 1-token once-limit puts any transcript at hundreds of
+	// percent, so the gate passes and the normal mechanical compaction runs.
+	const {resetSessionContextLimit} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	options.messages = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission('/compact ?threshold=80 ?context-max=1', options);
+
+	t.true(
+		texts.some(text => text.includes('Compacted')),
+		`expected a compaction success message, got: ${JSON.stringify(texts)}`,
+	);
+	t.not(rewritten, null, 'compaction above the threshold rewrites messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		null,
+		'no prior threshold means null after restore',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
 });

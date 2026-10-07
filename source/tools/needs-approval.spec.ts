@@ -8,6 +8,7 @@ import {fileOpTool} from './file-ops/file-op.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {findFilesTool} from './find-files.js';
+import {formatDocumentTool} from './lsp-format-document.js';
 import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
 import {readFileTool} from './read-file.js';
 import {searchFileContentsTool} from './search-file-contents.js';
@@ -49,6 +50,12 @@ test('execute_bash always requires approval in plan mode', async t => {
 	t.true(await evaluateNeedsApproval(executeBashTool, 'plan', {command: 'ls'}));
 });
 
+test('execute_bash requires approval in architect mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(executeBashTool, 'architect', {command: 'ls'}),
+	);
+});
+
 // ============================================================================
 // MEDIUM RISK: File Write Tools (mode-dependent approval)
 // ============================================================================
@@ -76,6 +83,47 @@ test('write_file requires approval in plan mode', async t => {
 		await evaluateNeedsApproval(writeFileTool, 'plan', {
 			path: 'test.txt',
 			content: 'test',
+		}),
+	);
+});
+
+test('write_file does NOT require approval in architect mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(writeFileTool, 'architect', {
+			path: 'test.txt',
+			content: 'test',
+		}),
+	);
+});
+
+test('lsp_format_document requires approval in normal mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(formatDocumentTool, 'normal', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document does NOT require approval in auto-accept mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(formatDocumentTool, 'auto-accept', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document requires approval in plan mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(formatDocumentTool, 'plan', {
+			path: 'test.ts',
+		}),
+	);
+});
+
+test('lsp_format_document does NOT require approval in headless mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(formatDocumentTool, 'headless', {
+			path: 'test.ts',
 		}),
 	);
 });
@@ -110,6 +158,16 @@ test('string_replace requires approval in plan mode', async t => {
 	);
 });
 
+test('string_replace does NOT require approval in architect mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(stringReplaceTool, 'architect', {
+			path: 'test.txt',
+			old_str: 'old',
+			new_str: 'new',
+		}),
+	);
+});
+
 test('diff_edit requires approval in normal mode', async t => {
 	t.true(
 		await evaluateNeedsApproval(diffEditTool, 'normal', {
@@ -137,11 +195,20 @@ test('diff_edit requires approval in plan mode', async t => {
 	);
 });
 
+test('diff_edit does NOT require approval in architect mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(diffEditTool, 'architect', {
+			path: 'test.txt',
+			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
+		}),
+	);
+});
+
 // ============================================================================
 // LOW RISK: Read-Only Tools (never require approval, via !readOnly default)
 // ============================================================================
 
-for (const mode of ['normal', 'auto-accept', 'plan'] as const) {
+for (const mode of ['normal', 'auto-accept', 'plan', 'architect' ] as const) {
 	test(`read_file never requires approval in ${mode} mode`, async t => {
 		t.false(await evaluateNeedsApproval(readFileTool, mode, {path: 'test.txt'}));
 	});
@@ -258,6 +325,15 @@ test('file_op does NOT require approval in auto-accept mode', async t => {
 test('file_op requires approval in plan mode', async t => {
 	t.true(
 		await evaluateNeedsApproval(fileOpTool, 'plan', {
+			operation: 'delete',
+			path: 'test.txt',
+		}),
+	);
+});
+
+test('file_op does NOT require approval in architect mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(fileOpTool, 'architect', {
 			operation: 'delete',
 			path: 'test.txt',
 		}),

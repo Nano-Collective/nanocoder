@@ -1,6 +1,16 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {dropOrphanedToolResults} from '@/ai-sdk-client/converters/message-converter.js';
-import {clearAppConfig, getAppConfig} from '@/config/index.js';
+import {
+	clearAppConfig,
+	getAppConfig,
+	reloadAppConfig,
+} from '@/config/index.js';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host.js';
+import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd.js';
+import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
 import type {
@@ -263,6 +273,125 @@ test.serial('processAssistantResponse - marks the non-interactive approval notic
 	t.regex(notice.content, /Tool approval required for: some_tool/);
 	t.true(notice.displayOnly, 'the approval notice must never reach the model');
 });
+
+const PERMISSION_PLUGIN = `export default {
+	apiVersion: 1,
+	name: 'guard',
+	hooks: {
+		'permission.asked': ({toolArgs}) =>
+			String(toolArgs.command).includes('--force')
+				? {decision: 'deny', reason: 'no force push'}
+				: {decision: 'defer'},
+	},
+};
+`;
+
+async function withPermissionPlugin(
+	run: () => Promise<void>,
+): Promise<void> {
+	const root = join(tmpdir(), `nanocoder-loop-plugins-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'plugins', 'guard.mjs'),
+		PERMISSION_PLUGIN,
+		'utf-8',
+	);
+	setProjectRoot(root);
+	resetPluginsForTests();
+	await loadPlugins(true);
+	try {
+		await run();
+	} finally {
+		resetPluginsForTests();
+		resetSessionCwd();
+	}
+}
+
+test.serial(
+	'processAssistantResponse - a plugin deny refuses the tool before the approval prompt',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return true;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_force',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git push --force'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.false(asked);
+		t.true(shown.includes('no force push'));
+	},
+);
+
+test.serial(
+	'processAssistantResponse - a plugin defer still asks for approval',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return false;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_status',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git status'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.true(asked);
+		t.false(shown.includes('no force push'));
+	},
+);
 
 // ============================================================================
 // Auto-Nudge Tests (lines 469-506)
@@ -2721,7 +2850,7 @@ test.serial('malformed-retry limit honors a custom configured value', async t =>
 	const giveUpMessage = queuedComponents.find(
 		(c: any) =>
 			typeof c.props?.message === 'string' &&
-			c.props.message.includes('malformed tool calls 1 times'),
+			c.props.message.includes('malformed tool calls 1 time in a row'),
 	);
 	t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
 });
@@ -2824,3 +2953,279 @@ test.serial('repeated-tool-call limit hard-stops without prompting in headless m
 	);
 	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
 });
+
+// ============================================================================
+// Lifecycle hook gate (pre-tool-use)
+//
+// The gate has to sit in front of the approval prompt, not behind it. Behind
+// it, a "never touch .env" hook still renders the full confirmation with its
+// diff preview, waits for the user to approve, and only then refuses — the
+// tool is blocked either way, but the user is asked to authorize something
+// that was never going to run.
+// ============================================================================
+
+const HOOK_GATE_DIR = join(tmpdir(), `nanocoder-loop-hooks-${Date.now()}`);
+
+function withLoopHooks(hooks: HooksConfig): void {
+	writeFileSync(
+		join(HOOK_GATE_DIR, 'agents.config.json'),
+		JSON.stringify({nanocoder: {hooks}}),
+		'utf-8',
+	);
+	reloadAppConfig();
+}
+
+function enterHookFixture(): () => void {
+	const previousCwd = process.cwd();
+	const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	mkdirSync(HOOK_GATE_DIR, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = join(HOOK_GATE_DIR, 'no-global-config');
+	process.chdir(HOOK_GATE_DIR);
+	setProjectRoot(HOOK_GATE_DIR);
+	return () => {
+		process.chdir(previousCwd);
+		if (previousConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+		}
+		setProjectRoot(previousCwd);
+		clearAppConfig();
+	};
+}
+
+// Portable hook body: `sh -c` on POSIX, `cmd /c` on Windows.
+const hookNode = (script: string) => `node -e "${script}"`;
+
+test.serial(
+	'a pre-tool-use veto blocks the tool without ever prompting for approval',
+	async t => {
+		const leave = enterHookFixture();
+		let confirmPrompts = 0;
+		const setMessagesCalls: Message[][] = [];
+		let chatCalls = 0;
+
+		try {
+			withLoopHooks({
+				'pre-tool-use': [
+					{
+						name: 'no-env',
+						command: hookNode(
+							"console.log('.env is off limits');process.exit(1)",
+						),
+					},
+				],
+			});
+
+			// If the gate were behind the approval prompt, this would fire.
+			setGlobalToolConfirmHandler(async () => {
+				confirmPrompts++;
+				return true;
+			});
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				if (chatCalls === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{
+											id: 'call_1',
+											function: {
+												name: 'some_tool',
+												arguments: '{"path":".env"}',
+											},
+										},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					} as never;
+				}
+				// Terminal turn so the loop stops after the blocked result.
+				return {
+					choices: [{message: {role: 'assistant', content: 'understood'}}],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			const params = createDefaultParams({
+				client: mockClient,
+				toolManager: createMockToolManager({
+					tools: ['some_tool'],
+					needsApproval: true,
+				}) as never,
+				nonInteractiveMode: false,
+				setMessages: (m: Message[]) => setMessagesCalls.push(m),
+			});
+
+			await processAssistantResponse(params as never);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+			leave();
+		}
+
+		t.is(
+			confirmPrompts,
+			0,
+			'a vetoed tool must never reach the confirmation prompt',
+		);
+
+		const toolResults = setMessagesCalls
+			.flat()
+			.filter(m => m.role === 'tool')
+			.map(m => String(m.content));
+		t.true(
+			toolResults.some(c => c.includes('.env is off limits')),
+			`the hook's reason should reach the model, got: ${toolResults.join(' | ')}`,
+		);
+	},
+);
+
+test.serial(
+	'a passing pre-tool-use hook still lets the approval prompt run',
+	async t => {
+		const leave = enterHookFixture();
+		let confirmPrompts = 0;
+		let chatCalls = 0;
+
+		try {
+			withLoopHooks({
+				'pre-tool-use': [{command: hookNode('process.exit(0)')}],
+			});
+
+			setGlobalToolConfirmHandler(async () => {
+				confirmPrompts++;
+				return false; // decline, so the loop stops deterministically
+			});
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'call_1',
+										function: {name: 'some_tool', arguments: '{}'},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			const params = createDefaultParams({
+				client: mockClient,
+				toolManager: createMockToolManager({
+					tools: ['some_tool'],
+					needsApproval: true,
+				}) as never,
+				nonInteractiveMode: false,
+			});
+
+			await processAssistantResponse(params as never);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+			leave();
+		}
+
+		t.is(
+			confirmPrompts,
+			1,
+			'the gate must not swallow the approval prompt for an allowed tool',
+		);
+	},
+);
+
+// ============================================================================
+// Top-level alwaysAllow in interactive sessions
+//
+// nanocoder.alwaysAllow used to reach resolveToolApproval only in
+// non-interactive runs, so tools with a hard `approval: true` (git_commit,
+// custom `approval: always` tools) still prompted in the TUI.
+// ============================================================================
+
+for (const [listed, expectedPrompts] of [
+	[true, 0],
+	[false, 1],
+] as const) {
+	test.serial(
+		`interactive loop ${listed ? 'skips' : 'keeps'} the prompt for a tool ${listed ? 'in' : 'not in'} alwaysAllow`,
+		async t => {
+			const leave = enterHookFixture();
+			let confirmPrompts = 0;
+			let chatCalls = 0;
+			try {
+				writeFileSync(
+					join(HOOK_GATE_DIR, 'agents.config.json'),
+					JSON.stringify({
+						nanocoder: {alwaysAllow: listed ? ['some_tool'] : []},
+					}),
+					'utf-8',
+				);
+				reloadAppConfig();
+				setGlobalToolConfirmHandler(async () => {
+					confirmPrompts++;
+					return true;
+				});
+
+				const mockClient = createMockClient({content: '', toolCalls: []});
+				mockClient.chat = async () => {
+					chatCalls++;
+					if (chatCalls === 1) {
+						return {
+							choices: [
+								{
+									message: {
+										role: 'assistant',
+										content: '',
+										tool_calls: [
+											{
+												id: 'call_1',
+												function: {name: 'some_tool', arguments: '{}'},
+											},
+										],
+									},
+								},
+							],
+							toolsDisabled: false,
+						} as never;
+					}
+					return {
+						choices: [{message: {role: 'assistant', content: 'done'}}],
+						toolsDisabled: false,
+					} as never;
+				};
+
+				await processAssistantResponse(
+					createDefaultParams({
+						client: mockClient,
+						toolManager: createMockToolManager({
+							tools: ['some_tool'],
+							needsApproval: true,
+						}) as never,
+						nonInteractiveMode: false,
+					}) as never,
+				);
+			} finally {
+				setGlobalToolConfirmHandler(async () => true);
+				leave();
+			}
+
+			t.is(confirmPrompts, expectedPrompts);
+		},
+	);
+}

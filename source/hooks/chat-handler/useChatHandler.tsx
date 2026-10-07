@@ -89,6 +89,7 @@ export function useChatHandler({
 	onConversationComplete,
 	onError,
 	onPlanTurnComplete,
+	onArchitectTurnComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
@@ -250,6 +251,10 @@ export function useChatHandler({
 			sessionId?: string,
 			onToolExecuted?: (toolName: string) => void,
 			onFinalAssistantText?: (content: string) => void,
+			architectCheckpointState?: {
+				created: boolean;
+				name?: string;
+			},
 		) => {
 			if (!client) return;
 
@@ -273,6 +278,7 @@ export function useChatHandler({
 					developmentModeRef,
 					nonInteractiveMode,
 					conversationStateManager,
+					architectCheckpointState,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
 					reasoningExpandedRef,
@@ -345,11 +351,26 @@ export function useChatHandler({
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		historyMessages?: Message[],
 	) => {
-		if (!client || !toolManager) return;
+		if (!client || !toolManager) {
+			// handleMessageSubmit marks a turn as incomplete before reaching this
+			// hook. Signal completion here as well so an unavailable setup cannot
+			// leave the queue blocked forever.
+			onConversationComplete?.();
+			return;
+		}
 		const sessionId = ensureCurrentSessionId?.();
 		let wrotePlan = false;
 		let finalAssistantText = '';
+
+		// Lifetime /stats: count each user turn (fire-and-forget).
+		try {
+			const {recordUserPrompt} = await import('@/stats/record');
+			recordUserPrompt(currentProvider, currentModel);
+		} catch {
+			// Stats must never block chat.
+		}
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
@@ -371,8 +392,15 @@ export function useChatHandler({
 			/>,
 		);
 
-		// Add user message to conversation history (single addition)
+		// Add user message to conversation history (single addition). Any
+		// caller-supplied historyMessages (e.g. the preceding turns of a
+		// multi-message MCP prompt) are spliced in first, preserving their
+		// original roles, so a few-shot prompt keeps its turn structure
+		// instead of being flattened into this one user message.
 		const builder = new MessageBuilder(messages);
+		for (const historyMessage of historyMessages ?? []) {
+			builder.addMessage(historyMessage);
+		}
 		builder.addUserMessage(message, images);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
@@ -385,6 +413,14 @@ export function useChatHandler({
 		// Create abort controller for cancellation
 		const controller = new AbortController();
 		setAbortController(controller);
+
+		// Keep Architect checkpoint state for the entire user turn.
+		const architectCheckpointState: {
+			created: boolean;
+			name?: string;
+		} = {
+			created: false,
+		};
 
 		try {
 			let systemPrompt = getBaseSystemPrompt(
@@ -440,6 +476,7 @@ export function useChatHandler({
 				content => {
 					finalAssistantText = content;
 				},
+				architectCheckpointState,
 			);
 
 			if (
@@ -481,6 +518,15 @@ export function useChatHandler({
 				!controller.signal.aborted
 			) {
 				onPlanTurnComplete?.();
+			}
+
+			if (
+				developmentMode === 'architect' &&
+				architectCheckpointState.created &&
+				architectCheckpointState.name &&
+				!controller.signal.aborted
+			) {
+				onArchitectTurnComplete?.(architectCheckpointState.name);
 			}
 		} catch (error) {
 			onError?.(error);

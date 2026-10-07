@@ -37,15 +37,18 @@ import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useNotifications} from '@/hooks/useNotifications';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
+import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {setAutoCommitClient} from '@/services/auto-commit';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
-import type {ImageAttachment} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
@@ -53,6 +56,11 @@ import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
+
+// Rows the interactive frame keeps for itself in fullscreen: the root box's
+// top and bottom padding, plus the input footer below the chat viewport
+// (input box, its border and the mode indicator).
+const FULLSCREEN_CHROME_ROWS = 7;
 
 export default function App({
 	vscodeMode = false,
@@ -87,14 +95,6 @@ export default function App({
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
 	const userMessageQueue = useUserMessageQueue();
-	const queuedUserSubmitRef = React.useRef<
-		| ((
-				message: string,
-				displayValue: string,
-				images?: ImageAttachment[],
-		  ) => Promise<void>)
-		| null
-	>(null);
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
 		useDirectoryTrust();
@@ -212,10 +212,16 @@ export default function App({
 	);
 
 	// Create title shape context value (memoized to prevent unnecessary re-renders)
+	// `setCurrentTitleShape` is a preview-only update (no persistence); `commitTitleShape`
+	// persists. Decoupling the two lets a selector navigate/highlight without writing to
+	// disk — the shape is only saved when the user confirms (Enter).
 	const titleShapeContextValue = React.useMemo(
 		() => ({
 			currentTitleShape: appState.currentTitleShape,
 			setCurrentTitleShape: (shape: TitleShape) => {
+				appState.setCurrentTitleShape(shape);
+			},
+			commitTitleShape: (shape: TitleShape) => {
 				appState.setCurrentTitleShape(shape);
 				updateTitleShape(shape);
 			},
@@ -239,11 +245,20 @@ export default function App({
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
 		webRuntimeBridge,
 	});
+
+	// Auto-commit writes its commit messages with the session's current client.
+	// Synced here rather than at each setClient call so /model, /provider and
+	// mode-provider switches are all picked up.
+	React.useEffect(() => {
+		setAutoCommitClient(appState.client);
+	}, [appState.client]);
 
 	// Initialize notifications config from app config (once)
 	React.useEffect(() => {
@@ -252,35 +267,6 @@ export default function App({
 			setNotificationsConfig(config.notifications);
 		}
 	}, []);
-
-	const drainQueuedUserMessage = React.useCallback(() => {
-		// Defer to a macrotask, not a microtask. `onConversationComplete` fires
-		// deep inside the finishing turn's await chain, so a microtask drain would
-		// start the next turn BEFORE that turn's `resetStreamingState()` finally
-		// runs — and the stale reset would then wipe the new turn's abortController
-		// and isGenerating, leaving the busy indicator (and Escape-to-cancel) dead.
-		// A timeout runs after those continuations, so the drained turn keeps its
-		// busy state.
-		setTimeout(() => {
-			void userMessageQueue.drainNextMessage(async message => {
-				const submitQueuedMessage = queuedUserSubmitRef.current;
-				if (!submitQueuedMessage || !appState.client || !appState.toolManager) {
-					return false;
-				}
-
-				await submitQueuedMessage(
-					message.message,
-					message.displayValue,
-					message.images,
-				);
-				return true;
-			});
-		}, 0);
-	}, [
-		appState.client,
-		appState.toolManager,
-		userMessageQueue.drainNextMessage,
-	]);
 
 	// Setup chat handler
 	const chatHandler = useChatHandler({
@@ -304,7 +290,6 @@ export default function App({
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
 			webRuntimeBridge?.completeTurn();
-			drainQueuedUserMessage();
 		},
 		onError: error => {
 			webRuntimeBridge?.failTurn(error);
@@ -314,6 +299,43 @@ export default function App({
 		onPlanTurnComplete: () => {
 			appState.setPlanTurnCompleted(true);
 		},
+		onArchitectTurnComplete: async checkpointName => {
+			// Nothing awaits this callback, so an unhandled rejection here would
+			// surface as a process-level warning and the gate would simply never
+			// appear - the turn's changes silently unreviewed. Fall back to
+			// showing the bar with the name we already have.
+			try {
+				const checkpointManager = new CheckpointManager(getProjectRoot());
+				// List what the turn actually changed, not every path it set out
+				// to touch: a rejected or no-op edit is still checkpointed.
+				const {filesChanged, filesMissing} =
+					await checkpointManager.getChangesSince(checkpointName);
+
+				// Every mutation failed or was a no-op: there is nothing to
+				// review, so release the checkpoint instead of opening an empty
+				// gate that blocks the prompt.
+				if (filesChanged.length === 0 && filesMissing.length === 0) {
+					await checkpointManager
+						.deleteCheckpoint(checkpointName)
+						.catch(() => {});
+					return;
+				}
+
+				appState.setArchitectReviewState({
+					show: true,
+					checkpointName,
+					filesChanged,
+					filesMissing,
+				});
+			} catch {
+				appState.setArchitectReviewState({
+					show: true,
+					checkpointName,
+					filesChanged: [],
+					filesMissing: [],
+				});
+			}
+		},
 		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
@@ -321,8 +343,15 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
-		onApiCallComplete: record =>
-			appState.setApiCallHistory(prev => [...prev, record]),
+		onApiCallComplete: record => {
+			appState.setApiCallHistory(prev => [...prev, record]);
+			// Lifetime /stats: tokens + estimated cost (never blocks UI).
+			void import('@/stats/record')
+				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
+				.catch(() => {
+					/* ignore */
+				});
+		},
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
@@ -408,6 +437,10 @@ export default function App({
 		cliModel,
 		nonInteractiveMode,
 		developmentModeRef: appState.developmentModeRef,
+		// Nothing initializes until the trust disclaimer is accepted: the
+		// conditional `<SecurityDisclaimer />` return below runs after every
+		// hook, so it cannot gate this on its own.
+		isTrusted: isEffectivelyTrusted,
 	});
 
 	// Setup mode handlers
@@ -518,6 +551,7 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
 		setIsToolExecuting: appState.setIsToolExecuting,
+		setLiveComponentCapturesInput: appState.setLiveComponentCapturesInput,
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
@@ -527,6 +561,8 @@ export default function App({
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
+		setArchitectReviewState: appState.setArchitectReviewState,
+		architectReviewState: appState.architectReviewState,
 		setPendingPlanProceed: appState.setPendingPlanProceed,
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,
@@ -709,10 +745,6 @@ export default function App({
 		activeEditor: vscodeServer.activeEditor,
 	});
 
-	React.useEffect(() => {
-		queuedUserSubmitRef.current = handleUserSubmit;
-	}, [handleUserSubmit]);
-
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
 		nonInteractivePrompt,
@@ -743,17 +775,45 @@ export default function App({
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
 	// indicator.
-	const initialProvider = React.useRef(appState.currentProvider);
-	const initialModel = React.useRef(appState.currentModel);
+	// Fullscreen clips the banner at the chat viewport, which is the terminal
+	// minus the interactive frame: the root box's padding rows plus the input
+	// footer beneath it. Inline mode prints into scrollback and clips nothing.
+	const terminalRows = useTerminalRows();
+	const welcomeRows = altScreenActive
+		? Math.max(0, terminalRows - FULLSCREEN_CHROME_ROWS)
+		: terminalRows;
+
+	// Pin the provider/model the run started under, but only once
+	// initialization has resolved them: on the first render they are still the
+	// placeholder defaults (no model), which blanked the boot line's provider
+	// segment and, on narrow terminals, the whole line. The transcript only
+	// mounts once startChat is true, so nothing renders before this is set.
+	const bootIdentity = React.useRef<{provider: string; model: string} | null>(
+		null,
+	);
+	if (!bootIdentity.current && appState.startChat) {
+		bootIdentity.current = {
+			provider: appState.currentProvider,
+			model: appState.currentModel,
+		};
+	}
+	const {startChat} = appState;
 	const staticComponents = React.useMemo(() => {
 		return createStaticComponents({
 			shouldShowWelcome: showWelcome && !nonInteractiveMode,
-			currentProvider: initialProvider.current,
-			currentModel: initialModel.current,
+			currentProvider: startChat ? (bootIdentity.current?.provider ?? '') : '',
+			currentModel: startChat ? (bootIdentity.current?.model ?? '') : '',
 			nonInteractiveMode,
 			developmentMode: initialDevelopmentMode,
+			availableRows: welcomeRows,
 		});
-	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode]);
+	}, [
+		showWelcome,
+		nonInteractiveMode,
+		initialDevelopmentMode,
+		welcomeRows,
+		startChat,
+	]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
@@ -919,6 +979,8 @@ export default function App({
 							handleSubagentToolApproval={handleSubagentToolApproval}
 							pendingToolConfirmation={pendingToolConfirmation}
 							handleToolConfirmation={handleToolConfirmation}
+							pendingVoiceInstall={pendingVoiceInstall}
+							onVoiceInstallConfirm={handleVoiceInstallConfirm}
 							handleQuestionAnswer={handleQuestionAnswer}
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}

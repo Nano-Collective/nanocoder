@@ -23,6 +23,7 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import type {MCPHealthChange} from '@/types/mcp';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -45,6 +46,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'string_replace',
 		'diff_edit',
 		'file_op',
+		'lsp_format_document',
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
@@ -55,7 +57,53 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
 	headless: ['ask_user', 'agent', 'write_plan'],
+	architect: ['write_plan', 'git_commit', 'git_pr'],
 };
+
+export interface ModeFilterLookups {
+	getCustomToolPolicy(
+		name: string,
+	): {approval: CustomToolApprovalPolicy; readOnly: boolean} | undefined;
+	/** Server read-only annotation for an MCP tool; undefined when not MCP. */
+	getMcpReadOnly(name: string): boolean | undefined;
+}
+
+/**
+ * Apply a development mode's tool exclusions to a list of tool names.
+ *
+ * Custom tools follow the same posture as built-ins but with policy applied
+ * per-tool from their approval/readOnly metadata. MCP tools can't be
+ * enumerated in MODE_EXCLUDED_TOOLS (their names come from the server), so
+ * plan mode gates them on the server's read-only annotation instead - an
+ * unannotated tool may mutate, so it's hidden. The annotation is a
+ * server-supplied hint read off the MCP client, not the registry entry:
+ * isReadOnly() also decides checkpointing and parallel batching, which it
+ * must not influence.
+ */
+export function filterToolNamesForMode(
+	names: string[],
+	mode: DevelopmentMode,
+	lookups: ModeFilterLookups,
+): string[] {
+	const excludeSet = new Set(MODE_EXCLUDED_TOOLS[mode]);
+	let result = names.filter(n => !excludeSet.has(n));
+
+	if (mode === 'plan' || mode === 'headless') {
+		result = result.filter(n => {
+			const meta = lookups.getCustomToolPolicy(n);
+			if (!meta) {
+				return lookups.getMcpReadOnly(n) ?? true;
+			}
+			if (mode === 'headless') {
+				return meta.approval === 'never';
+			}
+			// plan mode: only read-only tools with no approval are safe
+			return meta.approval === 'never' && meta.readOnly;
+		});
+	}
+
+	return result;
+}
 
 /**
  * Session-artifact tools. These write to the *parent session's* artifact
@@ -77,6 +125,7 @@ export const SESSION_ARTIFACT_TOOLS = [
 export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
+	private mcpHealthUnsubscribe: (() => void) | null = null;
 	private customTools = new Map<
 		string,
 		{
@@ -98,16 +147,44 @@ export class ToolManager {
 	}
 
 	/**
-	 * Initialize MCP servers and register their tools
+	 * Initialize MCP servers and register their tools.
+	 *
+	 * Servers marked `"enabled": false` are skipped entirely — no connection,
+	 * no tools, no init result. That flag is the documented server-level gate
+	 * (see docs/configuration/mcp-configuration.md), and it is the only opt-out
+	 * for headless runs, where every MCP tool executes unattended. An absent
+	 * flag means enabled, so existing configs are unaffected.
 	 */
 	async initializeMCP(
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
+		onHealthChange?: (change: MCPHealthChange) => void,
 	): Promise<MCPInitResult[]> {
-		if (servers && servers.length > 0) {
+		const enabledServers = servers?.filter(server => server.enabled !== false);
+		// Reinitialization must close the previous transports before replacing the client.
+		await this.disconnectMCP();
+
+		if (enabledServers && enabledServers.length > 0) {
 			// Dynamic import — only paid for by sessions with configured MCP servers.
-			const {MCPClient} = await import('@/mcp/mcp-client');
-			this.mcpClient = new MCPClient();
+			this.mcpClient = await this.createMCPClient();
+			const unsubscribeHealth = [
+				onHealthChange && this.mcpClient.onHealthChange(onHealthChange),
+				this.mcpClient.onHealthChange(change => {
+					if (change.status === 'unhealthy') {
+						const toolNames = Object.keys(
+							this.mcpClient?.getNativeToolsRegistry() || {},
+						).filter(
+							name =>
+								this.mcpClient?.getToolMapping().get(name)?.serverName ===
+								change.serverName,
+						);
+						this.registry.unregisterMany(toolNames);
+					}
+				}),
+			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
+			this.mcpHealthUnsubscribe = () => {
+				for (const unsubscribe of unsubscribeHealth) unsubscribe();
+			};
 
 			getShutdownManager().register({
 				name: 'mcp-client',
@@ -118,7 +195,7 @@ export class ToolManager {
 			});
 
 			const results = await this.mcpClient.connectToServers(
-				servers,
+				enabledServers,
 				onProgress,
 			);
 
@@ -128,6 +205,11 @@ export class ToolManager {
 			return results;
 		}
 		return [];
+	}
+
+	protected async createMCPClient(): Promise<MCPClient> {
+		const {MCPClient} = await import('@/mcp/mcp-client');
+		return new MCPClient();
 	}
 
 	/**
@@ -211,25 +293,7 @@ export class ToolManager {
 
 		// Apply mode-based exclusions
 		if (developmentMode) {
-			const excluded = MODE_EXCLUDED_TOOLS[developmentMode];
-			if (excluded.length > 0) {
-				const excludeSet = new Set(excluded);
-				names = names.filter(n => !excludeSet.has(n));
-			}
-
-			// Custom tools follow the same posture as built-ins but with policy
-			// applied per-tool from their approval/readOnly metadata.
-			if (developmentMode === 'plan' || developmentMode === 'headless') {
-				names = names.filter(n => {
-					const meta = this.customTools.get(n);
-					if (!meta) return true;
-					if (developmentMode === 'headless') {
-						return meta.approval === 'never';
-					}
-					// plan mode: only read-only tools with no approval are safe
-					return meta.approval === 'never' && meta.readOnly;
-				});
-			}
+			names = this.filterToolNamesForMode(names, developmentMode);
 		}
 
 		// Apply user-configured disable list (intersects with profile + mode).
@@ -242,6 +306,42 @@ export class ToolManager {
 		}
 
 		return names;
+	}
+
+	/**
+	 * Drop the tools a development mode must not offer. Shared by the main
+	 * conversation (via getAvailableToolNames) and subagents, so a subagent
+	 * spawned in plan or headless mode can't reach tools its parent can't.
+	 */
+	filterToolNamesForMode(names: string[], mode: DevelopmentMode): string[] {
+		return filterToolNamesForMode(names, mode, {
+			getCustomToolPolicy: name => this.getCustomToolPolicy(name),
+			getMcpReadOnly: name =>
+				mode === 'plan'
+					? this.mcpClient?.getToolMapping().get(name)?.readOnly
+					: undefined,
+		});
+	}
+
+	/**
+	 * Approval/read-only policy for a file-based custom tool, or for a
+	 * skill-bundle tool (registered straight into the registry, so its policy
+	 * is recovered from the entry's approval shape).
+	 */
+	private getCustomToolPolicy(
+		name: string,
+	): {approval: CustomToolApprovalPolicy; readOnly: boolean} | undefined {
+		const meta = this.customTools.get(name);
+		if (meta) return meta;
+		const entry = this.registry.getEntry(name);
+		if (!entry?.ownerSkill) return undefined;
+		const approval: CustomToolApprovalPolicy =
+			entry.approval === false || entry.approval === undefined
+				? 'never'
+				: entry.approval === true
+					? 'always'
+					: 'destructive';
+		return {approval, readOnly: entry.readOnly === true};
 	}
 
 	// =========================================================================
@@ -396,6 +496,8 @@ export class ToolManager {
 	}
 
 	async disconnectMCP(): Promise<void> {
+		this.mcpHealthUnsubscribe?.();
+		this.mcpHealthUnsubscribe = null;
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);
@@ -425,6 +527,10 @@ export class ToolManager {
 		return this.mcpClient?.getConnectedServers() || [];
 	}
 
+	getServerNames(): string[] {
+		return this.mcpClient?.getServerNames() || [];
+	}
+
 	getServerTools(serverName: string): MCPTool[] {
 		return this.mcpClient?.getServerTools(serverName) || [];
 	}
@@ -435,5 +541,9 @@ export class ToolManager {
 
 	getMCPClient() {
 		return this.mcpClient;
+	}
+
+	onMCPHealthChange(listener: (change: MCPHealthChange) => void): () => void {
+		return this.mcpClient?.onHealthChange(listener) || (() => {});
 	}
 }

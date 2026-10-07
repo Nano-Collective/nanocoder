@@ -63,14 +63,19 @@ export interface PlainConversationUsage {
 	inputTokens: number;
 	outputTokens: number;
 	totalTokens: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 }
 
+// `steps` counts model round-trips, including retried turns. It is not
+// `toolCalls.length`: one step can issue zero or several tool calls.
 export type PlainConversationOutcome =
 	| {
 			kind: 'success';
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  }
 	| {
@@ -79,6 +84,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  }
 	| {
@@ -87,6 +93,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			steps: number;
 			usage?: PlainConversationUsage;
 	  };
 
@@ -97,6 +104,18 @@ const FINAL_TURN_INSTRUCTION =
 	'You have reached the maximum number of tool-execution turns for this run. ' +
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
+
+// Sent after a turn the provider truncated at its output-token limit. The
+// partial reply is already in the history above this, so the model can see
+// where it was cut off. The explicit steer away from re-explaining exists
+// because the commonest way to spend a whole output budget without finishing
+// is narrating analysis that was only ever meant to end in a tool call.
+const TRUNCATED_TURN_INSTRUCTION =
+	'Your previous reply was cut off at the output-token limit before it ' +
+	'finished. Continue from exactly where it stopped. Do not repeat or ' +
+	'summarise what you already wrote, and keep any remaining explanation ' +
+	'brief. If the task requires a tool call to be complete, make that call ' +
+	'now rather than describing what it would do.';
 
 /**
  * Headless conversation loop. Streams assistant text to stdout, runs tools
@@ -116,16 +135,49 @@ const FINAL_TURN_INSTRUCTION =
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
 ): Promise<PlainConversationOutcome> {
+	const {client, initialMessages, model} = options;
+
+	// Lifetime /stats: count each initial user prompt in this headless run.
+	try {
+		const {recordUserPrompt} = await import('@/stats/record');
+		const provider = client.getProviderConfig().name;
+		const modelName = model ?? client.getCurrentModel();
+		for (const msg of initialMessages) {
+			if (msg.role === 'user') {
+				recordUserPrompt(provider, modelName);
+			}
+		}
+	} catch {
+		// Stats must never fail the plain loop.
+	}
+
+	try {
+		return await runPlainConversationBody(options, initialMessages, model);
+	} finally {
+		// Debounced stats writes use an unref'd timer — flush before exit so
+		// --plain / headless runs don't lose the ledger.
+		try {
+			const {finalizeStatsForExit} = await import('@/stats/record');
+			finalizeStatsForExit();
+		} catch {
+			// Stats must never fail the plain loop.
+		}
+	}
+}
+
+async function runPlainConversationBody(
+	options: RunPlainConversationOptions,
+	initialMessages: Message[],
+	model: string | undefined,
+): Promise<PlainConversationOutcome> {
 	const {
 		client,
 		toolManager,
 		systemMessage,
-		initialMessages,
 		developmentMode,
 		nonInteractiveAlwaysAllow,
 		abortSignal,
 		tune,
-		model,
 		outputFormat = 'text',
 		sessionId,
 		workingDirectory = process.cwd(),
@@ -140,11 +192,14 @@ export async function runPlainConversation(
 	let finalTextBeforeWalkthroughNudge: string | undefined;
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
+	let steps = 0;
 
 	let hasReportedUsage = false;
 	let accumulatedInputTokens = 0;
 	let accumulatedOutputTokens = 0;
 	let accumulatedTotalTokens = 0;
+	let accumulatedCacheReadTokens = 0;
+	let accumulatedCacheWriteTokens = 0;
 
 	const getUsage = (): PlainConversationUsage | undefined => {
 		if (!hasReportedUsage) return undefined;
@@ -152,6 +207,12 @@ export async function runPlainConversation(
 			inputTokens: accumulatedInputTokens,
 			outputTokens: accumulatedOutputTokens,
 			totalTokens: accumulatedTotalTokens,
+			...(accumulatedCacheReadTokens > 0
+				? {cacheReadTokens: accumulatedCacheReadTokens}
+				: {}),
+			...(accumulatedCacheWriteTokens > 0
+				? {cacheWriteTokens: accumulatedCacheWriteTokens}
+				: {}),
 		};
 	};
 
@@ -161,13 +222,18 @@ export async function runPlainConversation(
 	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
 	// interactive loop applies. There is nobody to ask in a plain run, so
 	// hitting any of them hard-stops with a clear error instead of pausing.
-	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
-		getRetryLimits();
+	const {
+		maxRepeatedToolCalls,
+		maxEmptyTurns,
+		maxMalformedRetries,
+		maxTruncatedTurns,
+	} = getRetryLimits();
 
 	// Consecutive-failure streaks. Each kind of failing turn increments its own
 	// counter and resets the others; any healthy turn resets all of them.
 	let emptyTurnCount = 0;
 	let malformedRetryCount = 0;
+	let truncatedTurnCount = 0;
 	let lastToolSignature = '';
 	let repeatedToolCallCount = 0;
 
@@ -194,6 +260,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -212,6 +279,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -284,6 +352,7 @@ export async function runPlainConversation(
 			abortSignal,
 			modeOverrides,
 		);
+		steps++;
 
 		// The client always returns a `usage` object, but every field inside it is
 		// optional — providers that report nothing leave all three undefined, and
@@ -300,14 +369,45 @@ export async function runPlainConversation(
 				: null;
 		const totalTokens =
 			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+		const cacheReadTokens =
+			typeof turnUsage?.cacheReadTokens === 'number'
+				? turnUsage.cacheReadTokens
+				: null;
+		const cacheWriteTokens =
+			typeof turnUsage?.cacheWriteTokens === 'number'
+				? turnUsage.cacheWriteTokens
+				: null;
 
-		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+		if (
+			inputTokens !== null ||
+			outputTokens !== null ||
+			totalTokens !== null ||
+			cacheReadTokens !== null ||
+			cacheWriteTokens !== null
+		) {
 			hasReportedUsage = true;
 			accumulatedInputTokens += inputTokens ?? 0;
 			accumulatedOutputTokens += outputTokens ?? 0;
+			accumulatedCacheReadTokens += cacheReadTokens ?? 0;
+			accumulatedCacheWriteTokens += cacheWriteTokens ?? 0;
 			// Fall back to input+output so a missing total never reads as zero spend.
-			accumulatedTotalTokens +=
-				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			const turnTotal = totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			accumulatedTotalTokens += turnTotal;
+			// Lifetime /stats (headless / --plain paths) with estimated cost.
+			try {
+				const {recordApiCallForStats} = await import('@/stats/record');
+				await recordApiCallForStats({
+					provider: client.getProviderConfig().name,
+					model: options.model ?? client.getCurrentModel(),
+					inputTokens: inputTokens ?? undefined,
+					outputTokens: outputTokens ?? undefined,
+					totalTokens: turnTotal,
+					cacheReadTokens: cacheReadTokens ?? undefined,
+					cacheWriteTokens: cacheWriteTokens ?? undefined,
+				});
+			} catch {
+				// Stats must never fail the plain loop.
+			}
 		}
 
 		if (!isJson && (reasoningPrinted || contentStarted)) {
@@ -321,6 +421,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -344,13 +445,14 @@ export async function runPlainConversation(
 			// bad tool calls cannot drain tokens unbounded.
 			if (malformedRetryCount >= maxMalformedRetries) {
 				// The caller prints the `error` outcome message; see above.
-				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
 				return {
 					kind: 'error',
 					message,
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
+					steps,
 					usage: getUsage(),
 				};
 			}
@@ -442,6 +544,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -473,6 +576,7 @@ export async function runPlainConversation(
 						finalText: accumulatedFinalText,
 						reasoning: accumulatedReasoning || null,
 						toolCalls: toolCallsLog,
+						steps,
 						usage: getUsage(),
 					};
 				}
@@ -493,6 +597,51 @@ export async function runPlainConversation(
 				];
 				continue;
 			}
+			// A turn the provider cut off at its output-token limit is a fragment,
+			// not an answer — but it arrives with no tool calls, which is exactly
+			// what a finished turn looks like from here. Without this check the
+			// loop returns `success` carrying half a sentence, and a run whose
+			// whole deliverable was a tool call (write the file, open the PR)
+			// reports that it completed having produced nothing at all.
+			//
+			// Nudge rather than error: the model has the context it needs and its
+			// own truncated prose is still in `messages`, so asking it to carry on
+			// usually recovers the turn — and when the task was "call this tool",
+			// being told the budget is spent is what gets it to stop narrating and
+			// make the call. Capped like the other retry limits so a model that
+			// truncates every time cannot spin to maxTurns.
+			//
+			// Skipped on the final turn, which has already stripped tools and
+			// asked for a wrap-up: there is no turn left to continue into, so
+			// returning the fragment beats burning the last one.
+			if (result.finishReason === 'length' && !finalTurn) {
+				if (truncatedTurnCount < maxTruncatedTurns) {
+					truncatedTurnCount += 1;
+					emptyTurnCount = 0;
+					malformedRetryCount = 0;
+					lastToolSignature = '';
+					repeatedToolCallCount = 0;
+					if (!isJson) {
+						writeStatus(
+							`response truncated at the output limit — continuing ${truncatedTurnCount}/${maxTruncatedTurns}`,
+						);
+					}
+					// The truncated reply is already in `messages` — the
+					// hasAssistantPayload append above ran for it, since we only
+					// get here with non-empty content. Only the nudge is needed.
+					messages = [
+						...messages,
+						{role: 'user', content: TRUNCATED_TURN_INSTRUCTION},
+					];
+					continue;
+				}
+				if (!isJson) {
+					writeStatus(
+						`response truncated at the output limit after ${maxTruncatedTurns} continuation${maxTruncatedTurns === 1 ? '' : 's'} — stopping`,
+					);
+				}
+			}
+
 			// Only nudge when the walkthrough will actually outlive the run.
 			// `nanocoder --plain` deletes its ephemeral artifact directory on
 			// exit and reports nothing about the walkthrough, so forcing one
@@ -514,6 +663,7 @@ export async function runPlainConversation(
 				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -557,6 +707,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				steps,
 				usage: getUsage(),
 			};
 		}
@@ -615,6 +766,7 @@ export async function runPlainConversation(
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
 		toolCalls: toolCallsLog,
+		steps,
 		usage: getUsage(),
 	};
 }

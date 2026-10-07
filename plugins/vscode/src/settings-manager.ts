@@ -29,6 +29,40 @@ export interface SettingsData {
  * CLI reads them from .mcp.json (see config/mcp-config-loader.ts), merging
  * project, global and env sources rather than picking one file.
  */
+/** The CLI's global config directory, resolved like getConfigPath() in source/config/paths.ts. */
+export function getGlobalConfigDir(): string {
+	if (process.env.NANOCODER_CONFIG_DIR) {
+		return process.env.NANOCODER_CONFIG_DIR;
+	}
+
+	let baseConfigPath: string;
+	switch (process.platform) {
+		case 'win32':
+			baseConfigPath = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+			break;
+		case 'darwin':
+			baseConfigPath = path.join(os.homedir(), 'Library', 'Preferences');
+			break;
+		default:
+			baseConfigPath = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
+	}
+	return path.join(baseConfigPath, 'nanocoder');
+}
+
+/**
+ * Resolve a config file: project-level first, then global.
+ * If neither exists, return the global path (it will be created on write).
+ */
+export function resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
+	// fileName is never user input - every call site passes a string literal.
+	// Same shape as getConfigPath() in source/config/index.ts.
+	const projectPath = path.join(cwd, fileName); // nosemgrep
+	if (fs.existsSync(projectPath)) {
+		return projectPath;
+	}
+	return path.join(globalDir, fileName); // nosemgrep
+}
+
 export class SettingsManager {
 	constructor(private outputChannel: { appendLine: (msg: string) => void }) {}
 
@@ -188,6 +222,39 @@ export class SettingsManager {
 		}
 	}
 
+	/**
+	 * Add a new provider to agents.config.json.
+	 */
+	addProvider(cwd: string, provider: any): { success: boolean; error?: string } {
+		try {
+			const paths = this.getConfigPaths(cwd);
+			let config = this.readJsonSafe(paths.agentsConfig);
+			if (config === null) throw new Error(`Config file ${paths.agentsConfig} contains invalid JSON. Cannot update.`);
+			
+			config = config || {};
+			if (!config.nanocoder || typeof config.nanocoder !== 'object') {
+				config.nanocoder = {};
+			}
+			if (!Array.isArray(config.nanocoder.providers)) {
+				config.nanocoder.providers = [];
+			}
+			
+			// Check if provider already exists by name
+			const exists = config.nanocoder.providers.some((p: any) => p.name === provider.name);
+			if (exists) {
+				return { success: false, error: `A provider named '${provider.name}' already exists.` };
+			}
+			
+			config.nanocoder.providers.push(provider);
+			this.atomicWrite(paths.agentsConfig, config);
+			return { success: true };
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			this.outputChannel.appendLine(`[Settings] Failed to add provider: ${msg}`);
+			return { success: false, error: msg };
+		}
+	}
+
 	// ----- Private helpers -----
 
 	/**
@@ -275,36 +342,11 @@ export class SettingsManager {
 	}
 
 	private getGlobalConfigDir(): string {
-		if (process.env.NANOCODER_CONFIG_DIR) {
-			return process.env.NANOCODER_CONFIG_DIR;
-		}
-
-		let baseConfigPath: string;
-		switch (process.platform) {
-			case 'win32':
-				baseConfigPath = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
-				break;
-			case 'darwin':
-				baseConfigPath = path.join(os.homedir(), 'Library', 'Preferences');
-				break;
-			default:
-				baseConfigPath = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
-		}
-		return path.join(baseConfigPath, 'nanocoder');
+		return getGlobalConfigDir();
 	}
 
-	/**
-	 * Resolve a config file: project-level first, then global.
-	 * If neither exists, return the global path (it will be created on write).
-	 */
 	private resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
-		// fileName is never user input - both call sites pass a string literal.
-		// Same shape as getConfigPath() in source/config/index.ts.
-		const projectPath = path.join(cwd, fileName); // nosemgrep
-		if (fs.existsSync(projectPath)) {
-			return projectPath;
-		}
-		return path.join(globalDir, fileName); // nosemgrep
+		return resolveConfigPath(cwd, globalDir, fileName);
 	}
 
 	private readJsonSafe(filePath: string): any {

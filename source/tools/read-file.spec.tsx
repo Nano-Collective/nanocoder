@@ -6,6 +6,10 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	bumpReadContentGeneration,
+	clearReadTracker,
+} from '../utils/read-tracker.js';
 import {readFileTool} from './read-file';
 
 // ============================================================================
@@ -13,6 +17,10 @@ import {readFileTool} from './read-file';
 // ============================================================================
 
 console.log(`\nread-file.spec.tsx – ${React.version}`);
+
+test.beforeEach(() => {
+	clearReadTracker();
+});
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
@@ -146,6 +154,95 @@ test('ReadFileFormatter displays line range for partial reads', async t => {
 		t.truthy(output);
 		t.regex(output!, /Lines:/);
 		t.regex(output!, /2 - 4/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test('ReadFileFormatter shows the metadata layout for a metadata_only read', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2\nline3');
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{path: join(testDir, 'test.ts'), metadata_only: true},
+			'File Information for "test.ts"\n==================================================\n\nType: file\nSize: 18 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nReadable: yes\nLines: 3\nEstimated Tokens: ~5\nFile Type: TypeScript\nEncoding: UTF-8\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
+		t.regex(output, /Total lines:\s+3/);
+		t.notRegex(output, /Tokens:/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test('ReadFileFormatter shows the metadata layout for a directory', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-dir-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{path: testDir, metadata_only: true},
+			'File Information for "test-metadata-only-dir-temp"\n==================================================\n\nType: directory\nSize: 64 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nNote: Use list_directory tool to see directory contents\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
+		t.notRegex(output, /Tokens:/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test('ReadFileFormatter treats a truthy metadata_only string as metadata-only', async t => {
+	const testDir = join(process.cwd(), 'test-metadata-only-string-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2');
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{
+				path: join(testDir, 'test.ts'),
+				metadata_only: 'true' as unknown as boolean,
+			},
+			'File Information for "test.ts"\n==================================================\n\nType: file\nSize: 12 bytes\nLast Modified: 2026-01-01T00:00:00.000Z\nReadable: yes\nLines: 2\nEstimated Tokens: ~4\nFile Type: TypeScript\nEncoding: UTF-8\n\n[Use read_file to view file contents]\n',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /\(metadata only\)/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -1116,6 +1213,129 @@ test.serial('read_file metadata_only shows converted binary encoding for DOCX', 
 		)) as string;
 
 		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file stubs a second unchanged read of the same path', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'same.ts');
+		writeFileSync(filePath, 'const a = 1;\n');
+
+		const first = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(first.includes('const a = 1;'));
+
+		const second = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(second.includes('already in context'));
+		t.false(second.includes('const a = 1;'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the body again after the file changes', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-changed-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'changed.ts');
+		writeFileSync(filePath, 'first\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		writeFileSync(filePath, 'second\n');
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('second'));
+		t.false(result.includes('already in context'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file range request is never stubbed as a full-file read', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-range-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'ranged.ts');
+		writeFileSync(filePath, 'one\ntwo\nthree\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		const ranged = await readFileTool.tool.execute!(
+			{path: filePath, start_line: 2, end_line: 2},
+			{toolCallId: 'test', messages: []},
+		);
+		t.is(ranged, 'two');
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only does not create a stub', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-meta-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'meta.ts');
+		writeFileSync(filePath, 'visible\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath, metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('visible'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the body again after compact generation bump', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-gen-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const filePath = join(testDir, 'gen.ts');
+		writeFileSync(filePath, 'keep me\n');
+
+		await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		bumpReadContentGeneration();
+		const result = await readFileTool.tool.execute!(
+			{path: filePath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(result.includes('keep me'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

@@ -1,6 +1,14 @@
 import test from 'ava';
 import type {FileNode} from './file-tree';
-import {flattenTree, flattenTreeAll, getRelativePath} from './file-tree';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {
+	buildFileTree,
+	flattenTree,
+	flattenTreeAll,
+	getRelativePath,
+} from './file-tree';
 
 console.log(`\nfile-tree.spec.ts`);
 
@@ -238,4 +246,20 @@ test('flattenTree - preserves node properties', t => {
 
 	t.is(result[0].node.size, 1234);
 	t.is(result[0].node.absolutePath, '/test/test.ts');
+});
+
+test('buildFileTree drops a directory matched by a directory-only ignore pattern', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'filetree-ignore-'));
+	try {
+		mkdirSync(join(root, 'dist'));
+		writeFileSync(join(root, 'dist', 'bundle.js'), 'x');
+		writeFileSync(join(root, 'index.ts'), 'x');
+		writeFileSync(join(root, '.nanocoderignore'), 'dist/\n');
+
+		const names = (await buildFileTree(root)).map(node => node.name);
+
+		t.deepEqual(names, ['index.ts']);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });

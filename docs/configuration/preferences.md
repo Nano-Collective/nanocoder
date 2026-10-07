@@ -12,9 +12,9 @@ Nanocoder automatically saves your preferences to remember your choices across s
 
 You should rarely need to edit these files by hand. `/settings` opens an in-TUI editor covering everything on this page, grouped into six tabs:
 
-- **Appearance** - theme, title shape, nanocoder ASCII shape, alternate screen mode
+- **Appearance** - theme, title shape, nanocoder ASCII shape, alternate screen mode, mouse wheel reporting
 - **Input** - paste threshold, desktop notifications
-- **Behavior** - tool results and thinking display, reasoning traces, default mode, auto-compact, session autosave
+- **Behavior** - tool results and thinking display, reasoning traces, professional tone, default mode, auto-compact, session autosave
 - **Providers** - configure providers, web search, tool auto-approval
 - **MCP** - configure MCP servers
 - **Advanced** - privacy, direct config file editing, environment, model tuning, IDE connection
@@ -30,8 +30,14 @@ Preferences follow the same location hierarchy as configuration files:
 1. **Project-level**: `nanocoder-preferences.json` in your current working directory (overrides user-level)
 2. **User-level**: Platform-specific configuration directory:
    - **macOS**: `~/Library/Preferences/nanocoder/nanocoder-preferences.json`
-   - **Linux/Unix**: `~/.config/nanocoder/nanocoder-preferences.json`
+   - **Linux/Unix**: `~/.config/nanocoder/nanocoder-preferences.json` (respects `XDG_CONFIG_HOME`)
    - **Windows**: `%APPDATA%\nanocoder\nanocoder-preferences.json`
+
+When a project-level file exists, Nanocoder both reads preferences from it and writes preference changes (last model, theme and so on) back to it, so avoid committing one unless you mean to share those choices.
+
+**Directory trust is global only.** `trustedDirectories` is always read from, and written to, the user-level file. A `trustedDirectories` entry in a project-level `nanocoder-preferences.json` is ignored, so a cloned repository cannot mark itself trusted and skip the security disclaimer that gates its MCP servers and hooks.
+
+If `NANOCODER_CONFIG_DIR` is set, the project-level file is skipped for top-level preferences, which are read from and written to `nanocoder-preferences.json` in that directory. The namespaced `nanocoder.sessions` and `nanocoder.paste` blocks are the exception: they are still read from a project-level file first. If no user-level file exists yet, an empty one is created the first time preferences are resolved.
 
 ## What Gets Saved Automatically
 
@@ -44,27 +50,33 @@ Preferences follow the same location hierarchy as configuration files:
 | `syntaxTheme` | Optional. Name of the theme whose palette colours syntax highlighting, when you want code to keep a palette of its own (e.g. `"dracula"`) instead of following `selectedTheme`. Any theme name from `/settings` → **Theme** works; an unknown name falls back to `selectedTheme` |
 | `titleShape` | The title shape style (e.g., box, rounded) |
 | `nanocoderShape` | The nanocoder ASCII art shape |
-| `trustedDirectories` | Directories you've approved through the first-run security disclaimer |
+| `trustedDirectories` | Directories you've approved through the first-run security disclaimer (user-level file only) |
 | `lastUpdateCheck` | Timestamp of the last update check (used to avoid checking too frequently) |
 | `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
 | `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |
 | `semanticMemoryLimit` | Maximum memories considered for a single prompt. Default `8`, clamped to 1-50. Adjustable from `/settings` → **Advanced**. |
-| `alternateScreen` | When `true`, starts in fullscreen mode (alternate screen buffer with in-app scrolling) by default. The `--alt-screen`/`--no-alt-screen` CLI flags override this for a single run. See [CLI Options](../getting-started/index.md#cli-options). |
+| `alternateScreen` | When `true` (default), starts in fullscreen mode (alternate screen buffer with in-app scrolling). Set to `false` or pass `--no-alt-screen` to force inline mode. See [CLI Options](../getting-started/index.md#cli-options). |
+| `mouseReporting` | When `true` (default), the terminal reports mouse wheel ticks in fullscreen mode so the wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Set to `false` for native click-drag selection, at the cost of wheel scrolling. Switchable with `--mouse` / `--no-mouse` or `/settings` → **Appearance** → **Mouse Wheel Reporting**. |
+| `compactToolDisplay` | When `true` (default), tool results render in compact form. Ctrl+O toggles it for the current session without saving. In `/settings` → **Behavior** → **Tool Results and Thinking** this appears as **Expand Tool Results by default**, which is the inverse of this value. |
+| `tune` | The settings last applied with `/tune` (tool profile, tool-calling mode, model parameters). A `nanocoder.tune` block in `agents.config.json` takes priority; see [Tune](../features/tune.md). |
+| `enablePromptScrubbing` | When `true`, sensitive identifiers are replaced with placeholders in everything sent to the provider - prompts, the system prompt, tool results (including `structuredContent`) and assistant tool-call arguments - and rehydrated to real values in the response. Applies in the TUI, `--plain`, ACP / VS Code, subagents and compaction. File paths and URLs are left in the clear so tools keep working. Default `false`. Toggle with `/settings` → **Advanced** → **Privacy**; preview what would be scrubbed with `/privacy inspect <text>`. |
 
 ### Paste Configuration
 
-The paste threshold is also stored in the preferences file under the top-level `paste` key:
+The paste threshold is also stored in the preferences file under the namespaced `nanocoder.paste` key:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer pastes become `[Paste #N: X chars]` placeholders, and multi-line pastes become `[Paste #N: X lines]`. |
 
 You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
-  "paste": {
-    "singleLineThreshold": 1500
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 1500
+    }
   }
 }
 ```
@@ -105,6 +117,24 @@ You can change this via `/settings` → **Behavior** → **Tool Results and Thin
 
 The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
 
+### Agent Bash Output
+
+By default, a completed card for a command the agent runs shows the command and its status. The command output is not kept on the card. Set `showAgentBashOutput` to keep the output on the card regardless of `compactToolDisplay` being true or false:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `showAgentBashOutput` | boolean | `false` | When true, a completed card for a command the agent runs shows the command output. This applies whether compact tool display is on or off, and also covers failed commands. |
+
+You can change this via `/settings` → **Behavior** → **Tool Results and Thinking**, or by editing the preferences file directly:
+
+```json
+{
+  "showAgentBashOutput": true
+}
+```
+
+This setting only affects commands the agent runs. Output for commands you type yourself with `!command` is always shown. Toggling it from `/settings` applies from the next command onwards, with no restart needed. Editing the preferences file by hand needs a restart.
+
 ### Professional Tone
 
 Professional ("boring") tone is stored in the preferences file with the `professionalTone` field:
@@ -141,6 +171,8 @@ Desktop notification preferences are stored under the top-level `notifications` 
 | `notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
 | `notifications.events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
 
+Any event you leave out of `notifications.events` keeps its default of `true`, so `{"notifications": {"enabled": true}}` turns on every event.
+
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
@@ -155,7 +187,7 @@ When you restart Nanocoder, it automatically restores your last provider, model,
 Nanocoder stores internal application data (such as usage statistics) in a separate application data directory:
 
 - **macOS**: `~/Library/Application Support/nanocoder`
-- **Linux/Unix**: `$XDG_DATA_HOME/nanocoder` or `~/.local/share/nanocoder`
+- **Linux/Unix**: `~/.local/share/nanocoder`
 - **Windows**: `%APPDATA%\nanocoder`
 
-You can override this directory using `NANOCODER_DATA_DIR`.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder` is used instead on every platform, including macOS and Windows. `NANOCODER_DATA_DIR` overrides both. Lifetime `/stats` data is stored in `stats.json` in this directory. Older `.nanocoder-stats.json` files are migrated automatically on first read.

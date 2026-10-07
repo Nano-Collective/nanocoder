@@ -16,11 +16,17 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"moduleResolution": "Bundler",
-		"resolveJsonModule": true
+		"resolveJsonModule": true,
+		"jsx": "react-jsx",
+		"paths": {
+			"@/*": ["../../source/*"]
+		}
 	},
 	"include": [
 		"src/**/*",
-		"../../source/vscode/cli-path-discovery.ts"
+		"../../source/vscode/cli-path-discovery.ts",
+		"../../source/vscode/discovery.ts",
+		"../../source/wizards/templates/provider-templates.ts"
 	],
 	"exclude": [
 		"node_modules",

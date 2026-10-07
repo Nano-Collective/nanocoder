@@ -17,7 +17,17 @@ type McpServers = Record<string, McpServerConfig>;
 
 function parseMcpConfig(raw: unknown): McpServers {
 	const config = raw as {mcpServers?: McpServers} | null;
-	return config?.mcpServers ?? {};
+	const servers = config?.mcpServers ?? {};
+	// In `.mcp.json` a server's name is its key; only wizard-built entries also
+	// carry a `name` field. Without this, a hand-written server showed as a
+	// blank "•  (stdio)" throughout the wizard and its edit form opened with
+	// an empty name.
+	return Object.fromEntries(
+		Object.entries(servers).map(([key, server]) => [
+			key,
+			{...server, name: server.name || key},
+		]),
+	);
 }
 
 function McpSummaryItems({items}: {items: McpServers}) {

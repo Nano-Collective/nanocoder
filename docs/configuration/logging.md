@@ -6,27 +6,27 @@ sidebar_order: 5
 
 # Logging Configuration
 
-Nanocoder includes structured logging with Pino, providing correlation tracking, performance monitoring, and automatic PII redaction.
+Nanocoder includes structured logging with Pino, providing correlation tracking, basic timing and memory metrics, and automatic redaction of sensitive data.
 
 ## Quick Start
 
 ```bash
 # Environment Variables
-NANOCODER_LOG_LEVEL=debug          # Log level (trace, debug, info, warn, error, fatal)
+NANOCODER_LOG_LEVEL=debug            # Log level (trace, debug, info, warn, error, fatal, silent)
 NANOCODER_LOG_DIR=/var/log/nanocoder # Log directory override
-NANOCODER_CORRELATION_ENABLED=true  # Enable correlation tracking
+NANOCODER_LOG_DISABLE_FILE=true      # Turn file logging off entirely
 ```
 
 ## Features
 
 - Structured JSON logging with metadata support
 - Correlation tracking across components
-- Automatic PII detection and redaction
-- Performance monitoring and metrics
+- Automatic redaction of sensitive data
+- Timing and memory metrics for provider requests and MCP operations
 
 ## Default Log File Locations
 
-Logs are always written to file. The default locations are platform-specific:
+Logs are written to a daily file (`nanocoder-YYYY-MM-DD.log`) unless file logging is disabled. The default locations are platform-specific:
 
 - **macOS**: `~/Library/Logs/nanocoder`
 - **Linux/Unix**: `~/.local/state/nanocoder/logs` (or `$XDG_STATE_HOME/nanocoder/logs`)
@@ -34,35 +34,35 @@ Logs are always written to file. The default locations are platform-specific:
 
 You can override the default location using the `NANOCODER_LOG_DIR` environment variable.
 
-To disable file logging entirely, set `NANOCODER_LOG_DISABLE_FILE=true`.
+To disable file logging entirely, set `NANOCODER_LOG_DISABLE_FILE=true`. This takes precedence over `NANOCODER_LOG_LEVEL`: no log directory or file is created and nothing is written.
+
+When Nanocoder runs under the Bun runtime, Pino's file transport is not loaded (it relies on worker threads Bun does not support), so a lightweight fallback logger is used and no log file is written.
 
 ## Configuration Examples
 
-**Development:**
+**Debugging an issue:**
 ```bash
 NANOCODER_LOG_LEVEL=debug
-NANOCODER_CORRELATION_ENABLED=true
-NANOCODER_CORRELATION_DEBUG=true
 ```
 
-**Production:**
+**Custom log location:**
 ```bash
 NANOCODER_LOG_LEVEL=info
 NANOCODER_LOG_DIR=/var/log/nanocoder
-NANOCODER_CORRELATION_ENABLED=true
-NANOCODER_CORRELATION_DEBUG=false
+```
+
+**No log files:**
+```bash
+NANOCODER_LOG_DISABLE_FILE=true
 ```
 
 ## Environment Variables Reference
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NANOCODER_LOG_LEVEL` | Log level (trace, debug, info, warn, error, fatal) | `info` |
-| `NANOCODER_LOG_TO_FILE` | Enable file logging | `true` |
+| `NANOCODER_LOG_LEVEL` | Log level (trace, debug, info, warn, error, fatal, silent) | `info` |
 | `NANOCODER_LOG_DIR` | Log directory override | Platform default |
-| `NANOCODER_LOG_DISABLE_FILE` | Disable file logging entirely | `false` |
-| `NANOCODER_CORRELATION_DEBUG` | Debug correlation tracking | `false` |
-| `NANOCODER_CORRELATION_ENABLED` | Enable correlation tracking | `true` |
+| `NANOCODER_LOG_DISABLE_FILE` | Disable file logging entirely (overrides `NANOCODER_LOG_LEVEL`) | `false` |
 
 ## Key Capabilities
 
@@ -72,15 +72,16 @@ Unique correlation IDs are generated for request tracking across components. Thi
 
 ### Security & Data Protection
 
-Automatic detection and redaction of sensitive data including emails, phone numbers, SSNs, credit cards, API keys, passwords, and tokens.
+Sensitive data is redacted automatically before it reaches the log file:
 
-### Performance Monitoring
+- Fields whose names look sensitive (for example `apiKey`, `token`, `password`, `secret`, `authorization`, `credentials`, `accessToken`, and anything containing `card` or `credit`)
+- Values that look like API keys (long alphanumeric strings), Bearer tokens, email addresses, IPv4 addresses and UUIDs
 
-Function execution time tracking, memory usage monitoring, CPU usage tracking, and configurable performance threshold alerts.
+Values that do not match these key names or patterns (for example phone numbers) are not redacted.
 
-### Request Tracking
+### Performance Metrics
 
-HTTP request timing, AI provider call tracking, MCP server operation monitoring, and error rate monitoring.
+Execution time and memory usage deltas are recorded for provider requests and MCP operations, and written alongside the related log entries.
 
 ## Usage Examples
 
@@ -135,10 +136,10 @@ await withNewCorrelationContext(async (context) => {
 
 ### Performance degradation with logging
 
-- Reduce log level in production to `info` or `warn`
-- Disable correlation tracking for high-volume operations
+- Reduce the log level to `info` or `warn`
+- Set `NANOCODER_LOG_DISABLE_FILE=true` if you do not need log files
 
 ### Sensitive data in logs
 
-- The automatic redaction system handles common patterns
-- Add custom redaction rules for application-specific fields
+- The automatic redaction system handles the key names and patterns listed above
+- Anything outside those patterns is written as-is, so avoid raising the log level to `debug` or `trace` when working with sensitive data you do not want on disk

@@ -266,3 +266,61 @@ test.serial('SettingsManager - validates autoCompact.threshold values', (t) => {
 
 	fs.rmSync(tempDir, { recursive: true, force: true });
 });
+
+test.serial('SettingsManager - addProvider adds a fresh provider and guards duplicates', (t) => {
+	const manager = new SettingsManager(mockOutputChannel);
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+	const anyManager = manager as any;
+	anyManager.getGlobalConfigDir = () => tempDir;
+
+	// Add first provider
+	const res1 = manager.addProvider(tempDir, {
+		name: 'My Custom Provider',
+		sdkProvider: 'openai-compatible',
+		baseUrl: 'http://localhost:1234/v1',
+		models: ['test-model-1'],
+	});
+	t.is(res1.success, true);
+	
+	let settings = manager.readSettings(tempDir);
+	t.is(settings.providers.length, 1);
+	t.is(settings.providers[0].name, 'My Custom Provider');
+	t.deepEqual(settings.providers[0].models, ['test-model-1']);
+
+	// Attempt duplicate name
+	const res2 = manager.addProvider(tempDir, {
+		name: 'My Custom Provider',
+		sdkProvider: 'openai-compatible',
+		baseUrl: 'http://localhost:1234/v2',
+	});
+	t.is(res2.success, false);
+	t.regex(res2.error || '', /already exists/);
+
+	// Validate config file wasn't overwritten on error
+	settings = manager.readSettings(tempDir);
+	t.is(settings.providers.length, 1);
+	t.is(settings.providers[0].baseUrl, 'http://localhost:1234/v1'); // original intact
+
+	fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test.serial('SettingsManager - addProvider bails if agents.config.json is invalid JSON', (t) => {
+	const manager = new SettingsManager(mockOutputChannel);
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+	const anyManager = manager as any;
+	anyManager.getGlobalConfigDir = () => tempDir;
+
+	const agentsConfigPath = path.join(tempDir, 'agents.config.json');
+	fs.writeFileSync(agentsConfigPath, '{ invalid: json }'); // Syntax error
+
+	const res = manager.addProvider(tempDir, {
+		name: 'Will Fail',
+		sdkProvider: 'openai-compatible',
+	});
+	
+	t.is(res.success, false);
+	t.regex(res.error || '', /invalid JSON/);
+
+	fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
