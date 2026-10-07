@@ -10,14 +10,18 @@ import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
+import {VoiceStatusBar} from '@/components/voice-status-bar';
+import {getVoicePreference, subscribeToPreferences} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
+import {useVoice} from '@/hooks/useVoice';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {hasStagedChanges} from '@/tools/git/utils';
 import type {ImageAttachment} from '@/types/core';
@@ -37,6 +41,10 @@ interface InteractiveAppProps {
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
+	pendingVoiceInstall?:
+		| import('@/utils/voice-install-queue').PendingVoiceInstall
+		| null;
+	onVoiceInstallConfirm?: (confirmed: boolean) => void;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
 	handleUserSubmit: (
@@ -73,6 +81,8 @@ export function InteractiveApp({
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
 	pendingToolConfirmation,
+	pendingVoiceInstall,
+	onVoiceInstallConfirm,
 	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
@@ -107,6 +117,46 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
+	const {currentTheme} = useTheme();
+	const voiceInputAllowed =
+		!appState.activeMode &&
+		!appState.isToolConfirmationMode &&
+		!appState.isQuestionMode &&
+		pendingSubagentApproval === null &&
+		pendingToolConfirmation === null;
+	const agentBusy =
+		appState.isCancelling ||
+		chatHandler.isGenerating ||
+		appState.isToolExecuting ||
+		appState.abortController !== null;
+
+	// Load voice preferences reactively for useVoice via preference store subscription
+	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
+
+	React.useEffect(() => {
+		return subscribeToPreferences(() => {
+			setVoicePref(getVoicePreference());
+		});
+	}, []);
+
+	const {
+		state: voiceState,
+		startStopRecording,
+		unavailableReason: voiceUnavailableReason,
+	} = useVoice({
+		handleUserSubmit,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
+		voicePreference: voicePref,
+		handleCancel: appHandlers.handleCancel,
+		client: appState.client,
+		isConversationComplete: appState.isConversationComplete,
+		developmentMode: appState.developmentMode,
+		isInputAvailable: voiceInputAllowed,
+		isAgentBusy: agentBusy,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+	});
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -399,6 +449,19 @@ export function InteractiveApp({
 		{isActive: cancellable},
 	);
 
+	const isVoiceInputAppropriate =
+		Boolean(voicePref.enabled) && voiceInputAllowed;
+
+	// Push-to-talk keybinding (Ctrl+G) avoids the existing Ctrl+T task-list binding.
+	useInput(
+		(input, key) => {
+			if (key.ctrl && input === 'g') {
+				void startStopRecording();
+			}
+		},
+		{isActive: isVoiceInputAppropriate},
+	);
+
 	// Fullscreen layout if and only if cli.tsx put us on the alternate
 	// screen. Inline mode (--no-alt-screen / alternateScreen:false pref),
 	// test renderers, and piped stdout all use the classic flow layout
@@ -408,7 +471,6 @@ export function InteractiveApp({
 	const artifactRefreshKey = `${appState.isConversationComplete}:${
 		appState.planReviewState?.show ?? false
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
-
 	return (
 		// One provider for the whole interactive tree, not just the composer.
 		// FileExplorer reads the same context to hand its selection over as
@@ -622,6 +684,8 @@ export function InteractiveApp({
 								pendingSubagentApproval={pendingSubagentApproval}
 								onSubagentToolApproval={handleSubagentToolApproval}
 								pendingToolConfirmation={pendingToolConfirmation}
+								pendingVoiceInstall={pendingVoiceInstall}
+								onVoiceInstallConfirm={onVoiceInstallConfirm}
 								onToolConfirmation={handleToolConfirmation}
 								onSubmit={handleUserSubmit}
 								activeEditor={vscodeServer.activeEditor}
@@ -648,6 +712,23 @@ export function InteractiveApp({
 						/>
 					</Box>
 				</Box>
+
+				{appState.startChat &&
+					appState.activeMode === null &&
+					!appState.isSettingsMode &&
+					!appState.planReviewState?.show &&
+					voicePref.enabled && (
+						<VoiceStatusBar
+							state={voiceState}
+							theme={currentTheme}
+							idleHint={
+								voiceUnavailableReason ??
+								(voicePref.activationMode === 'hands-free'
+									? 'Waiting for speech'
+									: 'Press Ctrl+G to talk')
+							}
+						/>
+					)}
 			</Box>
 		</UIStateProvider>
 	);

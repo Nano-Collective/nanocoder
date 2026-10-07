@@ -192,7 +192,8 @@ async function collectProviders(
 }
 
 function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
-	const serverNames = toolManager?.getConnectedServers() ?? [];
+	const serverNames =
+		toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers() ?? [];
 
 	return serverNames.map(serverName => {
 		const serverInfo = toolManager?.getServerInfo(serverName);

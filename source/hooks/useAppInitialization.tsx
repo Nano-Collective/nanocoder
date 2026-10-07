@@ -29,6 +29,7 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
 	runLifecycleHooks,
@@ -248,9 +249,29 @@ export function useAppInitialization({
 					setMcpServersStatus([...mcpStatus]);
 				}
 			};
+			const onHealthChange = (change: {
+				serverName: string;
+				status: 'connected' | 'unhealthy';
+				error?: string;
+			}) => {
+				const statusIndex = mcpStatus.findIndex(
+					s => s.name === change.serverName,
+				);
+				if (statusIndex === -1) return;
+				mcpStatus[statusIndex] = {
+					name: change.serverName,
+					status: change.status === 'connected' ? 'connected' : 'unhealthy',
+					errorMessage: change.error,
+				};
+				setMcpServersStatus([...mcpStatus]);
+			};
 
 			try {
-				await toolManager.initializeMCP(config.mcpServers, onProgress);
+				await toolManager.initializeMCP(
+					config.mcpServers,
+					onProgress,
+					onHealthChange,
+				);
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -667,6 +688,10 @@ export function useAppInitialization({
 			// so nothing gates on MCP/LSP/update-check completing. Show
 			// the prompt immediately after the LLM client + subagents are
 			// ready. Everything else connects in the background.
+			// Wait so the first prompt sees plugins. Trust is not revoked
+			// during a session; if it ever is, this load has to be undone
+			// or the plugins stay active after the revoke.
+			await loadPlugins(true);
 			setMcpInitialized(true);
 			setStartChat(true);
 

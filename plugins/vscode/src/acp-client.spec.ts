@@ -247,3 +247,21 @@ test('NanocoderAcpClient - failed resumeSession does not leave a stale _sessionI
 	);
 	t.is(toasts, 1, 'a real failure must still surface as an error toast');
 });
+
+test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
+	t.false(client.isHandshakeComplete);
+
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version: '1.29.0'}}),
+	} as any);
+	t.false(client.isHandshakeComplete, 'stdio attached is not a completed handshake');
+
+	const ok = await client.initializeHandshake();
+	t.true(ok);
+	t.true(client.isHandshakeComplete);
+
+	client.setConnection({initialize: async () => ({agentInfo: {version: '1.29.0'}})} as any);
+	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
+});
