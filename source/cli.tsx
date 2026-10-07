@@ -109,8 +109,8 @@ Examples:
 	}
 
 	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
+		import('./init/init-args.js'),
+		import('./init/initializer.js'),
 	]);
 	try {
 		const options = parseInitArguments(args.slice(1));
@@ -261,8 +261,8 @@ async function main(): Promise<void> {
 	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
 	if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
 		const [{parseContextLimit}, {setSessionContextLimit}] = await Promise.all([
-			import('@/utils/parse-context-limit'),
-			import('@/models/index'),
+			import('./utils/parse-context-limit.js'),
+			import('./models/index.js'),
 		]);
 		const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
 		if (limit !== null) {
