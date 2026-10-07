@@ -147,7 +147,11 @@ export async function loadFileContent(
 		}
 
 		// Format with path header (no line numbers)
-		const formattedContent = formatFileContent(selectedLines, filePath);
+		const formattedContent = formatFileContent(
+			selectedLines,
+			filePath,
+			actualLineRange,
+		);
 
 		// Calculate metadata
 		const size = content.length;
@@ -186,8 +190,20 @@ export async function loadFileContent(
 /**
  * Format file content with path header (no line numbers for clean content-based editing)
  */
-function formatFileContent(lines: string[], filePath: string): string {
-	return `Path: ${filePath}\n\n${lines.join('\n')}`;
+function formatFileContent(
+	lines: string[],
+	filePath: string,
+	lineRange?: {start: number; end?: number},
+): string {
+	let header = `Path: ${filePath}`;
+	if (lineRange) {
+		if (lineRange.end) {
+			header += ` (lines ${lineRange.start}-${lineRange.end})`;
+		} else {
+			header += ` (lines ${lineRange.start})`;
+		}
+	}
+	return `${header}\n\n${lines.join('\n')}`;
 }
 
 function formatBytes(bytes: number): string {
