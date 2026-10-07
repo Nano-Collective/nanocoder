@@ -80,6 +80,8 @@ test('getTotalTokens sums input and output when total is missing', t => {
 test('getTotalTokens uses whichever partial field is reported', t => {
 	t.is(getTotalTokens({inputTokens: 100}), 100);
 	t.is(getTotalTokens({outputTokens: 50}), 50);
+	t.is(getTotalTokens({outputTokens: 50, cacheReadTokens: 100}), 150);
+	t.is(getTotalTokens({inputTokens: 100, outputTokens: 50, totalTokens: 0}), 150);
 });
 
 test('getTotalTokens returns null when nothing usable is reported', t => {

@@ -18,8 +18,16 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {markFileSeen} from '@/utils/read-tracker';
+import {
+	markFileSeen,
+	matchReadContent,
+	rememberReadContent,
+} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
+
+function formatReadStub(path: string, lineCount: number, size: number): string {
+	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
+}
 
 const executeReadFile = async (args: {
 	path: string;
@@ -72,10 +80,9 @@ const executeReadFile = async (args: {
 					// Detect likely encoding (simple heuristic)
 					let encoding = 'UTF-8';
 					try {
-						if (
-							absPath.toLowerCase().endsWith('.pdf') ||
-							absPath.toLowerCase().endsWith('.docx')
-						) {
+						// `derived` records what the cache actually produced for this
+						// path, so the label cannot disagree with the content above.
+						if (cached.derived) {
 							encoding = 'Binary (Converted to Markdown)';
 						} else {
 							// Try to read as UTF-8
@@ -102,12 +109,26 @@ const executeReadFile = async (args: {
 			return output;
 		}
 
+		const stats = await lstat(absPath);
+		if (stats.isFile() || stats.isSymbolicLink()) {
+			const stub = matchReadContent(
+				absPath,
+				stats,
+				args.start_line,
+				args.end_line,
+			);
+			if (stub) {
+				return formatReadStub(args.path, stub.lineCount, stub.size);
+			}
+		}
+
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
 
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
+			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -129,6 +150,13 @@ const executeReadFile = async (args: {
 			// Marking it seen keeps the read-before-edit guard aligned with the
 			// content that was actually returned, just like a ranged read.
 			markFileSeen(absPath);
+			rememberReadContent(
+				absPath,
+				stats,
+				totalLines,
+				args.start_line,
+				args.end_line,
+			);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -145,6 +173,13 @@ const executeReadFile = async (args: {
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
 		markFileSeen(absPath);
+		rememberReadContent(
+			absPath,
+			stats,
+			totalLines,
+			args.start_line,
+			args.end_line,
+		);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
@@ -165,7 +200,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;
@@ -306,14 +341,19 @@ const readFileFormatter = async (
 		return <></>;
 	}
 
-	// Load file info to calculate actual read information
+	// The flag that selects the metadata response shape in executeReadFile.
+	// Boolean() rather than === true so the XML fallback's string 'true'
+	// matches, and set before the read so a directory still renders the
+	// metadata layout.
+	const isMetadataOnly = Boolean(args.metadata_only);
+
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
 		readEndLine: 0,
 		tokens: 0,
 		isPartialRead: false,
-		isMetadataOnly: false,
+		isMetadataOnly,
 		isTruncated: false,
 	};
 
@@ -322,16 +362,9 @@ const readFileFormatter = async (
 		if (path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
-			const content = cached.content;
 			const lines = cached.lines;
 			const totalLines = lines.length;
 
-			// Detect if this was a metadata-only response
-			const isMetadataOnly =
-				(result?.startsWith('File:') ?? false) &&
-				!args.start_line &&
-				!args.end_line &&
-				totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
@@ -342,15 +375,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			// Calculate tokens
-			let tokens: number;
-			if (isMetadataOnly) {
-				// For metadata, show estimated tokens of the FULL FILE
-				tokens = calculateTokens(content);
-			} else {
-				// For content reads, show tokens of what was actually returned
-				tokens = result ? calculateTokens(result) : 0;
-			}
+			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,

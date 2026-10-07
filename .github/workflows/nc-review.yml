@@ -1,0 +1,53 @@
+name: nc-review
+
+# Thin caller for the shared org workflow. The machinery lives in
+# Nano-Collective/.github — change it there and every repo picks it up on its
+# next run. What stays here is the trigger wiring and the rubric.
+#
+# The rubric is deliberately NOT shared. `.github/nc-review/rubric.md` is where
+# this project says what it cares about — its conventions, its test layout, the
+# mistakes it keeps seeing. Sharing it would produce reviews that read the same
+# everywhere and land nowhere. Same split as pr-checks: shared machinery, local
+# judgement.
+#
+# The security reasoning for pull_request_target — why it is used and why the
+# contributor's branch is never checked out — lives with the workflow it
+# protects, in the shared file.
+
+on:
+  pull_request_target:
+    # On open only (decision Q8). Re-review is manual, via the comment trigger
+    # below — re-running on every push would burn tokens on work in progress.
+    types: [opened]
+    branches: [main]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
+
+concurrency:
+  # One review per PR. A /re-review while one is running queues behind it.
+  group: nc-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  nc-review:
+    uses: Nano-Collective/.github/.github/workflows/nc-review.yml@main
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    with:
+      pr-number: ${{ inputs.pr_number }}
+      architecture-doc: CLAUDE.md
+    secrets:
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}

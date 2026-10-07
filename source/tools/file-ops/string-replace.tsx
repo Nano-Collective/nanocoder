@@ -9,8 +9,12 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -24,6 +28,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
@@ -71,6 +76,11 @@ const executeStringReplace = async (
 		);
 	}
 
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
+	}
+
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
 	const fileContent = cached.content;
@@ -95,6 +105,7 @@ const executeStringReplace = async (
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -136,6 +147,11 @@ const stringReplaceCoreTool = tool({
 				type: 'string',
 				description:
 					'The replacement string. Can be empty to delete content. Must preserve proper indentation and formatting.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this replacement.',
 			},
 		},
 		required: ['path', 'old_str', 'new_str'],
@@ -197,6 +213,9 @@ const stringReplaceValidator = async (
 
 	const pathResult = validatePath(path);
 	if (!pathResult.valid) return pathResult;
+
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), path);
 	try {

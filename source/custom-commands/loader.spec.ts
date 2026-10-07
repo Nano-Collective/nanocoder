@@ -1,8 +1,35 @@
-import { writeFileSync, rmSync, existsSync, mkdirSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
-import { CustomCommandLoader } from './loader';
+import {CustomCommandLoader} from './loader';
+
+let configDir: string;
+let originalConfigDir: string | undefined;
+
+test.before(() => {
+	originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	configDir = join(tmpdir(), `nanocoder-cmd-config-${Date.now()}`);
+	mkdirSync(configDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = configDir;
+});
+
+test.after.always(() => {
+	if (originalConfigDir !== undefined) {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	} else {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	}
+	if (configDir && existsSync(configDir)) {
+		rmSync(configDir, {recursive: true, force: true});
+	}
+});
 
 // Helper to create a valid custom command file
 function createCommandFile(path: string, content: string) {
@@ -365,6 +392,7 @@ Do stuff.`,
 	);
 	writeFileSync(join(resourcesDir, 'template.yaml'), 'key: value', 'utf-8');
 	writeFileSync(join(resourcesDir, 'helper.sh'), '#!/bin/bash\necho hi', 'utf-8');
+	writeFileSync(join(resourcesDir, 'report.template'), 'Hi {{name}}', 'utf-8');
 
 	const loader = new CustomCommandLoader(testDir);
 	loader.loadCommands();
@@ -372,7 +400,11 @@ Do stuff.`,
 	const command = loader.getCommand('my-skill');
 	t.truthy(command);
 	t.truthy(command?.loadedResources);
-	t.is(command?.loadedResources?.length, 2);
+	t.is(command?.loadedResources?.length, 3);
+	t.is(
+		command?.loadedResources?.find(r => r.name === 'report.template')?.type,
+		'template',
+	);
 
 	const templateRes = command?.loadedResources?.find(
 		r => r.name === 'template.yaml',
@@ -563,6 +595,82 @@ Generate API docs.`,
 	t.is(relevant.length, 0);
 });
 
+test('CustomCommandLoader - findRelevantCommands tags match whole words only', t => {
+	const testDir = createTestDir('relevance-word-boundary');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'test-cmd.md'),
+		`---
+description: Run the tests
+tags: [test]
+---
+Run tests.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	t.is(loader.findRelevantCommands('upgrade to the latest release', []).length, 0);
+	t.is(loader.findRelevantCommands('add a test for this', []).length, 1);
+	// A later whole-word hit still counts after an embedded one.
+	t.is(loader.findRelevantCommands('the latest TEST.', []).length, 1);
+});
+
+test('CustomCommandLoader - findRelevantCommands matches literal punctuation in tags', t => {
+	const testDir = createTestDir('relevance-literal-tag');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	writeFileSync(
+		join(commandsDir, 'version-cmd.md'),
+		`---
+description: Check the API version
+tags: [v1.2]
+---
+Check version.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	t.is(loader.findRelevantCommands('Use API V1.2 please', []).length, 1);
+	t.is(loader.findRelevantCommands('Use API v1x2 please', []).length, 0);
+});
+
+test('CustomCommandLoader - findRelevantCommands scores description word overlap', t => {
+	const testDir = createTestDir('relevance-description');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'changelog.md'),
+		`---
+description: Draft release notes from recent commits
+tags: [unrelated-tag]
+---
+Draft notes.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const relevant = loader.findRelevantCommands(
+		'can you draft the release notes for me',
+		[],
+	);
+	t.is(relevant[0]?.name, 'changelog');
+});
+
 // ============================================================================
 // Source tracking
 // ============================================================================
@@ -597,4 +705,81 @@ test('CustomCommandLoader - commands have lastModified set', t => {
 	t.truthy(command?.lastModified);
 	t.true(command!.lastModified instanceof Date);
 });
+
+test(
+	'CustomCommandLoader - continues loading commands when a subdirectory throws permission error',
+	t => {
+		if (process.platform === 'win32' || process.getuid?.() === 0) {
+			t.pass(
+				'Skipping on Windows/root where chmod 000 does not block directory access',
+			);
+			return;
+		}
+
+		const testDir = createTestDir('permission-error');
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const unreadableSubDir = join(commandsDir, 'unreadable');
+		mkdirSync(unreadableSubDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'root-cmd.md'), 'Root command');
+		createCommandFile(join(unreadableSubDir, 'hidden.md'), 'Hidden command');
+
+		chmodSync(unreadableSubDir, 0o000);
+
+		t.teardown(() => {
+			try {
+				chmodSync(unreadableSubDir, 0o755);
+			} catch {
+				// ignore
+			}
+			cleanupTestDir(testDir);
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'root-cmd');
+	},
+);
+
+test(
+	'CustomCommandLoader - continues scanning when statSync throws on an unreadable entry',
+	t => {
+		if (process.platform === 'win32' || process.getuid?.() === 0) {
+			t.pass(
+				'Skipping on Windows/root where chmod 000 does not block directory access',
+			);
+			return;
+		}
+
+		const testDir = createTestDir('stat-error');
+		const commandsDir = join(testDir, '.nanocoder', 'commands');
+		const unsearchableDir = join(commandsDir, 'unsearchable');
+		mkdirSync(unsearchableDir, {recursive: true});
+
+		createCommandFile(join(commandsDir, 'valid-cmd.md'), 'Valid command');
+		createCommandFile(join(unsearchableDir, 'child.md'), 'Child command');
+
+		// 0o400 allows readdir on unsearchableDir, but statSync on unsearchableDir/child.md fails with EACCES
+		chmodSync(unsearchableDir, 0o400);
+
+		t.teardown(() => {
+			try {
+				chmodSync(unsearchableDir, 0o755);
+			} catch {
+				// ignore
+			}
+			cleanupTestDir(testDir);
+		});
+
+		const loader = new CustomCommandLoader(testDir);
+		t.notThrows(() => loader.loadCommands());
+
+		const commands = loader.getAllCommands();
+		t.is(commands.length, 1);
+		t.is(commands[0]?.name, 'valid-cmd');
+	},
+);
 

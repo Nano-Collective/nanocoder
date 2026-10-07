@@ -30,11 +30,13 @@ With ACP the **client is the UI**: the agent runs headless and everything (strea
 - **Streaming responses** including reasoning/thinking, rendered in the editor's agent panel.
 - **Tool calls with rich cards** — file tools report their kind and the files they touch, and edits (`string_replace`, `write_file`) include a **before/after diff** the editor can preview.
 - **Permission prompts** — tools that need approval surface as the editor's own allow/deny prompt, respecting the current [development mode](development-modes.md).
-- **Development modes** — `normal`, `auto-accept`, `yolo`, and `plan` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
+- **Development modes** — `normal`, `auto-accept`, `yolo`, `plan`, and `architect` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
 - **Model display and switching** — the editor shows the current model and lets you switch between the models configured for your active provider.
 - **`ask_user`** — when the agent asks a clarifying question, the options appear as selectable buttons in the editor. (Selection only; a free-form typed answer is not available over ACP.)
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.
-- **Session reload** — reopening a thread is supported, so the editor won't error when restoring a session.
+- **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart.
+- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `renameSession` extension method (`sessionId`, `title`), and new sessions get a generated title from the first message.
+- **Images** - PNG, JPEG, GIF and WebP attachments are sent to the model as images.
 
 ## Setup in Zed
 
@@ -80,9 +82,9 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 
 ## Limitations
 
-- **Session history is in-memory.** Reopening a thread within the same running agent restores its history, but after the editor (and agent process) fully restarts, a reloaded thread starts empty — it is usable, but prior messages are not replayed.
 - **`ask_user` is selection-only.** ACP permission options have no text input, so the model receives whichever option you pick rather than a typed answer.
-- **Images and audio are not processed.** Non-text attachments are noted to the model but not interpreted.
+- **Audio and other image types are not processed.** Audio, and images other than PNG, JPEG, GIF and WebP, are noted to the model but not sent.
+- **Sub-agent tool approvals ignore the session mode.** Tool calls inside a sub-agent always ask for permission, regardless of the ACP session's mode or the configured `alwaysAllow` list, so a `yolo` or `auto-accept` session is still prompted there. An approved sub-agent call is also marked `completed` as soon as it is approved, before it actually runs, so it may still fail afterwards. The sub-agent approval handler is also shared across the agent process, so if two sessions run sub-agents at the same time, an approval prompt can be routed to the wrong session.
 
 ## Troubleshooting
 

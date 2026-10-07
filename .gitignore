@@ -129,9 +129,14 @@ coverage
 # Generated quality report (baseline.json is checked in, others are not)
 benchmarks/report.json
 benchmarks/explain.json
+benchmarks/agent/results.json
 benchmarks/.module-*
 .github/issues/docs
 
 # Auto-generated CSS
 plugins/vscode/media/chat-panel.css
 assets/*.vsix
+
+# nc-review scratch: PR context and verdict, written into the workspace
+# because Nanocoder file tools are sandboxed to the project directory.
+.nc-review/

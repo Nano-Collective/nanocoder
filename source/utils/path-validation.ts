@@ -84,7 +84,7 @@ export function isValidFilePath(
 		}
 		const root = path.resolve(containmentRoot);
 		const abs = path.resolve(filePath);
-		return abs === root || abs.startsWith(root + path.sep);
+		return isPathInside(abs, root);
 	}
 
 	// A relative path must not start with a separator
@@ -171,7 +171,11 @@ export function resolveFilePath(
  *
  * Both arguments are resolved first, so callers may pass relative paths. The
  * trailing separator is what stops a sibling directory with a shared prefix
- * (e.g. `/proj-evil` for project `/proj`) from passing.
+ * (e.g. `/proj-evil` for project `/proj`) from passing. Filesystem roots
+ * (`/`, `C:\`) already end with a separator — appending another would yield
+ * `//` or `C:\\`, which no real path starts with, so containment would always
+ * fail when the workspace root is a drive or `/` (containers, root-owned
+ * checkouts). See #1240.
  *
  * This is purely lexical — it never touches the filesystem, so a symlink
  * inside the root can still point outside it. Use `isRealPathInside` when the
@@ -180,10 +184,13 @@ export function resolveFilePath(
 export function isPathInside(target: string, root: string): boolean {
 	const normalizedRoot = path.resolve(root);
 	const normalizedTarget = path.resolve(target);
-	return (
-		normalizedTarget === normalizedRoot ||
-		normalizedTarget.startsWith(normalizedRoot + path.sep)
-	);
+	if (normalizedTarget === normalizedRoot) {
+		return true;
+	}
+	const prefix = normalizedRoot.endsWith(path.sep)
+		? normalizedRoot
+		: normalizedRoot + path.sep;
+	return normalizedTarget.startsWith(prefix);
 }
 
 /**

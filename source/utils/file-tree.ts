@@ -51,7 +51,12 @@ export async function buildFileTree(
 
 				// Check gitignore
 				const itemPath = relativeTo ? join(relativeTo, item.name) : item.name;
-				if (ig.ignores(itemPath)) {
+				// Directory-only patterns (`dist/`) match only the trailing-slash
+				// form, so test directories with it as well.
+				if (
+					ig.ignores(itemPath) ||
+					(item.isDirectory() && ig.ignores(`${itemPath}/`))
+				) {
 					continue;
 				}
 

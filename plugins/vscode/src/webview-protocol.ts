@@ -2,6 +2,7 @@
  * Type-safe protocol for postMessage communication between the extension host
  * and the Sidebar Webview UI.
  */
+import type {SettingsData} from './settings-manager';
 
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
@@ -70,12 +71,19 @@ export interface ExtensionMessagePermissionsCancelled {
 
 export interface ExtensionMessageSyncState {
 	type: 'syncState';
-	mode: string;
+	mode?: string;
 	availableModes: string[];
-	model: string;
+	model?: string;
 	availableModels: string[];
-	provider: string;
+	provider?: string;
 	availableProviders: string[];
+}
+
+/** ACP child-process / handshake status so the composer is not stuck on "Loading...". */
+export interface ExtensionMessageConnectionStatus {
+	type: 'connectionStatus';
+	status: 'connecting' | 'connected' | 'error';
+	message?: string;
 }
 
 export interface ExtensionMessageCopyLastCodeBlock {
@@ -95,21 +103,6 @@ export interface ExtensionMessageCopyResult {
 	error?: string;
 }
 
-export interface TimelineCheckpoint {
-	id: string;
-	seq: number;
-	toolCallId: string;
-	toolName: string;
-	title: string;
-	timestamp: string;
-	filesChanged: string[];
-}
-
-export interface ExtensionMessageUpdateTimeline {
-	type: 'updateTimeline';
-	entries: TimelineCheckpoint[];
-}
-
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
@@ -122,15 +115,18 @@ export interface ExtensionMessageUpdateSessions {
 
 export interface ExtensionMessageSettingsData {
 	type: 'settingsData';
-	settings: {
-		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
-		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
-		alwaysAllow: string[];
-		defaultMode: string | null;
-		autoCompact: { enabled: boolean; threshold: number; mode: string };
-		reasoningTraces: boolean;
-		sessions: { autoSave: boolean };
-		webSearch: { configured: boolean };
+	settings: SettingsData & {
+		showTokenUsage: boolean;
+		providerTemplates: Record<
+			string,
+			{
+				name: string;
+				sdk: string;
+				url: string;
+				requiresKey: boolean;
+				models: string[];
+			}
+		>;
 	};
 }
 
@@ -139,6 +135,17 @@ export interface ExtensionMessageSettingsUpdated {
 	key: string;
 	success: boolean;
 	error?: string;
+}
+
+export interface ExtensionMessageProviderResult {
+	type: 'addProviderResult';
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageTokenUsageVisibility {
+	type: 'tokenUsageVisibility';
+	showTokenUsage: boolean;
 }
 
 export interface ExtensionMessageToggleSettings {
@@ -197,6 +204,24 @@ export interface ExtensionMessageMentionCompletions {
 	items: MentionItem[];
 }
 
+/** A submitted prompt is waiting behind the in-flight turn. */
+export interface ExtensionMessagePromptQueued {
+	type: 'promptQueued';
+	id: string;
+}
+
+/** The host has started (or dequeued) this prompt as the active turn. */
+export interface ExtensionMessagePromptStarted {
+	type: 'promptStarted';
+	id: string;
+}
+
+/** Waiting prompts were discarded (Stop / Escape, new chat, /clear, resume). */
+export interface ExtensionMessagePromptQueueCleared {
+	type: 'promptQueueCleared';
+	ids: string[];
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -208,11 +233,14 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessagePermissionsCancelled
+	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
+	| ExtensionMessageConnectionStatus
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageTokenUsageVisibility
 	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessagePlanReviewRequested
@@ -222,8 +250,9 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageCopyResult
 	| ExtensionMessageRunPrompt
 	| ExtensionMessageMentionCompletions
-	| ExtensionMessageUpdateTimeline;
-
+	| ExtensionMessagePromptQueued
+	| ExtensionMessagePromptStarted
+	| ExtensionMessagePromptQueueCleared;
 
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
@@ -235,12 +264,26 @@ export interface WebviewMessageReady {
 
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
+	/** Client-generated id so the host can queue, start, or discard this prompt. */
+	id: string;
+	text: string;
+	images?: { data: string; mimeType: string }[];
+}
+
+export interface WebviewMessageRetryMessage {
+	type: 'retryMessage';
 	text: string;
 	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {
 	type: 'cancel';
+}
+
+/** Remove one waiting prompt before it starts. Does not cancel the in-flight turn. */
+export interface WebviewMessageCancelQueuedMessage {
+	type: 'cancelQueuedMessage';
+	id: string;
 }
 
 export interface WebviewMessageApproveTool {
@@ -339,6 +382,17 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageAddProvider {
+	type: 'addProvider';
+	provider: {
+		name: string;
+		sdkProvider: string;
+		baseUrl?: string;
+		apiKey?: string;
+		models?: string[];
+	};
+}
+
 export interface WebviewMessageApprovePlan {
 	type: 'approvePlan';
 }
@@ -366,19 +420,12 @@ export interface WebviewMessageRequestMentionCompletions {
 	requestId: number;
 }
 
-export interface WebviewMessageRequestTimeline {
-	type: 'requestTimeline';
-}
-
-export interface WebviewMessageRevertToCheckpoint {
-	type: 'revertToCheckpoint';
-	checkpointId: string;
-}
-
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
+	| WebviewMessageRetryMessage
 	| WebviewMessageCancel
+	| WebviewMessageCancelQueuedMessage
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
 	| WebviewMessageResolveTool
@@ -398,9 +445,8 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageAddProvider
 	| WebviewMessageApprovePlan
 	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
-	| WebviewMessageRequestMentionCompletions
-	| WebviewMessageRequestTimeline
-	| WebviewMessageRevertToCheckpoint;
+	| WebviewMessageRequestMentionCompletions;

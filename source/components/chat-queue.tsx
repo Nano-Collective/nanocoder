@@ -8,9 +8,27 @@ import type {ChatQueueProps} from '@/types/index';
  * ever be seen (the viewport clips the rest), but Yoga still lays out every
  * mounted component. Cap the rendered tail so layout cost stays bounded in
  * long sessions. 60 components is comfortably more than any terminal is
- * tall.
+ * tall - it's the hard ceiling computeFullscreenTailCap clamps to, and the
+ * default used when no terminal-derived cap is supplied.
  */
 const FULLSCREEN_TAIL_CAP = 60;
+
+/** Floor for computeFullscreenTailCap, below which scrollback would feel unusably shallow. */
+const FULLSCREEN_TAIL_MIN = 10;
+
+/**
+ * Scales the fullscreen tail to terminal height instead of the flat
+ * FULLSCREEN_TAIL_CAP: messages are typically several rows tall, so roughly
+ * half as many mounted components as terminal rows comfortably covers what
+ * can be visible plus a page of scrollback, without paying Yoga layout cost
+ * for components that can never be seen.
+ */
+export function computeFullscreenTailCap(terminalRows: number): number {
+	return Math.min(
+		FULLSCREEN_TAIL_CAP,
+		Math.max(FULLSCREEN_TAIL_MIN, Math.ceil(terminalRows / 2)),
+	);
+}
 
 const componentKey = (component: ReactNode, fallback: string): Key => {
 	if (
@@ -30,6 +48,7 @@ export default memo(function ChatQueue({
 	renderLastQueuedComponentLive = false,
 	clearKey,
 	disableStatic = false,
+	fullscreenTailCap = FULLSCREEN_TAIL_CAP,
 }: ChatQueueProps) {
 	const {staticQueuedComponents, liveQueuedComponents} = useMemo(() => {
 		if (!renderLastQueuedComponentLive) {
@@ -55,8 +74,8 @@ export default memo(function ChatQueue({
 	// the bottom-anchored viewport in ChatHistory can clip it at the top.
 	const flowComponents = useMemo(() => {
 		if (!disableStatic) return [];
-		return allStaticComponents.slice(-FULLSCREEN_TAIL_CAP);
-	}, [disableStatic, allStaticComponents]);
+		return allStaticComponents.slice(-fullscreenTailCap);
+	}, [disableStatic, allStaticComponents, fullscreenTailCap]);
 
 	if (disableStatic) {
 		// Fullscreen (alt-screen): this transcript renders inside the scroll

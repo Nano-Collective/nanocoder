@@ -10,10 +10,21 @@ type ClientTransport =
 	| WebSocketClientTransport
 	| StreamableHTTPClientTransport;
 
+type LifecycleTransport = ClientTransport & {
+	onclose?: () => void;
+	onerror?: (error: Error) => void;
+};
+
 import {dynamicTool} from 'ai';
 import type {
 	AISDKCoreTool,
+	MCPHealthChange,
+	MCPHealthStatus,
 	MCPInitResult,
+	MCPPrompt,
+	MCPPromptResult,
+	MCPResource,
+	MCPResourceContent,
 	MCPServer,
 	MCPTool,
 	MCPToolInputSchema,
@@ -33,6 +44,8 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
+import {getToolJsonSchema} from '@/utils/schema-validate';
+import {withValidation} from '@/utils/tool-validation';
 import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
@@ -40,8 +53,26 @@ export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
 	private serverTools: Map<string, MCPTool[]> = new Map();
+	/**
+	 * Memoised getToolMapping() result. Plan mode calls that method on every
+	 * getAvailableToolNames() — both when building the prompt and per turn at
+	 * runtime — so rebuilding the Map each time is pure waste. Invalidated
+	 * wherever serverTools changes (connect, disconnect).
+	 */
+	private toolMappingCache: Map<
+		string,
+		{serverName: string; originalName: string; readOnly: boolean}
+	> | null = null;
+	private serverResources: Map<string, MCPResource[]> = new Map();
+	private serverPrompts: Map<string, MCPPrompt[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
+	private health: Map<string, MCPHealthStatus> = new Map();
+	private healthErrors: Map<string, string> = new Map();
+	private healthTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+	private healthChecksInFlight = new Set<string>();
+	private healthListeners = new Set<(change: MCPHealthChange) => void>();
+	private closing = new Set<string>();
 	private logger = getLogger();
 
 	private isToolAutoApproved(toolName: string, serverName: string): boolean {
@@ -79,6 +110,93 @@ export class MCPClient {
 			name: 'nanocoder-mcp-client',
 			version: '1.0.0',
 		});
+	}
+
+	onHealthChange(listener: (change: MCPHealthChange) => void): () => void {
+		this.healthListeners.add(listener);
+		return () => this.healthListeners.delete(listener);
+	}
+
+	private emitHealthChange(change: MCPHealthChange): void {
+		for (const listener of this.healthListeners) listener(change);
+	}
+
+	private setServerHealth(
+		serverName: string,
+		status: MCPHealthStatus,
+		error?: unknown,
+	): void {
+		const errorMessage = error ? formatError(error) : undefined;
+		const previousStatus = this.health.get(serverName);
+		const previousError = this.healthErrors.get(serverName);
+		this.health.set(serverName, status);
+		if (errorMessage) this.healthErrors.set(serverName, errorMessage);
+		else this.healthErrors.delete(serverName);
+		if (previousStatus === undefined && status === 'connected') return;
+		if (previousStatus === status && previousError === errorMessage) return;
+		this.emitHealthChange({serverName, status, error: errorMessage});
+	}
+
+	private markServerUnhealthy(serverName: string, error?: unknown): void {
+		if (this.closing.has(serverName)) return;
+		this.setServerHealth(serverName, 'unhealthy', error);
+		this.serverTools.set(serverName, []);
+		this.serverResources.set(serverName, []);
+		this.serverPrompts.set(serverName, []);
+		this.toolMappingCache = null;
+	}
+
+	private startHealthChecks(
+		serverName: string,
+		client: Client,
+		transport: LifecycleTransport,
+		interval: number,
+		pingOptions?: {timeout: number},
+	): void {
+		const markUnhealthy = (error?: unknown) =>
+			this.markServerUnhealthy(serverName, error);
+		const check = async () => {
+			if (
+				this.closing.has(serverName) ||
+				this.health.get(serverName) !== 'connected' ||
+				this.healthChecksInFlight.has(serverName) ||
+				typeof client.ping !== 'function'
+			) {
+				return;
+			}
+			this.healthChecksInFlight.add(serverName);
+			try {
+				await client.ping(pingOptions ?? {timeout: 10_000});
+			} catch (error) {
+				// A pending ping can reject after an intentional disconnect.
+				if (this.health.get(serverName) === 'connected') markUnhealthy(error);
+			} finally {
+				this.healthChecksInFlight.delete(serverName);
+			}
+		};
+		const previousOnClose = transport.onclose;
+		const previousOnError = transport.onerror;
+		transport.onclose = () => {
+			try {
+				previousOnClose?.();
+			} finally {
+				markUnhealthy(new Error('MCP transport closed'));
+			}
+		};
+		transport.onerror = error => {
+			try {
+				previousOnError?.(error);
+			} finally {
+				// HTTP/SSE errors can be recoverable; let the SDK handle the error
+				// before confirming liveness with a bounded ping. Deferring also
+				// prevents a ping's own transport error from starting another ping.
+				void Promise.resolve().then(check);
+			}
+		};
+		if (interval <= 0 || typeof client.ping !== 'function') return;
+		const timer = setInterval(() => void check(), interval);
+		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+		this.healthTimers.set(serverName, timer);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -132,7 +250,15 @@ export class MCPClient {
 					serverName: normalizedServer.name,
 				});
 
-				await client.connect(transport);
+				// `timeout` bounds the connection handshake (initialize) and the
+				// initial tools/list; tool calls keep the SDK's own default.
+				const connectOptions =
+					typeof normalizedServer.timeout === 'number' &&
+					normalizedServer.timeout > 0
+						? {timeout: normalizedServer.timeout}
+						: undefined;
+
+				await client.connect(transport, connectOptions);
 
 				// Stdio transports are created with stderr:'pipe' (see
 				// TransportFactory) so server children can't write to the
@@ -159,7 +285,7 @@ export class MCPClient {
 				// List available tools from this server. Do this before registering
 				// the server so a failed tools/list doesn't leave it visible as
 				// connected — the maps are populated only once discovery succeeds.
-				const toolsResult = await client.listTools();
+				const toolsResult = await client.listTools(undefined, connectOptions);
 				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
 					name: tool.name,
 					description: tool.description || undefined,
@@ -169,20 +295,114 @@ export class MCPClient {
 						? (tool.inputSchema as MCPToolInputSchema)
 						: undefined,
 					serverName: normalizedServer.name,
+					readOnly: tool.annotations?.readOnlyHint === true,
 				}));
 
-				// Store client, transport, config, and tools together only after
-				// connection and tool discovery have both succeeded.
+				// Discovery is gated on the server's declared capabilities (available
+				// on the Client only after connect() completes the handshake) rather
+				// than attempted unconditionally, so a server that never advertises
+				// resources/prompts doesn't pay for a doomed round trip on every
+				// connect.
+				const capabilities = client.getServerCapabilities();
+
+				// List available resources from this server
+				let resources: MCPResource[] = [];
+				if (capabilities?.resources) {
+					try {
+						const resourcesResult = await client.listResources();
+						resources = resourcesResult.resources.map(resource => ({
+							uri: resource.uri,
+							name: resource.name,
+							description: resource.description || undefined,
+							mimeType: resource.mimeType || undefined,
+							serverName: normalizedServer.name,
+						}));
+						this.logger.debug('MCP resources discovered', {
+							serverName: normalizedServer.name,
+							resourceCount: resources.length,
+						});
+					} catch (error) {
+						// Server declared the capability but the call still failed -
+						// this is a genuine error, not an unsupported-feature guess.
+						this.logger.warn(
+							'MCP resources/list failed despite declared capability',
+							{
+								serverName: normalizedServer.name,
+								error: formatError(error),
+							},
+						);
+					}
+				} else {
+					this.logger.debug(
+						'MCP server does not declare resources capability',
+						{
+							serverName: normalizedServer.name,
+						},
+					);
+				}
+
+				// List available prompts from this server
+				let prompts: MCPPrompt[] = [];
+				if (capabilities?.prompts) {
+					try {
+						const promptsResult = await client.listPrompts();
+						prompts = promptsResult.prompts.map(prompt => ({
+							name: prompt.name,
+							description: prompt.description || undefined,
+							arguments: prompt.arguments?.map(arg => ({
+								name: arg.name,
+								description: arg.description || undefined,
+								required: arg.required || false,
+							})),
+							serverName: normalizedServer.name,
+						}));
+						this.logger.debug('MCP prompts discovered', {
+							serverName: normalizedServer.name,
+							promptCount: prompts.length,
+						});
+					} catch (error) {
+						// Server declared the capability but the call still failed -
+						// this is a genuine error, not an unsupported-feature guess.
+						this.logger.warn(
+							'MCP prompts/list failed despite declared capability',
+							{
+								serverName: normalizedServer.name,
+								error: formatError(error),
+							},
+						);
+					}
+				} else {
+					this.logger.debug('MCP server does not declare prompts capability', {
+						serverName: normalizedServer.name,
+					});
+				}
+
+				// Store client, transport, config, tools, resources, and prompts together only after
+				// connection and discovery have both succeeded.
 				this.clients.set(normalizedServer.name, client);
 				this.transports.set(normalizedServer.name, transport);
 				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
+				this.toolMappingCache = null;
+				this.serverResources.set(normalizedServer.name, resources);
+				this.serverPrompts.set(normalizedServer.name, prompts);
+				this.setServerHealth(normalizedServer.name, 'connected');
+				const healthInterval = normalizedServer.healthCheckInterval ?? 30_000;
+				this.startHealthChecks(
+					normalizedServer.name,
+					client,
+					transport as LifecycleTransport,
+					healthInterval,
+					connectOptions,
+				);
 
 				const finalMetrics = endMetrics(metrics);
 
 				this.logger.info('MCP server connection completed', {
 					serverName: normalizedServer.name,
 					toolCount: tools.length,
+					resourceCount: resources.length,
+					promptCount: prompts.length,
 					duration: `${finalMetrics.duration.toFixed(2)}ms`,
 					memoryDelta: formatMemoryUsage(
 						finalMetrics.memoryUsage || getSafeMemory(),
@@ -245,16 +465,23 @@ export class MCPClient {
 
 					await this.connectToServer(normalizedServer);
 					const tools = this.serverTools.get(normalizedServer.name) || [];
+					const resources =
+						this.serverResources.get(normalizedServer.name) || [];
+					const prompts = this.serverPrompts.get(normalizedServer.name) || [];
 					const result: MCPInitResult = {
 						serverName: normalizedServer.name,
 						success: true,
 						toolCount: tools.length,
+						resourceCount: resources.length,
+						promptCount: prompts.length,
 					};
 					results.push(result);
 
 					this.logger.debug('MCP server connection successful in batch', {
 						serverName: normalizedServer.name,
 						toolCount: tools.length,
+						resourceCount: resources.length,
+						promptCount: prompts.length,
 						correlationId,
 					});
 
@@ -381,10 +608,35 @@ export class MCPClient {
 
 		return nativeTools;
 	}
-	getToolMapping(): Map<string, {serverName: string; originalName: string}> {
+
+	/**
+	 * Map every discovered tool name to the server that owns it, plus the
+	 * server's `readOnlyHint` for that tool.
+	 *
+	 * `readOnly` here is the raw, untrusted server hint. It lives on this
+	 * mapping rather than on the registered tool entry on purpose: an entry's
+	 * `readOnly` flag is consumed by `ToolManager.isReadOnly`, which also
+	 * decides whether ACP captures a checkpoint before the call
+	 * (`acp-timeline.ts`) and whether the tool joins a parallel batch
+	 * (`tool-executor.tsx`). A server must not be able to talk itself out of a
+	 * restore point, so the hint is confined to plan-mode availability, which
+	 * is the only thing `docs/features/development-modes.md` promises it does.
+	 *
+	 * The result is memoised and returned by reference — treat it as read-only.
+	 * All callers only look tools up (`get`/`has`); mutating it would corrupt
+	 * the cache for everyone else until the next connect/disconnect.
+	 */
+	getToolMapping(): Map<
+		string,
+		{serverName: string; originalName: string; readOnly: boolean}
+	> {
+		if (this.toolMappingCache) {
+			return this.toolMappingCache;
+		}
+
 		const mapping = new Map<
 			string,
-			{serverName: string; originalName: string}
+			{serverName: string; originalName: string; readOnly: boolean}
 		>();
 
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
@@ -392,10 +644,12 @@ export class MCPClient {
 				mapping.set(mcpTool.name, {
 					serverName,
 					originalName: mcpTool.name,
+					readOnly: mcpTool.readOnly === true,
 				});
 			}
 		}
 
+		this.toolMappingCache = mapping;
 		return mapping;
 	}
 
@@ -432,18 +686,50 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					// Create handler that calls this tool
-					const handler = async (args: Record<string, unknown>) => {
-						return this.callTool(toolName, args);
-					};
+					// Run the same lenient schema type-check the approval prompt
+					// renders (tool-confirmation → getToolJsonSchema), so a
+					// malformed call is rejected locally — it never reaches the
+					// server, and approving a "wrong type" call no longer silently
+					// skips the schema gate. No per-tool validator exists for MCP;
+					// the server remains the authority on value constraints.
+					const handler = withValidation(
+						async (args: Record<string, unknown>) => {
+							return this.callTool(toolName, args);
+						},
+						undefined,
+						getToolJsonSchema(coreTool),
+						// The wrapper types its result as the generic
+						// ToolExecuteResult union; MCP handlers always resolve a
+						// string, so the narrower entry signature is safe here.
+					) as (args: Record<string, unknown>) => Promise<string>;
 
-					// Medium risk: MCP tools require approval unless the server's
-					// alwaysAllow list covers them or the mode is auto-accept. (Yolo
-					// is bypassed centrally by resolveToolApproval.)
+					// MCP tools take the same mode posture as built-in tools:
+					//   - auto-accept and headless both run unattended — headless is
+					//     daemon-driven, so there is no foreground prompt to answer
+					//     (mirrors createFileToolApproval in @/utils/tool-approval);
+					//   - plan inspects without side effects, so a server's
+					//     alwaysAllow entry must not short-circuit it; only a
+					//     server-annotated reader is safe to run there;
+					//   - normal prompts unless alwaysAllow covers the tool.
+					// readOnly deliberately does NOT skip approval in normal mode:
+					// `readOnlyHint` is a hint supplied by the very server being
+					// gated, so it must not be able to silence its own prompt.
+					// alwaysAllow — set by the user, not the server — stays the only
+					// way to skip a normal-mode prompt, exactly as
+					// docs/configuration/mcp-configuration.md describes.
+					// (Yolo is bypassed centrally by resolveToolApproval.)
+					//
+					// For the same reason the hint is not copied onto the entry as
+					// `readOnly`: that field feeds ToolManager.isReadOnly, which
+					// gates ACP checkpoint capture and parallel batching. It stays
+					// on getToolMapping(), which only plan-mode filtering reads.
+					const readOnly = mcpTool.readOnly === true;
 					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
-					const approval: ToolApprovalPolicy = isAutoApproved
-						? false
-						: (_args, mode) => mode !== 'auto-accept';
+					const approval: ToolApprovalPolicy = (_args, mode) => {
+						if (mode === 'auto-accept' || mode === 'headless') return false;
+						if (mode === 'plan') return !readOnly;
+						return !isAutoApproved;
+					};
 
 					entries.push({
 						name: toolName,
@@ -456,6 +742,21 @@ export class MCPClient {
 		}
 
 		return entries;
+	}
+
+	private getHealthyClient(serverName: string): Client {
+		const client = this.clients.get(serverName);
+		if (!client) {
+			throw new Error(`No MCP client connected for server: ${serverName}`);
+		}
+		if (this.health.get(serverName) === 'unhealthy') {
+			throw new Error(
+				`MCP server is unhealthy: ${serverName}: ${
+					this.healthErrors.get(serverName) || 'health check failed'
+				}`,
+			);
+		}
+		return client;
 	}
 
 	async callTool(
@@ -472,20 +773,16 @@ export class MCPClient {
 			if (parts.length >= 3 && parts[0] === 'mcp' && parts[1]) {
 				const serverName = parts[1];
 				const originalToolName = parts.slice(2).join('_');
-				const client = this.clients.get(serverName);
-				if (client) {
-					return this.executeToolCall(client, originalToolName, args);
-				}
+				return this.executeToolCall(
+					this.getHealthyClient(serverName),
+					originalToolName,
+					args,
+				);
 			}
 			throw new Error(`MCP tool not found: ${toolName}`);
 		}
 
-		const client = this.clients.get(mapping.serverName);
-		if (!client) {
-			throw new Error(
-				`No MCP client connected for server: ${mapping.serverName}`,
-			);
-		}
+		const client = this.getHealthyClient(mapping.serverName);
 
 		// Sanitize arguments: If schema expects a string but we got an object, ensureString it.
 		const serverTools = this.serverTools.get(mapping.serverName) || [];
@@ -607,6 +904,296 @@ export class MCPClient {
 		}, correlationId);
 	}
 
+	/**
+	 * Gets server information including transport type and URL for remote servers
+	 */
+	getServerInfo(serverName: string):
+		| {
+				name: string;
+				transport: string;
+				url?: string;
+				toolCount: number;
+				resourceCount: number;
+				promptCount: number;
+				connected: boolean;
+				health: MCPHealthStatus;
+				healthError?: string;
+				description?: string;
+				tags?: string[];
+				autoApprovedCommands?: string[];
+		  }
+		| undefined {
+		const client = this.clients.get(serverName);
+		const serverConfig = this.serverConfigs.get(serverName);
+		const tools = this.serverTools.get(serverName) || [];
+		const resources = this.serverResources.get(serverName) || [];
+		const prompts = this.serverPrompts.get(serverName) || [];
+
+		if (!client || !serverConfig) {
+			return undefined;
+		}
+
+		return {
+			name: serverName,
+			transport: serverConfig.transport,
+			url: serverConfig.url,
+			toolCount: tools.length,
+			resourceCount: resources.length,
+			promptCount: prompts.length,
+			connected: this.health.get(serverName) !== 'unhealthy',
+			health: this.health.get(serverName) || 'connected',
+			healthError: this.healthErrors.get(serverName),
+			description: serverConfig.description,
+			tags: serverConfig.tags,
+			autoApprovedCommands: serverConfig.alwaysAllow,
+		};
+	}
+
+	/**
+	 * Get all MCP resources from all connected servers
+	 */
+	getAllResources(): MCPResource[] {
+		const resources: MCPResource[] = [];
+
+		this.logger.debug('Building all resources registry from MCP servers', {
+			serverCount: this.serverResources.size,
+			totalResourcesAvailable: Array.from(this.serverResources.values()).reduce(
+				(sum, resources) => sum + resources.length,
+				0,
+			),
+		});
+
+		for (const [
+			serverName,
+			serverResources,
+		] of this.serverResources.entries()) {
+			this.logger.debug('Processing resources from MCP server', {
+				serverName,
+				resourceCount: serverResources.length,
+			});
+
+			resources.push(...serverResources);
+		}
+
+		return resources;
+	}
+
+	/**
+	 * Get resources from a specific server
+	 */
+	getServerResources(serverName: string): MCPResource[] {
+		return this.serverResources.get(serverName) || [];
+	}
+
+	/**
+	 * Read content from an MCP resource
+	 */
+	/**
+	 * Read a resource's content from a specific server. `serverName` is
+	 * required (rather than searching every connected server by URI) so two
+	 * servers can never be confused when they happen to expose the same URI.
+	 *
+	 * Returns every content block the server sent: a resource read can
+	 * legitimately return more than one (`ReadResourceResult.contents` is an
+	 * array), so truncating to the first would silently drop data.
+	 */
+	async readResource(
+		serverName: string,
+		uri: string,
+	): Promise<MCPResourceContent[]> {
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
+
+		return await withNewCorrelationContext(async () => {
+			this.logger.info('Reading MCP resource', {
+				uri,
+				serverName,
+				correlationId,
+			});
+
+			const client = this.getHealthyClient(serverName);
+
+			try {
+				const result = await client.readResource({uri});
+
+				// Text vs. blob content is NOT distinguished by a `type` field in
+				// the MCP schema — TextResourceContents carries a `text` property,
+				// BlobResourceContents carries a `blob` property, and neither
+				// declares the other. Discriminate on which key is present.
+				const contents: MCPResourceContent[] = (result.contents ?? []).map(
+					c => {
+						const block = c as {
+							uri: string;
+							mimeType?: string;
+							text?: string;
+							blob?: string;
+						};
+						return {
+							uri: block.uri,
+							mimeType: block.mimeType,
+							text: 'text' in block ? block.text : undefined,
+							blob: 'blob' in block ? block.blob : undefined,
+						};
+					},
+				);
+
+				const finalMetrics = endMetrics(metrics);
+				this.logger.info('MCP resource read completed', {
+					uri,
+					serverName,
+					contentCount: contents.length,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				return contents;
+			} catch (error) {
+				const errorMessage = formatError(error);
+				const errorName = error instanceof Error ? error.name : 'Unknown';
+
+				const finalMetrics = endMetrics(metrics);
+
+				this.logger.error('MCP resource read failed', {
+					uri,
+					serverName,
+					error: errorMessage,
+					errorName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				throw new Error(`MCP resource read failed: ${errorMessage}`);
+			}
+		}, correlationId);
+	}
+
+	/**
+	 * Get all MCP prompts from all connected servers
+	 */
+	getAllPrompts(): MCPPrompt[] {
+		const prompts: MCPPrompt[] = [];
+
+		this.logger.debug('Building all prompts registry from MCP servers', {
+			serverCount: this.serverPrompts.size,
+			totalPromptsAvailable: Array.from(this.serverPrompts.values()).reduce(
+				(sum, prompts) => sum + prompts.length,
+				0,
+			),
+		});
+
+		for (const [serverName, serverPrompts] of this.serverPrompts.entries()) {
+			this.logger.debug('Processing prompts from MCP server', {
+				serverName,
+				promptCount: serverPrompts.length,
+			});
+
+			prompts.push(...serverPrompts);
+		}
+
+		return prompts;
+	}
+
+	/**
+	 * Get prompts from a specific server
+	 */
+	getServerPrompts(serverName: string): MCPPrompt[] {
+		return this.serverPrompts.get(serverName) || [];
+	}
+
+	/**
+	 * Get a prompt from an MCP server
+	 */
+	/**
+	 * Fetch a prompt from a specific server. `serverName` is required (rather
+	 * than searching every connected server by name) so two servers can never
+	 * be confused when they happen to expose a same-named prompt.
+	 */
+	async getPrompt(
+		serverName: string,
+		name: string,
+		args?: Record<string, string>,
+	): Promise<MCPPromptResult> {
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
+
+		return await withNewCorrelationContext(async () => {
+			this.logger.info('Getting MCP prompt', {
+				name,
+				serverName,
+				hasArgs: !!args,
+				argCount: args ? Object.keys(args).length : 0,
+				correlationId,
+			});
+
+			const client = this.getHealthyClient(serverName);
+
+			try {
+				const result = await client.getPrompt({name, arguments: args});
+
+				this.logger.debug('MCP prompt retrieved successfully', {
+					name,
+					serverName,
+					hasDescription: !!result.description,
+					messageCount: result.messages?.length || 0,
+					correlationId,
+				});
+
+				const finalMetrics = endMetrics(metrics);
+				this.logger.info('MCP prompt retrieval completed', {
+					name,
+					serverName,
+					messageCount: result.messages?.length || 0,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				return {
+					description: result.description,
+					messages: result.messages.map(
+						(msg: {
+							role: string;
+							content:
+								| {
+										type: string;
+										text?: string;
+										data?: string;
+										mimeType?: string;
+								  }
+								| string;
+						}) => ({
+							role: msg.role as 'user' | 'assistant',
+							content:
+								typeof msg.content === 'string'
+									? {type: 'text' as const, text: msg.content}
+									: {
+											type: msg.content.type as 'text' | 'image' | 'resource',
+											text: msg.content.text,
+											data: msg.content.data,
+											mimeType: msg.content.mimeType,
+										},
+						}),
+					),
+				};
+			} catch (error) {
+				const errorMessage = formatError(error);
+				const errorName = error instanceof Error ? error.name : 'Unknown';
+
+				const finalMetrics = endMetrics(metrics);
+
+				this.logger.error('MCP prompt retrieval failed', {
+					name,
+					serverName,
+					error: errorMessage,
+					errorName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				throw new Error(`MCP prompt retrieval failed: ${errorMessage}`);
+			}
+		}, correlationId);
+	}
+
 	async disconnect(): Promise<void> {
 		const correlationId = generateCorrelationId();
 		const serverNames = Array.from(this.clients.keys());
@@ -627,6 +1214,11 @@ export class MCPClient {
 			let failedDisconnections = 0;
 
 			for (const [serverName, client] of this.clients.entries()) {
+				this.closing.add(serverName);
+				const timer = this.healthTimers.get(serverName);
+				if (timer) clearInterval(timer);
+				this.healthTimers.delete(serverName);
+				this.healthChecksInFlight.delete(serverName);
 				try {
 					await client.close();
 					successfulDisconnections++;
@@ -647,12 +1239,20 @@ export class MCPClient {
 						correlationId,
 					});
 				}
+				this.closing.delete(serverName);
 			}
 
 			this.clients.clear();
 			this.transports.clear();
 			this.serverTools.clear();
+			this.toolMappingCache = null;
+			this.serverResources.clear();
+			this.serverPrompts.clear();
 			this.serverConfigs.clear();
+			this.health.clear();
+			this.healthErrors.clear();
+			this.healthChecksInFlight.clear();
+			this.closing.clear();
 			this.isConnected = false;
 
 			this.logger.info('MCP client disconnection completed', {
@@ -665,49 +1265,23 @@ export class MCPClient {
 	}
 
 	getConnectedServers(): string[] {
+		return Array.from(this.clients.keys()).filter(
+			serverName => this.health.get(serverName) !== 'unhealthy',
+		);
+	}
+
+	getServerNames(): string[] {
 		return Array.from(this.clients.keys());
 	}
 
 	isServerConnected(serverName: string): boolean {
-		return this.clients.has(serverName);
+		return (
+			this.clients.has(serverName) &&
+			this.health.get(serverName) !== 'unhealthy'
+		);
 	}
 
 	getServerTools(serverName: string): MCPTool[] {
 		return this.serverTools.get(serverName) || [];
-	}
-
-	/**
-	 * Gets server information including transport type and URL for remote servers
-	 */
-	getServerInfo(serverName: string):
-		| {
-				name: string;
-				transport: string;
-				url?: string;
-				toolCount: number;
-				connected: boolean;
-				description?: string;
-				tags?: string[];
-				autoApprovedCommands?: string[];
-		  }
-		| undefined {
-		const client = this.clients.get(serverName);
-		const serverConfig = this.serverConfigs.get(serverName);
-		const tools = this.serverTools.get(serverName) || [];
-
-		if (!client || !serverConfig) {
-			return undefined;
-		}
-
-		return {
-			name: serverName,
-			transport: serverConfig.transport,
-			url: serverConfig.url,
-			toolCount: tools.length,
-			connected: true,
-			description: serverConfig.description,
-			tags: serverConfig.tags,
-			autoApprovedCommands: serverConfig.alwaysAllow,
-		};
 	}
 }

@@ -6,6 +6,7 @@ import {StyledTitle} from '@/components/ui/styled-title';
 import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
+	getMouseReporting,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
@@ -14,11 +15,13 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	updateAlternateScreen,
+	updateMouseReporting,
 	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
@@ -144,7 +147,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'nanocoder-shape',
 					label: 'Nanocoder Shape',
-					value: getNanocoderShape() ?? 'tiny',
+					value: getNanocoderShape() ?? DEFAULT_NANOCODER_SHAPE,
 					panel: 'nanocoder-shape',
 				},
 				{
@@ -153,6 +156,13 @@ function buildRowsForTab(
 					label: 'Alternate Screen',
 					value: getAlternateScreen(),
 					onToggle: () => updateAlternateScreen(!getAlternateScreen()),
+				},
+				{
+					kind: 'boolean',
+					id: 'mouse-reporting',
+					label: 'Mouse Wheel Reporting',
+					value: getMouseReporting(),
+					onToggle: () => updateMouseReporting(!getMouseReporting()),
 				},
 			];
 		}

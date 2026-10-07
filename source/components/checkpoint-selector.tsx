@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
-import {StyledSelectInput} from '@/components/ui/styled-select-input';
+import {FilterableSelectList} from '@/components/filterable-select-list';
+import type {ItemSelectorOption} from '@/components/item-selector';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -13,11 +14,6 @@ interface CheckpointSelectorProps {
 	onCancel: () => void;
 	onError?: (error: Error) => void;
 	currentMessageCount: number;
-}
-
-interface CheckpointOption {
-	label: string;
-	value: string;
 }
 
 export default function CheckpointSelector({
@@ -34,32 +30,38 @@ export default function CheckpointSelector({
 	const [awaitingBackupConfirmation, setAwaitingBackupConfirmation] =
 		useState(false);
 
-	useInput((inputChar, key) => {
-		if (key.escape) {
-			onCancel();
-			return;
-		}
+	// Escape belongs to FilterableSelectList once the list is up (Ink useInput
+	// is broadcast, so a second active handler would cancel twice). Only the
+	// confirmation step and the empty state need their own keys.
+	useInput(
+		(inputChar, key) => {
+			if (key.escape) {
+				onCancel();
+				return;
+			}
 
-		if (awaitingBackupConfirmation) {
-			const char = inputChar.toLowerCase();
-			if (char === 'y' || char === '\r' || char === '\n') {
-				if (selectedCheckpoint) {
-					onSelect(selectedCheckpoint, true);
-				}
-			} else if (char === 'n') {
-				if (selectedCheckpoint) {
-					onSelect(selectedCheckpoint, false);
+			if (awaitingBackupConfirmation) {
+				const char = inputChar.toLowerCase();
+				if (char === 'y' || char === '\r' || char === '\n') {
+					if (selectedCheckpoint) {
+						onSelect(selectedCheckpoint, true);
+					}
+				} else if (char === 'n') {
+					if (selectedCheckpoint) {
+						onSelect(selectedCheckpoint, false);
+					}
 				}
 			}
-		}
-	});
+		},
+		{isActive: awaitingBackupConfirmation || checkpoints.length === 0},
+	);
 
-	const handleCheckpointSelect = (item: CheckpointOption) => {
-		setSelectedCheckpoint(item.value);
+	const handleCheckpointSelect = (name: string) => {
+		setSelectedCheckpoint(name);
 		if (currentMessageCount > 0) {
 			setAwaitingBackupConfirmation(true);
 		} else {
-			onSelect(item.value, false);
+			onSelect(name, false);
 		}
 	};
 
@@ -122,11 +124,14 @@ export default function CheckpointSelector({
 		);
 	}
 
-	const options: CheckpointOption[] = checkpoints.map(checkpoint => ({
+	const options: ItemSelectorOption[] = checkpoints.map(checkpoint => ({
 		label: `${checkpoint.name} - ${checkpoint.metadata.messageCount} msgs, ${
 			checkpoint.metadata.filesChanged.length
 		} files - ${formatRelativeTime(checkpoint.metadata.timestamp)}`,
 		value: checkpoint.name,
+		// Filter on the name alone: the counts and age suffix would match most
+		// queries, the same reason the session list filters on its title.
+		searchText: checkpoint.name,
 	}));
 
 	if (options.length === 0) {
@@ -161,10 +166,15 @@ export default function CheckpointSelector({
 			marginBottom={1}
 		>
 			<Box flexDirection="column">
-				<StyledSelectInput items={options} onSelect={handleCheckpointSelect} />
+				<FilterableSelectList
+					items={options}
+					onSelect={handleCheckpointSelect}
+					onCancel={onCancel}
+					visibleCount={10}
+				/>
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
-						Use ↑↓ arrows to select, Enter to confirm, Escape to cancel
+						Type to filter • ↑/↓ to navigate • Enter to select • Esc to cancel
 					</Text>
 				</Box>
 			</Box>

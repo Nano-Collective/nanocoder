@@ -43,6 +43,7 @@ interface ProbeOverrides {
 	cliModel?: string;
 	nonInteractiveMode?: boolean;
 	customCommandCache?: Map<string, CustomCommand>;
+	isTrusted?: boolean;
 }
 
 let captured: ReturnType<typeof useAppInitialization> | null = null;
@@ -76,17 +77,20 @@ function setup(overrides: ProbeOverrides = {}) {
 		nonInteractiveMode: overrides.nonInteractiveMode,
 	};
 
-	function Probe() {
-		captured = useAppInitialization(props as never);
+	function Probe({isTrusted}: {isTrusted: boolean}) {
+		captured = useAppInitialization({...props, isTrusted} as never);
 		return null;
 	}
 
-	const instance = render(<Probe />);
+	const initialTrust = overrides.isTrusted ?? true;
+	const instance = render(<Probe isTrusted={initialTrust} />);
 	if (!captured) throw new Error('useAppInitialization did not initialize');
 	return {
 		handlers: captured as ReturnType<typeof useAppInitialization>,
 		instance,
 		props,
+		setTrust: (isTrusted: boolean) =>
+			instance.rerender(<Probe isTrusted={isTrusted} />),
 	};
 }
 
@@ -181,4 +185,34 @@ test('loadCustomCommands handles loaders that return undefined', t => {
 
 	t.is(cache.size, 0);
 	t.deepEqual(props.setCustomCommandsCount.calls, [[0]]);
+});
+
+test('untrusted directory initializes nothing on mount', t => {
+	const {props} = setup({isTrusted: false});
+
+	// No tool manager means no MCP spawn, no client means no provider
+	// resolution — nothing has read the untrusted project directory yet.
+	t.is(props.setToolManager.calls.length, 0);
+	t.is(props.setClient.calls.length, 0);
+	t.is(props.setPreferencesLoaded.calls.length, 0);
+	t.is(props.setStartChat.calls.length, 0);
+});
+
+test('confirming trust initializes exactly once', t => {
+	const {props, setTrust} = setup({isTrusted: false});
+	t.is(props.setToolManager.calls.length, 0);
+
+	setTrust(true);
+	t.is(props.setToolManager.calls.length, 1);
+
+	// A later re-render at the same trust value must not initialize again.
+	setTrust(true);
+	t.is(props.setToolManager.calls.length, 1);
+});
+
+test('already-trusted directory initializes on mount', t => {
+	const {props} = setup({isTrusted: true});
+
+	t.is(props.setToolManager.calls.length, 1);
+	t.true(props.setPreferencesLoaded.calls.length > 0);
 });

@@ -52,6 +52,7 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 				],
 				toolsDisabled: partial.toolsDisabled,
 				usage: partial.usage,
+				finishReason: partial.finishReason,
 			} as LLMChatResponse;
 		},
 	} as unknown as LLMClient;
@@ -117,6 +118,7 @@ test("returns success when model emits content and no tool calls", async (t) => 
 	});
 
 	t.is(outcome.kind, "success");
+	t.is(outcome.steps, 1);
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
@@ -144,6 +146,7 @@ test("nudges through empty responses up to the cap, then returns error", async (
 	if (outcome.kind === "error") {
 		t.regex(outcome.message, /produced no output after 3 attempts/i);
 	}
+	t.is(outcome.steps, 3);
 });
 
 test("recovers when a nudge after an empty response gets the model talking", async (t) => {
@@ -168,6 +171,9 @@ test("recovers when a nudge after an empty response gets the model talking", asy
 	// finalText stays empty here because the fake client never streams tokens;
 	// the success outcome (driven by the message content) is the behavior under test.
 	t.is(outcome.kind, "success");
+	// The nudged retry is a step of its own even though it made no tool call.
+	t.is(outcome.steps, 2);
+	t.is(outcome.toolCalls.length, 0);
 });
 
 test("executes a tool call that does not need approval and recurses to success", async (t) => {
@@ -217,6 +223,9 @@ test("executes a tool call that does not need approval and recurses to success",
 
 	t.is(outcome.kind, "success");
 	t.is(handlerCalls, 1);
+	// One step issued the tool call, the next produced the answer.
+	t.is(outcome.steps, 2);
+	t.is(outcome.toolCalls.length, 1);
 });
 
 test("returns tool-approval-required when a tool needs approval and mode is not yolo", async (t) => {
@@ -255,6 +264,7 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	});
 
 	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
 	}
@@ -663,6 +673,7 @@ test("aborted signal short-circuits with an error outcome", async (t) => {
 	});
 
 	t.is(outcome.kind, "error");
+	t.is(outcome.steps, 0);
 });
 
 // --- Tool execution error telemetry (isError) ---
@@ -878,6 +889,7 @@ function makeRecordingClient(
 				],
 				toolsDisabled: partial.toolsDisabled,
 				usage: partial.usage,
+				finishReason: partial.finishReason,
 			} as LLMChatResponse;
 		},
 	} as unknown as LLMClient;
@@ -1252,9 +1264,47 @@ function repeatingToolResponse(): Partial<LLMChatResponse> {
 	};
 }
 
+test.serial(
+	"reports steps equal to maxTurns when the loop runs out without a final answer",
+	async (t) => {
+		// An empty reply on the final turn is nudged like any other (the empty
+		// cap is not hit yet), which leaves the loop with no turn left and lands
+		// on the post-loop "exceeded" fallback.
+		process.env.NANOCODER_MAX_TURNS = "2";
+		reloadAppConfig();
+
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{ choices: [{ message: { role: "assistant", content: "" } }] },
+				{ choices: [{ message: { role: "assistant", content: "" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /exceeded 2 turns without a final answer/);
+		}
+		t.is(calls.length, 2);
+		t.is(outcome.steps, 2);
+	},
+);
+
 // Scope a retry-limit override to one test; afterEach.always reloads config,
 // but restore explicitly so a mid-test failure cannot leak into another test.
-async function withRetryLimit<K extends "maxRepeatedToolCalls" | "maxEmptyTurns" | "maxMalformedRetries">(
+async function withRetryLimit<K extends "maxRepeatedToolCalls" | "maxEmptyTurns" | "maxMalformedRetries" | "maxTruncatedTurns">(
 	key: K,
 	value: number,
 	body: () => Promise<void>,
@@ -1634,6 +1684,7 @@ test.serial(
 			t.regex(outcome.message, /maxMalformedRetries/);
 		}
 		t.is(calls.length, 3);
+		t.is(outcome.steps, 3, "every malformed retry is a model round-trip");
 
 		// The self-correction feedback must reach the model on retry turns.
 		const retryTurnMessages = calls[1].messages;
@@ -1678,6 +1729,7 @@ test.serial(
 		});
 
 		t.is(outcome.kind, "success");
+		t.is(outcome.steps, 2, "the malformed turn and its retry both count");
 	},
 );
 
@@ -1971,5 +2023,200 @@ test.serial(
 			resetAutoCompactSession();
 			resetSessionContextLimit();
 		}
+	},
+);
+
+// --- Output-limit truncation ---
+//
+// A turn the provider cut off at max output tokens comes back as content with
+// no tool calls, which is byte-for-byte what a finished turn looks like. The
+// regression these cover: the loop returned `success` carrying the fragment,
+// so a headless run whose entire deliverable was a tool call reported that it
+// completed having written nothing.
+
+test.serial(
+	"continues a turn truncated at the output limit instead of accepting the fragment",
+	async (t) => {
+		const toolCall: ToolCall = {
+			id: "call-1",
+			function: { name: "safe_tool", arguments: {} },
+		};
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				// Cut off mid-sentence, no tool call — the shape that used to end
+				// the run with nothing written.
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "Let me check the arithmetic: the span starts at",
+							},
+						},
+					],
+					finishReason: "length",
+				},
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [toolCall],
+							},
+						},
+					],
+					finishReason: "tool-calls",
+				},
+				{
+					choices: [{ message: { role: "assistant", content: "written" } }],
+					finishReason: "stop",
+				},
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		let handlerCalls = 0;
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => {
+				handlerCalls++;
+				return "tool-output";
+			}) as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(handlerCalls, 1, "the deliverable tool call must still happen");
+		t.is(calls.length, 3, "the truncated turn must be continued, not accepted");
+		t.is(outcome.steps, 3, "a truncation continuation is a step of its own");
+
+		// The nudge goes in as a user turn after the partial reply, and the
+		// partial must be carried exactly once — the assistant append upstream
+		// already recorded it.
+		const second = calls[1].messages;
+		const last = second[second.length - 1];
+		t.is(last.role, "user");
+		t.regex(String(last.content), /cut off at the output-token limit/i);
+		t.is(
+			second.filter(
+				(m) =>
+					m.role === "assistant" &&
+					String(m.content).includes("the span starts at"),
+			).length,
+			1,
+			"the truncated reply must not be duplicated into the history",
+		);
+	},
+);
+
+test.serial(
+	"stops continuing once the truncation cap is hit and returns what it has",
+	async (t) => {
+		const truncated = {
+			choices: [
+				{ message: { role: "assistant" as const, content: "still going" } },
+			],
+			finishReason: "length" as const,
+		};
+		const calls: RecordedCall[] = [];
+		// Default maxTruncatedTurns = 2: the initial truncated turn plus two
+		// continuations, then the loop gives up rather than spinning to maxTurns.
+		const client = makeRecordingClient(
+			[truncated, truncated, truncated],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 3);
+		t.is(outcome.steps, 3);
+	},
+);
+
+test.serial(
+	"maxTruncatedTurns = 0 accepts the first truncated turn as final",
+	async (t) => {
+		await withRetryLimit("maxTruncatedTurns", 0, async () => {
+			const calls: RecordedCall[] = [];
+			const client = makeRecordingClient(
+				[
+					{
+						choices: [
+							{ message: { role: "assistant", content: "cut off here" } },
+						],
+						finishReason: "length",
+					},
+				],
+				calls,
+			);
+			const toolManager = makeFakeToolManager();
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(calls.length, 1, "no continuation when the cap is 0");
+			t.is(outcome.steps, 1);
+		});
+	},
+);
+
+test.serial(
+	"a normal stop is still accepted without a continuation",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{
+					choices: [{ message: { role: "assistant", content: "all done" } }],
+					finishReason: "stop",
+				},
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 1);
 	},
 );
