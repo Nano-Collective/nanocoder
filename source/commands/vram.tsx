@@ -118,7 +118,9 @@ export const vramCommand: Command = {
 		if (sub === 'unload') {
 			const targetModel = args[1]?.trim();
 			if (targetModel) {
-				await allocator.evictModel(targetModel);
+				await allocator.evictModel(targetModel, {
+					provider: metadata.provider,
+				});
 				return successMsg(
 					`Dispatched VRAM unload for model '${targetModel}'.`,
 					'vram',
@@ -126,8 +128,18 @@ export const vramCommand: Command = {
 			}
 
 			const states = allocator.getResidencyStates();
+			if (states.length === 0) {
+				return errorMsg(
+					'No models tracked. Run a model turn first, or specify /vram unload <model>',
+					'vram',
+				);
+			}
+
 			for (const s of states) {
-				await allocator.evictModel(s.model, s.backendUrl);
+				await allocator.evictModel(s.model, {
+					provider: metadata.provider,
+					backendUrl: s.backendUrl,
+				});
 			}
 			return successMsg(
 				`Dispatched VRAM unload for all ${states.length} tracked models.`,
@@ -151,7 +163,13 @@ export const vramCommand: Command = {
 		}
 
 		if (metadata.model) {
-			allocator.registerModel(metadata.model, 'coder');
+			const targetModel = metadata.model.toLowerCase().trim();
+			const existing = allocator
+				.getResidencyStates()
+				.find(s => s.model.toLowerCase().trim() === targetModel);
+			if (!existing) {
+				allocator.registerModel(metadata.model, 'coder');
+			}
 		}
 
 		return React.createElement(VramStatusView, {

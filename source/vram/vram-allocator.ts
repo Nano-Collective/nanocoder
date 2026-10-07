@@ -1,3 +1,4 @@
+import {getAppConfig} from '@/config/index';
 import type {
 	AgentPhase,
 	ModelResidencyState,
@@ -5,6 +6,55 @@ import type {
 	VramConfig,
 } from '@/types/vram';
 import {VRAM_DEFAULTS} from '@/types/vram';
+
+export interface OllamaConnectionOptions {
+	baseURL?: string;
+	apiKey?: string;
+	headers?: Record<string, string>;
+	provider?: string;
+}
+
+/**
+ * Resolves the connection settings (baseURL, apiKey, headers) for communicating
+ * with Ollama. Checks the explicit override first, then looks up the provider
+ * configuration from agents.config.json by provider name, model name, or Ollama type.
+ * Defaults to unauthenticated http://127.0.0.1:11434.
+ */
+export function resolveOllamaConnection(
+	provider?: string,
+	model?: string,
+	backendUrlOverride?: string,
+): {baseURL: string; apiKey?: string; headers?: Record<string, string>} {
+	if (backendUrlOverride) {
+		return {baseURL: backendUrlOverride};
+	}
+
+	try {
+		const providers = getAppConfig().providers ?? [];
+		let matched = providers.find(
+			p => provider && p.name.toLowerCase() === provider.toLowerCase(),
+		);
+		if (!matched && model) {
+			const modelLower = model.toLowerCase().trim();
+			matched = providers.find(p =>
+				p.models?.some(m => m.toLowerCase().trim() === modelLower),
+			);
+		}
+		if (!matched) {
+			matched = providers.find(p => p.name?.toLowerCase().includes('ollama'));
+		}
+		if (matched) {
+			return {
+				baseURL: matched.baseUrl || 'http://127.0.0.1:11434',
+				apiKey: matched.apiKey,
+			};
+		}
+	} catch {
+		// Fall back to default
+	}
+
+	return {baseURL: 'http://127.0.0.1:11434'};
+}
 
 export class VramAllocator {
 	private currentPhase: AgentPhase = 'idle';
@@ -57,6 +107,7 @@ export class VramAllocator {
 		options?: {
 			toolName?: string;
 			model?: string;
+			provider?: string;
 			backendUrl?: string;
 		},
 	): Promise<void> {
@@ -75,19 +126,18 @@ export class VramAllocator {
 				// Pin embedders, evict coder if aggressive
 				for (const state of this.models.values()) {
 					if (state.role === 'embedder') {
-						await this.pinModel(
-							state.model,
-							this.config.keepAliveMinutes,
-							state.backendUrl || options?.backendUrl,
-						);
+						await this.pinModel(state.model, this.config.keepAliveMinutes, {
+							provider: options?.provider,
+							backendUrl: state.backendUrl || options?.backendUrl,
+						});
 					} else if (
 						this.config.strategy === 'aggressive' &&
 						state.role === 'coder'
 					) {
-						await this.evictModel(
-							state.model,
-							state.backendUrl || options?.backendUrl,
-						);
+						await this.evictModel(state.model, {
+							provider: options?.provider,
+							backendUrl: state.backendUrl || options?.backendUrl,
+						});
 					}
 				}
 				break;
@@ -97,18 +147,17 @@ export class VramAllocator {
 				// Evict embedders to free VRAM for generation context & KV cache
 				for (const state of this.models.values()) {
 					if (state.role === 'embedder') {
-						await this.evictModel(
-							state.model,
-							state.backendUrl || options?.backendUrl,
-						);
+						await this.evictModel(state.model, {
+							provider: options?.provider,
+							backendUrl: state.backendUrl || options?.backendUrl,
+						});
 					}
 				}
 				if (options?.model) {
-					await this.pinModel(
-						options.model,
-						this.config.keepAliveMinutes,
-						options.backendUrl,
-					);
+					await this.pinModel(options.model, this.config.keepAliveMinutes, {
+						provider: options?.provider,
+						backendUrl: options.backendUrl,
+					});
 				}
 				break;
 			}
@@ -116,16 +165,15 @@ export class VramAllocator {
 			case 'execution': {
 				// If executing heavy tools (e.g. bash commands), evict to yield RAM/VRAM back to OS
 				const isHeavyTool =
-					!options?.toolName ||
-					options.toolName === 'execute_bash' ||
+					options?.toolName === 'execute_bash' ||
 					this.config.strategy === 'aggressive';
 
 				if (this.config.unloadOnExecution && isHeavyTool) {
 					for (const state of this.models.values()) {
-						await this.evictModel(
-							state.model,
-							state.backendUrl || options?.backendUrl,
-						);
+						await this.evictModel(state.model, {
+							provider: options?.provider,
+							backendUrl: state.backendUrl || options?.backendUrl,
+						});
 					}
 				}
 				break;
@@ -134,10 +182,10 @@ export class VramAllocator {
 			case 'idle': {
 				if (this.config.strategy === 'aggressive') {
 					for (const state of this.models.values()) {
-						await this.evictModel(
-							state.model,
-							state.backendUrl || options?.backendUrl,
-						);
+						await this.evictModel(state.model, {
+							provider: options?.provider,
+							backendUrl: state.backendUrl || options?.backendUrl,
+						});
 					}
 				}
 				break;
@@ -149,20 +197,29 @@ export class VramAllocator {
 		}
 	}
 
-	async evictModel(model: string, backendUrl?: string): Promise<boolean> {
+	async evictModel(
+		model: string,
+		options?: string | {provider?: string; backendUrl?: string},
+	): Promise<boolean> {
 		const key = model.toLowerCase().trim();
 		const state = this.models.get(key);
 		if (state) {
 			state.isLoaded = false;
 		}
 
-		return await dispatchOllamaKeepAlive(model, 0, backendUrl);
+		const backendUrl =
+			typeof options === 'string' ? options : options?.backendUrl;
+		const provider =
+			typeof options === 'object' ? options?.provider : undefined;
+		const conn = resolveOllamaConnection(provider, model, backendUrl);
+
+		return await dispatchOllamaKeepAlive(model, 0, conn);
 	}
 
 	async pinModel(
 		model: string,
 		durationMinutes: number,
-		backendUrl?: string,
+		options?: string | {provider?: string; backendUrl?: string},
 	): Promise<boolean> {
 		const key = model.toLowerCase().trim();
 		const state = this.models.get(key);
@@ -171,11 +228,13 @@ export class VramAllocator {
 			state.lastUsedAt = Date.now();
 		}
 
-		return await dispatchOllamaKeepAlive(
-			model,
-			`${durationMinutes}m`,
-			backendUrl,
-		);
+		const backendUrl =
+			typeof options === 'string' ? options : options?.backendUrl;
+		const provider =
+			typeof options === 'object' ? options?.provider : undefined;
+		const conn = resolveOllamaConnection(provider, model, backendUrl);
+
+		return await dispatchOllamaKeepAlive(model, `${durationMinutes}m`, conn);
 	}
 
 	clear(): void {
@@ -184,12 +243,26 @@ export class VramAllocator {
 	}
 }
 
-async function dispatchOllamaKeepAlive(
+/**
+ * Dispatches a keep_alive call to Ollama (/api/generate endpoint).
+ * Sends Authorization headers if apiKey is present in the connection config.
+ */
+export async function dispatchOllamaKeepAlive(
 	model: string,
 	keepAlive: number | string,
-	baseURL?: string,
+	connection?:
+		| {
+				baseURL?: string;
+				apiKey?: string;
+				headers?: Record<string, string>;
+		  }
+		| string,
 ): Promise<boolean> {
-	const url = (baseURL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+	const conn =
+		typeof connection === 'string'
+			? {baseURL: connection}
+			: (connection ?? {baseURL: 'http://127.0.0.1:11434'});
+	const url = (conn.baseURL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 	// Standard Ollama generate endpoint with keep_alive payload
 	const endpoint = url.endsWith('/v1')
 		? `${url.slice(0, -3)}/api/generate`
@@ -197,13 +270,19 @@ async function dispatchOllamaKeepAlive(
 			? `${url}/generate`
 			: `${url}/api/generate`;
 
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json',
+		...(conn.apiKey ? {Authorization: `Bearer ${conn.apiKey}`} : {}),
+		...(conn.headers ?? {}),
+	};
+
 	try {
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 1000);
 
 		const response = await fetch(endpoint, {
 			method: 'POST',
-			headers: {'Content-Type': 'application/json'},
+			headers,
 			body: JSON.stringify({
 				model,
 				keep_alive: keepAlive,
@@ -221,6 +300,10 @@ async function dispatchOllamaKeepAlive(
 
 let globalVramAllocator: VramAllocator | null = null;
 
+/**
+ * Returns the singleton VramAllocator instance.
+ * For test isolation, tests should call resetVramAllocator() in beforeEach/afterEach.
+ */
 export function getVramAllocator(): VramAllocator {
 	if (!globalVramAllocator) {
 		globalVramAllocator = new VramAllocator();
@@ -228,6 +311,10 @@ export function getVramAllocator(): VramAllocator {
 	return globalVramAllocator;
 }
 
+/**
+ * Resets the singleton VramAllocator instance.
+ * Intended for test cleanup and isolation across test cases.
+ */
 export function resetVramAllocator(): void {
 	globalVramAllocator = null;
 }
