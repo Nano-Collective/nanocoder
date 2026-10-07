@@ -1,4 +1,8 @@
 import test from 'ava';
+import {
+	clearCalibrationProfile,
+	saveCalibrationProfile,
+} from '@/calibration/calibration-store';
 import {ToolManager} from './tool-manager.js';
 import {
 	getToolsForProfile,
@@ -166,6 +170,23 @@ test('auto profile resolves via the profile helpers too', t => {
 	t.false(isNanoProfile('auto', 'gpt-4o'));
 	t.deepEqual(getToolsForProfile('auto', 'gpt-4o'), []);
 	t.true(getToolsForProfile('auto', 'qwen2.5-coder:7b').includes('agent'));
+});
+
+test('resolveToolProfile - calibrated profile overrides name heuristics', t => {
+	saveCalibrationProfile({
+		provider: 'ollama',
+		model: 'llama3.2:1b', // normally 'nano'
+		timestamp: Date.now(),
+		overallScore: 95,
+		tier: 'tier-1',
+		recommendedProfile: 'full',
+		recommendedToolMode: 'native',
+		recommendedAggressiveCompact: false,
+		testResults: [],
+	});
+
+	t.is(resolveToolProfile('auto', 'llama3.2:1b', 'ollama'), 'full');
+	clearCalibrationProfile('ollama', 'llama3.2:1b');
 });
 
 // ============================================================================
