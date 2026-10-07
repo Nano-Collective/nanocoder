@@ -155,6 +155,25 @@ export class MCPClient {
 	): void {
 		const markUnhealthy = (error?: unknown) =>
 			this.markServerUnhealthy(serverName, error);
+		const check = async () => {
+			if (
+				this.closing.has(serverName) ||
+				this.health.get(serverName) !== 'connected' ||
+				this.healthChecksInFlight.has(serverName) ||
+				typeof client.ping !== 'function'
+			) {
+				return;
+			}
+			this.healthChecksInFlight.add(serverName);
+			try {
+				await client.ping(pingOptions ?? {timeout: 10_000});
+			} catch (error) {
+				// A pending ping can reject after an intentional disconnect.
+				if (this.health.get(serverName) === 'connected') markUnhealthy(error);
+			} finally {
+				this.healthChecksInFlight.delete(serverName);
+			}
+		};
 		const previousOnClose = transport.onclose;
 		const previousOnError = transport.onerror;
 		transport.onclose = () => {
@@ -168,27 +187,13 @@ export class MCPClient {
 			try {
 				previousOnError?.(error);
 			} finally {
-				markUnhealthy(error);
+				// HTTP/SSE errors can be recoverable; let the SDK handle the error
+				// before confirming liveness with a bounded ping. Deferring also
+				// prevents a ping's own transport error from starting another ping.
+				void Promise.resolve().then(check);
 			}
 		};
 		if (interval <= 0 || typeof client.ping !== 'function') return;
-		const check = async () => {
-			if (
-				this.closing.has(serverName) ||
-				this.health.get(serverName) === 'unhealthy' ||
-				this.healthChecksInFlight.has(serverName)
-			) {
-				return;
-			}
-			this.healthChecksInFlight.add(serverName);
-			try {
-				await client.ping(pingOptions);
-			} catch (error) {
-				markUnhealthy(error);
-			} finally {
-				this.healthChecksInFlight.delete(serverName);
-			}
-		};
 		const timer = setInterval(() => void check(), interval);
 		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
 		this.healthTimers.set(serverName, timer);

@@ -1478,6 +1478,90 @@ test('MCPClient transport close marks a server unhealthy immediately', t => {
 	clearInterval((client as any).healthTimers.get(serverName));
 });
 
+for (const pingFails of [false, true]) {
+	test(`MCPClient transport error ${pingFails ? 'removes tools after a failed ping' : 'preserves tools when the server responds'}`, async t => {
+		let transport: any;
+		let previousErrorCalls = 0;
+		let pingCalls = 0;
+		let pingOptions: unknown;
+		let finishPing!: () => void;
+		const pendingPing = new Promise<void>(resolve => {
+			finishPing = resolve;
+		});
+		const sdkClient = {
+			async connect(value: any) {
+				transport = value;
+				transport.onerror = () => {
+					previousErrorCalls++;
+				};
+			},
+			async listTools() {
+				return {tools: [{name: 'live_tool', inputSchema: {type: 'object'}}]};
+			},
+			getServerCapabilities: () => undefined,
+			async ping(options: unknown) {
+				pingCalls++;
+				pingOptions = options;
+				await pendingPing;
+				if (pingFails) throw new Error('ping failed');
+			},
+			async close() {},
+		};
+		const client = new SeamMCPClient(sdkClient);
+		try {
+			await client.connectToServer({...httpServer, healthCheckInterval: 0});
+			t.is((client as any).healthTimers.size, 0);
+			transport.onerror(new Error('recoverable SSE interruption'));
+			transport.onerror(new Error('another transport error'));
+			await Promise.resolve();
+			t.is(previousErrorCalls, 2);
+			t.is(pingCalls, 1, 'overlapping errors share one liveness check');
+			t.deepEqual(pingOptions, {timeout: 10_000});
+			t.true(client.isServerConnected(httpServer.name));
+			t.is(client.getServerTools(httpServer.name).length, 1);
+			finishPing();
+			await new Promise(resolve => setImmediate(resolve));
+			t.is(client.isServerConnected(httpServer.name), !pingFails);
+			t.is(client.getServerTools(httpServer.name).length, pingFails ? 0 : 1);
+		} finally {
+			finishPing();
+			await client.disconnect();
+		}
+	});
+}
+
+test('MCPClient does not emit unhealthy after disconnecting with a pending ping', async t => {
+	let transport: any;
+	let rejectPing!: (error: Error) => void;
+	const pendingPing = new Promise<void>((_resolve, reject) => {
+		rejectPing = reject;
+	});
+	const client = new SeamMCPClient({
+		async connect(value: any) {
+			transport = value;
+		},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities: () => undefined,
+		ping: () => pendingPing,
+		async close() {
+			transport.onclose?.();
+		},
+	});
+	const changes: unknown[] = [];
+	client.onHealthChange(change => changes.push(change));
+	await client.connectToServer({...httpServer, healthCheckInterval: 0});
+	transport.onerror(new Error('temporary error'));
+	await Promise.resolve();
+	await client.disconnect();
+	rejectPing(new Error('connection closed'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.deepEqual(changes, []);
+	t.deepEqual(client.getServerNames(), []);
+	t.is((client as any).health.size, 0);
+});
+
 test('MCPClient rejects calls to an unhealthy server clearly', async t => {
 	const client = new SeamMCPClient({});
 	const serverName = 'unhealthy-server';
