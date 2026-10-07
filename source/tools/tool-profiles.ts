@@ -1,4 +1,7 @@
-import {getCalibrationProfile} from '@/calibration/calibration-store';
+import {
+	getAllCalibrationProfiles,
+	getCalibrationProfile,
+} from '@/calibration/calibration-store';
 import type {ToolProfile} from '@/types/config';
 
 /** Concrete profiles — the result of resolving 'auto'. */
@@ -90,6 +93,18 @@ export function inferToolProfile(
 			const cal = getCalibrationProfile(provider, model);
 			if (cal) {
 				return cal.recommendedProfile;
+			}
+		} catch {
+			// Fallback to heuristic
+		}
+	} else {
+		try {
+			const all = getAllCalibrationProfiles();
+			const modelLower = model.toLowerCase().trim();
+			for (const profile of Object.values(all)) {
+				if (profile.model.toLowerCase().trim() === modelLower) {
+					return profile.recommendedProfile;
+				}
 			}
 		} catch {
 			// Fallback to heuristic

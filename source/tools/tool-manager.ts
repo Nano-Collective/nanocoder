@@ -264,13 +264,18 @@ export class ToolManager {
 		developmentMode?: DevelopmentMode,
 		disabledTools?: string[],
 		model?: string,
+		provider?: string,
 	): string[] {
 		let names = this.getToolNames();
 
 		if (tuneConfig?.enabled) {
-			const profile = resolveToolProfile(tuneConfig.toolProfile, model);
+			const profile = resolveToolProfile(
+				tuneConfig.toolProfile,
+				model,
+				provider,
+			);
 			if (profile !== 'full') {
-				const profileTools = getToolsForProfile(profile);
+				const profileTools = getToolsForProfile(profile, model, provider);
 				if (profileTools.length > 0) {
 					names = profileTools;
 				}

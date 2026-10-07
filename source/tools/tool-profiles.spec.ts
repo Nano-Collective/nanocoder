@@ -185,7 +185,11 @@ test('resolveToolProfile - calibrated profile overrides name heuristics', t => {
 		testResults: [],
 	});
 
+	// Explicit provider
 	t.is(resolveToolProfile('auto', 'llama3.2:1b', 'ollama'), 'full');
+	// Omitted provider (searches all calibrations for matching model)
+	t.is(resolveToolProfile('auto', 'llama3.2:1b'), 'full');
+
 	clearCalibrationProfile('ollama', 'llama3.2:1b');
 });
 
