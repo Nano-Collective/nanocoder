@@ -1,4 +1,5 @@
 import {getLogger} from '@/utils/logging';
+import {getVramAllocator} from '@/vram/vram-allocator';
 import type {MemoryFileChange, SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
@@ -149,6 +150,7 @@ export async function appendRelevantProjectContextWithCount(
 	}
 
 	try {
+		await getVramAllocator().transitionPhase('retrieval');
 		const memories = await memoryFinder.findRelevantMemories(
 			query,
 			options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
