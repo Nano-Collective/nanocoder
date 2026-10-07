@@ -1105,6 +1105,121 @@ test('McpStep editing an X-API-Key template instance keeps its saved key', async
 	unmount();
 });
 
+test('McpStep lists FXMacroData on the remote servers tab', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep onComplete={() => {}} />,
+	);
+
+	await waitTick();
+	// "Add MCP servers", then Tab over to the remote templates.
+	stdin.write('\r');
+	await waitTick();
+	stdin.write('\t');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /Select a remote MCP server to add:/);
+	t.regex(output, /FXMacroData/);
+
+	unmount();
+});
+
+// FXMacroData keeps the key optional (keyless covers the free USD tier) and
+// stores it as a bearer Authorization header, so edits must round-trip both a
+// saved key and no key at all.
+const fxmacrodataServer = (headers?: {Authorization: string}) => ({
+	'fxmacrodata-work': {
+		name: 'fxmacrodata-work',
+		transport: 'http' as const,
+		url: 'https://mcp.fxmacrodata.com',
+		...(headers ? {headers} : {}),
+		templateId: 'fxmacrodata',
+		tags: ['fxmacrodata', 'finance', 'macro', 'forex', 'http'],
+	},
+});
+
+test('McpStep editing a keyed FXMacroData server keeps its bearer key', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer({Authorization: 'Bearer test-key'})}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData Configuration/);
+	t.notRegex(lastFrame()!, /Custom MCP Server Configuration/);
+
+	// Accept the prefilled server name; the key field opens prefilled.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(lastFrame()!, /This field is required/);
+	t.notRegex(lastFrame()!, /must not contain/);
+	t.notRegex(lastFrame()!, /FXMacroData API key/);
+
+	unmount();
+});
+
+test('McpStep editing a keyless FXMacroData server accepts an empty key', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer()}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData Configuration/);
+
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(lastFrame()!, /This field is required/);
+	t.notRegex(lastFrame()!, /FXMacroData API key/);
+
+	unmount();
+});
+
+test('McpStep rejects an FXMacroData key with a space inside it', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer()}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+	stdin.write('\r');
+	await waitTick();
+	stdin.write('test key');
+	await waitTick();
+	stdin.write('\r');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /must not contain spaces/);
+	t.regex(output, /FXMacroData API key/, 'should stay on the key field');
+
+	unmount();
+});
+
 // Regression (#1424): a renamed github-remote saved before the templateId
 // stamp only has a `github` tag, which is the stdio template. Edit opened
 // Custom and saving dropped Authorization. The token field is required, so
