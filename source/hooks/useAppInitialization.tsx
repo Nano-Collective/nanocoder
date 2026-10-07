@@ -248,9 +248,29 @@ export function useAppInitialization({
 					setMcpServersStatus([...mcpStatus]);
 				}
 			};
+			const onHealthChange = (change: {
+				serverName: string;
+				status: 'connected' | 'unhealthy';
+				error?: string;
+			}) => {
+				const statusIndex = mcpStatus.findIndex(
+					s => s.name === change.serverName,
+				);
+				if (statusIndex === -1) return;
+				mcpStatus[statusIndex] = {
+					name: change.serverName,
+					status: change.status === 'connected' ? 'connected' : 'unhealthy',
+					errorMessage: change.error,
+				};
+				setMcpServersStatus([...mcpStatus]);
+			};
 
 			try {
-				await toolManager.initializeMCP(config.mcpServers, onProgress);
+				await toolManager.initializeMCP(
+					config.mcpServers,
+					onProgress,
+					onHealthChange,
+				);
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {

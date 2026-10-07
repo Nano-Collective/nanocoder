@@ -458,6 +458,8 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/** Period between MCP ping health checks, in milliseconds. */
+	healthCheckInterval?: number;
 	alwaysAllow?: string[];
 	description?: string;
 	tags?: string[];
