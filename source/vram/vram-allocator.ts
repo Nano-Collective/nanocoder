@@ -7,13 +7,6 @@ import type {
 } from '@/types/vram';
 import {VRAM_DEFAULTS} from '@/types/vram';
 
-export interface OllamaConnectionOptions {
-	baseURL?: string;
-	apiKey?: string;
-	headers?: Record<string, string>;
-	provider?: string;
-}
-
 /**
  * Resolves the connection settings (baseURL, apiKey, headers) for communicating
  * with Ollama. Checks the explicit override first, then looks up the provider

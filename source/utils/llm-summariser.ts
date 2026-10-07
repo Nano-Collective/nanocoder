@@ -183,7 +183,7 @@ function truncationSuffix(omitted: number): string {
  * the omitted count), so budgeting for the widest possible suffix gives a
  * valid starting point that can then be widened one character at a time.
  *
- * @internal exported for tests
+ * Exported for direct unit testing only.
  */
 export function truncate(text: string, max: number): string {
 	if (text.length <= max) return text;
