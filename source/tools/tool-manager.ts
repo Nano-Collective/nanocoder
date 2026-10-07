@@ -46,6 +46,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'diff_edit',
 		'file_op',
 		'execute_bash',
+		'browser',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
 		// No git mutation tools — keep read-only git tools

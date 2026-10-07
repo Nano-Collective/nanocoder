@@ -1,6 +1,7 @@
 import test from 'ava';
 import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
 import {resolveToolApproval} from './approval-policy.js';
+import {browserTool} from './browser.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
 import {diffEditTool} from './file-ops/diff-edit.js';
@@ -47,6 +48,15 @@ test('execute_bash always requires approval in auto-accept mode', async t => {
 
 test('execute_bash always requires approval in plan mode', async t => {
 	t.true(await evaluateNeedsApproval(executeBashTool, 'plan', {command: 'ls'}));
+});
+
+test('browser requires approval in normal mode and skips it when headless', async t => {
+	t.true(
+		await evaluateNeedsApproval(browserTool, 'normal', {action: 'navigate'}),
+	);
+	t.false(
+		await evaluateNeedsApproval(browserTool, 'headless', {action: 'navigate'}),
+	);
 });
 
 // ============================================================================
