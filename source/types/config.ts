@@ -336,6 +336,8 @@ export interface DiskNanocoderConfig {
 	retries?: Partial<RetryLimitsConfig>;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
+	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
+	autoCommit?: boolean;
 }
 
 /**
@@ -438,6 +440,9 @@ export interface AppConfig {
 
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
 	sandbox?: boolean;
+
+	// Commit each successful agent file edit, one commit per edited file.
+	autoCommit?: boolean;
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
@@ -623,6 +628,14 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+export interface VoiceConfig {
+	enabled: boolean;
+	activationMode: 'push-to-talk' | 'hands-free';
+	voiceName?: string;
+	sttBackend: 'local' | 'cloud';
+	ttsBackend: 'local' | 'cloud';
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -702,4 +715,5 @@ export interface UserPreferences {
 	 * model to be terse — no filler, no preamble, no celebratory wrap-ups.
 	 */
 	professionalTone?: boolean;
+	voice?: VoiceConfig;
 }

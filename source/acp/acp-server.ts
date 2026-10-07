@@ -2,7 +2,6 @@ import {AgentSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {initializePlain} from '@/plain/initialize';
-import {loadTrustedProjectPlugins} from '@/plugins/host';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -35,8 +34,6 @@ export async function runAcpServer(
 	logger.info(
 		`ACP initialized: provider=${initContext.provider} model=${initContext.model}`,
 	);
-
-	await loadTrustedProjectPlugins();
 
 	// Convert Node.js streams to web streams for the SDK
 	const input = new ReadableStream<Uint8Array>({

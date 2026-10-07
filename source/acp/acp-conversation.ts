@@ -24,7 +24,10 @@ import {
 	partitionUnknownToolCalls,
 } from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
-import {consultPluginPermission} from '@/plugins/host';
+import {
+	consultPluginPermission,
+	withTrustedProjectPlugins,
+} from '@/plugins/host';
 import {
 	getAllSubagentProgress,
 	type SubagentEvent,
@@ -171,7 +174,9 @@ export async function runAcpConversation(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
 	try {
-		return await runTurn(options);
+		return await withTrustedProjectPlugins(options.session.cwd, () =>
+			runTurn(options),
+		);
 	} finally {
 		restoreApprovalHandler();
 	}

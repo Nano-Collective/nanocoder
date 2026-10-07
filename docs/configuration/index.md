@@ -269,6 +269,25 @@ This is not a secrets boundary. Network is blocked, writes outside the project a
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 
+### Auto-commit
+
+Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off, with a warning) to commit every successful agent file edit (`write_file`, `string_replace`, `diff_edit`) as it happens. Each edit becomes its own commit, so you can `git revert` a single agent mistake without losing the rest of the session. Default is off.
+
+```json
+{
+  "nanocoder": {
+    "autoCommit": true
+  }
+}
+```
+
+- **Only the edited file is committed.** Your own staged or unstaged changes are left exactly as they were, and new files the agent creates are included.
+- **Commit messages** are Conventional Commits (`feat: ...`, `fix: ...`) written by the current model from that file's diff, using the same prompt as `/commit`. If the model call fails or returns nothing, the message falls back to `chore: update <path>`.
+- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, no git identity) is logged as a warning and the edit stays in the working tree.
+- Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
+
+This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).

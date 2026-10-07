@@ -2,6 +2,8 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {runAcpConversation} from '@/acp/acp-conversation';
+import {AcpSession} from '@/acp/acp-session';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {
 	appendPostToolUseOutput,
@@ -15,6 +17,7 @@ import {
 	loadPlugins,
 	loadTrustedProjectPlugins,
 	resetPluginsForTests,
+	withTrustedProjectPlugins,
 } from './host';
 
 console.log(`\nhost.spec.ts`);
@@ -281,6 +284,100 @@ test.serial('a .js file is left unloaded', async t => {
 
 	t.deepEqual(gate, {blocked: false, output: ''});
 });
+
+test.serial('concurrent workspace scopes isolate plugins and exclude untrusted projects', async t => {
+	const guardRoot = withPlugins({'guard.mjs': BLOCK_BASH});
+	const otherRoot = withPlugins({
+		'other.mjs': `export default {
+			apiVersion: 1, name: 'other',
+			hooks: {'tool.execute.before': () => ({block: 'other workspace'})},
+		};`,
+	});
+	const untrustedRoot = withPlugins({'guard.mjs': BLOCK_BASH});
+	const configDir = join(testDir, 'no-global-config');
+	mkdirSync(configDir, {recursive: true});
+	writeFileSync(
+		join(configDir, 'nanocoder-preferences.json'),
+		JSON.stringify({trustedDirectories: [guardRoot, otherRoot]}),
+	);
+	// Even a loaded default plugin must not leak into an ACP workspace.
+	setProjectRoot(guardRoot);
+	await loadPlugins(true);
+	const results = await Promise.all(
+		[guardRoot, otherRoot, untrustedRoot].map(root =>
+			withTrustedProjectPlugins(root, async () => {
+				await new Promise(resolve => setImmediate(resolve));
+				return runPreToolUseGate(bashCall(root), {command: 'ls'});
+			}),
+		),
+	);
+	t.is(results[0].reason, 'Blocked by plugin "guard": bash is disabled here');
+	t.is(results[1].reason, 'Blocked by plugin "other": other workspace');
+	t.deepEqual(results[2], {blocked: false, output: ''});
+});
+
+for (const decision of ['deny', 'defer']) {
+	test.serial(`ACP loads session workspace plugins and ${decision === 'deny' ? 'skips' : 'preserves'} permission requests`, async t => {
+		const root = withPlugins({
+			'permission.mjs': `export default {
+				apiVersion: 1, name: 'permission',
+				hooks: {'permission.asked': () => ({decision: '${decision}', reason: 'workspace policy'})},
+			};`,
+		});
+		const configDir = join(testDir, 'no-global-config');
+		mkdirSync(configDir, {recursive: true});
+		writeFileSync(
+			join(configDir, 'nanocoder-preferences.json'),
+			JSON.stringify({trustedDirectories: [root]}),
+		);
+		// Launch directory differs from the session's workspace.
+		setProjectRoot(testDir);
+		let permissionRequests = 0;
+		const conn = {
+			sessionUpdate: async () => {},
+			requestPermission: async () => {
+				permissionRequests++;
+				return {outcome: {outcome: 'selected', optionId: 'reject'}};
+			},
+		};
+		const session = new AcpSession({
+			sessionId: `plugin-${decision}`,
+			cwd: root,
+			conn: conn as never,
+			initialMode: 'normal',
+		});
+		session.systemMessage = {role: 'system', content: 'Test'};
+		let calls = 0;
+		await runAcpConversation({
+			session,
+			conn: conn as never,
+			nonInteractiveAlwaysAllow: [],
+			toolManager: {
+				getAvailableToolNames: () => ['read_file'],
+				getFilteredTools: () => ({}),
+				hasTool: () => true,
+				getToolEntry: () => ({approval: true}),
+				isReadOnly: () => true,
+			} as never,
+			client: {
+				chat: async () => ({
+					choices: [{message: calls++ === 0
+						? {role: 'assistant', content: '', tool_calls: [{
+							id: 'plugin-call', function: {name: 'read_file', arguments: {path: 'a.ts'}},
+						}]}
+						: {role: 'assistant', content: 'Done'}}],
+					toolsDisabled: false,
+				}),
+			} as never,
+		});
+		t.is(permissionRequests, decision === 'deny' ? 0 : 1);
+		if (decision === 'deny') {
+			t.true(session.messages.some(message =>
+				message.role === 'tool' && message.content.includes('workspace policy'),
+			));
+		}
+	});
+}
 
 test.serial('a before hook that returns the wrong shape does not block', async t => {
 	withPlugins({

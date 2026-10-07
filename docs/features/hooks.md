@@ -230,7 +230,9 @@ There are five hooks. Each may return its result directly or as a promise.
 
 Shell hooks for the same event run first. If a shell hook blocks, plugins do not run. A plugin that throws, times out after 30 seconds, or returns something malformed is logged and ignored; it never blocks anything. A file with an unknown hook name, a wrong `apiVersion`, or a `name` already used by an earlier file is skipped.
 
-An editor session (ACP) has no trust prompt. It loads plugins only when this directory is already in your trusted list.
+An editor session (ACP) has no trust prompt. It loads plugins from the session's workspace only when that directory is already in your trusted list. Plugins are isolated between workspaces, including when sessions run concurrently.
+
+This is the initial in-process plugin API. Its types ship with the CLI; a separately published, independently versioned SDK package and custom UI component APIs are not provided yet.
 
 ## Security
 

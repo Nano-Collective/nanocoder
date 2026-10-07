@@ -346,26 +346,68 @@ export class BashExecutor extends EventEmitter {
 	 * group; signalling the negative PID reaches the whole group (the command
 	 * plus anything it spawned). Windows has no process groups here, so we fall
 	 * back to killing the single process.
+	 *
+	 * Sends SIGTERM first. If the process has not exited after a grace period
+	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
+	 * trapped or ignored.
 	 */
 	private killProcessTree(proc: ChildProcess): void {
 		const pid = proc.pid;
 		if (pid === undefined) return;
 
-		if (isWindows) {
-			proc.kill('SIGTERM');
-			return;
-		}
-
-		try {
-			process.kill(-pid, 'SIGTERM');
-		} catch {
-			// Group already gone (or never formed) - fall back to the lone process.
-			try {
-				proc.kill('SIGTERM');
-			} catch {
-				// Process already exited; nothing to terminate.
+		const sendKillSignal = (sig: 'SIGTERM' | 'SIGKILL') => {
+			if (isWindows) {
+				try {
+					proc.kill(sig);
+				} catch {
+					// Ignore if already dead
+				}
+				return;
 			}
-		}
+
+			try {
+				process.kill(-pid, sig);
+			} catch {
+				// Group already gone (or never formed) - fall back to the lone process.
+				try {
+					proc.kill(sig);
+				} catch {
+					// Process already exited; nothing to terminate.
+				}
+			}
+		};
+
+		// On Unix, probe the process group rather than the leader. Every command
+		// runs under a wrapping `sh`, which can exit (on SIGTERM, or on its own
+		// after backgrounding a job) while descendants live on in the group. The
+		// PGID cannot be recycled while any member is alive, so a successful
+		// probe means the signal reaches our own processes.
+		const isAlive = (): boolean => {
+			if (isWindows) {
+				return proc.exitCode === null && proc.signalCode === null;
+			}
+			try {
+				process.kill(-pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		if (!isAlive()) return;
+
+		// Initial SIGTERM
+		sendKillSignal('SIGTERM');
+
+		// SIGKILL fallback after 2 seconds for anything that trapped or ignored
+		// SIGTERM. Gate on liveness only, not proc.killed: Node sets proc.killed
+		// on any successful proc.kill() call, including the SIGTERM above.
+		const sigkillTimer = setTimeout(() => {
+			if (isAlive()) {
+				sendKillSignal('SIGKILL');
+			}
+		}, 2000);
+		sigkillTimer.unref();
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {

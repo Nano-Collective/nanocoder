@@ -1,3 +1,4 @@
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -30,19 +31,34 @@ const PLUGIN_HOOK_TIMEOUT_MS = 30_000;
 
 const FAILED = Symbol('failed');
 
-let plugins: NanocoderPlugin[] = [];
-let loading: Promise<void> | null = null;
+interface PluginState {
+	plugins: NanocoderPlugin[];
+	loading: Promise<void> | null;
+}
+
+let defaultState: PluginState = {plugins: [], loading: null};
+const projectStates = new Map<string, PluginState>();
+const pluginScope = new AsyncLocalStorage<PluginState>();
+
+function currentState(): PluginState {
+	return pluginScope.getStore() ?? defaultState;
+}
 
 export function loadPlugins(trusted: boolean): Promise<void> {
 	if (!trusted) return Promise.resolve();
 	// A load that already started is not cancelled by a later false.
-	loading ??= importPlugins();
-	return loading;
+	const state = currentState();
+	state.loading ??= importPlugins(getProjectRoot(), state);
+	return state.loading;
 }
 
 /** ACP has no trust prompt. Load only when this project was trusted before. */
 export function loadTrustedProjectPlugins(): Promise<void> {
-	const root = path.resolve(getProjectRoot());
+	return loadPlugins(isProjectTrusted(getProjectRoot()));
+}
+
+function isProjectTrusted(projectRoot: string): boolean {
+	const root = path.resolve(projectRoot);
 	let trusted = false;
 	try {
 		const listed = loadPreferences().trustedDirectories ?? [];
@@ -50,16 +66,35 @@ export function loadTrustedProjectPlugins(): Promise<void> {
 	} catch (error) {
 		logError(`Could not read directory trust: ${errorMessage(error)}`);
 	}
-	return loadPlugins(trusted);
+	return trusted;
+}
+
+/** Keep concurrent ACP workspaces isolated, including their delegated tools. */
+export async function withTrustedProjectPlugins<T>(
+	projectRoot: string,
+	run: () => Promise<T>,
+): Promise<T> {
+	const root = path.resolve(projectRoot);
+	if (!isProjectTrusted(root)) {
+		return pluginScope.run({plugins: [], loading: null}, run);
+	}
+	let state = projectStates.get(root);
+	if (!state) {
+		state = {plugins: [], loading: null};
+		projectStates.set(root, state);
+	}
+	state.loading ??= importPlugins(root, state);
+	await state.loading;
+	return pluginScope.run(state, run);
 }
 
 export function resetPluginsForTests(): void {
-	plugins = [];
-	loading = null;
+	defaultState = {plugins: [], loading: null};
+	projectStates.clear();
 }
 
-async function importPlugins(): Promise<void> {
-	const dir = path.join(getProjectRoot(), '.nanocoder', 'plugins');
+async function importPlugins(root: string, state: PluginState): Promise<void> {
+	const dir = path.join(root, '.nanocoder', 'plugins');
 	let files: string[];
 	try {
 		const entries = await readdir(dir, {withFileTypes: true});
@@ -92,13 +127,13 @@ async function importPlugins(): Promise<void> {
 			continue;
 		}
 		const plugin = exported as NanocoderPlugin;
-		if (plugins.some(loaded => loaded.name === plugin.name)) {
+		if (state.plugins.some(loaded => loaded.name === plugin.name)) {
 			logError(
 				`Plugin ${file} skipped: name "${plugin.name}" is already loaded.`,
 			);
 			continue;
 		}
-		plugins.push(plugin);
+		state.plugins.push(plugin);
 	}
 }
 
@@ -188,10 +223,11 @@ export async function runPluginHooks(
 ): Promise<HookOutcome> {
 	const pluginEvent = PLUGIN_EVENT_FOR[event];
 	if (!pluginEvent) return {blocked: false, output: ''};
-	if (loading) await loading;
+	const state = currentState();
+	if (state.loading) await state.loading;
 
 	const collected: string[] = [];
-	for (const plugin of plugins) {
+	for (const plugin of state.plugins) {
 		if (!plugin.hooks?.[pluginEvent]) continue;
 		const result = await invoke(
 			plugin,
@@ -238,9 +274,10 @@ export async function consultPluginPermission(
 	toolName: string,
 	toolArgs: Record<string, unknown>,
 ): Promise<{decision: 'defer'} | {decision: 'deny'; reason: string}> {
-	if (loading) await loading;
+	const state = currentState();
+	if (state.loading) await state.loading;
 
-	for (const plugin of plugins) {
+	for (const plugin of state.plugins) {
 		if (!plugin.hooks?.['permission.asked']) continue;
 		const vote = await invoke(plugin, 'permission.asked', {
 			toolName,

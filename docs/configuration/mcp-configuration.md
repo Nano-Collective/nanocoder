@@ -287,7 +287,7 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. Variable names must be up
 
 Run `/settings mcp` for interactive configuration with:
 
-- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, Context7, DeepWiki, Playwright, etc.)
+- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, FXMacroData, Context7, DeepWiki, Playwright, etc.)
 - Custom server setup for stdio, HTTP, and WebSocket
 - Edit or delete existing servers
 - **Ctrl+E** to open the config file in your system editor
