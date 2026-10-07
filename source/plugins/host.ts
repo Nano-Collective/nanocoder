@@ -220,7 +220,7 @@ function buildPluginContext(event: PluginEvent, context: HookContext): object {
 export async function runPluginHooks(
 	event: HookEvent,
 	context: HookContext,
-): Promise<HookOutcome> {
+): Promise<Omit<HookOutcome, 'failures'>> {
 	const pluginEvent = PLUGIN_EVENT_FOR[event];
 	if (!pluginEvent) return {blocked: false, output: ''};
 	const state = currentState();

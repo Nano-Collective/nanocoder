@@ -95,7 +95,7 @@ test.serial('an untrusted load leaves the plugin inert', async t => {
 	await loadPlugins(false);
 	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
 
-	t.deepEqual(gate, {blocked: false, output: ''});
+	t.deepEqual(gate, {blocked: false, output: '', failures: []});
 
 	await loadPlugins(true);
 	const trusted = await runPreToolUseGate(bashCall('pwd'), {command: 'pwd'});
@@ -138,6 +138,30 @@ test.serial('tool.execute.after appends to the tool result', async t => {
 	);
 });
 
+test.serial('failing shell output survives alongside post-tool-use plugin output', async t => {
+	withPlugins({'annotate.mjs': `export default {
+		apiVersion: 1, name: 'annotate',
+		hooks: {'tool.execute.after': () => ({append: 'plugin note'})},
+	};`});
+	writeFileSync(
+		join(testDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {hooks: {
+			'post-tool-use': [{command:
+				`node -e "console.error('lint failed');process.exit(2)"`,
+			}],
+		}}}),
+	);
+	reloadAppConfig();
+	try {
+		await loadPlugins(true);
+		const content = await appendPostToolUseOutput('write_file', {path: 'a.ts'}, 'written');
+		t.is(content, 'written\n\n<hook-output event="post-tool-use">\nplugin note\n</hook-output>\n\n<hook-output event="post-tool-use" exit="2">\nlint failed\n</hook-output>');
+	} finally {
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify({nanocoder: {hooks: {}}}));
+		reloadAppConfig();
+	}
+});
+
 test.serial('tui.prompt.append becomes the prompt hook output', async t => {
 	withPlugins({
 		'branch.mjs': `export default {
@@ -159,8 +183,8 @@ test.serial('tui.prompt.append becomes the prompt hook output', async t => {
 		prompt: 'fix the typo',
 	});
 
-	t.deepEqual(outcome, {blocked: false, output: 'release branch: main'});
-	t.deepEqual(unrelated, {blocked: false, output: ''});
+	t.deepEqual(outcome, {blocked: false, output: 'release branch: main', failures: []});
+	t.deepEqual(unrelated, {blocked: false, output: '', failures: []});
 });
 
 test.serial('a throwing session.compacting plugin does not block', async t => {
@@ -180,7 +204,7 @@ test.serial('a throwing session.compacting plugin does not block', async t => {
 	await loadPlugins(true);
 	const outcome = await runLifecycleHooks('pre-compact', {messageCount: 3});
 
-	t.deepEqual(outcome, {blocked: false, output: ''});
+	t.deepEqual(outcome, {blocked: false, output: '', failures: []});
 });
 
 test.serial('an allow vote does not approve the tool', async t => {
@@ -261,7 +285,7 @@ test.serial(
 
 		await loadTrustedProjectPlugins();
 		const before = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
-		t.deepEqual(before, {blocked: false, output: ''});
+		t.deepEqual(before, {blocked: false, output: '', failures: []});
 
 		writeFileSync(
 			join(configDir, 'nanocoder-preferences.json'),
@@ -282,7 +306,7 @@ test.serial('a .js file is left unloaded', async t => {
 	await loadPlugins(true);
 	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
 
-	t.deepEqual(gate, {blocked: false, output: ''});
+	t.deepEqual(gate, {blocked: false, output: '', failures: []});
 });
 
 test.serial('concurrent workspace scopes isolate plugins and exclude untrusted projects', async t => {
@@ -313,7 +337,7 @@ test.serial('concurrent workspace scopes isolate plugins and exclude untrusted p
 	);
 	t.is(results[0].reason, 'Blocked by plugin "guard": bash is disabled here');
 	t.is(results[1].reason, 'Blocked by plugin "other": other workspace');
-	t.deepEqual(results[2], {blocked: false, output: ''});
+	t.deepEqual(results[2], {blocked: false, output: '', failures: []});
 });
 
 for (const decision of ['deny', 'defer']) {
@@ -394,7 +418,7 @@ test.serial('a before hook that returns the wrong shape does not block', async t
 	await loadPlugins(true);
 	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
 
-	t.deepEqual(gate, {blocked: false, output: ''});
+	t.deepEqual(gate, {blocked: false, output: '', failures: []});
 });
 
 test.serial('a duplicate plugin name is skipped', async t => {
