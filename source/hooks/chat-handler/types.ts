@@ -43,6 +43,7 @@ export interface UseChatHandlerProps {
 	onConversationComplete?: () => void;
 	onError?: (error: unknown) => void;
 	onAssistantContent?: (content: string) => void;
+	onReasoningContent?: (content: string) => void;
 	// Fired when a turn that STARTED in plan mode runs to completion without
 	// being interrupted — i.e. a plan was actually produced. Decided here rather
 	// than inferred from ambient state (isConversationComplete + current mode),

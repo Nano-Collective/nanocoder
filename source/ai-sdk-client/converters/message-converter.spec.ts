@@ -123,6 +123,12 @@ test('convertToModelMessages keeps image-only user messages without a text part'
 	t.is(content[0].type, 'image');
 });
 
+test('saved browser data URLs are not prefixed twice', t => {
+	const result = convertToModelMessages([{role: 'user', content: 'describe', images: [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}]}]);
+	const content = result[0].content as Array<Record<string, unknown>>;
+	t.is(content[1].image, 'data:image/png;base64,AA==');
+});
+
 test('convertToModelMessages leaves text-only user messages as plain strings', t => {
 	const messages: Message[] = [{role: 'user', content: 'plain text'}];
 	const result = convertToModelMessages(messages);

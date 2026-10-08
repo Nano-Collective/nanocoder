@@ -399,3 +399,17 @@ test('local web server closes WebSocket clients during shutdown', async t => {
 
 	t.is(client.readyState, WebSocket.CLOSED);
 });
+
+test('invalid WebSocket frames close the client without taking down the HTTP server', async t => {
+	const webServer = await startLocalWebServer({openBrowser: false});
+	t.teardown(() => webServer.close());
+	const client = new WebSocket(webServer.eventsUrl);
+	client.on('error', () => {});
+	await waitForWebSocketOpen(client);
+	const closed = new Promise<void>(resolve => client.once('close', () => resolve()));
+	// Reserved opcode 3 is invalid; this bypasses ws's outgoing validation.
+	(client as unknown as {_socket: {write: (data: Buffer) => void}})._socket.write(Buffer.from([0x83, 0x80, 0, 0, 0, 0]));
+	await closed;
+	const response = await fetch(`http://127.0.0.1:${webServer.port}/health`);
+	t.is(response.status, 200);
+});

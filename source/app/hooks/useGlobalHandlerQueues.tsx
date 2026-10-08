@@ -199,6 +199,7 @@ export function useGlobalHandlerQueues({
 				return webRuntimeBridge.requestApproval(
 					{
 						toolName: approval.toolCall.function.name,
+						toolCallId: approval.toolCall.id,
 						arguments: approval.toolCall.function.arguments,
 						context: `Subagent: ${approval.subagentName}`,
 					},
@@ -220,6 +221,7 @@ export function useGlobalHandlerQueues({
 				return webRuntimeBridge.requestApproval(
 					{
 						toolName: confirmation.toolCall.function.name,
+						toolCallId: confirmation.toolCall.id,
 						arguments: confirmation.toolCall.function.arguments,
 					},
 					signal,

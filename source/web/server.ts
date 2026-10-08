@@ -115,6 +115,9 @@ export async function startLocalWebServer(
 
 	webSocketServer.on('connection', clientSocket => {
 		connectedClients.add(clientSocket);
+		// Protocol and transport failures are emitted on the socket itself.
+		// Without a listener Node treats them as fatal unhandled errors.
+		clientSocket.on('error', () => clientSocket.terminate());
 		sendServerEvent(clientSocket, {
 			type: 'ready',
 			protocolVersion: WEB_PROTOCOL_VERSION,

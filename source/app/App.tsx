@@ -3,6 +3,7 @@ import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import {createStaticComponents} from '@/app/components/app-container';
 import {NonInteractiveShell} from '@/app/components/non-interactive-shell';
+import {getWebModeFooterRows} from '@/app/components/web-mode-footer';
 import {useAppLogging} from '@/app/hooks/useAppLogging';
 import {useGlobalHandlerQueues} from '@/app/hooks/useGlobalHandlerQueues';
 import {
@@ -37,7 +38,7 @@ import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useNotifications} from '@/hooks/useNotifications';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
-import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
@@ -55,6 +56,7 @@ import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
+import {handleWebCommand} from '@/web/commands';
 import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
@@ -75,6 +77,7 @@ export default function App({
 	initialSession,
 	openSessionSelectorOnStart = false,
 	webRuntimeBridge,
+	webUrl,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -296,6 +299,7 @@ export default function App({
 		onAssistantContent: content => {
 			webRuntimeBridge?.publishAssistantContent(content);
 		},
+		onReasoningContent: content => webRuntimeBridge?.publishReasoning(content),
 		// A turn that started in plan mode finished uninterrupted — a plan was
 		// produced. Flag it so the interactive UI can show the plan review bar.
 		onPlanTurnComplete: () => {
@@ -581,12 +585,65 @@ export default function App({
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
+	const {isSaving, flush: flushSession} = useSessionAutosave({
+		messages: appState.messages,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+		currentSessionId: appState.currentSessionId,
+		setCurrentSessionId: appState.setCurrentSessionId,
+		client: appState.client,
+		isConversationComplete: appState.isConversationComplete,
+	});
+	React.useEffect(() => {
+		if (appState.isConversationComplete && appState.messages.length > 0)
+			void flushSession();
+	}, [appState.isConversationComplete, appState.messages.length, flushSession]);
+	const getWebSessionState = React.useCallback(
+		() => ({
+			session: appState.currentSessionId
+				? {
+						id: appState.currentSessionId,
+						title:
+							appState.sessionName ||
+							appState.messages
+								.find(message => message.role === 'user')
+								?.content.slice(0, 80) ||
+							'New chat',
+						lastAccessedAt: new Date().toISOString(),
+						messageCount: appState.messages.length,
+					}
+				: null,
+			messages: appState.messages
+				.filter(
+					message =>
+						(message.role === 'user' || message.role === 'assistant') &&
+						(message.content.trim().length > 0 ||
+							(message.images?.length ?? 0) > 0),
+				)
+				.map(message => ({
+					role: message.role as 'user' | 'assistant',
+					content: message.content,
+					images: message.images,
+				})),
+		}),
+		[appState.currentSessionId, appState.sessionName, appState.messages],
+	);
 	const webRuntimeStateRef = React.useRef({
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
 		resetSession: appHandlers.clearMessages,
 		applySession: appHandlers.applySession,
+		getSessionState: getWebSessionState,
+		flushSession,
+		selectModel: modeHandlers.handleModelSelect,
+		setMode: appState.setDevelopmentMode,
+		ensureSessionId: appState.ensureCurrentSessionId,
+		settings: {
+			provider: appState.currentProvider,
+			model: appState.currentModel,
+			mode: appState.developmentMode,
+		},
 	});
 	webRuntimeStateRef.current = {
 		isGenerating: chatHandler.isGenerating,
@@ -594,7 +651,75 @@ export default function App({
 		cancel: appHandlers.handleCancel,
 		resetSession: appHandlers.clearMessages,
 		applySession: appHandlers.applySession,
+		getSessionState: getWebSessionState,
+		flushSession,
+		selectModel: modeHandlers.handleModelSelect,
+		setMode: appState.setDevelopmentMode,
+		ensureSessionId: appState.ensureCurrentSessionId,
+		settings: {
+			provider: appState.currentProvider,
+			model: appState.currentModel,
+			mode: appState.developmentMode,
+		},
 	};
+	React.useEffect(
+		() =>
+			sessionManager.subscribeToSaves(session => {
+				if (
+					session.id ===
+					webRuntimeStateRef.current.getSessionState().session?.id
+				) {
+					appState.setSessionName(session.title);
+				}
+				if (webRuntimeBridge && session.workingDirectory === process.cwd()) {
+					void webRuntimeBridge
+						.handleClientEvent({
+							type: 'list_sessions',
+							id: `saved-${session.id}`,
+						})
+						.catch(() => {});
+				}
+			}),
+		[webRuntimeBridge, appState.setSessionName],
+	);
+	React.useEffect(() => {
+		webRuntimeBridge?.setRuntimeStatus(
+			isTrustedError
+				? `Directory trust check failed: ${isTrustedError}`
+				: !isEffectivelyTrusted
+					? 'Approve directory trust in the terminal to start web mode.'
+					: !appState.client || !appState.toolManager
+						? 'Configure a provider and model in the terminal to start web mode.'
+						: 'Ready',
+		);
+	}, [
+		webRuntimeBridge,
+		isTrustedError,
+		isEffectivelyTrusted,
+		appState.client,
+		appState.toolManager,
+	]);
+	React.useEffect(() => {
+		const snapshot = getWebSessionState();
+		webRuntimeBridge?.syncSession(snapshot.session, snapshot.messages);
+	}, [webRuntimeBridge, getWebSessionState]);
+	React.useEffect(() => {
+		webRuntimeBridge?.setSettings({
+			provider: appState.currentProvider,
+			model: appState.currentModel,
+			mode: appState.developmentMode,
+			providers: (getAppConfig().providers ?? []).map(provider => ({
+				name: provider.name,
+				models: provider.models,
+			})),
+			modes: ['normal', 'auto-accept', 'yolo', 'plan', 'architect'],
+		});
+	}, [
+		webRuntimeBridge,
+		appState.currentProvider,
+		appState.currentModel,
+		appState.developmentMode,
+	]);
 
 	React.useEffect(() => {
 		if (
@@ -607,26 +732,83 @@ export default function App({
 		}
 
 		return webRuntimeBridge.bindRuntimeHandlers({
-			submitMessage: (message, images) => {
+			submitMessage: async (message, images) => {
 				if (webRuntimeStateRef.current.isGenerating) {
 					throw new Error('Nanocoder is already processing a turn.');
 				}
 
-				return webRuntimeStateRef.current.submitMessage(
+				if (
+					await handleWebCommand(message, {
+						resetSession: async () => {
+							await webRuntimeStateRef.current.flushSession();
+							await webRuntimeStateRef.current.resetSession();
+						},
+						getSettings: () => webRuntimeStateRef.current.settings,
+						notice: text => webRuntimeBridge.publishNotice(text),
+					})
+				) {
+					await new Promise<void>(resolve => setImmediate(resolve));
+					return;
+				}
+				const sessionId = webRuntimeStateRef.current.ensureSessionId();
+				await sessionManager.initialize();
+				if (!(await sessionManager.readSession(sessionId))) {
+					await sessionManager.createSession({
+						id: sessionId,
+						title: message.trim().slice(0, 50) || 'Image conversation',
+						provider: webRuntimeStateRef.current.settings.provider,
+						model: webRuntimeStateRef.current.settings.model,
+						workingDirectory: process.cwd(),
+						messageCount: 0,
+						messages: [],
+					});
+				}
+				await webRuntimeStateRef.current.submitMessage(
 					message,
 					undefined,
 					images,
 				);
+				await new Promise<void>(resolve => setImmediate(resolve));
+			},
+			getSessionState: () => webRuntimeStateRef.current.getSessionState(),
+			updateSettings: async settings => {
+				const provider = getAppConfig().providers?.find(
+					provider => provider.name === settings.provider,
+				);
+				if (!provider?.models.includes(settings.model))
+					throw new Error('Select a configured provider and model.');
+				const modes = [
+					'normal',
+					'auto-accept',
+					'yolo',
+					'plan',
+					'architect',
+				] as const;
+				const mode = modes.find(mode => mode === settings.mode);
+				if (!mode) throw new Error('Unsupported development mode.');
+				const switched = await webRuntimeStateRef.current.selectModel(
+					settings.provider,
+					settings.model,
+					true,
+				);
+				if (!switched)
+					throw new Error(
+						`Unable to switch to ${settings.provider}. Check the provider configuration.`,
+					);
+				webRuntimeStateRef.current.setMode(mode);
+				await new Promise<void>(resolve => setImmediate(resolve));
 			},
 			cancel: () => webRuntimeStateRef.current.cancel(),
-			resetSession: () => {
+			resetSession: async () => {
 				if (webRuntimeStateRef.current.isGenerating) {
 					throw new Error(
 						'Cannot start a new chat while Nanocoder is processing a turn.',
 					);
 				}
 
-				return webRuntimeStateRef.current.resetSession();
+				await webRuntimeStateRef.current.flushSession();
+				await webRuntimeStateRef.current.resetSession();
+				await new Promise<void>(resolve => setImmediate(resolve));
 			},
 			listSessions: async () => {
 				await sessionManager.initialize();
@@ -658,6 +840,7 @@ export default function App({
 					);
 				}
 
+				await webRuntimeStateRef.current.flushSession();
 				await sessionManager.initialize();
 				const session = await sessionManager.loadSession(sessionId);
 				if (!session) {
@@ -701,9 +884,10 @@ export default function App({
 		}
 
 		setWebToolLifecyclePublisher({
-			started: (id, name) => webRuntimeBridge.publishToolStarted(id, name),
-			finished: (id, name, ok) =>
-				webRuntimeBridge.publishToolFinished(id, name, ok),
+			started: (id, name, args) =>
+				webRuntimeBridge.publishToolStarted(id, name, args),
+			finished: (id, name, ok, output) =>
+				webRuntimeBridge.publishToolFinished(id, name, ok, output),
 		});
 
 		return () => {
@@ -762,15 +946,6 @@ export default function App({
 		developmentMode: initialDevelopmentMode,
 	});
 
-	// Setup session autosave
-	const {isSaving} = useSessionAutosave({
-		messages: appState.messages,
-		currentProvider: appState.currentProvider,
-		currentModel: appState.currentModel,
-		currentSessionId: appState.currentSessionId,
-		setCurrentSessionId: appState.setCurrentSessionId,
-	});
-
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
@@ -779,8 +954,14 @@ export default function App({
 	// minus the interactive frame: the root box's padding rows plus the input
 	// footer beneath it. Inline mode prints into scrollback and clips nothing.
 	const terminalRows = useTerminalRows();
+	const {actualWidth} = useResponsiveTerminal();
 	const welcomeRows = altScreenActive
-		? Math.max(0, terminalRows - FULLSCREEN_CHROME_ROWS)
+		? Math.max(
+				0,
+				terminalRows -
+					FULLSCREEN_CHROME_ROWS -
+					getWebModeFooterRows(webUrl, actualWidth - 2),
+			)
 		: terminalRows;
 
 	// Pin the provider/model the run started under, but only once
@@ -967,6 +1148,7 @@ export default function App({
 					) : (
 						<InteractiveApp
 							altScreenActive={altScreenActive}
+							webUrl={webUrl}
 							appState={appState}
 							chatHandler={chatHandler}
 							modeHandlers={modeHandlers}

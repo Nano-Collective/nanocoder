@@ -1,8 +1,11 @@
 import type {
 	WebClientEvent,
+	WebNotice,
 	WebServerEvent,
 	WebSessionMessage,
 	WebSessionSummary,
+	WebSettings,
+	WebWorkSummary,
 } from './protocol.js';
 
 export interface WebSessionLoadResult {
@@ -20,9 +23,19 @@ export interface WebRuntimeHandlers {
 	listSessions: () => Promise<WebSessionSummary[]>;
 	loadSession: (sessionId: string) => Promise<WebSessionLoadResult | null>;
 	deleteSession: (sessionId: string) => Promise<void>;
+	getSessionState?: () => {
+		session: WebSessionSummary | null;
+		messages: WebSessionMessage[];
+	};
+	updateSettings?: (settings: {
+		provider: string;
+		model: string;
+		mode: string;
+	}) => Promise<void>;
 }
 
 export interface WebApprovalRequest {
+	toolCallId?: string;
 	toolName: string;
 	arguments: Record<string, unknown>;
 	context?: string;
@@ -38,8 +51,18 @@ export interface WebRuntimeBridge {
 	handleClientEvent: (event: WebClientEvent) => Promise<void>;
 	bindRuntimeHandlers: (handlers: WebRuntimeHandlers) => () => void;
 	publishAssistantContent: (content: string) => void;
-	publishToolStarted: (id: string, name: string) => void;
-	publishToolFinished: (id: string, name: string, ok: boolean) => void;
+	publishReasoning: (content: string) => void;
+	publishToolStarted: (
+		id: string,
+		name: string,
+		arguments_?: Record<string, unknown>,
+	) => void;
+	publishToolFinished: (
+		id: string,
+		name: string,
+		ok: boolean,
+		output?: string,
+	) => void;
 	hasActiveBrowserTurn: () => boolean;
 	requestApproval: (
 		request: WebApprovalRequest,
@@ -53,6 +76,13 @@ export interface WebRuntimeBridge {
 	completeTurn: () => void;
 	failTurn: (error: unknown) => void;
 	handleDisconnect: () => void;
+	syncSession: (
+		session: WebSessionSummary | null,
+		messages: WebSessionMessage[],
+	) => void;
+	setRuntimeStatus: (status: string) => void;
+	setSettings: (settings: WebSettings) => void;
+	publishNotice: (message: string) => void;
 }
 
 type PendingInteraction =
@@ -87,6 +117,26 @@ export function createWebRuntimeBridge(
 	let sessionRevision = 0;
 	let assistantId: string | null = null;
 	let responseCounter = 0;
+	let runtimeStatus = 'Nanocoder runtime is still starting.';
+	let settings: WebSettings | null = null;
+	let notices: WebNotice[] = [];
+	let work: WebWorkSummary[] = [];
+	let reasoningId: string | null = null;
+	let reasoningCounter = 0;
+	const currentWork = () => {
+		let summary = work.find(item => item.id === activeTurnId);
+		if (!summary && activeTurnId) {
+			summary = {
+				id: activeTurnId,
+				status: 'working',
+				startedAt: Date.now(),
+				reasoning: [],
+				tools: [],
+			};
+			work.push(summary);
+		}
+		return summary;
+	};
 	const stateEvent = (): WebServerEvent => ({
 		type: 'state',
 		activeTurnId,
@@ -94,6 +144,11 @@ export function createWebRuntimeBridge(
 		session,
 		busy: sessionBusy,
 		sessionRevision,
+		runtimeReady: runtimeHandlers !== null,
+		runtimeStatus,
+		settings,
+		notices: structuredClone(notices),
+		work: structuredClone(work),
 	});
 	const publishState = () => {
 		broadcastEvent(stateEvent());
@@ -137,6 +192,67 @@ export function createWebRuntimeBridge(
 		previousAssistantContent = '';
 		assistantId = null;
 	};
+	const syncSession = (
+		nextSession: WebSessionSummary | null,
+		nextMessages: WebSessionMessage[],
+	) => {
+		const changedSession = session?.id !== nextSession?.id;
+		session = nextSession;
+		if (!activeTurnId) {
+			if (
+				changedSession ||
+				(messages.length > 0 && nextMessages.length === 0)
+			) {
+				sessionRevision++;
+				notices = [];
+				work = [];
+			}
+			const previousMessages = messages;
+			const used = new Set<WebSessionMessage>();
+			messages = nextMessages.map((message, index) => {
+				const previous = !changedSession
+					? previousMessages.find(
+							previous =>
+								!used.has(previous) &&
+								previous.role === message.role &&
+								(previous.content === message.content ||
+									(message.role === 'assistant' &&
+										(previous.content.startsWith(message.content) ||
+											message.content.startsWith(previous.content)))),
+						)
+					: undefined;
+				if (previous) used.add(previous);
+				return {
+					...message,
+					createdAt: message.createdAt ?? previous?.createdAt,
+					content:
+						previous &&
+						message.role === 'assistant' &&
+						previous.content.startsWith(message.content)
+							? previous.content
+							: message.content,
+					id:
+						message.id ??
+						previous?.id ??
+						`session-${nextSession?.id ?? 'new'}-${index}`,
+				};
+			});
+			if (!changedSession && nextMessages.length > 0) {
+				const lastMatchedIndex = Math.max(
+					-1,
+					...[...used].map(message => previousMessages.indexOf(message)),
+				);
+				for (const previous of previousMessages.slice(lastMatchedIndex + 1)) {
+					if (previous.role === 'assistant' && !used.has(previous))
+						messages.push(previous);
+				}
+			}
+		}
+	};
+	const refreshSession = () => {
+		const snapshot = runtimeHandlers?.getSessionState?.();
+		if (snapshot) syncSession(snapshot.session, snapshot.messages);
+	};
 
 	const settlePendingInteraction = (options: {
 		denyApprovals: boolean;
@@ -172,7 +288,17 @@ export function createWebRuntimeBridge(
 				'The browser turn completed before the question was answered.',
 		});
 		broadcastEvent({type: 'turn_completed', id: activeTurnId});
+		const summary = currentWork();
+		if (summary) summary.status = 'completed';
+		const isLocalAction =
+			activeTurnId &&
+			!messages.some(
+				message => message.role === 'user' && message.id === activeTurnId,
+			);
 		clearActiveTurn();
+		// React commits its history asynchronously. The live transcript already
+		// contains the final token; don't replace it with an older render here.
+		if (isLocalAction) refreshSession();
 		publishState();
 	};
 
@@ -187,15 +313,20 @@ export function createWebRuntimeBridge(
 			questionMessage:
 				'The browser turn failed before the question was answered.',
 		});
+		const message =
+			error instanceof Error
+				? error.message
+				: 'Nanocoder could not complete this turn.';
 		broadcastEvent({
 			type: 'error',
 			id: activeTurnId,
-			message:
-				error instanceof Error
-					? error.message
-					: 'Nanocoder could not complete this turn.',
+			message,
 		});
+		const summary = currentWork();
+		if (summary) summary.status = 'failed';
 		clearActiveTurn();
+		refreshSession();
+		notices.push({role: 'system error', text: message});
 		publishState();
 	};
 
@@ -211,7 +342,7 @@ export function createWebRuntimeBridge(
 			}
 
 			if (!runtimeHandlers) {
-				throw new Error('Nanocoder runtime is still starting.');
+				throw new Error(runtimeStatus);
 			}
 
 			if (event.type === 'approval_response') {
@@ -288,7 +419,27 @@ export function createWebRuntimeBridge(
 					await runtimeHandlers.resetSession();
 					messages = [];
 					session = null;
+					notices = [];
+					work = [];
 					sessionRevision++;
+				} finally {
+					sessionBusy = false;
+					publishState();
+				}
+				return;
+			}
+
+			if (event.type === 'update_settings') {
+				if (activeTurnId)
+					throw new Error(
+						'Finish or cancel the current turn before changing settings.',
+					);
+				if (!runtimeHandlers.updateSettings)
+					throw new Error('Runtime settings are unavailable.');
+				sessionBusy = true;
+				publishState();
+				try {
+					await runtimeHandlers.updateSettings(event);
 				} finally {
 					sessionBusy = false;
 					publishState();
@@ -328,6 +479,8 @@ export function createWebRuntimeBridge(
 						id: message.id ?? `session-${result.session.id}-${index}`,
 					}));
 					session = result.session;
+					notices = [];
+					work = [];
 					sessionRevision++;
 				} finally {
 					sessionBusy = false;
@@ -348,10 +501,13 @@ export function createWebRuntimeBridge(
 				try {
 					// Clear the active session before deleting it so later autosaves
 					// cannot recreate the deleted conversation.
+					refreshSession();
 					if (session?.id === event.sessionId) {
 						await runtimeHandlers.resetSession();
 						messages = [];
 						session = null;
+						notices = [];
+						work = [];
 						sessionRevision++;
 					}
 					await runtimeHandlers.deleteSession(event.sessionId);
@@ -375,12 +531,18 @@ export function createWebRuntimeBridge(
 			previousAssistantContent = '';
 			assistantId = null;
 			responseCounter = 0;
-			messages.push({
-				id: event.id,
-				role: 'user',
-				content: event.text,
-				images: event.images,
-			});
+			reasoningId = null;
+			reasoningCounter = 0;
+			const isLocalAction =
+				event.text.trim().startsWith('/') || event.text.trim().startsWith('!');
+			if (!isLocalAction)
+				messages.push({
+					id: event.id,
+					role: 'user',
+					content: event.text,
+					images: event.images,
+					createdAt: new Date().toISOString(),
+				});
 			publishState();
 
 			try {
@@ -393,7 +555,7 @@ export function createWebRuntimeBridge(
 					error => failActiveTurn(error, event.id),
 				);
 			} catch (error) {
-				messages.pop();
+				if (!isLocalAction) messages.pop();
 				clearActiveTurn();
 				publishState();
 				throw error;
@@ -402,12 +564,41 @@ export function createWebRuntimeBridge(
 
 		bindRuntimeHandlers(handlers) {
 			runtimeHandlers = handlers;
+			refreshSession();
+			publishState();
 
 			return () => {
 				if (runtimeHandlers === handlers) {
 					runtimeHandlers = null;
+					publishState();
 				}
 			};
+		},
+
+		syncSession(nextSession, nextMessages) {
+			const previousSession = session;
+			syncSession(nextSession, nextMessages);
+			// Token delivery uses deltas. History commits during an active turn
+			// must not force full DOM/markdown work on every model step.
+			if (
+				!activeTurnId ||
+				previousSession?.id !== session?.id ||
+				previousSession?.title !== session?.title
+			)
+				publishState();
+		},
+		setRuntimeStatus(status) {
+			if (runtimeStatus === status) return;
+			runtimeStatus = status;
+			publishState();
+		},
+		setSettings(next) {
+			settings = next;
+			publishState();
+		},
+		publishNotice(message) {
+			notices.push({role: 'system', text: message, metaText: 'Local UI'});
+			broadcastEvent({type: 'notice', message});
 		},
 
 		publishAssistantContent(content) {
@@ -426,7 +617,12 @@ export function createWebRuntimeBridge(
 					responseCounter++ === 0
 						? activeTurnId
 						: `${activeTurnId}:response:${responseCounter}`;
-				messages.push({id: assistantId, role: 'assistant', content: ''});
+				messages.push({
+					id: assistantId,
+					role: 'assistant',
+					content: '',
+					createdAt: new Date().toISOString(),
+				});
 			}
 			const extendsContent = content.startsWith(previousAssistantContent);
 			const delta = extendsContent
@@ -446,21 +642,62 @@ export function createWebRuntimeBridge(
 				});
 			}
 		},
-
-		publishToolStarted(id, name) {
-			if (!activeTurnId) {
+		publishReasoning(content) {
+			if (!activeTurnId) return;
+			if (!content) {
+				reasoningId = null;
 				return;
 			}
-
-			broadcastEvent({type: 'tool_started', id, name});
+			const summary = currentWork();
+			if (!summary) return;
+			if (!reasoningId) {
+				reasoningId = `${activeTurnId}:thought:${++reasoningCounter}`;
+				summary.reasoning.push({id: reasoningId, text: ''});
+			}
+			const thought = summary.reasoning.find(item => item.id === reasoningId);
+			if (thought) thought.text = content;
+			broadcastEvent({type: 'work_update', work: structuredClone(summary)});
 		},
 
-		publishToolFinished(id, name, ok) {
+		publishToolStarted(id, name, arguments_) {
 			if (!activeTurnId) {
 				return;
 			}
 
-			broadcastEvent({type: 'tool_finished', id, name, ok});
+			const summary = currentWork();
+			summary?.tools.push({id, name, status: 'running', arguments: arguments_});
+			broadcastEvent({
+				type: 'tool_started',
+				id,
+				name,
+				...(arguments_ ? {arguments: arguments_} : {}),
+			});
+		},
+
+		publishToolFinished(id, name, ok, output) {
+			if (!activeTurnId) {
+				return;
+			}
+
+			const summary = currentWork();
+			const tool = summary?.tools.find(tool => tool.id === id);
+			if (tool) {
+				tool.status = ok ? 'completed' : 'failed';
+				tool.output = output?.slice(0, 12000);
+			} else
+				summary?.tools.push({
+					id,
+					name,
+					status: ok ? 'completed' : 'failed',
+					output: output?.slice(0, 12000),
+				});
+			broadcastEvent({
+				type: 'tool_finished',
+				id,
+				name,
+				ok,
+				...(output ? {output: output.slice(0, 12000)} : {}),
+			});
 		},
 
 		hasActiveBrowserTurn() {
@@ -492,6 +729,7 @@ export function createWebRuntimeBridge(
 							id,
 							toolName: request.toolName,
 							arguments: sanitizeJsonRecord(request.arguments),
+							...(request.toolCallId ? {toolCallId: request.toolCallId} : {}),
 							...(request.context ? {context: request.context} : {}),
 						},
 					},

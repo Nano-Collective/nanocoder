@@ -66,6 +66,8 @@ export interface AppProps {
 	 * runtime remains the owner of providers, tools, and conversation state.
 	 */
 	webRuntimeBridge?: WebRuntimeBridge;
+	/** Local browser URL displayed inside the terminal's fixed-height footer. */
+	webUrl?: string;
 }
 
 /**

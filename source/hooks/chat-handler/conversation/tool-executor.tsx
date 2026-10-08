@@ -46,13 +46,18 @@ const executeOne = async (
 	const {publishWebToolFinished, publishWebToolStarted} = await import(
 		'@/web/tool-lifecycle'
 	);
-	publishWebToolStarted(toolCall.id, toolCall.function.name);
+	publishWebToolStarted(
+		toolCall.id,
+		toolCall.function.name,
+		toolCall.function.arguments,
+	);
 	try {
 		const result = await processToolUse(toolCall);
 		publishWebToolFinished(
 			toolCall.id,
 			toolCall.function.name,
 			!isToolResultError(result),
+			result.content,
 		);
 		return {toolCall, result};
 	} catch (error) {
@@ -116,7 +121,11 @@ export const executeApprovedTool = async (
 		const {publishWebToolFinished, publishWebToolStarted} = await import(
 			'@/web/tool-lifecycle'
 		);
-		publishWebToolStarted(toolCall.id, toolCall.function.name);
+		publishWebToolStarted(
+			toolCall.id,
+			toolCall.function.name,
+			toolCall.function.arguments,
+		);
 		try {
 			const execution = await executeBashStreaming(
 				toolCall,
@@ -128,6 +137,7 @@ export const executeApprovedTool = async (
 				toolCall.id,
 				toolCall.function.name,
 				!isToolResultError(execution.result),
+				execution.result.content,
 			);
 			return execution;
 		} catch (error) {

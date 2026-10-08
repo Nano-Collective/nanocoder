@@ -150,8 +150,8 @@ test('web mode renders actionable approval and question cards', t => {
 test('web mode shows live tool running and completed status', t => {
 	const page = renderWebModePage();
 
-	t.true(page.includes("'system tool-status', 'Running tool: ' + message.name"));
-	t.true(page.includes("'Tool finished: ' + message.name"));
+	t.true(page.includes('function updateWorkTool(turnId, tool)'));
+	t.true(page.includes("status: message.ok ? 'completed' : 'failed'"));
 });
 
 test('web mode page ships a light theme that cannot affect the dark default', t => {
@@ -173,7 +173,7 @@ test('web mode page toggles and persists the theme', t => {
 	t.true(page.includes("id=\"themeToggleButton\""));
 	t.true(page.includes('function applyTheme(theme)'));
 	t.true(page.includes("document.documentElement.dataset.theme = theme"));
-	t.true(page.includes("window.localStorage.setItem(themeStorageKey, theme)"));
+	t.true(page.includes('writePreference(themeStorageKey, theme)'));
 	t.true(
 		page.includes(
 			"return 'light'; // Default to light mode (Organisation theme)",
@@ -199,7 +199,7 @@ test('web mode page collapses and persists the sidebar', t => {
 			"applySidebarCollapsed(!appShell.classList.contains('sidebar-collapsed'))",
 		),
 	);
-	t.true(page.includes('window.localStorage.setItem(sidebarStorageKey'));
+	t.true(page.includes('writePreference(sidebarStorageKey'));
 });
 
 test('web mode page reduces metadata label weight so it does not compete with primary text', t => {
@@ -277,7 +277,7 @@ test('web mode page handles the sessions and session_loaded server events', t =>
 	t.true(page.includes("if (message.type === 'sessions') {"));
 	t.true(page.includes('renderThreadList(message.sessions)'));
 	t.true(page.includes("if (message.type === 'session_loaded') {"));
-	t.true(page.includes('applyLoadedSession(message.session, message.messages)'));
+	t.true(page.includes('The following authoritative state event applies the transcript once.'));
 });
 
 test('web mode history button reveals and refreshes the real session list', t => {

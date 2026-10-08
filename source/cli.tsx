@@ -728,7 +728,7 @@ async function main(): Promise<void> {
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now.
-		const [{render, Box, Text}, {default: App}] = await Promise.all([
+		const [{render}, {default: App}] = await Promise.all([
 			import('ink'),
 			import('@/app'),
 		]);
@@ -790,10 +790,7 @@ async function main(): Promise<void> {
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
 		const useAltScreen =
-			process.stdout.isTTY &&
-			!nonInteractiveMode &&
-			!webMode &&
-			altScreenAllowed;
+			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
 		const mouseReportingAllowed =
 			!args.includes('--no-mouse') &&
 			(args.includes('--mouse') || getMouseReporting());
@@ -968,36 +965,29 @@ async function main(): Promise<void> {
 				handler: webServer.close,
 			});
 
-			console.log('Nanocoder web mode started.');
-			console.log(`Local URL: ${webServer.url}`);
-			console.log('Press Ctrl+C to stop.');
+			if (!useAltScreen) {
+				console.log('Nanocoder web mode started.');
+				console.log(`Local URL: ${webServer.url}`);
+				console.log('Press Ctrl+C to stop.');
+			}
 		}
 
 		const result = render(
-			<Box flexDirection="column">
-				<App
-					vscodeMode={vscodeMode}
-					vscodePort={vscodePort}
-					nonInteractivePrompt={nonInteractivePrompt}
-					nonInteractiveMode={nonInteractiveMode}
-					cliProvider={cliProvider}
-					cliModel={cliModel}
-					cliMode={cliMode}
-					trustDirectory={trustDirectory}
-					altScreenActive={useAltScreen}
-					initialSession={initialSession}
-					openSessionSelectorOnStart={openSessionSelectorOnStart}
-					webRuntimeBridge={webRuntimeBridge}
-				/>
-				{webUrl && (
-					<Box flexDirection="column" paddingX={1}>
-						<Text>Web mode: {webUrl}</Text>
-						<Text dimColor>
-							Open this URL in your browser. Ctrl+C stops the server.
-						</Text>
-					</Box>
-				)}
-			</Box>,
+			<App
+				vscodeMode={vscodeMode}
+				vscodePort={vscodePort}
+				nonInteractivePrompt={nonInteractivePrompt}
+				nonInteractiveMode={nonInteractiveMode}
+				cliProvider={cliProvider}
+				cliModel={cliModel}
+				cliMode={cliMode}
+				trustDirectory={trustDirectory}
+				altScreenActive={useAltScreen}
+				initialSession={initialSession}
+				openSessionSelectorOnStart={openSessionSelectorOnStart}
+				webRuntimeBridge={webRuntimeBridge}
+				webUrl={webUrl}
+			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
 				// manager) so the exit-render handler below can paint the

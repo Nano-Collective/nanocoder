@@ -129,6 +129,7 @@ interface ProcessAssistantResponseParams {
 	setStreamingReasoning: (content: string) => void;
 	setStreamingContent: (content: string) => void;
 	onAssistantContent?: (content: string) => void;
+	onReasoningContent?: (content: string) => void;
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -245,6 +246,7 @@ export const processAssistantResponse = async (
 		setStreamingReasoning,
 		setStreamingContent,
 		onAssistantContent,
+		onReasoningContent,
 		setTokenCount,
 		setMessages,
 		addToChatQueue,
@@ -348,6 +350,7 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	onAssistantContent?.('');
 	setStreamingReasoning('');
+	onReasoningContent?.('');
 	setTokenCount(0);
 	// Drop any prior empty-response retry counter from the live area so the
 	// streaming UI for this turn renders unobstructed. The counter is only
@@ -414,6 +417,7 @@ export const processAssistantResponse = async (
 			onReasoningToken: (token: string) => {
 				streamedReasoning += token;
 				setStreamingReasoning(streamedReasoning);
+				onReasoningContent?.(streamedReasoning);
 			},
 			onPrivacyEvent,
 		},
@@ -434,6 +438,7 @@ export const processAssistantResponse = async (
 	// leak the tokens into the assistant message and conversation history.
 	const fullContent = stripThinkTags(message.content || '');
 	const fullReasoning = message.reasoning;
+	if (fullReasoning) onReasoningContent?.(fullReasoning);
 
 	// Tool extraction is layered:
 	//   - XML fallback path (toolsDisabled): parse text for XML/JSON tool calls.

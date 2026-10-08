@@ -15,6 +15,75 @@ const userMessage = (id: string, text = 'hello') => ({
 	text,
 });
 
+test('completion and delayed history commits cannot remove or shorten the streamed reply', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers({getSessionState: () => ({session: null, messages: []})}));
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishAssistantContent('Hello world');
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {messages: [{id: 'turn', role: 'user'}, {id: 'turn', role: 'assistant', content: 'Hello world'}]});
+	bridge.syncSession(null, [{role: 'user', content: 'hello'}, {role: 'assistant', content: 'Hello'}]);
+	t.like(bridge.getStateEvents()[0], {messages: [{id: 'turn', role: 'user'}, {id: 'turn', role: 'assistant', content: 'Hello world'}]});
+});
+
+test('reasoning snapshots retain multiple model steps and tool results', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishReasoning('First thought');
+	bridge.publishReasoning('');
+	bridge.publishReasoning('Second thought');
+	bridge.publishToolStarted('read', 'read_file', {path: 'README.md'});
+	bridge.publishToolFinished('read', 'read_file', true, 'Contents');
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {work: [{status: 'completed', reasoning: [{text: 'First thought'}, {text: 'Second thought'}], tools: [{id: 'read', status: 'completed', output: 'Contents'}]}]});
+});
+
+test('authoritative runtime snapshots restore resumed history and track autosaved sessions for deletion', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	let snapshot = {session: {id: 'resumed', title: 'Resumed chat', lastAccessedAt: '2026-01-01', messageCount: 1}, messages: [{role: 'user' as const, content: 'existing history'}]};
+	let resets = 0;
+	bridge.bindRuntimeHandlers(handlers({
+		getSessionState: () => snapshot,
+		resetSession: () => {resets++;},
+	}));
+	t.like(bridge.getStateEvents()[0], {runtimeReady: true, session: {id: 'resumed'}, messages: [{role: 'user', content: 'existing history'}]});
+	snapshot = {...snapshot, session: {...snapshot.session, id: 'autosaved'}};
+	await bridge.handleClientEvent({type: 'delete_session', id: 'delete', sessionId: 'autosaved'});
+	t.is(resets, 1);
+	t.like(bridge.getStateEvents()[0], {session: null, messages: []});
+});
+
+test('turn completion and slash clear reconcile the authoritative runtime transcript', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	let history = [{role: 'user' as const, content: 'old prompt'}];
+	bridge.bindRuntimeHandlers(handlers({
+		getSessionState: () => ({session: null, messages: history}),
+		submitMessage: async () => {history = [];},
+	}));
+	await bridge.handleClientEvent(userMessage('clear', '/clear'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.like(bridge.getStateEvents()[0], {activeTurnId: null, messages: []});
+});
+
+test('runtime startup status and settings failures release the browser lock', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.setRuntimeStatus('Approve directory trust in the terminal.');
+	await t.throwsAsync(bridge.handleClientEvent(userMessage('wait')), {message: 'Approve directory trust in the terminal.'});
+	bridge.bindRuntimeHandlers(handlers({updateSettings: async () => {throw new Error('Provider unavailable');}}));
+	await t.throwsAsync(bridge.handleClientEvent({type: 'update_settings', id: 'settings', provider: 'local', model: 'small', mode: 'normal'}), {message: 'Provider unavailable'});
+	t.like(bridge.getStateEvents()[0], {busy: false, runtimeReady: true});
+});
+
+test('reconnect snapshots retain tool failures and provider errors', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishToolFinished('tool', 'write_file', false);
+	bridge.failTurn(new Error('Provider failed'));
+	t.like(bridge.getStateEvents()[0], {notices: [{role: 'system error', text: 'Provider failed'}], work: [{status: 'failed', tools: [{id: 'tool', name: 'write_file', status: 'failed'}]}]});
+});
+
 test('web runtime bridge rejects messages until the runtime is ready', async t => {
 	const bridge = createWebRuntimeBridge(() => {});
 
@@ -262,7 +331,7 @@ test('web runtime bridge publishes tool lifecycle only during an active browser 
 	});
 
 	bridge.publishToolStarted('tool-1', 'read_file');
-	t.deepEqual(events, []);
+	t.deepEqual(events.filter(event => event.type !== 'state'), []);
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
 	bridge.publishToolStarted('tool-1', 'read_file');
@@ -330,7 +399,7 @@ test('web runtime bridge broadcasts the session list on list_sessions', async t 
 
 	await bridge.handleClientEvent({type: 'list_sessions', id: 'list-1'});
 
-	t.deepEqual(events, [
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
 		{
 			type: 'sessions',
 			id: 'list-1',

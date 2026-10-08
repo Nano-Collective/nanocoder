@@ -12,6 +12,35 @@ export interface WebSessionMessage {
 	role: 'user' | 'assistant';
 	content: string;
 	images?: {data: string; mediaType: string}[];
+	createdAt?: string;
+}
+
+export interface WebSettings {
+	provider: string;
+	model: string;
+	mode: string;
+	providers: {name: string; models: string[]}[];
+	modes: string[];
+}
+
+export interface WebNotice {
+	role: string;
+	text: string;
+	metaText?: string;
+}
+
+export interface WebWorkSummary {
+	id: string;
+	status: 'working' | 'completed' | 'failed';
+	startedAt: number;
+	reasoning: {id: string; text: string}[];
+	tools: {
+		id: string;
+		name: string;
+		status: 'running' | 'completed' | 'failed';
+		arguments?: Record<string, unknown>;
+		output?: string;
+	}[];
 }
 
 export type WebClientEvent =
@@ -28,7 +57,14 @@ export type WebClientEvent =
 	| {type: 'reset_session'; id: string}
 	| {type: 'list_sessions'; id: string}
 	| {type: 'load_session'; id: string; sessionId: string}
-	| {type: 'delete_session'; id: string; sessionId: string};
+	| {type: 'delete_session'; id: string; sessionId: string}
+	| {
+			type: 'update_settings';
+			id: string;
+			provider: string;
+			model: string;
+			mode: string;
+	  };
 
 export type WebServerEvent =
 	| {
@@ -38,20 +74,38 @@ export type WebServerEvent =
 			session: WebSessionSummary | null;
 			busy: boolean;
 			sessionRevision: number;
+			runtimeReady: boolean;
+			runtimeStatus: string;
+			settings: WebSettings | null;
+			notices: WebNotice[];
+			work?: WebWorkSummary[];
 	  }
 	| {type: 'interaction_closed'; id: string}
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
 	| {type: 'ack'; id: string}
 	| {type: 'assistant_delta'; id: string; text: string}
 	| {type: 'assistant_content'; id: string; text: string}
-	| {type: 'tool_started'; id: string; name: string}
-	| {type: 'tool_finished'; id: string; name: string; ok: boolean}
+	| {type: 'work_update'; work: WebWorkSummary}
+	| {
+			type: 'tool_started';
+			id: string;
+			name: string;
+			arguments?: Record<string, unknown>;
+	  }
+	| {
+			type: 'tool_finished';
+			id: string;
+			name: string;
+			ok: boolean;
+			output?: string;
+	  }
 	| {
 			type: 'approval_required';
 			id: string;
 			toolName: string;
 			arguments: Record<string, unknown>;
 			context?: string;
+			toolCallId?: string;
 	  }
 	| {
 			type: 'question_required';
@@ -62,6 +116,7 @@ export type WebServerEvent =
 	  }
 	| {type: 'turn_completed'; id: string}
 	| {type: 'error'; message: string; id?: string}
+	| {type: 'notice'; message: string}
 	| {type: 'sessions'; id: string; sessions: WebSessionSummary[]}
 	| {
 			type: 'session_loaded';
@@ -120,9 +175,14 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 				type: 'user_message',
 				id: parsed.id,
 				text: parsed.text,
-				images: parsed.images as
-					| {data: string; mediaType: string}[]
-					| undefined,
+				images: (
+					parsed.images as {data: string; mediaType: string}[] | undefined
+				)?.map(image => ({
+					...image,
+					data: image.data.startsWith('data:')
+						? image.data.slice(image.data.indexOf(',') + 1)
+						: image.data,
+				})),
 			};
 		case 'cancel':
 			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
@@ -212,6 +272,25 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 				type: 'delete_session',
 				id: parsed.id,
 				sessionId: parsed.sessionId,
+			};
+		case 'update_settings':
+			if (
+				typeof parsed.id !== 'string' ||
+				!parsed.id ||
+				typeof parsed.provider !== 'string' ||
+				!parsed.provider ||
+				typeof parsed.model !== 'string' ||
+				!parsed.model ||
+				typeof parsed.mode !== 'string' ||
+				!parsed.mode
+			)
+				throw new Error('Settings id, provider, model and mode are required.');
+			return {
+				type: 'update_settings',
+				id: parsed.id,
+				provider: parsed.provider,
+				model: parsed.model,
+				mode: parsed.mode,
 			};
 		default:
 			throw new Error(`Unsupported web event type: ${parsed.type}.`);
