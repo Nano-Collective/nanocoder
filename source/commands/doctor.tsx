@@ -428,11 +428,13 @@ export function Doctor({report}: {report: DoctorReport}) {
 			{report.hooks.status === 'error' ? (
 				<SectionError message={report.hooks.error} />
 			) : report.hooks.data.length === 0 ? (
-				<Text color={colors.secondary}>• No lifecycle hooks configured</Text>
+				<Text color={colors.secondary}>
+					{ICON_BULLET} No lifecycle hooks configured
+				</Text>
 			) : (
 				report.hooks.data.map(hook => (
 					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
-						• {hook.event}: {hook.label}
+						{ICON_BULLET} {hook.event}: {hook.label}
 						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
 					</Text>
 				))
@@ -442,11 +444,13 @@ export function Doctor({report}: {report: DoctorReport}) {
 			{report.formatters.status === 'error' ? (
 				<SectionError message={report.formatters.error} />
 			) : report.formatters.data.length === 0 ? (
-				<Text color={colors.secondary}>• No formatters configured</Text>
+				<Text color={colors.secondary}>
+					{ICON_BULLET} No formatters configured
+				</Text>
 			) : (
 				report.formatters.data.map(formatter => (
 					<Text key={formatter.label} color={colors.text}>
-						• {formatter.label} • {formatter.match.join(', ')}
+						{ICON_BULLET} {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
 			)}

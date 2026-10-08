@@ -1,12 +1,6 @@
 import {Box, Text} from 'ink';
 import React, {useEffect, useState} from 'react';
-import {
-	ICON_BULLET,
-	ICON_MCP_HTTP,
-	ICON_MCP_STDIO,
-	ICON_MCP_UNKNOWN,
-	ICON_MCP_WEBSOCKET,
-} from '@/components/ui/icons';
+import {ICON_BULLET, mcpTransportIcon} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -14,23 +8,6 @@ import {getToolManager} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
-
-// Helper function to get transport icons. Uses the consistent icon
-// vocabulary (ASCII brackets) rather than full-emoji glyphs so the
-// symbols align cleanly across terminals — emoji transport icons were
-// rendered as 2-column glyphs by string-width and broke MCP-list alignment.
-function getTransportIcon(transportType: string): string {
-	switch (transportType.toLowerCase()) {
-		case 'stdio':
-			return ICON_MCP_STDIO;
-		case 'websocket':
-			return ICON_MCP_WEBSOCKET;
-		case 'http':
-			return ICON_MCP_HTTP;
-		default:
-			return ICON_MCP_UNKNOWN;
-	}
-}
 
 interface MCPProps {
 	toolManager: ToolManager | null;
@@ -116,7 +93,7 @@ export function MCP({toolManager}: MCPProps) {
 							mcpClient?.getServerResources(serverName) || [];
 						const serverPrompts = mcpClient?.getServerPrompts(serverName) || [];
 						const serverInfo = toolManager?.getServerInfo(serverName);
-						const transportIcon = getTransportIcon(
+						const transportIcon = mcpTransportIcon(
 							serverInfo?.transport || 'stdio',
 						);
 

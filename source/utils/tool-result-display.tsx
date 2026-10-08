@@ -289,7 +289,7 @@ export async function displayToolResult(
 	const errorMessage = getToolErrorMessage(result);
 
 	// Compact mode: condense failures to a short red one-liner
-	// ("⚒ write_file failed") instead of the full error output.
+	// ("› write_file failed") instead of the full error output.
 	// The model still receives the full error in conversation history,
 	// so this only trims the user-facing display.
 	if (

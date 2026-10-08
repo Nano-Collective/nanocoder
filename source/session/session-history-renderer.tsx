@@ -83,7 +83,7 @@ function isErrorResult(content: string | undefined): boolean {
 
 /**
  * Compact one-line summary of a historical tool call and its result. Mirrors the
- * live compact-tool look (the ⚒ glyph in tool color) without re-running the
+ * live compact-tool look (the tool glyph in tool color) without re-running the
  * tool's formatter — replaying history must be side-effect free (formatters can
  * touch VS Code, the filesystem, etc.) and cheap.
  */

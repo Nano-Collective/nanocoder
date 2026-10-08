@@ -25,12 +25,9 @@ import {
 	ICON_TREE_COLLAPSED,
 	ICON_TREE_EXPANDED,
 	ICON_WARNING,
-	MODE_GLYPHS,
-	NANO_COLLECTIVE_BRAND,
-	TASK_STATUS_ICONS,
 	mcpTransportIcon,
-	toolTitle,
 } from '@/components/ui/icons';
+import stringWidth from 'string-width';
 import {width} from '@/utils/width';
 
 // Every icon glyph must measure as a single column under our internal
@@ -66,31 +63,14 @@ const singleColumnGlyphs: ReadonlyArray<readonly [string, string]> = [
 
 // Note: ICON_GOODBYE ('ツ', EAW=W) is intentionally excluded from singleColumnGlyphs
 // because it is a Wide glyph that consumes 2 columns regardless of ambiguousIsNarrow.
-// MODE_GLYPHS are also excluded because some modes (like 'auto-accept' and 'yolo')
-// intentionally span multiple columns.
+// The development-mode labels are also excluded because some modes (like
+// 'auto-accept' and 'yolo') intentionally span multiple columns.
 
 for (const [name, glyph] of singleColumnGlyphs) {
 	test(`icons › ${name} measures as a single column internally`, t => {
 		t.is(width(glyph), 1, `${name} (${glyph}) must measure as 1 column under our string-width config`);
 	});
 }
-
-test('icons › NANO_COLLECTIVE_BRAND is Nano Collective purple', t => {
-	t.is(NANO_COLLECTIVE_BRAND, '#8373F7');
-});
-
-test('icons › MODE_GLYPHS covers every development mode', t => {
-	const expected = ['normal', 'auto-accept', 'yolo', 'plan', 'headless'];
-	for (const mode of expected) {
-		t.truthy(MODE_GLYPHS[mode], `${mode} must have a glyph`);
-	}
-});
-
-test('icons › TASK_STATUS_ICONS covers every task status', t => {
-	t.is(TASK_STATUS_ICONS.pending, ICON_TASK_PENDING);
-	t.is(TASK_STATUS_ICONS.in_progress, ICON_TASK_IN_PROGRESS);
-	t.is(TASK_STATUS_ICONS.completed, ICON_TASK_COMPLETE);
-});
 
 test('icons › mcpTransportIcon maps every supported transport', t => {
 	t.is(mcpTransportIcon('stdio'), ICON_MCP_STDIO);
@@ -100,6 +80,19 @@ test('icons › mcpTransportIcon maps every supported transport', t => {
 	t.is(mcpTransportIcon(''), ICON_MCP_UNKNOWN);
 });
 
-test('icons › toolTitle composes the canonical header', t => {
-	t.is(toolTitle('execute_bash'), `${ICON_TOOL} execute_bash`);
-});
+// Glyphs that carry state a user must not misread are chosen so they stay one
+// column even in a CJK-configured terminal, where East-Asian-Ambiguous glyphs
+// (such as `○` or `◎`) are drawn two columns wide.
+const narrowEverywhere: ReadonlyArray<readonly [string, string]> = [
+	['ICON_WARNING', ICON_WARNING],
+	['ICON_ERROR', ICON_ERROR],
+	['ICON_SUCCESS', ICON_SUCCESS],
+	['ICON_DIRTY', ICON_DIRTY],
+	['ICON_LSP_NOT_READY', ICON_LSP_NOT_READY],
+];
+
+for (const [name, glyph] of narrowEverywhere) {
+	test(`icons › ${name} is one column even where ambiguous glyphs are wide`, t => {
+		t.is(stringWidth(glyph, {ambiguousIsNarrow: false}), 1);
+	});
+}
