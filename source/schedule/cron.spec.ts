@@ -78,6 +78,11 @@ test('formatCronHuman reads a 6-field expression with seconds', t => {
 	t.is(formatCronHuman('30 0 9 * * *'), 'daily at 9:00');
 });
 
+test('formatCronHuman returns raw expression for 7-field expressions with a year', t => {
+	// A trailing year field is not described: return the input unchanged
+	t.is(formatCronHuman('0 0 9 * * * 2025'), '0 0 9 * * * 2025');
+});
+
 test('formatCronHuman formats every minute', t => {
 	t.is(formatCronHuman('* * * * *'), 'every minute');
 });

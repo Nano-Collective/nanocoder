@@ -30,16 +30,14 @@ export function getNextRunTime(expression: string): Date | null {
  * Formats a cron expression into a human-readable description.
  *
  * Accepts both the traditional five-field form (minute hour day month weekday)
- * and croner's extended forms where a leading seconds field and an optional
- * trailing year field may be present.
+ * and croner's extended form with a leading seconds field.
  */
 export function formatCronHuman(expression: string): string {
 	const parts = expression.trim().split(/\s+/);
-	if (parts.length < 5) return expression;
+	if (parts.length < 5 || parts.length > 6) return expression;
 
 	// A leading seconds field shifts every following field by one.
-	const sixField = parts.length >= 6;
-	const offset = sixField ? 1 : 0;
+	const offset = parts.length === 6 ? 1 : 0;
 	const [minute, hour, dayOfMonth, month, dayOfWeek] = [
 		parts[offset],
 		parts[offset + 1],
