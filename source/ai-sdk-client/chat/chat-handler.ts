@@ -59,6 +59,7 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import type {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
 	buildProviderOptions,
@@ -85,6 +86,8 @@ export interface ChatHandlerParams {
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	/** Compares each request with the previous one to log prompt-prefix breaks. */
+	prefixTracker?: PrefixTracker;
 }
 
 /**
@@ -107,6 +110,7 @@ export async function handleChat(
 		privacySessionMapRef,
 		privacyEnabled,
 		onPrivacyEvent,
+		prefixTracker,
 	} = params;
 	const logger = getLogger();
 
@@ -205,6 +209,31 @@ export async function handleChat(
 			const modelMessages = promptCaching
 				? withCacheBreakpoints(convertedMessages, finalSystemContent)
 				: convertedMessages;
+
+			if (prefixTracker) {
+				try {
+					// Fingerprint the logical prompt (system + tools + converted
+					// history), not `modelMessages`: the Anthropic cache breakpoints
+					// move to the newest message by design, so including them would
+					// report a break on every single turn.
+					const divergence = await prefixTracker.record(
+						finalSystemContent,
+						aiTools,
+						convertedMessages,
+					);
+					logger.debug('Prompt prefix stability', {
+						...divergence,
+						model: currentModel,
+						correlationId,
+						provider: providerConfig.name,
+					});
+				} catch (error) {
+					// Diagnostics only: never let fingerprinting fail a request.
+					logger.debug('Prompt prefix tracking failed', {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
