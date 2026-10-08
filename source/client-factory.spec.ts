@@ -16,6 +16,7 @@ console.log('\nclient-factory.spec.ts');
 // Store originals for restoration
 const originalFetch = globalThis.fetch;
 const originalCwd = process.cwd;
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
 
 // Create a temporary test directory
 const testDir = join(tmpdir(), `nanocoder-client-factory-test-${Date.now()}`);
@@ -75,6 +76,11 @@ test.afterEach(() => {
 	globalThis.fetch = originalFetch;
 	// Restore original cwd
 	process.cwd = originalCwd;
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
 });
 
 test.after.always(() => {
@@ -749,6 +755,7 @@ test.serial(
 		// Create config with multiple providers
 		const configDir = join(testDir, 'requested-fallback-test');
 		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
 
 		createTestConfig(
 			{
@@ -792,6 +799,7 @@ test.serial(
 		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
 		const configDir = join(testDir, 'strict-requested-provider-test');
 		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
 		createTestConfig(
 			{
 				nanocoder: {
