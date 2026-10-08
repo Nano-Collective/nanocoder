@@ -1,3 +1,5 @@
+import {stripTypeScriptTypes} from 'node:module';
+import vm from 'node:vm';
 import type {IslandSplicingResult, SyntaxIsland} from '@/types/syntax-island';
 
 /**
@@ -124,6 +126,47 @@ export function validateDelimiterBalance(code: string): {
 }
 
 /**
+ * Validates syntax of replacement body inside a synthetic AST wrapper using TS type stripping & VM syntax analysis.
+ */
+function validateSyntheticWrapper(
+	body: string,
+	island: SyntaxIsland,
+): {valid: boolean; error?: string} {
+	const cleanSignature = island.signature.replace(
+		/^\s*export\s+(?:default\s+)?/,
+		'',
+	);
+	let wrapped = '';
+
+	if (island.kind === 'method') {
+		wrapped = `class __SyntheticContainer__ {\n  ${cleanSignature} {\n${body}\n  }\n}`;
+	} else if (island.kind === 'class') {
+		wrapped = `${cleanSignature} {\n${body}\n}`;
+	} else if (island.kind === 'arrow') {
+		wrapped = `${cleanSignature} {\n${body}\n};`;
+	} else {
+		// function
+		wrapped = `${cleanSignature} {\n${body}\n}`;
+	}
+
+	try {
+		if (typeof stripTypeScriptTypes === 'function') {
+			const stripped = stripTypeScriptTypes(wrapped);
+			new vm.Script(stripped);
+		} else {
+			new vm.Script(wrapped);
+		}
+		return {valid: true};
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			valid: false,
+			error: message,
+		};
+	}
+}
+
+/**
  * Normalizes replacement body: if the model wrapped the body in outer `{ ... }`, unwrap it.
  */
 function normalizeReplacementBody(rawBody: string): string {
@@ -155,6 +198,16 @@ export function spliceSyntaxIsland(
 		return {
 			success: false,
 			error: `Invalid syntax in replacement body: ${bodyValidation.error}`,
+			island,
+		};
+	}
+
+	// Validate synthetic wrapper syntax / compilation
+	const syntheticValidation = validateSyntheticWrapper(normalizedBody, island);
+	if (!syntheticValidation.valid) {
+		return {
+			success: false,
+			error: `Replacement body failed syntax check: ${syntheticValidation.error}`,
 			island,
 		};
 	}

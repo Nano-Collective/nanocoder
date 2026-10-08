@@ -1,10 +1,4 @@
-export type SyntaxIslandKind =
-	| 'function'
-	| 'method'
-	| 'component'
-	| 'arrow'
-	| 'class'
-	| 'block';
+export type SyntaxIslandKind = 'function' | 'method' | 'arrow' | 'class';
 
 export interface SyntaxIsland {
 	name: string;

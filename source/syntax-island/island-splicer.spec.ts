@@ -68,3 +68,37 @@ test('spliceSyntaxIsland rejects syntactically invalid replacement body', (t) =>
 	t.false(result.success);
 	t.truthy(result.error);
 });
+
+test('spliceSyntaxIsland rejects expression bracket mismatch like return (foo + bar]', (t) => {
+	const original = `export function calculate(foo: number, bar: number): number { return foo + bar; }`;
+	const extraction = findSyntaxIsland(original, 'calculate');
+	t.true(extraction.found);
+
+	const malformedBody = `return (foo + bar];`;
+	const result = spliceSyntaxIsland(original, extraction.island!, malformedBody);
+	t.false(result.success);
+	t.truthy(result.error);
+	t.true(result.error?.includes('syntax') || result.error?.includes('Expected'));
+});
+
+test('spliceSyntaxIsland correctly validates and splices TypeScript class method', (t) => {
+	const original = `
+class Service {
+	public async execute<T>(payload: T): Promise<T> {
+		return payload;
+	}
+}
+`;
+	const extraction = findSyntaxIsland(original, 'execute');
+	t.true(extraction.found);
+
+	const validBody = `
+		const timestamp: number = Date.now();
+		console.log('executing at', timestamp);
+		return payload;
+`;
+	const result = spliceSyntaxIsland(original, extraction.island!, validBody);
+	t.true(result.success);
+	t.truthy(result.newContent);
+	t.true(result.newContent?.includes('const timestamp: number = Date.now();'));
+});
