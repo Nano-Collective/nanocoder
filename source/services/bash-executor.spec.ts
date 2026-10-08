@@ -1,6 +1,10 @@
-import test from 'ava';
-import {readFileSync} from 'node:fs';
+import test, {type ExecutionContext} from 'ava';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import { BashExecutor } from './bash-executor';
+import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
 console.log(`\nbash-executor.spec.ts`);
 
@@ -747,3 +751,67 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 
 	await promise;
 });
+
+// cmd.exe parses its command line itself, so Node's default argv quoting turns
+// every inner `"` into `\"` and mangles the command (#1663). These need a real
+// cmd.exe, so they only run on Windows.
+const cmdQuotingTest = process.platform === 'win32' ? test : test.skip;
+
+/* c8 ignore start -- the callbacks run in the Windows CI job */
+async function runInCwd(command: string, cwd?: string) {
+	if (cwd) setSessionCwd(cwd);
+	try {
+		return await createExecutor().execute(command).promise;
+	} finally {
+		resetSessionCwd();
+	}
+}
+
+function makeRepo(t: ExecutionContext): string {
+	const repo = mkdtempSync(join(tmpdir(), 'nc-quote-'));
+	t.teardown(() => rmSync(repo, {recursive: true, force: true}));
+	for (const args of [
+		['init', '-q'],
+		['config', 'user.name', 'Test'],
+		['config', 'user.email', 'test@example.com'],
+	]) {
+		execFileSync('git', args, {cwd: repo});
+	}
+	return repo;
+}
+
+cmdQuotingTest('cmd.exe quoting - echo keeps its quotes', async t => {
+	const result = await runInCwd('echo "hello world"');
+	t.is(result.fullOutput.trim(), '"hello world"');
+});
+
+// Previously exited 0 with no output at all.
+cmdQuotingTest('cmd.exe quoting - node -e runs its script', async t => {
+	const result = await runInCwd('node -e "console.log(1+1)"');
+	t.is(result.fullOutput.trim(), '2');
+});
+
+cmdQuotingTest('cmd.exe quoting - git commit takes a multi-word message', async t => {
+	const repo = makeRepo(t);
+	const result = await runInCwd('git commit --allow-empty -m "fix the bug"', repo);
+	t.is(result.exitCode, 0, result.stderr);
+	const subject = execFileSync('git', ['log', '-1', '--format=%s'], {
+		cwd: repo,
+		encoding: 'utf8',
+	});
+	t.is(subject.trim(), 'fix the bug');
+});
+
+cmdQuotingTest('cmd.exe quoting - git log keeps its quoted format', async t => {
+	const repo = makeRepo(t);
+	execFileSync('git', ['commit', '--allow-empty', '-m', 'fix the bug'], {cwd: repo});
+	const result = await runInCwd('git log -1 --format="%h %s"', repo);
+	t.is(result.exitCode, 0, result.stderr);
+	t.regex(result.fullOutput.trim(), /^[0-9a-f]+ fix the bug$/);
+});
+
+cmdQuotingTest('cmd.exe quoting - & still chains commands', async t => {
+	const result = await runInCwd('echo a & echo b');
+	t.deepEqual(result.fullOutput.trim().split(/\s*\r?\n/), ['a', 'b']);
+});
+/* c8 ignore stop */
