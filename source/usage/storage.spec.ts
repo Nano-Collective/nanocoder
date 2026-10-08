@@ -3,12 +3,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
 import type {SessionUsage, TokenBreakdown, UsageData} from '../types/usage.js';
+import {publishFileNoClobber} from '../utils/atomic-write.js';
 import {
 	addSession,
 	clearUsageData,
 	getLastNDaysAggregate,
 	getTodayAggregate,
-	publishFileNoClobber,
 	readUsageData,
 	writeUsageData,
 } from './storage.js';
@@ -164,11 +164,15 @@ test('migration skips when new file already exists', t => {
 	t.true(fs.existsSync(newFilePath));
 });
 
-test('migration never overwrites a newer destination file (concurrent-migration race)', t => {
-	// Regression: two processes racing the one-time migration must not let
-	// the loser paste its stale legacy copy over the winner's fresher file.
-	// Simulate the post-race state directly: a newer usage.json already sits
-	// at the destination while a stale legacy copy still exists.
+test('migration preserves an existing usage.json when a legacy file is also present', t => {
+	// Steady state, not the race: the destination already exists, so the
+	// migration fast path adopts it without entering the publish step.
+	// The concurrent-publish path itself (destination appearing between the
+	// exists check and the publish) cannot be staged single-threaded —
+	// link(2) atomicity is the arbiter there — so it is covered at the
+	// seam where old and new code differ: `publishFileNoClobber keeps the
+	// existing file when a peer won the race` fails against a copy-based
+	// implementation and passes against the link-based one.
 	const legacyConfigDir = path.join(os.tmpdir(), 'nanocoder-legacy-config-race');
 	fs.mkdirSync(legacyConfigDir, {recursive: true});
 	const legacyFilePath = path.join(legacyConfigDir, 'usage.json');
