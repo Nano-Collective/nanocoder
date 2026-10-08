@@ -3,6 +3,7 @@
  * Persists usage statistics to the app data directory
  */
 
+import {randomUUID} from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath, getConfigPath} from '@/config/paths';
@@ -44,25 +45,25 @@ function getUsageFilePath(): string {
 				fs.mkdirSync(appDataDir, {recursive: true});
 			}
 
-			try {
-				fs.renameSync(legacyPath, newPath);
-				logInfo(`Migrated usage data to new location: ${newPath}`);
-			} catch (renameError) {
-				// Fallback if rename/move fails: copy then best-effort delete
-				logWarning(
-					`Could not move usage file (${formatError(
-						renameError,
-					)}), copying instead...`,
-				);
-				fs.copyFileSync(legacyPath, newPath);
+			// No-clobber publish: if a concurrent process already migrated
+			// (or wrote) usage data, newPath exists and we adopt it
+			// untouched. The hard link inside is atomic and raises EEXIST
+			// when the destination appeared concurrently, so two racers can
+			// never both publish — the loser keeps the winner's fresher
+			// file instead of overwriting it with this stale copy.
+			if (publishFileNoClobber(newPath, fs.readFileSync(legacyPath))) {
 				try {
 					fs.unlinkSync(legacyPath);
-					logInfo(`Successfully migrated usage data to: ${newPath}`);
 				} catch {
 					logWarning(
 						`Migrated usage data to new location, but could not remove old file at ${legacyPath}. You may want to manually delete it.`,
 					);
 				}
+				logInfo(`Migrated usage data to new location: ${newPath}`);
+			} else {
+				logInfo(
+					`Usage data already present at ${newPath}; keeping it and leaving legacy file in place.`,
+				);
 			}
 
 			return newPath;
@@ -77,6 +78,70 @@ function getUsageFilePath(): string {
 	}
 
 	return newPath;
+}
+
+/**
+ * Best-effort durability sync. Failures must never fail the surrounding
+ * operation (e.g. directory fsync on Windows), so all errors are swallowed
+ * — the data itself is already fully written either way.
+ */
+function fsyncBestEffort(targetPath: string): void {
+	try {
+		const fd = fs.openSync(targetPath, 'r');
+		try {
+			fs.fsyncSync(fd);
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch {
+		// ignore — durability hint only
+	}
+}
+
+/**
+ * Publish file content at `newPath` without ever overwriting an existing
+ * destination. Returns true when this call published the file, false when a
+ * destination was already present — i.e. a concurrent process won the race
+ * and its (fresher) file is adopted untouched.
+ *
+ * The payload goes to a unique temp file in the destination directory
+ * first and is published with a hard link, which is atomic and raises
+ * EEXIST when the destination appeared concurrently. Because temp and
+ * destination share a directory, a cross-device move can never occur, so —
+ * unlike a `renameSync` + copy fallback — there is no path that overwrites
+ * the winner's file with this stale copy.
+ */
+export function publishFileNoClobber(
+	newPath: string,
+	data: string | Buffer,
+): boolean {
+	// No existsSync fast path here on purpose: the link below is the atomic
+	// arbiter, and attempting it unconditionally keeps the EEXIST branch
+	// genuinely reachable (and covered by tests) instead of dead code
+	// hiding behind a racy pre-check.
+	const tmpPath = `${newPath}.${process.pid}.${randomUUID()}.tmp`;
+	fs.writeFileSync(tmpPath, data, 'utf-8');
+	try {
+		fsyncBestEffort(tmpPath);
+		try {
+			fs.linkSync(tmpPath, newPath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') {
+				// A concurrent process published first: adopt its file.
+				return false;
+			}
+			throw error;
+		}
+		// Sync the directory so the new link entry itself is durable.
+		fsyncBestEffort(path.dirname(newPath));
+		return true;
+	} finally {
+		try {
+			fs.unlinkSync(tmpPath);
+		} catch {
+			// Already consumed by a successful link, or never created.
+		}
+	}
 }
 
 function ensureAppDataDir(): void {

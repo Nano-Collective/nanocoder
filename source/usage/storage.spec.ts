@@ -8,6 +8,7 @@ import {
 	clearUsageData,
 	getLastNDaysAggregate,
 	getTodayAggregate,
+	publishFileNoClobber,
 	readUsageData,
 	writeUsageData,
 } from './storage.js';
@@ -161,6 +162,79 @@ test('migration skips when new file already exists', t => {
 	// Legacy file should still exist (wasn't touched)
 	t.true(fs.existsSync(legacyFilePath));
 	t.true(fs.existsSync(newFilePath));
+});
+
+test('migration never overwrites a newer destination file (concurrent-migration race)', t => {
+	// Regression: two processes racing the one-time migration must not let
+	// the loser paste its stale legacy copy over the winner's fresher file.
+	// Simulate the post-race state directly: a newer usage.json already sits
+	// at the destination while a stale legacy copy still exists.
+	const legacyConfigDir = path.join(os.tmpdir(), 'nanocoder-legacy-config-race');
+	fs.mkdirSync(legacyConfigDir, {recursive: true});
+	const legacyFilePath = path.join(legacyConfigDir, 'usage.json');
+	fs.writeFileSync(
+		legacyFilePath,
+		JSON.stringify({
+			sessions: [createMockSession('legacy', 'model', 111)],
+			dailyAggregates: [],
+			totalLifetime: 111,
+			lastUpdated: Date.now(),
+		}),
+		'utf-8',
+	);
+
+	const appDataHome = process.env.XDG_DATA_HOME!;
+	const appDataDir = path.join(appDataHome, 'nanocoder');
+	fs.mkdirSync(appDataDir, {recursive: true});
+	const newFilePath = path.join(appDataDir, 'usage.json');
+	const winnerPayload = JSON.stringify({
+		sessions: [createMockSession('winner', 'model', 999)],
+		dailyAggregates: [],
+		totalLifetime: 999,
+		lastUpdated: Date.now(),
+	});
+	fs.writeFileSync(newFilePath, winnerPayload, 'utf-8');
+
+	process.env.NANOCODER_CONFIG_DIR = legacyConfigDir;
+
+	const data = readUsageData();
+
+	// The winner's file must survive byte-identical: adopted, not overwritten.
+	t.is(data.totalLifetime, 999);
+	t.is(fs.readFileSync(newFilePath, 'utf-8'), winnerPayload);
+	// The loser must not consume a legacy file it did not publish from.
+	t.true(fs.existsSync(legacyFilePath));
+});
+
+test('publishFileNoClobber publishes when the destination is absent', t => {
+	const dir = path.join(os.tmpdir(), `nanocoder-publish-${Date.now()}`);
+	fs.mkdirSync(dir, {recursive: true});
+	const dest = path.join(dir, 'usage.json');
+
+	t.true(publishFileNoClobber(dest, '{"totalLifetime": 5}'));
+	t.is(fs.readFileSync(dest, 'utf-8'), '{"totalLifetime": 5}');
+	// No temp litter left behind.
+	t.deepEqual(
+		fs.readdirSync(dir).filter(name => name.includes('.tmp')),
+		[],
+	);
+});
+
+test('publishFileNoClobber keeps the existing file when a peer won the race', t => {
+	const dir = path.join(
+		os.tmpdir(),
+		`nanocoder-publish-race-${Date.now()}`,
+	);
+	fs.mkdirSync(dir, {recursive: true});
+	const dest = path.join(dir, 'usage.json');
+	fs.writeFileSync(dest, 'winner-data', 'utf-8');
+
+	t.false(publishFileNoClobber(dest, 'stale-data'));
+	t.is(fs.readFileSync(dest, 'utf-8'), 'winner-data');
+	t.deepEqual(
+		fs.readdirSync(dir).filter(name => name.includes('.tmp')),
+		[],
+	);
 });
 
 test('migration handles missing legacy config directory gracefully', t => {
