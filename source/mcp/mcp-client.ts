@@ -1284,4 +1284,15 @@ export class MCPClient {
 	getServerTools(serverName: string): MCPTool[] {
 		return this.serverTools.get(serverName) || [];
 	}
+
+	/**
+	 * Returns all discovered MCP tools across all connected servers.
+	 */
+	getAllDiscoveredTools(): MCPTool[] {
+		const result: MCPTool[] = [];
+		for (const tools of this.serverTools.values()) {
+			result.push(...tools);
+		}
+		return result;
+	}
 }
