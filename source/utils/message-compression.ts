@@ -368,16 +368,23 @@ function extractErrorInfo(content: string): {
 	return null;
 }
 
-// Check if content indicates success
+// Check if content indicates success.
+// Only a short, single-line result counts: a multi-line log that happens to
+// contain "completed successfully" may also report failures further down,
+// so it must not be collapsed into "Result: success" (#1633).
 function isSuccess(content: string): boolean {
+	const text = content.trim();
+	if (text.includes('\n')) {
+		return false;
+	}
 	const successPatterns = [
 		/^success$/i,
 		/^ok$/i,
 		/^done$/i,
-		/completed successfully/i,
-		/no errors/i,
+		/^.{0,80}completed successfully\.?$/i,
+		/^no errors\.?$/i,
 	];
-	return successPatterns.some(pattern => pattern.test(content));
+	return successPatterns.some(pattern => pattern.test(text));
 }
 
 // Check for error in content
