@@ -286,6 +286,16 @@ test('collectEditedPaths skips failed or cancelled edits', t => {
 	t.deepEqual(paths, []);
 });
 
+test('collectEditedPaths skips a failed edit saved by an older version (⚒ prefix)', t => {
+	// Resumed sessions keep the tool results exactly as they were stored.
+	const paths = collectEditedPaths(
+		[toolCall('call_1', 'string_replace', {path: 'source/a.ts'})],
+		[toolResult('call_1', 'string_replace', '⚒ Validation failed: old_str')],
+	);
+
+	t.deepEqual(paths, []);
+});
+
 test('buildAutoDiagnosticsMessage returns null when diagnostics are clean', async t => {
 	const message = await buildAutoDiagnosticsMessage(
 		[toolCall('call_1', 'write_file', {path: 'source/a.ts'})],

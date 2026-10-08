@@ -3,6 +3,7 @@ import type {ToolHandler, ToolValidator} from '@/types/core';
 import {
 	ToolValidationError,
 	formatValidationError,
+	isValidationFailure,
 	toolErrorToContent,
 	withValidation,
 } from './tool-validation';
@@ -111,4 +112,20 @@ test('toolErrorToContent formats validation errors with detail, others generical
 
 	const generic = toolErrorToContent(new Error('boom'));
 	t.is(generic, 'Error: boom');
+});
+
+test('isValidationFailure recognises the current prefix', t => {
+	t.true(isValidationFailure(formatValidationError('bad args')));
+	t.true(isValidationFailure('! Validation failed: bad args'));
+});
+
+test('isValidationFailure recognises the prefix saved sessions from older versions use', t => {
+	t.true(isValidationFailure('⚒ Validation failed: bad args'));
+});
+
+test('isValidationFailure ignores ordinary tool output', t => {
+	t.false(isValidationFailure('Error: file not found'));
+	t.false(isValidationFailure('Validation failed'));
+	t.false(isValidationFailure('The build said: ! Validation failed'));
+	t.false(isValidationFailure(''));
 });

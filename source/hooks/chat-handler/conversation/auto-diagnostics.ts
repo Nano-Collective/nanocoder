@@ -1,4 +1,5 @@
 import type {Message, ToolCall, ToolResult} from '@/types/core';
+import {isValidationFailure} from '@/utils/tool-validation';
 
 const DIAGNOSTICS_TOOL_NAME = 'lsp_get_diagnostics';
 // Keep in sync with edit tools that produce a single changed file path.
@@ -28,7 +29,7 @@ function parseToolArgs(
 function isSuccessfulToolResult(result: ToolResult): boolean {
 	return !(
 		result.content.startsWith('Error: ') ||
-		result.content.startsWith('! Validation failed') ||
+		isValidationFailure(result.content) ||
 		result.content === 'Tool execution was cancelled by the user.'
 	);
 }

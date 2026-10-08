@@ -12,6 +12,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Message, ToolCall} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {isValidationFailure} from '@/utils/tool-validation';
 
 /**
  * Cap on how many trailing messages are replayed into scrollback on resume.
@@ -77,9 +78,7 @@ function describeToolCall(toolCall: ToolCall): string {
 /** True when a tool result string represents an error the user should notice. */
 function isErrorResult(content: string | undefined): boolean {
 	if (!content) return false;
-	return (
-		content.startsWith('Error: ') || content.startsWith('! Validation failed')
-	);
+	return content.startsWith('Error: ') || isValidationFailure(content);
 }
 
 /**

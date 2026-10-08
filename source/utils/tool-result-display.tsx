@@ -10,6 +10,7 @@ import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {isValidationFailure} from '@/utils/tool-validation';
 
 /**
  * Tools that should always show expanded (full formatter) output,
@@ -210,12 +211,12 @@ export function clearExpandableToolResults(): void {
 
 /**
  * Generic failures are prefixed "Error: "; validation failures (bad arg
- * types, failed per-tool validators) come back as "⚒ Validation failed: …".
+ * types, failed per-tool validators) come back as "! Validation failed: …".
  * Both render as a red error so the user sees the same feedback the model
  * gets. Returns undefined for a successful result.
  */
 function getToolErrorMessage(result: ToolResult): string | undefined {
-	if (result.content.startsWith('! Validation failed')) return result.content;
+	if (isValidationFailure(result.content)) return result.content;
 	if (result.content.startsWith('Error: ')) {
 		return result.content.slice('Error: '.length);
 	}
