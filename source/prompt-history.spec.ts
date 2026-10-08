@@ -578,6 +578,11 @@ test('saveHistory preserves malformed JSON history files', async t => {
 	await history.saveHistory();
 
 	t.is(
+		history.getPrevious()?.displayValue,
+		'new prompt',
+		'The new prompt should remain available in the in-session history',
+	);
+	t.is(
 		readFileSync(tempFile, 'utf8'),
 		corruptContent,
 		'A malformed history file should not be replaced by a new empty history',

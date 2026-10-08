@@ -21,7 +21,6 @@ export class PromptHistory {
 	}
 
 	async loadHistory(): Promise<void> {
-		this.canSaveHistory = true;
 		try {
 			const content = await fs.readFile(this.historyFile, 'utf8');
 
@@ -51,6 +50,7 @@ export class PromptHistory {
 					.filter(line => line.trim() !== '');
 				this.history = this.migrateStringArrayToInputState(stringEntries);
 			}
+			this.canSaveHistory = true;
 			this.currentIndex = -1;
 		} catch (error) {
 			// A missing file is a normal first-run case. Other read or parse
