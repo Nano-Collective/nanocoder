@@ -3,6 +3,7 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
+import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -100,6 +101,15 @@ const executeStringReplace = async (
 	}
 
 	const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
+
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is

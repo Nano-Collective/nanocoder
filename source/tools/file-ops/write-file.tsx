@@ -7,6 +7,7 @@ import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -66,6 +67,19 @@ const executeWriteFile = async (args: {
 	// Type guard: ensure content is string for write operation
 	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
 	const contentStr = ensureString(args.content);
+	const originalContent =
+		fileExists && previousContentCache.get(absPath) !== null
+			? (previousContentCache.get(absPath) ?? '')
+			: '';
+
+	const firewallResult = evaluateMutationEnvelope(
+		args.path,
+		originalContent,
+		contentStr,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
 
 	await writeFile(absPath, contentStr, 'utf-8');
 
