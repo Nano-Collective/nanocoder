@@ -1,7 +1,6 @@
 import cliTruncate from 'cli-truncate';
 import {useEffect, useState} from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
-import {truncatePathByColumns, width as visualWidth} from '@/utils/width';
 
 type TerminalSize = 'narrow' | 'normal' | 'wide';
 
@@ -139,12 +138,15 @@ export const useResponsiveTerminal = () => {
 	const truncate = (text: string, maxLength: number): string =>
 		cliTruncate(text, maxLength, {truncationCharacter: '...'});
 
-	// Utility to truncate path intelligently (keep end of path). Also
-	// counts visual columns rather than UTF-16 code units.
+	// Utility to truncate path intelligently (keep end of path)
 	const truncatePath = (
 		pathStr: string | undefined,
 		maxLength: number,
-	): string => truncatePathByColumns(pathStr, maxLength);
+	): string =>
+		cliTruncate(pathStr ?? '', maxLength, {
+			position: 'start',
+			truncationCharacter: '...',
+		});
 
 	return {
 		boxWidth,
@@ -155,6 +157,5 @@ export const useResponsiveTerminal = () => {
 		isWide: size === 'wide',
 		truncate,
 		truncatePath,
-		visualWidth,
 	};
 };
