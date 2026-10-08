@@ -270,4 +270,10 @@ export const lazyCommands: LazyCommand[] = [
 		description: 'Toggle voice mode and configure voice settings',
 		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
+	{
+		name: 'firewall',
+		description:
+			'Configure negative-space mutation firewall. Subcommands: status, mode <strict|lenient|disabled>, toggle <any|tests|exports>, protect <pattern>, unprotect <pattern>, reset',
+		load: () => import('@/commands/firewall').then(m => m.firewallCommand),
+	},
 ];

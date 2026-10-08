@@ -4,6 +4,7 @@ import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
+import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -267,6 +268,15 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 
 	validateBlocks(fileContent, blocks);
 	const newContent = applyBlocks(fileContent, blocks);
+
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
