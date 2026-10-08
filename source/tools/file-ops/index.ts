@@ -5,4 +5,3 @@ import {syntaxIslandEditTool} from './syntax-island-edit';
 export function getFileOpTools(): NanocoderToolExport[] {
 	return [fileOpTool, syntaxIslandEditTool];
 }
-
