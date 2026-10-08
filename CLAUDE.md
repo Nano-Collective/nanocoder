@@ -23,6 +23,7 @@ pnpm run test:lint                              # Biome lint check
 pnpm run test:lint:fix                          # Auto-fix lint/format issues
 pnpm run test:knip                              # Unused code detection
 pnpm run test:benchmark                         # Run model benchmarks
+pnpm run test:agent-eval                        # Agent evaluation harness (steps/tokens/cost per task; needs a model, not part of test:all)
 
 # VS Code extension
 pnpm run build:vscode   # Build extension to assets/nanocoder-vscode.vsix
@@ -135,6 +136,12 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **Location**: `source/**/*.spec.ts` files alongside source
 - **Serial execution**: Tests run one at a time
 - **Run single test**: `pnpm run test:ava source/path/to/file.spec.ts`
+
+## Voice Plugin
+
+The optional local voice plugin lives in `plugins/voice/`. The root build compiles it before compiling the main app and copies its runtime files into `dist/voice/`; type checks use the committed declaration shim at `source/types/nanocoder-voice.d.ts`. Run `pnpm run test:types:voice` when changing the plugin.
+
+Cloud STT sends microphone audio to the configured OpenAI endpoint only after explicitly selecting `/voice stt cloud`; local STT is the default. Hands-free mode is unavailable in yolo mode.
 
 ## Development Modes
 

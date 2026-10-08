@@ -44,6 +44,7 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
@@ -242,10 +243,19 @@ export default function App({
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
 	});
+
+	// Auto-commit writes its commit messages with the session's current client.
+	// Synced here rather than at each setClient call so /model, /provider and
+	// mode-provider switches are all picked up.
+	React.useEffect(() => {
+		setAutoCommitClient(appState.client);
+	}, [appState.client]);
 
 	// Initialize notifications config from app config (once)
 	React.useEffect(() => {
@@ -831,6 +841,8 @@ export default function App({
 							handleSubagentToolApproval={handleSubagentToolApproval}
 							pendingToolConfirmation={pendingToolConfirmation}
 							handleToolConfirmation={handleToolConfirmation}
+							pendingVoiceInstall={pendingVoiceInstall}
+							onVoiceInstallConfirm={handleVoiceInstallConfirm}
 							handleQuestionAnswer={handleQuestionAnswer}
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}

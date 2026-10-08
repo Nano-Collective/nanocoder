@@ -294,7 +294,7 @@ export type DevelopmentMode =
 	| 'architect'
 	| 'headless';
 
-export type ConnectionStatus = 'connected' | 'failed' | 'pending';
+export type ConnectionStatus = 'connected' | 'failed' | 'pending' | 'unhealthy';
 
 export interface MCPConnectionStatus {
 	name: string;

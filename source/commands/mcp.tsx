@@ -1,5 +1,5 @@
 import {Box, Text} from 'ink';
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {
 	ICON_BULLET,
 	ICON_MCP_HTTP,
@@ -37,9 +37,16 @@ interface MCPProps {
 }
 
 export function MCP({toolManager}: MCPProps) {
+	const [, refresh] = useState(0);
+	useEffect(() => {
+		if (!toolManager?.onMCPHealthChange) return;
+		return toolManager.onMCPHealthChange(() => refresh(value => value + 1));
+	}, [toolManager]);
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
-	const connectedServers = toolManager?.getConnectedServers() || [];
+	const connectedServers =
+		(toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers()) ||
+		[];
 
 	return (
 		<TitledBoxWithPreferences
@@ -93,7 +100,12 @@ export function MCP({toolManager}: MCPProps) {
 				<>
 					<Box marginBottom={1}>
 						<Text color={colors.primary}>
-							Connected MCP Servers ({connectedServers.length}):
+							{connectedServers.every(
+								serverName => toolManager?.getServerInfo(serverName)?.connected,
+							)
+								? 'Connected MCP Servers'
+								: 'MCP Servers'}{' '}
+							({connectedServers.length}):
 						</Text>
 					</Box>
 
@@ -117,6 +129,9 @@ export function MCP({toolManager}: MCPProps) {
 										<Text color={colors.secondary}>
 											({serverInfo?.transport?.toUpperCase() || 'STDIO'})
 										</Text>{' '}
+										{serverInfo?.connected
+											? `${ICON_BULLET} healthy`
+											: `${ICON_BULLET} unhealthy`}{' '}
 										{ICON_BULLET} {serverTools.length} tool
 										{serverTools.length !== 1 ? 's' : ''}
 										{serverResources.length > 0 &&

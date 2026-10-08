@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
+import stringWidth from 'string-width';
 import {ICON_GIT_BRANCH} from '@/components/ui/icons';
 import {
 	getNanocoderShape,
@@ -151,10 +152,15 @@ export default memo(function WelcomeMessage({
 		}
 	}
 
+	// Each menu row is a single line this wide: label, gap, key. A menu is only
+	// offered when that line fits the width too, or its rows wrap apart.
+	const menuWidth = (items: Array<[string, string]>) =>
+		Math.max(...items.map(([l, k]) => l.length + k.length)) + 4;
+
 	let menu: Array<[string, string]> = [];
-	if (budget >= MENU_FULL_ROWS) {
+	if (budget >= MENU_FULL_ROWS && menuWidth(MENU_FULL) <= actualWidth) {
 		menu = MENU_FULL;
-	} else if (budget >= MENU_MIN_ROWS) {
+	} else if (budget >= MENU_MIN_ROWS && menuWidth(MENU_MIN) <= actualWidth) {
 		menu = MENU_MIN;
 	}
 
@@ -164,10 +170,7 @@ export default memo(function WelcomeMessage({
 		return marker ? `${branch} (${marker})` : branch;
 	})();
 
-	const colW =
-		menu.length > 0
-			? Math.max(...menu.map(([l, k]) => l.length + k.length)) + 4
-			: 0;
+	const colW = menu.length > 0 ? menuWidth(menu) : 0;
 
 	// Full terminal width for every row so the wordmark and the text below it
 	// share one center axis — a capped box would sit left of the centered
@@ -200,7 +203,10 @@ export default memo(function WelcomeMessage({
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
 		const branchPart = `${ICON_GIT_BRANCH} ${shortBranch} · `;
-		const cwdBudget = Math.max(10, termW - branchPart.length - 3);
+		// branchPart already includes the separator, so the trailing 3 is not it:
+		// it is slack, kept from the original budget, for fonts that draw the branch glyph and ·
+		// wider than string-width reports.
+		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
 

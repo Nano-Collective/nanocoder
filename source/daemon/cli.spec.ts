@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	isDirectoryTrusted,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
@@ -261,7 +262,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.false(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					isDirectoryTrusted(root, loadPreferences()),
 					'--trust-directory is a one-shot bypass and must not persist',
 				);
 			});
@@ -289,7 +290,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.true(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					isDirectoryTrusted(root, loadPreferences()),
 				);
 			});
 		} finally {
