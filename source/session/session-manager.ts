@@ -79,6 +79,14 @@ export class SessionManager {
 	private indexWriteLock: Promise<void> = Promise.resolve();
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
+	private readonly saveListeners = new Set<
+		(session: SessionMetadata) => void
+	>();
+
+	subscribeToSaves(listener: (session: SessionMetadata) => void): () => void {
+		this.saveListeners.add(listener);
+		return () => this.saveListeners.delete(listener);
+	}
 
 	constructor(
 		sessionsDir?: string,
@@ -166,6 +174,19 @@ export class SessionManager {
 		// to prevent orphaned files if the process dies between them.
 		await this.withIndexLock(async () => {
 			const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
+			// A save may have read the heuristic title before the background
+			// generator or a manual rename committed. Preserve the newer title
+			// while holding the same lock as the write, not at call-site read time.
+			const existing = await this.readSession(session.id);
+			if (existing?.titleManuallySet && !session.titleManuallySet) {
+				session = {...session, title: existing.title, titleManuallySet: true};
+			} else if (
+				existing?.titleGenerated &&
+				!session.titleGenerated &&
+				!session.titleManuallySet
+			) {
+				session = {...session, title: existing.title, titleGenerated: true};
+			}
 
 			// Write session file atomically
 			await atomicWriteFile(
@@ -203,6 +224,13 @@ export class SessionManager {
 				0o600,
 			);
 		});
+		for (const listener of this.saveListeners) {
+			try {
+				listener(session);
+			} catch {
+				/* UI updates must not fail a completed save. */
+			}
+		}
 	}
 
 	/** Read the index file (internal helper — not locked). */

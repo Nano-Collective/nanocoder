@@ -204,6 +204,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			props.setSessionName('');
 			// Reset the key-generator session ID so keys in the new conversation
 			// are not prefixed with the cleared session's ID. A fresh random ID
 			// will be lazily generated on the next generateKey() call.
@@ -569,6 +570,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
+			props.setSessionName(session.title);
 			setKeyGeneratorSessionId(session.id);
 			void loadTasks(session.id).then(tasks => {
 				props.setLiveTaskList(tasks.length > 0 ? tasks : null);

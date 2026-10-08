@@ -10,6 +10,36 @@ import {InteractiveApp} from './interactive-app.js';
 
 console.log(`\ninteractive-app.spec.tsx – ${React.version}`);
 
+test('web URL stays inside the fullscreen frame and welcome disappears when a prompt arrives', async t => {
+	const previousRows = process.stdout.rows;
+	const previousColumns = process.stdout.columns;
+	process.stdout.rows = 24;
+	process.stdout.columns = 120;
+	t.teardown(() => {
+		process.stdout.rows = previousRows;
+		process.stdout.columns = previousColumns;
+	});
+	const url = `http://127.0.0.1:12345/?token=${'a'.repeat(64)}`;
+	let addPrompt = () => {};
+	function WebTuiHarness() {
+		const [chatComponents, setChatComponents] = React.useState<React.ReactNode[]>([]);
+		addPrompt = () => setChatComponents([<Text key="prompt">hello prompt</Text>]);
+		return <InteractiveApp {...makeProps({startChat: true, altScreenActive: true, chatComponents})} webUrl={url} staticComponents={[<Text key="welcome">welcome-marker</Text>]} />;
+	}
+	const view = renderWithTheme(<WebTuiHarness />);
+	t.teardown(() => view.unmount());
+	await new Promise(resolve => setTimeout(resolve, 30));
+	t.true(view.lastFrame()!.includes('welcome-marker'));
+	t.true(view.lastFrame()!.includes(url));
+	t.true(view.lastFrame()!.split('\n').length <= 24);
+	addPrompt();
+	await new Promise(resolve => setTimeout(resolve, 30));
+	t.false(view.lastFrame()!.includes('welcome-marker'));
+	t.true(view.lastFrame()!.includes('hello prompt'));
+	t.true(view.lastFrame()!.includes(url));
+	t.true(view.lastFrame()!.split('\n').length <= 24);
+});
+
 interface Overrides {
 	isExplorerMode?: boolean;
 	isIdeSelectionMode?: boolean;

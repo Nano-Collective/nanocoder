@@ -9,21 +9,16 @@ export function createPageNonce(): string {
 	return randomBytes(16).toString('base64');
 }
 
-export const IconSidebar = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>`;
-export const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-export const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
-export const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
-export const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
-export const IconTrash = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
-export const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
-export const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
-export const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
-export const IconMoon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>`;
-export const IconTheme = IconSun;
-export const IconCreate = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>`;
-export const IconExplore = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
-export const IconCode = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
-export const IconLearn = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>`;
+const IconSidebar = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>`;
+const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+const IconTrash = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
+const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+const IconMoon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>`;
 
 export function renderWebModePage(nonce: string = createPageNonce()): string {
 	return `<!doctype html>
@@ -43,6 +38,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		* {
 			box-sizing: border-box;
 			transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+		}
+		html.theme-switching *,
+		html.theme-switching *::before,
+		html.theme-switching *::after {
+			transition: none !important;
 		}
 		body {
 			margin: 0;
@@ -78,7 +78,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border-right: 1px solid var(--border);
 		}
 		.app-shell.sidebar-collapsed .brand span,
-		.app-shell.sidebar-collapsed #sessionMenuButton,
+		.app-shell.sidebar-collapsed #historyButton,
 		.app-shell.sidebar-collapsed .thread-list,
 		.app-shell.sidebar-collapsed .sidebar-footer {
 			display: none;
@@ -86,7 +86,16 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.app-shell.sidebar-collapsed .brand-row {
 			justify-content: center;
 			width: 100%;
+			display: contents;
 		}
+		.app-shell.sidebar-collapsed .brand-actions {
+			flex-direction: column;
+			width: 100%;
+			display: contents;
+		}
+		.app-shell.sidebar-collapsed #settingsButton { order: 1; }
+		.app-shell.sidebar-collapsed .new-chat { order: 2; }
+		.app-shell.sidebar-collapsed #sidebarToggleButton { order: 3; }
 		.app-shell.sidebar-collapsed .brand {
 			display: none;
 		}
@@ -233,28 +242,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: var(--primary);
 			transform: translateY(-1px);
 		}
-		.search-box {
-			display: flex;
-			align-items: center;
-			gap: 10px;
-			min-height: 36px;
-			padding: 0 10px;
-			border: 1px solid transparent;
-			border-radius: 8px;
-			color: var(--muted-foreground);
-			font-size: 13px;
-		}
-		.search-box input {
-			width: 100%;
-			border: 0;
-			background: transparent;
-			color: var(--foreground);
-			font: inherit;
-			outline: 0;
-		}
-		.search-box input::placeholder {
-			color: var(--muted-foreground);
-		}
 		.thread-list {
 			display: flex;
 			flex-direction: column;
@@ -273,7 +260,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			align-items: center;
 			justify-content: space-between;
 			width: 100%;
-			padding: 12px 14px;
+			padding: 7px 10px;
 			background: transparent;
 			border: 0;
 			color: var(--foreground);
@@ -431,7 +418,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			z-index: 1;
 			display: flex;
 			flex-direction: column;
-			gap: 16px;
+			gap: 10px;
 			overflow-y: auto;
 			padding: 28px 0 160px;
 			scrollbar-width: none;
@@ -445,8 +432,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 6px;
 			pointer-events: auto;
 			width: auto;
-			margin-left: max(16px, calc(50% - 340px));
-			margin-right: max(16px, calc(50% - 340px));
+			margin-left: max(16px, calc(50% - 400px));
+			margin-right: max(16px, calc(50% - 400px));
 			padding: 14px 16px;
 			border: 1px solid var(--border);
 			border-radius: 8px;
@@ -462,7 +449,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.message.user {
 			align-self: flex-end;
 			margin-left: auto;
-			margin-right: max(16px, calc(50% - 340px));
+			margin-right: max(16px, calc(50% - 400px));
 			width: auto;
 			max-width: min(600px, 85%);
 			border-radius: 20px;
@@ -473,7 +460,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			box-shadow: none;
 		}
 		.message.assistant {
-			padding: 4px 0 18px;
+			padding: 2px 0 6px;
 			border: 0;
 			background: transparent;
 			box-shadow: none;
@@ -734,7 +721,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.composer-wrap {
 			position: relative;
 			z-index: 2;
-			width: min(680px, calc(100vw - 32px));
+			width: min(800px, calc(100% - 32px));
 			margin: 0 auto 24px;
 			transition: transform 0.6s cubic-bezier(0.2, 1, 0.2, 1);
 		}
@@ -996,7 +983,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			display: none;
 		}
 		.modal-content {
-			background: var(--bg-surface);
+			background: var(--background);
 			border: 1px solid var(--border);
 			border-radius: 8px;
 			width: 100%;
@@ -1016,23 +1003,112 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			margin: 0;
 			font-size: 1.1rem;
 			font-weight: 600;
-			color: var(--text);
+			color: var(--foreground);
 		}
 		.close-button {
 			background: transparent;
-			color: var(--text-muted);
+			color: var(--muted-foreground);
 			font-size: 1.5rem;
 			padding: 0 4px;
 			line-height: 1;
 		}
 		.close-button:hover {
-			color: var(--text);
+			color: var(--foreground);
 		}
 		.modal-body {
 			padding: 20px;
-			color: var(--text-muted);
+			color: var(--muted-foreground);
 			font-size: 0.95rem;
 		}
+		.setting-group, .setting-group label {
+			display: grid;
+			gap: 8px;
+		}
+		.setting-group { gap: 16px; }
+		.setting-group select, .setting-group button {
+			font: inherit;
+			padding: 10px;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			background: var(--background);
+			color: var(--foreground);
+			min-width: 0;
+			width: 100%;
+		}
+		.setting-group button:disabled { opacity: 0.5; cursor: default; }
+		.custom-dropdown { position: relative; }
+		.dropdown-trigger { display: flex; justify-content: space-between; gap: 12px; text-align: left; }
+		.dropdown-trigger::after { content: '⌄'; }
+		.dropdown-menu {
+			position: absolute;
+			top: calc(100% + 6px);
+			left: 0;
+			right: 0;
+			max-height: 220px;
+			overflow-y: auto;
+			padding: 4px;
+			background: var(--background);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+			z-index: 10;
+		}
+		.dropdown-menu[hidden] { display: none; }
+		.setting-group .dropdown-option { border: 0; text-align: left; padding: 8px 10px; }
+		.dropdown-option:hover, .dropdown-option:focus-visible, .dropdown-option[aria-selected="true"] { background: var(--muted); }
+		.image-viewer { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.8); display: grid; place-items: center; padding: 48px 24px; }
+		.image-viewer[hidden] { display: none; }
+		.image-viewer img { max-width: 100%; max-height: 85vh; object-fit: contain; }
+		.image-viewer button {
+			position: absolute;
+			top: 16px;
+			right: 20px;
+			width: 40px;
+			height: 40px;
+			padding: 0;
+			border-radius: 0;
+			background: transparent;
+			border: 0;
+			color: white;
+			display: grid;
+			place-items: center;
+			font-size: 24px;
+			line-height: 1;
+		}
+		.image-viewer button:focus { outline: none; }
+		.image-viewer button:focus-visible { outline: 2px solid white; outline-offset: 2px; }
+		.work-summary { display: block; color: var(--muted-foreground); padding: 0; }
+		.response-loader { padding: 4px 0; }
+		.response-loader svg { width: 24px; height: 24px; animation: nc-pulse 2s ease-in-out infinite; }
+		@keyframes nc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+		@media (prefers-reduced-motion: reduce) { .response-loader svg { animation: none; } }
+		.work-summary > summary { cursor: pointer; font-weight: 500; padding: 3px 0; }
+		.work-body { display: grid; gap: 10px; padding-top: 8px; }
+		.work-summary:not([open]) > .work-body { display: none; }
+		.work-thought { white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+		.work-tools { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+		.work-tool { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+		.work-tool:last-child { border-bottom: 0; }
+		.work-tool-label { display: flex; gap: 8px; font-size: 13px; }
+		.work-tool[data-status="failed"] .work-tool-label { color: #f7768e; }
+		.work-tool[data-status="completed"] .work-tool-icon { color: #73daca; }
+		.work-tool pre { max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
+		.work-tool .interaction-card { margin-top: 10px; }
+		.message-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+		.message.user { position: relative; margin-bottom: 16px; }
+		.message.user .message-footer {
+			position: absolute;
+			top: 100%;
+			right: 4px;
+			margin-top: 4px;
+			opacity: 0;
+			pointer-events: none;
+			white-space: nowrap;
+		}
+		.message.user:hover .message-footer { opacity: 1; }
+		.message-footer button { display: grid; place-items: center; background: transparent; color: inherit; padding: 2px; border-radius: 4px; }
+		.message-footer button:hover { color: var(--foreground); background: var(--muted); }
+		.message-image, .composer-attachment img { cursor: zoom-in; }
 		
 		/* Image Upload Preview */
 		.composer-preview {
@@ -1040,6 +1116,21 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 8px;
 			padding: 8px 12px 0;
 			flex-wrap: wrap;
+			grid-column: 1 / -1;
+		}
+		.composer-preview[hidden] { display: none; }
+		.composer-attachment { position: relative; }
+		.remove-attachment {
+			position: absolute;
+			top: -6px;
+			right: -6px;
+			width: 22px;
+			height: 22px;
+			border-radius: 50%;
+			background: var(--foreground);
+			color: var(--background);
+			font-size: 16px;
+			line-height: 1;
 		}
 		.composer-preview img {
 			height: 48px;
@@ -1047,11 +1138,19 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border: 1px solid var(--border);
 			object-fit: contain;
 		}
-		.message-image {
-			max-width: 100%;
-			max-height: 300px;
-			border-radius: 6px;
+		.message-images {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
 			margin-bottom: 8px;
+		}
+		.message-image {
+			width: auto;
+			height: auto;
+			max-width: 160px;
+			max-height: 112px;
+			object-fit: contain;
+			border-radius: 6px;
 			display: block;
 			border: 1px solid var(--border);
 		}
@@ -1073,7 +1172,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: var(--text);
 		}
 	</style>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js" nonce="${nonce}"></script>
 </head>
 <body>
 	<div class="app-shell">
@@ -1083,7 +1181,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					<span>Nanocoder</span>
 				</div>
 				<div class="brand-actions">
-					<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
+					<button class="icon-button" id="historyButton" type="button" aria-label="Refresh history">${IconHistory}</button>
+					<button class="icon-button" id="settingsButton" type="button" aria-label="Settings">${IconSettings}</button>
 					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">${IconSidebar}</button>
 				</div>
 			</div>
@@ -1107,8 +1206,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			</section>
 			<form class="composer-wrap" id="messageForm">
 				<div class="empty-state" id="emptyState"></div>
-				<div class="composer-preview" id="imagePreviewContainer" hidden></div>
 				<div class="composer">
+					<div class="composer-preview" id="imagePreviewContainer" hidden></div>
 					<div class="composer-inputs">
 						<input type="file" id="imageUploadInput" accept="image/*" multiple hidden>
 						<button class="icon-button upload-button" id="uploadImageButton" type="button" aria-label="Upload image">${IconUpload}</button>
@@ -1132,13 +1231,18 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<button type="button" class="close-button" id="closeSettingsButton" aria-label="Close settings">${IconClose}</button>
 			</div>
 			<div class="modal-body">
-				<div class="setting-group">
-					<p>Settings configuration is not yet available in the Web Mode interface. Check back later!</p>
-				</div>
+				<form id="settingsForm" class="setting-group">
+					<div class="custom-dropdown"><span id="providerLabel">Provider</span><button type="button" class="dropdown-trigger" id="providerSelect" aria-labelledby="providerLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="providerOptions" role="listbox" hidden></div></div>
+					<div class="custom-dropdown"><span id="modelLabel">Model</span><button type="button" class="dropdown-trigger" id="modelSelect" aria-labelledby="modelLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="modelOptions" role="listbox" hidden></div></div>
+					<div class="custom-dropdown"><span id="modeLabel">Development mode</span><button type="button" class="dropdown-trigger" id="modeSelect" aria-labelledby="modeLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="modeOptions" role="listbox" hidden></div></div>
+					<p id="settingsStatus">Waiting for the runtime.</p>
+					<button type="submit" id="saveSettingsButton">Save settings</button>
+				</form>
 			</div>
 		</div>
 	</div>
 
+	<div class="image-viewer" id="imageViewer" role="dialog" aria-modal="true" aria-label="Image preview" hidden><button type="button" id="closeImageViewer" aria-label="Close image preview">×</button><img id="expandedImage" alt="Expanded attachment"></div>
 	<script nonce="${nonce}">
 			const statusElement = document.querySelector('#connectionStatus');
 			const messageList = document.querySelector('#messageList');
@@ -1151,11 +1255,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const themeToggleButton = document.querySelector('#themeToggleButton');
 			const sidebarToggleButton = document.querySelector('#sidebarToggleButton');
 			const appShell = document.querySelector('.app-shell');
-			const sessionMenuButton = document.querySelector('#sessionMenuButton');
 			const historyButton = document.querySelector('#historyButton');
 			const settingsButton = document.querySelector('#settingsButton');
 			const composerNote = document.querySelector('#composerNote');
-			const threadSearchInput = document.querySelector('#threadSearchInput');
 			const threadList = document.querySelector('#threadList');
 			
 			const settingsModal = document.querySelector('#settingsModal');
@@ -1163,6 +1265,25 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const imageUploadInput = document.querySelector('#imageUploadInput');
 			const uploadImageButton = document.querySelector('#uploadImageButton');
 			const imagePreviewContainer = document.querySelector('#imagePreviewContainer');
+			const settingsForm = document.querySelector('#settingsForm');
+			const providerSelect = document.querySelector('#providerSelect');
+			const modelSelect = document.querySelector('#modelSelect');
+			const modeSelect = document.querySelector('#modeSelect');
+			const settingsStatus = document.querySelector('#settingsStatus');
+			const saveSettingsButton = document.querySelector('#saveSettingsButton');
+			const imageViewer = document.querySelector('#imageViewer');
+			const expandedImage = document.querySelector('#expandedImage');
+			function imageSource(image) { return image.data.startsWith('data:') ? image.data : 'data:' + image.mediaType + ';base64,' + image.data; }
+			function openImageViewer(src) { if (!src.startsWith('data:image/')) return; expandedImage.src = src; imageViewer.hidden = false; document.querySelector('#closeImageViewer').focus(); }
+			function closeImageViewer() { imageViewer.hidden = true; expandedImage.src = ''; }
+			document.querySelector('#closeImageViewer').addEventListener('click', closeImageViewer);
+			imageViewer.addEventListener('click', event => { if (event.target === imageViewer) closeImageViewer(); });
+			document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeImageViewer(); closeDropdowns(); } });
+			let runtimeSettings = null;
+			let runtimeReady = false;
+			let runtimeStatus = 'Waiting for the runtime.';
+			let settingsRequestId = null;
+			let transientMessages = [];
 			let pendingImages = [];
 			const token = new URLSearchParams(window.location.search).get('token');
 			const eventsUrl = new URL('/events', window.location.href);
@@ -1170,25 +1291,108 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			eventsUrl.searchParams.set('token', token ?? '');
 			const storageKey = 'nanocoder.webMode.localSession.v1';
 			const pendingMessages = new Map();
+			const pendingDrafts = new Map();
 			const assistantMessages = new Map();
 			let messageCounter = 0;
 			let storedMessages = [];
 			let activeTurnId = null;
+			let sessionBusy = false;
+			let sessionRevision = null;
+			const pendingSessionActions = new Map();
 			let isConnected = false;
 			let socket = null;
 			let reconnectTimer = null;
 			let reconnectDelayMs = 1000;
 			const maxReconnectDelayMs = 15000;
+			const dirtyAssistantMessages = new Set();
+			let renderTimer = null;
+			let storageTimer = null;
+			const threadElements = new Map();
+			const messageElements = new Map();
+			let previousNoticeSnapshot = '';
+			const workSummaries = new Map();
+			let responseLoader = null;
+			function stopResponseLoader() { responseLoader?.remove(); responseLoader = null; }
+			function showResponseLoader() {
+				if (responseLoader) return;
+				responseLoader = document.createElement('div');
+				responseLoader.className = 'message assistant response-loader';
+				responseLoader.setAttribute('role', 'status');
+				responseLoader.setAttribute('aria-label', 'Nanocoder is responding');
+				responseLoader.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z"/><path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z"/></svg>';
+				messageList.append(responseLoader);
+				messageList.scrollTop = messageList.scrollHeight;
+			}
+			const toolCards = new Map();
+			function ensureWorkSummary(id) {
+				stopResponseLoader();
+				let entry = workSummaries.get(id);
+				if (entry) return entry;
+				const element = document.createElement('details');
+				element.className = 'message assistant work-summary';
+				element.open = true;
+				const header = document.createElement('summary');
+				header.textContent = 'Thinking…';
+				const body = document.createElement('div');
+				body.className = 'work-body';
+				element.append(header, body);
+				messageList.append(element);
+				entry = {element, header, body, thoughts: new Map(), tools: null, userToggled: false, status: 'working', startedAt: Date.now()};
+				header.addEventListener('click', () => { entry.userToggled = true; });
+				workSummaries.set(id, entry);
+				return entry;
+			}
+			function updateWorkTool(turnId, tool) {
+				const work = ensureWorkSummary(turnId);
+				if (!work.tools) { work.tools = document.createElement('div'); work.tools.className = 'work-tools'; work.body.append(work.tools); }
+				let card = toolCards.get(tool.id);
+				if (!card) {
+					const element = document.createElement('div'); element.className = 'work-tool';
+					const label = document.createElement('div'); label.className = 'work-tool-label';
+					const icon = document.createElement('span'); icon.className = 'work-tool-icon';
+					const title = document.createElement('span');
+					label.append(icon, title); element.append(label); work.tools.append(element);
+					card = {element, icon, title, work, args: null, output: null}; toolCards.set(tool.id, card);
+				}
+				card.element.dataset.status = tool.status;
+				card.icon.textContent = tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'approval' ? '?' : '◌';
+				const target = tool.arguments?.path ?? tool.arguments?.file_path ?? tool.arguments?.command ?? '';
+				card.title.textContent = tool.name.replace(/_/g, ' ') + (target ? ' · ' + String(target).slice(0, 160) : '') + ' — ' + (tool.status === 'approval' ? 'Needs permission' : tool.status);
+				if (tool.arguments && !card.args) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Arguments'; const pre = document.createElement('pre'); pre.textContent = formatToolArguments(tool.arguments); details.append(summary, pre); card.element.append(details); card.args = details; }
+				if (tool.output && !card.output) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Result'; const pre = document.createElement('pre'); pre.textContent = tool.output; details.append(summary, pre); card.element.append(details); card.output = details; }
+				work.header.textContent = work.status === 'working' ? 'Working…' : work.header.textContent;
+				return card;
+			}
+			function renderWorkSummary(summary) {
+				if (!summary.reasoning.length && !summary.tools.length) return;
+				const work = ensureWorkSummary(summary.id);
+				for (const thought of summary.reasoning) {
+					let element = work.thoughts.get(thought.id);
+					if (!element) { element = document.createElement('div'); element.className = 'work-thought'; work.body.append(element); work.thoughts.set(thought.id, element); }
+					element.textContent = thought.text;
+				}
+				for (const tool of summary.tools) updateWorkTool(summary.id, tool);
+				work.status = summary.status;
+				work.startedAt = summary.startedAt;
+				const seconds = Math.max(1, Math.round((Date.now() - summary.startedAt) / 1000));
+				work.header.textContent = summary.status === 'working' ? (summary.tools.length ? 'Working…' : 'Thinking…') : (summary.status === 'failed' ? 'Work failed' : 'Worked') + ' · ' + seconds + 's' + (summary.tools.length ? ' · ' + summary.tools.length + ' tools' : '');
+				if (summary.status !== 'working' && !work.userToggled) work.element.open = false;
+			}
+			function readPreference(key) {
+				try { return window.localStorage.getItem(key); } catch { return null; }
+			}
+			function writePreference(key, value) {
+				try { window.localStorage.setItem(key, value); } catch {}
+			}
 
 			// Initial load animation
-			gsap.from('.sidebar', { opacity: 0, x: -20, duration: 0.6, ease: 'power2.out' });
-			gsap.from('.topbar', { opacity: 0, y: -10, duration: 0.5, ease: 'power2.out', delay: 0.1 });
-			gsap.from('.composer-wrap', { opacity: 0, duration: 0.6, ease: 'power2.out', delay: 0.2 });
 
 
 			// Custom helper to animate elements in
 			function animateIn(element) {
-				gsap.fromTo(element, { opacity: 0, y: 15 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' });
+				if (element.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+					element.animate([{opacity: 0, transform: 'translateY(15px)'}, {opacity: 1, transform: 'translateY(0)'}], {duration: 250, easing: 'ease-out'});
+				}
 			}
 
 
@@ -1196,6 +1400,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const sidebarStorageKey = 'nanocoder.webMode.sidebarCollapsed.v1';
 
 			function applyTheme(theme) {
+				document.documentElement.classList.add('theme-switching');
 				document.documentElement.dataset.theme = theme;
 				const isLight = theme === 'light';
 				if (themeToggleButton) {
@@ -1206,11 +1411,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						isLight ? 'Switch to dark theme' : 'Switch to light theme',
 					);
 				}
-				window.localStorage.setItem(themeStorageKey, theme);
+				writePreference(themeStorageKey, theme);
+				// Commit the new colors with transitions disabled before restoring
+				// normal hover and layout animations.
+				void document.documentElement.offsetHeight;
+				document.documentElement.classList.remove('theme-switching');
 			}
 
 			function initialTheme() {
-				const stored = window.localStorage.getItem(themeStorageKey);
+				const stored = readPreference(themeStorageKey);
 				if (stored === 'light' || stored === 'dark') {
 					return stored;
 				}
@@ -1225,7 +1434,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					'aria-label',
 					isCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
 				);
-				window.localStorage.setItem(sidebarStorageKey, String(isCollapsed));
+				writePreference(sidebarStorageKey, String(isCollapsed));
 			}
 
 			function setStatus(text, state) {
@@ -1235,15 +1444,62 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			function setComposerEnabled(isEnabled) {
 				isConnected = isEnabled;
-				messageInput.disabled = !isEnabled || activeTurnId !== null;
-				sendButton.disabled = !isEnabled;
+				updateComposer();
+			}
+			function fillSelect(select, values, selected) {
+				select.value = selected;
+				select.textContent = selected;
+				const menu = dropdownMenus.get(select);
+				menu.replaceChildren();
+				for (const value of values) {
+					const option = document.createElement('button');
+					option.type = 'button';
+					option.className = 'dropdown-option';
+					option.setAttribute('role', 'option');
+					option.setAttribute('aria-selected', String(value === selected));
+					option.value = value;
+					option.textContent = value;
+					option.addEventListener('click', () => { fillSelect(select, values, value); closeDropdowns(); select.dispatchEvent(new Event('change')); select.focus(); });
+					menu.append(option);
+				}
+			}
+			const dropdownMenus = new Map([[providerSelect, document.querySelector('#providerOptions')], [modelSelect, document.querySelector('#modelOptions')], [modeSelect, document.querySelector('#modeOptions')]]);
+			function closeDropdowns() { for (const [trigger, menu] of dropdownMenus) { menu.hidden = true; trigger.setAttribute('aria-expanded', 'false'); } }
+			for (const [trigger, menu] of dropdownMenus) {
+				menu.hidden = true;
+				trigger.addEventListener('click', () => { const open = menu.hidden; closeDropdowns(); menu.hidden = !open; trigger.setAttribute('aria-expanded', String(open)); });
+				trigger.addEventListener('keydown', event => { if (event.key === 'ArrowDown') { event.preventDefault(); closeDropdowns(); menu.hidden = false; trigger.setAttribute('aria-expanded', 'true'); menu.querySelector('button')?.focus(); } });
+				menu.addEventListener('keydown', event => {
+					if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+					event.preventDefault();
+					const options = [...menu.querySelectorAll('button')];
+					const index = options.indexOf(document.activeElement);
+					options[(index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length]?.focus();
+				});
+			}
+			document.addEventListener('click', event => { if (!event.target.closest('.custom-dropdown')) closeDropdowns(); });
+			function applyRuntimeSettings(settings) {
+				if (JSON.stringify(settings) === JSON.stringify(runtimeSettings)) return;
+				runtimeSettings = settings;
+				fillSelect(providerSelect, settings.providers.map(provider => provider.name), settings.provider);
+				fillSelect(modelSelect, settings.providers.find(provider => provider.name === settings.provider)?.models ?? [], settings.model);
+				fillSelect(modeSelect, settings.modes, settings.mode);
+				settingsStatus.textContent = 'Changes apply to this local session.';
+			}
+
+			function updateComposer() {
+				if (!messageInput.value) messageInput.style.height = 'auto';
+				messageInput.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null;
+				sendButton.disabled = !isConnected || !runtimeReady || sessionBusy || (activeTurnId === null && messageInput.value.trim().length === 0 && pendingImages.length === 0);
+				newChatButton.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null;
+				uploadImageButton.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null;
+				saveSettingsButton.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null || !runtimeSettings || settingsRequestId !== null;
+				for (const select of [providerSelect, modelSelect, modeSelect]) select.disabled = saveSettingsButton.disabled;
 			}
 
 			function setActiveTurn(id) {
 				activeTurnId = id;
 				const isActive = id !== null;
-				messageInput.disabled = !isConnected || isActive;
-				sendButton.disabled = !isConnected;
 				sendButton.classList.toggle('is-cancel', isActive);
 				sendButton.textContent = isActive ? '■' : '↑';
 				sendButton.setAttribute(
@@ -1252,8 +1508,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				);
 				composerNote.textContent = isActive
 					? 'Nanocoder is working. Use the stop button to cancel.'
-					: 'Enter sends. Shift+Enter creates a new line.';
-				newChatButton.disabled = isActive;
+					: runtimeReady ? 'Enter sends. Shift+Enter creates a new line.' : runtimeStatus;
+				updateComposer();
+				if (!id) stopResponseLoader();
+				else if (!assistantMessages.has(id) && !workSummaries.has(id)) showResponseLoader();
 			}
 
 			function readStoredMessages() {
@@ -1280,7 +1538,25 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function writeStoredMessages() {
-				window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
+				try {
+					window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
+				} catch {
+					// Browser storage is optional; a full quota must not stop chat.
+				}
+			}
+			function scheduleStorageWrite() {
+				if (storageTimer !== null) return;
+				storageTimer = window.setTimeout(() => { storageTimer = null; writeStoredMessages(); }, 500);
+			}
+			function flushAssistantRendering() {
+				if (renderTimer !== null) window.clearTimeout(renderTimer);
+				renderTimer = null;
+				for (const id of dirtyAssistantMessages) {
+					const element = assistantMessages.get(id)?.querySelector('.message-content');
+					if (element) renderAssistantText(element, element.dataset.rawText ?? '');
+				}
+				dirtyAssistantMessages.clear();
+				messageList.scrollTop = messageList.scrollHeight;
 			}
 
 			function setEmptyState(title, detail) {
@@ -1397,6 +1673,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				for (const line of text.split('\\n')) {
 					if (line.trim().startsWith(codeFence)) {
 						if (codeElement) {
+							highlightCode(codeElement, codeRawText, codeLang);
 							codeElement = null;
 							codeRawText = '';
 							codeLang = '';
@@ -1414,7 +1691,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 					if (codeElement) {
 						codeRawText += (codeRawText ? '\\n' : '') + line;
-						highlightCode(codeElement, codeRawText, codeLang);
 						continue;
 					}
 
@@ -1453,12 +1729,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					element.append(paragraphElement);
 					listElement = null;
 				}
+				if (codeElement) highlightCode(codeElement, codeRawText, codeLang);
 			}
 
-			function appendMessage(role, text, metaText, shouldStore = true, images = []) {
+			function appendMessage(role, text, metaText, shouldStore = true, images = [], id, shouldAnimate = true) {
+				if (shouldStore && role.startsWith('system')) transientMessages.push({role, text, metaText});
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message ' + role;
+				if (id) messageElement.dataset.messageId = id;
 
 				if (images && images.length > 0) {
 					const imageContainer = document.createElement('div');
@@ -1466,7 +1745,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					for (const img of images) {
 						const imgEl = document.createElement('img');
 						imgEl.className = 'message-image';
-						imgEl.src = img.data;
+						imgEl.src = imageSource(img);
+						imgEl.addEventListener('click', () => openImageViewer(imgEl.src));
 						imageContainer.append(imgEl);
 					}
 					messageElement.append(imageContainer);
@@ -1482,6 +1762,19 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					textElement.textContent = text;
 				}
 				messageElement.append(textElement);
+				if (role === 'user' || role === 'assistant') {
+					const footer = document.createElement('div'); footer.className = 'message-footer';
+					const copy = document.createElement('button'); copy.type = 'button'; copy.title = 'Copy message'; copy.setAttribute('aria-label', 'Copy message');
+					copy.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>';
+					copy.addEventListener('click', async () => {
+						try { await navigator.clipboard.writeText(role === 'assistant' ? textElement.dataset.rawText ?? '' : textElement.textContent); copy.title = 'Copied'; }
+						catch { copy.title = 'Unable to copy'; }
+					});
+					const time = document.createElement('time'); time.className = 'message-time';
+					if (role === 'assistant') footer.append(copy);
+					footer.append(time); messageElement.append(footer);
+					setMessageTime(messageElement, new Date().toISOString());
+				}
 
 				if (metaText) {
 					const metaElement = document.createElement('div');
@@ -1493,17 +1786,32 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageList.append(messageElement);
 				messageList.scrollTop = messageList.scrollHeight;
 
-				animateIn(messageElement);
+				if (shouldAnimate) animateIn(messageElement);
+				if (id) messageElements.set(role + ':' + id, messageElement);
 
 				if (shouldStore) {
-					storedMessages.push({role, text, metaText: metaText ?? ''});
+					storedMessages.push({id, role, text, metaText: metaText ?? '', images});
 					writeStoredMessages();
 				}
 
 				return messageElement;
 			}
+			function setMessageTime(element, createdAt) {
+				const time = element.querySelector('.message-time');
+				if (!time || !createdAt) return;
+				const date = new Date(createdAt);
+				if (Number.isNaN(date.getTime())) return;
+				time.dateTime = createdAt;
+				time.title = date.toLocaleString();
+				time.textContent = date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+			}
 
 			function updateMessageMeta(messageElement, metaText) {
+				const stored = storedMessages.find(message => message.id === messageElement.dataset.messageId);
+				if (stored) {
+					stored.metaText = metaText;
+					writeStoredMessages();
+				}
 				let metaElement = messageElement.querySelector('.meta');
 				if (!metaElement) {
 					metaElement = document.createElement('div');
@@ -1520,13 +1828,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				for (const message of storedMessages) {
-					appendMessage(message.role, message.text, message.metaText, false);
+					const element = appendMessage(message.role, message.text, message.metaText, false, message.images ?? [], message.id);
+					if (message.role === 'assistant' && message.id) assistantMessages.set(message.id, element);
 				}
 			}
 
 			function clearLocalSession() {
 				storedMessages = [];
-				window.localStorage.removeItem(storageKey);
+				try { window.localStorage.removeItem(storageKey); } catch {}
 				pendingMessages.clear();
 				assistantMessages.clear();
 				messageList.replaceChildren();
@@ -1534,6 +1843,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageInput.value = '';
 				messageInput.focus();
 				activeSessionId = null;
+				pendingImages = [];
+				renderImagePreviews();
 				renderThreadList(currentSessions);
 			}
 
@@ -1565,9 +1876,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			function renderThreadList(sessions) {
 				currentSessions = sessions;
-				threadList.replaceChildren();
+				const ids = new Set(sessions.map(session => session.id));
+				for (const [id, entry] of threadElements) {
+					if (!ids.has(id)) { entry.item.remove(); if (entry.timer) window.clearTimeout(entry.timer); threadElements.delete(id); }
+				}
 
 				if (sessions.length === 0) {
+					threadList.replaceChildren();
 					const empty = document.createElement('p');
 					empty.className = 'thread-list-empty';
 					empty.textContent = 'No saved sessions yet.';
@@ -1576,6 +1891,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				for (const session of sessions) {
+					let entry = threadElements.get(session.id);
+					if (entry) {
+						entry.item.classList.toggle('active', session.id === activeSessionId);
+						entry.time.textContent = formatRelativeTime(session.lastAccessedAt);
+						if (entry.title !== session.title) animateThreadTitle(entry, session.title);
+						threadList.append(entry.item);
+						continue;
+					}
+					if (threadElements.size === 0) threadList.replaceChildren();
 					const item = document.createElement('button');
 					item.className = 'thread-item' + (session.id === activeSessionId ? ' active' : '');
 					item.type = 'button';
@@ -1584,8 +1908,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					
 					const textSpan = document.createElement('span');
 					textSpan.className = 'thread-item-text';
-					const relative = formatRelativeTime(session.lastAccessedAt);
-					textSpan.textContent = session.title + (relative ? ' · ' + relative : '');
+					const titleSpan = document.createElement('span');
+					titleSpan.textContent = session.title;
+					const timeSpan = document.createElement('span');
+					timeSpan.className = 'thread-time';
+					timeSpan.textContent = formatRelativeTime(session.lastAccessedAt);
+					textSpan.append(titleSpan, document.createTextNode(' · '), timeSpan);
+					entry = {item, titleSpan, time: timeSpan, title: session.title, timer: null};
+					threadElements.set(session.id, entry);
 					
 					const deleteBtn = document.createElement('div');
 					deleteBtn.className = 'thread-delete-btn';
@@ -1605,17 +1935,23 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 							sessionId: session.id,
 						});
 						
-						const updatedSessions = currentSessions.filter(s => s.id !== session.id);
-						renderThreadList(updatedSessions);
-						
-						if (session.id === activeSessionId) {
-							newChatButton.click();
-						}
 					});
 
 					item.append(textSpan, deleteBtn);
 					threadList.append(item);
 				}
+			}
+			function animateThreadTitle(entry, title) {
+				entry.title = title;
+				entry.item.dataset.threadLabel = title;
+				if (entry.timer) window.clearTimeout(entry.timer);
+				if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { entry.titleSpan.textContent = title; return; }
+				let index = 0;
+				const type = () => {
+					entry.titleSpan.textContent = title.slice(0, ++index);
+					entry.timer = index < title.length ? window.setTimeout(type, 35) : null;
+				};
+				type();
 			}
 
 			function applyLoadedSession(sessionSummary, messages) {
@@ -1624,23 +1960,26 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				pendingMessages.clear();
 				assistantMessages.clear();
 				messageList.replaceChildren();
+				pendingImages = [];
+				renderImagePreviews();
 
 				if (messages.length === 0) {
 					setEmptyState('How can I help you?', '');
 				} else {
 					hideEmptyState();
 					for (const message of messages) {
-						appendMessage(message.role, message.content);
+						const element = appendMessage(message.role, message.content, '', true, message.images ?? [], message.id);
+						if (message.role === 'assistant' && message.id) assistantMessages.set(message.id, element);
 					}
 				}
 
 				messageInput.value = '';
 				renderThreadList(currentSessions);
-				addSystemNotice('Resumed session: ' + sessionSummary.title, 'Session switch');
 			}
 
 			function setPromptText(text) {
 				messageInput.value = text;
+				adjustMessageInputHeight();
 				composerElement.classList.add('is-attention');
 				window.setTimeout(() => {
 					composerElement.classList.remove('is-attention');
@@ -1653,22 +1992,26 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				appendMessage('system', text, metaText);
 			}
 
-			function appendAssistantDelta(id, text) {
+			function appendAssistantDelta(id, text, replace = false) {
+				stopResponseLoader();
 				let messageElement = assistantMessages.get(id);
 				if (!messageElement) {
-					messageElement = appendMessage('assistant', '');
+					messageElement = appendMessage('assistant', '', '', true, [], id, false);
 					assistantMessages.set(id, messageElement);
 				}
 
-				const textElement = messageElement.firstElementChild;
-				const nextText = (textElement.dataset.rawText ?? '') + text;
+				const textElement = messageElement.querySelector('.message-content');
+				const nextText = replace ? text : (textElement.dataset.rawText ?? '') + text;
 				textElement.dataset.rawText = nextText;
-				renderAssistantText(textElement, nextText);
-				messageList.scrollTop = messageList.scrollHeight;
+				dirtyAssistantMessages.add(id);
+				if (renderTimer === null) renderTimer = window.setTimeout(flushAssistantRendering, 16);
+				const stored = storedMessages.find(message => message.id === id && message.role === 'assistant');
+				if (stored) stored.text = nextText;
+				scheduleStorageWrite();
 			}
 
 			function sendClientEvent(event) {
-				if (socket.readyState !== WebSocket.OPEN) {
+				if (!socket || socket.readyState !== WebSocket.OPEN) {
 					appendMessage('system error', 'The local session is not connected.');
 					return false;
 				}
@@ -1692,11 +2035,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function renderApprovalCard(message) {
+				if (messageList.querySelector('[data-interaction-id="' + message.id + '"]')) return;
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message system interaction';
+				const tool = message.toolCallId && activeTurnId ? updateWorkTool(activeTurnId, {id: message.toolCallId, name: message.toolName, status: 'approval', arguments: message.arguments}) : null;
+				if (tool) { messageElement.className = 'interaction'; tool.work.element.open = true; }
 				const card = document.createElement('div');
 				card.className = 'interaction-card';
+				card.dataset.interactionId = message.id;
 
 				const title = document.createElement('strong');
 				title.textContent = 'Approve tool: ' + message.toolName;
@@ -1726,20 +2073,17 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				actions.append(approveButton, denyButton);
 				card.append(actions);
 				messageElement.append(card);
-				messageList.append(messageElement);
+				if (tool) tool.element.append(messageElement); else messageList.append(messageElement);
 				messageList.scrollTop = messageList.scrollHeight;
 
 				const respond = (approved) => {
+					if (!sendClientEvent({type: 'approval_response', id: message.id, approved})) return;
 					disableInteractionCard(card);
+					if (tool) { tool.element.dataset.status = approved ? 'running' : 'failed'; tool.title.textContent = message.toolName.replace(/_/g, ' ') + (approved ? ' — Approved' : ' — Denied'); }
 					const meta = document.createElement('div');
 					meta.className = 'meta';
 					meta.textContent = approved ? 'Approved' : 'Denied';
 					messageElement.append(meta);
-					sendClientEvent({
-						type: 'approval_response',
-						id: message.id,
-						approved,
-					});
 				};
 
 				approveButton.addEventListener('click', () => respond(true));
@@ -1747,11 +2091,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function renderQuestionCard(message) {
+				if (messageList.querySelector('[data-interaction-id="' + message.id + '"]')) return;
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message system interaction';
 				const card = document.createElement('div');
 				card.className = 'interaction-card';
+				card.dataset.interactionId = message.id;
 
 				const title = document.createElement('strong');
 				title.textContent = message.question;
@@ -1822,21 +2168,101 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function handleServerEvent(message) {
+				if (message.type === 'state') {
+					flushAssistantRendering();
+					const previousSession = activeSessionId;
+					const sessionChanged = sessionRevision !== null && sessionRevision !== message.sessionRevision;
+					sessionRevision = message.sessionRevision;
+					const wasReady = runtimeReady;
+					runtimeReady = message.runtimeReady ?? true;
+					runtimeStatus = message.runtimeStatus ?? 'Ready';
+					if (message.settings) applyRuntimeSettings(message.settings);
+					if (isConnected) setStatus(runtimeReady ? 'Connected' : runtimeStatus, runtimeReady ? 'connected' : '');
+					activeSessionId = message.session?.id ?? null;
+					if (message.session) {
+						const existing = currentSessions.find(session => session.id === message.session.id);
+						if (!existing) currentSessions = [message.session, ...currentSessions];
+						else Object.assign(existing, message.session);
+					}
+					sessionBusy = message.busy;
+					if (sessionChanged) { stopResponseLoader(); messageList.replaceChildren(); messageElements.clear(); assistantMessages.clear(); workSummaries.clear(); toolCards.clear(); }
+					const keep = new Set();
+					storedMessages = [];
+					for (const item of message.messages) {
+						const key = item.role + ':' + item.id;
+						keep.add(key);
+						let element = messageElements.get(key);
+						if (!element) element = appendMessage(item.role, item.content, '', false, item.images ?? [], item.id, false);
+						else {
+							const content = element.querySelector('.message-content');
+							if (item.role === 'assistant' && content.dataset.rawText !== item.content) { content.dataset.rawText = item.content; renderAssistantText(content, item.content); }
+							else if (item.role !== 'assistant') content.textContent = item.content;
+						}
+						storedMessages.push({id: item.id, role: item.role, text: item.content, images: item.images ?? []});
+						setMessageTime(element, item.createdAt);
+						if (item.role === 'assistant' && item.id) assistantMessages.set(item.id, element);
+					}
+					for (const [key, element] of messageElements) {
+						if (!keep.has(key)) { element.remove(); messageElements.delete(key); }
+					}
+					if (message.notices) transientMessages = message.notices;
+					else if (sessionChanged || previousSession !== activeSessionId) transientMessages = [];
+					const noticeSnapshot = JSON.stringify(transientMessages);
+					if (sessionChanged || noticeSnapshot !== previousNoticeSnapshot) {
+						for (const node of messageList.querySelectorAll('.system')) { if (!node.classList.contains('interaction')) node.remove(); }
+						for (const notice of transientMessages) appendMessage(notice.role, notice.text, notice.metaText, false, [], undefined, false);
+						previousNoticeSnapshot = noticeSnapshot;
+					}
+					writeStoredMessages();
+					if (message.messages.length === 0) setEmptyState('How can I help you?', '');
+					if (sessionChanged || previousSession !== activeSessionId) {
+						pendingImages = [];
+						messageInput.value = '';
+						renderImagePreviews();
+					}
+					setActiveTurn(message.activeTurnId);
+					for (const summary of message.work ?? []) renderWorkSummary(summary);
+					if (isConnected && !wasReady && runtimeReady) sendClientEvent({type: 'list_sessions', id: 'browser-sessions-' + Date.now()});
+					renderThreadList(currentSessions);
+					return;
+				}
+				if (message.type === 'interaction_closed') {
+					const card = document.querySelector('[data-interaction-id="' + message.id + '"]');
+					if (card) disableInteractionCard(card);
+					return;
+				}
 				if (message.type === 'ready') {
-					setStatus('Connected', 'connected');
+					setStatus(runtimeReady ? 'Connected' : runtimeStatus, runtimeReady ? 'connected' : '');
 					setComposerEnabled(true);
 					if (storedMessages.length === 0) {
 						setEmptyState('How can I help you?', '');
 					}
 					messageInput.focus();
-					sendClientEvent({type: 'list_sessions', id: 'browser-sessions-' + Date.now()});
+					if (runtimeReady) sendClientEvent({type: 'list_sessions', id: 'browser-sessions-' + Date.now()});
 					return;
 				}
 
 				if (message.type === 'ack') {
+					if (message.id === settingsRequestId) {
+						settingsRequestId = null;
+						settingsStatus.textContent = 'Settings saved.';
+						settingsModal.classList.add('hidden');
+						settingsModal.setAttribute('aria-hidden', 'true');
+						closeDropdowns();
+						messageInput.focus();
+						updateComposer();
+					}
+					pendingDrafts.delete(message.id);
+					const action = pendingSessionActions.get(message.id);
+					if (action) {
+						pendingSessionActions.delete(message.id);
+						pendingImages = [];
+						messageInput.value = '';
+						renderImagePreviews();
+					}
 					const messageElement = pendingMessages.get(message.id);
 					if (messageElement) {
-						updateMessageMeta(messageElement, 'Delivered to local session');
+						messageElement.querySelector('.meta')?.remove();
 						pendingMessages.delete(message.id);
 					}
 					return;
@@ -1846,18 +2272,19 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					appendAssistantDelta(message.id, message.text);
 					return;
 				}
+				if (message.type === 'assistant_content') {
+					appendAssistantDelta(message.id, message.text, true);
+					return;
+				}
+				if (message.type === 'work_update') { renderWorkSummary(message.work); return; }
 
 				if (message.type === 'tool_started') {
-					appendMessage('system tool-status', 'Running tool: ' + message.name, 'In progress');
+					updateWorkTool(activeTurnId ?? 'current', {id: message.id, name: message.name, status: 'running', arguments: message.arguments});
 					return;
 				}
 
 				if (message.type === 'tool_finished') {
-					appendMessage(
-						'system tool-status',
-						'Tool finished: ' + message.name,
-						message.ok ? 'Completed' : 'Failed',
-					);
+					updateWorkTool(activeTurnId ?? 'current', {id: message.id, name: message.name, status: message.ok ? 'completed' : 'failed', output: message.output});
 					return;
 				}
 
@@ -1872,6 +2299,16 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				if (message.type === 'turn_completed') {
+					const work = workSummaries.get(message.id);
+					const reply = assistantMessages.get(message.id);
+					if (reply && work && !reply.querySelector('.message-duration')) {
+						const duration = document.createElement('span'); duration.className = 'message-duration';
+						duration.textContent = Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's';
+						reply.querySelector('.message-footer')?.append(duration);
+					}
+					if (work) { work.status = 'completed'; work.header.textContent = 'Worked · ' + Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's'; if (!work.userToggled) work.element.open = false; }
+					flushAssistantRendering();
+					writeStoredMessages();
 					if (message.id === activeTurnId) {
 						setActiveTurn(null);
 						messageInput.focus();
@@ -1880,7 +2317,21 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				if (message.type === 'error') {
-					setActiveTurn(null);
+					flushAssistantRendering();
+					if (message.id === settingsRequestId) {
+						settingsRequestId = null;
+						settingsStatus.textContent = message.message;
+						updateComposer();
+					}
+					if (message.id === activeTurnId) setActiveTurn(null);
+					pendingSessionActions.delete(message.id);
+					const draft = pendingDrafts.get(message.id);
+					if (draft) {
+						setPromptText(draft.text);
+						pendingImages = draft.images;
+						pendingDrafts.delete(message.id);
+						renderImagePreviews();
+					}
 					const pendingMessageElement = message.id
 						? pendingMessages.get(message.id)
 						: undefined;
@@ -1890,6 +2341,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						updateMessageMeta(pendingMessageElement, 'Not sent — ' + message.message);
 						pendingMessages.delete(message.id);
 						setPromptText(failedText);
+						pendingImages = storedMessages.find(item => item.id === message.id)?.images ?? [];
+						renderImagePreviews();
 					} else {
 						appendMessage('system error', message.message);
 					}
@@ -1900,9 +2353,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					renderThreadList(message.sessions);
 					return;
 				}
+				if (message.type === 'notice') {
+					addSystemNotice(message.message);
+					return;
+				}
 
 				if (message.type === 'session_loaded') {
-					applyLoadedSession(message.session, message.messages);
+					// The following authoritative state event applies the transcript once.
+					// Session metadata and selection arrive with that snapshot too.
 					return;
 				}
 
@@ -1910,7 +2368,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function submitUserMessage(text) {
-				if (activeTurnId) {
+				if (!isConnected || !runtimeReady || sessionBusy || activeTurnId) {
 					return;
 				}
 
@@ -1920,8 +2378,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				const id = 'browser-message-' + Date.now() + '-' + messageCounter++;
-				const messageElement = appendMessage('user', trimmedText, 'Sending...', true, pendingImages);
+				const messageElement = appendMessage('user', trimmedText, 'Sending...', true, pendingImages, id);
 				pendingMessages.set(id, messageElement);
+				pendingDrafts.set(id, {text: trimmedText, images: pendingImages});
 				messageInput.value = '';
 				setActiveTurn(id);
 
@@ -1944,26 +2403,41 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				imagePreviewContainer.innerHTML = '';
 				if (pendingImages.length > 0) {
 					imagePreviewContainer.hidden = false;
-					for (const img of pendingImages) {
+					for (const [index, img] of pendingImages.entries()) {
+						const attachment = document.createElement('div');
+						attachment.className = 'composer-attachment';
 						const imgEl = document.createElement('img');
-						imgEl.src = img.data;
-						imagePreviewContainer.append(imgEl);
+						imgEl.src = imageSource(img);
+						imgEl.addEventListener('click', () => openImageViewer(imgEl.src));
+						imgEl.alt = 'Attached image ' + (index + 1);
+						const remove = document.createElement('button');
+						remove.type = 'button';
+						remove.className = 'remove-attachment';
+						remove.textContent = '×';
+						remove.setAttribute('aria-label', 'Remove attached image ' + (index + 1));
+						remove.addEventListener('click', () => { pendingImages.splice(index, 1); renderImagePreviews(); });
+						attachment.append(imgEl, remove);
+						imagePreviewContainer.append(attachment);
 					}
 				} else {
 					imagePreviewContainer.hidden = true;
 				}
+				updateComposer();
 			}
 
 			function handleFiles(files) {
+				if (activeTurnId || sessionBusy || !isConnected) return;
 				for (const file of files) {
 					if (!file.type.startsWith('image/')) continue;
 					const reader = new FileReader();
 					reader.onload = e => {
-						pendingImages.push({ data: e.target.result, mediaType: file.type });
+						if (activeTurnId || sessionBusy || !isConnected) return;
+						pendingImages.push({ data: e.target.result.split(',')[1], mediaType: file.type });
 						renderImagePreviews();
 					};
 					reader.readAsDataURL(file);
 				}
+				imageUploadInput.value = '';
 			}
 
 			emptyState.addEventListener('click', event => {
@@ -2021,7 +2495,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			applyTheme(initialTheme());
-			applySidebarCollapsed(window.localStorage.getItem(sidebarStorageKey) === 'true');
+			applySidebarCollapsed(readPreference(sidebarStorageKey) === 'true');
 
 			setEmptyState('How can I help you?', '');
 			restoreStoredMessages();
@@ -2046,9 +2520,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			messageInput.addEventListener('input', () => {
 				adjustMessageInputHeight();
-				if (!activeTurnId) {
-					sendButton.disabled = messageInput.value.trim().length === 0 && pendingImages.length === 0;
-				}
+					updateComposer();
 			});
 
 			messageInput.addEventListener('keydown', event => {
@@ -2082,9 +2554,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			});
 
 			newChatButton.addEventListener('click', () => {
-				sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});
-				clearLocalSession();
-				addSystemNotice('Started a fresh local browser session.', 'Stored only in this browser');
+				if (!isConnected || activeTurnId || sessionBusy) return;
+				const id = 'browser-reset-' + Date.now();
+				if (sendClientEvent({type: 'reset_session', id})) pendingSessionActions.set(id, 'reset');
 			});
 
 			themeToggleButton.addEventListener('click', () => {
@@ -2095,13 +2567,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				applySidebarCollapsed(!appShell.classList.contains('sidebar-collapsed'));
 			});
 
-			sessionMenuButton.addEventListener('click', () => {
-				addSystemNotice(
-					'This session is served from localhost and protected by the private URL token. The live connection uses ws:// rather than wss:// because it never leaves your machine.',
-					'Session menu',
-				);
-			});
-
 			if (historyButton) historyButton.addEventListener('click', () => {
 				if (appShell.classList.contains('sidebar-collapsed')) {
 					applySidebarCollapsed(false);
@@ -2110,26 +2575,31 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					type: 'list_sessions',
 					id: 'browser-sessions-' + Date.now(),
 				});
-				if (threadSearchInput) threadSearchInput.focus();
 			});
 
 			if (settingsButton) settingsButton.addEventListener('click', () => {
 				settingsModal.classList.remove('hidden');
+				settingsModal.setAttribute('aria-hidden', 'false');
+			});
+			providerSelect.addEventListener('change', () => {
+				const models = runtimeSettings?.providers.find(provider => provider.name === providerSelect.value)?.models ?? [];
+				fillSelect(modelSelect, models, models[0] ?? '');
+			});
+			settingsForm.addEventListener('submit', event => {
+				event.preventDefault();
+				if (!runtimeReady || sessionBusy || activeTurnId || settingsRequestId) return;
+				settingsRequestId = 'browser-settings-' + Date.now();
+				if (!sendClientEvent({type: 'update_settings', id: settingsRequestId, provider: providerSelect.value, model: modelSelect.value, mode: modeSelect.value})) settingsRequestId = null;
+				updateComposer();
 			});
 			closeSettingsButton.addEventListener('click', () => {
 				settingsModal.classList.add('hidden');
+				settingsModal.setAttribute('aria-hidden', 'true');
 			});
 			settingsModal.addEventListener('click', event => {
 				if (event.target === settingsModal) {
 					settingsModal.classList.add('hidden');
-				}
-			});
-
-			if (threadSearchInput) threadSearchInput.addEventListener('input', () => {
-				const query = threadSearchInput.value.trim().toLowerCase();
-				for (const threadButton of threadList.querySelectorAll('.thread-item')) {
-					const label = (threadButton.dataset.threadLabel || '').toLowerCase();
-					threadButton.hidden = query.length > 0 && !label.includes(query);
+					settingsModal.setAttribute('aria-hidden', 'true');
 				}
 			});
 

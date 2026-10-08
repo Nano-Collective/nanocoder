@@ -5,8 +5,8 @@
  */
 
 export interface WebToolLifecyclePublisher {
-	started: (id: string, name: string) => void;
-	finished: (id: string, name: string, ok: boolean) => void;
+	started: (id: string, name: string, args?: Record<string, unknown>) => void;
+	finished: (id: string, name: string, ok: boolean, output?: string) => void;
 }
 
 let publisher: WebToolLifecyclePublisher | null = null;
@@ -17,14 +17,19 @@ export function setWebToolLifecyclePublisher(
 	publisher = next;
 }
 
-export function publishWebToolStarted(id: string, name: string): void {
-	publisher?.started(id, name);
+export function publishWebToolStarted(
+	id: string,
+	name: string,
+	args?: Record<string, unknown>,
+): void {
+	publisher?.started(id, name, args);
 }
 
 export function publishWebToolFinished(
 	id: string,
 	name: string,
 	ok: boolean,
+	output?: string,
 ): void {
-	publisher?.finished(id, name, ok);
+	publisher?.finished(id, name, ok, output);
 }

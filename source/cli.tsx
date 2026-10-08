@@ -933,6 +933,7 @@ async function main(): Promise<void> {
 		}
 
 		let webRuntimeBridge: WebRuntimeBridge | undefined;
+		let webUrl: string | undefined;
 		if (webMode) {
 			const [
 				{createWebRuntimeBridge},
@@ -950,11 +951,13 @@ async function main(): Promise<void> {
 			});
 			const webServer = await startLocalWebServer({
 				onClientEvent: webRuntimeBridge.handleClientEvent,
+				getStateEvents: webRuntimeBridge.getStateEvents,
 				onAllClientsDisconnected: () => {
 					webRuntimeBridge?.handleDisconnect();
 				},
 			});
 			broadcastEvent = webServer.broadcastEvent;
+			webUrl = webServer.url;
 
 			getShutdownManager().register({
 				name: 'web-server',
@@ -962,9 +965,11 @@ async function main(): Promise<void> {
 				handler: webServer.close,
 			});
 
-			console.log('Nanocoder web mode started.');
-			console.log(`Local URL: ${webServer.url}`);
-			console.log('Press Ctrl+C to stop.');
+			if (!useAltScreen) {
+				console.log('Nanocoder web mode started.');
+				console.log(`Local URL: ${webServer.url}`);
+				console.log('Press Ctrl+C to stop.');
+			}
 		}
 
 		const result = render(
@@ -981,6 +986,7 @@ async function main(): Promise<void> {
 				initialSession={initialSession}
 				openSessionSelectorOnStart={openSessionSelectorOnStart}
 				webRuntimeBridge={webRuntimeBridge}
+				webUrl={webUrl}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown

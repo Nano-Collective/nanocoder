@@ -31,6 +31,16 @@ test.afterEach(async () => {
 
 // --- initialize ---
 
+test.serial('a stale autosave preserves a title generated after its read', async t => {
+	const session = await manager.createSession({title: 'hi', provider: 'test', model: 'test', workingDirectory: '/tmp', messageCount: 1, messages: [{role: 'user', content: 'hi'}]});
+	await manager.saveSession({...session, title: 'Fix Login Redirect', titleGenerated: true});
+	await manager.saveSession({...session, messageCount: 2, messages: [...session.messages, {role: 'assistant', content: 'done'}]});
+	const saved = await manager.readSession(session.id);
+	t.is(saved?.title, 'Fix Login Redirect');
+	t.true(saved?.titleGenerated);
+	t.is(saved?.messageCount, 2);
+});
+
 test.serial('initialize creates sessions directory and index', async t => {
 	const indexPath = join(sessionsDir, 'sessions.json');
 	const data = await readFile(indexPath, 'utf-8');

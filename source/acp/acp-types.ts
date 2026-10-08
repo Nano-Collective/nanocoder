@@ -1,3 +1,4 @@
+import type {CustomCommandExecutor} from '@/custom-commands/executor';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient} from '@/types/index';
@@ -6,6 +7,7 @@ export interface AcpInitContext {
 	client: LLMClient;
 	toolManager: ToolManager;
 	customCommandLoader: CustomCommandLoader;
+	customCommandExecutor: CustomCommandExecutor;
 	provider: string;
 	model: string;
 }

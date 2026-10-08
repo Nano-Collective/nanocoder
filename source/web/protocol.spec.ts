@@ -131,3 +131,16 @@ test('parseWebClientEvent rejects malformed interaction responses', t => {
 		{message: 'Approval response id is required.'},
 	);
 });
+
+test('settings updates validate required fields', t => {
+	const event = {type: 'update_settings', id: 'settings', provider: 'local', model: 'small', mode: 'normal'};
+	t.deepEqual(parseWebClientEvent(JSON.stringify(event)), event);
+	for (const key of ['id', 'provider', 'model', 'mode']) {
+		t.throws(() => parseWebClientEvent(JSON.stringify({...event, [key]: ''})), {message: 'Settings id, provider, model and mode are required.'});
+	}
+});
+
+test('browser image data URLs are normalized to raw base64 for the runtime', t => {
+	const event = parseWebClientEvent(JSON.stringify({type: 'user_message', id: 'image', text: 'describe', images: [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}]}));
+	t.like(event, {images: [{data: 'AA==', mediaType: 'image/png'}]});
+});

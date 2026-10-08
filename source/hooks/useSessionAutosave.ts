@@ -3,9 +3,10 @@ import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
 import {deriveTitleFromFirstMessage} from '@/session/title-generator';
-import type {Message} from '@/types/core';
+import type {LLMClient, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -16,6 +17,8 @@ interface UseSessionAutosaveProps {
 	currentModel: string;
 	currentSessionId: string | null;
 	setCurrentSessionId: (id: string | null) => void;
+	client?: LLMClient | null;
+	isConversationComplete?: boolean;
 }
 
 const SHUTDOWN_HANDLER_NAME = 'session-autosave-flush';
@@ -96,12 +99,16 @@ export function useSessionAutosave({
 	currentModel,
 	currentSessionId,
 	setCurrentSessionId,
+	client,
+	isConversationComplete = false,
 }: UseSessionAutosaveProps) {
 	const [isSaving, setIsSaving] = useState<boolean>(false);
 	const initPromiseRef = useRef<Promise<boolean> | null>(null);
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSaveRef = useRef<number>(0);
+	const titleContextRef = useRef({client, isConversationComplete});
+	titleContextRef.current = {client, isConversationComplete};
 
 	// Serialises saves: each new save is chained onto the tail of this promise.
 	const saveChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -287,6 +294,18 @@ export function useSessionAutosave({
 				}
 
 				lastSaveRef.current = Date.now();
+				const titleContext = titleContextRef.current;
+				if (
+					titleContext.client &&
+					titleContext.isConversationComplete &&
+					currentSessionIdRef.current
+				) {
+					void maybeGenerateTitle({
+						sessionId: currentSessionIdRef.current,
+						messages: persistedMessages,
+						client: titleContext.client,
+					});
+				}
 			} catch (error) {
 				console.warn('Failed to auto-save session:', error);
 			} finally {
@@ -380,5 +399,5 @@ export function useSessionAutosave({
 		return () => manager.unregister(SHUTDOWN_HANDLER_NAME);
 	}, [flush]);
 
-	return {isSaving};
+	return {isSaving, flush};
 }

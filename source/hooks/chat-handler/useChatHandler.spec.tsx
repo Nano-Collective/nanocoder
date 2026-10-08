@@ -14,6 +14,8 @@ import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
 import {useUserMessageQueue} from '../useUserMessageQueue';
+import {createWebRuntimeBridge} from '@/web/runtime-bridge';
+import type {WebServerEvent} from '@/web/protocol';
 import {
         resetSessionCwd,
         setProjectRoot,
@@ -116,6 +118,36 @@ test('useChatHandler - returns correct interface', t => {
 	t.true('streamingReasoning' in hookResult!);
 	t.true('tokenCount' in hookResult!);
 });
+
+for (const timing of ['burst', 'last-token', 'nonstream'] as const) {
+	test(`browser observer delivers the complete ${timing} reply before completion`, async t => {
+		const events: WebServerEvent[] = [];
+		const bridge = createWebRuntimeBridge(event => events.push(event));
+		let hook: ChatHandlerReturn | null = null;
+		const client: LLMClient = {
+			...createMockClient(),
+			chat: async (_messages, _tools, callbacks) => {
+				if (timing !== 'nonstream') {
+					callbacks.onToken('Hello');
+					if (timing === 'last-token') await new Promise(resolve => setTimeout(resolve, 25));
+					callbacks.onToken(' world');
+				}
+				return {choices: [{message: {role: 'assistant', content: 'Hello world'}}]};
+			},
+		};
+		const instance = render(<TestHookComponent {...createMockProps({client, toolManager: createMockToolManager(),
+			onAssistantContent: bridge.publishAssistantContent,
+		})} onResult={result => {hook = result;}} />);
+		await waitForCondition(() => hook !== null);
+		bridge.bindRuntimeHandlers({submitMessage: text => hook!.handleChatMessage(text), cancel: () => {}, resetSession: () => {}});
+		await bridge.handleClientEvent({type: 'user_message', id: timing, text: 'hello'});
+		await waitForCondition(() => !bridge.hasActiveBrowserTurn());
+		const text = events.filter(event => event.type === 'assistant_delta').map(event => event.text).join('');
+		t.is(text, 'Hello world');
+		t.true(events.findIndex(event => event.type === 'turn_completed') > events.findIndex(event => event.type === 'assistant_delta'));
+		instance.unmount();
+	});
+}
 
 test('useChatHandler - returns correct function types', t => {
 	let hookResult: ChatHandlerReturn | null = null;

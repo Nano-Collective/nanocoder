@@ -1,11 +1,87 @@
 import test from 'ava';
 import type {WebServerEvent} from './protocol.js';
 import {createWebRuntimeBridge} from './runtime-bridge.js';
+import type {WebRuntimeHandlers} from './runtime-bridge.js';
+
+const handlers = (overrides: Partial<WebRuntimeHandlers> = {}): WebRuntimeHandlers => ({
+	submitMessage: () => new Promise<void>(() => {}),
+	cancel: () => {}, resetSession: () => {}, listSessions: async () => [],
+	loadSession: async () => null, deleteSession: async () => {}, ...overrides,
+});
 
 const userMessage = (id: string, text = 'hello') => ({
 	type: 'user_message' as const,
 	id,
 	text,
+});
+
+test('completion and delayed history commits cannot remove or shorten the streamed reply', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers({getSessionState: () => ({session: null, messages: []})}));
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishAssistantContent('Hello world');
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {messages: [{id: 'turn', role: 'user'}, {id: 'turn', role: 'assistant', content: 'Hello world'}]});
+	bridge.syncSession(null, [{role: 'user', content: 'hello'}, {role: 'assistant', content: 'Hello'}]);
+	t.like(bridge.getStateEvents()[0], {messages: [{id: 'turn', role: 'user'}, {id: 'turn', role: 'assistant', content: 'Hello world'}]});
+});
+
+test('reasoning snapshots retain multiple model steps and tool results', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishReasoning('First thought');
+	bridge.publishReasoning('');
+	bridge.publishReasoning('Second thought');
+	bridge.publishToolStarted('read', 'read_file', {path: 'README.md'});
+	bridge.publishToolFinished('read', 'read_file', true, 'Contents');
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {work: [{status: 'completed', reasoning: [{text: 'First thought'}, {text: 'Second thought'}], tools: [{id: 'read', status: 'completed', output: 'Contents'}]}]});
+});
+
+test('authoritative runtime snapshots restore resumed history and track autosaved sessions for deletion', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	let snapshot = {session: {id: 'resumed', title: 'Resumed chat', lastAccessedAt: '2026-01-01', messageCount: 1}, messages: [{role: 'user' as const, content: 'existing history'}]};
+	let resets = 0;
+	bridge.bindRuntimeHandlers(handlers({
+		getSessionState: () => snapshot,
+		resetSession: () => {resets++;},
+	}));
+	t.like(bridge.getStateEvents()[0], {runtimeReady: true, session: {id: 'resumed'}, messages: [{role: 'user', content: 'existing history'}]});
+	snapshot = {...snapshot, session: {...snapshot.session, id: 'autosaved'}};
+	await bridge.handleClientEvent({type: 'delete_session', id: 'delete', sessionId: 'autosaved'});
+	t.is(resets, 1);
+	t.like(bridge.getStateEvents()[0], {session: null, messages: []});
+});
+
+test('turn completion and slash clear reconcile the authoritative runtime transcript', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	let history = [{role: 'user' as const, content: 'old prompt'}];
+	bridge.bindRuntimeHandlers(handlers({
+		getSessionState: () => ({session: null, messages: history}),
+		submitMessage: async () => {history = [];},
+	}));
+	await bridge.handleClientEvent(userMessage('clear', '/clear'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.like(bridge.getStateEvents()[0], {activeTurnId: null, messages: []});
+});
+
+test('runtime startup status and settings failures release the browser lock', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.setRuntimeStatus('Approve directory trust in the terminal.');
+	await t.throwsAsync(bridge.handleClientEvent(userMessage('wait')), {message: 'Approve directory trust in the terminal.'});
+	bridge.bindRuntimeHandlers(handlers({updateSettings: async () => {throw new Error('Provider unavailable');}}));
+	await t.throwsAsync(bridge.handleClientEvent({type: 'update_settings', id: 'settings', provider: 'local', model: 'small', mode: 'normal'}), {message: 'Provider unavailable'});
+	t.like(bridge.getStateEvents()[0], {busy: false, runtimeReady: true});
+});
+
+test('reconnect snapshots retain tool failures and provider errors', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishToolFinished('tool', 'write_file', false);
+	bridge.failTurn(new Error('Provider failed'));
+	t.like(bridge.getStateEvents()[0], {notices: [{role: 'system error', text: 'Provider failed'}], work: [{status: 'failed', tools: [{id: 'tool', name: 'write_file', status: 'failed'}]}]});
 });
 
 test('web runtime bridge rejects messages until the runtime is ready', async t => {
@@ -65,16 +141,16 @@ test('web runtime bridge publishes assistant deltas and completion for the activ
 	bridge.publishAssistantContent('Again');
 	bridge.completeTurn();
 
-	t.deepEqual(events, [
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
 		{type: 'assistant_delta', id: 'turn-1', text: 'Hel'},
 		{type: 'assistant_delta', id: 'turn-1', text: 'lo'},
-		{type: 'assistant_delta', id: 'turn-1', text: 'Again'},
+		{type: 'assistant_delta', id: 'turn-1:response:2', text: 'Again'},
 		{type: 'turn_completed', id: 'turn-1'},
 	]);
 
 	resolveSubmission?.();
 	await submission;
-	t.is(events.length, 4);
+	t.is(events.filter(event => event.type !== 'state').length, 4);
 });
 
 test('web runtime bridge cancels only the matching active browser turn', async t => {
@@ -121,8 +197,8 @@ test('web runtime bridge reports asynchronous submission failures and clears the
 	await new Promise(resolve => setTimeout(resolve, 0));
 
 	t.deepEqual(submittedMessages, ['fail', 'retry']);
-	t.deepEqual(events, [
-		{type: 'error', message: 'Model request failed.'},
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
+		{type: 'error', id: 'turn-1', message: 'Model request failed.'},
 		{type: 'turn_completed', id: 'turn-2'},
 	]);
 });
@@ -255,13 +331,13 @@ test('web runtime bridge publishes tool lifecycle only during an active browser 
 	});
 
 	bridge.publishToolStarted('tool-1', 'read_file');
-	t.deepEqual(events, []);
+	t.deepEqual(events.filter(event => event.type !== 'state'), []);
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
 	bridge.publishToolStarted('tool-1', 'read_file');
 	bridge.publishToolFinished('tool-1', 'read_file', true);
 
-	t.deepEqual(events, [
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
 		{type: 'tool_started', id: 'tool-1', name: 'read_file'},
 		{type: 'tool_finished', id: 'tool-1', name: 'read_file', ok: true},
 	]);
@@ -323,7 +399,7 @@ test('web runtime bridge broadcasts the session list on list_sessions', async t 
 
 	await bridge.handleClientEvent({type: 'list_sessions', id: 'list-1'});
 
-	t.deepEqual(events, [
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
 		{
 			type: 'sessions',
 			id: 'list-1',
@@ -372,7 +448,7 @@ test('web runtime bridge broadcasts the loaded session on load_session', async t
 	});
 
 	t.deepEqual(loadedIds, ['session-1']);
-	t.deepEqual(events, [
+	t.deepEqual(events.filter(event => event.type !== 'state'), [
 		{
 			type: 'session_loaded',
 			id: 'load-1',
@@ -453,4 +529,94 @@ test('web runtime bridge denies pending approval on disconnect', async t => {
 	bridge.handleDisconnect();
 
 	t.false(await approvalPromise);
+});
+
+test('concurrent approvals and questions are presented FIFO across slots', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	const first = bridge.requestApproval({toolName: 'first', arguments: {}});
+	const second = bridge.requestApproval({toolName: 'second', arguments: {}});
+	const question = bridge.requestQuestion({question: 'Which?', options: ['A', 'B'], allowFreeform: false});
+	t.is(events.filter(event => event.type === 'approval_required').length, 1);
+	const firstEvent = events.at(-1)!;
+	await bridge.handleClientEvent({type: 'approval_response', id: firstEvent.id!, approved: true});
+	t.true(await first);
+	t.like(events.at(-1), {type: 'approval_required', toolName: 'second'});
+	await bridge.handleClientEvent({type: 'approval_response', id: events.at(-1)!.id!, approved: false});
+	t.false(await second);
+	t.like(events.at(-1), {type: 'question_required', question: 'Which?'});
+	await bridge.handleClientEvent({type: 'question_response', id: events.at(-1)!.id!, answer: 'B'});
+	t.is(await question, 'B');
+});
+
+test('aborting browser interactions denies them and removes stale responses', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	const controller = new AbortController();
+	const approval = bridge.requestApproval({toolName: 'first', arguments: {}}, controller.signal);
+	const id = events.at(-1)!.id!;
+	const queuedController = new AbortController();
+	const queued = bridge.requestQuestion({question: 'queued', options: [], allowFreeform: true}, queuedController.signal);
+	queuedController.abort();
+	t.regex(await queued, /cancelled/);
+	controller.abort();
+	t.false(await approval);
+	await t.throwsAsync(bridge.handleClientEvent({type: 'approval_response', id, approved: true}));
+	t.is(bridge.getStateEvents().length, 1);
+});
+
+test('reconnect snapshots include the active prompt, full replies, images and pending interaction', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	const images = [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}];
+	await bridge.handleClientEvent({...userMessage('turn'), images});
+	bridge.publishAssistantContent('Hello');
+	bridge.publishAssistantContent('Hello world');
+	const approval = bridge.requestApproval({toolName: 'write_file', arguments: {}});
+	const snapshot = bridge.getStateEvents();
+	t.like(snapshot[0], {type: 'state', activeTurnId: 'turn', messages: [
+		{id: 'turn', role: 'user', content: 'hello', images},
+		{id: 'turn', role: 'assistant', content: 'Hello world'},
+	]});
+	t.like(snapshot[1], {type: 'approval_required', toolName: 'write_file'});
+	bridge.publishAssistantContent('Corrected');
+	t.like(snapshot[0], {messages: [{content: 'hello'}, {content: 'Hello world'}]});
+	bridge.completeTurn();
+	t.false(await approval);
+	t.like(bridge.getStateEvents()[0], {activeTurnId: null, messages: [{content: 'hello'}, {content: 'Corrected'}]});
+});
+
+test('session operations lock out prompts and release the lock on failure', async t => {
+	let release!: () => void;
+	const loading = new Promise<void>(resolve => {release = resolve;});
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers({loadSession: async () => {await loading; throw new Error('load failed');}}));
+	const load = bridge.handleClientEvent({type: 'load_session', id: 'load', sessionId: 'saved'});
+	await t.throwsAsync(bridge.handleClientEvent(userMessage('turn')), {message: 'A session operation is already in progress.'});
+	t.like(bridge.getStateEvents()[0], {busy: true});
+	release();
+	await t.throwsAsync(load, {message: 'load failed'});
+	t.like(bridge.getStateEvents()[0], {busy: false});
+	await t.notThrowsAsync(bridge.handleClientEvent(userMessage('retry')));
+});
+
+test('failed reset preserves the transcript and deleting the active session resets it first', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	const sequence: string[] = [];
+	const session = {id: 'saved', title: 'Saved', lastAccessedAt: '', messageCount: 1};
+	bridge.bindRuntimeHandlers(handlers({
+		loadSession: async () => ({session, messages: [{role: 'user', content: 'keep me'}]}),
+		resetSession: async () => {throw new Error('reset failed');},
+	}));
+	await bridge.handleClientEvent({type: 'load_session', id: 'load', sessionId: 'saved'});
+	await t.throwsAsync(bridge.handleClientEvent({type: 'reset_session', id: 'reset'}));
+	t.like(bridge.getStateEvents()[0], {session, messages: [{content: 'keep me'}]});
+	bridge.bindRuntimeHandlers(handlers({resetSession: () => {sequence.push('reset');}, deleteSession: async () => {sequence.push('delete');}}));
+	await bridge.handleClientEvent({type: 'delete_session', id: 'delete', sessionId: 'saved'});
+	t.deepEqual(sequence, ['reset', 'delete']);
+	t.like(bridge.getStateEvents()[0], {session: null, messages: []});
 });
