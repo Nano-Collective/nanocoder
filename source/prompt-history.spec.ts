@@ -567,6 +567,23 @@ test('loadHistory handles non-existent file', async t => {
 	t.is(history.getHistory().length, 0);
 });
 
+test('saveHistory preserves malformed JSON history files', async t => {
+	const tempFile = join(testDir, `history-corrupt-${Date.now()}-${Math.random()}.json`);
+	const corruptContent = `${JSON_FORMAT_MARKER}[{"displayValue":"unfinished"`;
+	writeFileSync(tempFile, corruptContent, 'utf8');
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+	history.addPrompt('new prompt');
+	await history.saveHistory();
+
+	t.is(
+		readFileSync(tempFile, 'utf8'),
+		corruptContent,
+		'A malformed history file should not be replaced by a new empty history',
+	);
+});
+
 test('loadHistory parses JSON format correctly', async t => {
 	const tempFile = join(testDir, `history-${Date.now()}-${Math.random()}.json`);
 	const history = new PromptHistory(tempFile);
