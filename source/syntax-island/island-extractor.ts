@@ -266,13 +266,22 @@ export function findSyntaxIsland(
 	}
 
 	const trimmedName = symbolName.trim();
+	if (trimmedName.length > 256) {
+		return {
+			found: false,
+			error: 'Symbol name is too long (maximum 256 characters).',
+		};
+	}
+
 	const escapedName = escapeRegex(trimmedName);
 	const ignoredRanges = getIgnoredRanges(content);
 
 	// Patterns to find start of target symbol
+	// Note: escapedName is sanitized via escapeRegex() and length-bounded; threat model is developer tool input.
 	const patterns: PatternEntry[] = [
 		// standard function: function name(...) { ... } or export async function name(...)
 		{
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			regex: new RegExp(
 				`(?:export\\s+(?:default\\s+)?)?(?:async\\s+)?function\\s*\\*?\\s+${escapedName}\\s*(?:<[^>]*>)?\\s*\\([^)]*\\)[^{]*\\{`,
 				'g',
@@ -281,6 +290,7 @@ export function findSyntaxIsland(
 		},
 		// arrow function or expression: const name = async (...) => { ... }
 		{
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			regex: new RegExp(
 				`(?:export\\s+)?(?:const|let|var)\\s+${escapedName}\\s*(?::\\s*[^=]+)?\\s*=\\s*(?:async\\s*)?(?:<[^>]*>\\s*)?(?:\\([^)]*\\)|[a-zA-Z0-9_$]+)\\s*(?::\\s*[^=]+)?\\s*=>\\s*\\{`,
 				'g',
@@ -289,6 +299,7 @@ export function findSyntaxIsland(
 		},
 		// class method with explicit modifiers (e.g. public async calculate(...) { ... })
 		{
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			regex: new RegExp(
 				`(?:(?:public|private|protected|static|async|readonly|override|get|set)\\s+)+${escapedName}\\s*(?:<[^>]*>)?\\s*\\([^)]*\\)[^{]*\\{`,
 				'g',
@@ -297,6 +308,7 @@ export function findSyntaxIsland(
 		},
 		// class/object method without explicit modifiers (e.g. calculate(...) { ... })
 		{
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			regex: new RegExp(
 				`\\b${escapedName}\\s*(?:<[^>]*>)?\\s*\\([^)]*\\)[^{]*\\{`,
 				'g',
@@ -327,6 +339,7 @@ export function findSyntaxIsland(
 		},
 		// class definition: class name { ... } or class name<T> extends Base implements IFoo { ... }
 		{
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			regex: new RegExp(
 				`(?:export\\s+(?:default\\s+)?)?(?:abstract\\s+)?class\\s+${escapedName}(?:<[^{]*>)?(?:\\s+extends\\s+[^{]+)?(?:\\s+implements\\s+[^{]+)?\\s*\\{`,
 				'g',
