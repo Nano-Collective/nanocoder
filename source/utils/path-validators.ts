@@ -1,5 +1,4 @@
 import {extname} from 'node:path';
-import {validationError} from '@/components/ui/icons';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
@@ -16,9 +15,7 @@ export function validatePath(path: string): ValidationResult {
 	if (!isValidFilePath(path, root)) {
 		return {
 			valid: false,
-			error: validationError(
-				`Invalid file path. Path must be within the project directory.`,
-			),
+			error: `Invalid file path. Path must be within the project directory.`,
 		};
 	}
 
@@ -28,7 +25,7 @@ export function validatePath(path: string): ValidationResult {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: validationError(errorMessage),
+			error: `Path validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -47,9 +44,7 @@ export function validateEditableFormat(path: string): ValidationResult {
 
 	return {
 		valid: false,
-		error: validationError(
-			`Cannot write to "${path}": reading a ${extname(path).toLowerCase()} file returns a markdown transcript, not the document itself, so writing an edit back would replace the document with that transcript. Do not retry — edit the document with a tool that understands its format, or save the new text to a separate file.`,
-		),
+		error: `Cannot write to "${path}": reading a ${extname(path).toLowerCase()} file returns a markdown transcript, not the document itself, so writing an edit back would replace the document with that transcript. Do not retry — edit the document with a tool that understands its format, or save the new text to a separate file.`,
 	};
 }
 
@@ -65,18 +60,14 @@ export function validatePathPair(
 	if (!isValidFilePath(source, root)) {
 		return {
 			valid: false,
-			error: validationError(
-				`Invalid source path. Path must be within the project directory.`,
-			),
+			error: `Invalid source path. Path must be within the project directory.`,
 		};
 	}
 
 	if (!isValidFilePath(destination, root)) {
 		return {
 			valid: false,
-			error: validationError(
-				`Invalid destination path. Path must be within the project directory.`,
-			),
+			error: `Invalid destination path. Path must be within the project directory.`,
 		};
 	}
 
@@ -87,7 +78,7 @@ export function validatePathPair(
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: validationError(errorMessage),
+			error: `Path validation failed: ${errorMessage}`,
 		};
 	}
 

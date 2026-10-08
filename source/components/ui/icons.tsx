@@ -134,19 +134,6 @@ const ICON_PLAN = '?';
 /** Goodbye / farewell (replaces waving-hand emoji). */
 export const ICON_GOODBYE = '\u30C4'; // ツ
 
-/** Sentinel prefix for tool-validation errors. The codebase performs string
- *  `startsWith` checks against this prefix in a few places (`isErrorResult`,
- *  `displayToolResult`, `tool-executor`, `auto-diagnostics`); changing it
- *  requires updating those checks together. Using `!` keeps it ASCII and
- *  narrow. */
-const VALIDATION_ERROR_PREFIX = '!';
-
-/** Compose a complete validation-error message in a way that matches the
- *  format the existing startsWith checks expect. */
-export function validationError(message: string): string {
-	return `${VALIDATION_ERROR_PREFIX} Validation failed: ${message}`;
-}
-
 /** Convenience: format a `<icon> <name>` tool header in one call. */
 export function toolTitle(name: string): string {
 	return `${ICON_TOOL} ${name}`;

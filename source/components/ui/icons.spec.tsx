@@ -30,7 +30,6 @@ import {
 	TASK_STATUS_ICONS,
 	mcpTransportIcon,
 	toolTitle,
-	validationError,
 } from '@/components/ui/icons';
 import {width} from '@/utils/width';
 
@@ -103,10 +102,4 @@ test('icons › mcpTransportIcon maps every supported transport', t => {
 
 test('icons › toolTitle composes the canonical header', t => {
 	t.is(toolTitle('execute_bash'), `${ICON_TOOL} execute_bash`);
-});
-
-test('icons › validationError matches the consumer startsWith checks', t => {
-	const msg = validationError('bad args');
-	t.true(msg.startsWith('! Validation failed:'));
-	t.is(msg, '! Validation failed: bad args');
 });
