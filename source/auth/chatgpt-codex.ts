@@ -286,6 +286,14 @@ export async function getValidCodexToken(
 		);
 	}
 
+	credential.accessToken = refreshed.accessToken;
+	if (refreshed.refreshToken !== undefined) {
+		credential.refreshToken = refreshed.refreshToken;
+	}
+	if (refreshed.expiresAt !== undefined) {
+		credential.expiresAt = refreshed.expiresAt;
+	}
+
 	onUpdate(refreshed);
 
 	return {

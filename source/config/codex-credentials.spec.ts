@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
-import type {CodexTokens} from '@/auth/chatgpt-codex';
+import {getValidCodexToken, type CodexTokens} from '@/auth/chatgpt-codex';
 import {
 	getCodexNoCredentialsMessage,
 	loadCodexCredential,
@@ -135,6 +135,94 @@ test.serial(
 		t.is(loaded!.refreshToken, 'original-refresh');
 		t.is(loaded!.expiresAt, 2000);
 		t.is(loaded!.accountId, 'acc-1');
+	},
+);
+
+test.serial(
+	'refresh keeps the saved account id and refresh token',
+	async t => {
+		saveCodexCredential('ChatGPT', {
+			accessToken: 'old-access',
+			refreshToken: 'keep-refresh',
+			expiresAt: Date.now() - 1000,
+			accountId: 'acc-keep',
+		});
+		const credential = loadCodexCredential('ChatGPT')!;
+		let fetches = 0;
+		const mockFetch = async () => {
+			fetches++;
+			return {
+				ok: true,
+				json: async () => ({
+					access_token: 'new-access',
+					expires_in: 3600,
+				}),
+			} as Response;
+		};
+
+		const first = await getValidCodexToken(
+			credential,
+			tokens => {
+				updateCodexCredential('ChatGPT', tokens);
+			},
+			mockFetch as typeof fetch,
+		);
+		const saved = loadCodexCredential('ChatGPT');
+
+		t.is(first.accessToken, 'new-access');
+		t.is(first.accountId, 'acc-keep');
+		t.is(saved!.accessToken, 'new-access');
+		t.is(saved!.accountId, 'acc-keep');
+		t.is(saved!.refreshToken, 'keep-refresh');
+		t.is(credential.refreshToken, 'keep-refresh');
+
+		const second = await getValidCodexToken(
+			credential,
+			tokens => {
+				updateCodexCredential('ChatGPT', tokens);
+			},
+			mockFetch as typeof fetch,
+		);
+		t.is(second.accessToken, 'new-access');
+		t.is(second.accountId, 'acc-keep');
+		t.is(fetches, 1);
+	},
+);
+
+test.serial(
+	'refresh stores a new refresh token when the server sends one',
+	async t => {
+		saveCodexCredential('ChatGPT', {
+			accessToken: 'old-access',
+			refreshToken: 'old-refresh',
+			expiresAt: Date.now() - 1000,
+			accountId: 'acc-keep',
+		});
+		const credential = loadCodexCredential('ChatGPT')!;
+		const mockFetch = async () =>
+			({
+				ok: true,
+				json: async () => ({
+					access_token: 'new-access',
+					refresh_token: 'rotated-refresh',
+					expires_in: 3600,
+				}),
+			}) as Response;
+
+		await getValidCodexToken(
+			credential,
+			tokens => {
+				updateCodexCredential('ChatGPT', tokens);
+			},
+			mockFetch as typeof fetch,
+		);
+		const saved = loadCodexCredential('ChatGPT');
+
+		t.is(saved!.accessToken, 'new-access');
+		t.is(saved!.refreshToken, 'rotated-refresh');
+		t.is(saved!.accountId, 'acc-keep');
+		t.is(credential.refreshToken, 'rotated-refresh');
+		t.is(credential.accessToken, 'new-access');
 	},
 );
 

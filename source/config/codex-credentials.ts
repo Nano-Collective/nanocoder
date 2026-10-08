@@ -72,7 +72,16 @@ export function updateCodexCredential(
 	const store = credentialStore.load();
 	const existing = store[providerName];
 	if (!existing) return;
-	store[providerName] = {...existing, ...updates};
+	// JSON.stringify drops keys whose value is undefined, so a refresh that
+	// omits accountId or refreshToken must not overwrite the saved ones.
+	const next = {...existing};
+	if (updates.accessToken !== undefined) next.accessToken = updates.accessToken;
+	if (updates.refreshToken !== undefined) {
+		next.refreshToken = updates.refreshToken;
+	}
+	if (updates.expiresAt !== undefined) next.expiresAt = updates.expiresAt;
+	if (updates.accountId !== undefined) next.accountId = updates.accountId;
+	store[providerName] = next;
 	credentialStore.write(store);
 }
 
