@@ -743,22 +743,8 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: falls back when requested provider fails',
+	'createLLMClient: falls back when a non-strict requested provider fails',
 	async t => {
-		// Mock fetch: fail first call, succeed second
-		let callCount = 0;
-		globalThis.fetch = (async () => {
-			callCount++;
-			if (callCount === 1) {
-				throw new TypeError('Failed to fetch');
-			}
-			return {
-				ok: true,
-				status: 200,
-				statusText: 'OK',
-			} as Response;
-		}) as typeof fetch;
-
 		// Create config with multiple providers
 		const configDir = join(testDir, 'requested-fallback-test');
 		mkdirSync(configDir, {recursive: true});
@@ -774,7 +760,8 @@ test.serial(
 						},
 						{
 							name: 'Provider2',
-							baseUrl: 'http://localhost:9000/v1',
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
 							models: ['model2'],
 						},
 					],
@@ -794,8 +781,46 @@ test.serial(
 
 		t.truthy(result);
 		t.truthy(result.client);
-		// Should fallback to Provider1
-		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
+		t.is(result.actualProvider, 'Provider1');
+	},
+);
+
+test.serial(
+	'createLLMClient: does not fall back when provider selection is strict',
+	async t => {
+		const configDir = join(testDir, 'strict-requested-provider-test');
+		mkdirSync(configDir, {recursive: true});
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Provider1',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+						},
+						{
+							name: 'Provider2',
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(
+			createLLMClient('Provider2', undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+
+		t.true(error.message.includes("Explicitly requested provider 'Provider2' failed"));
 	},
 );
 

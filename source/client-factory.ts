@@ -35,13 +35,20 @@ export async function createLLMClient(
 	overrides?: Partial<
 		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
 	>,
+	options: {strictProvider?: boolean} = {},
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Check if agents.config.json exists
 	const agentsJsonPath = getClosestConfigFile('agents.config.json');
 	const hasConfigFile = existsSync(agentsJsonPath);
 
 	// Use AI SDK - it handles both tool-calling and non-tool-calling models
-	return createAISDKClient(provider, model, hasConfigFile, overrides);
+	return createAISDKClient(
+		provider,
+		model,
+		hasConfigFile,
+		overrides,
+		options.strictProvider,
+	);
 }
 
 async function createAISDKClient(
@@ -51,6 +58,7 @@ async function createAISDKClient(
 	overrides?: Partial<
 		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
 	>,
+	strictProvider = false,
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Load provider configs
 	const providers = loadProviderConfigs();
@@ -140,12 +148,13 @@ async function createAISDKClient(
 		}
 	}
 
-	// Order providers: requested first, then others
+	// An explicitly selected provider must not silently send prompts to a
+	// different provider if initialization fails. Callers using preferences
+	// or defaults keep the existing fallback behavior.
 	const availableProviders = providers.map(p => p.name);
-	const providerOrder = [
-		targetProvider,
-		...availableProviders.filter(p => p !== targetProvider),
-	];
+	const providerOrder = strictProvider
+		? [targetProvider]
+		: [targetProvider, ...availableProviders.filter(p => p !== targetProvider)];
 
 	const errors: string[] = [];
 
@@ -184,7 +193,10 @@ async function createAISDKClient(
 		}\n\nPlease create an agents.config.json file with provider configuration.`;
 		throw new Error(combinedError);
 	} else {
-		const combinedError = `All configured providers failed:\n${errors
+		const failureSummary = strictProvider
+			? `Explicitly requested provider '${targetProvider}' failed:`
+			: 'All configured providers failed:';
+		const combinedError = `${failureSummary}\n${errors
 			.map(e => `• ${e}`)
 			.join(
 				'\n',

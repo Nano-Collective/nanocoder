@@ -133,6 +133,7 @@ export function useAppInitialization({
 		preferredProvider?: string,
 		preferredModel?: string,
 		isProgrammatic: boolean = false,
+		strictProvider: boolean = false,
 	): Promise<LLMClient | null> => {
 		// Lint provider configs before instantiation so typos and misplaced
 		// blocks surface as warnings in the chat queue, without a box —
@@ -151,6 +152,8 @@ export function useAppInitialization({
 		const {client, actualProvider} = await createLLMClient(
 			preferredProvider,
 			preferredModel,
+			undefined,
+			{strictProvider},
 		);
 		setClient(client);
 		setCurrentProvider(actualProvider);
@@ -429,7 +432,12 @@ export function useAppInitialization({
 				);
 			}
 			const model = cliModel || modeConfig?.model || undefined;
-			const client = await initializeClient(provider, model, isProgrammatic);
+			const client = await initializeClient(
+				provider,
+				model,
+				isProgrammatic,
+				Boolean(cliProvider),
+			);
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
