@@ -6,6 +6,7 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
+import {MCPToolCatalog} from '@/mcp/tool-catalog';
 import {allToolExports} from '@/tools/index';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
@@ -25,6 +26,16 @@ import type {
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
 import {getShutdownManager} from '@/utils/shutdown';
+
+let activeToolManager: ToolManager | null = null;
+
+export function setActiveToolManager(manager: ToolManager | null): void {
+	activeToolManager = manager;
+}
+
+export function getActiveToolManager(): ToolManager | null {
+	return activeToolManager;
+}
 
 /**
  * Filter knob for tool access methods. Default behavior hides scoped
@@ -126,6 +137,7 @@ export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
 	private mcpHealthUnsubscribe: (() => void) | null = null;
+	private mcpCatalog = new MCPToolCatalog();
 	private customTools = new Map<
 		string,
 		{
@@ -139,11 +151,39 @@ export class ToolManager {
 
 	constructor() {
 		this.registry = ToolRegistry.fromToolExports(allToolExports);
+		setActiveToolManager(this);
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
 			this.registry.unregister('web_search');
 		}
+	}
+
+	/**
+	 * Returns the MCP tool catalog for on-demand tool discovery.
+	 */
+	getMcpCatalog(): MCPToolCatalog {
+		return this.mcpCatalog;
+	}
+
+	/**
+	 * Dynamically loads an on-demand MCP tool from the catalog into the active ToolRegistry.
+	 */
+	loadMcpTool(toolName: string): boolean {
+		if (this.registry.hasTool(toolName)) {
+			this.mcpCatalog.markLoaded(toolName);
+			return true;
+		}
+
+		if (!this.mcpClient) return false;
+
+		const mcpToolEntries = this.mcpClient.getToolEntries();
+		const entry = mcpToolEntries.find(e => e.name === toolName);
+		if (!entry) return false;
+
+		this.registry.register(entry);
+		this.mcpCatalog.markLoaded(toolName);
+		return true;
 	}
 
 	/**
@@ -159,6 +199,7 @@ export class ToolManager {
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
 		onHealthChange?: (change: MCPHealthChange) => void,
+		tuneConfig?: TuneConfig,
 	): Promise<MCPInitResult[]> {
 		const enabledServers = servers?.filter(server => server.enabled !== false);
 		// Reinitialization must close the previous transports before replacing the client.
@@ -179,6 +220,7 @@ export class ToolManager {
 								change.serverName,
 						);
 						this.registry.unregisterMany(toolNames);
+						this.mcpCatalog.removeServerTools(change.serverName);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
@@ -200,7 +242,32 @@ export class ToolManager {
 			);
 
 			const mcpToolEntries = this.mcpClient.getToolEntries();
-			this.registry.registerMany(mcpToolEntries);
+			const mapping = this.mcpClient.getToolMapping();
+
+			const useDiscovery =
+				tuneConfig?.mcpDiscovery === 'always' ||
+				(tuneConfig?.mcpDiscovery !== 'disabled' && mcpToolEntries.length >= 8);
+
+			this.mcpCatalog.clear();
+			const discoveredTools: MCPTool[] =
+				typeof this.mcpClient.getAllDiscoveredTools === 'function'
+					? this.mcpClient.getAllDiscoveredTools()
+					: mcpToolEntries.map(e => {
+							const map = mapping.get(e.name);
+							return {
+								name: e.name,
+								serverName: map?.serverName || 'mcp',
+								readOnly: map?.readOnly,
+							};
+						});
+
+			for (const tool of discoveredTools) {
+				this.mcpCatalog.add(tool.serverName, tool, !useDiscovery);
+			}
+
+			if (!useDiscovery) {
+				this.registry.registerMany(mcpToolEntries);
+			}
 
 			return results;
 		}
@@ -406,14 +473,23 @@ export class ToolManager {
 	}
 
 	getToolHandler(toolName: string): ToolHandler | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getHandler(toolName);
 	}
 
 	getToolFormatter(toolName: string): ToolFormatter | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getFormatter(toolName);
 	}
 
 	getToolValidator(toolName: string): ToolValidator | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getValidator(toolName);
 	}
 
@@ -422,7 +498,13 @@ export class ToolManager {
 	}
 
 	isReadOnly(toolName: string): boolean {
-		return this.registry.getEntry(toolName)?.readOnly === true;
+		if (this.registry.hasTool(toolName)) {
+			return this.registry.getEntry(toolName)?.readOnly === true;
+		}
+		if (this.mcpCatalog.has(toolName)) {
+			return this.mcpCatalog.get(toolName)?.readOnly === true;
+		}
+		return false;
 	}
 
 	hasTool(toolName: string): boolean {
@@ -498,6 +580,7 @@ export class ToolManager {
 	async disconnectMCP(): Promise<void> {
 		this.mcpHealthUnsubscribe?.();
 		this.mcpHealthUnsubscribe = null;
+		this.mcpCatalog.clear();
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);
@@ -512,6 +595,9 @@ export class ToolManager {
 	}
 
 	getToolEntry(toolName: string): ToolEntry | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getEntry(toolName);
 	}
 
