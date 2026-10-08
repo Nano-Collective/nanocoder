@@ -529,7 +529,12 @@ export class AcpAgent implements Agent {
 			}
 
 			this.initContext.provider = providerId;
-			const {client: newClient} = await createLLMClient(providerId);
+			const {client: newClient} = await createLLMClient(
+				providerId,
+				undefined,
+				undefined,
+				{strictProvider: true},
+			);
 			this.initContext.client = newClient;
 			setAutoCommitClient(newClient);
 

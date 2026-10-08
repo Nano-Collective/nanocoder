@@ -745,6 +745,7 @@ test.serial(
 test.serial(
 	'createLLMClient: falls back when a non-strict requested provider fails',
 	async t => {
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
 		// Create config with multiple providers
 		const configDir = join(testDir, 'requested-fallback-test');
 		mkdirSync(configDir, {recursive: true});
@@ -759,7 +760,7 @@ test.serial(
 							models: ['model1'],
 						},
 						{
-							name: 'Provider2',
+							name: failingProvider,
 							baseUrl: 'https://api.example.com/v1',
 							sdkProvider: 'github-copilot',
 							models: ['model2'],
@@ -777,7 +778,7 @@ test.serial(
 		reloadAppConfig();
 
 		// Request Provider2, which will fail, then fallback to Provider1
-		const result = await createLLMClient('Provider2');
+		const result = await createLLMClient(failingProvider);
 
 		t.truthy(result);
 		t.truthy(result.client);
@@ -788,6 +789,7 @@ test.serial(
 test.serial(
 	'createLLMClient: does not fall back when provider selection is strict',
 	async t => {
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
 		const configDir = join(testDir, 'strict-requested-provider-test');
 		mkdirSync(configDir, {recursive: true});
 		createTestConfig(
@@ -800,7 +802,7 @@ test.serial(
 							models: ['model1'],
 						},
 						{
-							name: 'Provider2',
+							name: failingProvider,
 							baseUrl: 'https://api.example.com/v1',
 							sdkProvider: 'github-copilot',
 							models: ['model2'],
@@ -815,12 +817,16 @@ test.serial(
 		reloadAppConfig();
 
 		const error = await t.throwsAsync(
-			createLLMClient('Provider2', undefined, undefined, {
+			createLLMClient(failingProvider, undefined, undefined, {
 				strictProvider: true,
 			}),
 		);
 
-		t.true(error.message.includes("Explicitly requested provider 'Provider2' failed"));
+		t.true(
+			error.message.includes(
+				`Explicitly requested provider '${failingProvider}' failed`,
+			),
+		);
 	},
 );
 
