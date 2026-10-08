@@ -7,6 +7,8 @@
  * External dependency; changing it may break device flow compatibility.
  */
 
+import {mergeCodexCredential} from '@/config/codex-credentials';
+
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const DEVICE_CODE_URL =
 	'https://auth.openai.com/api/accounts/deviceauth/usercode';
@@ -247,6 +249,8 @@ export async function refreshCodexAccessToken(
 /**
  * Get a valid access token, refreshing if necessary.
  * Returns {accessToken, accountId} or throws if no valid credential.
+ * After a refresh, writes the new tokens onto `credential` so the next
+ * call in this session uses the new expiry and refresh token.
  */
 export async function getValidCodexToken(
 	credential: {
@@ -286,13 +290,7 @@ export async function getValidCodexToken(
 		);
 	}
 
-	credential.accessToken = refreshed.accessToken;
-	if (refreshed.refreshToken !== undefined) {
-		credential.refreshToken = refreshed.refreshToken;
-	}
-	if (refreshed.expiresAt !== undefined) {
-		credential.expiresAt = refreshed.expiresAt;
-	}
+	Object.assign(credential, mergeCodexCredential(credential, refreshed));
 
 	onUpdate(refreshed);
 
