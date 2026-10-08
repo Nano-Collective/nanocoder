@@ -199,7 +199,7 @@ export class ToolManager {
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
 		onHealthChange?: (change: MCPHealthChange) => void,
-		tuneConfig?: TuneConfig,
+		tuneConfig?: Partial<TuneConfig>,
 	): Promise<MCPInitResult[]> {
 		const enabledServers = servers?.filter(server => server.enabled !== false);
 		// Reinitialization must close the previous transports before replacing the client.
