@@ -4,9 +4,8 @@ import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
-import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
-import {parseMarkdown} from './index.js';
+import {parseMarkdown, parseMarkdownParts} from './index.js';
 
 console.log(`\nindex.spec.ts`);
 
@@ -342,4 +341,65 @@ test('parseMarkdown restores inline code placeholders correctly', t => {
 	t.false(result.includes('__INLINE_CODE'));
 	t.false(result.includes('_INLINE'));
 	t.false(result.includes('CODE_'));
+});
+
+test('parseMarkdown preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__CODE_BLOCK_0__'));
+	t.true(result.includes('__INLINE_CODE_0__'));
+	t.true(result.includes('const value = "real code";'));
+	t.true(result.includes('inline code'));
+	t.false(result.includes('__NANOCODER_MD_'));
+});
+
+test('parseMarkdown avoids marker collisions after HTML entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(result.includes('real code'));
+	t.false(result.includes('__NANOCODER_MD_1__'));
+});
+
+test('parseMarkdownParts preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('const value = "real code";'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_'));
 });
