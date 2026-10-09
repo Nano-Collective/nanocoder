@@ -982,9 +982,11 @@ function formatMatchContent(content: string, maxLength: number): string {
 	return `${content.slice(0, maxLength)}…`;
 }
 
+// `data` is absent on rg's begin/end/summary records, so it must be optional
+// for a line to be narrowed on `type` alone.
 interface RgJsonMatch {
 	type: string;
-	data: {
+	data?: {
 		path?: {text?: string};
 		line_number?: number;
 		lines?: {text?: string};
@@ -1016,8 +1018,8 @@ function parseRgJsonLines(stdout: string): Array<{
 		if (parsed.type !== 'match' && parsed.type !== 'context') {
 			continue;
 		}
-		const file = parsed.data.path?.text;
-		const lineNumber = parsed.data.line_number;
+		const file = parsed.data?.path?.text;
+		const lineNumber = parsed.data?.line_number;
 		if (file === undefined || lineNumber === undefined) {
 			continue;
 		}
@@ -1025,7 +1027,7 @@ function parseRgJsonLines(stdout: string): Array<{
 			type: parsed.type,
 			file: normalizePathForMatch(file),
 			lineNumber,
-			text: parsed.data.lines?.text,
+			text: parsed.data?.lines?.text,
 		});
 	}
 	return results;
@@ -1207,10 +1209,14 @@ export async function searchProjectContents(
 		} catch {
 			return 'skip';
 		}
-		const file = parsed.data.path?.text;
+		// rg also emits begin/end/summary records, which carry no `data`. Check the
+		// type first so a data-less line can't throw inside the stream handler,
+		// where an exception escapes as an uncaught error instead of failing the
+		// search.
 		if (parsed.type !== 'match' && parsed.type !== 'context') {
 			return 'skip';
 		}
+		const file = parsed.data?.path?.text;
 		if (file === undefined) {
 			return 'skip';
 		}
