@@ -1,5 +1,22 @@
 export const WEB_PROTOCOL_VERSION = 1;
 
+export type WebPanel = 'files' | 'tasks' | 'changes';
+export interface WebPanelItem {
+	name: string;
+	detail?: string;
+	path?: string;
+	kind?: 'directory' | 'file';
+	status?: string;
+}
+export interface WebPanelData {
+	panel: WebPanel;
+	path?: string;
+	items: WebPanelItem[];
+	content?: string;
+	message?: string;
+	diffs?: {title: string; content: string}[];
+}
+
 export interface WebSessionSummary {
 	id: string;
 	title: string;
@@ -46,6 +63,7 @@ export interface WebWorkSummary {
 }
 
 export type WebClientEvent =
+	| {type: 'workspace_panel'; id: string; panel: WebPanel; path?: string}
 	| {type: 'hello'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
 	| {
 			type: 'user_message';
@@ -69,6 +87,7 @@ export type WebClientEvent =
 	  };
 
 export type WebServerEvent =
+	| {type: 'workspace_panel'; id: string; data: WebPanelData}
 	| {
 			type: 'state';
 			activeTurnId: string | null;
@@ -140,6 +159,20 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 	}
 
 	switch (parsed.type) {
+		case 'workspace_panel':
+			if (
+				typeof parsed.id !== 'string' ||
+				!parsed.id ||
+				!['files', 'tasks', 'changes'].includes(String(parsed.panel)) ||
+				(parsed.path !== undefined && typeof parsed.path !== 'string')
+			)
+				throw new Error('Invalid workspace panel request.');
+			return {
+				type: 'workspace_panel',
+				id: parsed.id,
+				panel: parsed.panel as WebPanel,
+				path: parsed.path as string | undefined,
+			};
 		case 'hello':
 			if (parsed.protocolVersion !== WEB_PROTOCOL_VERSION) {
 				throw new Error('Unsupported web protocol version.');

@@ -50,6 +50,7 @@ import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
+import {loadTasks} from '@/tools/tasks/storage';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
@@ -59,6 +60,7 @@ import {isExtensionInstalled} from '@/vscode/extension-installer';
 import {handleWebCommand} from '@/web/commands';
 import {prepareWebSession} from '@/web/session';
 import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
+import {getWorkspacePanel} from '@/web/workspace';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
 // top and bottom padding, plus the input footer below the chat viewport
@@ -630,6 +632,7 @@ export default function App({
 		[appState.currentSessionId, appState.sessionName, appState.messages],
 	);
 	const webRuntimeStateRef = React.useRef({
+		tasks: appState.liveTaskList,
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
@@ -647,6 +650,7 @@ export default function App({
 		},
 	});
 	webRuntimeStateRef.current = {
+		tasks: appState.liveTaskList,
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
@@ -733,6 +737,14 @@ export default function App({
 		}
 
 		return webRuntimeBridge.bindRuntimeHandlers({
+			getWorkspacePanel: async (panel, path) => {
+				const current = webRuntimeStateRef.current;
+				const sessionId = current.getSessionState().session?.id;
+				return getWorkspacePanel(panel, path, {
+					root: process.cwd(),
+					tasks: current.tasks ?? (sessionId ? await loadTasks(sessionId) : []),
+				});
+			},
 			submitMessage: async (message, images) => {
 				if (webRuntimeStateRef.current.isGenerating) {
 					throw new Error('Nanocoder is already processing a turn.');

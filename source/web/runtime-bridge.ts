@@ -1,6 +1,8 @@
 import type {
 	WebClientEvent,
 	WebNotice,
+	WebPanel,
+	WebPanelData,
 	WebServerEvent,
 	WebSessionMessage,
 	WebSessionSummary,
@@ -14,6 +16,7 @@ export interface WebSessionLoadResult {
 }
 
 export interface WebRuntimeHandlers {
+	getWorkspacePanel?: (panel: WebPanel, path?: string) => Promise<WebPanelData>;
 	submitMessage: (
 		text: string,
 		images?: {data: string; mediaType: string}[],
@@ -428,6 +431,16 @@ export function createWebRuntimeBridge(
 						'The browser turn was cancelled before the question was answered.',
 				});
 				runtimeHandlers.cancel();
+				return;
+			}
+			if (event.type === 'workspace_panel') {
+				if (!runtimeHandlers.getWorkspacePanel)
+					throw new Error('Workspace panels are unavailable.');
+				const data = await runtimeHandlers.getWorkspacePanel(
+					event.panel,
+					event.path,
+				);
+				broadcastEvent({type: 'workspace_panel', id: event.id, data});
 				return;
 			}
 

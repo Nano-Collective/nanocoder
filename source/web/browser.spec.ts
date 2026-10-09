@@ -56,6 +56,26 @@ test('browser boots without CDN globals and persists the full streamed reply', t
 	t.is(browser.get('#messageList').querySelector('.message-content')!.textContent, 'Corrected');
 });
 
+test('panel navigation ignores stale replies and shows compact per-file source control', t => {
+	const browser = bootBrowser();
+	browser.run('runtimeReady = true; setComposerEnabled(true);');
+	browser.get('#tasksPanelButton').click();
+	const old = browser.sent.at(-1) as {id: string};
+	browser.get('#changesPanelButton').click();
+	const current = browser.sent.at(-1) as {id: string};
+	browser.event({type: 'workspace_panel', id: old.id, data: {panel: 'tasks', items: [{name: 'Stale task'}]}});
+	t.false(browser.get('#workspacePanelContent').textContent.includes('Stale task'));
+	browser.event({type: 'workspace_panel', id: current.id, data: {panel: 'changes', items: [{name: 'file.ts', path: 'src/file.ts', detail: 'src', status: 'M'}]}});
+	browser.get('#workspacePanelContent').querySelector('button')!.click();
+	const selected = browser.sent.at(-1) as {id: string};
+	t.like(selected, {panel: 'changes', path: 'src/file.ts'});
+	browser.event({type: 'workspace_panel', id: selected.id, data: {panel: 'changes', path: 'src/file.ts', items: [{name: 'file.ts', path: 'src/file.ts', detail: 'src', status: 'M'}], diffs: [{title: 'Unstaged changes', content: '@@ -3,1 +3,1 @@\n-old\n+new'}]}});
+	t.is(browser.get('#workspacePanelContent').querySelectorAll('.addition').length, 1);
+	t.is(browser.get('#workspacePanelContent').querySelectorAll('.deletion').length, 1);
+	t.is(browser.get('#workspacePanelContent').querySelector('.change-status')!.textContent, 'M');
+	t.false(browser.sent.some((event: any) => event.type === 'user_message'));
+});
+
 test('reconnect releases a settings request whose acknowledgment was lost', t => {
 	const browser = bootBrowser();
 	browser.run("settingsRequestId = 'pending'; disconnect();");

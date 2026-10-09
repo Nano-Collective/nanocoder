@@ -1,6 +1,13 @@
 import test from 'ava';
 import {parseWebClientEvent, WEB_PROTOCOL_VERSION} from './protocol.js';
 
+test('workspace requests validate panels and optional paths', t => {
+	t.like(parseWebClientEvent(JSON.stringify({type: 'workspace_panel', id: 'files', panel: 'files', path: 'src'})), {panel: 'files', path: 'src'});
+	for (const invalid of [{panel: 'shell'}, {panel: 'skills'}, {panel: 'files', path: 123}, {panel: 'tasks', id: ''}]) {
+		t.throws(() => parseWebClientEvent(JSON.stringify({type: 'workspace_panel', id: 'request', ...invalid})));
+	}
+});
+
 test('parseWebClientEvent accepts approval and question responses', t => {
 	t.deepEqual(
 		parseWebClientEvent(

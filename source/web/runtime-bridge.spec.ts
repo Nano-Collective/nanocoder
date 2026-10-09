@@ -15,6 +15,16 @@ const userMessage = (id: string, text = 'hello') => ({
 	text,
 });
 
+test('workspace panels remain available during a turn without submitting or cancelling it', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers(handlers({getWorkspacePanel: async panel => ({panel, items: [{name: 'Current task'}]})}));
+	await bridge.handleClientEvent(userMessage('turn'));
+	await bridge.handleClientEvent({type: 'workspace_panel', id: 'tasks', panel: 'tasks'});
+	t.true(bridge.hasActiveBrowserTurn());
+	t.true(events.some(event => event.type === 'workspace_panel' && event.id === 'tasks' && event.data.items[0].name === 'Current task'));
+});
+
 test('empty cleaned tool text is removed and only the final finished reply gets a footer', async t => {
 	const events: WebServerEvent[] = [];
 	const bridge = createWebRuntimeBridge(event => events.push(event));
