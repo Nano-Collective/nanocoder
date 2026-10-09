@@ -1,14 +1,24 @@
+import {lookup} from 'node:dns/promises';
+import {isIP} from 'node:net';
+
 /**
  * Reject fetch_url targets that are loopback, private, link-local, or cloud
- * metadata — on the *request* URL only.
+ * metadata.
  *
- * `fetch-url.tsx` resolves redirects itself and runs every hop through this
- * same check, so a `http://attacker.example/r` → `http://169.254.169.254/`
+ * `assertPublicHttpUrl` judges the URL text: hostname spellings and IP
+ * literals. It cannot see where a name points, so `assertResolvedPublicHttpUrl`
+ * also resolves the host and rejects it when any address is blocked - a public
+ * record such as `localtest.me` or `169.254.169.254.nip.io` leads to an
+ * internal address without being one (#1662).
+ *
+ * `fetch-url.tsx` resolves redirects itself and runs every hop through the
+ * validator, so a `http://attacker.example/r` -> `http://169.254.169.254/`
  * chain is rejected at the hop rather than followed (#1089).
  *
- * Known gap (not this file): DNS rebinding. A public name can resolve to a
- * blocked address at request time; this check is hostname-string / parsed IP,
- * not a pinned lookup.
+ * Known gap: DNS rebinding. The address is checked, not pinned, and the final
+ * download is made by `@nanocollective/get-md`, which resolves the name again
+ * and offers no way to supply a resolver. Closing it needs that package to
+ * accept a lookup or dispatcher.
  */
 
 function parseIpv4(host: string): number | null {
@@ -100,6 +110,35 @@ export function assertPublicHttpUrl(urlString: string): void {
 	if (isBlockedFetchHost(parsed.hostname)) {
 		throw new Error(
 			`Cannot fetch from internal/private network address: ${parsed.hostname}`,
+		);
+	}
+}
+
+/** @internal Test-only: swap the resolver so specs never reach real DNS. */
+export const hostResolver = {
+	resolve: async (hostname: string): Promise<string[]> =>
+		(await lookup(hostname, {all: true})).map(({address}) => address),
+};
+
+/**
+ * `assertPublicHttpUrl`, plus a lookup of the host: every address it resolves
+ * to must be public. One blocked address among several is enough to reject,
+ * since the connection may use any of them. A name that does not resolve is
+ * rejected too, rather than left for the fetch to fail on.
+ */
+export async function assertResolvedPublicHttpUrl(
+	urlString: string,
+): Promise<void> {
+	assertPublicHttpUrl(urlString);
+
+	const host = new URL(urlString).hostname.replace(/^\[|\]$/g, '');
+	// An IP literal needs no lookup; the check above already judged it.
+	if (isIP(host)) return;
+
+	const blocked = (await hostResolver.resolve(host)).find(isBlockedFetchHost);
+	if (blocked !== undefined) {
+		throw new Error(
+			`Cannot fetch from internal/private network address: ${host} resolves to ${blocked}`,
 		);
 	}
 }
