@@ -53,10 +53,30 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 30));
 
 // Serial: each test swaps the process-wide NANOCODER_CONFIG_DIR.
 test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
-	const cases: Array<{label: string; stored: (root: string) => string[]}> = [
+	const cases: Array<{
+		label: string;
+		stored: (root: string) => Array<string | {path: string; fingerprint: string}>;
+	}> = [
 		{label: 'no entries', stored: () => []},
-		{label: 'exact entry', stored: root => [root]},
-		{label: 'un-normalized entry', stored: root => [unnormalized(root)]},
+		{
+			label: 'current fingerprint',
+			stored: root => [
+				{path: root, fingerprint: describeProjectTrust(root).fingerprint},
+			],
+		},
+		{
+			label: 'un-normalized entry',
+			stored: root => [
+				{
+					path: unnormalized(root),
+					fingerprint: describeProjectTrust(root).fingerprint,
+				},
+			],
+		},
+		{
+			label: 'path only',
+			stored: root => [root],
+		},
 		{label: 'unrelated entry', stored: root => [join(root, 'elsewhere')]},
 	];
 
@@ -106,7 +126,10 @@ test.serial(
 		await withIsolatedPreferences(async root => {
 			// Stored in a form only the shared resolution rule recognises: an
 			// exact-string check would miss it and append a duplicate entry.
-			const stored = unnormalized(root);
+			const stored = {
+				path: unnormalized(root),
+				fingerprint: describeProjectTrust(root).fingerprint,
+			};
 			savePreferences({trustedDirectories: [stored]});
 			resetPreferencesCache();
 

@@ -533,7 +533,15 @@ test.serial(
 				trustDirectory: false,
 				outputFormat: "json",
 				deps: baseDeps({
-					loadPreferences: () => ({ trustedDirectories: [cwd] }) as never,
+					loadPreferences: () =>
+						({
+							trustedDirectories: [
+								{
+									path: cwd,
+									fingerprint: describeProjectTrust(cwd).fingerprint,
+								},
+							],
+						}) as never,
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: "success",

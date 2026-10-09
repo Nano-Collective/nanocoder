@@ -187,9 +187,16 @@ export function isDirectoryTrusted(
 	preferences: UserPreferences,
 ): boolean {
 	const resolved = path.resolve(directory); // nosemgrep
-	return (preferences.trustedDirectories ?? []).some(
-		entry => path.resolve(trustPath(entry)) === resolved, // nosemgrep
-	);
+	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	return (preferences.trustedDirectories ?? []).some(entry => {
+		if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+			return false;
+		}
+		return (
+			path.resolve(entry.path) === resolved && // nosemgrep
+			entry.fingerprint === fingerprint
+		);
+	});
 }
 
 /** Record this folder, including a fingerprint of what it will run. */
@@ -223,11 +230,10 @@ export interface DirectoryTrustDeps {
  *
  * `bypass` is the caller's own one-shot override (each entry point's own
  * `--trust-directory` flag); it never persists, matching the interactive
- * disclaimer's per-run nature. Absent that, a directory already recorded in
- * `trustedDirectories` (from a prior interactive run, or a previous
- * `NANOCODER_TRUST_DIRECTORY=1` run) is trusted as-is. A first-time
- * `NANOCODER_TRUST_DIRECTORY=1` run persists the directory so later runs
- * don't need the env var again.
+ * disclaimer's per-run nature. A directory is trusted only when its saved
+ * fingerprint still matches the plugins, hooks, formatters, and MCP servers
+ * in the folder. A path with no fingerprint, or an old fingerprint, is not
+ * trusted. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(
 	directory: string,

@@ -2107,14 +2107,62 @@ test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
 	t.false(isDirectoryTrusted('/some/project', {}));
 });
 
-test('isDirectoryTrusted matches an exact entry', t => {
+test('isDirectoryTrusted matches a record with the current fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+	const fingerprint = describeProjectTrust(dir).fingerprint;
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint}],
+		}),
+	);
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: '.', fingerprint}],
+		}),
+	);
 });
 
-test('isDirectoryTrusted resolves relative entries before comparing', t => {
+test('isDirectoryTrusted ignores a path that has no fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+	t.false(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted ignores a stale fingerprint', t => {
+	const dir = process.cwd();
+	t.false(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
+		}),
+	);
+});
+
+test('isDirectoryTrusted is false after a plugin is added', t => {
+	const root = join(tmpdir(), `trust-plugin-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, '.nanocoder', 'plugins', 'pulled.mjs'),
+			'export default {name:"pulled"}\n',
+		);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [{path: root, fingerprint: before}],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: describeProjectTrust(root).fingerprint,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 test('isDirectoryTrusted does not match an unrelated directory', t => {
@@ -2141,7 +2189,11 @@ test('ensureDirectoryTrust trusts an already-recorded directory without persisti
 	const dir = process.cwd();
 	let saveCalled = false;
 	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({trustedDirectories: [dir]}),
+		loadPreferences: () => ({
+			trustedDirectories: [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			],
+		}),
 		savePreferences: () => {
 			saveCalled = true;
 		},
@@ -2199,13 +2251,44 @@ test.serial(
 			const dir = process.cwd();
 			let saveCalled = false;
 			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({trustedDirectories: [dir]}),
+				loadPreferences: () => ({
+					trustedDirectories: [
+						{
+							path: dir,
+							fingerprint: describeProjectTrust(dir).fingerprint,
+						},
+					],
+				}),
 				savePreferences: () => {
 					saveCalled = true;
 				},
 			});
 			t.deepEqual(result, {trusted: true, persisted: false});
 			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 replaces a path-only entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const dir = process.cwd();
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
