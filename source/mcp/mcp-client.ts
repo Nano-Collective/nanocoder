@@ -69,7 +69,8 @@ export class MCPClient {
 	private isConnected: boolean = false;
 	private health: Map<string, MCPHealthStatus> = new Map();
 	private healthErrors: Map<string, string> = new Map();
-	private healthTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+	private healthTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+	private healthFailureCounts: Map<string, number> = new Map();
 	private healthChecksInFlight = new Set<string>();
 	private healthListeners = new Set<(change: MCPHealthChange) => void>();
 	private closing = new Set<string>();
@@ -146,6 +147,99 @@ export class MCPClient {
 		this.toolMappingCache = null;
 	}
 
+	private isLivenessResponse(error: unknown): boolean {
+		if (!error || typeof error !== 'object') return false;
+		const code = (error as {code?: number}).code;
+		// JSON-RPC MethodNotFound (-32601) means the server received the ping and responded
+		return code === -32601;
+	}
+
+	private async restoreServerHealth(
+		serverName: string,
+		client: Client,
+	): Promise<void> {
+		if (this.closing.has(serverName)) return;
+
+		try {
+			// Re-discover tools from this server
+			const toolsResult = await client.listTools();
+			const tools: MCPTool[] = toolsResult.tools.map(tool => ({
+				name: tool.name,
+				description: tool.description || undefined,
+				inputSchema: isPlainObject(tool.inputSchema)
+					? (tool.inputSchema as MCPToolInputSchema)
+					: undefined,
+				serverName,
+				readOnly: tool.annotations?.readOnlyHint === true,
+			}));
+			this.serverTools.set(serverName, tools);
+
+			// Re-discover resources if declared
+			const capabilities = client.getServerCapabilities();
+			if (capabilities?.resources) {
+				try {
+					const resourcesResult = await client.listResources();
+					const resources: MCPResource[] = resourcesResult.resources.map(
+						resource => ({
+							uri: resource.uri,
+							name: resource.name,
+							description: resource.description || undefined,
+							mimeType: resource.mimeType || undefined,
+							serverName,
+						}),
+					);
+					this.serverResources.set(serverName, resources);
+				} catch (error) {
+					this.logger.warn('MCP resources/list failed on recovery', {
+						serverName,
+						error: formatError(error),
+					});
+				}
+			}
+
+			// Re-discover prompts if declared
+			if (capabilities?.prompts) {
+				try {
+					const promptsResult = await client.listPrompts();
+					const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt => ({
+						name: prompt.name,
+						description: prompt.description || undefined,
+						arguments: prompt.arguments?.map(arg => ({
+							name: arg.name,
+							description: arg.description || undefined,
+							required: arg.required || false,
+						})),
+						serverName,
+					}));
+					this.serverPrompts.set(serverName, prompts);
+				} catch (error) {
+					this.logger.warn('MCP prompts/list failed on recovery', {
+						serverName,
+						error: formatError(error),
+					});
+				}
+			}
+
+			this.toolMappingCache = null;
+			this.setServerHealth(serverName, 'connected');
+			this.logger.info(
+				`MCP server "${serverName}" recovered and restored tools`,
+				{
+					serverName,
+					toolCount: tools.length,
+				},
+			);
+		} catch (error) {
+			this.logger.warn(
+				`Failed to rediscover tools for recovered MCP server "${serverName}"`,
+				{
+					serverName,
+					error: formatError(error),
+				},
+			);
+		}
+	}
+
 	private startHealthChecks(
 		serverName: string,
 		client: Client,
@@ -155,10 +249,27 @@ export class MCPClient {
 	): void {
 		const markUnhealthy = (error?: unknown) =>
 			this.markServerUnhealthy(serverName, error);
-		const check = async () => {
+		const scheduleNext = (delay: number) => {
 			if (
 				this.closing.has(serverName) ||
-				this.health.get(serverName) !== 'connected' ||
+				interval <= 0 ||
+				typeof client.ping !== 'function'
+			) {
+				return;
+			}
+			const existingTimer = this.healthTimers.get(serverName);
+			if (existingTimer) {
+				clearTimeout(existingTimer);
+			}
+			const timer = setTimeout(() => void check(), delay);
+			if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+			this.healthTimers.set(serverName, timer);
+		};
+		const check = async () => {
+			const currentStatus = this.health.get(serverName);
+			if (
+				this.closing.has(serverName) ||
+				(currentStatus !== 'connected' && currentStatus !== 'unhealthy') ||
 				this.healthChecksInFlight.has(serverName) ||
 				typeof client.ping !== 'function'
 			) {
@@ -167,11 +278,34 @@ export class MCPClient {
 			this.healthChecksInFlight.add(serverName);
 			try {
 				await client.ping(pingOptions ?? {timeout: 10_000});
+				if (this.health.get(serverName) === 'unhealthy') {
+					await this.restoreServerHealth(serverName, client);
+				}
+				this.healthFailureCounts.delete(serverName);
 			} catch (error) {
-				// A pending ping can reject after an intentional disconnect.
-				if (this.health.get(serverName) === 'connected') markUnhealthy(error);
+				if (this.isLivenessResponse(error)) {
+					if (this.health.get(serverName) === 'unhealthy') {
+						await this.restoreServerHealth(serverName, client);
+					}
+					this.healthFailureCounts.delete(serverName);
+				} else {
+					// A pending ping can reject after an intentional disconnect.
+					if (this.health.get(serverName) === 'connected') {
+						markUnhealthy(error);
+					}
+					const currentFailures =
+						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
+					this.healthFailureCounts.set(serverName, currentFailures);
+				}
 			} finally {
 				this.healthChecksInFlight.delete(serverName);
+				if (!this.closing.has(serverName)) {
+					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
+					const multiplier =
+						failureCount > 0 ? Math.min(2 ** (failureCount - 1), 8) : 1;
+					const nextDelay = Math.min(interval * multiplier, 300_000);
+					scheduleNext(nextDelay);
+				}
 			}
 		};
 		const previousOnClose = transport.onclose;
@@ -194,9 +328,7 @@ export class MCPClient {
 			}
 		};
 		if (interval <= 0 || typeof client.ping !== 'function') return;
-		const timer = setInterval(() => void check(), interval);
-		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-		this.healthTimers.set(serverName, timer);
+		scheduleNext(interval);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -662,7 +794,7 @@ export class MCPClient {
 	 *
 	 * @returns Array of tool entries with name, AI SDK tool, and handler function
 	 */
-	getToolEntries(): Array<{
+	getToolEntries(forServerName?: string): Array<{
 		name: string;
 		tool: AISDKCoreTool;
 		handler: (args: Record<string, unknown>) => Promise<string>;
@@ -679,6 +811,7 @@ export class MCPClient {
 		const nativeTools = this.getNativeToolsRegistry();
 
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
+			if (forServerName && serverName !== forServerName) continue;
 			for (const mcpTool of serverTools) {
 				const toolName = mcpTool.name;
 
@@ -1216,8 +1349,9 @@ export class MCPClient {
 			for (const [serverName, client] of this.clients.entries()) {
 				this.closing.add(serverName);
 				const timer = this.healthTimers.get(serverName);
-				if (timer) clearInterval(timer);
+				if (timer) clearTimeout(timer);
 				this.healthTimers.delete(serverName);
+				this.healthFailureCounts.delete(serverName);
 				this.healthChecksInFlight.delete(serverName);
 				try {
 					await client.close();
