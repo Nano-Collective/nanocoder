@@ -3,7 +3,13 @@
  */
 
 import {execFileSync} from 'node:child_process';
-import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import React from 'react';
@@ -155,7 +161,7 @@ test('git_log formatter shows file filter', t => {
 // Execution Tests
 // ============================================================================
 
-type GitLogArgs = {branch?: string; count?: number};
+type GitLogArgs = {branch?: string; count?: number; file?: string};
 
 // biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
 const executeGitLog = (gitLogTool.tool as any).execute as (
@@ -240,6 +246,58 @@ test.serial(
 		});
 
 		t.is(result, 'No commits found matching filters: branch: does-not-exist');
+	},
+);
+
+/**
+ * Runs git_log inside a repo with both a `docs` branch and a `docs/` folder,
+ * with `main` checked out. Without `--` after the revision, git refuses the
+ * bare `docs` as ambiguous ("both revision and filename").
+ */
+async function runInRepoWithBranchNamedLikeAFolder(
+	args: GitLogArgs,
+): Promise<string> {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-log-test-'));
+	const originalCwd = process.cwd();
+	try {
+		git(dir, 'init', '-q', '-b', 'main');
+		mkdirSync(join(dir, 'docs'));
+		commit(dir, 'docs/guide.md', 'add the guide');
+		git(dir, 'checkout', '-q', '-b', 'docs');
+		commit(dir, 'docs/guide.md', 'docs branch rewrites the guide');
+		git(dir, 'checkout', '-q', 'main');
+		commit(dir, 'main.txt', 'main only commit');
+
+		process.chdir(dir);
+		return await executeGitLog(args);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial(
+	'git_log reads a branch named like an existing folder as the branch',
+	async t => {
+		const result = await runInRepoWithBranchNamedLikeAFolder({branch: 'docs'});
+
+		t.regex(result, /^Showing 2 commit\(s\) on docs:/);
+		t.regex(result, /docs branch rewrites the guide/);
+		t.false(result.includes('main only commit'));
+	},
+);
+
+test.serial(
+	'git_log narrows a branch named like a folder to a file in it',
+	async t => {
+		const result = await runInRepoWithBranchNamedLikeAFolder({
+			branch: 'docs',
+			file: 'docs/guide.md',
+		});
+
+		t.regex(result, /^Showing 2 commit\(s\) on docs:/);
+		t.regex(result, /docs branch rewrites the guide/);
+		t.regex(result, /add the guide/);
 	},
 );
 

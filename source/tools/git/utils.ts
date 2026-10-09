@@ -534,7 +534,11 @@ export async function getCommits(
 		if (options.author) args.push(`--author=${options.author}`);
 		if (options.since) args.push(`--since=${options.since}`);
 		if (options.grep) args.push(`--grep=${options.grep}`);
-		if (options.file) args.push('--', options.file);
+		// Always close the revisions with `--`: a branch that shares its name
+		// with a file or folder (a `docs` branch next to `docs/`) is otherwise
+		// rejected as ambiguous, which would surface here as "no commits".
+		args.push('--');
+		if (options.file) args.push(options.file);
 
 		const output = await execGit(args);
 		if (!output.trim()) return [];
