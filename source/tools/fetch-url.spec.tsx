@@ -20,10 +20,14 @@ if (typeof File === 'undefined') {
 // Dynamically import to avoid loading undici in test environment
 let fetchUrlTool: any;
 
+// Hostnames are resolved before every hop; point them all at a public address
+// so these specs never touch real DNS, and put the real resolver back after.
+// Individual tests override it.
+let originalResolve: typeof import('./fetch-url-guard.js').hostResolver.resolve;
+
 test.before(async () => {
-	// Hostnames are resolved before every hop; point them all at a public
-	// address so these specs never touch real DNS. Individual tests override it.
 	const {hostResolver} = await import('./fetch-url-guard.js');
+	originalResolve = hostResolver.resolve;
 	hostResolver.resolve = async () => ['93.184.216.34'];
 
 	// Only import when we need it, and handle the case where undici might not work
@@ -34,6 +38,11 @@ test.before(async () => {
 		// If undici fails to load (e.g., in CI), we'll skip handler tests
 		console.warn('Failed to load fetch-url module:', error);
 	}
+});
+
+test.after.always(async () => {
+	const {hostResolver} = await import('./fetch-url-guard.js');
+	hostResolver.resolve = originalResolve;
 });
 
 // Mock ThemeProvider for testing

@@ -5,10 +5,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
-import {
-	assertPublicHttpUrl,
-	assertResolvedPublicHttpUrl,
-} from '@/tools/fetch-url-guard';
+import {assertResolvedPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -97,9 +94,9 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 };
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
-	assertPublicHttpUrl(args.url);
-
 	try {
+		// The first hop of this walk runs the URL through the validator, which
+		// does the text checks and the DNS lookup.
 		const safeUrl = await resolveSafeRedirects(args.url);
 
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
