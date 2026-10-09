@@ -525,12 +525,7 @@ export async function createProvider(
 	}
 
 	const includeUsage =
-		typeof config.includeUsage === 'boolean'
-			? config.includeUsage
-			: typeof (providerConfig as {includeUsage?: boolean}).includeUsage ===
-					'boolean'
-				? (providerConfig as {includeUsage?: boolean}).includeUsage
-				: true;
+		typeof config.includeUsage === 'boolean' ? config.includeUsage : true;
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {
