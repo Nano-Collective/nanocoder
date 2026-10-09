@@ -1,4 +1,5 @@
 import {getLogger} from '@/utils/logging';
+import {getVramAllocator} from '@/vram/vram-allocator';
 import type {SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
@@ -87,6 +88,7 @@ export async function appendRelevantProjectContextWithCount(
 	}
 
 	try {
+		await getVramAllocator().transitionPhase('retrieval');
 		const projectContext = formatProjectContextWithCount(
 			await memoryFinder.findRelevantMemories(
 				query,

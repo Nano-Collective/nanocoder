@@ -31,6 +31,7 @@ import {
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
+import {getVramAllocator} from '@/vram/vram-allocator';
 
 /**
  * Validates and executes a single tool call.
@@ -44,6 +45,9 @@ const executeOne = async (
 	result: ToolResult;
 }> => {
 	try {
+		await getVramAllocator().transitionPhase('execution', {
+			toolName: toolCall.function.name,
+		});
 		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
@@ -95,13 +99,16 @@ export interface ToolDisplayOptions {
  * the validated registry handler. The single per-tool execution primitive
  * shared by the auto-execute batch and the (post-approval) confirmation path.
  */
-export const executeApprovedTool = (
+export const executeApprovedTool = async (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
+	await getVramAllocator().transitionPhase('execution', {
+		toolName: toolCall.function.name,
+	});
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
 			toolCall,

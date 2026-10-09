@@ -85,7 +85,7 @@ function getIconPath(): string | null {
 let _terminalNotifierPath: string | null | undefined;
 let _terminalNotifierHinted = false;
 
-/** @internal Test helper to override or reset the cached terminal-notifier path */
+/** Test helper to override or reset the cached terminal-notifier path */
 export function setTerminalNotifierPathForTests(
 	path: string | null | undefined,
 ): void {
