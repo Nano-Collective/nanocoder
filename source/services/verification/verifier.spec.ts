@@ -125,6 +125,20 @@ test('a failure reporting no test stops rather than guessing', t => {
 	t.is(stop(decision).reason, 'no-failures-reported');
 });
 
+test('an elided run does not get blamed on a compile error', t => {
+	// The runner caps the output head-and-tail before it gets here, so a large
+	// run whose failures all landed in the omitted span extracts to nothing.
+	// Without the truncation check the user is sent to a build that compiled
+	// perfectly, told the failure was a compile or configuration error.
+	const decision = judge([
+		result('failed', 'Tests: 3 failed, 3 total', {truncated: true}),
+	])[0];
+
+	const text = formatStop(stop(decision));
+	t.regex(text, /maxOutputBytes/);
+	t.notRegex(text, /compile or configuration error/);
+});
+
 // ============================================================================
 // The attempt budget
 // ============================================================================
@@ -348,6 +362,47 @@ test('includes the output verbatim', t => {
 		'the raw stack trace',
 	);
 	t.regex(text, /```\nthe raw stack trace\n```/);
+});
+
+test('a fence in the output cannot close the block it sits in', t => {
+	// The output is not ours. A markdown fence in a test name, an assertion
+	// message, or a compiler diagnostic is ordinary, and with a fixed ``` fence
+	// everything after it is read as instruction to the model rather than data
+	// from the suite.
+	const body = [
+		'FAIL',
+		'  ✕ renders a fenced block',
+		'```js',
+		'const x = 1;',
+		'```',
+	].join('\n');
+
+	const text = formatFeedback(
+		feedback(judge([fails(['alpha'])], {maxAttempts: 5})[0]),
+		body,
+	);
+
+	const fence = text.match(/^(`{3,})$/m)?.[1] ?? '';
+	t.true(fence.length > 3, `expected a widened fence, got ${fence}`);
+
+	// Nothing inside the block can be read as its closing delimiter: a body
+	// run would have to be at least as long as the fence.
+	for (const run of body.match(/`+/g) ?? []) {
+		t.true(
+			run.length < fence.length,
+			`a run of ${run.length} backticks can close a ${fence.length}-backtick fence`,
+		);
+	}
+	t.true(text.includes(`\n${fence}\n${body}\n${fence}`), 'body stays inside');
+});
+
+test('a fence is widened past the longest run in the output', t => {
+	// The rule, pinned so it cannot quietly become "always three".
+	const text = formatFeedback(
+		feedback(judge([fails(['alpha'])], {maxAttempts: 5})[0]),
+		'a failure mentioning ```` a four-backtick span',
+	);
+	t.regex(text, /(`{5})\na failure mentioning ```` a four-backtick span\n\1/);
 });
 
 test('warns when the last change broke something', t => {

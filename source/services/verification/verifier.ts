@@ -181,15 +181,24 @@ export function decideNextAction(
 	// configuration error: the suite never reached a test. There is nothing to
 	// diff against the baseline, so there is no actionable set, and asking the
 	// model to fix an unnamed failure is guesswork. Report and stop.
+	//
+	// `truncated` is checked because the runner caps the output *before* it gets
+	// here, head and tail kept with the middle elided. A large run whose failures
+	// all landed in the omitted span extracts to nothing, and calling that a
+	// compile error would send the user to a file that has nothing wrong with it.
 	if (currentFailures.length === 0) {
 		return {
 			decision: {
 				action: 'stop',
 				reason: 'no-failures-reported',
 				attempts,
-				detail:
-					'The verification command failed without reporting any test failure. ' +
-					'The output is most likely a compile or configuration error.',
+				detail: result.truncated
+					? 'The verification command failed without reporting any readable ' +
+						'test failure, and the output was capped, so the failures may ' +
+						'sit in the portion that was omitted. Raise ' +
+						'verification.maxOutputBytes if that is the case.'
+					: 'The verification command failed without reporting any test failure. ' +
+						'The output is most likely a compile or configuration error.',
 			},
 			state: advanced,
 		};

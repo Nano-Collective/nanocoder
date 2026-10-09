@@ -22,6 +22,25 @@ import type {StopReason, VerificationDecision} from './verifier.js';
 /** Beyond this the list stops guiding and starts crowding out the output. */
 const MAX_LISTED = 20;
 
+/**
+ * A fence that cannot be closed by the text it wraps.
+ *
+ * The output is not ours: test names, assertion messages and compiler
+ * diagnostics are arbitrary strings, and a suite is a perfectly ordinary place
+ * for a markdown fence to appear. With a fixed ``` fence, an output containing
+ * one closes the block early and everything after it is read as instruction
+ * rather than data — the model is handed text it was told to quote and told to
+ * obey. Longest run of backticks wins; one more than the longest run is a fence
+ * that cannot appear in the body, because closing it would need a longer run.
+ */
+function fenceFor(output: string): string {
+	let longest = 0;
+	for (const run of output.match(/`+/g) ?? []) {
+		longest = Math.max(longest, run.length);
+	}
+	return '`'.repeat(Math.max(3, longest + 1));
+}
+
 const STOP_EXPLANATIONS: Record<StopReason, string> = {
 	'attempts-exhausted':
 		'The verification command is still failing and the retry limit was reached.',
@@ -101,9 +120,10 @@ export function formatFeedback(
 	);
 
 	parts.push('Verification output:');
-	parts.push('```');
+	const fence = fenceFor(output);
+	parts.push(fence);
 	parts.push(output);
-	parts.push('```');
+	parts.push(fence);
 
 	return parts.join('\n');
 }
