@@ -49,7 +49,10 @@ import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
-import {runWithReadContentScope} from '@/utils/read-tracker';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
@@ -189,6 +192,11 @@ export async function runAcpConversation(
 
 function acpReadScope(sessionId: string): string {
 	return `acp:${sessionId}`;
+}
+
+/** Forget read stubs for a chat whose history was cut, swapped, or deleted. */
+export function clearAcpReadStubs(sessionId: string): void {
+	clearReadContentScope(acpReadScope(sessionId));
 }
 
 const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';

@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -13,6 +14,9 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {readFileTool} from '@/tools/read-file';
+import type {Message} from '@/types/core';
+import {clearReadTracker} from '@/utils/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -1381,3 +1385,129 @@ test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried
 	}
 });
 
+
+// ============================================================================
+// read_file stubs follow the chat history
+// ============================================================================
+
+function createReadAgent(file: string): AcpAgent {
+	const context = createMockInitContext();
+	(context.client as any).chat = async (messages: Message[]) => {
+		const last = messages.at(-1);
+		if (last?.role === 'user' && String(last.content).includes('read it')) {
+			return {
+				choices: [
+					{
+						message: {
+							content: '',
+							tool_calls: [
+								{
+									id: `call-${randomUUID()}`,
+									function: {name: 'read_file', arguments: {path: file}},
+								},
+							],
+						},
+					},
+				],
+			};
+		}
+		return {choices: [{message: {content: 'done'}}]};
+	};
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	} as any;
+	return new AcpAgent(context, createMockConn());
+}
+
+async function sendText(agent: AcpAgent, sessionId: string, text: string) {
+	await agent.prompt({sessionId, prompt: [{type: 'text', text}]});
+}
+
+async function withAcpReadFixture(
+	run: (fixture: {
+		agent: AcpAgent;
+		sessionId: string;
+		dir: string;
+		lastRead: () => string;
+	}) => Promise<void>,
+): Promise<void> {
+	clearReadTracker();
+	let last = '';
+	setToolManagerGetter(() => null);
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => {
+			last = await readFileTool.tool.execute!(args, {
+				toolCallId: 'read',
+				messages: [],
+			});
+			return last;
+		},
+	}));
+	const dir = join(process.cwd(), `acp-read-stub-${randomUUID()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	try {
+		const agent = createReadAgent(file);
+		const {sessionId} = await agent.newSession({cwd: dir, mcpServers: []});
+		await run({agent, sessionId, dir, lastRead: () => last});
+	} finally {
+		clearReadTracker();
+		setToolRegistryGetter(() => ({}));
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('ACP /clear makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('already in context'));
+
+		await sendText(agent, sessionId, '/clear');
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial('ACP retryTurn makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+
+		await agent.extMethod('retryTurn', {sessionId});
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial(
+	'ACP timeline/revert makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			const session = (agent as any).sessions.get(sessionId);
+			writeFileSync(join(dir, 'other.ts'), 'before');
+			const entry = await session.timeline.capture({
+				toolCallId: 'call-other',
+				toolName: 'write_file',
+				title: 'write_file: other.ts',
+				truncateToMessageIndex: 0,
+				files: new Map([['other.ts', 'before']]),
+			});
+			await agent.extMethod('timeline/revert', {
+				sessionId,
+				checkpointId: entry.id,
+			});
+
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
