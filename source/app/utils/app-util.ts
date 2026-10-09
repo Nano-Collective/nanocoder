@@ -20,7 +20,10 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {resetStatsLedger} from '@/stats/record';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {
+	distillBashResultForLLM,
+	executeBashCommand,
+} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -198,7 +201,9 @@ async function handleBashCommand(
 			}),
 		);
 
-		const llmContext = formatBashResultForLLM(result);
+		// No re-run here: the user typed this command, so nothing else is run
+		// on their behalf.
+		const llmContext = await distillBashResultForLLM(result);
 
 		if (llmContext) {
 			const userMessage: Message = {
