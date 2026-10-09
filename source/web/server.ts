@@ -245,7 +245,9 @@ function buildContentSecurityPolicy(
 		`script-src 'self' 'nonce-${nonce}'`,
 		`style-src 'self' 'nonce-${nonce}'`,
 		"img-src 'self' data:",
-		`connect-src 'self' ws://${host}:${port}`,
+		// This CSP permits the WebSocket paired with our local HTTP server.
+		// wss:// requires TLS, which this localhost server does not provide.
+		`connect-src 'self' ws://${host}:${port}`, // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 		"base-uri 'none'",
 		"form-action 'none'",
 		"frame-ancestors 'none'",

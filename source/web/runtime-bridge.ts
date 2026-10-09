@@ -1,6 +1,8 @@
 import type {
 	WebClientEvent,
 	WebNotice,
+	WebPanel,
+	WebPanelData,
 	WebServerEvent,
 	WebSessionMessage,
 	WebSessionSummary,
@@ -14,6 +16,7 @@ export interface WebSessionLoadResult {
 }
 
 export interface WebRuntimeHandlers {
+	getWorkspacePanel?: (panel: WebPanel, path?: string) => Promise<WebPanelData>;
 	submitMessage: (
 		text: string,
 		images?: {data: string; mediaType: string}[],
@@ -50,7 +53,7 @@ export interface WebQuestionRequest {
 export interface WebRuntimeBridge {
 	handleClientEvent: (event: WebClientEvent) => Promise<void>;
 	bindRuntimeHandlers: (handlers: WebRuntimeHandlers) => () => void;
-	publishAssistantContent: (content: string) => void;
+	publishAssistantContent: (content: string, newResponse?: boolean) => void;
 	publishReasoning: (content: string) => void;
 	publishToolStarted: (
 		id: string,
@@ -192,6 +195,30 @@ export function createWebRuntimeBridge(
 		previousAssistantContent = '';
 		assistantId = null;
 	};
+	const finishAssistantReply = () => {
+		const reply = [...messages]
+			.reverse()
+			.find(
+				message =>
+					message.role === 'assistant' &&
+					message.content.trim() &&
+					(message.id === activeTurnId ||
+						message.id?.startsWith(`${activeTurnId}:response:`)),
+			);
+		if (reply) {
+			reply.footerVisible = true;
+			reply.createdAt = new Date().toISOString();
+		}
+	};
+	const isFinalReply = (history: WebSessionMessage[], index: number) => {
+		for (const message of history.slice(index + 1)) {
+			if (message.role === 'user') break;
+			if (message.role === 'assistant' && message.content.trim()) return false;
+		}
+		return (
+			history[index].role === 'assistant' && !!history[index].content.trim()
+		);
+	};
 	const syncSession = (
 		nextSession: WebSessionSummary | null,
 		nextMessages: WebSessionMessage[],
@@ -224,6 +251,10 @@ export function createWebRuntimeBridge(
 				if (previous) used.add(previous);
 				return {
 					...message,
+					footerVisible:
+						message.footerVisible ??
+						previous?.footerVisible ??
+						isFinalReply(nextMessages, index),
 					createdAt: message.createdAt ?? previous?.createdAt,
 					content:
 						previous &&
@@ -288,6 +319,7 @@ export function createWebRuntimeBridge(
 				'The browser turn completed before the question was answered.',
 		});
 		broadcastEvent({type: 'turn_completed', id: activeTurnId});
+		finishAssistantReply();
 		const summary = currentWork();
 		if (summary) summary.status = 'completed';
 		const isLocalAction =
@@ -401,6 +433,16 @@ export function createWebRuntimeBridge(
 				runtimeHandlers.cancel();
 				return;
 			}
+			if (event.type === 'workspace_panel') {
+				if (!runtimeHandlers.getWorkspacePanel)
+					throw new Error('Workspace panels are unavailable.');
+				const data = await runtimeHandlers.getWorkspacePanel(
+					event.panel,
+					event.path,
+				);
+				broadcastEvent({type: 'workspace_panel', id: event.id, data});
+				return;
+			}
 
 			if (sessionBusy && event.type !== 'list_sessions') {
 				throw new Error('A session operation is already in progress.');
@@ -476,6 +518,7 @@ export function createWebRuntimeBridge(
 					});
 					messages = result.messages.map((message, index) => ({
 						...message,
+						footerVisible: isFinalReply(result.messages, index),
 						id: message.id ?? `session-${result.session.id}-${index}`,
 					}));
 					session = result.session;
@@ -601,16 +644,17 @@ export function createWebRuntimeBridge(
 			broadcastEvent({type: 'notice', message});
 		},
 
-		publishAssistantContent(content) {
+		publishAssistantContent(content, newResponse = false) {
 			if (!activeTurnId) {
 				return;
 			}
 
-			if (content.length === 0) {
+			if (newResponse) {
 				previousAssistantContent = '';
 				assistantId = null;
 				return;
 			}
+			if (!content && !assistantId) return;
 
 			if (!assistantId) {
 				assistantId =
@@ -622,6 +666,7 @@ export function createWebRuntimeBridge(
 					role: 'assistant',
 					content: '',
 					createdAt: new Date().toISOString(),
+					footerVisible: false,
 				});
 			}
 			const extendsContent = content.startsWith(previousAssistantContent);
@@ -633,14 +678,17 @@ export function createWebRuntimeBridge(
 				message => message.role === 'assistant' && message.id === assistantId,
 			);
 			if (assistant) assistant.content = content;
+			if (!content)
+				messages = messages.filter(message => message !== assistant);
 
-			if (delta.length > 0) {
+			if (delta.length > 0 || !extendsContent) {
 				broadcastEvent({
 					type: extendsContent ? 'assistant_delta' : 'assistant_content',
 					id: assistantId,
 					text: delta,
 				});
 			}
+			if (!content) assistantId = null;
 		},
 		publishReasoning(content) {
 			if (!activeTurnId) return;

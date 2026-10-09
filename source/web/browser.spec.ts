@@ -22,10 +22,11 @@ function bootBrowser(storageBlocked = false) {
 	const copied: string[] = [];
 	const timers = new Map<number, () => void>();
 	let nextTimer = 0;
+	const socketListeners = new Map<string, () => void>();
 	class Socket {
 		static OPEN = 1;
 		readyState = 1;
-		addEventListener() {}
+		addEventListener(type: string, callback: () => void) {socketListeners.set(type, callback);}
 		send(raw: string) {sent.push(JSON.parse(raw));}
 	}
 	const context = createContext({
@@ -37,6 +38,7 @@ function bootBrowser(storageBlocked = false) {
 	const script = renderWebModePage('test').match(/<script nonce="test">([\s\S]*?)<\/script>/)![1];
 	runInContext(script, context);
 	context.copied = copied;
+	context.disconnect = () => socketListeners.get('close')?.();
 	return {get, sent, storage, flushTimers: () => {for (let count = 0; timers.size && count < 100; count++) {const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback());}}, run: (code: string) => runInContext(code, context), event: (event: unknown) => runInContext(`handleServerEvent(${JSON.stringify(event)})`, context)};
 }
 
@@ -52,6 +54,74 @@ test('browser boots without CDN globals and persists the full streamed reply', t
 	browser.event({type: 'assistant_content', id: 'turn', text: 'Corrected'});
 	browser.run('flushAssistantRendering();');
 	t.is(browser.get('#messageList').querySelector('.message-content')!.textContent, 'Corrected');
+});
+
+test('panel navigation ignores stale replies and shows compact per-file source control', t => {
+	const browser = bootBrowser();
+	browser.run('runtimeReady = true; setComposerEnabled(true);');
+	browser.get('#tasksPanelButton').click();
+	const old = browser.sent.at(-1) as {id: string};
+	browser.get('#changesPanelButton').click();
+	const current = browser.sent.at(-1) as {id: string};
+	browser.event({type: 'workspace_panel', id: old.id, data: {panel: 'tasks', items: [{name: 'Stale task'}]}});
+	t.false(browser.get('#workspacePanelContent').textContent.includes('Stale task'));
+	browser.event({type: 'workspace_panel', id: current.id, data: {panel: 'changes', items: [{name: 'file.ts', path: 'src/file.ts', detail: 'src', status: 'M'}]}});
+	browser.get('#workspacePanelContent').querySelector('button')!.click();
+	const selected = browser.sent.at(-1) as {id: string};
+	t.like(selected, {panel: 'changes', path: 'src/file.ts'});
+	browser.event({type: 'workspace_panel', id: selected.id, data: {panel: 'changes', path: 'src/file.ts', items: [{name: 'file.ts', path: 'src/file.ts', detail: 'src', status: 'M'}], diffs: [{title: 'Unstaged changes', content: '@@ -3,1 +3,1 @@\n-old\n+new'}]}});
+	t.is(browser.get('#workspacePanelContent').querySelectorAll('.addition').length, 1);
+	t.is(browser.get('#workspacePanelContent').querySelectorAll('.deletion').length, 1);
+	t.is(browser.get('#workspacePanelContent').querySelector('.change-status')!.textContent, 'M');
+	t.false(browser.sent.some((event: any) => event.type === 'user_message'));
+});
+
+test('reconnect releases a settings request whose acknowledgment was lost', t => {
+	const browser = bootBrowser();
+	browser.run("settingsRequestId = 'pending'; disconnect();");
+	browser.event({type: 'ready', protocolVersion: 1});
+	browser.event({type: 'state', activeTurnId: null, busy: false, session: null, messages: [], sessionRevision: 0, runtimeReady: true, settings: {provider: 'local', model: 'small', mode: 'normal', providers: [{name: 'local', models: ['small']}], modes: ['normal']}});
+	t.is(browser.run('settingsRequestId'), null);
+	t.false(browser.get('#saveSettingsButton').disabled);
+});
+
+test('tool IDs are scoped to their turn and updated output replaces the old result', t => {
+	const browser = bootBrowser();
+	for (const turn of ['first', 'second']) {
+		browser.run(`setActiveTurn('${turn}');`);
+		browser.event({type: 'tool_started', id: 'reused', name: 'read_file'});
+		browser.event({type: 'tool_finished', id: 'reused', name: 'read_file', ok: true, output: turn});
+	}
+	t.is(browser.run("workSummaries.get('second').tools.children.length"), 1);
+	t.true(browser.get('#messageList').textContent.includes('first'));
+	browser.event({type: 'tool_finished', id: 'reused', name: 'read_file', ok: true, output: 'updated'});
+	t.true(browser.get('#messageList').textContent.includes('updated'));
+	t.false(browser.get('#messageList').textContent.includes('second'));
+});
+
+test('copy and time remain hidden through intermediate responses and appear only on the final reply', t => {
+	const browser = bootBrowser();
+	browser.run("setActiveTurn('turn');");
+	browser.event({type: 'assistant_delta', id: 'turn', text: 'Checking'});
+	browser.event({type: 'assistant_delta', id: 'turn:response:2', text: 'Done'});
+	const footers = browser.get('#messageList').querySelectorAll('.message-footer');
+	t.true(footers[0].hidden);
+	t.true(footers[1].hidden);
+	browser.event({type: 'turn_completed', id: 'turn'});
+	t.true(footers[0].hidden);
+	t.false(footers[1].hidden);
+	browser.event({type: 'state', activeTurnId: null, busy: false, session: null, sessionRevision: 0, messages: [{id: 'turn', role: 'assistant', content: 'Checking', footerVisible: false}, {id: 'turn:response:2', role: 'assistant', content: 'Done', footerVisible: true}]});
+	t.true(footers[0].hidden);
+	t.false(footers[1].hidden);
+});
+
+test('empty cleaned assistant content removes its streamed tool text', t => {
+	const browser = bootBrowser();
+	browser.event({type: 'assistant_delta', id: 'turn', text: '<tool_call>read_file</tool_call>'});
+	browser.event({type: 'assistant_content', id: 'turn', text: ''});
+	browser.flushTimers();
+	t.is(browser.get('#messageList').querySelectorAll('.message-content').length, 0);
+	t.is(browser.run('storedMessages.length'), 0);
 });
 
 test('state restores another tab or refreshed browser with prompt, reply, images and stop control', t => {
@@ -246,6 +316,7 @@ test('message footers show timestamps and copy the full streamed reply', async t
 	browser.event({type: 'assistant_delta', id: 'reply', text: 'Hello'});
 	browser.event({type: 'assistant_delta', id: 'reply', text: ' world'});
 	browser.flushTimers();
+	browser.event({type: 'turn_completed', id: 'reply'});
 	t.truthy(browser.get('#messageList').querySelector('.message-time')!.textContent);
 	browser.get('#messageList').querySelector('.message-footer')!.querySelector('button')!.click();
 	await Promise.resolve();

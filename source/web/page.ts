@@ -252,6 +252,47 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			padding-top: 2px;
 			scrollbar-width: none;
 		}
+		.workspace-nav { display: flex; flex-direction: column; gap: 2px; }
+		.workspace-nav button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; background: transparent; color: var(--muted-foreground); text-align: left; cursor: pointer; }
+		.workspace-nav button:hover, .workspace-nav button:focus-visible { background: var(--muted); color: var(--foreground); outline: 2px solid var(--border); }
+		.workspace-nav svg { width: 18px; height: 18px; flex-shrink: 0; }
+		.recent-chats-label { margin: 8px 12px 0; font-size: 10px; letter-spacing: 0.08em; color: var(--muted-foreground); }
+		.app-shell.sidebar-collapsed .workspace-nav span, .app-shell.sidebar-collapsed .recent-chats-label { display: none; }
+		.app-shell.sidebar-collapsed .workspace-nav button { justify-content: center; padding: 9px 0; }
+		#workspacePanelModal { padding: 24px; }
+		#workspacePanelModal .modal-content { width: min(1100px, 100%); max-width: 1100px; height: min(780px, calc(100dvh - 48px)); overflow: hidden; }
+		#workspacePanelModal .modal-header { flex-shrink: 0; }
+		#workspacePanelModal .modal-body { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 16px; overflow: hidden; }
+		#workspacePanelStatus { margin: 0 0 12px; font-size: 12px; flex-shrink: 0; overflow-wrap: anywhere; }
+		.workspace-panel-content { display: flex; flex-direction: column; flex: 1; gap: 2px; min-height: 0; overflow: auto; }
+		.workspace-panel-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--foreground); text-align: left; min-height: 34px; width: 100%; }
+		button.workspace-panel-row { cursor: pointer; }
+		button.workspace-panel-row:hover, button.workspace-panel-row:focus-visible, .workspace-panel-row.selected { background: var(--muted); outline: none; }
+		.workspace-panel-row strong { font-size: 13px; font-weight: 400; white-space: nowrap; }
+		.workspace-panel-row small { color: var(--muted-foreground); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.file-type-icon { width: 22px; flex-shrink: 0; color: #58a6ff; font-size: 10px; font-weight: 600; }
+		.change-status { margin-left: auto; font-weight: 600; font-size: 12px; color: #d6b77c; }
+		.change-status[data-status="U"], .change-status[data-status="A"] { color: #52b788; }
+		.change-status[data-status="D"] { color: #f08080; }
+		.workspace-panel-content pre { white-space: pre; font-size: 12px; overflow: auto; margin: 0; padding: 12px; }
+		.source-control-layout { display: grid; grid-template-columns: 310px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+		.source-control-files { overflow: auto; border-right: 1px solid var(--border); padding-right: 10px; }
+		.source-control-heading { display: flex; justify-content: space-between; padding: 8px 10px 12px; font-size: 13px; font-weight: 600; }
+		.source-control-heading span { background: var(--muted); border-radius: 12px; padding: 1px 7px; }
+		.source-control-diff { overflow: auto; min-width: 0; padding-left: 14px; }
+		.diff-section { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+		.diff-section h3 { padding: 10px 12px; margin: 0; font-size: 12px; font-weight: 500; background: var(--muted); }
+		.diff-lines { overflow: auto; font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+		.diff-rows { width: max-content; min-width: 100%; }
+		.diff-line { display: flex; width: 100%; white-space: pre; }
+		.diff-line.addition { background: rgba(46, 160, 67, 0.15); }
+		.diff-line.deletion { background: rgba(248, 81, 73, 0.15); }
+		.diff-line.hunk { background: rgba(56, 139, 253, 0.12); color: #58a6ff; }
+		.diff-number { display: inline-block; width: 42px; text-align: right; flex-shrink: 0; padding-right: 8px; color: var(--muted-foreground); user-select: none; }
+		.diff-text { padding-right: 16px; }
+		@media (max-width: 720px) { #workspacePanelModal { padding: 10px; } #workspacePanelModal .modal-content { height: calc(100dvh - 20px); } .source-control-layout { grid-template-columns: 1fr; grid-template-rows: minmax(90px, 30%) minmax(0, 1fr); } .source-control-files { border-right: 0; border-bottom: 1px solid var(--border); } .source-control-diff { padding: 12px 0 0; } }
+		.workspace-panel-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+		.workspace-panel-toolbar button { padding: 8px 12px; background: var(--muted); color: var(--foreground); border-radius: 6px; cursor: pointer; }
 		.thread-list::-webkit-scrollbar {
 			display: none;
 		}
@@ -1095,6 +1136,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.work-tool pre { max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
 		.work-tool .interaction-card { margin-top: 10px; }
 		.message-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+		.message-footer[hidden] { display: none; }
 		.message.user { position: relative; margin-bottom: 16px; }
 		.message.user .message-footer {
 			position: absolute;
@@ -1187,6 +1229,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				</div>
 			</div>
 			<button class="new-chat" id="newChatButton" type="button">${IconNewChat}<span>New chat</span></button>
+			<nav class="workspace-nav" aria-label="Project tools">
+				<button id="tasksPanelButton" type="button" aria-label="Tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m3 6 2 2 3-4m-5 9 2 2 3-4m-5 9 2 2 3-4M11 6h10M11 13h10M11 20h10"/></svg><span>Tasks</span></button>
+				<button id="changesPanelButton" type="button" aria-label="Changes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M7 3v12m0-7h7a3 3 0 0 1 3 3v5"/><circle cx="7" cy="18" r="3"/><circle cx="17" cy="19" r="3"/></svg><span>Changes</span></button>
+			</nav>
+			<p class="recent-chats-label">RECENT CHATS</p>
 			<div class="thread-list" id="threadList" aria-live="polite">
 				<p class="thread-list-empty" id="threadListEmpty">Loading sessions...</p>
 			</div>
@@ -1224,6 +1271,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 	</div>
 
 	<!-- Settings Modal -->
+	<div id="workspacePanelModal" class="modal-overlay hidden" aria-hidden="true">
+		<div class="modal-content" role="dialog" aria-labelledby="workspacePanelTitle" aria-modal="true">
+			<div class="modal-header"><h2 id="workspacePanelTitle">Files</h2><button type="button" class="close-button" id="closeWorkspacePanel" aria-label="Close project panel">${IconClose}</button></div>
+			<div class="modal-body"><div class="workspace-panel-toolbar"><button id="workspacePanelBack" type="button" hidden>Back to folder</button><button id="workspacePanelRefresh" type="button">Refresh</button><button id="workspacePanelAttach" type="button" hidden>Add to prompt</button></div><p id="workspacePanelStatus" role="status"></p><div id="workspacePanelContent" class="workspace-panel-content"></div></div>
+		</div>
+	</div>
 	<div id="settingsModal" class="modal-overlay hidden" aria-hidden="true">
 		<div class="modal-content" role="dialog" aria-labelledby="modalTitle" aria-modal="true">
 			<div class="modal-header">
@@ -1259,6 +1312,100 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const settingsButton = document.querySelector('#settingsButton');
 			const composerNote = document.querySelector('#composerNote');
 			const threadList = document.querySelector('#threadList');
+			const workspacePanelModal = document.querySelector('#workspacePanelModal');
+			const workspacePanelContent = document.querySelector('#workspacePanelContent');
+			const workspacePanelStatus = document.querySelector('#workspacePanelStatus');
+			const workspacePanelBack = document.querySelector('#workspacePanelBack');
+			const workspacePanelAttach = document.querySelector('#workspacePanelAttach');
+			const panelButtons = new Map([['tasks', document.querySelector('#tasksPanelButton')], ['changes', document.querySelector('#changesPanelButton')]]);
+			let workspacePanel = 'files';
+			let workspacePanelPath = '';
+			let workspacePanelRequest = null;
+			let workspacePanelData = null;
+			function closeWorkspacePanel() {
+				workspacePanelModal.classList.add('hidden'); workspacePanelModal.setAttribute('aria-hidden', 'true');
+				workspacePanelRequest = null;
+				panelButtons.get(workspacePanel)?.focus();
+			}
+			function requestWorkspacePanel(panel, path = '') {
+				workspacePanel = panel; workspacePanelPath = path; workspacePanelData = null;
+				workspacePanelContent.replaceChildren(); workspacePanelAttach.hidden = true;
+				workspacePanelStatus.textContent = 'Loading…';
+				workspacePanelRequest = 'browser-panel-' + Date.now() + '-' + messageCounter++;
+				if (!sendClientEvent({type: 'workspace_panel', id: workspacePanelRequest, panel, path})) { workspacePanelRequest = null; workspacePanelStatus.textContent = 'Reconnect to load project tools.'; }
+			}
+			function openWorkspacePanel(panel) {
+				workspacePanelModal.classList.remove('hidden'); workspacePanelModal.setAttribute('aria-hidden', 'false');
+				document.querySelector('#workspacePanelTitle').textContent = panel === 'changes' ? 'Source Control' : panel[0].toUpperCase() + panel.slice(1);
+				requestWorkspacePanel(panel); document.querySelector('#closeWorkspacePanel').focus();
+			}
+			function renderWorkspacePanel(data) {
+				workspacePanelData = data; workspacePanelContent.replaceChildren();
+				workspacePanelStatus.textContent = data.message ?? (data.path || (data.items.length + ' items'));
+				workspacePanelBack.hidden = data.panel !== 'files' || !data.path;
+				workspacePanelAttach.hidden = data.panel !== 'files' || data.content === undefined;
+				workspacePanelAttach.disabled = activeTurnId !== null || !runtimeReady || sessionBusy;
+				if (data.panel === 'changes') { renderSourceControl(data); return; }
+				for (const item of data.items) {
+					const clickable = item.path !== undefined;
+					const row = document.createElement(clickable ? 'button' : 'div'); row.className = 'workspace-panel-row';
+					if (clickable) row.type = 'button';
+					appendFileIcon(row, item.name, item.kind);
+					const name = document.createElement('strong'); name.textContent = item.name; row.append(name);
+					if (item.detail) { const detail = document.createElement('small'); detail.textContent = item.detail; row.append(detail); }
+					if (item.path !== undefined) row.addEventListener('click', () => requestWorkspacePanel('files', item.path));
+					workspacePanelContent.append(row);
+				}
+				if (data.content !== undefined) { const pre = document.createElement('pre'); pre.textContent = data.content; workspacePanelContent.append(pre); }
+			}
+			function appendFileIcon(row, name, kind) {
+				const icon = document.createElement('span'); icon.className = 'file-type-icon'; icon.setAttribute('aria-hidden', 'true');
+				icon.textContent = kind === 'directory' ? '▸' : name.endsWith('.tsx') || name.endsWith('.jsx') ? '⚛' : name.endsWith('.ts') ? 'TS' : name.endsWith('.js') ? 'JS' : name.endsWith('.json') ? '{}' : '≡'; row.append(icon);
+			}
+			function renderSourceControl(data) {
+				const layout = document.createElement('div'); layout.className = 'source-control-layout';
+				const files = document.createElement('div'); files.className = 'source-control-files';
+				const heading = document.createElement('div'); heading.className = 'source-control-heading'; heading.textContent = 'Changes';
+				const count = document.createElement('span'); count.textContent = String(data.items.length); heading.append(count); files.append(heading);
+				for (const item of data.items) {
+					const row = document.createElement('button'); row.type = 'button'; row.className = 'workspace-panel-row' + (item.path === data.path ? ' selected' : ''); row.title = item.path; row.setAttribute('aria-pressed', String(item.path === data.path));
+					appendFileIcon(row, item.name); const name = document.createElement('strong'); name.textContent = item.name; row.append(name);
+					const directory = document.createElement('small'); directory.textContent = item.detail ?? ''; row.append(directory);
+					const status = document.createElement('span'); status.className = 'change-status'; status.dataset.status = item.status; status.textContent = item.status; row.append(status);
+					row.addEventListener('click', () => requestWorkspacePanel('changes', item.path)); files.append(row);
+				}
+				const viewer = document.createElement('div'); viewer.className = 'source-control-diff';
+				if (!data.diffs?.length) { const empty = document.createElement('p'); empty.textContent = data.path ? 'No text diff available.' : 'Select a changed file to inspect additions and deletions.'; viewer.append(empty); }
+				for (const diff of data.diffs ?? []) {
+					const section = document.createElement('section'); section.className = 'diff-section';
+					const title = document.createElement('h3'); title.textContent = diff.title + ' · ' + data.path; section.append(title);
+					const lines = document.createElement('div'); lines.className = 'diff-lines'; let oldLine = 1; let newLine = 1;
+					const rows = document.createElement('div'); rows.className = 'diff-rows';
+					for (const text of diff.content.split('\\n')) {
+						const hunk = /^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/.exec(text);
+						if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); }
+						if (/^(diff --git|index |--- |\\+\\+\\+ |new file mode|deleted file mode)/.test(text)) continue;
+						const added = text.startsWith('+'); const removed = text.startsWith('-'); const context = text.startsWith(' ');
+						const line = document.createElement('div'); line.className = 'diff-line' + (hunk ? ' hunk' : added ? ' addition' : removed ? ' deletion' : '');
+						for (const number of [removed || context ? String(oldLine++) : '', added || context ? String(newLine++) : '']) { const gutter = document.createElement('span'); gutter.className = 'diff-number'; gutter.textContent = number; line.append(gutter); }
+						const code = document.createElement('span'); code.className = 'diff-text'; code.textContent = text; line.append(code); rows.append(line);
+					}
+					lines.append(rows); section.append(lines); viewer.append(section);
+				}
+				layout.append(files, viewer); workspacePanelContent.append(layout);
+			}
+			for (const [panel, button] of panelButtons) button.addEventListener('click', () => openWorkspacePanel(panel));
+			document.querySelector('#closeWorkspacePanel').addEventListener('click', closeWorkspacePanel);
+			document.querySelector('#workspacePanelRefresh').addEventListener('click', () => requestWorkspacePanel(workspacePanel, workspacePanelPath));
+			workspacePanelBack.addEventListener('click', () => { const parts = workspacePanelPath.split(/[\\/]/); parts.pop(); requestWorkspacePanel('files', parts.join('/')); });
+			workspacePanelAttach.addEventListener('click', () => {
+				if (activeTurnId || sessionBusy || !runtimeReady || !workspacePanelData || workspacePanelData.content === undefined) return;
+				const data = workspacePanelData;
+				if (data.content.length > 32000) { workspacePanelStatus.textContent = 'This file is too large to attach. Select a smaller file or ask the agent to read it.'; return; }
+				closeWorkspacePanel(); setPromptText(messageInput.value + '\\n\\nFile: ' + data.path + '\\n<file-context>\\n' + data.content + '\\n</file-context>\\n');
+			});
+			workspacePanelModal.addEventListener('click', event => { if (event.target === workspacePanelModal) closeWorkspacePanel(); });
+			document.addEventListener('keydown', event => { if (event.key === 'Escape' && !workspacePanelModal.classList.contains('hidden')) closeWorkspacePanel(); });
 			
 			const settingsModal = document.querySelector('#settingsModal');
 			const closeSettingsButton = document.querySelector('#closeSettingsButton');
@@ -1345,14 +1492,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			function updateWorkTool(turnId, tool) {
 				const work = ensureWorkSummary(turnId);
 				if (!work.tools) { work.tools = document.createElement('div'); work.tools.className = 'work-tools'; work.body.append(work.tools); }
-				let card = toolCards.get(tool.id);
+				const key = JSON.stringify([turnId, tool.id]);
+				let card = toolCards.get(key);
 				if (!card) {
 					const element = document.createElement('div'); element.className = 'work-tool';
 					const label = document.createElement('div'); label.className = 'work-tool-label';
 					const icon = document.createElement('span'); icon.className = 'work-tool-icon';
 					const title = document.createElement('span');
 					label.append(icon, title); element.append(label); work.tools.append(element);
-					card = {element, icon, title, work, args: null, output: null}; toolCards.set(tool.id, card);
+					card = {element, icon, title, work, args: null, output: null}; toolCards.set(key, card);
 				}
 				card.element.dataset.status = tool.status;
 				card.icon.textContent = tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'approval' ? '?' : '◌';
@@ -1360,6 +1508,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				card.title.textContent = tool.name.replace(/_/g, ' ') + (target ? ' · ' + String(target).slice(0, 160) : '') + ' — ' + (tool.status === 'approval' ? 'Needs permission' : tool.status);
 				if (tool.arguments && !card.args) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Arguments'; const pre = document.createElement('pre'); pre.textContent = formatToolArguments(tool.arguments); details.append(summary, pre); card.element.append(details); card.args = details; }
 				if (tool.output && !card.output) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Result'; const pre = document.createElement('pre'); pre.textContent = tool.output; details.append(summary, pre); card.element.append(details); card.output = details; }
+				else if (tool.output !== undefined && card.output) card.output.querySelector('pre').textContent = tool.output;
 				work.header.textContent = work.status === 'working' ? 'Working…' : work.header.textContent;
 				return card;
 			}
@@ -1488,6 +1637,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function updateComposer() {
+				for (const button of panelButtons.values()) button.disabled = !isConnected || !runtimeReady;
+				workspacePanelAttach.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null;
 				if (!messageInput.value) messageInput.style.height = 'auto';
 				messageInput.disabled = !isConnected || !runtimeReady || sessionBusy || activeTurnId !== null;
 				sendButton.disabled = !isConnected || !runtimeReady || sessionBusy || (activeTurnId === null && messageInput.value.trim().length === 0 && pendingImages.length === 0);
@@ -1764,6 +1915,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageElement.append(textElement);
 				if (role === 'user' || role === 'assistant') {
 					const footer = document.createElement('div'); footer.className = 'message-footer';
+					footer.hidden = role === 'assistant';
 					const copy = document.createElement('button'); copy.type = 'button'; copy.title = 'Copy message'; copy.setAttribute('aria-label', 'Copy message');
 					copy.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>';
 					copy.addEventListener('click', async () => {
@@ -1995,6 +2147,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			function appendAssistantDelta(id, text, replace = false) {
 				stopResponseLoader();
 				let messageElement = assistantMessages.get(id);
+				if (replace && !text) {
+					messageElement?.remove();
+					assistantMessages.delete(id);
+					messageElements.delete('assistant:' + id);
+					storedMessages = storedMessages.filter(message => message.role !== 'assistant' || message.id !== id);
+					dirtyAssistantMessages.delete(id);
+					return;
+				}
 				if (!messageElement) {
 					messageElement = appendMessage('assistant', '', '', true, [], id, false);
 					assistantMessages.set(id, messageElement);
@@ -2168,6 +2328,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			}
 
 			function handleServerEvent(message) {
+				if (message.type === 'workspace_panel') {
+					if (message.id !== workspacePanelRequest) return;
+					workspacePanelRequest = null; renderWorkspacePanel(message.data); return;
+				}
 				if (message.type === 'state') {
 					flushAssistantRendering();
 					const previousSession = activeSessionId;
@@ -2199,7 +2363,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 							else if (item.role !== 'assistant') content.textContent = item.content;
 						}
 						storedMessages.push({id: item.id, role: item.role, text: item.content, images: item.images ?? []});
-						setMessageTime(element, item.createdAt);
+					setMessageTime(element, item.createdAt);
+					if (item.role === 'assistant') element.querySelector('.message-footer').hidden = item.footerVisible !== true;
 						if (item.role === 'assistant' && item.id) assistantMessages.set(item.id, element);
 					}
 					for (const [key, element] of messageElements) {
@@ -2300,7 +2465,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 				if (message.type === 'turn_completed') {
 					const work = workSummaries.get(message.id);
-					const reply = assistantMessages.get(message.id);
+					const replies = [...assistantMessages].filter(([id]) => id === message.id || id.startsWith(message.id + ':response:'));
+					const reply = replies.at(-1)?.[1];
+					if (reply) {
+						reply.querySelector('.message-footer').hidden = false;
+						setMessageTime(reply, new Date().toISOString());
+					}
 					if (reply && work && !reply.querySelector('.message-duration')) {
 						const duration = document.createElement('span'); duration.className = 'message-duration';
 						duration.textContent = Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's';
@@ -2317,6 +2487,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				if (message.type === 'error') {
+					if (message.id === workspacePanelRequest) { workspacePanelRequest = null; workspacePanelStatus.textContent = message.message; return; }
 					flushAssistantRendering();
 					if (message.id === settingsRequestId) {
 						settingsRequestId = null;
@@ -2472,6 +2643,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					}
 				});
 				socket.addEventListener('close', () => {
+					if (workspacePanelRequest) { workspacePanelRequest = null; workspacePanelStatus.textContent = 'Connection lost. Refresh after reconnecting.'; }
+					if (settingsRequestId) {
+						settingsRequestId = null;
+						settingsStatus.textContent = 'Connection lost while saving. Check settings after reconnecting and retry if needed.';
+					}
 					setActiveTurn(null);
 					setComposerEnabled(false);
 					setStatus('Reconnecting…', '');

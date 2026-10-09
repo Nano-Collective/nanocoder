@@ -128,7 +128,7 @@ interface ProcessAssistantResponseParams {
 	setIsGenerating: (generating: boolean) => void;
 	setStreamingReasoning: (content: string) => void;
 	setStreamingContent: (content: string) => void;
-	onAssistantContent?: (content: string) => void;
+	onAssistantContent?: (content: string, newResponse?: boolean) => void;
 	onReasoningContent?: (content: string) => void;
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
@@ -348,7 +348,7 @@ export const processAssistantResponse = async (
 	// Use streaming with callbacks
 	setIsGenerating(true);
 	setStreamingContent('');
-	onAssistantContent?.('');
+	onAssistantContent?.('', true);
 	setStreamingReasoning('');
 	onReasoningContent?.('');
 	setTokenCount(0);
