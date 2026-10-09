@@ -132,6 +132,29 @@ const MOCHA_OUTPUT = `
 
 npm warn Unknown env config "devdir". This will stop working in the next major version of npm.`;
 
+// The error is thrown in the code under test, so the first project frame is
+// the source file and the test file only appears one frame down.
+const MOCHA_SOURCE_FRAME_OUTPUT = `
+
+  parser
+    ✔ parses a line
+    1) rejects empty input
+
+
+  1 passing (2ms)
+  1 failing
+
+  1) parser
+       rejects empty input:
+     TypeError: Cannot read properties of undefined (reading 'length')
+      at parse (mocha2/src/parser.js:3:16)
+      at Context.<anonymous> (mocha2/test/parser.test.js:6:24)
+      at process.processImmediate (node:internal/timers:504:21)
+
+
+
+`;
+
 const AVA_OUTPUT = `  ✔ config › index › loads the project config
   ✘ [fail]: source › config › index › getClosestConfigFile prefers cwd config over home config Should prefer cwd config
   ─
@@ -250,6 +273,61 @@ test('parseFailureReport reads Mocha failures and stops at the end of the stack'
 			],
 		},
 	]);
+});
+
+test('parseFailureReport takes the Mocha test file from the stack, not the code under test', t => {
+	const report = reportFor(MOCHA_SOURCE_FRAME_OUTPUT);
+
+	t.deepEqual(report.failures, [
+		{
+			title: 'parser rejects empty input',
+			file: 'mocha2/test/parser.test.js',
+			location: 'mocha2/src/parser.js:3:16',
+			nameFilter: 'parser rejects empty input',
+			diagnostic: [
+				"TypeError: Cannot read properties of undefined (reading 'length')",
+			],
+		},
+	]);
+});
+
+test('parseFailureReport leaves the Mocha file unset when no stack frame is a test file', t => {
+	const report = reportFor(
+		MOCHA_SOURCE_FRAME_OUTPUT.replace(
+			'at Context.<anonymous> (mocha2/test/parser.test.js:6:24)',
+			'at Context.<anonymous> (mocha2/src/runner.js:6:24)',
+		),
+	);
+
+	t.is(report.failures[0]?.file, undefined);
+	t.is(report.failures[0]?.location, 'mocha2/src/parser.js:3:16');
+});
+
+test('parseFailureReport normalises Windows paths to forward slashes', t => {
+	const jest = reportFor(
+		JEST_OUTPUT.replace('FAIL jest/auth.test.js', 'FAIL jest\\auth.test.js').replace(
+			'(jest/auth.test.js:7:35)',
+			'(jest\\auth.test.js:7:35)',
+		),
+	);
+	t.is(jest.failures[0]?.file, 'jest/auth.test.js');
+	t.is(jest.failures[0]?.location, 'jest/auth.test.js:7:35');
+
+	const ava = reportFor(
+		AVA_OUTPUT.replace(
+			'  source/config/index.spec.ts:49',
+			'  source\\config\\index.spec.ts:49',
+		).replace(
+			'(source/config/index.spec.ts:49:5)',
+			'(.\\source\\config\\index.spec.ts:49:5)',
+		),
+	);
+	t.is(ava.failures[0]?.file, 'source/config/index.spec.ts');
+	t.is(ava.failures[0]?.location, 'source/config/index.spec.ts:49:5');
+	t.is(
+		ava.failures[0]?.nameFilter,
+		'getClosestConfigFile prefers cwd config over home config',
+	);
 });
 
 test('parseFailureReport reads AVA failure blocks and strips the file prefix from the title', t => {
@@ -438,6 +516,45 @@ test('buildNarrowCommand only narrows the runner that produced the output', t =>
 	t.is(buildNarrowCommand('npx tsc -p ts', reportFor(TSC_OUTPUT), CWD), null);
 });
 
+test('buildNarrowCommand never narrows Mocha to the source file the error came from', t => {
+	const report = reportFor(MOCHA_SOURCE_FRAME_OUTPUT);
+
+	t.is(
+		buildNarrowCommand('npx mocha mocha2/test/parser.test.js', report, CWD),
+		"npx mocha mocha2/test/parser.test.js --grep 'parser rejects empty input'",
+	);
+	t.is(
+		buildNarrowCommand('npx mocha', report, CWD),
+		"npx mocha mocha2/test/parser.test.js --grep 'parser rejects empty input'",
+	);
+
+	const cwd = mkdtempSync(join(tmpdir(), 'nanocoder-capsule-'));
+	try {
+		writeFileSync(
+			join(cwd, 'package.json'),
+			JSON.stringify({scripts: {test: 'mocha "mocha2/test/*.test.js"'}}),
+		);
+		t.is(
+			buildNarrowCommand('npm test', report, cwd),
+			"npm test -- mocha2/test/parser.test.js --grep 'parser rejects empty input'",
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+
+	// No test-file frame at all: narrow by name only.
+	const noTestFrame = reportFor(
+		MOCHA_SOURCE_FRAME_OUTPUT.replace(
+			'mocha2/test/parser.test.js:6:24',
+			'mocha2/src/runner.js:6:24',
+		),
+	);
+	t.is(
+		buildNarrowCommand('npx mocha', noTestFrame, CWD),
+		"npx mocha --grep 'parser rejects empty input'",
+	);
+});
+
 test('buildNarrowCommand does not repeat a file the command already names', t => {
 	t.is(
 		buildNarrowCommand('npx jest jest/auth.test.js', reportFor(JEST_OUTPUT), CWD),
@@ -493,18 +610,75 @@ test('formatFailureCapsule leads with the reproduce command and lists each failu
 	);
 });
 
-test('formatFailureCapsule reports a narrow re-run that passed or could not finish', t => {
-	t.true(
-		capsuleFor(bashState({exitCode: 0})).includes(
-			'Re-ran it on its own: it passed, so the failure depends on other tests or is flaky.',
-		),
+test('formatFailureCapsule only says "still fails" when the re-run reports a failing test', t => {
+	const rerunLine = (rerun: BashExecutionState) =>
+		capsuleFor(rerun)
+			.split('\n')
+			.find(line => line.startsWith('Re-ran'));
+
+	t.is(
+		rerunLine(bashState({exitCode: 1})),
+		'Re-ran it on its own: still fails (exit 1).',
 	);
+	// AVA exits 1 when --match finds nothing.
+	t.is(
+		rerunLine(
+			bashState({
+				exitCode: 1,
+				stderr: "  ✘ Couldn't find any matching tests",
+			}),
+		),
+		'Re-ran it on its own: exited 1 without reporting a failing test, so the result is inconclusive.',
+	);
+});
+
+test('formatFailureCapsule only says "passed" when the re-run ran a test', t => {
+	const rerunLine = (stderr: string, output = JEST_OUTPUT) =>
+		capsuleFor(bashState({exitCode: 0, stderr}), output)
+			.split('\n')
+			.find(line => line.startsWith('Re-ran'));
+	const flaky =
+		'Re-ran it on its own: it passed, so the failure depends on other tests or is flaky.';
+	const noTests =
+		'Re-ran it on its own: no tests ran, so the result is inconclusive.';
+
+	// Real summaries of narrow re-runs: one that ran the test, and filters
+	// that matched nothing (each exits 0).
+	t.is(rerunLine('Tests:       39 skipped, 1 passed, 40 total'), flaky);
+	t.is(rerunLine('Tests:       83 skipped, 83 total'), noTests);
+	t.is(
+		rerunLine('      Tests  1 passed | 39 skipped (40)', VITEST_OUTPUT),
+		flaky,
+	);
+	t.is(rerunLine('      Tests  1 skipped (1)', VITEST_OUTPUT), noTests);
+	t.is(rerunLine('  1 passing (2ms)', MOCHA_OUTPUT), flaky);
+	t.is(rerunLine('  0 passing (1ms)', MOCHA_OUTPUT), noTests);
+	t.is(rerunLine('  1 test passed', AVA_OUTPUT), flaky);
+});
+
+test('formatFailureCapsule reports a narrow re-run that could not finish or was skipped', t => {
 	t.true(
 		capsuleFor(bashState({exitCode: null, error: 'Command timed out'})).includes(
 			'Re-ran it on its own: could not finish (Command timed out).',
 		),
 	);
 	t.false(capsuleFor(null).includes('Re-ran'));
+});
+
+test('formatFailureCapsule names the test file when the error came from the code under test', t => {
+	const capsule = formatFailureCapsule({
+		result: bashState({command: 'npx mocha', stderr: MOCHA_SOURCE_FRAME_OUTPUT}),
+		report: reportFor(MOCHA_SOURCE_FRAME_OUTPUT),
+		narrowCommand: null,
+		originalLength: 5_000,
+	});
+
+	t.true(
+		capsule.includes(
+			'1) parser rejects empty input\n   at mocha2/src/parser.js:3:16\n   in mocha2/test/parser.test.js\n',
+		),
+		capsule,
+	);
 });
 
 test('formatFailureCapsule stays within the bash output limit and counts what it left out', t => {

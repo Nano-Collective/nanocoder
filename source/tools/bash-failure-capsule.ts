@@ -64,11 +64,28 @@ function clip(line: string): string {
 		: trimmed;
 }
 
+/**
+ * A file path as the capsule and the narrowed command show it: relative to the
+ * working directory when inside it, and always with forward slashes - Windows
+ * runners print backslashes and `relative()` returns them there, while every
+ * runner here accepts forward slashes on every platform.
+ */
 function normalizeFile(file: string, cwd: string): string {
-	const withoutDot = file.replace(/^\.\//u, '');
-	if (!isAbsolute(withoutDot)) return withoutDot;
-	const relativePath = relative(cwd, withoutDot);
-	return relativePath.startsWith('..') ? withoutDot : relativePath;
+	const withoutDot = file.replace(/^\.[\\/]/u, '');
+	let resolved = withoutDot;
+	if (isAbsolute(withoutDot)) {
+		const relativePath = relative(cwd, withoutDot);
+		resolved = relativePath.startsWith('..') ? withoutDot : relativePath;
+	}
+	return resolved.replaceAll('\\', '/');
+}
+
+/** Whether a path names a test file rather than the code under test. */
+function looksLikeTestFile(file: string): boolean {
+	return (
+		/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file) ||
+		/(?:^|\/)(?:tests?|specs?|__tests__)\//u.test(file)
+	);
 }
 
 function escapeRegExp(value: string): string {
@@ -90,27 +107,28 @@ const STACK_LOCATION =
 	/((?:[A-Za-z]:)?[^\s()]+\.[cm]?[jt]sx?):(\d+)(?::(\d+))?\)?\s*$/u;
 
 /**
- * Split a failure body into the lines worth keeping and the first location
- * that points into the project (not node_modules or Node internals).
+ * Split a failure body into the lines worth keeping, the first location that
+ * points into the project (not node_modules or Node internals), and every
+ * project file on the stack, innermost first.
  */
 function summarizeBody(
 	body: string[],
 	cwd: string,
-): {diagnostic: string[]; location?: string; locationFile?: string} {
+): {diagnostic: string[]; location?: string; stackFiles: string[]} {
 	const diagnostic: string[] = [];
+	const stackFiles: string[] = [];
 	let location: string | undefined;
-	let locationFile: string | undefined;
 	for (const line of body) {
 		if (STACK_LINE.test(line)) {
 			const match = STACK_LOCATION.exec(line);
 			if (
-				!location &&
 				match?.[1] &&
 				!match[1].includes('node_modules') &&
 				!match[1].startsWith('node:')
 			) {
-				locationFile = normalizeFile(match[1], cwd);
-				location = [locationFile, match[2], match[3]].filter(Boolean).join(':');
+				const file = normalizeFile(match[1], cwd);
+				stackFiles.push(file);
+				location ??= [file, match[2], match[3]].filter(Boolean).join(':');
 			}
 			continue;
 		}
@@ -124,7 +142,7 @@ function summarizeBody(
 		}
 		if (diagnostic.length < MAX_DIAGNOSTIC_LINES) diagnostic.push(clip(line));
 	}
-	return {diagnostic, location, locationFile};
+	return {diagnostic, location, stackFiles};
 }
 
 function dedupe(failures: FailingTarget[]): FailingTarget[] {
@@ -261,11 +279,16 @@ function parseMocha(lines: string[], cwd: string): FailureReport | null {
 		const header = /^\s+\d+\) (.+)$/u.exec(rest[index] ?? '');
 		if (!header?.[1]) continue;
 
-		// The title runs over the header and the lines below it up to the first
-		// blank line; the last part ends in ":".
+		// The title runs over the header and the lines below it, and ends with
+		// the part that ends in ":". The error can follow on the very next line
+		// (no blank line after a thrown TypeError), so stop there, not at a gap.
 		const titleParts = [header[1].trim()];
 		let cursor = index + 1;
-		while (cursor < rest.length && rest[cursor]?.trim()) {
+		while (
+			!titleParts.at(-1)?.endsWith(':') &&
+			cursor < rest.length &&
+			rest[cursor]?.trim()
+		) {
 			titleParts.push((rest[cursor] ?? '').trim());
 			cursor++;
 		}
@@ -285,10 +308,14 @@ function parseMocha(lines: string[], cwd: string): FailureReport | null {
 		}
 		index = cursor - 1;
 
-		const {diagnostic, location, locationFile} = summarizeBody(body, cwd);
+		// Mocha never names the test file, only the stack does - and its first
+		// project frame is often the code under test (src/parser.js) rather
+		// than the test calling it. Narrowing to a source file runs no tests,
+		// so only a frame that looks like a test file counts.
+		const {diagnostic, location, stackFiles} = summarizeBody(body, cwd);
 		failures.push({
 			title: titleParts.join(' '),
-			file: locationFile,
+			file: stackFiles.find(looksLikeTestFile),
 			location,
 			nameFilter: titleParts.join(' '),
 			diagnostic,
@@ -563,17 +590,48 @@ export function buildNarrowCommand(
 
 // --- capsule ------------------------------------------------------------------
 
-function describeRerun(rerun: BashExecutionState | null | undefined): string[] {
+/** How many tests a run reports as passed, or null when it doesn't say. */
+function passedCount(runner: FailureRunner, output: string): number | null {
+	const pattern = {
+		jest: /^Tests:.*?\b(\d+) passed\b/mu,
+		vitest: /^\s*Tests\s.*?\b(\d+) passed\b/mu,
+		mocha: /^\s*(\d+) passing\b/mu,
+		ava: /^\s*(\d+) tests? passed\b/mu,
+		tsc: null,
+	}[runner];
+	const match = pattern?.exec(output);
+	return match?.[1] ? Number(match[1]) : null;
+}
+
+/**
+ * The exit code alone doesn't say what a narrow re-run showed: a name filter
+ * that matches nothing runs zero tests and exits 0 under Jest, Vitest and
+ * Mocha, and AVA exits 1 when --match finds nothing. So "still fails" needs a
+ * failing test in the re-run's own output, and "passed" needs a passing one.
+ */
+function describeRerun(
+	rerun: BashExecutionState | null | undefined,
+	runner: FailureRunner,
+): string[] {
 	if (!rerun) return [];
 	if (rerun.error !== null) {
 		return [`Re-ran it on its own: could not finish (${rerun.error}).`];
 	}
+	const output = stripAnsi(`${rerun.fullOutput}\n${rerun.stderr}`);
 	if ((rerun.exitCode ?? 0) !== 0) {
-		return [`Re-ran it on its own: still fails (exit ${rerun.exitCode}).`];
+		// Only whether the runner reported a failure matters here, not paths.
+		const report = parseFailureReport(output, '.');
+		return report?.runner === runner && report.failures.length > 0
+			? [`Re-ran it on its own: still fails (exit ${rerun.exitCode}).`]
+			: [
+					`Re-ran it on its own: exited ${rerun.exitCode} without reporting a failing test, so the result is inconclusive.`,
+				];
 	}
-	return [
-		'Re-ran it on its own: it passed, so the failure depends on other tests or is flaky.',
-	];
+	return (passedCount(runner, output) ?? 0) > 0
+		? [
+				'Re-ran it on its own: it passed, so the failure depends on other tests or is flaky.',
+			]
+		: ['Re-ran it on its own: no tests ran, so the result is inconclusive.'];
 }
 
 function formatTarget(index: number, target: FailingTarget): string {
@@ -583,7 +641,10 @@ function formatTarget(index: number, target: FailingTarget): string {
 	}
 	const lines = [`${index}) ${target.title}`];
 	if (target.location) lines.push(`   at ${target.location}`);
-	else if (target.file) lines.push(`   in ${target.file}`);
+	// The error can be raised outside the test (in the code under test).
+	if (target.file && !target.location?.startsWith(`${target.file}:`)) {
+		lines.push(`   in ${target.file}`);
+	}
 	for (const line of target.diagnostic) lines.push(`   ${line}`);
 	return lines.join('\n');
 }
@@ -603,7 +664,7 @@ export function formatFailureCapsule(options: {
 		...(result.exitCode !== null ? [`EXIT_CODE: ${result.exitCode}`] : []),
 		`FAILURE CAPSULE (${report.runner}): ${count} ${noun}. Distilled from ${originalLength} characters of output; only the failures are kept.`,
 		`Reproduce: ${narrowCommand ?? result.command}`,
-		...describeRerun(rerun),
+		...describeRerun(rerun, report.runner),
 	].join('\n');
 	const footer = report.summary ? `\nSummary: ${report.summary}` : '';
 	const separator = report.runner === 'tsc' ? '\n' : '\n\n';
