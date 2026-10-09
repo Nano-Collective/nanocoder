@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
-import TextInput from '@/components/text-input';
+import TextInput, {isBackspaceKey, useRawInput} from '@/components/text-input';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -375,6 +375,8 @@ export function McpStep({
 		})),
 	];
 
+	const rawInputRef = useRawInput();
+
 	// Handle keyboard navigation
 	useInput((input, key) => {
 		// Handle Shift+Tab for going back (but not regular Tab, let Tabs component handle it)
@@ -434,10 +436,7 @@ export function McpStep({
 				} else if (key.escape) {
 					// Submit multiline input on Escape
 					handleFieldSubmit();
-				} else if (
-					key.backspace ||
-					(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-				) {
+				} else if (isBackspaceKey(key, rawInputRef.current)) {
 					// Backspace, told apart from forward Delete the same way
 					// TextInput does. The buffer has no cursor - typing always
 					// appends - so forward Delete has nothing after it to remove.

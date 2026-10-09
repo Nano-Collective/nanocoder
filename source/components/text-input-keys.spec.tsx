@@ -1,3 +1,6 @@
+import {readdirSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
@@ -427,4 +430,17 @@ test('component Ctrl+E in multi-line input moves to the end of the current line'
 	await waitForValue(valueRef, v => v === 'alpha\nbravoX\ncharlie');
 	t.is(valueRef.current, 'alpha\nbravoX\ncharlie');
 	unmount();
+});
+
+// --- Stock Ink (#1505) ---
+// `key.raw` only exists through a pnpm patch to Ink. pnpm patches apply inside
+// this repo alone, so every test here passes with the patch while an npm
+// install (plain Ink) loses it and Backspace turns into forward Delete. Read
+// the sequence through useRawInput instead; this fails if `key.raw` creeps back.
+test('source never reads key.raw, which stock Ink does not provide', t => {
+	const sourceDir = fileURLToPath(new URL('..', import.meta.url));
+	const offenders = readdirSync(sourceDir, {recursive: true, encoding: 'utf8'})
+		.filter(file => /\.tsx?$/.test(file) && !/\.spec\.tsx?$/.test(file))
+		.filter(file => /key\.raw/.test(readFileSync(join(sourceDir, file), 'utf8')));
+	t.deepEqual(offenders, []);
 });
