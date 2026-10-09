@@ -50,7 +50,7 @@ If `NANOCODER_CONFIG_DIR` is set, the project-level file is skipped for top-leve
 | `syntaxTheme` | Optional. Name of the theme whose palette colours syntax highlighting, when you want code to keep a palette of its own (e.g. `"dracula"`) instead of following `selectedTheme`. Any theme name from `/settings` → **Theme** works; an unknown name falls back to `selectedTheme` |
 | `titleShape` | The title shape style (e.g., box, rounded) |
 | `nanocoderShape` | The nanocoder ASCII art shape |
-| `trustedDirectories` | Directories you've approved through the security disclaimer (user-level file only). Each entry stores the folder path and a fingerprint of its plugins, hooks, formatters, and MCP servers. A change to those files asks again. A path saved before fingerprints is asked again too. |
+| `trustedDirectories` | Directories you've approved through the security disclaimer (user-level file only). Each entry is `{ "path": "/absolute/folder", "fingerprint": "<sha256>" }`. The fingerprint covers that folder's plugins, hooks, formatters, and `.mcp.json`. A change asks again. A plain path saved before fingerprints is asked again too. |
 | `lastUpdateCheck` | Timestamp of the last update check (used to avoid checking too frequently) |
 | `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
 | `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |

@@ -128,21 +128,30 @@ function listFormatters(
 
 function listMcpServers(root: string, lines: string[]): number {
 	const file = path.join(root, '.mcp.json');
-	const parsed = readJsonFile(file, lines);
+	if (!existsSync(file)) return 0;
+	let raw: string;
+	try {
+		raw = readFileSync(file, 'utf8');
+	} catch (error) {
+		lines.push(`unreadable .mcp.json ${hashText(String(error))}`);
+		return 0;
+	}
+	// The whole file, not just command and url. An args or env edit is still
+	// a different program.
+	lines.push(`mcp ${hashText(raw)}`);
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw) as unknown;
+	} catch {
+		return 0;
+	}
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 0;
 	const servers = (parsed as {mcpServers?: unknown}).mcpServers;
 	if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
 		return 0;
 	}
-
-	const names = Object.keys(servers).sort();
-	for (const name of names) {
-		const server = (servers as Record<string, unknown>)[name];
-		const command = serverField(server, 'command');
-		const url = serverField(server, 'url');
-		lines.push(`mcp ${name} ${command} ${url}`);
-	}
-	return names.length;
+	return Object.keys(servers).length;
 }
 
 function hookCommands(entries: unknown): string[] {
@@ -191,12 +200,6 @@ function readJsonFile(file: string, lines: string[]): unknown {
 		lines.push(`invalid ${path.basename(file)} ${hashText(raw)}`);
 		return undefined;
 	}
-}
-
-function serverField(server: unknown, key: string): string {
-	if (!server || typeof server !== 'object' || Array.isArray(server)) return '';
-	const value = (server as Record<string, unknown>)[key];
-	return typeof value === 'string' ? value : '';
 }
 
 function hashFile(file: string): string {

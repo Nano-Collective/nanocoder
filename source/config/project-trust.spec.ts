@@ -70,6 +70,29 @@ test('plugins, hooks, formatters, and MCP servers are listed', t => {
 	}
 });
 
+test('editing an MCP server argument changes the fingerprint', t => {
+	const root = tempRoot();
+	try {
+		const file = join(root, '.mcp.json');
+		writeFileSync(
+			file,
+			JSON.stringify({mcpServers: {local: {command: 'node', args: ['safe.js']}}}),
+		);
+		const before = describeProjectTrust(root);
+		writeFileSync(
+			file,
+			JSON.stringify({mcpServers: {local: {command: 'node', args: ['other.js']}}}),
+		);
+		const after = describeProjectTrust(root);
+
+		t.is(before.mcpServers, 1);
+		t.is(after.mcpServers, 1);
+		t.not(before.fingerprint, after.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('editing a plugin changes the fingerprint without changing the count', t => {
 	const root = tempRoot();
 	try {
