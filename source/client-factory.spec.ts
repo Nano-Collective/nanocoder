@@ -291,6 +291,31 @@ test.serial(
 	},
 );
 
+test.serial(
+	'createLLMClient: attaches unreadableError when agents.config.json has invalid JSON syntax',
+	async t => {
+		const invalidDir = join(testDir, 'invalid-json-test');
+		mkdirSync(invalidDir, {recursive: true});
+
+		writeFileSync(
+			join(invalidDir, 'agents.config.json'),
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		process.cwd = () => invalidDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.truthy(error.unreadableError);
+		t.true(error.unreadableError?.startsWith('unreadable: '));
+		t.true(error.message.includes('unreadable: '));
+	},
+);
+
 // ============================================================================
 // createLLMClient - Localhost Provider Tests
 // ============================================================================

@@ -1129,8 +1129,47 @@ test.serial("plain shell captures logWarning and logError to stderr and includes
 	const jsonOutput = JSON.parse(stdout.get());
 	t.is(jsonOutput.kind, "success");
 	t.truthy(jsonOutput.warnings);
-	t.is(jsonOutput.warnings.length, 2);
+	t.is(jsonOutput.warnings.length, 3);
 	t.true(jsonOutput.warnings[0].includes("unknown lifecycle event 'post-tool-uze'"));
 	t.true(jsonOutput.warnings[1].includes("entries need a 'command' string"));
+	t.true(jsonOutput.warnings[2].includes("Plugin bad.mjs failed to load: boom from plugin"));
 });
+
+test.serial("plain shell includes collected warnings in prompt-gate-blocked json report", async (t) => {
+	const stdout = capturingStdout();
+	const stderr = capturingStderr();
+	try {
+		await runPlainShell({
+			prompt: "blocked prompt",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: async () => {
+					logWarning("Some startup warning");
+					return {
+						client: FAKE_CLIENT,
+						toolManager: FAKE_TOOL_MANAGER,
+						provider: "fake-provider",
+						model: "fake-model",
+					};
+				},
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+			}),
+		});
+	} finally {
+		stdout.restore();
+		stderr.restore();
+	}
+
+	const stderrOutput = stderr.get();
+	t.true(stderrOutput.includes("Some startup warning"));
+});
+
 
