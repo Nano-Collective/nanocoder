@@ -76,6 +76,10 @@ async function launch(
 ): Promise<BrowserPage> {
 	const pw = await load();
 	const browser = await pw.chromium.launch({headless: true});
+	// A crashed or closed browser launches fresh on the next call.
+	browser.on('disconnected', () => {
+		opening = null;
+	});
 	getShutdownManager().register({
 		name: 'browser-page',
 		priority: 15,
@@ -85,6 +89,9 @@ async function launch(
 		},
 	});
 	const page = await browser.newPage({viewport: VIEWPORT});
+	page.on('crash', () => {
+		void browser.close().catch(() => undefined);
+	});
 	// Covers subresources, iframes, fetch, and link clicks. Redirect hops skip
 	// routing, so runBrowserAction also checks where each frame landed.
 	await page.route('**/*', route =>

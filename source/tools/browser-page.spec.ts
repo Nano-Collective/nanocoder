@@ -72,18 +72,61 @@ test('a redirect that lands a frame on a private address is dropped', async t =>
 	t.deepEqual(opened, ['https://example.com/r', 'about:blank']);
 });
 
+function fakePlaywright() {
+	const fake = {
+		launches: 0,
+		closes: 0,
+		route: undefined as ((route: unknown) => Promise<void>) | undefined,
+		browserEvents: new Map<string, () => void>(),
+		pageEvents: new Map<string, () => void>(),
+		load: async () => ({
+			chromium: {
+				launch: async () => {
+					fake.launches += 1;
+					return {
+						on: (event: string, fn: () => void) =>
+							fake.browserEvents.set(event, fn),
+						close: async () => {
+							fake.closes += 1;
+						},
+						newPage: async () => ({
+							on: (event: string, fn: () => void) =>
+								fake.pageEvents.set(event, fn),
+							route: async (
+								_pattern: string,
+								fn: (route: unknown) => Promise<void>,
+							) => {
+								fake.route = fn;
+							},
+						}),
+					} as never;
+				},
+			},
+		}),
+	};
+	return fake;
+}
+
+test('a crashed browser is relaunched on the next call', async t => {
+	resetBrowserPageForTests();
+	const fake = fakePlaywright();
+	await getBrowserPage(fake.load);
+	await getBrowserPage(fake.load);
+	t.is(fake.launches, 1);
+
+	fake.pageEvents.get('crash')?.();
+	t.is(fake.closes, 1);
+	fake.browserEvents.get('disconnected')?.();
+	await getBrowserPage(fake.load);
+	t.is(fake.launches, 2);
+	resetBrowserPageForTests();
+});
+
 test('the launched page aborts requests to private addresses', async t => {
 	resetBrowserPageForTests();
-	let handler: ((route: unknown) => Promise<void>) | undefined;
-	const page = {
-		route: async (_pattern: string, fn: typeof handler) => {
-			handler = fn;
-		},
-	};
-	const browser = {newPage: async () => page, close: async () => undefined};
-	await getBrowserPage(async () => ({
-		chromium: {launch: async () => browser as never},
-	}));
+	const fake = fakePlaywright();
+	await getBrowserPage(fake.load);
+	const handler = fake.route;
 	const outcome = async (url: string) => {
 		let result = '';
 		await handler?.({
