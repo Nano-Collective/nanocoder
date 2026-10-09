@@ -1,6 +1,12 @@
+import {existsSync, mkdtempSync, readFileSync, realpathSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {platform} from 'node:process';
 import test from 'ava';
-import {existsSync, readFileSync} from 'node:fs';
-import { BashExecutor } from './bash-executor';
+import {getAppConfig} from '@/config/index';
+import {BashExecutor} from './bash-executor';
+import {findBwrap} from './bash-sandbox.js';
+import {resetSessionCwd, setProjectRoot, setSessionCwd} from './session-cwd.js';
 
 console.log(`\nbash-executor.spec.ts`);
 
@@ -748,39 +754,59 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 	await promise;
 });
 
-test('cancel preserves sandbox jail directory until child process exits and cleans up afterwards', async t => {
-	const executor = createExecutor();
-	const cmd =
-		'node -e "const fs = require(\'fs\'); const path = require(\'path\'); process.on(\'SIGTERM\', () => { try { fs.writeFileSync(path.join(process.env.TMPDIR || \'/tmp\', \'sigterm.txt\'), \'shutting down\'); } catch {} setTimeout(() => process.exit(0), 300); }); console.log(\'READY\'); setInterval(() => {}, 1000);"';
-	const { executionId, promise } = executor.execute(cmd);
+test.serial(
+	'cancel preserves sandbox jail directory until child process exits and cleans up afterwards',
+	async t => {
+		if (platform === 'win32' || (platform === 'linux' && !findBwrap())) {
+			t.pass();
+			return;
+		}
 
-	for (let tick = 0; tick < 30; tick++) {
-		await new Promise(resolve => setTimeout(resolve, 100));
-		const state = executor.getState(executionId);
-		if (state?.fullOutput.includes('READY')) break;
-	}
+		const previousSandbox = getAppConfig().sandbox;
+		const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'nc-test-jail-')));
+		getAppConfig().sandbox = true;
+		setProjectRoot(tmpDir);
+		setSessionCwd(tmpDir);
 
-	const entry = (executor as any).executions.get(executionId);
-	const jailTmp = entry?.jailTmp;
+		try {
+			const executor = createExecutor();
+			const cmd =
+				'node -e "const fs = require(\'fs\'); const path = require(\'path\'); process.on(\'SIGTERM\', () => { try { fs.writeFileSync(path.join(process.env.TMPDIR || \'/tmp\', \'sigterm.txt\'), \'shutting down\'); } catch {} setTimeout(() => process.exit(0), 300); }); console.log(\'READY\'); setInterval(() => {}, 1000);"';
+			const { executionId, promise } = executor.execute(cmd);
 
-	const cancelled = executor.cancel(executionId);
-	t.true(cancelled);
+			for (let tick = 0; tick < 30; tick++) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+				const state = executor.getState(executionId);
+				if (state?.fullOutput.includes('READY')) break;
+			}
 
-	if (jailTmp) {
-		t.true(
-			existsSync(jailTmp),
-			'jailTmp must still exist while process is handling SIGTERM',
-		);
-	}
+			const jailTmp = executor.getJailTmp(executionId);
+			t.truthy(jailTmp, 'jailTmp must be defined when sandbox is enabled');
 
-	const result = await promise;
-	t.true(result.isComplete);
+			const cancelled = executor.cancel(executionId);
+			t.true(cancelled);
 
-	await new Promise(resolve => setTimeout(resolve, 600));
-	if (jailTmp) {
-		t.false(
-			existsSync(jailTmp),
-			'jailTmp must be cleaned up after process terminates',
-		);
-	}
-});
+			t.true(
+				existsSync(jailTmp!),
+				'jailTmp must still exist while process is handling SIGTERM',
+			);
+
+			const result = await promise;
+			t.true(result.isComplete);
+
+			await new Promise(resolve => setTimeout(resolve, 600));
+			t.false(
+				existsSync(jailTmp!),
+				'jailTmp must be cleaned up after process terminates',
+			);
+		} finally {
+			getAppConfig().sandbox = previousSandbox;
+			resetSessionCwd();
+			try {
+				rmSync(tmpDir, {recursive: true, force: true});
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	},
+);

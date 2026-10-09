@@ -421,10 +421,26 @@ export class BashExecutor extends EventEmitter {
 		const sigkillTimer = setTimeout(() => {
 			if (isAlive()) {
 				sendKillSignal('SIGKILL');
+				const reapPoll = setInterval(() => {
+					if (!isAlive()) {
+						clearInterval(reapPoll);
+						onExit?.();
+					}
+				}, 50);
+				reapPoll.unref();
+				setTimeout(() => clearInterval(reapPoll), 1000).unref();
+			} else {
+				onExit?.();
 			}
-			onExit?.();
 		}, 2000);
 		sigkillTimer.unref();
+	}
+
+	/**
+	 * Get the temporary jail directory path for an active execution, if sandboxed.
+	 */
+	getJailTmp(executionId: string): string | undefined {
+		return this.executions.get(executionId)?.jailTmp;
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {
