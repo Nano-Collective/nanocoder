@@ -25,6 +25,7 @@ import {
 	runLifecycleHooks,
 	runPreToolUseGate,
 	takePendingHookContext,
+	toPlatformHookCommand,
 } from './lifecycle-hooks';
 
 console.log(`\nlifecycle-hooks.spec.ts`);
@@ -1039,3 +1040,67 @@ posixTest.serial(
 		t.false(alive, `hook pid ${pid} outlived its timeout`);
 	},
 );
+
+// cmd.exe expands `%FILE%`, not `$FILE`, so the documented POSIX-style
+// references are renamed on Windows (#1688). Pure string checks, so every
+// platform covers the Windows branch.
+const PATH_ENV: NodeJS.ProcessEnv = {
+	FILE: 'C:\\proj\\a&b c.ts',
+	NANOCODER_FILE: 'C:\\proj\\a&b c.ts',
+	NANOCODER_CWD: 'C:\\proj',
+	NANOCODER_TOOL_ARGS: '{"path":"x"}',
+};
+
+test('toPlatformHookCommand leaves POSIX commands untouched', t => {
+	for (const platform of ['linux', 'darwin'] as const) {
+		t.deepEqual(
+			toPlatformHookCommand('gofmt -w "$FILE"', PATH_ENV, platform),
+			{command: 'gofmt -w "$FILE"'},
+		);
+	}
+});
+
+test('toPlatformHookCommand renames path references for cmd.exe', t => {
+	const cases: Array<[string, string]> = [
+		['npx biome format --write "$FILE"', 'npx biome format --write "%FILE%"'],
+		['gofmt -w "${FILE}"', 'gofmt -w "%FILE%"'],
+		['biome check --write "$NANOCODER_FILE"', 'biome check --write "%NANOCODER_FILE%"'],
+		['cd "$NANOCODER_CWD" && x', 'cd "%NANOCODER_CWD%" && x'],
+		// Unquoted references are quoted so `&` in a path stays literal.
+		['gofmt -w $FILE', 'gofmt -w "%FILE%"'],
+		['gofmt -w ${FILE}', 'gofmt -w "%FILE%"'],
+		// `^"` is an escaped quote outside a quoted region, not an opening one.
+		['echo ^"$FILE', 'echo ^""%FILE%"'],
+		// Free-text and unknown variables are not translated.
+		['log "$NANOCODER_TOOL_ARGS" $FILENAME $file', 'log "$NANOCODER_TOOL_ARGS" $FILENAME $file'],
+		['echo %FILE%', 'echo %FILE%'],
+	];
+	for (const [input, expected] of cases) {
+		t.deepEqual(toPlatformHookCommand(input, PATH_ENV, 'win32'), {
+			command: expected,
+		}, input);
+	}
+});
+
+test('toPlatformHookCommand expands an unset path variable to nothing', t => {
+	t.deepEqual(
+		toPlatformHookCommand('echo "$NANOCODER_SESSION_CWD" $NANOCODER_SESSION_CWD.', PATH_ENV, 'win32'),
+		{command: 'echo "" .'},
+	);
+});
+
+test('toPlatformHookCommand refuses a path cmd.exe cannot quote', t => {
+	for (const value of ['a" & calc & "', 'a\r\nb', 'a\0b']) {
+		const result = toPlatformHookCommand(
+			'check "$NANOCODER_FILE"',
+			{NANOCODER_FILE: value},
+			'win32',
+		);
+		t.true('failure' in result, JSON.stringify(value));
+	}
+	// A command that never references the value is not affected by it.
+	t.deepEqual(
+		toPlatformHookCommand('echo ok', {NANOCODER_FILE: 'a"b'}, 'win32'),
+		{command: 'echo ok'},
+	);
+});
