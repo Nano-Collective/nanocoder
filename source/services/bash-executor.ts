@@ -53,6 +53,7 @@ interface ExecutionEntry {
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
 	jailTmp?: string;
+	cleanupJailTmp?: () => void;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -108,10 +109,14 @@ export class BashExecutor extends EventEmitter {
 			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
 		};
 
+		let jailTmpCleaned = false;
 		const cleanupJailTmp = () => {
-			if (!jailTmp) return;
+			if (!jailTmp || jailTmpCleaned) return;
+			jailTmpCleaned = true;
 			try {
-				rmSync(jailTmp, {recursive: true, force: true});
+				if (existsSync(jailTmp)) {
+					rmSync(jailTmp, {recursive: true, force: true});
+				}
 			} catch {
 				// best-effort cleanup
 			}
@@ -168,7 +173,6 @@ export class BashExecutor extends EventEmitter {
 				} catch {
 					// best-effort cleanup
 				}
-				cleanupJailTmp();
 			}
 		};
 
@@ -222,6 +226,7 @@ export class BashExecutor extends EventEmitter {
 				signal: options?.signal,
 				cwdCaptureFile,
 				jailTmp,
+				cleanupJailTmp,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -254,12 +259,16 @@ export class BashExecutor extends EventEmitter {
 				}
 
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) return;
+				if (!this.executions.has(executionId)) {
+					cleanupJailTmp();
+					return;
+				}
 
 				flushStreams();
 
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.exitCode = code;
@@ -275,11 +284,15 @@ export class BashExecutor extends EventEmitter {
 				}
 
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) return;
+				if (!this.executions.has(executionId)) {
+					cleanupJailTmp();
+					return;
+				}
 
 				flushStreams();
 
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.error = error.message;
@@ -310,20 +323,13 @@ export class BashExecutor extends EventEmitter {
 		execution.process.stderr?.destroy();
 		execution.process.stdin?.destroy();
 
-		this.killProcessTree(execution.process);
+		this.killProcessTree(execution.process, execution.cleanupJailTmp);
 		// Drop the cwd temp file; a killed command must not move the session cwd.
 		if (execution.cwdCaptureFile) {
 			try {
 				if (existsSync(execution.cwdCaptureFile)) {
 					unlinkSync(execution.cwdCaptureFile);
 				}
-			} catch {
-				// best-effort cleanup
-			}
-		}
-		if (execution.jailTmp) {
-			try {
-				rmSync(execution.jailTmp, {recursive: true, force: true});
 			} catch {
 				// best-effort cleanup
 			}
@@ -351,9 +357,12 @@ export class BashExecutor extends EventEmitter {
 	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
 	 * trapped or ignored.
 	 */
-	private killProcessTree(proc: ChildProcess): void {
+	private killProcessTree(proc: ChildProcess, onExit?: () => void): void {
 		const pid = proc.pid;
-		if (pid === undefined) return;
+		if (pid === undefined) {
+			onExit?.();
+			return;
+		}
 
 		const sendKillSignal = (sig: 'SIGTERM' | 'SIGKILL') => {
 			if (isWindows) {
@@ -394,7 +403,14 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		if (!isAlive()) return;
+		if (!isAlive()) {
+			onExit?.();
+			return;
+		}
+
+		if (onExit) {
+			proc.once('close', () => onExit());
+		}
 
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
@@ -405,9 +421,26 @@ export class BashExecutor extends EventEmitter {
 		const sigkillTimer = setTimeout(() => {
 			if (isAlive()) {
 				sendKillSignal('SIGKILL');
+				const reapPoll = setInterval(() => {
+					if (!isAlive()) {
+						clearInterval(reapPoll);
+						onExit?.();
+					}
+				}, 50);
+				reapPoll.unref();
+				setTimeout(() => clearInterval(reapPoll), 1000).unref();
+			} else {
+				onExit?.();
 			}
 		}, 2000);
 		sigkillTimer.unref();
+	}
+
+	/**
+	 * Get the temporary jail directory path for an active execution, if sandboxed.
+	 */
+	getJailTmp(executionId: string): string | undefined {
+		return this.executions.get(executionId)?.jailTmp;
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {
