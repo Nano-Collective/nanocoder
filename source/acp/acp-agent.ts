@@ -273,7 +273,7 @@ export class AcpAgent implements Agent {
 						if (commandName === 'clear') {
 							// Clear the conversation history and action timeline
 							session.messages = [];
-							clearAcpReadStubs(session.sessionId);
+							clearAcpReadStubs(params.sessionId);
 							await session.timeline.clear();
 							const msg = 'Conversation cleared.';
 							this.conn.sessionUpdate({
