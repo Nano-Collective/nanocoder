@@ -157,8 +157,10 @@ async function commitFile(absPath: string): Promise<string | null> {
 			} else {
 				await git('reset', '-q', '--', pathspec);
 			}
-		} catch {
-			// Ignore rollback errors if repository is in an abnormal state
+		} catch (error) {
+			logWarning(
+				`Failed to restore git index for ${pathspec}: ${formatError(error)}`,
+			);
 		}
 	};
 
