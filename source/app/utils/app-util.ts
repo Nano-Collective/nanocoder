@@ -16,6 +16,7 @@ import {
 	MAX_SESSION_NAME_LENGTH,
 } from '@/constants';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
+import {expandCustomCommandPrompt} from '@/custom-commands/executor';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
@@ -177,14 +178,9 @@ async function handleCustomCommand(
 		return false;
 	}
 
-	const rawArgs = message.slice(commandName.length + 2).trim();
-	const args = parseCustomCommandArgs(rawArgs);
-
-	const processedPrompt = customCommandExecutor?.execute(
-		customCommand,
-		args,
-		rawArgs,
-	);
+	const processedPrompt = customCommandExecutor
+		? expandCustomCommandPrompt(customCommand, message, customCommandExecutor)
+		: undefined;
 
 	if (processedPrompt) {
 		await onHandleChatMessage(processedPrompt);
