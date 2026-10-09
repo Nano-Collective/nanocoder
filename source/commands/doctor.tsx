@@ -91,7 +91,7 @@ export interface DoctorReport {
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
-formatters: Section<DoctorFormatter[]>;
+	formatters: Section<DoctorFormatter[]>;
 	verification: Section<DoctorVerification>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
@@ -306,7 +306,7 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-const [
+	const [
 		nanocoder,
 		providers,
 		lsp,
@@ -315,17 +315,16 @@ const [
 		formatters,
 		verification,
 		daemonLock,
-	] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => collectVerification()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => collectVerification()),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -338,7 +337,7 @@ const [
 		lsp,
 		mcp,
 		hooks,
-formatters,
+		formatters,
 		verification,
 		daemon:
 			daemonLock.status === 'ok'
@@ -481,7 +480,7 @@ export function Doctor({report}: {report: DoctorReport}) {
 				))
 			)}
 
-<SectionTitle>Formatters</SectionTitle>
+			<SectionTitle>Formatters</SectionTitle>
 			{report.formatters.status === 'error' ? (
 				<SectionError message={report.formatters.error} />
 			) : report.formatters.data.length === 0 ? (

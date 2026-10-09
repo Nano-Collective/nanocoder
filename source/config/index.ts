@@ -981,7 +981,7 @@ function loadAppConfig(): AppConfig {
 		modeProviders,
 		tune,
 		sandbox,
-autoCommit,
+		autoCommit,
 		...(verification ? {verification} : {}),
 	};
 }
