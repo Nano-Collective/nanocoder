@@ -45,6 +45,8 @@ export interface AIProviderConfig {
 		apiKey?: string;
 		caCertPath?: string;
 		headers?: Record<string, string>;
+		// Request streaming usage from OpenAI-compatible providers (defaults to true)
+		includeUsage?: boolean;
 		[key: string]: unknown;
 	};
 }
@@ -71,6 +73,8 @@ export interface ProviderConfig {
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
 	headers?: Record<string, string>;
+	// Whether to request streaming usage from OpenAI-compatible endpoints (defaults to true)
+	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
 	// OpenRouter-specific request body fields. Only applied when the provider

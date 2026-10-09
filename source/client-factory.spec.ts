@@ -1544,3 +1544,50 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'loadProviderConfigs threads includeUsage from ProviderConfig to AIProviderConfig',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OllamaDefault',
+						baseUrl: 'http://localhost:11434/v1',
+						models: ['llama3:8b'],
+					},
+					{
+						name: 'OllamaOptOut',
+						baseUrl: 'http://localhost:11434/v1',
+						models: ['llama3:8b'],
+						includeUsage: false,
+					},
+					{
+						name: 'OllamaOptIn',
+						baseUrl: 'http://localhost:11434/v1',
+						models: ['llama3:8b'],
+						includeUsage: true,
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const defaultProvider = resolved.find(p => p.name === 'OllamaDefault');
+			const optOutProvider = resolved.find(p => p.name === 'OllamaOptOut');
+			const optInProvider = resolved.find(p => p.name === 'OllamaOptIn');
+
+			t.is(defaultProvider?.config.includeUsage, undefined);
+			t.is(optOutProvider?.config.includeUsage, false);
+			t.is(optInProvider?.config.includeUsage, true);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);
+

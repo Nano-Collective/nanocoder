@@ -235,6 +235,103 @@ test('createProvider uses openai-compatible when sdkProvider is explicitly opena
 	t.is(typeof provider.kind, 'string');
 });
 
+test('createProvider enables streaming usage by default for openai-compatible', async t => {
+	let capturedBody: any = null;
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		let raw = '';
+		req.on('data', chunk => {
+			raw += chunk;
+		});
+		req.on('end', () => {
+			capturedBody = JSON.parse(raw);
+			res.writeHead(200, {'Content-Type': 'text/event-stream'});
+			res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+			res.end('data: [DONE]\n\n');
+		});
+	});
+
+	await new Promise<void>(resolve => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	try {
+		const config: AIProviderConfig = {
+			name: 'Ollama',
+			type: 'openai',
+			models: ['llama3:8b'],
+			config: {
+				baseURL: `http://127.0.0.1:${port}/v1`,
+				apiKey: 'test-key',
+			},
+		};
+
+		const agent = new Agent();
+		const provider = await createProvider(config, agent);
+		const model = (provider.provider as any)('llama3:8b');
+
+		const streamResult = await model.doStream({
+			prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+		});
+		for await (const _ of streamResult.stream) {
+			// consume stream
+		}
+
+		t.truthy(capturedBody);
+		t.deepEqual(capturedBody.stream_options, {include_usage: true});
+	} finally {
+		server.close();
+	}
+});
+
+test('createProvider respects includeUsage: false for openai-compatible', async t => {
+	let capturedBody: any = null;
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		let raw = '';
+		req.on('data', chunk => {
+			raw += chunk;
+		});
+		req.on('end', () => {
+			capturedBody = JSON.parse(raw);
+			res.writeHead(200, {'Content-Type': 'text/event-stream'});
+			res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+			res.end('data: [DONE]\n\n');
+		});
+	});
+
+	await new Promise<void>(resolve => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	try {
+		const config: AIProviderConfig = {
+			name: 'CustomProvider',
+			type: 'openai',
+			models: ['custom-model'],
+			config: {
+				baseURL: `http://127.0.0.1:${port}/v1`,
+				apiKey: 'test-key',
+				includeUsage: false,
+			},
+		};
+
+		const agent = new Agent();
+		const provider = await createProvider(config, agent);
+		const model = (provider.provider as any)('custom-model');
+
+		const streamResult = await model.doStream({
+			prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+		});
+		for await (const _ of streamResult.stream) {
+			// consume stream
+		}
+
+		t.truthy(capturedBody);
+		t.is(capturedBody.stream_options, undefined);
+	} finally {
+		server.close();
+	}
+});
+
 test('createProvider google provider works without baseURL', async t => {
 	const config: AIProviderConfig = {
 		name: 'Gemini',

@@ -524,6 +524,14 @@ export async function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
+	const includeUsage =
+		typeof config.includeUsage === 'boolean'
+			? config.includeUsage
+			: typeof (providerConfig as {includeUsage?: boolean}).includeUsage ===
+					'boolean'
+				? (providerConfig as {includeUsage?: boolean}).includeUsage
+				: true;
+
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {
 		kind: 'openai-compatible',
@@ -533,6 +541,7 @@ export async function createProvider(
 			apiKey: config.apiKey ?? 'dummy-key',
 			fetch: createUndiciFetch(undiciAgent),
 			headers,
+			includeUsage,
 		}),
 	};
 }

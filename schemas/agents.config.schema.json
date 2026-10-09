@@ -646,6 +646,9 @@
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},
+				"includeUsage": {
+					"type": "boolean"
+				},
 				"maxRetries": {
 					"type": "number"
 				},

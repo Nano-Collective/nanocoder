@@ -226,6 +226,10 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 			apiKey: provider.apiKey || 'dummy-key',
 			caCertPath: provider.caCertPath,
 			headers: provider.headers ?? {},
+			includeUsage:
+				typeof provider.includeUsage === 'boolean'
+					? provider.includeUsage
+					: undefined,
 		},
 	}));
 }
