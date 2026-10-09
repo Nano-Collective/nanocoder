@@ -258,15 +258,17 @@ export class BashExecutor extends EventEmitter {
 					entry.signal.removeEventListener('abort', entry.abortListener);
 				}
 
-				cleanupJailTmp();
-
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) return;
+				if (!this.executions.has(executionId)) {
+					cleanupJailTmp();
+					return;
+				}
 
 				flushStreams();
 
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.exitCode = code;
@@ -281,14 +283,16 @@ export class BashExecutor extends EventEmitter {
 					entry.signal.removeEventListener('abort', entry.abortListener);
 				}
 
-				cleanupJailTmp();
-
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) return;
+				if (!this.executions.has(executionId)) {
+					cleanupJailTmp();
+					return;
+				}
 
 				flushStreams();
 
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.error = error.message;
