@@ -177,6 +177,51 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.notRegex(output, /apiKey/);
 });
 
+test('Doctor redacts credentials embedded in provider and MCP URLs', async t => {
+	// The report header promises "Secrets are not printed" and users paste it
+	// into public bug reports, so every URL shape that can carry a credential
+	// must be redacted at the print site, not just in the config view.
+	const report = await collectDoctorReport(
+		createDependencies({
+			getProviders: () => [
+				{
+					name: 'ProxyProvider',
+					type: 'openai',
+					models: ['gpt-4'],
+					config: {
+						baseURL:
+							'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK',
+						apiKey: 'sk-test-LEAKCHECK123',
+					},
+				},
+			],
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['mcp-server'],
+					getServerTools: () => [{name: 'search', description: 'Search'}],
+					getServerInfo: () => ({
+						name: 'mcp-server',
+						transport: 'http',
+						connected: true,
+						url: 'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK',
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const output = lastFrame()!;
+
+	// The URLs stay diagnosable...
+	t.regex(output, /https:\/\/REDACTED:REDACTED@proxy\.example\.com\/v1/);
+	t.regex(output, /https:\/\/mcp\.example\.com\/api\/mcp\/s\/REDACTED\/mcp/);
+	// ...and none of the four secret shapes survive.
+	t.notRegex(output, /sk-test-LEAKCHECK123/);
+	t.notRegex(output, /QUERYKEY-LEAKCHECK/);
+	t.notRegex(output, /PATHTOKEN-LEAKCHECK/);
+	t.notRegex(output, /APIKEY-LEAKCHECK/);
+});
+
 test('Doctor reports LSP MCP and daemon details', async t => {
 	const report = await collectDoctorReport(createDependencies());
 

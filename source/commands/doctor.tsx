@@ -20,7 +20,7 @@ import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getPackageVersion} from '@/utils/package-version';
-import {isLocalURL} from '@/utils/url-utils';
+import {isLocalURL, redactSecretsInURL} from '@/utils/url-utils';
 
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 
@@ -363,7 +363,9 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={provider.name} color={colors.text}>
 						• {provider.name}: {provider.modelCount} model
 						{provider.modelCount === 1 ? '' : 's'} • {provider.location}
-						{provider.baseURL ? ` • ${provider.baseURL}` : ''}
+						{provider.baseURL
+							? ` • ${redactSecretsInURL(provider.baseURL)}`
+							: ''}
 						{provider.location === 'local' ? ` • ${provider.reachability}` : ''}
 					</Text>
 				))
@@ -408,7 +410,7 @@ export function Doctor({report}: {report: DoctorReport}) {
 						{server.promptCount > 0
 							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
 							: ''}
-						{server.url ? ` • ${server.url}` : ''}
+						{server.url ? ` • ${redactSecretsInURL(server.url)}` : ''}
 					</Text>
 				))
 			)}
