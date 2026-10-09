@@ -9,6 +9,8 @@ export interface Command<T = React.ReactElement | void> {
 	 * not silent for seconds. Present tense, no trailing ellipsis.
 	 */
 	progressLabel?: string;
+	/** Echo the submitted slash command into chat before showing its result. */
+	echoInvocation?: boolean;
 	handler: (
 		args: string[],
 		messages: Message[],
@@ -43,6 +45,8 @@ export interface LazyCommand {
 	 * cannot be read off the lazily-imported module.
 	 */
 	progressLabel?: string;
+	/** Mirrors `Command.echoInvocation` without loading the command module. */
+	echoInvocation?: boolean;
 	load: () => Promise<Command>;
 }
 

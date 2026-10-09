@@ -1,5 +1,11 @@
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import React from 'react';
+import AssistantMessage from '@/components/assistant-message';
+import AssistantReasoning from '@/components/assistant-reasoning';
+import {getShowUsageFooter} from '@/config/preferences';
+import {generateKey} from '@/session/key-generator';
+import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
 	execGit,
@@ -10,9 +16,10 @@ import {
 } from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
+import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
+import {errorMsg, infoMsg, warningMsg} from '@/utils/message-factory';
 import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,6 +70,554 @@ function validateTarget(target: string): string | null {
 	return null;
 }
 
+type PullRequestTarget = {
+	number: string;
+	repository?: string;
+};
+
+type ParsedReviewTarget =
+	| {kind: 'default'}
+	| {kind: 'branch'; branch: string}
+	| {kind: 'pull-request'; pullRequest: PullRequestTarget};
+
+type ReviewTargetParseResult =
+	| {ok: true; target: ParsedReviewTarget}
+	| {ok: false; error: string};
+
+// Targets are only ever parsed from github.com URLs and remotes. Pass the host
+// to gh explicitly, or a GH_HOST pointing at GitHub Enterprise would redirect
+// these lookups and the diff fetch to another server.
+const GITHUB_HOST = 'github.com';
+
+const REVIEW_USAGE =
+	'Usage: /review [quick] [<branch | PR number | GitHub PR URL>]. Pass exactly one target.';
+
+function parseReviewTarget(args: string[]): ReviewTargetParseResult {
+	const targetArgs = args[0]?.toLowerCase() === 'quick' ? args.slice(1) : args;
+	if (targetArgs.length > 1) {
+		return {ok: false, error: REVIEW_USAGE};
+	}
+
+	const target = targetArgs[0];
+	if (target === undefined) {
+		return {ok: true, target: {kind: 'default'}};
+	}
+
+	const validationError = validateTarget(target);
+	if (validationError) return {ok: false, error: validationError};
+
+	if (/^\d+$/.test(target)) {
+		const number = normalizePullRequestNumber(target);
+		return number
+			? {ok: true, target: {kind: 'pull-request', pullRequest: {number}}}
+			: {
+					ok: false,
+					error: 'Pull request number must be a positive safe integer.',
+				};
+	}
+
+	if (/^(?:https?:\/\/|ssh:\/\/|git@github\.com:)/i.test(target)) {
+		const pullRequest = parsePullRequestUrl(target);
+		return pullRequest
+			? {ok: true, target: {kind: 'pull-request', pullRequest}}
+			: {
+					ok: false,
+					error:
+						'Target URL must be a GitHub pull request URL like https://github.com/owner/repo/pull/123.',
+				};
+	}
+
+	return {ok: true, target: {kind: 'branch', branch: target}};
+}
+
+function normalizePullRequestNumber(value: string): string | null {
+	const number = Number(value);
+	if (!Number.isSafeInteger(number) || number <= 0) return null;
+	return String(number);
+}
+
+function parsePullRequestUrl(value: string): PullRequestTarget | null {
+	try {
+		const url = new URL(value);
+		if (
+			url.protocol !== 'https:' ||
+			(url.hostname !== 'github.com' && url.hostname !== 'www.github.com')
+		) {
+			return null;
+		}
+
+		const match = url.pathname.match(
+			/^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:\/.*)?\/?$/,
+		);
+		if (!match) return null;
+		const number = normalizePullRequestNumber(match[3]);
+		if (!number) return null;
+
+		return {
+			number,
+			repository: `${match[1]}/${match[2].replace(/\.git$/i, '')}`,
+		};
+	} catch {
+		return null;
+	}
+}
+
+function parseGitHubRepository(value: string): string | null {
+	const remote = value.trim();
+	const scpMatch = remote.match(
+		/^(?:[^@/]+@)?github\.com:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i,
+	);
+	if (scpMatch) return scpMatch[1];
+
+	try {
+		const url = new URL(remote);
+		if (
+			!['https:', 'ssh:', 'git:'].includes(url.protocol) ||
+			(url.hostname !== 'github.com' && url.hostname !== 'www.github.com')
+		) {
+			return null;
+		}
+
+		const path = url.pathname.replace(/\/+$/, '').replace(/\.git$/i, '');
+		const match = path.match(/^\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/);
+		return match?.[1] ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function parseRepositorySlug(value: unknown): string | null {
+	if (typeof value !== 'string') return null;
+	return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) ? value : null;
+}
+
+function isGitHubNotFound(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return /\bHTTP 404\b|\bstatus(?: code)? 404\b/i.test(message);
+}
+
+type RemoteInfo = {name: string; repository: string | null};
+
+async function listRemotes(
+	dependencies: ReviewDependencies,
+): Promise<RemoteInfo[]> {
+	const remoteNames = (await dependencies.execGit(['remote']))
+		.split(/\r?\n/)
+		.map(remote => remote.trim())
+		.filter(Boolean);
+	const remotes: RemoteInfo[] = [];
+	for (const name of remoteNames) {
+		const remoteUrl = await dependencies.execGit([
+			'remote',
+			'get-url',
+			'--',
+			name,
+		]);
+		remotes.push({name, repository: parseGitHubRepository(remoteUrl)});
+	}
+	return remotes;
+}
+
+async function getGitHubRepositoryCandidates(
+	dependencies: ReviewDependencies,
+	execGh: (args: string[]) => Promise<string>,
+): Promise<string[]> {
+	const remoteRepositories = new Map<string, string>();
+	for (const {repository} of await listRemotes(dependencies)) {
+		if (repository) {
+			remoteRepositories.set(repository.toLowerCase(), repository);
+		}
+	}
+
+	if (remoteRepositories.size === 0) {
+		throw new Error(
+			'Cannot determine a GitHub repository from the configured remotes. Pass a full GitHub PR URL instead.',
+		);
+	}
+
+	const candidates = new Map(remoteRepositories);
+	for (const repository of remoteRepositories.values()) {
+		let metadata: unknown;
+		try {
+			const response = await execGh([
+				'api',
+				'--hostname',
+				GITHUB_HOST,
+				`repos/${repository}`,
+			]);
+			metadata = JSON.parse(response);
+		} catch (error) {
+			if (isGitHubNotFound(error)) continue;
+			throw new Error(
+				`Could not inspect GitHub repository ${repository}: ${
+					error instanceof Error ? error.message : String(error)
+				}. Pass a full GitHub PR URL to specify the repository explicitly.`,
+			);
+		}
+		if (!metadata || typeof metadata !== 'object') {
+			throw new Error(
+				`GitHub returned invalid repository data for ${repository}. Pass a full GitHub PR URL to specify the repository explicitly.`,
+			);
+		}
+		const parent = parseRepositorySlug(
+			(metadata as {parent?: {full_name?: unknown}}).parent?.full_name,
+		);
+		if (parent) candidates.set(parent.toLowerCase(), parent);
+	}
+
+	return [...candidates.values()];
+}
+
+async function resolvePullRequestRepository(
+	dependencies: ReviewDependencies,
+	execGh: (args: string[]) => Promise<string>,
+	number: string,
+): Promise<string> {
+	const candidates = await getGitHubRepositoryCandidates(dependencies, execGh);
+	const matches: string[] = [];
+
+	for (const repository of candidates) {
+		try {
+			const response = await execGh([
+				'api',
+				'--hostname',
+				GITHUB_HOST,
+				`repos/${repository}/pulls/${number}`,
+			]);
+			const pullRequest: unknown = JSON.parse(response);
+			const htmlUrl =
+				pullRequest && typeof pullRequest === 'object'
+					? (pullRequest as {html_url?: unknown}).html_url
+					: undefined;
+			if (typeof htmlUrl !== 'string') {
+				throw new Error(
+					`GitHub returned invalid pull request data for ${repository}#${number}.`,
+				);
+			}
+			// A renamed or transferred repository still answers on its old slug,
+			// so a stale remote and the fork parent can both find the same PR.
+			// Its html_url always carries the current slug.
+			const canonical = parsePullRequestUrl(htmlUrl)?.repository ?? repository;
+			if (
+				!matches.some(match => match.toLowerCase() === canonical.toLowerCase())
+			) {
+				matches.push(canonical);
+			}
+		} catch (error) {
+			if (isGitHubNotFound(error)) continue;
+			throw new Error(
+				`Could not check PR #${number} in ${repository}: ${
+					error instanceof Error ? error.message : String(error)
+				}. Pass a full GitHub PR URL to choose the repository explicitly.`,
+			);
+		}
+	}
+
+	if (matches.length === 0) {
+		throw new Error(
+			`PR #${number} was not found in the configured GitHub repositories. Pass a full GitHub PR URL to specify its owner and repository.`,
+		);
+	}
+	if (matches.length > 1) {
+		throw new Error(
+			`PR #${number} exists in multiple configured GitHub repositories (${matches.join(', ')}). Pass a full GitHub PR URL to choose one.`,
+		);
+	}
+
+	return matches[0];
+}
+
+type RepositoryInfo = {
+	fullName: string;
+	parent: string | null;
+	defaultBranch: string | null;
+};
+
+type ReviewBase = {
+	/** Git revision the diff is taken against, e.g. `upstream/main`. */
+	ref: string;
+	/** Branch name on its own, used to spot `/review main`. */
+	branch: string;
+	description: string;
+	notices: string[];
+};
+
+async function fetchRepositoryInfo(
+	execGh: (args: string[]) => Promise<string>,
+	repository: string,
+): Promise<RepositoryInfo | null> {
+	try {
+		const metadata: unknown = JSON.parse(
+			await execGh(['api', '--hostname', GITHUB_HOST, `repos/${repository}`]),
+		);
+		if (!metadata || typeof metadata !== 'object') return null;
+		const data = metadata as {
+			full_name?: unknown;
+			default_branch?: unknown;
+			parent?: {full_name?: unknown};
+		};
+		return {
+			fullName: parseRepositorySlug(data.full_name) ?? repository,
+			parent: parseRepositorySlug(data.parent?.full_name),
+			defaultBranch:
+				typeof data.default_branch === 'string' ? data.default_branch : null,
+		};
+	} catch {
+		return null;
+	}
+}
+
+async function findOpenPullRequest(
+	execGh: (args: string[]) => Promise<string>,
+	repositories: string[],
+	branch: string,
+	headOwners: Set<string>,
+): Promise<{repository: string; number: number; baseBranch: string} | null> {
+	for (const repository of repositories) {
+		let pullRequests: unknown;
+		try {
+			pullRequests = JSON.parse(
+				await execGh([
+					'pr',
+					'list',
+					'--repo',
+					`${GITHUB_HOST}/${repository}`,
+					'--head',
+					branch,
+					'--state',
+					'open',
+					'--json',
+					'number,baseRefName,headRefName,headRepositoryOwner',
+					'--limit',
+					'20',
+				]),
+			);
+		} catch {
+			continue;
+		}
+		if (!Array.isArray(pullRequests)) continue;
+		// --head matches the branch name in every fork, so another user's
+		// branch with the same name must not decide this review's base.
+		const ours = pullRequests.filter(
+			(pr: {
+				headRefName?: unknown;
+				headRepositoryOwner?: {login?: unknown};
+				baseRefName?: unknown;
+				number?: unknown;
+			}) =>
+				pr.headRefName === branch &&
+				typeof pr.headRepositoryOwner?.login === 'string' &&
+				headOwners.has(pr.headRepositoryOwner.login.toLowerCase()) &&
+				typeof pr.baseRefName === 'string' &&
+				typeof pr.number === 'number',
+		);
+		if (ours.length === 1) {
+			return {
+				repository,
+				number: ours[0].number,
+				baseBranch: ours[0].baseRefName,
+			};
+		}
+	}
+	return null;
+}
+
+async function gitRefExists(
+	dependencies: ReviewDependencies,
+	ref: string,
+): Promise<boolean> {
+	try {
+		await dependencies.execGit([
+			'rev-parse',
+			'--verify',
+			'--quiet',
+			`${ref}^{commit}`,
+		]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function describeRef(
+	dependencies: ReviewDependencies,
+	ref: string,
+	label: string,
+): Promise<string> {
+	try {
+		const sha = (
+			await dependencies.execGit(['rev-parse', '--short', ref])
+		).trim();
+		return /^[0-9a-f]{7,40}$/i.test(sha) ? `${label} at ${sha}` : label;
+	} catch {
+		return label;
+	}
+}
+
+async function remoteDefaultBranch(
+	dependencies: ReviewDependencies,
+	remote: string,
+	reported: string | null | undefined,
+): Promise<string | null> {
+	if (reported) return reported;
+	try {
+		const head = (
+			await dependencies.execGit([
+				'symbolic-ref',
+				'--quiet',
+				'--short',
+				`refs/remotes/${remote}/HEAD`,
+			])
+		).trim();
+		if (head.startsWith(`${remote}/`)) return head.slice(remote.length + 1);
+	} catch {
+		// Clones only set HEAD for origin; probe the usual names below.
+	}
+	for (const candidate of ['main', 'master']) {
+		if (await gitRefExists(dependencies, `${remote}/${candidate}`)) {
+			return candidate;
+		}
+	}
+	return null;
+}
+
+/**
+ * Pick the branch a branch review is diffed against. Local `main` is the last
+ * resort: it goes stale, and in a fork even `origin/main` is only the fork's
+ * copy, so a branch that merged upstream would show every upstream commit.
+ */
+async function resolveReviewBase(
+	dependencies: ReviewDependencies,
+	branch: string,
+): Promise<ReviewBase> {
+	const notices: string[] = [];
+	const localFallback = async (): Promise<ReviewBase> => {
+		const name = await dependencies.getDefaultBranch();
+		return {ref: name, branch: name, description: `"${name}"`, notices};
+	};
+
+	let remotes: RemoteInfo[];
+	try {
+		remotes = await listRemotes(dependencies);
+	} catch {
+		remotes = [];
+	}
+	if (remotes.length === 0) return localFallback();
+
+	const execGh =
+		(dependencies.isGhAvailable?.() ?? false) && dependencies.execGh
+			? dependencies.execGh
+			: null;
+	const infoByRemote = new Map<string, RepositoryInfo>();
+	if (execGh) {
+		for (const remote of remotes) {
+			if (!remote.repository) continue;
+			const info = await fetchRepositoryInfo(execGh, remote.repository);
+			if (info) infoByRemote.set(remote.name, info);
+		}
+	}
+	// GitHub reports the current slug, so a remote still using a renamed
+	// repository's old name matches its new name here.
+	const repositoryOf = (remote: RemoteInfo) =>
+		infoByRemote.get(remote.name)?.fullName ?? remote.repository;
+	const remoteFor = (repository: string) =>
+		remotes.find(
+			remote =>
+				repositoryOf(remote)?.toLowerCase() === repository.toLowerCase(),
+		);
+	const parent =
+		[...infoByRemote.values()].find(info => info.parent)?.parent ?? null;
+
+	if (execGh && branch !== 'HEAD') {
+		const repositories = [
+			...new Set(
+				[parent, ...remotes.map(repositoryOf)].filter(
+					(repository): repository is string => Boolean(repository),
+				),
+			),
+		];
+		const headOwners = new Set(
+			repositories
+				.filter(repository => remoteFor(repository))
+				.map(repository => repository.split('/')[0].toLowerCase()),
+		);
+		const pullRequest = await findOpenPullRequest(
+			execGh,
+			repositories,
+			branch,
+			headOwners,
+		);
+		const prRemote = pullRequest ? remoteFor(pullRequest.repository) : null;
+		if (pullRequest && prRemote) {
+			const ref = `${prRemote.name}/${pullRequest.baseBranch}`;
+			if (await gitRefExists(dependencies, ref)) {
+				return {
+					ref,
+					branch: pullRequest.baseBranch,
+					description: await describeRef(
+						dependencies,
+						ref,
+						`${ref}, the base of open PR #${pullRequest.number} in ${pullRequest.repository}`,
+					),
+					notices,
+				};
+			}
+			notices.push(
+				`Open PR #${pullRequest.number} targets ${ref}, which has not been fetched. Run: git fetch ${prRemote.name}`,
+			);
+		}
+	}
+
+	let remote: RemoteInfo | undefined;
+	if (parent) {
+		remote = remoteFor(parent);
+		if (!remote) {
+			notices.push(
+				`This is a fork of ${parent}, which is not a configured remote, so the review uses your fork's default branch. It may be behind ${parent}. To compare against ${parent}, run: git remote add upstream https://github.com/${parent}.git && git fetch upstream`,
+			);
+		}
+	}
+	remote ??=
+		remotes.find(candidate => candidate.name === 'upstream') ??
+		remotes.find(candidate => candidate.name === 'origin') ??
+		(remotes.length === 1 ? remotes[0] : undefined);
+	if (!remote) {
+		const fallback = await localFallback();
+		notices.push(
+			`Could not tell which remote is the main repository, so the review uses your local "${fallback.branch}" branch, which may be out of date.`,
+		);
+		return fallback;
+	}
+
+	const name = await remoteDefaultBranch(
+		dependencies,
+		remote.name,
+		infoByRemote.get(remote.name)?.defaultBranch,
+	);
+	const ref = name ? `${remote.name}/${name}` : null;
+	if (!name || !ref || !(await gitRefExists(dependencies, ref))) {
+		const fallback = await localFallback();
+		notices.push(
+			ref
+				? `${ref} has not been fetched, so the review uses your local "${fallback.branch}" branch, which may be out of date. Run: git fetch ${remote.name}`
+				: `Could not find the default branch of remote "${remote.name}", so the review uses your local "${fallback.branch}" branch, which may be out of date.`,
+		);
+		return fallback;
+	}
+
+	const repository = repositoryOf(remote);
+	return {
+		ref,
+		branch: name,
+		description: await describeRef(
+			dependencies,
+			ref,
+			repository ? `${ref} (${repository})` : ref,
+		),
+		notices,
+	};
+}
+
 export function createReviewCommand(
 	dependencies: ReviewDependencies = defaultDependencies,
 ): Command {
@@ -78,76 +633,67 @@ export function createReviewCommand(
 			}
 
 			try {
-				const defaultBranch = await dependencies.getDefaultBranch();
-				const currentBranch = await dependencies.getCurrentBranch();
-
+				const parsed = parseReviewTarget(args);
+				if (!parsed.ok) return errorMsg(parsed.error, 'review');
 				let diff: string;
 				let targetDescription: string;
+				let baseNotices: string[] = [];
 
-				if (args.length === 0) {
-					// No target: review current branch against default branch
-					diff = await getBranchDiff(
-						dependencies,
-						currentBranch,
-						defaultBranch,
-					);
-					targetDescription = `current branch "${currentBranch}" against "${defaultBranch}"`;
+				if (parsed.target.kind === 'default') {
+					const currentBranch = await dependencies.getCurrentBranch();
+					const base = await resolveReviewBase(dependencies, currentBranch);
+					baseNotices = base.notices;
+					diff = await getBranchDiff(dependencies, currentBranch, base.ref);
+					targetDescription = `current branch "${currentBranch}" against ${base.description}`;
+				} else if (parsed.target.kind === 'branch') {
+					const currentBranch = await dependencies.getCurrentBranch();
+					const target = parsed.target.branch;
+					const defaultBranch = await dependencies.getDefaultBranch();
+					// If the user passes the default branch name, they want
+					// to review the current branch against it (not an empty
+					// diff of main...main).
+					const reviewsCurrent = target === defaultBranch;
+					const branch = reviewsCurrent ? currentBranch : target;
+					const base = await resolveReviewBase(dependencies, branch);
+					baseNotices = base.notices;
+					diff = await getBranchDiff(dependencies, branch, base.ref);
+					targetDescription = reviewsCurrent
+						? `current branch "${currentBranch}" against ${base.description}`
+						: `branch "${target}" against ${base.description}`;
 				} else {
-					const target = args[0] as string;
-
-					const validationError = validateTarget(target);
-					if (validationError) {
-						return errorMsg(validationError, 'review');
+					const {number, repository: explicitRepository} =
+						parsed.target.pullRequest;
+					const ghAvailable = dependencies.isGhAvailable?.() ?? false;
+					if (!ghAvailable || !dependencies.execGh) {
+						return errorMsg(
+							'PR review requires the gh CLI. Install it from https://cli.github.com or use a branch name instead.',
+							'review',
+						);
 					}
 
-					const isPRNumber = /^\d+$/.test(target);
-					if (isPRNumber) {
-						const ghAvailable = dependencies.isGhAvailable?.() ?? false;
-						if (ghAvailable && dependencies.execGh) {
-							try {
-								const remote = await dependencies.execGit([
-									'remote',
-									'get-url',
-									'origin',
-								]);
-								const match = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
-								if (!match?.[1]) {
-									throw new Error(
-										'Cannot determine GitHub repository slug from remote URL.',
-									);
-								}
-								diff = await dependencies.execGh([
-									'pr',
-									'diff',
-									target,
-									'--repo',
-									match[1],
-								]);
-								targetDescription = `PR #${target}`;
-							} catch (error) {
-								const message =
-									error instanceof Error ? error.message : String(error);
-								return errorMsg(
-									`Failed to fetch PR #${target} diff: ${message}`,
-									'review',
-								);
-							}
-						} else {
-							return errorMsg(
-								'PR review requires the gh CLI. Install it from https://cli.github.com or use a branch name instead.',
-								'review',
-							);
-						}
-					} else {
-						// If the user passes the default branch name, they want
-						// to review the current branch against it (not an empty
-						// diff of main...main).
-						const branch = target === defaultBranch ? currentBranch : target;
-						diff = await getBranchDiff(dependencies, branch, defaultBranch);
-						targetDescription =
-							target === defaultBranch
-								? `current branch "${currentBranch}" against "${defaultBranch}"`
-								: `branch "${target}" against "${defaultBranch}"`;
+					try {
+						const repository =
+							explicitRepository ??
+							(await resolvePullRequestRepository(
+								dependencies,
+								dependencies.execGh,
+								number,
+							));
+						diff = await dependencies.execGh([
+							'pr',
+							'diff',
+							number,
+							'--repo',
+							`${GITHUB_HOST}/${repository}`,
+						]);
+						targetDescription = `PR #${number} in ${repository}`;
+					} catch (error) {
+						const message =
+							error instanceof Error ? error.message : String(error);
+						return errorMsg(
+							`Failed to fetch PR #${number} diff: ${message}`,
+							'review',
+						);
 					}
 				}
 
@@ -155,21 +701,23 @@ export function createReviewCommand(
 
 				if (!truncated.content.trim()) {
 					return warningMsg(
-						`No changes found in ${targetDescription}.`,
+						[`No changes found in ${targetDescription}.`, ...baseNotices].join(
+							'\n\n',
+						),
 						'review',
 					);
 				}
 
+				const coverageNotice = truncated.truncated
+					? getTruncationNotice(truncated.totalLines)
+					: null;
+				const scopeNotice = `Review scope: ${targetDescription}.`;
 				const reviewPrompt = dependencies.loadPrompt?.() ?? loadReviewPrompt();
-
 				const parts: string[] = [
 					`Reviewing changes from ${targetDescription}:\n`,
 				];
-				if (truncated.truncated) {
-					const halfLines = Math.ceil(REVIEW_MAX_DIFF_LINES / 2);
-					parts.push(
-						`[Note: diff truncated — reviewed first and last ${halfLines} of ${truncated.totalLines} lines]\n`,
-					);
+				if (coverageNotice) {
+					parts.push(`[Note: ${coverageNotice}]\n`);
 				}
 				parts.push(truncated.content);
 
@@ -179,18 +727,55 @@ export function createReviewCommand(
 				];
 
 				const response = await client.chat(messages, {}, {});
-				const review = response?.choices?.[0]?.message?.content?.trim();
+				const reply = response?.choices?.[0]?.message;
+				const review = stripThinkTags(reply?.content ?? '').trim();
 
 				if (!review) {
-					return warningMsg('Model returned an empty review.', 'review');
+					const userFacingNotices = [scopeNotice, ...baseNotices];
+					if (coverageNotice) userFacingNotices.push(coverageNotice);
+					userFacingNotices.push('Model returned an empty review.');
+					return warningMsg(userFacingNotices.join('\n\n'), 'review');
 				}
 
-				return successMsg(review, 'review');
+				const showUsageFooter = getShowUsageFooter();
+				const usage = showUsageFooter
+					? await buildResponseUsageBounded(response.usage, metadata.model)
+					: undefined;
+				// Rendered like a normal chat reply so the review's Markdown is
+				// parsed instead of being shown as raw text in a status color.
+				return React.createElement(
+					React.Fragment,
+					{key: generateKey('review')},
+					infoMsg(scopeNotice, 'review-scope'),
+					...baseNotices.map(notice => warningMsg(notice, 'review-base')),
+					coverageNotice ? warningMsg(coverageNotice, 'review-coverage') : null,
+					reply?.reasoning
+						? React.createElement(AssistantReasoning, {
+								key: generateKey('review-reasoning'),
+								reasoning: reply.reasoning,
+								expand: false,
+							})
+						: null,
+					React.createElement(AssistantMessage, {
+						key: generateKey('review-report'),
+						message: review,
+						model: metadata.model,
+						usage,
+						showUsageFooter,
+					}),
+				);
 			} catch (error) {
 				return errorMsg(formatError(error), 'review');
 			}
 		},
 	};
+}
+
+function getTruncationNotice(totalLines: number): string {
+	const firstLines = Math.ceil(REVIEW_MAX_DIFF_LINES / 2);
+	const lastLines = Math.floor(REVIEW_MAX_DIFF_LINES / 2);
+	const omittedLines = totalLines - firstLines - lastLines;
+	return `Partial diff coverage: the model received the first ${firstLines} and last ${lastLines} of ${totalLines} diff lines; ${omittedLines} intervening lines were omitted and were not reviewed.`;
 }
 
 async function getBranchDiff(
