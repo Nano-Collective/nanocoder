@@ -131,9 +131,36 @@ async function commitFile(absPath: string): Promise<string | null> {
 
 	if (await isIgnored(git, pathspec)) return null;
 
-	const wasAlreadyStaged =
-		(await git('diff', '--cached', '--name-only', '--', pathspec)).trim()
-			.length > 0;
+	let priorIndexEntry: {mode: string; sha: string} | null = null;
+	try {
+		const lsOutput = (await git('ls-files', '-s', '--', pathspec)).trim();
+		if (lsOutput) {
+			const [mode, sha] = lsOutput.split(/\s+/);
+			if (mode && sha) {
+				priorIndexEntry = {mode, sha};
+			}
+		}
+	} catch {
+		// Untracked or error
+	}
+
+	const restoreIndex = async () => {
+		try {
+			if (priorIndexEntry) {
+				await git(
+					'update-index',
+					'--cacheinfo',
+					priorIndexEntry.mode,
+					priorIndexEntry.sha,
+					pathspec,
+				);
+			} else {
+				await git('reset', '-q', '--', pathspec);
+			}
+		} catch {
+			// Ignore rollback errors if repository is in an abnormal state
+		}
+	};
 
 	await git('add', '--', pathspec);
 	try {
@@ -147,9 +174,7 @@ async function commitFile(absPath: string): Promise<string | null> {
 		);
 		// The edit left the file as it already was in HEAD.
 		if (!diff.trim()) {
-			if (!wasAlreadyStaged) {
-				await git('reset', '-q', '--', pathspec).catch(() => {});
-			}
+			await restoreIndex();
 			return null;
 		}
 
@@ -163,9 +188,7 @@ async function commitFile(absPath: string): Promise<string | null> {
 		);
 		return formatCommitNote(hash, subject);
 	} catch (error) {
-		if (!wasAlreadyStaged) {
-			await git('reset', '-q', '--', pathspec).catch(() => {});
-		}
+		await restoreIndex();
 		throw error;
 	}
 }

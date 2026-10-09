@@ -358,6 +358,7 @@ test.serial(
 			const file = join(dir, 'base.txt');
 			writeFileSync(file, 'stage 1\n');
 			git(dir, 'add base.txt');
+			const originalSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
 
 			writeFileSync(file, 'stage 2\n');
 			const note = await maybeAutoCommit('write_file', {path: file});
@@ -365,6 +366,9 @@ test.serial(
 			t.is(note, null);
 			t.is(commitCount(dir), 1);
 			t.is(git(dir, 'diff --cached --name-only'), 'base.txt');
+			const restoredSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+			t.is(restoredSha, originalSha);
+			t.is(git(dir, 'show :base.txt'), 'stage 1');
 		} finally {
 			rmSync(dir, {recursive: true, force: true});
 		}
