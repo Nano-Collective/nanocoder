@@ -163,6 +163,13 @@ test('buildSystemPrompt - includes web tools when web_search available', t => {
 	t.true(result.includes('WEB ACCESS'));
 });
 
+test('buildSystemPrompt - includes browser instructions only when the tool is available', t => {
+	const withBrowser = buildSystemPrompt('normal', undefined, ['browser']);
+	const without = buildSystemPrompt('normal', undefined, ['read_file']);
+	t.true(withBrowser.includes('BROWSER'));
+	t.false(without.includes('## BROWSER'));
+});
+
 test('buildSystemPrompt - includes diagnostics when lsp available', t => {
 	const result = buildSystemPrompt('normal', undefined, ['lsp_get_diagnostics']);
 	t.true(result.includes('DIAGNOSTICS'));

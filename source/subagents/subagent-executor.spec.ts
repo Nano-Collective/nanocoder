@@ -356,6 +356,45 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
+test.serial('keeps screenshot images on a subagent tool message', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-shot',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The button is misaligned.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Look at the page',
+	});
+
+	t.true(result.success);
+	t.is(toolResults[0]?.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(toolResults[0]?.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+});
+
 test.serial('stringifies structured tool output without llmContent', async t => {
 	const toolManager = createMockToolManager({
 		read_file: {
