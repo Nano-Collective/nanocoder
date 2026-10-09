@@ -6,8 +6,8 @@ import React from 'react';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
-	parseCustomCommandArgs,
 } from './app-util.js';
+import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
