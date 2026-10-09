@@ -286,17 +286,16 @@ export function createMemoryCommand(
 
 					const indexText = args[1] ?? '';
 					const index = Number(indexText);
-					if (!/^\d+$/.test(indexText) || !Number.isSafeInteger(index)) {
-						return errorMsg(
-							`Usage: /memory accept <1-${proposalStore.size}>`,
-							'memory-error',
-						);
-					}
-
-					const proposal = proposalStore.at(index);
+					const usage = `Usage: /memory accept <1-${proposalStore.size}>`;
+					const proposal =
+						/^\d+$/.test(indexText) && Number.isSafeInteger(index)
+							? proposalStore.at(index)
+							: undefined;
 					if (!proposal) {
 						return errorMsg(
-							`Usage: /memory accept <1-${proposalStore.size}>`,
+							indexText
+								? `${usage}\nInvalid proposal number "${indexText}". Use a whole number from 1 to ${proposalStore.size}.`
+								: usage,
 							'memory-error',
 						);
 					}
