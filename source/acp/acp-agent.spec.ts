@@ -1511,3 +1511,32 @@ test.serial(
 		});
 	},
 );
+
+test.serial(
+	'ACP resumeSession makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			await agent.resumeSession({sessionId, cwd: dir, mcpServers: []});
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
+
+test.serial(
+	'ACP loadSession from disk makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			(agent as any).sessions.delete(sessionId);
+			await agent.loadSession({sessionId, cwd: dir, mcpServers: []});
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);

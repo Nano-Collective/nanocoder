@@ -169,6 +169,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.initialize();
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			session = this.registerSession(params.sessionId, params.cwd);
+			clearAcpReadStubs(params.sessionId);
 			if (persisted) {
 				session.messages = persisted.messages;
 			}
@@ -636,6 +637,7 @@ export class AcpAgent implements Agent {
 			persisted.workingDirectory,
 		);
 		session.messages = persisted.messages;
+		clearAcpReadStubs(params.sessionId);
 		logger.info(
 			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
 		);
