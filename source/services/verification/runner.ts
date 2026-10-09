@@ -523,8 +523,22 @@ export function runVerificationCommand(
 		 * Kill the tree, then wait (briefly) for it to actually be gone before
 		 * reporting. A process that exits promptly — the common case — reaches
 		 * `finish` via 'close' with no added latency at all.
+		 *
+		 * First reason wins, and only the first reason kills. A timeout and an
+		 * abort routinely land together — the user presses Ctrl-C as the clock
+		 * runs out — and the second call changed the verdict.
+		 *
+		 * It did so through `close`, not through the grace timer. `pendingKill`
+		 * is read when the killed tree is reaped, so whichever reason was
+		 * scheduled last is the one reported: a run that genuinely ran out of
+		 * time was reported as `aborted`, and the user was pointed at Ctrl-C
+		 * rather than at the `timeoutMs` that caused it. The second
+		 * `killProcessTree` was waste on top of that, aimed at a tree already
+		 * being torn down, and its grace timer overwrote the first one's handle
+		 * so `finish` could no longer cancel it.
 		 */
 		const killAndSettle = (status: 'timeout' | 'aborted') => {
+			if (settled || pendingKill !== null) return;
 			pendingKill = status;
 			killProcessTree(proc);
 			graceTimer = setTimeout(() => {
@@ -534,6 +548,18 @@ export function runVerificationCommand(
 			// to exit on Ctrl-C.
 			graceTimer.unref?.();
 		};
+
+		// The entry guard above already answers the reachable case: `abort()` runs on
+		// the event loop, so a signal can only be aborted between two awaits, never
+		// inside the synchronous block between here and the listener below. This
+		// closes the remaining window so the invariant "an aborted signal never
+		// spawns" holds whatever that block goes on to do, rather than resting on
+		// `addEventListener` firing for an already-aborted signal — which it does
+		// not — plus the hope that nothing in between aborts.
+		if (signal?.aborted) {
+			finish('aborted', null, null);
+			return;
+		}
 
 		// stdin is ignored on purpose: a command that stops to prompt would
 		// otherwise block until the timeout, producing a confusing failure

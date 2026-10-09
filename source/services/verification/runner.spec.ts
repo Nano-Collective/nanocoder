@@ -592,6 +592,27 @@ test('runVerificationCommand: aborting mid-run settles as aborted', async t => {
 	t.is(result.status, 'aborted');
 });
 
+test.serial(
+	'runVerificationCommand: a timeout and an abort together report the timeout',
+	async t => {
+		// The two land together whenever the user presses Ctrl-C as the clock runs
+		// out. Both are legitimate reasons to end the run, and only one of them
+		// is the reason it actually ended - so the first has to win, or the user is
+		// told the suite was cancelled when in fact it ran out of time, and is sent
+		// to raise `timeoutMs` for a suite they had already stopped.
+		const controller = new AbortController();
+		const promise = run(
+			// Ignores nothing: a plain hang, so only the kill can end it.
+			node(script('hang-3.js', 'setTimeout(() => {}, 60_000);')),
+			{signal: controller.signal, timeoutMs: 60},
+		);
+		// Lands inside the reap grace window that the timeout opened.
+		setTimeout(() => controller.abort(), 150);
+		const result = await promise;
+		t.is(result.status, 'timeout');
+	},
+);
+
 // ============================================================================
 // Tree kill
 // ============================================================================
