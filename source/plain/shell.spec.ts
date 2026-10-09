@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "ava";
+import test, { type ExecutionContext } from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
 import {
 	clearPendingHookContext,
@@ -480,6 +480,32 @@ test.serial(
 	},
 );
 
+/**
+ * The two bypasses last different lengths of time: the flag covers one run,
+ * the variable saves the directory as trusted (see the persistence test
+ * below). The message has to say so, or a CI job exporting the variable
+ * "for this run" trusts every checkout it touches.
+ */
+function assertTrustBypassWording(
+	t: ExecutionContext,
+	message: string,
+): void {
+	t.true(
+		message.includes("--trust-directory to bypass the disclaimer for this run only"),
+		message,
+	);
+	t.true(
+		message.includes(
+			"NANOCODER_TRUST_DIRECTORY=1 to trust this directory permanently",
+		),
+		message,
+	);
+	t.false(
+		/NANOCODER_TRUST_DIRECTORY=1[^.]*for this run/.test(message),
+		message,
+	);
+}
+
 test.serial(
 	"untrusted directory short-circuits with exit code 1 and no initializePlain call",
 	async (t) => {
@@ -510,6 +536,7 @@ test.serial(
 		t.is(report.kind, "error");
 		t.is(report.exitCode, 1);
 		t.regex(report.message, /not trusted/i);
+		assertTrustBypassWording(t, report.message);
 		t.is(report.steps, 0);
 		t.is(shutdown.code, 1);
 		t.false(
@@ -860,6 +887,7 @@ test.serial(
 		}
 
 		t.regex(stderr.get(), /not trusted/i);
+		assertTrustBypassWording(t, stderr.get());
 		t.is(shutdown.code, 1);
 		t.false(initCalled);
 	},
