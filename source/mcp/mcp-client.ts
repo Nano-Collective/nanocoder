@@ -69,7 +69,8 @@ export class MCPClient {
 	private isConnected: boolean = false;
 	private health: Map<string, MCPHealthStatus> = new Map();
 	private healthErrors: Map<string, string> = new Map();
-	private healthTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+	private healthTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+	private healthFailureCounts: Map<string, number> = new Map();
 	private healthChecksInFlight = new Set<string>();
 	private healthListeners = new Set<(change: MCPHealthChange) => void>();
 	private closing = new Set<string>();
@@ -248,6 +249,22 @@ export class MCPClient {
 	): void {
 		const markUnhealthy = (error?: unknown) =>
 			this.markServerUnhealthy(serverName, error);
+		const scheduleNext = (delay: number) => {
+			if (
+				this.closing.has(serverName) ||
+				interval <= 0 ||
+				typeof client.ping !== 'function'
+			) {
+				return;
+			}
+			const existingTimer = this.healthTimers.get(serverName);
+			if (existingTimer) {
+				clearTimeout(existingTimer);
+			}
+			const timer = setTimeout(() => void check(), delay);
+			if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+			this.healthTimers.set(serverName, timer);
+		};
 		const check = async () => {
 			const currentStatus = this.health.get(serverName);
 			if (
@@ -264,19 +281,31 @@ export class MCPClient {
 				if (this.health.get(serverName) === 'unhealthy') {
 					await this.restoreServerHealth(serverName, client);
 				}
+				this.healthFailureCounts.delete(serverName);
 			} catch (error) {
 				if (this.isLivenessResponse(error)) {
 					if (this.health.get(serverName) === 'unhealthy') {
 						await this.restoreServerHealth(serverName, client);
 					}
+					this.healthFailureCounts.delete(serverName);
 				} else {
 					// A pending ping can reject after an intentional disconnect.
 					if (this.health.get(serverName) === 'connected') {
 						markUnhealthy(error);
 					}
+					const currentFailures =
+						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
+					this.healthFailureCounts.set(serverName, currentFailures);
 				}
 			} finally {
 				this.healthChecksInFlight.delete(serverName);
+				if (!this.closing.has(serverName)) {
+					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
+					const multiplier =
+						failureCount > 0 ? Math.min(2 ** (failureCount - 1), 8) : 1;
+					const nextDelay = Math.min(interval * multiplier, 300_000);
+					scheduleNext(nextDelay);
+				}
 			}
 		};
 		const previousOnClose = transport.onclose;
@@ -299,9 +328,7 @@ export class MCPClient {
 			}
 		};
 		if (interval <= 0 || typeof client.ping !== 'function') return;
-		const timer = setInterval(() => void check(), interval);
-		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-		this.healthTimers.set(serverName, timer);
+		scheduleNext(interval);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -1322,8 +1349,9 @@ export class MCPClient {
 			for (const [serverName, client] of this.clients.entries()) {
 				this.closing.add(serverName);
 				const timer = this.healthTimers.get(serverName);
-				if (timer) clearInterval(timer);
+				if (timer) clearTimeout(timer);
 				this.healthTimers.delete(serverName);
+				this.healthFailureCounts.delete(serverName);
 				this.healthChecksInFlight.delete(serverName);
 				try {
 					await client.close();

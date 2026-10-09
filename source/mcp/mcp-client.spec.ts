@@ -1441,7 +1441,7 @@ test('MCPClient health check marks a server unhealthy and removes its tools', as
 	t.false(client.isServerConnected(serverName));
 	t.deepEqual(client.getServerTools(serverName), []);
 	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
-	clearInterval((client as any).healthTimers.get(serverName));
+	clearTimeout((client as any).healthTimers.get(serverName));
 });
 
 test('MCPClient health check retries unhealthy server and restores its tools when ping succeeds', async t => {
@@ -1507,7 +1507,7 @@ test('MCPClient health check retries unhealthy server and restores its tools whe
 	const tools = client.getServerTools(serverName);
 	t.is(tools.length, 1);
 	t.is(tools[0].name, 'restored_tool');
-	clearInterval((client as any).healthTimers.get(serverName));
+	clearTimeout((client as any).healthTimers.get(serverName));
 });
 
 test('MCPClient health check treats JSON-RPC MethodNotFound as alive and recovers tools', async t => {
@@ -1568,7 +1568,102 @@ test('MCPClient health check treats JSON-RPC MethodNotFound as alive and recover
 	const tools = client.getServerTools(serverName);
 	t.is(tools.length, 1);
 	t.is(tools[0].name, 'alive_tool');
-	clearInterval((client as any).healthTimers.get(serverName));
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient health check applies exponential backoff on consecutive failures and resets on recovery', async t => {
+	let pingCalls = 0;
+	let pingShouldFail = true;
+
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			if (pingShouldFail) {
+				throw new Error('connection refused');
+			}
+			return {};
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'backoff_tool',
+						description: 'backoff tool desc',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+
+	const serverName = 'backoff-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'backoff_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	// First failure happens at initial 10ms timer
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if ((client as any).healthFailureCounts.get(serverName) === 1) {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	t.is((client as any).healthFailureCounts.get(serverName), 1);
+
+	// Wait for second failure -> failure count = 2
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if ((client as any).healthFailureCounts.get(serverName) >= 2) {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+	t.is((client as any).healthFailureCounts.get(serverName), 2);
+
+	// Now allow ping to succeed -> should recover and reset failure count
+	pingShouldFail = false;
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if (client.getServerInfo(serverName)?.health === 'connected') {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	t.is((client as any).healthFailureCounts.get(serverName), undefined);
+	t.is(client.getServerTools(serverName).length, 1);
+	clearTimeout((client as any).healthTimers.get(serverName));
 });
 
 test('MCPClient transport close marks a server unhealthy immediately', t => {
@@ -1602,7 +1697,7 @@ test('MCPClient transport close marks a server unhealthy immediately', t => {
 	t.false(client.isServerConnected(serverName));
 	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
 	t.deepEqual(client.getServerTools(serverName), []);
-	clearInterval((client as any).healthTimers.get(serverName));
+	clearTimeout((client as any).healthTimers.get(serverName));
 });
 
 for (const pingFails of [false, true]) {
