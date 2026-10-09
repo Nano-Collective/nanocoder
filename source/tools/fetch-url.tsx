@@ -5,7 +5,10 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
-import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
+import {
+	assertPublicHttpUrl,
+	assertResolvedPublicHttpUrl,
+} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -219,17 +222,14 @@ const fetchUrlFormatter = (
 	);
 };
 
-const fetchUrlValidator = (
+const fetchUrlValidator = async (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	try {
-		assertPublicHttpUrl(args.url);
-		return Promise.resolve({valid: true});
+		await assertResolvedPublicHttpUrl(args.url);
+		return {valid: true};
 	} catch (error: unknown) {
-		return Promise.resolve({
-			valid: false,
-			error: formatError(error),
-		});
+		return {valid: false, error: formatError(error)};
 	}
 };
 

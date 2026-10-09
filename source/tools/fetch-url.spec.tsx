@@ -21,6 +21,11 @@ if (typeof File === 'undefined') {
 let fetchUrlTool: any;
 
 test.before(async () => {
+	// Hostnames are resolved before every hop; point them all at a public
+	// address so these specs never touch real DNS. Individual tests override it.
+	const {hostResolver} = await import('./fetch-url-guard.js');
+	hostResolver.resolve = async () => ['93.184.216.34'];
+
 	// Only import when we need it, and handle the case where undici might not work
 	try {
 		const module = await import('./fetch-url.js');
@@ -132,6 +137,98 @@ test.serial(
 				/127\.0\.0\.1/,
 			);
 		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+// A public name whose DNS record points at an internal address (#1662).
+const resolveInternalNames = async (host: string) =>
+	host.endsWith('.nip.io') || host === 'localtest.me'
+		? ['127.0.0.1']
+		: ['93.184.216.34'];
+
+test.serial(
+	'handler rejects a public name that resolves to an internal address without fetching',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const {hostResolver} = await import('./fetch-url-guard.js');
+		const originalResolve = hostResolver.resolve;
+		const originalFetch = globalThis.fetch;
+		const requests: string[] = [];
+		hostResolver.resolve = resolveInternalNames;
+		globalThis.fetch = async input => {
+			requests.push(String(input));
+			throw new Error(`Unexpected request to ${String(input)}`);
+		};
+
+		try {
+			for (const url of [
+				'http://localtest.me:18080/admin',
+				'http://169.254.169.254.nip.io/latest/meta-data/',
+			]) {
+				await t.throwsAsync(
+					async () => {
+						await fetchUrlTool.tool.execute!(
+							{url},
+							{toolCallId: 'test', messages: []},
+						);
+					},
+					{message: /internal\/private network address: .* resolves to /},
+					url,
+				);
+			}
+			t.deepEqual(requests, []);
+		} finally {
+			hostResolver.resolve = originalResolve;
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial(
+	'handler rejects a redirect to a name that resolves to an internal address',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const {hostResolver} = await import('./fetch-url-guard.js');
+		const originalResolve = hostResolver.resolve;
+		const originalFetch = globalThis.fetch;
+		const requests: string[] = [];
+		hostResolver.resolve = resolveInternalNames;
+		globalThis.fetch = async input => {
+			requests.push(String(input));
+			if (String(input) === 'https://public.example.test/redirect') {
+				return new Response(null, {
+					status: 302,
+					statusText: 'Found',
+					headers: {location: 'http://127.0.0.1.nip.io:8080/internal'},
+				});
+			}
+
+			throw new Error(`Unexpected request to ${String(input)}`);
+		};
+
+		try {
+			await t.throwsAsync(
+				async () => {
+					await fetchUrlTool.tool.execute!(
+						{url: 'https://public.example.test/redirect'},
+						{toolCallId: 'test', messages: []},
+					);
+				},
+				{message: /resolves to 127\.0\.0\.1/},
+			);
+			t.deepEqual(requests, ['https://public.example.test/redirect']);
+		} finally {
+			hostResolver.resolve = originalResolve;
 			globalThis.fetch = originalFetch;
 		}
 	},
