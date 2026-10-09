@@ -31,6 +31,10 @@ import {
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
+import {
+	publishWebToolFinished,
+	publishWebToolStarted,
+} from '@/web/tool-lifecycle';
 
 /**
  * Validates and executes a single tool call.
@@ -43,9 +47,6 @@ const executeOne = async (
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
-	const {publishWebToolFinished, publishWebToolStarted} = await import(
-		'@/web/tool-lifecycle'
-	);
 	publishWebToolStarted(
 		toolCall.id,
 		toolCall.function.name,
@@ -118,9 +119,6 @@ export const executeApprovedTool = async (
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
-		const {publishWebToolFinished, publishWebToolStarted} = await import(
-			'@/web/tool-lifecycle'
-		);
 		publishWebToolStarted(
 			toolCall.id,
 			toolCall.function.name,

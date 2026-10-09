@@ -124,12 +124,14 @@ for (const timing of ['burst', 'last-token', 'nonstream'] as const) {
 		const events: WebServerEvent[] = [];
 		const bridge = createWebRuntimeBridge(event => events.push(event));
 		let hook: ChatHandlerReturn | null = null;
+		let releaseLastToken: () => void = () => {};
+		const lastTokenGate = new Promise<void>(resolve => {releaseLastToken = resolve;});
 		const client: LLMClient = {
 			...createMockClient(),
 			chat: async (_messages, _tools, callbacks) => {
 				if (timing !== 'nonstream') {
 					callbacks.onToken('Hello');
-					if (timing === 'last-token') await new Promise(resolve => setTimeout(resolve, 25));
+					if (timing === 'last-token') await lastTokenGate;
 					callbacks.onToken(' world');
 				}
 				return {choices: [{message: {role: 'assistant', content: 'Hello world'}}]};
@@ -141,9 +143,16 @@ for (const timing of ['burst', 'last-token', 'nonstream'] as const) {
 		await waitForCondition(() => hook !== null);
 		bridge.bindRuntimeHandlers({submitMessage: text => hook!.handleChatMessage(text), cancel: () => {}, resetSession: () => {}});
 		await bridge.handleClientEvent({type: 'user_message', id: timing, text: 'hello'});
+		if (timing === 'last-token') {
+			await waitForCondition(() => events.some(event => event.type === 'assistant_delta'));
+			t.deepEqual(events.filter(event => event.type === 'assistant_delta').map(event => event.text), ['Hello']);
+			t.false(events.some(event => event.type === 'turn_completed'));
+			releaseLastToken();
+		}
 		await waitForCondition(() => !bridge.hasActiveBrowserTurn());
 		const text = events.filter(event => event.type === 'assistant_delta').map(event => event.text).join('');
 		t.is(text, 'Hello world');
+		t.deepEqual(events.filter(event => event.type === 'assistant_delta').map(event => event.text), timing === 'nonstream' ? ['Hello world'] : ['Hello', ' world']);
 		t.true(events.findIndex(event => event.type === 'turn_completed') > events.findIndex(event => event.type === 'assistant_delta'));
 		instance.unmount();
 	});

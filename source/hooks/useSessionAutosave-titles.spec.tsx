@@ -5,6 +5,39 @@ import {sessionManager} from '@/session/session-manager';
 import type {LLMClient, Message} from '@/types/core';
 import {useSessionAutosave} from './useSessionAutosave';
 
+test('completion replaces the debounce once per turn and idle updates do not flush again', async t => {
+	await sessionManager.initialize();
+	const messages: Message[] = [{role: 'user', content: 'First prompt'}];
+	const session = await sessionManager.createSession({title: 'First prompt', provider: 'test', model: 'test', workingDirectory: process.cwd(), messageCount: 1, messages});
+	t.teardown(() => sessionManager.deleteSession(session.id));
+	let saves = 0;
+	const unsubscribe = sessionManager.subscribeToSaves(saved => {if (saved.id === session.id) saves++;});
+	t.teardown(unsubscribe);
+	function Probe({history, complete}: {history: Message[]; complete: boolean}) {
+		useSessionAutosave({messages: history, currentProvider: 'test', currentModel: 'test', currentSessionId: session.id, setCurrentSessionId: () => {}, isConversationComplete: complete});
+		return null;
+	}
+	const view = render(<Probe history={messages} complete={false} />);
+	t.teardown(() => view.unmount());
+	const waitForSaves = async (count: number) => {
+		for (let i = 0; saves < count && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10));
+		t.is(saves, count);
+	};
+	await waitForSaves(1);
+	const completed: Message[] = [...messages, {role: 'assistant', content: 'Done'}];
+	view.rerender(<Probe history={completed} complete={true} />);
+	await waitForSaves(2);
+	view.rerender(<Probe history={[...completed, {role: 'assistant', content: 'Idle update'}]} complete={true} />);
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.is(saves, 2);
+	view.rerender(<Probe history={completed} complete={false} />);
+	await new Promise(resolve => setTimeout(resolve, 20));
+	view.rerender(<Probe history={[...completed, {role: 'assistant', content: 'Next turn'}]} complete={true} />);
+	await waitForSaves(3);
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.is(saves, 3);
+});
+
 test('TUI autosave generates the same smart title as ACP and publishes the saved name', async t => {
 	await sessionManager.initialize();
 	const messages: Message[] = [

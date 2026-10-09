@@ -592,10 +592,6 @@ export default function App({
 		client: appState.client,
 		isConversationComplete: appState.isConversationComplete,
 	});
-	React.useEffect(() => {
-		if (appState.isConversationComplete && appState.messages.length > 0)
-			void flushSession();
-	}, [appState.isConversationComplete, appState.messages.length, flushSession]);
 	useWebRuntime({
 		bridge: webRuntimeBridge,
 		state: appState,

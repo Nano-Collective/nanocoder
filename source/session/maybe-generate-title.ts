@@ -51,6 +51,8 @@ export interface MaybeGenerateTitleOptions {
  * Give a session a real name, at most once, and only when the cheap heuristic
  * title is too thin to be useful. Every failure path is silent: the heuristic
  * title stands and the turn is unaffected.
+ * Shared by terminal/web autosave and ACP clients; generated/manual titles,
+ * in-flight requests, and the per-session attempt cap prevent redundant calls.
  */
 export async function maybeGenerateTitle(
 	options: MaybeGenerateTitleOptions,

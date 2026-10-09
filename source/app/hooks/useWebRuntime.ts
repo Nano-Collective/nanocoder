@@ -14,9 +14,26 @@ import {getWorkspacePanel} from '@/web/workspace';
 
 interface WebRuntimeProps {
 	bridge?: WebRuntimeBridge;
-	state: ReturnType<typeof useAppState>;
-	handlers: AppHandlers;
-	modes: ReturnType<typeof useModeHandlers>;
+	state: Pick<
+		ReturnType<typeof useAppState>,
+		| 'currentSessionId'
+		| 'sessionName'
+		| 'messages'
+		| 'currentProvider'
+		| 'currentModel'
+		| 'developmentMode'
+		| 'client'
+		| 'toolManager'
+		| 'liveTaskList'
+		| 'setSessionName'
+		| 'ensureCurrentSessionId'
+		| 'setDevelopmentMode'
+	>;
+	handlers: Pick<
+		AppHandlers,
+		'handleMessageSubmit' | 'clearMessages' | 'handleCancel' | 'applySession'
+	>;
+	modes: Pick<ReturnType<typeof useModeHandlers>, 'handleModelSelect'>;
 	isGenerating: boolean;
 	trusted: boolean;
 	trustError: string | null;

@@ -107,11 +107,19 @@ export function useSessionAutosave({
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSaveRef = useRef<number>(0);
+	const previousCompletionRef = useRef(isConversationComplete);
 	const titleContextRef = useRef({client, isConversationComplete});
 	titleContextRef.current = {client, isConversationComplete};
 
 	// Serialises saves: each new save is chained onto the tail of this promise.
 	const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+	const lastSavedRef = useRef<{
+		messages: Message[];
+		provider: string;
+		model: string;
+		sessionId: string | null;
+		complete: boolean;
+	} | null>(null);
 
 	// Live mirror of currentSessionId. runSave reads this ref after the
 	// initPromiseRef await (i.e. at execution time, not effect-fire time) so
@@ -196,6 +204,15 @@ export function useSessionAutosave({
 				// Wait for initialization to complete before saving
 				const initialized = await initPromiseRef.current;
 				if (!initialized || capturedMessages.length === 0) return;
+				const previous = lastSavedRef.current;
+				if (
+					previous?.messages === capturedMessages &&
+					previous.provider === capturedProvider &&
+					previous.model === capturedModel &&
+					previous.sessionId === currentSessionIdRef.current &&
+					previous.complete === titleContextRef.current.isConversationComplete
+				)
+					return;
 
 				// The walkthrough nudge is a transient in-loop protocol message. It
 				// has already done its job by the time we persist, so keep it out of
@@ -294,6 +311,13 @@ export function useSessionAutosave({
 				}
 
 				lastSaveRef.current = Date.now();
+				lastSavedRef.current = {
+					messages: capturedMessages,
+					provider: capturedProvider,
+					model: capturedModel,
+					sessionId: currentSessionIdRef.current,
+					complete: titleContextRef.current.isConversationComplete,
+				};
 				const titleContext = titleContextRef.current;
 				if (
 					titleContext.client &&
@@ -325,18 +349,19 @@ export function useSessionAutosave({
 
 	// Auto-save when messages change (debounced by saveInterval)
 	useEffect(() => {
+		const justCompleted =
+			isConversationComplete && !previousCompletionRef.current;
+		previousCompletionRef.current = isConversationComplete;
 		const config = getAppConfig();
 		const sessionConfig = config.sessions;
 		const autoSave = sessionConfig?.autoSave ?? true;
 		const saveInterval = sessionConfig?.saveInterval ?? 30000;
 
-		if (!autoSave || !initPromiseRef.current || messages.length === 0) {
-			return;
-		}
-
 		if (timeoutRef.current) {
 			clearTimeout(timeoutRef.current);
+			timeoutRef.current = null;
 		}
+		if (!autoSave || !initPromiseRef.current || messages.length === 0) return;
 
 		const now = Date.now();
 		const timeSinceLastSave = now - lastSaveRef.current;
@@ -358,13 +383,21 @@ export function useSessionAutosave({
 			saveChainRef.current = saveChainRef.current.then(doSave, doSave);
 		};
 
-		if (timeSinceLastSave >= saveInterval) {
+		// Completion replaces the pending debounce, rather than adding an
+		// independent flush. Idle history updates keep the regular save cadence.
+		if (justCompleted || timeSinceLastSave >= saveInterval) {
 			schedule();
 		} else {
 			const delay = saveInterval - timeSinceLastSave;
 			timeoutRef.current = setTimeout(schedule, delay);
 		}
-	}, [messages, currentProvider, currentModel, runSave]);
+	}, [
+		messages,
+		currentProvider,
+		currentModel,
+		isConversationComplete,
+		runSave,
+	]);
 
 	// Final synchronous-ish flush on exit: cancels any pending debounced timer
 	// and chains one last save with the live (ref) messages onto the same
