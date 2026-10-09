@@ -42,7 +42,10 @@ async function execute(
 // A line-number gutter, as emitted by the bounded edit tools: `  47: line 47`.
 const LINE_NUMBER_GUTTER = /^\s*\d+: /m;
 
-const CONTEXT_HEADER = /Updated file context \(lines \d+-\d+ of \d+\):/;
+// The handle `read_file` appends on its own last line, e.g. `[@span:k7]`.
+const SPAN_HANDLE_TRAILER = /\n\n\[@span:[a-z0-9]+\]$/;
+
+const CONTEXT_HEADER =/Updated file context \(lines \d+-\d+ of \d+\):/;
 const OMISSION_MARKER = /\[\.\.\. lines \d+-\d+ omitted \.\.\.\]/;
 
 const searchMarker = '<'.repeat(7) + ' SEARCH';
@@ -75,7 +78,9 @@ test('read_file returns raw content without line-number prefixes', async t => {
 
 	const result = await execute(readFileTool, {path: filePath});
 
-	t.is(result, content);
+	// The content is raw; the only addition is the trailing replace_span handle.
+	t.regex(result, SPAN_HANDLE_TRAILER);
+	t.is(result.replace(SPAN_HANDLE_TRAILER, ''), content);
 	t.notRegex(result, LINE_NUMBER_GUTTER);
 	t.notRegex(result, CONTEXT_HEADER);
 });
