@@ -2,6 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -2178,7 +2179,12 @@ test.serial(
 			});
 			t.true(result.trusted);
 			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{
+					path: target,
+					fingerprint: describeProjectTrust(target).fingerprint,
+				},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}

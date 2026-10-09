@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
+import { describeProjectTrust } from "@/config/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -559,7 +560,11 @@ test.serial(
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
-		let savedWith: { trustedDirectories?: string[] } | null = null;
+		let savedWith: {
+			trustedDirectories?: Array<
+				string | {path: string; fingerprint: string}
+			>;
+		} | null = null;
 		process.env.NANOCODER_TRUST_DIRECTORY = "1";
 		try {
 			await runPlainShell({
@@ -570,7 +575,11 @@ test.serial(
 				deps: baseDeps({
 					loadPreferences: () => ({ trustedDirectories: [] }) as never,
 					savePreferences: (prefs) => {
-						savedWith = prefs as { trustedDirectories?: string[] };
+						savedWith = prefs as {
+							trustedDirectories?: Array<
+								string | {path: string; fingerprint: string}
+							>;
+						};
 					},
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
@@ -592,11 +601,12 @@ test.serial(
 		t.is(report.kind, "success");
 		t.is(shutdown.code, 0);
 		t.truthy(savedWith);
-		t.true(
-			(savedWith?.trustedDirectories ?? []).some(
-				(dir) => dir === process.cwd(),
-			),
-		);
+		t.deepEqual(savedWith?.trustedDirectories, [
+			{
+				path: process.cwd(),
+				fingerprint: describeProjectTrust(process.cwd()).fingerprint,
+			},
+		]);
 	},
 );
 

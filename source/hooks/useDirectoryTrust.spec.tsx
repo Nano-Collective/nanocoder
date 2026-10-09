@@ -4,6 +4,7 @@ import {join, resolve, sep} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	isDirectoryTrusted,
 	loadPreferences,
@@ -89,7 +90,12 @@ test.serial(
 			t.true(hook.current?.isTrusted);
 			unmount();
 			resetPreferencesCache();
-			t.deepEqual(loadPreferences().trustedDirectories, [resolve(root)]);
+			t.deepEqual(loadPreferences().trustedDirectories, [
+				{
+					path: resolve(root),
+					fingerprint: describeProjectTrust(root).fingerprint,
+				},
+			]);
 		});
 	},
 );

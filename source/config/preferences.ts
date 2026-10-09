@@ -3,6 +3,7 @@ import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -13,7 +14,7 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import type {TuneConfig} from '@/types/config';
-import type {UserPreferences} from '@/types/index';
+import type {TrustedDirectoryRecord, UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
@@ -54,7 +55,9 @@ function isProjectPreferencesPath(preferencesPath: string): boolean {
 	);
 }
 
-function readGlobalTrustedDirectories(): string[] | undefined {
+function readGlobalTrustedDirectories():
+	| Array<string | TrustedDirectoryRecord>
+	| undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
@@ -68,7 +71,9 @@ function readGlobalTrustedDirectories(): string[] | undefined {
 	}
 }
 
-function writeGlobalTrustedDirectories(trustedDirectories: string[]): void {
+function writeGlobalTrustedDirectories(
+	trustedDirectories: Array<string | TrustedDirectoryRecord>,
+): void {
 	const globalPath = getGlobalPreferencesPath();
 	let data: UserPreferences = {};
 	if (existsSync(globalPath)) {
@@ -173,14 +178,32 @@ export function savePreferences(preferences: UserPreferences): void {
  * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
  * and the daemon boot path — so the resolution rule can't drift between them.
  */
+export function trustPath(entry: string | TrustedDirectoryRecord): string {
+	return typeof entry === 'string' ? entry : entry.path;
+}
+
 export function isDirectoryTrusted(
 	directory: string,
 	preferences: UserPreferences,
 ): boolean {
 	const resolved = path.resolve(directory); // nosemgrep
 	return (preferences.trustedDirectories ?? []).some(
-		dir => path.resolve(dir) === resolved, // nosemgrep
+		entry => path.resolve(trustPath(entry)) === resolved, // nosemgrep
 	);
+}
+
+/** Record this folder, including a fingerprint of what it will run. */
+export function grantDirectoryTrust(
+	preferences: UserPreferences,
+	directory: string,
+): UserPreferences {
+	const resolved = path.resolve(directory); // nosemgrep
+	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
+		entry => path.resolve(trustPath(entry)) !== resolved, // nosemgrep
+	);
+	trustedDirectories.push({path: resolved, fingerprint});
+	return {...preferences, trustedDirectories};
 }
 
 export interface DirectoryTrustResult {
@@ -219,11 +242,7 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const resolved = path.resolve(directory); // nosemgrep
-		deps.savePreferences({
-			...preferences,
-			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
-		});
+		deps.savePreferences(grantDirectoryTrust(preferences, directory));
 		return {trusted: true, persisted: true};
 	}
 
