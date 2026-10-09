@@ -346,3 +346,86 @@ test('cleanMessage strips a code fence around the message', t => {
 	t.is(cleanMessage('  docs: y  '), 'docs: y');
 	t.is(cleanMessage(undefined), '');
 });
+
+test.serial('un-stages the file when git commit fails', async t => {
+	const dir = makeRepo();
+	try {
+		const hooksDir = join(dir, '.hooks');
+		mkdirSync(hooksDir, {recursive: true});
+		const hookFile = join(hooksDir, 'pre-commit');
+		writeFileSync(hookFile, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+		git(dir, `config core.hooksPath "${hooksDir}"`);
+
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'export const a = 1;\n');
+
+		const note = await maybeAutoCommit('write_file', {path: file});
+
+		t.is(note, null);
+		t.is(commitCount(dir), 1);
+		t.is(git(dir, 'diff --cached --name-only'), '');
+		const status = git(dir, 'status --porcelain');
+		t.true(status.includes('?? a.ts'), status);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'preserves staged status when commit fails if file was already staged',
+	async t => {
+		const dir = makeRepo();
+		try {
+			const hooksDir = join(dir, '.hooks');
+			mkdirSync(hooksDir, {recursive: true});
+			const hookFile = join(hooksDir, 'pre-commit');
+			writeFileSync(hookFile, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+			git(dir, `config core.hooksPath "${hooksDir}"`);
+
+			const file = join(dir, 'base.txt');
+			writeFileSync(file, 'stage 1\n');
+			git(dir, 'add base.txt');
+			const originalSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+
+			writeFileSync(file, 'stage 2\n');
+			const note = await maybeAutoCommit('write_file', {path: file});
+
+			t.is(note, null);
+			t.is(commitCount(dir), 1);
+			t.is(git(dir, 'diff --cached --name-only'), 'base.txt');
+			const restoredSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+			t.is(restoredSha, originalSha);
+			t.is(git(dir, 'show :base.txt'), 'stage 1');
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'restores index when edit produces an empty diff against HEAD',
+	async t => {
+		const dir = makeRepo();
+		try {
+			const file = join(dir, 'base.txt');
+			writeFileSync(file, 'stage 1\n');
+			git(dir, 'add base.txt');
+			const originalSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+
+			// Agent writes identical content to HEAD ('base\n')
+			writeFileSync(file, 'base\n');
+			const note = await maybeAutoCommit('write_file', {path: file});
+
+			t.is(note, null);
+			t.is(commitCount(dir), 1);
+			// Exact prior staging state ('stage 1') is restored
+			t.is(git(dir, 'diff --cached --name-only'), 'base.txt');
+			const restoredSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+			t.is(restoredSha, originalSha);
+			t.is(git(dir, 'show :base.txt'), 'stage 1');
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+

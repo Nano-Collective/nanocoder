@@ -64,9 +64,10 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
  * `nanocoder.autoCommit` is on.
  *
  * Only that file is committed (`git commit -- <path>` has `--only`
- * semantics), so the user's own uncommitted or staged work is never swept into
- * an agent commit. Never throws: a failure is logged and the edit stays in the
- * working tree, exactly as if auto-commit were off.
+ * semantics), so changes in other files are never swept into an agent commit
+ * (note that prior uncommitted changes in the same file will be included in
+ * that file's commit). Never throws: a failure is logged and the edit stays in
+ * the working tree un-staged, exactly as if auto-commit were off.
  *
  * Returns a one-line note for the tool result, so the model knows a commit
  * happened, or null when nothing was committed.
@@ -134,25 +135,68 @@ async function commitFile(absPath: string): Promise<string | null> {
 
 	if (await isIgnored(git, pathspec)) return null;
 
+	let priorIndexEntry: {mode: string; sha: string} | null = null;
+	try {
+		const lsOutput = (await git('ls-files', '-s', '--', pathspec)).trim();
+		if (lsOutput) {
+			const [mode, sha] = lsOutput.split(/\s+/);
+			if (mode && sha) {
+				priorIndexEntry = {mode, sha};
+			}
+		}
+	} catch {
+		// Untracked or error
+	}
+
+	const restoreIndex = async () => {
+		try {
+			if (priorIndexEntry) {
+				await git(
+					'update-index',
+					'--cacheinfo',
+					priorIndexEntry.mode,
+					priorIndexEntry.sha,
+					pathspec,
+				);
+			} else {
+				await git('reset', '-q', '--', pathspec);
+			}
+		} catch (error) {
+			logWarning(
+				`Failed to restore git index for ${pathspec}: ${formatError(error)}`,
+			);
+		}
+	};
+
 	await git('add', '--', pathspec);
-	const diff = await git(
-		'diff',
-		'--cached',
-		'--no-ext-diff',
-		'--no-color',
-		'--',
-		pathspec,
-	);
-	// The edit left the file as it already was in HEAD.
-	if (!diff.trim()) return null;
+	try {
+		const diff = await git(
+			'diff',
+			'--cached',
+			'--no-ext-diff',
+			'--no-color',
+			'--',
+			pathspec,
+		);
+		// The edit left the file as it already was in HEAD.
+		if (!diff.trim()) {
+			await restoreIndex();
+			return null;
+		}
 
-	const message = await generateMessage(diff, pathspec);
-	const output = await git('commit', '-m', message, '--', pathspec);
+		const message = await generateMessage(diff, pathspec);
+		const output = await git('commit', '-m', message, '--', pathspec);
 
-	const hash = output.match(/\[[^\]]*?([a-f0-9]{7,})\]/)?.[1] ?? '';
-	const subject = message.split('\n')[0];
-	logInfo(`Auto-committed ${pathspec}${hash ? ` (${hash})` : ''}: ${subject}`);
-	return formatCommitNote(hash, subject);
+		const hash = output.match(/\[[^\]]*?([a-f0-9]{7,})\]/)?.[1] ?? '';
+		const subject = message.split('\n')[0];
+		logInfo(
+			`Auto-committed ${pathspec}${hash ? ` (${hash})` : ''}: ${subject}`,
+		);
+		return formatCommitNote(hash, subject);
+	} catch (error) {
+		await restoreIndex();
+		throw error;
+	}
 }
 
 /** Longest subject the model-visible note carries (git's own convention). */
