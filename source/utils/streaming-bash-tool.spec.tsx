@@ -40,6 +40,44 @@ test('runStreamingBashTool propagates AbortSignal to underlying bash execution',
 	t.is(result.bashState!.error, 'Cancelled via AbortSignal');
 });
 
+// A command that runs but exits non-zero is the case that used to read as a
+// success: the formatted output is ordinary stdout/stderr, so `isError` is the
+// only signal the display layer can branch on.
+const bashToolCall = (command: string) =>
+	({
+		id: 'call_exit',
+		type: 'function',
+		function: {name: 'execute_bash', arguments: JSON.stringify({command})},
+	}) as any;
+
+test('runStreamingBashTool flags a non-zero exit as an error', async t => {
+	const run = await runStreamingBashTool(
+		bashToolCall('exit 3'),
+		null,
+		() => {},
+		'test',
+	);
+
+	t.is(run.bashState?.exitCode, 3);
+	t.true(run.result.isError);
+	t.false(
+		run.result.content.startsWith('Error: '),
+		'content carries no prefix - the flag is the only signal',
+	);
+});
+
+test('runStreamingBashTool leaves a clean run unflagged', async t => {
+	const run = await runStreamingBashTool(
+		bashToolCall('echo ok'),
+		null,
+		() => {},
+		'test',
+	);
+
+	t.is(run.bashState?.exitCode, 0);
+	t.falsy(run.result.isError);
+});
+
 // ============================================================================
 // Lifecycle hooks on the streamed bash path.
 //

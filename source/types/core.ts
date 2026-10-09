@@ -312,7 +312,7 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	headless: '⏵⏵ headless',
 };
 
-export type ConnectionStatus = 'connected' | 'failed' | 'pending';
+export type ConnectionStatus = 'connected' | 'failed' | 'pending' | 'unhealthy';
 
 export interface MCPConnectionStatus {
 	name: string;

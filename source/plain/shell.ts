@@ -28,6 +28,7 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
+import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
 	runLifecycleHooks,
@@ -234,6 +235,7 @@ export async function runPlainShell(
 		},
 	});
 
+	await loadPlugins(true);
 	await beginSessionStartHooks();
 
 	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});

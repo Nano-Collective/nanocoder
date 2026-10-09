@@ -25,8 +25,9 @@ import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
-import {dirname, join} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
+import {isDirectoryTrusted, loadPreferences} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
@@ -239,6 +240,20 @@ export async function installAutoStart(
 	const loadService = opts.loadService ?? true;
 	const hash = projectHash(opts.projectRoot);
 
+	// The installed service runs `nanocoder daemon start` unattended, on a
+	// restart-on-failure policy, in an environment that carries none of the
+	// interactive session's trust bypasses. If the project isn't in
+	// trustedDirectories, that start will fail its own trust gate forever.
+	// Install still succeeds - the file is useful once the project is
+	// trusted - but the result names both ways to fix it.
+	const trusted = isDirectoryTrusted(opts.projectRoot, loadPreferences());
+	const trustWarning = trusted
+		? ''
+		: ` Warning: ${resolve(opts.projectRoot)} is not trusted, so the ` +
+			`installed service will fail to start until you run \`nanocoder\` here ` +
+			`once to accept the trust disclaimer, or pass --trust-directory to ` +
+			`\`nanocoder daemon start\`.`;
+
 	if (platform === 'darwin') {
 		const target = launchAgentPath(home, hash);
 		mkdirSync(dirname(target), {recursive: true});
@@ -265,7 +280,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${trustWarning}`,
 		};
 	}
 
@@ -294,7 +309,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${trustWarning}`,
 		};
 	}
 
@@ -329,7 +344,7 @@ export async function installAutoStart(
 		return {
 			platform,
 			written: target,
-			message: `Auto-start installed for ${opts.projectRoot}.`,
+			message: `Auto-start installed for ${opts.projectRoot}.${trustWarning}`,
 		};
 	}
 

@@ -134,11 +134,11 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
-	['Tab', 'Accept file / command suggestion'],
+	['Tab', 'Accept suggestion / insert suggested command'],
 	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
 	['Ctrl+W', 'Delete previous word'],
 	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
-	['Esc Esc', 'Clear input'],
+	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
 	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
 	['Shift+Tab', 'Cycle development mode'],
 	['Ctrl+O', 'Toggle compact tool output'],
@@ -181,9 +181,17 @@ interface ChatProps {
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	/**
+	 * Centre the prompt box in the terminal. Inline mode turns this off: the
+	 * transcript is printed by Ink's <Static> at column 0, which no wrapper can
+	 * shift, so the box shares that left edge instead of sitting inset from it.
+	 */
+	centered?: boolean;
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
+	onDismissSuggestion?: () => void;
 	/**
 	 * Fullscreen keeps the root box's left padding (inline pulls the composer
 	 * back over it), so the status row sits one column further right and has
@@ -216,9 +224,12 @@ export default function UserInput({
 	onDismissActiveEditor,
 	taskInfo,
 	forceFocus = false,
+	centered = true,
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	suggestedCommand = null,
+	onDismissSuggestion,
 	fullscreen = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
@@ -229,19 +240,30 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals.
-	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
+	// cols for legibility on tiny terminals. Clamped back down to actualWidth
+	// so that floor can never exceed the parent it's centered in - Ink centers
+	// an over-wide child by giving it a negative left offset, which clips the
+	// border, the prompt marker, and the start of the text instead of the end.
+	const promptWidth = Math.min(
+		actualWidth,
+		Math.max(PROMPT_WIDTH_MIN, actualWidth - 4),
+	);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
+	// One column right of the box's left border, plus 1 more in fullscreen
+	// for the root box's left padding, which inline cancels (see
+	// ChatInput's wrapper). Centred adds the ~2-column inset a box narrower
+	// than its container gets from being centred rather than flush left.
+	const indicatorIndent = (centered ? 3 : 1) + (fullscreen ? 1 : 0);
 	const [textInputKey, setTextInputKey] = useState(0);
 	// Imperative handle into TextInput so the terminal paste path can read the
 	// caret position before the splice and put it back after. Without this the
 	// pasted text would always land at the end of the value.
 	const textInputRef = useRef<TextInputHandle>(null);
 	const completionJustSelectedRef = useRef(false);
-	// Input value for which the user dismissed the completion menu with Escape,
-	// so the auto-show effect doesn't immediately re-open it until they type more.
+	// Input value for which the completion menu was closed, by Escape or by
+	// selecting a completion, so it doesn't re-open until the user types more.
 	const dismissedForInputRef = useRef<string | null>(null);
 	// True while the current input came from history navigation (↑/↓), not typing.
 	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
@@ -279,6 +301,7 @@ export default function UserInput({
 		resetInput,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
+		currentStateRef,
 		setInputState,
 		undo,
 		redo,
@@ -312,9 +335,6 @@ export default function UserInput({
 	// Check if we're in bash mode (input starts with !)
 	const isBashMode = input.trim().startsWith('!');
 
-	// Check if we're in command mode (input starts with /)
-	const isCommandMode = input.trim().startsWith('/');
-
 	// Load history on mount
 	useEffect(() => {
 		void promptHistory.loadHistory();
@@ -336,7 +356,13 @@ export default function UserInput({
 			const cursorOffset = textInputRef.current?.getCursorOffset();
 			const result = insertPaste(payload, cursorOffset);
 			if (result && textInputRef.current) {
-				textInputRef.current.setCursorOffset(result.cursorOffset);
+				// Hand TextInput the pasted value along with the caret: keys in the
+				// same stdin batch as the paste land before it re-renders, and
+				// must edit the pasted value, not the one it last rendered.
+				textInputRef.current.setCursorOffset(
+					result.cursorOffset,
+					currentStateRef.current.displayValue,
+				);
 			} else if (!result) {
 				setTextInputKey(prev => prev + 1);
 			}
@@ -345,7 +371,7 @@ export default function UserInput({
 		return () => {
 			pasteEvents.off('paste', handleTerminalPaste);
 		};
-	}, [disabled, effectiveFocus, insertPaste]);
+	}, [disabled, effectiveFocus, insertPaste, currentStateRef]);
 
 	useEffect(() => {
 		if (
@@ -464,57 +490,76 @@ export default function UserInput({
 		void runFileAutocomplete();
 	}, [input]);
 
+	// Command completions for a given input value. Shared by the memo below
+	// and the Enter gate, which can run ahead of a re-render (see there).
+	const getCommandCompletions = useCallback(
+		(value: string): Completion[] => {
+			if (!value.trim().startsWith('/') || isFileAutocompleteMode) {
+				return [];
+			}
+
+			// Once the user types a space, they're entering arguments for the
+			// command (e.g. `/model gpt-4`). Stop offering completions so Enter
+			// submits the command-with-args instead of selecting a completion and
+			// dropping everything after the command name.
+			if (value.slice(1).includes(' ')) {
+				return [];
+			}
+
+			const commandPrefix = value.slice(1).split(' ')[0];
+
+			const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
+			const mcpPromptNames = (
+				getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
+			).map(p => `mcp:${p.serverName}:${p.name}`);
+			const customCompletions = [...customCommands, ...mcpPromptNames]
+				.filter(cmd => {
+					// Include all when no prefix, otherwise filter by prefix
+					return (
+						!commandPrefix ||
+						cmd.toLowerCase().includes(commandPrefix.toLowerCase())
+					);
+				})
+				.sort((a, b) => a.localeCompare(b));
+
+			return [
+				...builtInCompletions.map(cmd => ({name: cmd, isCustom: false})),
+				...customCompletions.map(cmd => ({name: cmd, isCustom: true})),
+			] as Completion[];
+		},
+		[isFileAutocompleteMode, customCommands],
+	);
+
 	// Calculate command completions using useMemo to prevent flashing
-	const commandCompletions = useMemo(() => {
-		if (!isCommandMode || isFileAutocompleteMode) {
-			return [];
-		}
+	const commandCompletions = useMemo(
+		() => getCommandCompletions(input),
+		[getCommandCompletions, input],
+	);
 
-		// Once the user types a space, they're entering arguments for the
-		// command (e.g. `/model gpt-4`). Stop offering completions so Enter
-		// submits the command-with-args instead of selecting a completion and
-		// dropping everything after the command name.
-		if (input.slice(1).includes(' ')) {
-			return [];
-		}
-
-		const commandPrefix = input.slice(1).split(' ')[0];
-
-		const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
-		const mcpPromptNames = (
-			getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
-		).map(p => `mcp:${p.serverName}:${p.name}`);
-		const customCompletions = [...customCommands, ...mcpPromptNames]
-			.filter(cmd => {
-				// Include all when no prefix, otherwise filter by prefix
-				return (
-					!commandPrefix ||
-					cmd.toLowerCase().includes(commandPrefix.toLowerCase())
-				);
-			})
-			.sort((a, b) => a.localeCompare(b));
-
-		return [
-			...builtInCompletions.map(cmd => ({name: cmd, isCustom: false})),
-			...customCompletions.map(cmd => ({name: cmd, isCustom: true})),
-		] as Completion[];
-	}, [input, isCommandMode, isFileAutocompleteMode, customCommands]);
+	// The menu opens whenever completions exist, unless it was closed for this
+	// exact input or the input was recalled from history (keep ↑/↓ free to
+	// navigate).
+	const isMenuSuppressedFor = useCallback(
+		(value: string) =>
+			inputFromHistoryRef.current || dismissedForInputRef.current === value,
+		[],
+	);
 
 	// Update UI state for command completions
 	useEffect(() => {
+		// This run can still carry the pre-selection input: selecting sets
+		// `input` and closes the menu together, and the run that the close
+		// schedules gets here first. `dismissedForInputRef` is set at the
+		// selection itself for that reason - reading `input` here would record
+		// the fragment and let the menu re-open on the completed command.
 		if (completionJustSelectedRef.current) {
 			completionJustSelectedRef.current = false;
 			return;
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			// Show the menu as soon as completions exist (typing `/`), not only on
-			// Tab — unless the user dismissed it with Escape for this exact input,
-			// or the input was recalled from history (keep ↑/↓ free to navigate).
-			if (
-				!inputFromHistoryRef.current &&
-				dismissedForInputRef.current !== input
-			) {
+			// Show the menu as soon as completions exist (typing `/`), not only on Tab.
+			if (!isMenuSuppressedFor(input)) {
 				setShowCompletions(true);
 			}
 			setSelectedCompletionIndex(prev =>
@@ -536,6 +581,7 @@ export default function UserInput({
 		setCompletions,
 		setShowCompletions,
 		setSelectedCompletionIndex,
+		isMenuSuppressedFor,
 	]);
 
 	// Helper functions
@@ -613,9 +659,12 @@ export default function UserInput({
 	const handleSubmit = useCallback(() => {
 		if (!onSubmit && !onQueueMessage) return;
 
+		// The ref, not the render-time currentState: Enter can arrive in the
+		// same stdin batch as a paste, before this component re-renders with it.
+		const latestState = currentStateRef.current;
 		let images = attachments;
-		let assembled = assemblePrompt(currentState);
-		let display = currentState.displayValue;
+		let assembled = assemblePrompt(latestState);
+		let display = latestState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
 		// (often quoted, mixed in with prose) become attachments; the literal
@@ -640,8 +689,8 @@ export default function UserInput({
 		if (!assembled.trim() && images.length === 0) return;
 
 		const inputStateForHistory: InputState = {
-			displayValue: currentState.displayValue,
-			placeholderContent: {...currentState.placeholderContent},
+			displayValue: latestState.displayValue,
+			placeholderContent: {...latestState.placeholderContent},
 		};
 
 		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
@@ -669,6 +718,7 @@ export default function UserInput({
 			attachments: images,
 		});
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		onDismissSuggestion?.();
 		resetInput();
 		resetUIState();
 		setAttachments([]);
@@ -680,9 +730,10 @@ export default function UserInput({
 		onQueueMessage,
 		resetInput,
 		resetUIState,
-		currentState,
+		currentStateRef,
 		isBusy,
 		onSubmittedDraft,
+		onDismissSuggestion,
 	]);
 
 	// Handle escape key logic
@@ -698,19 +749,30 @@ export default function UserInput({
 			setFileCompletions([]);
 			return;
 		}
+		// Esc in an empty prompt dismisses the suggested command first.
+		if (suggestedCommand && input === '') {
+			onDismissSuggestion?.();
+			return;
+		}
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
 			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
-		} else {
+		} else if (input || attachments.length > 0 || activeEditor) {
+			// Nothing to clear otherwise - no-op instead of arming a hint for a
+			// second Escape that would have nothing to do either.
 			setShowClearMessage(true);
 		}
 	}, [
 		input,
+		attachments,
+		activeEditor,
 		showCompletions,
 		isFileAutocompleteMode,
+		suggestedCommand,
+		onDismissSuggestion,
 		showClearMessage,
 		setShowCompletions,
 		setSelectedCompletionIndex,
@@ -992,6 +1054,16 @@ export default function UserInput({
 
 		// Handle Tab key
 		if (key.tab) {
+			// Tab in an empty prompt inserts the suggested command, without
+			// popping the completion menu over it.
+			if (suggestedCommand && input === '') {
+				completionJustSelectedRef.current = true;
+				setInputState({displayValue: suggestedCommand, placeholderContent: {}});
+				setTextInputKey(prev => prev + 1);
+				onDismissSuggestion?.();
+				return;
+			}
+
 			// File autocomplete takes priority
 			if (isFileAutocompleteMode) {
 				void handleFileSelection();
@@ -1010,6 +1082,7 @@ export default function UserInput({
 						];
 					const completedText = `/${selected.name}`;
 					completionJustSelectedRef.current = true;
+					dismissedForInputRef.current = completedText;
 					setInputState({
 						displayValue: completedText,
 						placeholderContent: {},
@@ -1060,25 +1133,49 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle Enter to select completion
-		if (
-			key.return &&
-			!key.shift &&
+		// Handle Enter to select completion. The effect above opens the menu a
+		// commit after the keystroke that changed `input`, so an Enter landing in
+		// between still sees it closed and would submit the raw command fragment.
+		// When the menu state says closed, fall back to the memoized completions
+		// the effect is about to show.
+		//
+		// Decide on the latest input, not the render-time one: Enter can arrive
+		// in the same stdin batch as the keys before it, ahead of a re-render,
+		// and handleSubmit submits the latest input - so a gate that looked at
+		// the stale `input` would let a fresh command fragment through.
+		const latestInput = currentStateRef.current.displayValue;
+		const isStale = latestInput !== input;
+		const menuItems =
+			!isStale &&
 			showCompletions &&
 			completions.length > 0 &&
 			selectedCompletionIndex >= 0
-		) {
-			const selected = completions[selectedCompletionIndex];
+				? completions
+				: isMenuSuppressedFor(latestInput)
+					? []
+					: isStale
+						? getCommandCompletions(latestInput)
+						: commandCompletions;
+		if (key.return && !key.shift && menuItems.length > 0) {
+			const selected =
+				menuItems[
+					Math.min(Math.max(selectedCompletionIndex, 0), menuItems.length - 1)
+				];
 			const completedText = `/${selected.name}`;
-			completionJustSelectedRef.current = true;
-			setInputState({
-				displayValue: completedText,
-				placeholderContent: {},
-			});
-			setShowCompletions(false);
-			setSelectedCompletionIndex(-1);
-			setTextInputKey(prev => prev + 1);
-			return;
+			// Already typed in full, so there is nothing to complete: fall
+			// through and submit instead of needing a second Enter.
+			if (completedText !== latestInput) {
+				completionJustSelectedRef.current = true;
+				dismissedForInputRef.current = completedText;
+				setInputState({
+					displayValue: completedText,
+					placeholderContent: {},
+				});
+				setShowCompletions(false);
+				setSelectedCompletionIndex(-1);
+				setTextInputKey(prev => prev + 1);
+				return;
+			}
 		}
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
@@ -1207,7 +1304,11 @@ export default function UserInput({
 
 	return (
 		<>
-			<Box width={actualWidth} alignItems="center" flexDirection="column">
+			<Box
+				width={actualWidth}
+				alignItems={centered ? 'center' : 'flex-start'}
+				flexDirection="column"
+			>
 				{isBashMode && (
 					<Box width={promptWidth}>
 						<Text color={colors.tool} bold>
@@ -1261,7 +1362,11 @@ export default function UserInput({
 							onEdgeArrow={handleHistoryNavigation}
 							onSubmit={handleSubmit}
 							onEnter={handleSubmit}
-							placeholder="Ask anything..."
+							placeholder={
+								suggestedCommand
+									? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
+									: 'Ask anything...'
+							}
 							focus={effectiveFocus}
 							wrapWidth={inputWrapWidth}
 							handleEnter={false}
@@ -1378,16 +1483,15 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-			{/* Development mode indicator - always visible. marginLeft={3} shifts
-			the indicator one step to the right so it aligns cleanly under the
-			input box content. */}
-			<Box marginLeft={3}>
+			{/* Development mode indicator - always visible. The indent puts it one
+			step to the right of the box's left border, so it aligns cleanly under
+			the input box content whether the box is centred or flush left. */}
+			<Box marginLeft={indicatorIndent}>
 				<DevelopmentModeIndicator
-					// Must match the wrapper's marginLeft plus, in fullscreen, the
-					// root box's padding: the indicator budgets its segments against
-					// the width left after this indent, and overflowing it lets Ink
-					// cut the row mid-word.
-					indentColumns={fullscreen ? 4 : 3}
+					// Must match the wrapper's marginLeft: the indicator budgets its
+					// segments against the width left after this indent, and
+					// overflowing it lets Ink cut the row mid-word.
+					indentColumns={indicatorIndent}
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}

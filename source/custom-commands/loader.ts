@@ -17,7 +17,9 @@ const MAX_COMMANDS_IN_CONTEXT = 3;
 function containsPhrase(haystackLower: string, phrase: string): boolean {
 	const needle = phrase.trim().toLowerCase();
 	if (!needle) return false;
-	const isWordChar = (c: string | undefined) => !!c && /[a-z0-9]/.test(c);
+	const isWordChar = (char: string | undefined): boolean =>
+		char !== undefined &&
+		(('a' <= char && char <= 'z') || ('0' <= char && char <= '9'));
 	for (
 		let i = haystackLower.indexOf(needle);
 		i !== -1;
@@ -25,9 +27,7 @@ function containsPhrase(haystackLower: string, phrase: string): boolean {
 	) {
 		const before = haystackLower[i - 1];
 		const after = haystackLower[i + needle.length];
-		if (!isWordChar(before) && !isWordChar(after)) {
-			return true;
-		}
+		if (!isWordChar(before) && !isWordChar(after)) return true;
 	}
 	return false;
 }

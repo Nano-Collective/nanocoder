@@ -23,6 +23,7 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import type {MCPHealthChange} from '@/types/mcp';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -124,6 +125,7 @@ export const SESSION_ARTIFACT_TOOLS = [
 export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
+	private mcpHealthUnsubscribe: (() => void) | null = null;
 	private customTools = new Map<
 		string,
 		{
@@ -156,13 +158,33 @@ export class ToolManager {
 	async initializeMCP(
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
+		onHealthChange?: (change: MCPHealthChange) => void,
 	): Promise<MCPInitResult[]> {
 		const enabledServers = servers?.filter(server => server.enabled !== false);
+		// Reinitialization must close the previous transports before replacing the client.
+		await this.disconnectMCP();
 
 		if (enabledServers && enabledServers.length > 0) {
 			// Dynamic import — only paid for by sessions with configured MCP servers.
-			const {MCPClient} = await import('@/mcp/mcp-client');
-			this.mcpClient = new MCPClient();
+			this.mcpClient = await this.createMCPClient();
+			const unsubscribeHealth = [
+				onHealthChange && this.mcpClient.onHealthChange(onHealthChange),
+				this.mcpClient.onHealthChange(change => {
+					if (change.status === 'unhealthy') {
+						const toolNames = Object.keys(
+							this.mcpClient?.getNativeToolsRegistry() || {},
+						).filter(
+							name =>
+								this.mcpClient?.getToolMapping().get(name)?.serverName ===
+								change.serverName,
+						);
+						this.registry.unregisterMany(toolNames);
+					}
+				}),
+			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
+			this.mcpHealthUnsubscribe = () => {
+				for (const unsubscribe of unsubscribeHealth) unsubscribe();
+			};
 
 			getShutdownManager().register({
 				name: 'mcp-client',
@@ -183,6 +205,11 @@ export class ToolManager {
 			return results;
 		}
 		return [];
+	}
+
+	protected async createMCPClient(): Promise<MCPClient> {
+		const {MCPClient} = await import('@/mcp/mcp-client');
+		return new MCPClient();
 	}
 
 	/**
@@ -469,6 +496,8 @@ export class ToolManager {
 	}
 
 	async disconnectMCP(): Promise<void> {
+		this.mcpHealthUnsubscribe?.();
+		this.mcpHealthUnsubscribe = null;
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);
@@ -498,6 +527,10 @@ export class ToolManager {
 		return this.mcpClient?.getConnectedServers() || [];
 	}
 
+	getServerNames(): string[] {
+		return this.mcpClient?.getServerNames() || [];
+	}
+
 	getServerTools(serverName: string): MCPTool[] {
 		return this.mcpClient?.getServerTools(serverName) || [];
 	}
@@ -508,5 +541,9 @@ export class ToolManager {
 
 	getMCPClient() {
 		return this.mcpClient;
+	}
+
+	onMCPHealthChange(listener: (change: MCPHealthChange) => void): () => void {
+		return this.mcpClient?.onHealthChange(listener) || (() => {});
 	}
 }

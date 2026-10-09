@@ -1,4 +1,6 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -98,31 +100,49 @@ export async function processToolUse(
 		const isStructured =
 			result && typeof result === 'object' && 'llmContent' in result;
 		const rawContent = isStructured ? result.llmContent : result;
-		const content =
+		const truncated =
 			typeof rawContent === 'string'
 				? truncateToolResult(rawContent)
 				: (rawContent as string);
+		const failed = isStructured && result.isError;
+		// Formatters run on a successful write only, and before post-tool-use
+		// so its hooks see the formatted file.
+		const content =
+			typeof truncated === 'string' && !failed
+				? await formatWrittenFile(toolCall.function.name, parsedArgs, truncated)
+				: truncated;
+
+		// Only string content is extended; a structured payload passes through
+		// untouched.
+		const withHooks =
+			typeof content === 'string'
+				? await appendPostToolUseOutput(
+						toolCall.function.name,
+						parsedArgs,
+						content,
+					)
+				: content;
+
+		// Commit after post-tool-use hooks, so a formatter hook's rewrite of the
+		// file lands in the same commit instead of being left behind.
+		const commitNote = failed
+			? null
+			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
 
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			// Only string content is extended; a structured payload passes
-			// through untouched.
 			content:
-				typeof content === 'string'
-					? await appendPostToolUseOutput(
-							toolCall.function.name,
-							parsedArgs,
-							content,
-						)
-					: content,
+				commitNote && typeof withHooks === 'string'
+					? `${withHooks}\n\n${commitNote}`
+					: withHooks,
 			...(isStructured && result.structured !== undefined
 				? {structuredContent: result.structured}
 				: {}),
 			// A handler can report failure without throwing (a non-zero shell exit
 			// returns normally); surface it so --json and ACP see a failed call.
-			...(isStructured && result.isError ? {isError: true} : {}),
+			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the

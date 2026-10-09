@@ -13,6 +13,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
+import {getConfiguredFormatters} from '@/services/formatters';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -55,6 +56,11 @@ export interface DoctorHook {
 	matchTools?: string[];
 }
 
+export interface DoctorFormatter {
+	label: string;
+	match: string[];
+}
+
 /**
  * The post-edit check as configured, flattened so the report can render an
  * unconfigured case without a separate shape.
@@ -85,6 +91,7 @@ export interface DoctorReport {
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
+formatters: Section<DoctorFormatter[]>;
 	verification: Section<DoctorVerification>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
@@ -210,7 +217,8 @@ async function collectProviders(
 }
 
 function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
-	const serverNames = toolManager?.getConnectedServers() ?? [];
+	const serverNames =
+		toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers() ?? [];
 
 	return serverNames.map(serverName => {
 		const serverInfo = toolManager?.getServerInfo(serverName);
@@ -240,13 +248,22 @@ function collectHooks(): DoctorHook[] {
 	);
 }
 
+/** Formatters are shell commands too, so they are listed the same way. */
+function collectFormatters(): DoctorFormatter[] {
+	return getConfiguredFormatters().map(formatter => ({
+		label: formatter.name ?? formatter.command,
+		match: formatter.match,
+	}));
+}
+
 /**
  * The configured post-edit check, as a command the user can read and run.
  *
  * A project-supplied `verification.command` is executed by the agent, so it
- * belongs beside the hook and MCP commands here rather than only in the config
- * file: the trust disclaimer is a single yes/no for the whole directory, and
- * this is the one place the user can see what they actually agreed to.
+ * belongs beside the hook, formatter and MCP commands here rather than only in
+ * the config file: the trust disclaimer is a single yes/no for the whole
+ * directory, and this is the one place the user can see what they actually
+ * agreed to.
  */
 function collectVerification(): DoctorVerification {
 	const config = getAppConfig().verification;
@@ -289,13 +306,23 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, verification, daemonLock] =
+const [
+		nanocoder,
+		providers,
+		lsp,
+		mcp,
+		hooks,
+		formatters,
+		verification,
+		daemonLock,
+	] =
 		await Promise.all([
 			settle(() => dependencies.getVersion().then(version => ({version}))),
 			settle(() => collectProviders(dependencies)),
 			settle(() => dependencies.getLspStatus()),
 			settle(() => collectMcp(dependencies.getToolManager())),
 			settle(() => collectHooks()),
+			settle(() => collectFormatters()),
 			settle(() => collectVerification()),
 			settle(() => dependencies.getDaemonLock()),
 		]);
@@ -311,6 +338,7 @@ export async function collectDoctorReport(
 		lsp,
 		mcp,
 		hooks,
+formatters,
 		verification,
 		daemon:
 			daemonLock.status === 'ok'
@@ -449,6 +477,19 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
 						• {hook.event}: {hook.label}
 						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
+					</Text>
+				))
+			)}
+
+<SectionTitle>Formatters</SectionTitle>
+			{report.formatters.status === 'error' ? (
+				<SectionError message={report.formatters.error} />
+			) : report.formatters.data.length === 0 ? (
+				<Text color={colors.secondary}>• No formatters configured</Text>
+			) : (
+				report.formatters.data.map(formatter => (
+					<Text key={formatter.label} color={colors.text}>
+						• {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
 			)}

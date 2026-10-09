@@ -25,6 +25,10 @@ import {
 } from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
+	consultPluginPermission,
+	withTrustedProjectPlugins,
+} from '@/plugins/host';
+import {
 	getAllSubagentProgress,
 	type SubagentEvent,
 } from '@/services/subagent-events';
@@ -170,7 +174,9 @@ export async function runAcpConversation(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
 	try {
-		return await runTurn(options);
+		return await withTrustedProjectPlugins(options.session.cwd, () =>
+			runTurn(options),
+		);
 	} finally {
 		restoreApprovalHandler();
 	}
@@ -548,6 +554,27 @@ async function runTurn(
 			);
 
 			if (needsApproval) {
+				const vote = await consultPluginPermission(
+					toolCall.function.name,
+					toolCall.function.arguments,
+				);
+				if (vote.decision === 'deny') {
+					await emitToolCallUpdate(
+						session,
+						conn,
+						toolCall,
+						'failed',
+						vote.reason,
+					);
+					toolResults.push({
+						tool_call_id: toolCall.id,
+						role: 'tool',
+						name: toolCall.function.name,
+						content: `Tool call denied: ${vote.reason}`,
+					});
+					continue;
+				}
+
 				const permission = await requestToolPermission(
 					session,
 					toolCall,

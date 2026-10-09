@@ -2,11 +2,22 @@ import type {
 	MCPInitResult,
 	MCPServer,
 } from '@/types/index';
+import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
 import {ToolManager} from './tool-manager';
 import {getToolsForProfile} from './tool-profiles';
 
 console.log('\ntool-manager.spec.ts');
+
+class HealthSeamToolManager extends ToolManager {
+	constructor(private readonly fakeClient: unknown) {
+		super();
+	}
+
+	protected async createMCPClient(): Promise<MCPClient> {
+		return this.fakeClient as MCPClient;
+	}
+}
 
 // ============================================================================
 // Constructor Tests
@@ -132,6 +143,57 @@ test('initializeMCP - calls onProgress callback for each server', async t => {
 
 	t.is(progressResults.length, 1);
 	t.is(progressResults[0].serverName, 'test-server');
+});
+
+test('initializeMCP - unregisters tools when a server becomes unhealthy', async t => {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy'}) => void)
+		| undefined;
+	const toolName = 'mcp_health_server_tool';
+	const fakeClient = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return [{serverName: 'health-server', success: true, toolCount: 1}];
+		},
+		getToolEntries() {
+			return [
+				{
+					name: toolName,
+					tool: {description: 'health tool', execute: async () => 'ok'} as never,
+					handler: async () => 'ok',
+				},
+			];
+		},
+		getNativeToolsRegistry() {
+			return {[toolName]: {}};
+		},
+		getToolMapping() {
+			return new Map([
+				[
+					toolName,
+					{
+						serverName: 'health-server',
+						originalName: 'health_tool',
+						readOnly: true,
+					},
+				],
+			]);
+		},
+		disconnect: async () => {},
+	};
+	const manager = new HealthSeamToolManager(fakeClient);
+
+	await manager.initializeMCP([
+		{name: 'health-server', transport: 'http', url: 'http://localhost/mcp'},
+	]);
+	t.true(manager.getToolNames().includes(toolName));
+
+	healthListener?.({serverName: 'health-server', status: 'unhealthy'});
+
+	t.false(manager.getToolNames().includes(toolName));
 });
 
 // ============================================================================

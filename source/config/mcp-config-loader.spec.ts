@@ -3,6 +3,7 @@ import {writeFileSync, mkdirSync, rmSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import {loadAllMCPConfigs, loadGlobalMCPConfig, loadProjectMCPConfig, loadAllProviderConfigs, mergeMCPConfigs} from '@/config/mcp-config-loader';
+import {TransportFactory} from '@/mcp/transport-factory';
 
 test.beforeEach(t => {
     // Create a temporary directory for testing
@@ -104,6 +105,41 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
     t.is(server.description, 'A test server');
     t.deepEqual(server.tags, ['test', 'example']);
     t.is(server.enabled, true);
+});
+
+test('MCP config loading preserves health intervals and invalid values for validation', t => {
+	const originalEnv = process.env.NANOCODER_MCPSERVERS;
+	try {
+		for (const healthCheckInterval of [0, 1234, -1]) {
+			const server = {
+				transport: 'http',
+				url: 'http://localhost/mcp',
+				healthCheckInterval,
+			};
+			writeFileSync(
+				join(t.context.testDir as string, '.mcp.json'),
+				JSON.stringify({mcpServers: {'project-health': server}}),
+			);
+			process.env.NANOCODER_MCPSERVERS = JSON.stringify([
+				{name: 'env-health', ...server},
+			]);
+			const loaded = loadAllMCPConfigs();
+			for (const name of ['project-health', 'env-health']) {
+				const config = loaded.find(entry => entry.server.name === name)?.server;
+				t.truthy(config);
+				t.is(config?.healthCheckInterval, healthCheckInterval);
+				if (config) {
+					t.is(
+						TransportFactory.validateServerConfig(config).valid,
+						healthCheckInterval >= 0,
+					);
+				}
+			}
+		}
+	} finally {
+		if (originalEnv === undefined) delete process.env.NANOCODER_MCPSERVERS;
+		else process.env.NANOCODER_MCPSERVERS = originalEnv;
+	}
 });
 
 test('loadProjectMCPConfig - keeps pre-substitution env/headers in raw fields', t => {
