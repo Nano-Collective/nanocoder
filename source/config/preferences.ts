@@ -1,7 +1,8 @@
 import path from 'node:path';
-import {readFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
+import {getConfigPath} from '@/config/paths';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -19,6 +20,7 @@ import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
+let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
 
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
@@ -35,12 +37,63 @@ function getPreferencesPath(): string {
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
+	cachedVoicePreference = undefined;
+}
+
+// Trust is only ever read from, and written to, the global preferences file.
+// A project-level nanocoder-preferences.json ships with the repo, so honouring
+// `trustedDirectories` from it would let a cloned repo trust itself and skip
+// the disclaimer that gates its MCP servers and hooks.
+function getGlobalPreferencesPath(): string {
+	return path.join(getConfigPath(), 'nanocoder-preferences.json');
+}
+
+function isProjectPreferencesPath(preferencesPath: string): boolean {
+	return (
+		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+	);
+}
+
+function readGlobalTrustedDirectories(): string[] | undefined {
+	const globalPath = getGlobalPreferencesPath();
+	if (!existsSync(globalPath)) return undefined;
+	try {
+		const data = JSON.parse(
+			readFileSync(globalPath, 'utf-8'),
+		) as UserPreferences;
+		return data.trustedDirectories;
+	} catch (error) {
+		logError(`Failed to load global preferences: ${String(error)}`);
+		return undefined;
+	}
+}
+
+function writeGlobalTrustedDirectories(trustedDirectories: string[]): void {
+	const globalPath = getGlobalPreferencesPath();
+	let data: UserPreferences = {};
+	if (existsSync(globalPath)) {
+		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+	}
+	data.trustedDirectories = trustedDirectories;
+	mkdirSync(path.dirname(globalPath), {recursive: true});
+	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
 }
 
 export function loadPreferences(): UserPreferences {
 	try {
-		const data = readFileSync(getPreferencesPath(), 'utf-8');
-		return JSON.parse(data) as UserPreferences;
+		const preferencesPath = getPreferencesPath();
+		const data = JSON.parse(
+			readFileSync(preferencesPath, 'utf-8'),
+		) as UserPreferences;
+		if (isProjectPreferencesPath(preferencesPath)) {
+			const trustedDirectories = readGlobalTrustedDirectories();
+			if (trustedDirectories === undefined) {
+				delete data.trustedDirectories;
+			} else {
+				data.trustedDirectories = trustedDirectories;
+			}
+		}
+		return data;
 	} catch (error) {
 		logError(`Failed to load preferences: ${String(error)}`);
 	}
@@ -89,16 +142,26 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 
 export function savePreferences(preferences: UserPreferences): void {
 	try {
-		atomicWriteFileSync(
-			getPreferencesPath(),
-			JSON.stringify(preferences, null, 2),
-		);
+		const preferencesPath = getPreferencesPath();
+		if (isProjectPreferencesPath(preferencesPath)) {
+			const {trustedDirectories, ...rest} = preferences;
+			atomicWriteFileSync(preferencesPath, JSON.stringify(rest, null, 2));
+			if (trustedDirectories !== undefined) {
+				writeGlobalTrustedDirectories(trustedDirectories);
+			}
+		} else {
+			atomicWriteFileSync(
+				preferencesPath,
+				JSON.stringify(preferences, null, 2),
+			);
+		}
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
 		return;
 	}
 
 	preferencesVersion++;
+	cachedVoicePreference = preferences.voice;
 	for (const listener of preferencesListeners) {
 		listener();
 	}
@@ -495,5 +558,31 @@ export function getProfessionalTone(): boolean {
 export function updateProfessionalTone(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.professionalTone = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the voice configuration from preferences
+ */
+export function getVoicePreference(): import('@/types/config').VoiceConfig {
+	if (cachedVoicePreference) return cachedVoicePreference;
+	const preferences = loadPreferences();
+	cachedVoicePreference = preferences.voice ?? {
+		enabled: false,
+		activationMode: 'push-to-talk',
+		sttBackend: 'local',
+		ttsBackend: 'local',
+	};
+	return cachedVoicePreference;
+}
+
+/**
+ * Save the voice configuration to preferences
+ */
+export function updateVoicePreference(
+	config: import('@/types/config').VoiceConfig,
+): void {
+	const preferences = loadPreferences();
+	preferences.voice = config;
 	savePreferences(preferences);
 }

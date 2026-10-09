@@ -6,6 +6,7 @@ import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
@@ -18,6 +19,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 /** Truncate a plain line to fit terminal width */
@@ -41,7 +43,7 @@ export async function formatStringReplacePreview(
 	const isResult = result !== undefined;
 
 	try {
-		const absPath = resolve(path);
+		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -366,6 +368,12 @@ export async function formatStringReplacePreview(
 				message={
 					<Box flexDirection="column">
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						{args.description && (
+							<Box flexDirection="column">
+								<Text color={themeColors.secondary}>Description:</Text>
+								<Text color={themeColors.text}> {args.description}</Text>
+							</Box>
+						)}
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>

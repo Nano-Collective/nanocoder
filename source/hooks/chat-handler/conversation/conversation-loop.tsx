@@ -16,6 +16,7 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
+import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -51,6 +52,7 @@ import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
+import {markRunFailed} from '@/utils/run-outcome';
 import {calculateTokens} from '@/utils/token-calculator';
 import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -474,10 +476,11 @@ export const processAssistantResponse = async (
 		// Node's heap exhausts.
 		if (malformedRetryCount >= maxMalformedRetries) {
 			await flushAll();
+			markRunFailed('malformed-tool-giveup');
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('malformed-tool-giveup')}
-					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
+					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct. Try rephrasing the request or switching models.`}
 					hideBox={true}
 				/>,
 			);
@@ -802,6 +805,7 @@ export const processAssistantResponse = async (
 	// Surface the loop-detected stop. Callers must have paired this turn's
 	// tool calls with results in history before stopping.
 	const stopForRepeatedCalls = () => {
+		markRunFailed('repeated-tool-calls');
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey('tool-loop-detected')}
@@ -895,6 +899,22 @@ export const processAssistantResponse = async (
 		// Results for tools a pre-tool-use hook refused. They skip execution
 		// entirely but still need a result to pair with their tool call.
 		const blockedResults: ToolResult[] = [];
+		const refuseToolCall = (toolCall: ToolCall, reason: string) => {
+			blockedResults.push({
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content: `Error: ${reason}`,
+				isError: true,
+			});
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('hook-blocked-tool')}
+					message={reason}
+					hideBox={true}
+				/>,
+			);
+		};
 
 		for (const toolCall of validToolCalls) {
 			// The XML-fallback synthetic error isn't a real tool, so treat it as
@@ -909,30 +929,17 @@ export const processAssistantResponse = async (
 			// instead of rendering a diff preview, collecting an approval, and
 			// vetoing afterwards. runPreToolUseGate fires the hook once per tool
 			// call, so the downstream gates cost nothing after this one.
+			// Lenient: malformed arguments are the handler's error to report,
+			// and the hook should still see what the model actually sent.
+			const parsedArgs = parseToolArguments<Record<string, unknown>>(
+				toolCall.function.arguments,
+			);
 			if (!validationFailed) {
-				const gate = await runPreToolUseGate(
-					toolCall,
-					// Lenient: malformed arguments are the handler's error to report,
-					// and the hook should still see what the model actually sent.
-					parseToolArguments<Record<string, unknown>>(
-						toolCall.function.arguments,
-					),
-				);
+				const gate = await runPreToolUseGate(toolCall, parsedArgs);
 				if (gate.blocked) {
-					const reason = gate.reason ?? 'Blocked by a pre-tool-use hook.';
-					blockedResults.push({
-						tool_call_id: toolCall.id,
-						role: 'tool',
-						name: toolCall.function.name,
-						content: `Error: ${reason}`,
-						isError: true,
-					});
-					addToChatQueue(
-						<ErrorMessage
-							key={generateKey('hook-blocked-tool')}
-							message={reason}
-							hideBox={true}
-						/>,
+					refuseToolCall(
+						toolCall,
+						gate.reason ?? 'Blocked by a pre-tool-use hook.',
 					);
 					continue;
 				}
@@ -949,13 +956,22 @@ export const processAssistantResponse = async (
 						// Prefer the live ref so a mode switch made while this turn's
 						// tools are still executing takes effect on the next call.
 						mode: developmentModeRef?.current ?? developmentMode,
-						alwaysAllow: nonInteractiveMode
-							? nonInteractiveAlwaysAllow
-							: undefined,
+						// The top-level alwaysAllow list applies in interactive
+						// sessions too; plan mode stays safe because its excluded
+						// tools are never offered in the first place.
+						alwaysAllow: getAppConfig().alwaysAllow ?? [],
 					},
 				));
 
 			if (needsApproval) {
+				const vote = await consultPluginPermission(
+					toolCall.function.name,
+					parsedArgs,
+				);
+				if (vote.decision === 'deny') {
+					refuseToolCall(toolCall, vote.reason);
+					continue;
+				}
 				confirmTools.push(toolCall);
 			} else {
 				autoTools.push(toolCall);
@@ -1279,6 +1295,7 @@ export const processAssistantResponse = async (
 
 			await flushAll();
 			// Exhausted all retries (nudges + compact-and-retry cycles)
+			markRunFailed('empty-response-giveup');
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}

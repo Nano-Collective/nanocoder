@@ -461,3 +461,41 @@ test('diff_edit keeps $ tokens literal across multiple blocks', async t => {
 		'first: "$&"\nsecond: "$`$\'"\n',
 	);
 });
+
+test('diff_edit formatter renders description when provided', async t => {
+	const formatter = diffEditTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: 'test.ts',
+		diff: sampleDiff,
+		description: 'Update constant value to 2.',
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Update constant value to 2\./);
+});
+
+test('diff_edit formatter does not render description when omitted', async t => {
+	const formatter = diffEditTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: 'test.ts',
+		diff: sampleDiff,
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Description:/);
+});

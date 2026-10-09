@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.30.0",
+	"version": "1.31.0",
 	"description": "An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.",
 	"keywords": [
 		"cli",
@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && mkdir -p dist/voice && cp plugins/voice/dist/*.js plugins/voice/dist/*.d.ts dist/voice/ && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
@@ -49,6 +49,7 @@
 		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
+		"test:agent-eval": "tsx benchmarks/agent/run.ts",
 		"test:benchmark": "tsx benchmarks/report.ts",
 		"test:benchmark:update": "tsx benchmarks/report.ts --update",
 		"test:benchmark:explain": "tsx benchmarks/report.ts --explain",
@@ -60,13 +61,16 @@
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
 		"generate:schema": "tsx scripts/generate-config-schema.ts",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
-		"prepare": "husky"
+		"prepare": "husky",
+		"test:types:voice": "tsc --noEmit -p plugins/voice/tsconfig.json"
 	},
 	"files": [
 		"dist",
 		"schemas",
 		"source/app/prompts/sections",
+		"source/subagents/built-in",
 		"source/config/themes.json",
+		"assets/nanocoder-icon.png",
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
@@ -85,6 +89,7 @@
 		"chokidar": "^5.0.0",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
+		"cli-truncate": "^5.2.0",
 		"clipboardy": "^5.3.1",
 		"croner": "^10.0.1",
 		"diff": "^9.0.0",
@@ -103,6 +108,7 @@
 		"pino-roll": "^4.0.0",
 		"react": "^19.0.0",
 		"sonic-boom": "^5.0.0",
+		"string-width": "^8.2.2",
 		"tiktoken": "^1.0.22",
 		"undici": "^8.5.0",
 		"wrap-ansi": "^10.0.0",
@@ -111,6 +117,7 @@
 		"yaml": "^2.8.3"
 	},
 	"devDependencies": {
+		"@nanocollective/nanocoder-voice": "workspace:*",
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
 		"@changesets/cli": "^3.0.0",
@@ -147,6 +154,7 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
+			"benchmarks/**/*.spec.ts",
 			"plugins/**/*.spec.ts",
 			"plugins/**/*.spec.tsx",
 			"!plugins/**/node_modules/**",
@@ -158,7 +166,8 @@
 		"environmentVariables": {
 			"NODE_ENV": "test",
 			"LC_ALL": "en-US.UTF-8",
-			"LANG": "en-US.UTF-8"
+			"LANG": "en-US.UTF-8",
+			"NANOCODER_DATA_DIR": ".test-temp/data"
 		}
 	},
 	"c8": {

@@ -8,7 +8,8 @@ import {
 	getAppConfig,
 	reloadAppConfig,
 } from '@/config/index.js';
-import {setProjectRoot} from '@/services/session-cwd.js';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host.js';
+import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd.js';
 import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
@@ -272,6 +273,125 @@ test.serial('processAssistantResponse - marks the non-interactive approval notic
 	t.regex(notice.content, /Tool approval required for: some_tool/);
 	t.true(notice.displayOnly, 'the approval notice must never reach the model');
 });
+
+const PERMISSION_PLUGIN = `export default {
+	apiVersion: 1,
+	name: 'guard',
+	hooks: {
+		'permission.asked': ({toolArgs}) =>
+			String(toolArgs.command).includes('--force')
+				? {decision: 'deny', reason: 'no force push'}
+				: {decision: 'defer'},
+	},
+};
+`;
+
+async function withPermissionPlugin(
+	run: () => Promise<void>,
+): Promise<void> {
+	const root = join(tmpdir(), `nanocoder-loop-plugins-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'plugins', 'guard.mjs'),
+		PERMISSION_PLUGIN,
+		'utf-8',
+	);
+	setProjectRoot(root);
+	resetPluginsForTests();
+	await loadPlugins(true);
+	try {
+		await run();
+	} finally {
+		resetPluginsForTests();
+		resetSessionCwd();
+	}
+}
+
+test.serial(
+	'processAssistantResponse - a plugin deny refuses the tool before the approval prompt',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return true;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_force',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git push --force'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.false(asked);
+		t.true(shown.includes('no force push'));
+	},
+);
+
+test.serial(
+	'processAssistantResponse - a plugin defer still asks for approval',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return false;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_status',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git status'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.true(asked);
+		t.false(shown.includes('no force push'));
+	},
+);
 
 // ============================================================================
 // Auto-Nudge Tests (lines 469-506)
@@ -2730,7 +2850,7 @@ test.serial('malformed-retry limit honors a custom configured value', async t =>
 	const giveUpMessage = queuedComponents.find(
 		(c: any) =>
 			typeof c.props?.message === 'string' &&
-			c.props.message.includes('malformed tool calls 1 times'),
+			c.props.message.includes('malformed tool calls 1 time in a row'),
 	);
 	t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
 });
@@ -3029,3 +3149,83 @@ test.serial(
 		);
 	},
 );
+
+// ============================================================================
+// Top-level alwaysAllow in interactive sessions
+//
+// nanocoder.alwaysAllow used to reach resolveToolApproval only in
+// non-interactive runs, so tools with a hard `approval: true` (git_commit,
+// custom `approval: always` tools) still prompted in the TUI.
+// ============================================================================
+
+for (const [listed, expectedPrompts] of [
+	[true, 0],
+	[false, 1],
+] as const) {
+	test.serial(
+		`interactive loop ${listed ? 'skips' : 'keeps'} the prompt for a tool ${listed ? 'in' : 'not in'} alwaysAllow`,
+		async t => {
+			const leave = enterHookFixture();
+			let confirmPrompts = 0;
+			let chatCalls = 0;
+			try {
+				writeFileSync(
+					join(HOOK_GATE_DIR, 'agents.config.json'),
+					JSON.stringify({
+						nanocoder: {alwaysAllow: listed ? ['some_tool'] : []},
+					}),
+					'utf-8',
+				);
+				reloadAppConfig();
+				setGlobalToolConfirmHandler(async () => {
+					confirmPrompts++;
+					return true;
+				});
+
+				const mockClient = createMockClient({content: '', toolCalls: []});
+				mockClient.chat = async () => {
+					chatCalls++;
+					if (chatCalls === 1) {
+						return {
+							choices: [
+								{
+									message: {
+										role: 'assistant',
+										content: '',
+										tool_calls: [
+											{
+												id: 'call_1',
+												function: {name: 'some_tool', arguments: '{}'},
+											},
+										],
+									},
+								},
+							],
+							toolsDisabled: false,
+						} as never;
+					}
+					return {
+						choices: [{message: {role: 'assistant', content: 'done'}}],
+						toolsDisabled: false,
+					} as never;
+				};
+
+				await processAssistantResponse(
+					createDefaultParams({
+						client: mockClient,
+						toolManager: createMockToolManager({
+							tools: ['some_tool'],
+							needsApproval: true,
+						}) as never,
+						nonInteractiveMode: false,
+					}) as never,
+				);
+			} finally {
+				setGlobalToolConfirmHandler(async () => true);
+				leave();
+			}
+
+			t.is(confirmPrompts, expectedPrompts);
+		},
+	);
+}

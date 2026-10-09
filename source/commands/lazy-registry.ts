@@ -132,7 +132,7 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'export',
-		description: 'Export the chat history to a markdown file',
+		description: 'Export the chat history to a markdown or JSON file',
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{
@@ -264,5 +264,10 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
+	},
+	{
+		name: 'voice',
+		description: 'Toggle voice mode and configure voice settings',
+		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
 ];

@@ -15,6 +15,9 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {consultPluginPermission} from '@/plugins/host';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -47,6 +50,10 @@ import type {
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -264,15 +271,19 @@ export class SubagentExecutor {
 			};
 
 			try {
-				const output = await this.runSubagentConversation(
-					client,
-					messages,
-					filteredTools,
-					config,
-					signal,
-					agentId,
-					executionContext,
-					recordUsage,
+				const output = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.runSubagentConversation(
+							client,
+							messages,
+							filteredTools,
+							config,
+							signal,
+							agentId,
+							executionContext,
+							recordUsage,
+						),
 				);
 
 				// Read the final estimated progress count. Provider-reported usage is
@@ -292,6 +303,7 @@ export class SubagentExecutor {
 				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
+					clearReadContentScope(agentId);
 				}
 				restoreParent();
 			}
@@ -352,7 +364,14 @@ export class SubagentExecutor {
 		let available = allTools;
 
 		if (config.tools && config.tools.length > 0) {
-			available = available.filter(tool => config.tools?.includes(tool));
+			// A bundle subagent always keeps its sibling tools: they are
+			// scoped to it, and listing them in `tools:` is not required.
+			available = available.filter(
+				tool =>
+					config.tools?.includes(tool) ||
+					(config.ownerSkill !== undefined &&
+						this.toolManager.getOwnerSkill(tool) === config.ownerSkill),
+			);
 		}
 
 		if (config.disallowedTools && config.disallowedTools.length > 0) {
@@ -370,6 +389,16 @@ export class SubagentExecutor {
 
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
+
+		// Apply the parent's development mode, exactly as the main
+		// conversation does. Without this a subagent spawned in plan mode
+		// could propose write_file or execute_bash, and a headless
+		// (daemon-triggered) run would be offered ask_user and tools that
+		// need an approval nobody is there to give.
+		available = this.toolManager.filterToolNamesForMode(
+			available,
+			this.currentMode(),
+		);
 
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development
@@ -736,13 +765,17 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				const toolResult = await this.executeToolCall(
-					toolName,
-					toolCall.function.arguments,
-					toolCall.id,
-					config,
-					signal,
-					executionContext,
+				const toolResult = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.executeToolCall(
+							toolName,
+							toolCall.function.arguments,
+							toolCall.id,
+							config,
+							signal,
+							executionContext,
+						),
 				);
 
 				// Count tokens from tool results
@@ -778,6 +811,7 @@ export class SubagentExecutor {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
+			alwaysAllow: getAppConfig().alwaysAllow ?? [],
 		});
 	}
 
@@ -844,6 +878,11 @@ export class SubagentExecutor {
 			rawArguments,
 		);
 		if (needsApproval) {
+			const vote = await consultPluginPermission(toolName, parsedArgs);
+			if (vote.decision === 'deny') {
+				return `Error: ${vote.reason}`;
+			}
+
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
 			// them and joins with `Promise.allSettled`, so one subagent parked
@@ -873,11 +912,24 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const formatted =
+				typeof result !== 'string' && result.isError
+					? truncated
+					: await formatWrittenFile(toolName, parsedArgs, truncated);
+			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
-				truncateToolResult(content),
+				formatted,
 			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const failed = typeof result !== 'string' && result.isError;
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return commitNote ? `${withHooks}\n\n${commitNote}` : withHooks;
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use

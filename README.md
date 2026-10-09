@@ -5,7 +5,7 @@
 
 An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
-Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
+Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Requesty, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
 
 [![Typing SVG](https://readme-typing-svg.herokuapp.com?font=&size=33&letterSpacing=large&pause=1000&color=8373F7&center=true&vCenter=true&width=1000&lines=Nanocoder;your+private+%2C+local+first+AI+coding+assistant)](https://git.io/typing-svg)
 
@@ -48,8 +48,8 @@ nanocoder run --provider openrouter "refactor database module"
 nanocoder --mode yolo
 nanocoder --mode plan run "audit the auth module"
 
-# Fullscreen mode with in-app scrolling instead of the inline default
-nanocoder --alt-screen
+# Inline mode (native terminal scrollback) instead of the fullscreen default
+nanocoder --no-alt-screen
 
 # Review a branch or PR for bugs, security issues, and style violations
 nanocoder review main
@@ -65,7 +65,7 @@ Nanocoder supports two rendering modes, mirroring what Claude Code and Codex shi
 - **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting can be toggled with `--mouse` / `--no-mouse` or in preferences.
 - **Inline** (`--no-alt-screen` flag, or `"alternateScreen": false` in preferences) — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
 
-In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly, leaving the transcript and a farewell instead of a dead input box.
+In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly instead of leaving a dead input box. Inline mode leaves the transcript in your scrollback; fullscreen mode restores the terminal to what it showed before Nanocoder started, so the transcript is not kept on screen (use `/resume` or `/export` to get it back).
 
 ## Documentation
 

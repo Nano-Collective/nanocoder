@@ -22,6 +22,8 @@ sidebar_order: 25
 
 The `sdkProvider: "anthropic"` field is required as Thesean's Claude models use the Anthropic Messages API format. The `ship-like/` prefix on model names enables Ship's inference-time optimizations.
 
+If long replies stop mid-sentence, set `maxOutputTokens` on the provider entry. `@ai-sdk/anthropic` falls back to a 4096-token ceiling for model ids it does not recognise, see [Output Token Ceiling](index.md#output-token-ceiling).
+
 ## Setup
 
 1. Create an account at [app.thesean.ai](https://app.thesean.ai/)

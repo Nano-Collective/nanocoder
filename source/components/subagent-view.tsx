@@ -75,7 +75,11 @@ export function SubagentView({
 				return (
 					<ToolMessage
 						key={`tool-${index}`}
-						message={`⚒ ${msg.name}: ${msg.content.slice(0, 100)}...`}
+						message={`⚒ ${msg.name}: ${
+							msg.content.length > 100
+								? `${msg.content.slice(0, 100)}...`
+								: msg.content
+						}`}
 						hideBox={true}
 					/>
 				);

@@ -12,6 +12,10 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {
+	DEFAULT_SESSION_CONFIG,
+	normalizeSessionConfig,
+} from '@/config/session-config';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {
 	MAX_EMPTY_TURNS,
@@ -27,6 +31,7 @@ import type {
 	CompressionMode,
 	CompressionStrategy,
 	DevelopmentMode,
+	FormatterDefinition,
 	HookDefinition,
 	HookEvent,
 	HooksConfig,
@@ -41,6 +46,8 @@ import type {
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+
+export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -254,83 +261,12 @@ function validateStrategy(strategy: unknown): CompressionStrategy {
 	return 'llm';
 }
 
-/**
- * Built-in session defaults. See DEFAULT_AUTO_COMPACT_CONFIG for why this is
- * exported rather than inlined.
- * @public
- */
-export const DEFAULT_SESSION_CONFIG: NonNullable<AppConfig['sessions']> = {
-	autoSave: true,
-	saveInterval: 30000, // 30 seconds
-	maxSessions: 100,
-	maxMessages: 1000,
-	retentionDays: 30,
-	directory: '',
-	smartTitles: true,
-};
-
 // Load session configuration and Returns default config if not specified
 function loadSessionConfig(): AppConfig['sessions'] {
-	const defaults = DEFAULT_SESSION_CONFIG;
-
-	const normalizeSessionNumber = (
-		value: unknown,
-		min: number,
-		fallback: number,
-	): number => {
-		if (typeof value === 'number' && Number.isFinite(value)) {
-			return Math.max(min, value);
-		}
-		return fallback;
-	};
-
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
-			const sessions = config.nanocoder?.sessions;
-			if (sessions && typeof sessions === 'object') {
-				return {
-					autoSave:
-						sessions.autoSave !== undefined
-							? Boolean(sessions.autoSave)
-							: defaults.autoSave,
-					saveInterval: normalizeSessionNumber(
-						sessions.saveInterval,
-						1000, // Minimum 1 second
-						defaults.saveInterval ?? 30000,
-					),
-					maxSessions: normalizeSessionNumber(
-						sessions.maxSessions,
-						1,
-						defaults.maxSessions ?? 100,
-					),
-					maxMessages: normalizeSessionNumber(
-						sessions.maxMessages,
-						1,
-						defaults.maxMessages ?? 1000,
-					),
-					retentionDays: normalizeSessionNumber(
-						sessions.retentionDays,
-						1,
-						defaults.retentionDays ?? 30,
-					),
-					directory: sessions.directory || defaults.directory,
-					smartTitles:
-						sessions.smartTitles !== undefined
-							? Boolean(sessions.smartTitles)
-							: defaults.smartTitles,
-					// No default model: unset means "use the session's own".
-					titleModel:
-						typeof sessions.titleModel === 'string'
-							? sessions.titleModel
-							: undefined,
-					titleProvider:
-						typeof sessions.titleProvider === 'string'
-							? sessions.titleProvider
-							: undefined,
-				};
-			}
-			return null;
-		}) ?? {...defaults}
+		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config =>
+			normalizeSessionConfig(config.nanocoder?.sessions),
+		) ?? {...DEFAULT_SESSION_CONFIG}
 	);
 }
 
@@ -500,6 +436,23 @@ function loadSandboxConfig(): boolean {
 	);
 }
 
+function loadAutoCommitConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'autoCommit', config => {
+			const value = config.nanocoder?.autoCommit;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.autoCommit must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+				return false;
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -524,6 +477,47 @@ function loadDisabledToolsConfig(): string[] | undefined {
 				);
 			}
 			return null;
+		}) ?? undefined
+	);
+}
+
+// User-defined LSP servers. Entries without a name, command or languages list
+// are dropped rather than handed to the LSP manager half-formed.
+function loadLspServersConfig(): AppConfig['lspServers'] {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'lspServers', config => {
+			const lspServers = config.nanocoder?.lspServers;
+			if (!Array.isArray(lspServers)) {
+				return null;
+			}
+			const valid: NonNullable<AppConfig['lspServers']> = [];
+			for (const server of lspServers) {
+				if (
+					!server ||
+					typeof server.name !== 'string' ||
+					typeof server.command !== 'string' ||
+					!Array.isArray(server.languages)
+				) {
+					continue;
+				}
+				valid.push({
+					name: server.name,
+					command: server.command,
+					args: Array.isArray(server.args)
+						? server.args.filter(
+								(arg: unknown): arg is string => typeof arg === 'string',
+							)
+						: undefined,
+					languages: server.languages.filter(
+						(lang: unknown): lang is string => typeof lang === 'string',
+					),
+					env:
+						server.env && typeof server.env === 'object'
+							? server.env
+							: undefined,
+				});
+			}
+			return valid;
 		}) ?? undefined
 	);
 }
@@ -570,19 +564,42 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 
 	const definition: HookDefinition = {command};
 
-	if (Array.isArray(entry.matchTools)) {
-		const matchTools = entry.matchTools.filter(
-			(item: unknown): item is string => typeof item === 'string',
-		);
-		if (matchTools.length > 0) definition.matchTools = matchTools;
-	}
-
-	if (Array.isArray(entry.matchPaths)) {
-		const matchPaths = entry.matchPaths.filter(
+	// A bare string is accepted as a one-item list. Dropping it silently would
+	// widen a scoped guard to every tool.
+	const rawMatchTools =
+		typeof entry.matchTools === 'string'
+			? [entry.matchTools]
+			: entry.matchTools;
+	if (Array.isArray(rawMatchTools)) {
+		const matchTools = rawMatchTools.filter(
 			(item: unknown): item is string =>
 				typeof item === 'string' && item.trim() !== '',
 		);
-		if (matchPaths.length > 0) definition.matchPaths = matchPaths;
+		if (matchTools.length > 0) {
+			definition.matchTools = matchTools;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchTools list, so it runs for every tool. Remove matchTools to make that explicit, or list the tools to scope it.`,
+			);
+		}
+	}
+
+	const rawMatchPaths =
+		typeof entry.matchPaths === 'string'
+			? [entry.matchPaths]
+			: entry.matchPaths;
+	if (Array.isArray(rawMatchPaths)) {
+		const matchPaths = rawMatchPaths.filter(
+			(item: unknown): item is string =>
+				typeof item === 'string' && item.trim() !== '',
+		);
+		if (matchPaths.length > 0) {
+			definition.matchPaths = matchPaths;
+		} else {
+			logWarning(
+				`Hook "${command}" has an empty matchPaths list, so it is not scoped by path.`,
+			);
+		}
 	}
 
 	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
@@ -630,6 +647,63 @@ function loadHooksConfig(): HooksConfig | undefined {
 			// `$NANOCODER_FILE` and friends must survive to the shell that runs
 			// them rather than being expanded (to nothing) at config-load time.
 			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
+/**
+ * Parse one formatter entry. Like hooks, an invalid entry is dropped with an
+ * error rather than failing the whole config.
+ */
+function parseFormatterDefinition(raw: unknown): FormatterDefinition | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+	const entry = raw as Record<string, unknown>;
+	const command = entry.command;
+	if (typeof command !== 'string' || command.trim() === '') return null;
+
+	const rawMatch =
+		typeof entry.match === 'string' ? [entry.match] : entry.match;
+	const match = Array.isArray(rawMatch)
+		? rawMatch.filter(
+				(item: unknown): item is string =>
+					typeof item === 'string' && item.trim() !== '',
+			)
+		: [];
+	// Unlike a hook, a formatter with no `match` is not widened to every file:
+	// running `prettier --write` on a Go file is never what was meant.
+	if (match.length === 0) return null;
+
+	const definition: FormatterDefinition = {match, command};
+	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
+		definition.timeout = Math.max(1, Math.round(entry.timeout));
+	}
+	if (typeof entry.name === 'string' && entry.name.trim() !== '') {
+		definition.name = entry.name.trim();
+	}
+	return definition;
+}
+
+function loadFormattersConfig(): FormatterDefinition[] | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'formatters', config => {
+			const formatters = config.nanocoder?.formatters;
+			if (!Array.isArray(formatters)) return null;
+
+			const parsed = formatters
+				.map(parseFormatterDefinition)
+				.filter(
+					(formatter): formatter is FormatterDefinition => formatter !== null,
+				);
+			if (parsed.length !== formatters.length) {
+				logError(
+					"Invalid formatters config: entries need a 'command' string and a non-empty 'match' glob list.",
+				);
+			}
+
+			// No env substitution, for the same reason as hooks: `$FILE` must
+			// reach the shell rather than being expanded at config-load time.
+			return parsed;
 		}) ?? undefined
 	);
 }
@@ -769,6 +843,9 @@ function loadAppConfig(): AppConfig {
 	// Load lifecycle hooks (shell commands run at fixed points in the agent loop)
 	const hooks = loadHooksConfig();
 
+	// Load formatters (run on files the agent writes, before post-tool-use)
+	const formatters = loadFormattersConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
@@ -779,9 +856,15 @@ function loadAppConfig(): AppConfig {
 
 	const sandbox = loadSandboxConfig();
 
+	const autoCommit = loadAutoCommitConfig();
+
+	// Load user-defined LSP servers (auto-discovery still runs alongside)
+	const lspServers = loadLspServersConfig();
+
 	return {
 		providers,
 		mcpServers,
+		lspServers,
 		autoCompact,
 		sessions,
 		headless,
@@ -792,10 +875,12 @@ function loadAppConfig(): AppConfig {
 		disabledTools,
 		systemPrompt,
 		hooks,
+		formatters,
 		notifications,
 		modeProviders,
 		tune,
 		sandbox,
+		autoCommit,
 	};
 }
 

@@ -20,6 +20,8 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
+	private _pendingSession: Promise<string | undefined> | null = null;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
@@ -36,6 +38,17 @@ export class NanocoderAcpClient {
 	public availableModels: string[] = [];
 	public currentProvider?: string;
 	public availableProviders: string[] = [];
+
+	/**
+	 * True only after `initialize()` has succeeded on the current connection.
+	 * `connection` is set earlier, when stdio is wired — using that as a ready
+	 * signal lets `newSession` race the handshake and fail silently.
+	 */
+	private _handshakeComplete = false;
+
+	get isHandshakeComplete(): boolean {
+		return this._handshakeComplete && this.connection != null;
+	}
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
 	private activePrompt?: PromptAttempt;
@@ -85,10 +98,15 @@ export class NanocoderAcpClient {
 		return this.pendingPermissions.size > 0;
 	}
 
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
+	}
+
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._clearPendingPermissions();
+		this._handshakeComplete = false;
 	}
 
 	/** Handle custom notifications from the agent. */
@@ -171,6 +189,7 @@ export class NanocoderAcpClient {
 			}
 
 			// Complete handshake
+			this._handshakeComplete = true;
 			this.stateManager.setStatus(ACPStatus.Connected);
 			if (this.onConnectionReady) {
 				this.onConnectionReady();
@@ -188,23 +207,39 @@ export class NanocoderAcpClient {
 			return this._sessionId;
 		}
 		if (!this.connection) return undefined;
+		// Coalesce overlapping callers. Without this, a click on "Send" racing
+		// the auto-init from `onConnectionReady` would each call newSession()
+		// against the shared connection; the second writer overwrites the
+		// first `_sessionId` and the first session is orphaned with its mode
+		// and configOptions already read into local state.
+		if (this._pendingSession) {
+			return this._pendingSession;
+		}
+		this._pendingSession = this._createSession(cwd);
+		try {
+			return await this._pendingSession;
+		} finally {
+			this._pendingSession = null;
+		}
+	}
 
+	private async _createSession(cwd: string): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
 			const initialModel = config.get<string>('model');
 
-			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
-			
+
 			// Parse modes and configOptions
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
 			}
-			
+
 			if (result.configOptions) {
 				this._parseConfigOptions(result.configOptions);
 			}
@@ -227,7 +262,7 @@ export class NanocoderAcpClient {
 	}
 
 	notifyStateSync() {
-		if (this.onStateSync && (this.currentMode || this.currentModel || this.currentProvider)) {
+		if (this.onStateSync) {
 			this.onStateSync({
 				mode: this.currentMode,
 				availableModes: this.availableModes,
@@ -438,10 +473,10 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
+			this._sessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);

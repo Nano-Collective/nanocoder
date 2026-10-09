@@ -65,8 +65,8 @@ Every hook is one object with:
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `command` | yes | Shell command to run. Runs through `sh -c` (`cmd.exe` on Windows). |
-| `matchTools` | no | Tool names this hook applies to. Omitted means every tool. Ignored by non-tool events. |
-| `matchPaths` | no | Globs the acted-on file must match. Omitted means every file. See [Scoping by file](#scoping-by-file). |
+| `matchTools` | no | Tool names this hook applies to. A single string is accepted as a one-item list. Omitted means every tool; an empty list also means every tool and logs a warning. Ignored by non-tool events. |
+| `matchPaths` | no | Globs the acted-on file must match. A single string is accepted as a one-item list. Omitted means every file. See [Scoping by file](#scoping-by-file). |
 | `timeout` | no | Milliseconds before the hook is killed. Defaults to 30000, except `session-end` (see below). |
 | `name` | no | Label shown in transcripts, error messages, and `/doctor`. Defaults to the command. |
 
@@ -90,6 +90,8 @@ Entries without a usable `command` string are dropped with an error in the log r
   }
 ]
 ```
+
+For plain formatting, [`nanocoder.formatters`](../configuration/index.md#formatters) is the shorter form: it runs only after a successful write, runs before these hooks, and tells the model when the file changed under it.
 
 The patterns use the same dialect as [skill subscriptions](skills.md#event-subscriptions) — `**` across directories, `*` within one, `?` for a single character, and `{a,b}` alternation. The file is whichever of `path`, `file_path`, or `filePath` the tool was called with, which is every file tool.
 
@@ -152,7 +154,7 @@ Hooks run in config order, sequentially, **with the project root as their cwd** 
 
 ## Blocking a tool call
 
-On `pre-tool-use` and `user-prompt-submit`, a **non-zero exit denies the action**, and the hook's stdout is handed back to the model as the reason — so it can adapt rather than retry blindly.
+On `pre-tool-use` and `user-prompt-submit`, a **non-zero exit denies the action**, and the hook's stdout is handed back to the model as the reason - so it can adapt rather than retry blindly. If the hook printed nothing on stdout, its stderr is used instead.
 
 `.nanocoder/hooks/guard.sh`:
 
@@ -180,7 +182,7 @@ The gate is also applied again at each execution boundary (`processToolUse`, the
 
 The first veto ends the chain — later hooks on that event don't run.
 
-Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run.
+Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run; on `post-tool-use` the failing hook's output is also handed to the model (see below).
 
 Killing a hook kills what it started. The command runs under a shell, so signalling that shell alone would leave the grandchildren of a compound command (`a && b`, a pipeline) running after the agent has moved on. Hooks are spawned into their own process group on POSIX and reaped with `taskkill /T` on Windows, so the whole tree goes.
 
@@ -188,12 +190,51 @@ Killing a hook kills what it started. The command runs under a shell, so signall
 
 Anything a hook prints on stdout is put in front of the model:
 
-- `post-tool-use` stdout is appended to that tool's result inside a `<hook-output>` block, so a formatter's complaint lands on the same turn. The combined result is re-capped afterwards, so a chatty hook cannot push a tool result past the usual truncation limit.
+- `post-tool-use` stdout is appended to that tool's result inside a `<hook-output>` block, so a formatter's complaint lands on the same turn. A `post-tool-use` hook that exits non-zero is forwarded too, stdout and stderr both, in a block tagged with its exit code (`<hook-output event="post-tool-use" exit="1">`), so a failing linter or test run reaches the model instead of only your screen. The tool call itself still counts as a success. The combined result is re-capped afterwards, so a chatty hook cannot push a tool result past the usual truncation limit; failures go last, where the cut keeps them.
 - `session-start` and `user-prompt-submit` stdout is buffered and prepended to your next prompt inside a `<hook-context>` block. Your transcript still shows what you typed. `/clear` drops anything undelivered.
 
 A hook that prints nothing injects nothing.
 
 `session-start` does not hold up the UI — it runs in the background while the session finishes initializing. It is only waited on at the point it matters, which is the first prompt you submit: if the hook is still running, that submission waits for it rather than letting the context slip to prompt two. So keep `session-start` hooks fast, and give anything genuinely slow its own short `timeout` — the default is 30 seconds, and it is your first prompt that pays for it.
+
+## In-process plugins
+
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+
+The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
+
+```js
+/** @type {import('@nanocollective/nanocoder/dist/sdk/plugin.js').NanocoderPlugin} */
+export default {
+	apiVersion: 1,
+	name: 'guard',
+	hooks: {
+		'tool.execute.before': ({toolName, toolArgs}) => {
+			if (toolName === 'execute_bash' && String(toolArgs.command).includes('rm -rf')) {
+				return {block: 'rm -rf is not allowed in this repo'};
+			}
+		},
+		'permission.asked': ({toolArgs}) =>
+			String(toolArgs.command).includes('--force')
+				? {decision: 'deny', reason: 'no force push'}
+				: {decision: 'defer'},
+	},
+};
+```
+
+There are five hooks. Each may return its result directly or as a promise.
+
+- `tool.execute.before` runs with `pre-tool-use`. Return `{block: 'reason'}` to refuse the tool call.
+- `tool.execute.after` runs with `post-tool-use`. Return `{append: 'text'}` to add text to the tool result inside the same `<hook-output>` block a shell hook uses.
+- `session.compacting` runs with `pre-compact`. It is observe-only.
+- `tui.prompt.append` runs with `user-prompt-submit`. Return a string to add it to the prompt context. It cannot block the prompt.
+- `permission.asked` runs when a tool is about to ask for your approval. Return `{decision: 'deny', reason: '...'}` to refuse without asking, or `{decision: 'defer'}` to let the prompt appear. A plugin cannot approve a tool.
+
+Shell hooks for the same event run first. If a shell hook blocks, plugins do not run. A plugin that throws, times out after 30 seconds, or returns something malformed is logged and ignored; it never blocks anything. A file with an unknown hook name, a wrong `apiVersion`, or a `name` already used by an earlier file is skipped.
+
+An editor session (ACP) has no trust prompt. It loads plugins from the session's workspace only when that directory is already in your trusted list. Plugins are isolated between workspaces, including when sessions run concurrently.
+
+This is the initial in-process plugin API. Its types ship with the CLI; a separately published, independently versioned SDK package and custom UI component APIs are not provided yet.
 
 ## Security
 

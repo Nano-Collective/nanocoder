@@ -43,6 +43,7 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
@@ -241,10 +242,19 @@ export default function App({
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
 	});
+
+	// Auto-commit writes its commit messages with the session's current client.
+	// Synced here rather than at each setClient call so /model, /provider and
+	// mode-provider switches are all picked up.
+	React.useEffect(() => {
+		setAutoCommitClient(appState.client);
+	}, [appState.client]);
 
 	// Initialize notifications config from app config (once)
 	React.useEffect(() => {
@@ -288,14 +298,26 @@ export default function App({
 			// showing the bar with the name we already have.
 			try {
 				const checkpointManager = new CheckpointManager(getProjectRoot());
-				const metadata =
-					await checkpointManager.getCheckpointMetadata(checkpointName);
+				// List what the turn actually changed, not every path it set out
+				// to touch: a rejected or no-op edit is still checkpointed.
+				const {filesChanged, filesMissing} =
+					await checkpointManager.getChangesSince(checkpointName);
+
+				// Every mutation failed or was a no-op: there is nothing to
+				// review, so release the checkpoint instead of opening an empty
+				// gate that blocks the prompt.
+				if (filesChanged.length === 0 && filesMissing.length === 0) {
+					await checkpointManager
+						.deleteCheckpoint(checkpointName)
+						.catch(() => {});
+					return;
+				}
 
 				appState.setArchitectReviewState({
 					show: true,
-					checkpointName: metadata.name,
-					filesChanged: metadata.filesChanged,
-					filesMissing: metadata.filesMissing ?? [],
+					checkpointName,
+					filesChanged,
+					filesMissing,
 				});
 			} catch {
 				appState.setArchitectReviewState({
@@ -622,18 +644,37 @@ export default function App({
 		? Math.max(0, terminalRows - FULLSCREEN_CHROME_ROWS)
 		: terminalRows;
 
-	const initialProvider = React.useRef(appState.currentProvider);
-	const initialModel = React.useRef(appState.currentModel);
+	// Pin the provider/model the run started under, but only once
+	// initialization has resolved them: on the first render they are still the
+	// placeholder defaults (no model), which blanked the boot line's provider
+	// segment and, on narrow terminals, the whole line. The transcript only
+	// mounts once startChat is true, so nothing renders before this is set.
+	const bootIdentity = React.useRef<{provider: string; model: string} | null>(
+		null,
+	);
+	if (!bootIdentity.current && appState.startChat) {
+		bootIdentity.current = {
+			provider: appState.currentProvider,
+			model: appState.currentModel,
+		};
+	}
+	const {startChat} = appState;
 	const staticComponents = React.useMemo(() => {
 		return createStaticComponents({
 			shouldShowWelcome: showWelcome && !nonInteractiveMode,
-			currentProvider: initialProvider.current,
-			currentModel: initialModel.current,
+			currentProvider: startChat ? (bootIdentity.current?.provider ?? '') : '',
+			currentModel: startChat ? (bootIdentity.current?.model ?? '') : '',
 			nonInteractiveMode,
 			developmentMode: initialDevelopmentMode,
 			availableRows: welcomeRows,
 		});
-	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode, welcomeRows]);
+	}, [
+		showWelcome,
+		nonInteractiveMode,
+		initialDevelopmentMode,
+		welcomeRows,
+		startChat,
+	]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
@@ -799,6 +840,8 @@ export default function App({
 							handleSubagentToolApproval={handleSubagentToolApproval}
 							pendingToolConfirmation={pendingToolConfirmation}
 							handleToolConfirmation={handleToolConfirmation}
+							pendingVoiceInstall={pendingVoiceInstall}
+							onVoiceInstallConfirm={handleVoiceInstallConfirm}
 							handleQuestionAnswer={handleQuestionAnswer}
 							handleUserSubmit={handleUserSubmit}
 							userMessageQueue={userMessageQueue}

@@ -1,7 +1,7 @@
 import test from 'ava';
 import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
-import {jsonSchema, streamText, tool} from 'ai';
+import {jsonSchema, NoSuchToolError, streamText, tool} from 'ai';
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
@@ -9,7 +9,7 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import type {LanguageModel} from 'ai';
-import {handleChat} from './chat-handler.js';
+import {handleChat, stopOnUnknownTool} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
 import {rehydrateResponse} from './privacy.js';
 
@@ -1050,4 +1050,38 @@ test('the v4 spelling maxTokens does not reach the provider', async t => {
 		4096,
 		'maxTokens is silently ignored — the bug this fix exists for',
 	);
+});
+
+// A stuck model calling a nonexistent tool must reach the conversation loop's
+// repeated-call cap, not loop inside one SDK call.
+test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
+	const unknown = {
+		type: 'tool-call',
+		toolCallId: 'c1',
+		toolName: 'no_such_tool',
+		input: {},
+		dynamic: true,
+		invalid: true,
+		error: new NoSuchToolError({toolName: 'no_such_tool'}),
+	};
+	const valid = {
+		type: 'tool-call',
+		toolCallId: 'c2',
+		toolName: 'read_file',
+		input: {path: 'a'},
+	};
+	const steps = (toolCalls: unknown[]) =>
+		({steps: [{toolCalls}]}) as unknown as Parameters<
+			typeof stopOnUnknownTool
+		>[0];
+
+	t.true(stopOnUnknownTool(steps([unknown])) as boolean);
+	t.false(stopOnUnknownTool(steps([valid])) as boolean);
+	// An unparsable call to a real tool is not this condition's concern.
+	t.false(
+		stopOnUnknownTool(
+			steps([{...unknown, toolName: 'read_file', error: new Error('bad json')}]),
+		) as boolean,
+	);
+	t.false(stopOnUnknownTool({steps: []} as never) as boolean);
 });

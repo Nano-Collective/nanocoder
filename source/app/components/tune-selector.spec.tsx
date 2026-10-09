@@ -271,6 +271,36 @@ test('Include AGENTS.md defaults OFF for nano profile', t => {
 	t.regex(output, /Include AGENTS\.md.*OFF/);
 });
 
+test('Include AGENTS.md defaults OFF when auto resolves to nano for the model', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'auto'};
+	const {lastFrame} = render(
+		<Wrapper>
+			<TuneSelector
+				currentConfig={config}
+				currentModel="llama3.2:1b"
+				onSelect={() => {}}
+				onCancel={() => {}}
+			/>
+		</Wrapper>,
+	);
+	t.regex(lastFrame()!, /Include AGENTS\.md.*OFF/);
+});
+
+test('Include AGENTS.md defaults ON when auto resolves to full for the model', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'auto'};
+	const {lastFrame} = render(
+		<Wrapper>
+			<TuneSelector
+				currentConfig={config}
+				currentModel="gpt-5"
+				onSelect={() => {}}
+				onCancel={() => {}}
+			/>
+		</Wrapper>,
+	);
+	t.regex(lastFrame()!, /Include AGENTS\.md.*ON/);
+});
+
 test('Include AGENTS.md respects explicit override (false beats nano default-on)', t => {
 	const config: TuneConfig = {
 		...ENABLED_CONFIG,

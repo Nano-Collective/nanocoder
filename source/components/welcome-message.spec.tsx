@@ -1,11 +1,27 @@
 import fs from 'fs';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
+import stringWidth from 'string-width';
 import stripAnsi from 'strip-ansi';
-import {renderWithTheme} from '../test-utils/render-with-theme.js';
-import WelcomeMessage from './welcome-message';
+
+// CRITICAL: redirect preference reads to a temp dir BEFORE the banner (and its
+// @/config/preferences import chain) loads. The wordmark font is a preference,
+// so without this the developer's own Nanocoder Shape decides which glyphs the
+// assertions below see.
+process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
+	path.join(tmpdir(), 'nanocoder-welcome-spec-'),
+);
+const {resetPreferencesCache, savePreferences} = await import(
+	'@/config/preferences'
+);
+resetPreferencesCache();
+
+const {renderWithTheme} = await import('../test-utils/render-with-theme.js');
+const WelcomeMessage = (await import('./welcome-message')).default;
 
 console.log('\nwelcome-message.spec.tsx');
 
@@ -38,6 +54,109 @@ const VERSION = packageJson.version;
 // ============================================================================
 // Narrow Terminal Tests (width < 90 → text logo per mock ladder)
 // ============================================================================
+
+// The banner reads the branch through getCurrentBranchSync, which parses
+// .git/HEAD rather than shelling out to git — so a couple of ref files are
+// enough to put any branch state on the location line.
+function renderInDir(
+	setUp: (dir: string) => void,
+	columns = 50,
+): string[] {
+	const dir = fs.mkdtempSync(path.join(tmpdir(), 'welcome-location-'));
+	setUp(dir);
+
+	const originalCwd = process.cwd();
+	const originalColumns = process.stdout.columns;
+	process.chdir(dir);
+	process.stdout.columns = columns;
+
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<WelcomeMessage tip="Short pinned tip." />,
+		);
+		const lines = stripAnsi(lastFrame() ?? '')
+			.split('\n')
+			.map(line => line.trimEnd());
+		unmount();
+		return lines;
+	} finally {
+		process.chdir(originalCwd);
+		process.stdout.columns = originalColumns;
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+function writeHead(dir: string, contents: string): void {
+	fs.mkdirSync(path.join(dir, '.git'), {recursive: true});
+	fs.writeFileSync(path.join(dir, '.git', 'HEAD'), contents);
+}
+
+// Serial: these swap the process cwd, which is global to the worker.
+test.serial('WelcomeMessage shows the path alone outside a git repo', t => {
+	const lines = renderInDir(() => {});
+
+	t.false(
+		lines.some(line => line.includes('⎇')),
+		'no branch marker without a repo',
+	);
+	for (const line of lines) {
+		t.true(stringWidth(line) <= 50);
+	}
+});
+
+test.serial('WelcomeMessage keeps a CJK branch row inside the terminal', t => {
+	// Counting characters rather than columns overflowed the row, which broke
+	// into a branch line ending in a dangling separator with the path stranded
+	// below it.
+	const lines = renderInDir(dir =>
+		writeHead(dir, 'ref: refs/heads/\u{1F680}-功能-branch-名前-x\n'),
+	);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.false(
+		branchLine!.endsWith('·'),
+		'a trailing separator means the path was pushed onto its own row',
+	);
+	for (const line of lines) {
+		t.true(
+			stringWidth(line) <= 50,
+			`row is ${stringWidth(line)} columns wide in a 50-column terminal`,
+		);
+	}
+});
+
+test.serial('WelcomeMessage marks the default branch', t => {
+	// origin/HEAD naming the checked-out branch makes it the default one, which
+	// the banner annotates.
+	const lines = renderInDir(dir => {
+		writeHead(dir, 'ref: refs/heads/main\n');
+		fs.mkdirSync(path.join(dir, '.git', 'refs', 'remotes', 'origin'), {
+			recursive: true,
+		});
+		fs.writeFileSync(
+			path.join(dir, '.git', 'refs', 'remotes', 'origin', 'HEAD'),
+			'ref: refs/remotes/origin/main\n',
+		);
+	}, 80);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.regex(branchLine!, /main \(default\)/);
+});
+
+test.serial('WelcomeMessage marks a detached HEAD', t => {
+	// A bare SHA in HEAD is a detached checkout; the banner shows the short SHA
+	// with the state spelled out rather than a branch name.
+	const lines = renderInDir(
+		dir => writeHead(dir, '9f1c0de4b6a37c5e2d8f4a1b0c9e7d6f5a4b3c2d\n'),
+		80,
+	);
+
+	const branchLine = lines.find(line => line.includes('⎇'));
+	t.truthy(branchLine, 'the location line must render');
+	t.regex(branchLine!, /9f1c0de \(detached\)/);
+});
 
 test('WelcomeMessage renders compact layout for narrow terminal', t => {
 	const originalColumns = process.stdout.columns;
@@ -169,6 +288,34 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
+// Each menu row is one line, label then key. Where the full menu no longer
+// fits across, the short one takes over, and below that the menu is left out,
+// rather than any row wrapping its key onto a line of its own.
+test('WelcomeMessage steps the menu down to fit narrow terminals', t => {
+	const originalColumns = process.stdout.columns;
+	const menuAt = (columns: number) => {
+		process.stdout.columns = columns;
+		return stripAnsi(
+			renderWithTheme(<WelcomeMessage availableRows={40} tip="x" />).lastFrame()!,
+		);
+	};
+
+	try {
+		const full = menuAt(25);
+		t.regex(full, /Resume session +\/resume/);
+
+		const short = menuAt(20);
+		t.notRegex(short, /Resume session/);
+		t.regex(short, /Help +\/help/);
+		t.regex(short, /Quit +\/exit/);
+
+		const none = menuAt(12);
+		t.notRegex(none, /\/help|\/exit/);
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+});
+
 test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
@@ -182,6 +329,44 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	t.regex(output!, /\/model/);
 	t.regex(output!, /\/help/);
 	t.regex(output!, /\/exit/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('WelcomeMessage centers horizontally and vertically', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	const lines = output.split('\n');
+
+	// Horizontal: version and menu have fixed-width content, so their indents
+	// are stable. The location line's indent varies with the branch name length
+	// (truncateMiddle pulls it left on long branches), so it is not asserted
+	// here — the only behaviour this PR changed vertically is the second half.
+	t.true(
+		indentOf(output, /nanocoder v/) > 15,
+		'version line should be horizontally centered',
+	);
+	t.true(
+		indentOf(output, /Resume session/) > 15,
+		'menu should be horizontally centered',
+	);
+
+	// Vertical: on a 40-row budget the banner content (logo + text) is well
+	// under half the height, so a regression to top-flow leaves row 0 occupied.
+	// The block sitting somewhere in the middle proves justifyContent="center"
+	// is wired up on the outer Box.
+	const firstContentLine = lines.findIndex(l => l.trim().length > 0);
+	t.true(
+		firstContentLine > 0 && firstContentLine < 40,
+		`banner should not start at row 0 on a tall viewport (got row ${firstContentLine})`,
+	);
+	t.true(
+		lines.slice(-2).some(l => l.trim().length === 0),
+		'banner should leave trailing whitespace from vertical centering',
+	);
 
 	process.stdout.columns = originalColumns;
 });
@@ -435,5 +620,149 @@ test('WelcomeMessage handles very wide terminal', t => {
 	t.truthy(output);
 	t.regex(output!, /[_█]/);
 
+	process.stdout.columns = originalColumns;
+});
+
+// ============================================================================
+// Nanocoder Shape — the wordmark font is a user preference
+// ============================================================================
+
+/**
+ * Width of the rendered wordmark, found by measuring the widest line built
+ * from `font`'s own glyph characters. Distinguishes the full "NANOCODER" from
+ * the "NC" monogram without depending on cfonts' exact glyph layout.
+ */
+function logoWidth(frame: string, glyphs: RegExp): number {
+	const widths = stripAnsi(frame)
+		.split('\n')
+		.filter(line => glyphs.test(line))
+		// trim both ends: the banner centres the wordmark, so the leading pad
+		// would otherwise count as glyph width.
+		.map(line => line.trim().length);
+
+	return widths.length > 0 ? Math.max(...widths) : 0;
+}
+
+// Every font that draws with full blocks uses █, so identify the block font by
+// a run only its 6-row glyphs produce - tiny's 2-row glyphs never reach three.
+const BLOCK_GLYPHS = /███/;
+const TINY_NA = /█▄ █ ▄▀█/;
+const CHROME_N = /╔╗╔/;
+const CHROME_GLYPHS = /[╔╗╝╚╠╦╩═║╩╬]/;
+// The 3d font draws in runs of backslashes; nothing else in the banner does.
+const THREE_D_GLYPHS = /\\{3}/;
+
+test('WelcomeMessage renders the wordmark in the configured Nanocoder Shape', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: 'tiny'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.regex(output, TINY_NA, 'wordmark must use the configured font');
+	t.notRegex(output, BLOCK_GLYPHS, 'block font must not survive the preference');
+});
+
+test('WelcomeMessage repaints the wordmark when the shape preference changes', async t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	t.regex(stripAnsi(lastFrame() ?? ''), BLOCK_GLYPHS, 'block is the default');
+
+	// The settings panel writes straight to disk, so the banner only follows
+	// along if it subscribed to preference writes — the bug this covers is the
+	// shape changing and nothing on screen moving.
+	savePreferences({nanocoderShape: 'chrome'});
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	const after = stripAnsi(lastFrame() ?? '');
+	t.regex(after, CHROME_N, 'wordmark must follow the new shape');
+	t.notRegex(after, BLOCK_GLYPHS);
+});
+
+test('WelcomeMessage sizes the width threshold to the chosen font', t => {
+	const originalColumns = process.stdout.columns;
+	// 50 cols is below block's 90-col threshold, so block would fall back to
+	// the monogram here. chrome's "NANOCODER" is only 36 cols, so it fits.
+	process.stdout.columns = 50;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: 'chrome'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.true(
+		logoWidth(output, CHROME_GLYPHS) > 30,
+		'the full wordmark must render when the font is narrow enough for it',
+	);
+});
+
+test('WelcomeMessage drops the wordmark when the font is wider than the terminal', t => {
+	const originalColumns = process.stdout.columns;
+	// 3d's monogram alone is 35 cols wide.
+	process.stdout.columns = 30;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	savePreferences({nanocoderShape: '3d'});
+
+	const output = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
+	);
+
+	t.notRegex(output, THREE_D_GLYPHS, 'a wordmark that cannot fit must be dropped');
+	t.notRegex(output, BLOCK_GLYPHS, 'and no other font stands in for it');
+	t.regex(output, /Welcome to Nanocoder/, 'the rest of the banner stays');
+});
+
+test('WelcomeMessage sizes the row budget to the chosen font', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 100;
+	t.teardown(() => {
+		savePreferences({});
+		process.stdout.columns = originalColumns;
+	});
+
+	// 22 rows is the four-item menu (16) plus tiny's 6-row wordmark, but six
+	// short of what the block wordmark needs.
+	savePreferences({nanocoderShape: 'tiny'});
+	const withTiny = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
+	);
+	t.regex(withTiny, TINY_NA, 'a short font still fits in 22 rows');
+
+	savePreferences({});
+	const withBlock = stripAnsi(
+		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
+	);
+	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
+});
+test('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = stripAnsi(lastFrame() ?? '');
+	t.regex(output, /community collective/);
+	t.regex(output, /rather than a company/);
+	t.notRegex(output, /local-first coding agent/i);
 	process.stdout.columns = originalColumns;
 });

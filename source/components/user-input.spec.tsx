@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -6,6 +9,7 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
+import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
 import UserInput from './user-input';
 
@@ -61,13 +65,18 @@ const waitForCondition = async (
 	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
 };
 
+// Frames are matched with ANSI stripped. Under a colour-capable stdout (CI sets
+// FORCE_COLOR) the caret renders as an inverse-video run, so the escape codes
+// land INSIDE the text: "abcde" with the caret on "a" is "\x1b[7ma\x1b[27mbcde",
+// which /abcde/ does not match. Stripping keeps assertions about visible text
+// independent of where the caret happens to sit.
 const waitForFrame = async (
 	lastFrame: () => string | undefined,
 	pattern: RegExp,
 	timeoutMs = 3000,
 ) => {
 	await waitForCondition(
-		() => pattern.test(lastFrame() ?? ''),
+		() => pattern.test(stripAnsi(lastFrame() ?? '')),
 		timeoutMs,
 	);
 };
@@ -127,6 +136,132 @@ test('UserInput renders with disabled state', t => {
 	unmount();
 });
 
+test('UserInput shows a suggested command in the empty prompt and inserts it on Tab', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/checkpoint create"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		/Try \/checkpoint create · Tab to insert · Esc to dismiss/.test(
+			stripAnsi(lastFrame() ?? ''),
+		),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/checkpoint create') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /checkpoint create'),
+	);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput dismisses the suggested command on Esc in an empty prompt', async t => {
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\x1B');
+	await waitForCondition(() => dismissed === 1);
+	// The first Esc went to the suggestion, not the clear-input double press.
+	t.notRegex(stripAnsi(lastFrame() ?? ''), /Press escape again to clear/);
+	unmount();
+});
+
+test('UserInput clears the suggested command when a message is submitted', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'hello');
+	await waitForCondition(() => dismissed === 1);
+	t.is(dismissed, 1);
+	unmount();
+});
+
+test('UserInput submits an inserted suggested command on Enter and clears the suggestion', async t => {
+	let dismissed = 0;
+	let submittedMessage = '';
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				suggestedCommand="/commit"
+				onDismissSuggestion={() => {
+					dismissed++;
+				}}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	await waitForCondition(() =>
+		stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+
+	stdin.write('\t');
+	await waitForCondition(() => dismissed === 1);
+	// Wait for the inserted value itself, not the "Try /commit" placeholder.
+	await waitForCondition(
+		() =>
+			stripAnsi(lastFrame() ?? '').includes('/commit') &&
+			!stripAnsi(lastFrame() ?? '').includes('Try /commit'),
+	);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/commit');
+	// Tab dismissed once on insert; submitting dismisses again.
+	await waitForCondition(() => dismissed === 2);
+	t.is(submittedMessage, '/commit');
+	t.is(dismissed, 2);
+	unmount();
+});
+
 test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes it on Esc', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -136,7 +271,8 @@ test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes i
 
 	stdin.write('?');
 	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
-	t.regex(lastFrame()!, /Shift\+Tab/);
+	// The legend row, not the status row's "(Shift+Tab to cycle)" hint below it.
+	t.regex(lastFrame()!, /Cycle development mode/);
 	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
 
 	// Keys are swallowed while the overlay is open, so the prompt stays empty
@@ -197,6 +333,45 @@ test('UserInput renders development mode indicator', t => {
 
 // Serial: this test mutates the global process.stdout.columns. Run alone so the
 // forced width can't leak into a concurrently-rendering sibling test.
+// Inline mode: the transcript is printed by Ink's <Static> at column 0, which
+// no wrapper can shift, so the prompt box drops its centring to share that
+// left edge instead of sitting a couple of columns inside it.
+test.serial('UserInput sits flush left when it is not centered', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 100,
+		configurable: true,
+	});
+
+	try {
+		const indents = (centered: boolean) => {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput developmentMode="normal" centered={centered} />
+				</TestWrapper>,
+			);
+			const lines = stripAnsi(lastFrame() ?? '').split('\n');
+			const border = lines.find(line => line.includes('╭'))!.indexOf('╭');
+			const mode = lines
+				.find(line => line.includes('normal mode on'))!
+				.search(/\S/);
+			unmount();
+			return {border, mode};
+		};
+
+		t.deepEqual(indents(false), {border: 0, mode: 1});
+		// Centred is the default and keeps its inset, one step for the indicator.
+		const centred = indents(true);
+		t.true(centred.border > 0);
+		t.is(centred.mode, centred.border + 1);
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test.serial(
 	'UserInput aligns the mode indicator with the input box left border',
 	t => {
@@ -229,6 +404,82 @@ test.serial(
 				'Mode indicator text should start one step to the right of the input box border',
 			);
 
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+// Serial: these mutate the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+test.serial(
+	'UserInput keeps the left border, prompt marker, and placeholder start visible below the 40-col width floor',
+	t => {
+		const originalColumns = process.stdout.columns;
+		// Narrower than PROMPT_WIDTH_MIN (40): before the fix, the box's width
+		// floor exceeded the terminal it was centered in, so Ink gave it a
+		// negative left offset and clipped the border/marker/placeholder start.
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 30,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			t.regex(output, /╭/, 'left border must be on-screen, not clipped');
+			t.regex(output, />\s/, 'prompt marker must be on-screen, not clipped');
+			t.regex(
+				output,
+				/Ask/,
+				'the start of the placeholder must be visible, not cut off from the left',
+			);
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test.serial(
+	'UserInput input box never exceeds the terminal width it is centered in',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 20,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const borderLine = output.split('\n').find(line => line.includes('╭'));
+			t.truthy(borderLine, 'left border must be on-screen, not clipped');
+			// The old unclamped floor (40) would have pushed this line's rendered
+			// content well past the 20-column terminal; every line must fit.
+			for (const line of output.split('\n')) {
+				t.true(
+					line.length <= 20,
+					`line exceeds the 20-column terminal width: ${JSON.stringify(line)}`,
+				);
+			}
 			unmount();
 		} finally {
 			Object.defineProperty(process.stdout, 'columns', {
@@ -495,6 +746,50 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 			.find(line => line.includes('this is a very long'));
 		t.truthy(messageLine);
 		t.true(stripAnsi(messageLine ?? '').length <= 40);
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput keeps a long CJK queued message on a single row', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 80,
+		configurable: true,
+	});
+
+	try {
+		// Every character here is a CJK ideograph, 2 terminal columns wide -
+		// the exact repro from the bug report. formatQueuedMessage budgeted the
+		// truncation in UTF-16 units, so this ran to roughly twice the terminal
+		// width and wrapped: two full rows plus a dangling row of only "...".
+		const cjkMessage = '请把所有的测试用例都重新运行一遍然后告诉我结果'.repeat(4);
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: cjkMessage, displayValue: cjkMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const lines = stripAnsi(lastFrame() ?? '').split('\n');
+		// Rows are bordered ("│ ... │") and right-padded to the box width, so
+		// isolate each row's content before checking it - a naive trim() leaves
+		// the border character behind and never matches a bare "...".
+		const rowContent = (line: string) =>
+			line.replace(/^\s*│\s?/, '').replace(/\s*│\s*$/, '').trim();
+		t.true(lines.some(line => rowContent(line).includes('...')));
+		t.false(lines.some(line => rowContent(line) === '...'));
 		unmount();
 	} finally {
 		Object.defineProperty(process.stdout, 'columns', {
@@ -1037,14 +1332,43 @@ test('UserInput redoes an undone edit with ctrl+y', async t => {
 
 	// Undo with Ctrl+Z, settle so the redo stack commits, then redo with Ctrl+Y.
 	stdin.write('\u001a');
-	await waitForCondition(() => !/abcde/.test(lastFrame() ?? ''));
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
 	await wait(100);
 
 	stdin.write('\u0019');
 	await wait(100);
-	await waitForCondition(() => /abcde/.test(lastFrame() ?? ''));
+	await waitForCondition(() => /abcde/.test(stripAnsi(lastFrame() ?? '')));
 
-	t.regex(lastFrame()!, /abcde/);
+	t.regex(stripAnsi(lastFrame()!), /abcde/);
+	unmount();
+});
+
+test('UserInput puts the caret at the end of a redone edit', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('abcde');
+	await waitForFrame(lastFrame, /abcde/);
+
+	stdin.write('\u001a');
+	await waitForCondition(() => !/abcde/.test(stripAnsi(lastFrame() ?? '')));
+	await wait(100);
+
+	stdin.write('\u0019');
+	await waitForFrame(lastFrame, /abcde/);
+	await wait(100);
+
+	// Undo/redo restore a whole value and carry no caret of their own, so the
+	// caret must land at the end. It used to keep the offset the undo clamped it
+	// to (0), which sent the next keystroke to the front: "Xabcde".
+	stdin.write('X');
+	await waitForFrame(lastFrame, /abcdeX/);
+
+	t.regex(stripAnsi(lastFrame()!), /abcdeX/);
+	t.notRegex(stripAnsi(lastFrame()!), /Xabcde/);
 	unmount();
 });
 
@@ -1055,13 +1379,14 @@ test('UserInput ctrl+z does not insert a literal character', async t => {
 		</TestWrapper>,
 	);
 
-	stdin.write('ab');
-	await waitForFrame(lastFrame, /ab/);
+	// Not 'ab': the status row's "(Shift+Tab to cycle)" hint contains it.
+	stdin.write('xy');
+	await waitForFrame(lastFrame, /xy/);
 	stdin.write('\u001a');
 	await wait(50);
 
-	// Undo should remove "b", not append a control character.
-	t.notRegex(lastFrame()!, /ab/);
+	// Undo should remove "y", not append a control character.
+	t.notRegex(lastFrame()!, /xy/);
 	unmount();
 });
 
@@ -1143,6 +1468,129 @@ test('typing a space after a command hides completions so args submit', async t 
 	t.notRegex(afterArg, /Available commands:/);
 	t.regex(afterArg, /\/test arg/);
 
+	unmount();
+});
+
+test('Enter submits a command typed in full on the first press', async t => {
+	// The highlighted completion is exactly what was typed, so there is nothing
+	// to select. Enter used to "select" it anyway, close the menu and stop,
+	// needing a second Enter to run the command.
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-help');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submitted !== null);
+
+	t.is(submitted, '/test-help');
+});
+
+test('Enter on a partly typed command still completes it without submitting', async t => {
+	let submitted: string | null = null;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('/test-he');
+	await waitForFrame(lastFrame, /Available commands:/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(
+		() => !/Available commands:/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	await wait(50);
+
+	t.regex(stripAnsi(lastFrame()!), /\/test-help/);
+	t.is(submitted, null);
+});
+
+test('Escape on an empty composer does not offer to clear', async t => {
+	// Nothing to clear: no text, no attachments, no active editor pill.
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	// Can't synchronize on a second keystroke here: any other key - including
+	// one sent purely to prove Escape's handler has run - dismisses the hint
+	// itself (user-input.tsx's own "clear clear message on other input"), so
+	// it would pass whether or not Escape actually skipped showing it. 500ms
+	// is generous slack for a synchronous state update with no async work in
+	// between.
+	await wait(500);
+
+	t.notRegex(lastFrame()!, /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape still offers to clear when the composer has text', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(
+		() => !/hello/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	t.notRegex(stripAnsi(lastFrame()!), /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape with only an active editor pill still offers to clear, and clearing dismisses it', async t => {
+	// The pill is the only clearable thing here - an empty-input skip must not
+	// strand it undismissable.
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				activeEditor={{fileName: 'app.ts'}}
+				onDismissActiveEditor={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(() => dismissed > 0);
+
+	t.is(dismissed, 1);
 	unmount();
 });
 
@@ -1240,6 +1688,43 @@ test('UserInput windows long slash completion lists', async t => {
 	t.notRegex(laterFrame, /\/zz-window-00/);
 	t.regex(laterFrame, /▸ \/zz-window-11/);
 	t.regex(laterFrame, /Showing 5-14 of 14/);
+
+	unmount();
+});
+
+test('UserInput windows long file mention lists', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
+	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('@zzfile');
+	// The file walk is async; wait for the list rather than a fixed delay.
+	for (let i = 0; i < 40 && !/Showing/.test(lastFrame()!); i++) {
+		await wait(50);
+	}
+	t.regex(lastFrame()!, /Showing 1-5 of 8/);
+
+	// Moving past the fifth row scrolls the list, so the highlight stays on a
+	// drawn file instead of moving onto ones that are not shown.
+	for (let i = 0; i < 7; i++) {
+		stdin.write('\u001B[B');
+		await wait(50);
+		t.regex(lastFrame()!, /▸ zzfile\d\.txt/);
+	}
+	t.notRegex(lastFrame()!, /Showing 1-5 of 8/);
 
 	unmount();
 });
@@ -1368,3 +1853,339 @@ test.serial('UserInput ignores terminal pastes while disabled', async t => {
 	t.notRegex(lastFrame()!, /should not appear/);
 	unmount();
 });
+
+// Serial: this sweeps timing-sensitive keystrokes across seven renders, so keep
+// it from starving (or being starved by) the file's concurrent tests.
+test.serial('Enter right after typing a command fragment never submits the fragment', async t => {
+	// The menu opens in an effect that runs a commit after the keystroke, so an
+	// Enter in that gap used to see the previous input's closed menu and submit
+	// the raw fragment (#1327). The gap lasts a few event-loop turns, so sweep
+	// Enter across them rather than betting on one exact timing.
+	const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+	for (let turns = 0; turns <= 6; turns++) {
+		const submitted: string[] = [];
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					customCommands={TEST_COMMANDS}
+					onSubmit={message => {
+						submitted.push(message);
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		stdin.write('/test-h');
+		while (!lastFrame()?.includes('/test-h')) await nextTurn();
+		for (let i = 0; i < turns; i++) await nextTurn();
+		stdin.write('\r');
+		await wait();
+
+		t.false(
+			submitted.includes('/test-h'),
+			`Enter ${turns} turn(s) after the fragment rendered must not submit it`,
+		);
+		unmount();
+	}
+});
+
+test('Enter submits a command once its completion has been selected', async t => {
+	const submitted: string[] = [];
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				customCommands={TEST_COMMANDS}
+				onSubmit={message => {
+					submitted.push(message);
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('/test-h');
+	await waitForFrame(lastFrame, /Available commands:/);
+	stdin.write('\r');
+	await waitForCondition(
+		() =>
+			(lastFrame() ?? '').includes('/test-help') &&
+			!(lastFrame() ?? '').includes('Available commands:'),
+	);
+
+	// The completed command still has completions; Enter must submit it rather
+	// than select it again.
+	stdin.write('\r');
+	await waitForCondition(() => submitted.length > 0);
+	t.deepEqual(submitted, ['/test-help']);
+	unmount();
+});
+
+// Shift+Enter used to be appended to the END of the value by UserInput while
+// the caret stayed put, so each following word was spliced in at the stale
+// offset: `one`, `two`, `three` submitted as `onetwothree\n\n`. The insert
+// now happens at the caret, inside TextInput, which owns it.
+test('Shift+Enter inserts a line break instead of scrambling the message', async t => {
+	// CSI-u encoding, which is what kitty/WezTerm/Ghostty/iTerm2 actually send.
+	const SHIFT_ENTER = '\u001b[13;2u';
+	let submittedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	// Each key gets its own settle: a word (or the submit) arriving in the same
+	// stdin batch as the break before it would be applied to the pre-break
+	// value, which is a race in the test, not the behaviour under test.
+	stdin.write('one');
+	await waitForFrame(lastFrame, /one/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('two');
+	await waitForFrame(lastFrame, /two/);
+	stdin.write(SHIFT_ENTER);
+	await wait(50);
+	stdin.write('three');
+	await waitForFrame(lastFrame, /three/);
+	await wait(50);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage !== '');
+
+	t.is(submittedMessage, 'one\ntwo\nthree');
+});
+
+test('Ctrl+J still inserts a line break in both encodings', async t => {
+	// Most terminals send a literal LF for Ctrl+J; under the kitty keyboard
+	// protocol it arrives as CSI-u instead, which used to be dropped entirely.
+	for (const CTRL_J of ['\n', '\u001b[106;5u']) {
+		let submittedMessage = '';
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={message => {
+						submittedMessage = message;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		stdin.write('one');
+		await waitForFrame(lastFrame, /one/);
+		stdin.write(CTRL_J);
+		await wait(50);
+		stdin.write('two');
+		await waitForFrame(lastFrame, /two/);
+		await wait(50);
+		stdin.write('\r');
+		await waitForCondition(() => submittedMessage !== '');
+
+		t.is(submittedMessage, 'one\ntwo');
+		unmount();
+	}
+});
+
+// Regression for the cursor-mid-paste bug: a terminal paste used to leave the
+// caret at end-of-value regardless of where it started, so any keystroke after
+// the paste landed at the end instead of next to the inserted text. The
+// post-paste caret position is the bug; ink-testing-library strips inverse
+// styling from the frame, so we verify by typing one more character and
+// checking where it lands.
+test.serial(
+	'UserInput parks the caret after the splice when pasting mid-string',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+
+		// Move caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+
+		pasteEvents.emit('paste', 'XY');
+		await waitForFrame(lastFrame, /aXYbc/);
+
+		// One more keystroke lands immediately after the splice, not at the end.
+		stdin.write('Z');
+		await waitForFrame(lastFrame, /aXYZbc/);
+
+		// Match against the stripped frame: inverse ANSI on the cursor
+		// character interleaves with the surrounding text in the raw output,
+		// which makes a contiguous /aXYZbc/ regex miss. waitForFrame strips
+		// before matching for the same reason.
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput parks the caret after a multi-line placeholder splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('hello world');
+		await waitForFrame(lastFrame, /hello world/);
+
+		// Move caret to offset 5 (between 'hello' and ' world').
+		for (let i = 0; i < 6; i++) {
+			stdin.write('\x1B[D');
+		}
+
+		pasteEvents.emit('paste', 'line1\nline2\nline3');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]/);
+
+		// Next keystroke lands immediately after the placeholder, before ' world'.
+		stdin.write('!');
+		await waitForFrame(lastFrame, /\[Paste #\d+: 3 lines\]! world/);
+		t.notRegex(lastFrame()!, /!\[Paste/);
+		unmount();
+	},
+);
+
+// A paste lands out of band, while TextInput still holds the value it last
+// rendered. Keys that arrive before the re-render must build on the paste,
+// not on that stale value. No awaits between the paste and the keys: that
+// gap is the race.
+const PASTE = 'line one\nline two\nline three';
+
+test.serial(
+	'UserInput keeps a paste placeholder when typing lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]x/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput keeps a paste and key order when several keys land immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+		stdin.write('y');
+		stdin.write('z');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]xyz/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput applies a Backspace that lands immediately after a paste at the post-paste caret',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		pasteEvents.emit('paste', PASTE);
+		// The caret is parked after the placeholder, so the Backspace removes
+		// it whole - as it would once the paste is shown - and "abc" survives.
+		// It must not be swallowed (placeholder left behind) or applied to the
+		// pre-paste value.
+		stdin.write('\u007F');
+
+		await waitForCondition(() => !(lastFrame() ?? '').includes('[Paste #'));
+		await wait(50);
+		const frame = stripAnsi(lastFrame()!);
+		t.notRegex(frame, /\[Paste #/);
+		t.regex(frame, /abc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput puts a key that lands immediately after a mid-string paste right after the splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		// Caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+		await wait(50);
+
+		// No await between the paste and the key.
+		pasteEvents.emit('paste', 'XY');
+		stdin.write('Z');
+
+		await waitForFrame(lastFrame, /aXYZbc/);
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput submits a paste when Enter lands immediately after it',
+	async t => {
+		let submittedDisplay: string | undefined;
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={(_message, display) => {
+						submittedDisplay = display;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('\r');
+
+		await waitForCondition(() => submittedDisplay !== undefined);
+		t.regex(submittedDisplay!, /\[Paste #\d+: [^\]]+\]/);
+		t.notRegex(lastFrame()!, /\[Paste #/);
+		unmount();
+	},
+);

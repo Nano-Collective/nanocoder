@@ -4,7 +4,11 @@ import {PlaceholderType} from '../types/hooks';
 import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
-import {MAX_UNDO_STACK, useInputState} from './useInputState';
+import {
+	MAX_UNDO_STACK,
+	reconcileStaleEdit,
+	useInputState,
+} from './useInputState';
 
 console.log('\nuseInputState.spec.ts');
 
@@ -1165,4 +1169,153 @@ test('redo stack is capped at MAX_UNDO_STACK', t => {
 	instance.rerender(<TestComponent />);
 
 	t.true(currentHook!.redoStack.length < MAX_UNDO_STACK);
+});
+
+// ============================================================================
+// insertPaste — cursor-aware bracketed paste
+// ============================================================================
+
+test('insertPaste with cursorOffset splices a short paste at the caret and returns the new cursor', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('PASTED', 5);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 11});
+	t.is(currentHook!.input, 'helloPASTED world');
+});
+
+test('insertPaste with cursorOffset returns the cursor after the placeholder for a long paste', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const pasted = 'x'.repeat(801);
+	const result = currentHook!.insertPaste(pasted, 5);
+	instance.rerender(<TestComponent />);
+
+	t.truthy(result);
+	// Placeholder label is `[Paste #1: 801 chars]`, spliced at offset 5 on its
+	// own line so "hello" does not fuse with the paste at submit. The caret
+	// counts the separator too.
+	t.is(result!.cursorOffset, 5 + '\n[Paste #1: 801 chars]'.length);
+	t.true(currentHook!.input.startsWith('hello\n[Paste #1: 801 chars] world'));
+});
+
+test('insertPaste without a cursorOffset appends and returns null (legacy behaviour)', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('world');
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'helloworld');
+});
+
+test('insertPaste with an empty payload is a no-op', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('', 2);
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'hello');
+});
+
+test('insertPaste at cursor 0 inserts at the start', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('hello ', 0);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'hello world');
+});
+
+test('insertPaste at cursor equal to value length appends', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('abc');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('xyz', 3);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'abcxyz');
+});
+
+// reconcileStaleEdit: TextInput reported `edited`, built from `base`, but the
+// input has since become `latest` (a paste or undo landed out of band).
+test('reconcileStaleEdit passes the edit through when nothing changed', t => {
+	t.is(reconcileStaleEdit('abc', 'abcd', 'abc'), 'abcd');
+});
+
+test('reconcileStaleEdit puts typing after an appended paste', t => {
+	t.is(reconcileStaleEdit('abc', 'abcx', 'abc[P]'), 'abc[P]x');
+	t.is(reconcileStaleEdit('', 'x', '[P]'), '[P]x');
+});
+
+test('reconcileStaleEdit keeps key order across a burst', t => {
+	// Second key of a burst: TextInput built "xy" on its own "x", while the
+	// input already holds the paste and the first key.
+	t.is(reconcileStaleEdit('x', 'xy', '[P]x'), '[P]xy');
+});
+
+test('reconcileStaleEdit replays a deletion without touching the paste', t => {
+	t.is(reconcileStaleEdit('abc', 'ab', 'abc[P]'), 'ab[P]');
+});
+
+test('reconcileStaleEdit replays an edit before the change point', t => {
+	t.is(reconcileStaleEdit('abc', 'Xabc', 'abc[P]'), 'Xabc[P]');
+	t.is(reconcileStaleEdit('abc', 'bc', 'abc[P]'), 'bc[P]');
+});
+
+test('reconcileStaleEdit builds on a cleared input', t => {
+	// Submit cleared the input; the next key must not revive the old text.
+	t.is(reconcileStaleEdit('hello', 'hellox', ''), 'x');
+});
+
+test('reconcileStaleEdit lands an edit inside replaced text at its end', t => {
+	// "abcdef" became "aXYf"; an insert where "cd" used to be has nowhere of
+	// its own left, so it goes after the replacement.
+	t.is(reconcileStaleEdit('abcdef', 'abc!def', 'aXYf'), 'aXY!f');
+});
+
+test('insertPaste builds on a key typed in the same batch', t => {
+	const {hook} = setupTest();
+
+	// No rerender between the two: the paste must read the ref, not the
+	// render-time state that still says "".
+	hook.updateInput('a');
+	hook.insertPaste('pasted');
+
+	t.is(hook.currentStateRef.current.displayValue, 'apasted');
+});
+
+test('resetInput clears the ref before the next render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('hello');
+	instance.rerender(<TestComponent />);
+	hook.resetInput();
+
+	t.is(hook.currentStateRef.current.displayValue, '');
+	// A key TextInput reports on top of the text it still shows builds on the
+	// cleared input instead.
+	hook.updateInput('hellox');
+	t.is(hook.currentStateRef.current.displayValue, 'x');
 });

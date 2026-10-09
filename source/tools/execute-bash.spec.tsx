@@ -64,6 +64,26 @@ test('ExecuteBashFormatter shows command for confirmation preview', t => {
 	t.regex(output!, /echo test/);
 });
 
+test('ExecuteBashFormatter shows description when provided', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({
+		command: 'git commit -m "feat: add cache" && git push',
+		description: 'Commit the staged files and push to remote repository.',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Description:/);
+	t.regex(output!, /Commit the staged files and push to remote repository\./);
+	t.regex(output!, /Command:/);
+});
+
 test('ExecuteBashFormatter renders without result', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {
@@ -78,6 +98,7 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.truthy(output);
 	t.regex(output!, /execute_bash/);
 	t.regex(output!, /ls/);
+	t.notRegex(output!, /Description:/);
 });
 
 test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
@@ -396,3 +417,24 @@ test('bashRunFailed: distinguishes a clean run from a failure', t => {
 	// something to surface as a failed command.
 	t.false(bashRunFailed({...base, exitCode: null, error: null}));
 });
+
+// The fork-bomb pattern used to be an unescaped regex: `|` acted as
+// alternation and `()` as an empty group, so the real bomb slipped through
+// while harmless strings like `echo a:{:b` were blocked.
+for (const command of [
+	':(){ :|:& };:',
+	':(){:|:&};:',
+	'bomb(){ bomb|bomb& };bomb',
+]) {
+	test(`execute_bash validator blocks fork bomb ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
+for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
+	test(`execute_bash validator allows ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
