@@ -1,12 +1,14 @@
 import {Box, Text} from 'ink';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {describeProjectTrust} from '@/config/project-trust';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 
 interface SecurityDisclaimerProps {
 	onConfirm: () => void;
 	onExit: () => void;
+	directory?: string;
 }
 
 enum SecurityDisclaimerOption {
@@ -17,9 +19,11 @@ enum SecurityDisclaimerOption {
 export default function SecurityDisclaimer({
 	onConfirm,
 	onExit,
+	directory = process.cwd(),
 }: SecurityDisclaimerProps) {
 	const boxWidth = useTerminalWidth();
 	const colors = getThemeColors(defaultTheme);
+	const summary = describeProjectTrust(directory).summary;
 
 	// Inline item type kept close to usage to limit scope and improve readability
 	const items: {label: string; value: SecurityDisclaimerOption}[] = [
@@ -58,7 +62,7 @@ export default function SecurityDisclaimer({
 				<Text bold color={colors.warning}>
 					Do you trust the files in this folder?
 				</Text>
-				<Text>{process.cwd()}</Text>
+				<Text>{directory}</Text>
 				<Box marginTop={1}>
 					<Text>
 						Nanocoder may read, write, or execute files contained in this
@@ -66,6 +70,11 @@ export default function SecurityDisclaimer({
 						trusted sources.
 					</Text>
 				</Box>
+				{summary ? (
+					<Box marginTop={1}>
+						<Text>{summary}</Text>
+					</Box>
+				) : null}
 				<StyledSelectInput items={items} onSelect={handleSelect} />
 			</TitledBoxWithPreferences>
 		</Box>
