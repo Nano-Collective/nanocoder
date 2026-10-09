@@ -56,6 +56,7 @@ import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {
 	// State
@@ -566,6 +567,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const applySession = React.useCallback(
 		(session: Session) => {
 			props.updateMessages(session.messages);
+			// The resumed history has not seen this process's reads.
+			bumpReadContentGeneration();
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);

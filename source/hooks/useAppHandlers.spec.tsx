@@ -30,6 +30,9 @@ import {
 	drainPendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {resetPreferencesCache} from '@/config/preferences';
+import {readFileTool} from '@/tools/read-file';
+import {clearReadTracker} from '@/utils/read-tracker';
+import {writeFileSync} from 'fs';
 
 console.log('\nuseAppHandlers.spec.tsx');
 
@@ -904,5 +907,36 @@ test.serial('handleArchitectRevert tells the model the changes are gone', async 
 	} finally {
 		resetSessionCwd();
 		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('applySession makes the next read_file return the file', async t => {
+	clearReadTracker();
+	const dir = join(process.cwd(), `resume-read-stub-${Date.now()}`);
+	await fs.mkdir(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	const read = () =>
+		readFileTool.tool.execute!(
+			{path: file},
+			{toolCallId: 'read', messages: []},
+		) as Promise<string>;
+	try {
+		t.true((await read()).includes('kept = 1'));
+		t.true((await read()).includes('already in context'));
+
+		const {handlers} = setup();
+		handlers.applySession({
+			id: '22222222-2222-4222-8222-222222222222',
+			title: 'Other session',
+			messages: [{role: 'user', content: 'hello'}],
+			provider: 'openai-compatible',
+			model: 'mock-model',
+		} as never);
+
+		t.true((await read()).includes('kept = 1'));
+	} finally {
+		clearReadTracker();
+		rmSync(dir, {recursive: true, force: true});
 	}
 });

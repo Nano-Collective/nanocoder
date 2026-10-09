@@ -37,7 +37,7 @@ import {
 	negotiateProtocolVersion,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -169,6 +169,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.initialize();
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			session = this.registerSession(params.sessionId, params.cwd);
+			clearAcpReadStubs(params.sessionId);
 			if (persisted) {
 				session.messages = persisted.messages;
 			}
@@ -272,6 +273,7 @@ export class AcpAgent implements Agent {
 						if (commandName === 'clear') {
 							// Clear the conversation history and action timeline
 							session.messages = [];
+							clearAcpReadStubs(params.sessionId);
 							await session.timeline.clear();
 							const msg = 'Conversation cleared.';
 							this.conn.sessionUpdate({
@@ -635,6 +637,7 @@ export class AcpAgent implements Agent {
 			persisted.workingDirectory,
 		);
 		session.messages = persisted.messages;
+		clearAcpReadStubs(params.sessionId);
 		logger.info(
 			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
 		);
@@ -707,6 +710,7 @@ export class AcpAgent implements Agent {
 				0,
 				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
+			clearAcpReadStubs(sessionId);
 			// Harness chrome, not model output: it tells the user what the revert
 			// did. The model learns about the revert from the truncated history
 			// itself, so this must never come back as its own past turn.
@@ -762,6 +766,7 @@ export class AcpAgent implements Agent {
 			}
 			if (targetUserIdx >= 0) {
 				session.messages = session.messages.slice(0, targetUserIdx);
+				clearAcpReadStubs(sessionId);
 				await this.saveAcpSessionToDisk(session);
 				await session.timeline.truncateAfter(targetUserIdx);
 			}
