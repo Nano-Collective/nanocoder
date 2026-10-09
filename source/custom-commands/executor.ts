@@ -1,3 +1,4 @@
+import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {
 	parseCommandParameterSpec,
 	substituteTemplateVariables,
@@ -97,4 +98,20 @@ export class CustomCommandExecutor {
 
 		return parts.join(' ');
 	}
+}
+
+/**
+ * Fill a custom command from the line the user typed, slash included.
+ * `{{args}}` keeps the text after the name. Named parameters get the
+ * shell-parsed tokens.
+ */
+export function expandCustomCommandPrompt(
+	command: CustomCommand,
+	invocation: string,
+	executor = new CustomCommandExecutor(),
+): string {
+	const trimmed = invocation.trim();
+	const commandName = trimmed.slice(1).split(/\s+/)[0] ?? '';
+	const rawArgs = trimmed.slice(commandName.length + 2).trim();
+	return executor.execute(command, parseCustomCommandArgs(rawArgs), rawArgs);
 }
