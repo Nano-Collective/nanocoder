@@ -1216,20 +1216,36 @@ test.serial(
 		try {
 			mkdirSync(join(testDir, 'src', 'generated'), {recursive: true});
 			writeFileSync(join(testDir, '.gitignore'), 'generated/\n');
-			writeFileSync(join(testDir, 'src', 'generated', 'out.js'), 'x');
+			// src/generated/ sorts before src/main.ts, so a JS-side filter alone
+			// would let these 20 spend the whole scan budget and crowd main.ts
+			// out. Only rg pruning them during traversal survives that budget;
+			// a streamed-then-filtered walk reports truncated instead.
+			for (let index = 0; index < 20; index++) {
+				writeFileSync(
+					join(
+						testDir,
+						'src',
+						'generated',
+						`f${String(index).padStart(2, '0')}.js`,
+					),
+					'x',
+				);
+			}
 			writeFileSync(join(testDir, 'src', 'main.ts'), 'x');
 
 			const files: string[] = [];
-			await walkProjectEntries(
+			const result = await walkProjectEntries(
 				testDir,
 				join(testDir, 'src'),
 				entry => {
 					if (!entry.isDirectory) files.push(entry.relativePath);
 					return false;
 				},
+				{includeDirectories: false, maxRawFilesScanned: 5},
 			);
 
 			t.deepEqual(files, ['src/main.ts']);
+			t.false(result.truncated);
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
