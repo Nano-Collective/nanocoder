@@ -112,6 +112,33 @@ test.serial("leaves the user's other changes out of the commit", async t => {
 	}
 });
 
+test.serial(
+	'commits a file whose name is a glob pattern without matching other files',
+	async t => {
+		const dir = makeRepo();
+		try {
+			writeFileSync(join(dir, 'a.txt'), 'a\n');
+			writeFileSync(join(dir, 'b.txt'), 'b\n');
+			git(dir, 'add a.txt b.txt');
+			git(dir, 'commit -q -m "add a and b"');
+			// The user's own uncommitted edits, which "[ab].txt" matches as a glob.
+			writeFileSync(join(dir, 'a.txt'), 'user edit a\n');
+			writeFileSync(join(dir, 'b.txt'), 'user edit b\n');
+
+			const file = join(dir, '[ab].txt');
+			writeFileSync(file, 'agent\n');
+			await maybeAutoCommit('write_file', {path: file});
+
+			t.is(git(dir, 'show --name-only --format= HEAD'), '[ab].txt');
+			const status = git(dir, 'status --porcelain');
+			t.true(status.includes(' M a.txt'), status);
+			t.true(status.includes(' M b.txt'), status);
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial('ignores tools that do not edit files', async t => {
 	const dir = makeRepo();
 	try {

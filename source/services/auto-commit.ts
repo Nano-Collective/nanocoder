@@ -107,7 +107,11 @@ async function commitFile(absPath: string): Promise<string | null> {
 		return null; // Not a git repository: nothing to commit into.
 	}
 
-	const git = (...args: string[]) => execGit(['-C', root, ...args]);
+	// --literal-pathspecs: `--` only ends option parsing, so without it a file
+	// named `[ab].txt` is a glob that also matches `a.txt` and `b.txt`, and
+	// `git commit -- <path>` would sweep the user's edits to those in too.
+	const git = (...args: string[]) =>
+		execGit(['--literal-pathspecs', '-C', root, ...args]);
 	// Forward slashes: git pathspecs use them on every platform.
 	const pathspec = relative(root, absPath).split('\\').join('/');
 	// Outside the repository: a `../` escape, or on Windows another drive,
