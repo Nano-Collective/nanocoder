@@ -50,7 +50,22 @@ function getUsageFilePath(): string {
 			// when the destination appeared concurrently, so two racers can
 			// never both publish — the loser keeps the winner's fresher
 			// file instead of overwriting it with this stale copy.
-			if (publishFileNoClobber(newPath, fs.readFileSync(legacyPath))) {
+			let payload: Buffer;
+			try {
+				payload = fs.readFileSync(legacyPath);
+			} catch (readError) {
+				if ((readError as NodeJS.ErrnoException)?.code === 'ENOENT') {
+					// The winner unlinked the legacy file first: migration
+					// already happened — adopt the destination quietly
+					// instead of logging a misleading failure warning.
+					logInfo(
+						`Legacy usage file already migrated by another process; using ${newPath}.`,
+					);
+					return newPath;
+				}
+				throw readError;
+			}
+			if (publishFileNoClobber(newPath, payload)) {
 				try {
 					fs.unlinkSync(legacyPath);
 				} catch {

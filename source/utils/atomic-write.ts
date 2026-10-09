@@ -1,10 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {
-	closeSync,
-	fsyncSync,
 	linkSync,
 	mkdirSync,
-	openSync,
 	renameSync,
 	unlinkSync,
 	writeFileSync,
@@ -66,21 +63,25 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
- * Best-effort durability sync. Failures must never fail the surrounding
- * operation (e.g. directory fsync on Windows), so all errors are swallowed
- * — the data itself is already fully written either way.
+ * Link primitive used by {@link publishFileNoClobber}, replaceable for
+ * tests (e.g. to simulate filesystems without hard-link support).
+ * Production code never touches this.
+ * @internal
  */
-function fsyncBestEffort(targetPath: string): void {
-	try {
-		const fd = openSync(targetPath, 'r');
-		try {
-			fsyncSync(fd);
-		} finally {
-			closeSync(fd);
-		}
-	} catch {
-		// ignore — durability hint only
-	}
+type LinkSyncFn = (existingPath: string, newPath: string) => void;
+
+let linkSyncImpl: LinkSyncFn = (existingPath, targetPath) =>
+	linkSync(existingPath, targetPath);
+
+/**
+ * Test seam: replace the link primitive (e.g. with one that throws `EPERM`
+ * to simulate FAT/exFAT or SMB/FUSE mounts). Call with no arguments to
+ * restore the default.
+ * @internal
+ */
+export function setLinkSyncForTests(impl?: LinkSyncFn): void {
+	linkSyncImpl =
+		impl ?? ((existingPath, targetPath) => linkSync(existingPath, targetPath));
 }
 
 /**
@@ -100,25 +101,39 @@ export function publishFileNoClobber(
 	newPath: string,
 	data: string | Buffer,
 ): boolean {
-	// No existsSync fast path here on purpose: the link below is the atomic
-	// arbiter, and attempting it unconditionally keeps the EEXIST branch
-	// genuinely reachable (and covered by tests) instead of dead code
-	// hiding behind a racy pre-check.
 	const tmpPath = `${newPath}.${process.pid}.${randomUUID()}.tmp`;
-	writeFileSync(tmpPath, data, 'utf-8');
 	try {
-		fsyncBestEffort(tmpPath);
+		writeFileSync(tmpPath, data, 'utf-8');
 		try {
-			linkSync(tmpPath, newPath);
+			linkSyncImpl(tmpPath, newPath);
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') {
+			const code = (error as NodeJS.ErrnoException)?.code;
+			if (code === 'EEXIST') {
 				// A concurrent process published first: adopt its file.
 				return false;
 			}
+			if (
+				code === 'EPERM' ||
+				code === 'ENOTSUP' ||
+				code === 'EOPNOTSUPP' ||
+				code === 'ENOSYS'
+			) {
+				// Filesystem without hard-link support (FAT/exFAT, some
+				// SMB/FUSE mounts): fall back to an exclusive create, which
+				// still never overwrites — EEXIST from it likewise means a
+				// peer won.
+				try {
+					writeFileSync(newPath, data, {flag: 'wx'});
+				} catch (writeError) {
+					if ((writeError as NodeJS.ErrnoException)?.code === 'EEXIST') {
+						return false;
+					}
+					throw writeError;
+				}
+				return true;
+			}
 			throw error;
 		}
-		// Sync the directory so the new link entry itself is durable.
-		fsyncBestEffort(dirname(newPath));
 		return true;
 	} finally {
 		try {

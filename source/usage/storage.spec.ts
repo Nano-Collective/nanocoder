@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
 import type {SessionUsage, TokenBreakdown, UsageData} from '../types/usage.js';
-import {publishFileNoClobber} from '../utils/atomic-write.js';
+import {publishFileNoClobber, setLinkSyncForTests} from '../utils/atomic-write.js';
 import {
 	addSession,
 	clearUsageData,
@@ -239,6 +239,41 @@ test('publishFileNoClobber keeps the existing file when a peer won the race', t 
 		fs.readdirSync(dir).filter(name => name.includes('.tmp')),
 		[],
 	);
+});
+
+test('publishFileNoClobber falls back to exclusive write when hard links are unsupported', t => {
+	// Simulate FAT/exFAT or SMB/FUSE mounts where linkSync throws EPERM.
+	const linkError = new Error(
+		'operation not permitted, link',
+	) as NodeJS.ErrnoException;
+	linkError.code = 'EPERM';
+	setLinkSyncForTests(() => {
+		throw linkError;
+	});
+	try {
+		const dir = path.join(
+			os.tmpdir(),
+			`nanocoder-publish-nolink-${Date.now()}`,
+		);
+		fs.mkdirSync(dir, {recursive: true});
+		const dest = path.join(dir, 'usage.json');
+
+		// Absent destination: the exclusive-create fallback publishes.
+		t.true(publishFileNoClobber(dest, 'fallback-data'));
+		t.is(fs.readFileSync(dest, 'utf-8'), 'fallback-data');
+
+		// Present destination: EEXIST from the fallback likewise means a
+		// peer won — content stays untouched.
+		t.false(publishFileNoClobber(dest, 'stale-data'));
+		t.is(fs.readFileSync(dest, 'utf-8'), 'fallback-data');
+
+		t.deepEqual(
+			fs.readdirSync(dir).filter(name => name.includes('.tmp')),
+			[],
+		);
+	} finally {
+		setLinkSyncForTests();
+	}
 });
 
 test('migration handles missing legacy config directory gracefully', t => {
