@@ -5,6 +5,7 @@ import TextInput from '@/components/text-input';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {registerPasteTarget} from '@/utils/terminal-paste';
 import {
 	MCP_TEMPLATES,
 	type McpServerConfig,
@@ -375,6 +376,25 @@ export function McpStep({
 		})),
 	];
 
+	// Terminal pastes while the multiline env-vars editor is focused land in
+	// the buffer directly (Enter/Escape editing stays on the keyboard path).
+	const multilineFieldFocused =
+		mode === 'field-input' &&
+		selectedTemplate?.fields[currentFieldIndex]?.name === 'envVars';
+	useEffect(() => {
+		if (!multilineFieldFocused) {
+			return;
+		}
+		return registerPasteTarget(payload => {
+			// Plain append on purpose: the envVars editor keeps the caret at
+			// the end (key.return and printable input append too) and tracks
+			// no cursor position — splice-at-cursor only matters for fields
+			// that do.
+			setMultilineBuffer(prev => prev + payload);
+			return true;
+		});
+	}, [multilineFieldFocused]);
+
 	// Handle keyboard navigation
 	useInput((input, key) => {
 		// Handle Shift+Tab for going back (but not regular Tab, let Tabs component handle it)
@@ -434,13 +454,8 @@ export function McpStep({
 				} else if (key.escape) {
 					// Submit multiline input on Escape
 					handleFieldSubmit();
-				} else if (
-					key.backspace ||
-					(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-				) {
-					// Backspace, told apart from forward Delete the same way
-					// TextInput does. The buffer has no cursor - typing always
-					// appends - so forward Delete has nothing after it to remove.
+				} else if (key.backspace || key.delete) {
+					// Delete/Backspace removes the last line of the multiline buffer.
 					setMultilineBuffer(prev => prev.slice(0, -1));
 				} else if (!key.ctrl && !key.meta && input) {
 					setMultilineBuffer(prev => prev + input);

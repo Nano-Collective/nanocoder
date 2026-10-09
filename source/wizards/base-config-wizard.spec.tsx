@@ -238,6 +238,9 @@ test.serial('blocks saving corrupted config', async t => {
 	stdin.write('\r');
 	await new Promise(r => setTimeout(r, 100));
 
+	// Ink 8 drops keys written within ~100ms of a same-commit useInput swap
+	// (the step transition above); wait past that window before Enter.
+	await new Promise(r => setTimeout(r, 300));
 	stdin.write('\r');
 	await new Promise(r => setTimeout(r, 50));
 
@@ -276,17 +279,36 @@ test.serial('deleting corrupted config clears corruption state', async t => {
 		/>,
 	);
 
+	// Ink 8 drops keys written inside a short window after useInput
+	// mounts/swaps, so each Enter is gated on the next UI state actually
+	// rendering, plus a settle wait for that window to close.
+	const waitFor = async (predicate: () => boolean) => {
+		const deadline = Date.now() + 3000;
+		while (!predicate()) {
+			if (Date.now() > deadline) return;
+			await new Promise(r => setTimeout(r, 50));
+		}
+	};
+	// The first Enter accepts "Edit this configuration"; the corrupted-config
+	// notice then renders and its delete action mounts the confirmation.
+	await waitFor(() =>
+		(lastFrame() ?? '').includes('Configuration file has invalid JSON'),
+	);
+	await new Promise(r => setTimeout(r, 300));
 	stdin.write('\r');
-	await new Promise(r => setTimeout(r, 100));
+	await waitFor(() => (lastFrame() ?? '').includes('Delete Configuration?'));
+	await new Promise(r => setTimeout(r, 300));
+	stdin.write('\r');
+	await waitFor(() => !existsSync(configPath));
 
-	stdin.write('\r');
-	await new Promise(r => setTimeout(r, 50));
+
 
 	t.false(existsSync(configPath));
 	t.is(completedPath, configPath);
 });
 
 test.serial(
+
 	'configure step receives pre-existing config entries synchronously on entering configure (regression: deferred load lost entries)',
 	async t => {
 		const testDir = join(

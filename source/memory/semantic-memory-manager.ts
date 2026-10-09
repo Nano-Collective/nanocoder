@@ -103,7 +103,7 @@ async function readLockOwner(lockPath: string): Promise<number | null> {
  * for longer than the stale window, which covers both a wedged holder and the
  * case where the recorded pid has been recycled by an unrelated process.
  */
-/** @internal Exported for tests: this is where the reclaim decision lives. */
+/** Exported for tests: this is where the reclaim decision lives. */
 export async function isLockAbandoned(lockPath: string): Promise<boolean> {
 	const owner = await readLockOwner(lockPath);
 	// A dead owner is abandoned outright, however recently the file was

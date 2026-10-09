@@ -1,6 +1,8 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
+import {createTerminalInputFilter} from '@/utils/terminal-input';
+import {rewriteXtermModifiedEnter} from '@/utils/terminal-keypress';
 import TextInput from './text-input';
 
 /**
@@ -12,7 +14,9 @@ import TextInput from './text-input';
  *
  * - ESC+CR submitted the prompt instead of inserting a newline
  * - the xterm modifyOtherKeys form was unparseable by Ink and its ESC-stripped
- *   sequence was inserted into the prompt as the literal text `[27;2;13~`
+ *   sequence was inserted into the prompt as the literal text `[27;2;13~`; Ink 8
+ *   drops unrecognised control sequences outright, so cli.tsx now rewrites
+ *   that form into kitty CSI-u before the bytes reach Ink — mirrored below
  * - the kitty CSI-u form appended '\n' to the end of the value rather than at
  *   the cursor, and left the cursor stranded in front of it, so the next
  *   character typed went on the wrong line
@@ -21,7 +25,7 @@ import TextInput from './text-input';
  *   LF (Ctrl+J)                  \n
  *   ESC+CR (Option/Alt+Enter)    ESC \r
  *   kitty CSI-u Shift+Enter      ESC [13;2u
- *   xterm modifyOtherKeys        ESC [27;2;13~
+ *   xterm modifyOtherKeys        ESC [27;2;13~  (rewritten to ESC [13;2u)
  *   bare CR (Enter)              \r
  *   Left                         ESC [D
  */
@@ -30,7 +34,9 @@ const ESC = '\u001b';
 const LF = '\n';
 const ESC_CR = `${ESC}\r`;
 const KITTY_SHIFT_ENTER = `${ESC}[13;2u`;
-const XTERM_SHIFT_ENTER = `${ESC}[27;2;13~`;
+// What xterm.js actually emits; the stdin proxy in cli.tsx rewrites this into
+// KITTY_SHIFT_ENTER before Ink sees it, so mirror that composition here.
+const XTERM_SHIFT_ENTER = rewriteXtermModifiedEnter(`${ESC}[27;2;13~`);
 const LEFT = `${ESC}[D`;
 
 interface ValueRef {
@@ -58,6 +64,20 @@ const press = (stdin: ReturnType<typeof render>['stdin'], key: string) =>
 	});
 
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 100));
+
+// Match the CLI filtering order, but feed each filtered piece directly into
+// ink-testing-library's readable stream instead of the CLI's PassThrough queue.
+function createInputProxy(stdin: ReturnType<typeof render>['stdin']) {
+	const pastes: string[] = [];
+	const filter = createTerminalInputFilter(
+		segment => {
+			if (segment.kind === 'paste') pastes.push(segment.payload);
+			else stdin.write(segment.text);
+		},
+		() => {},
+	);
+	return {...filter, pastes};
+}
 
 const newlineSequences: Array<[string, string]> = [
 	['LF (Ctrl+J)', LF],
@@ -113,6 +133,59 @@ for (const [label, sequence] of newlineSequences) {
 		unmount();
 	});
 }
+
+for (const [label, modifier] of [
+	['Shift', 2],
+	['Alt', 3],
+] as const) {
+	test(`fragmented xterm ${label}+Enter survives the input proxy at every boundary`, async t => {
+		const valueRef: ValueRef = {current: ''};
+		const {stdin, unmount} = render(
+			<ControlledTextInput valueRef={valueRef} initialValue="aaa" />,
+		);
+		const proxy = createInputProxy(stdin);
+		t.teardown(() => {
+			proxy.dispose();
+			unmount();
+		});
+		await settle();
+		const sequence = `${ESC}[27;${modifier};13~`;
+		let expected = 'aaa';
+		for (let boundary = 1; boundary < sequence.length; boundary++) {
+			proxy.push(Buffer.from(sequence.slice(0, boundary)));
+			await new Promise<void>(resolve => setImmediate(resolve));
+			proxy.push(Buffer.from(sequence.slice(boundary)));
+			await settle();
+			expected += '\n';
+			t.is(valueRef.current, expected, `boundary ${boundary}`);
+			proxy.push('b');
+			await settle();
+			expected += 'b';
+			t.is(valueRef.current, expected, `cursor after boundary ${boundary}`);
+		}
+	});
+}
+
+test('the input proxy leaves bracketed paste payloads opaque', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="aaa" />,
+	);
+	const proxy = createInputProxy(stdin);
+	t.teardown(() => {
+		proxy.dispose();
+		unmount();
+	});
+	await settle();
+	const payload = `pasted\n${ESC}[27;2;13~${ESC}[<64;1;1M`;
+	proxy.push(`${ESC}[200~${payload.slice(0, 12)}`);
+	proxy.push(`${payload.slice(12)}${ESC}[201~${ESC}[<64;1;1M`);
+	proxy.push(`b${ESC}[27;3;`);
+	proxy.push('13~');
+	await settle();
+	t.deepEqual(proxy.pastes, [payload]);
+	t.is(valueRef.current, 'aaab\n');
+});
 
 test('consecutive newlines stack instead of overwriting each other', async t => {
 	const valueRef: ValueRef = {current: ''};

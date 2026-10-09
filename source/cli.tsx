@@ -816,20 +816,14 @@ async function main(): Promise<void> {
 			const {
 				ALTERNATE_SCROLL_OFF,
 				ALTERNATE_SCROLL_ON,
-				createUtf8InputDecoder,
 				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
-				stripMouseSequences,
 				wheelEvents,
 			} = await import('@/utils/terminal-mouse');
-			const {
-				createPasteExtractor,
-				DISABLE_BRACKETED_PASTE,
-				ENABLE_BRACKETED_PASTE,
-				pasteEvents,
-			} = await import('@/utils/terminal-paste');
-			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
+			const {emitPaste, DISABLE_BRACKETED_PASTE, ENABLE_BRACKETED_PASTE} =
+				await import('@/utils/terminal-paste');
+			const {createTerminalInputFilter} = await import(
+				'@/utils/terminal-input'
 			);
 
 			// Bracketed paste in both screen modes. Without it the terminal
@@ -866,57 +860,55 @@ async function main(): Promise<void> {
 			// Ink must never see the raw escape sequences (its keypress
 			// parser would leak them into the chat input as text, and a
 			// pasted newline would submit), so it reads from a filtered proxy
-			// stream. Paste payloads are lifted out first and republished on
-			// pasteEvents; mouse reports are then stripped from what's left,
-			// with wheel ticks re-emitted on wheelEvents for the viewport.
+			// stream. Paste payloads are lifted out and delivered to the
+			// focused text field (emitPaste); mouse reports are then stripped
+			// from what's left, with wheel ticks re-emitted on wheelEvents
+			// for the viewport. Keys and pastes share one FIFO so their
+			// original stream order survives.
 			const {PassThrough} = await import('node:stream');
 			const filtered = new PassThrough();
-			const decodeInput = createUtf8InputDecoder();
-			const extractPastes = createPasteExtractor();
-			let carry = '';
-			const forwardInput = (chunk: Buffer | string) => {
-				const text = decodeInput(chunk);
-				const split = extractPastes(text);
-				for (const payload of split.pastes) {
-					pasteEvents.emit('paste', payload);
-				}
-				const result = stripMouseSequences(split.clean, carry);
-				carry = result.carry;
-				for (const direction of result.wheel) {
-					wheelEvents.emit('wheel', direction);
-				}
-				if (result.clean) {
-					queueKeypresses(splitControlKeypresses(result.clean));
-				}
-			};
+			type InputWork =
+				| {kind: 'key'; text: string}
+				| {kind: 'paste'; payload: string};
 			// Ink drains everything buffered on each 'readable', so pieces
 			// written back to back would merge again. Its 'readable' fires on
 			// a nextTick, so writing one piece per setImmediate hands it each
 			// piece as a separate read, in order.
-			const pendingKeypresses: string[] = [];
+			const pendingWork: InputWork[] = [];
 			let drainScheduled = false;
-			const drainKeypresses = () => {
-				const next = pendingKeypresses.shift();
+			const drainWork = () => {
+				const next = pendingWork.shift();
 				if (next === undefined) {
 					drainScheduled = false;
 					return;
 				}
-				filtered.write(next);
-				setImmediate(drainKeypresses);
+				if (next.kind === 'paste') {
+					emitPaste(next.payload);
+				} else {
+					filtered.write(next.text);
+				}
+				setImmediate(drainWork);
 			};
-			const queueKeypresses = (pieces: string[]) => {
-				pendingKeypresses.push(...pieces);
+			const queueWork = (items: InputWork[]) => {
+				pendingWork.push(...items);
 				if (!drainScheduled) {
 					drainScheduled = true;
-					drainKeypresses();
+					drainWork();
 				}
 			};
+			const inputFilter = createTerminalInputFilter(
+				segment => queueWork([segment]),
+				direction => wheelEvents.emit('wheel', direction),
+			);
+			const forwardInput = (chunk: Buffer | string) => inputFilter.push(chunk);
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {
-				pendingKeypresses.length = 0;
+				inputFilter.dispose();
+				pendingWork.length = 0;
 				process.stdin.off('data', forwardInput);
 				process.stdin.pause();
 			};
+
 			// TTY facade: Ink checks isTTY for raw-mode support and calls
 			// setRawMode/ref/unref — delegate those to the real stdin.
 			inkStdin = Object.assign(filtered, {
@@ -991,10 +983,17 @@ async function main(): Promise<void> {
 		});
 
 		// Fallback restore for exit paths that bypass the shutdown manager
-		// (idempotent — the shutdown handler above usually runs first).
-		result.waitUntilExit().then(() => {
-			restoreTerminal();
-		});
+		// (idempotent — the shutdown handler above usually runs first). Ink
+		// rejects this promise when the renderer itself fails, so handle both
+		// settlements: terminal restoration must happen either way.
+		result.waitUntilExit().then(
+			() => {
+				restoreTerminal();
+			},
+			() => {
+				restoreTerminal();
+			},
+		);
 	}
 }
 

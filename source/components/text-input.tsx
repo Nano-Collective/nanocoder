@@ -13,6 +13,11 @@ import {
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/utils/text-wrapping';
+import {
+	nextCodePointEnd,
+	previousCodePointStart,
+	snapToCodePointStart,
+} from '@/utils/unicode-boundaries';
 
 /**
  * How the value effect should treat an incoming `value`, given the values
@@ -281,6 +286,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 	useInput(
 		(input, key) => {
+			// Kitty keyboard protocol reports key release events; with
+			// reportEventTypes enabled every press would otherwise be handled
+			// twice (once for press, once for release).
+			if (key.eventType === 'release') {
+				return;
+			}
+
 			if ((key.ctrl && input === 'c') || key.tab || (key.shift && key.tab)) {
 				return;
 			}
@@ -476,47 +488,46 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = previousCodePointStart(
+						originalValueRef.current,
+						nextCursorOffset,
+					);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = nextCodePointEnd(
+						originalValueRef.current,
+						nextCursorOffset,
+					);
 				}
-			} else if (
-				key.backspace ||
-				(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-			) {
-				// Backspace deletes the character before the cursor.
-				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
-				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence: '\x7f' and the Option/Alt+Backspace variant '\x1b\x7f'
-				// (macOS/Linux terminals) are backward deletes, while '\x1b[3~'
-				// is the forward Delete key. Kitty keyboard protocol encodes
-				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
-				// it is dormant here because nanocoder does not enable
-				// kittyKeyboard — if that changes, this guard needs the
-				// corresponding handling.
+			} else if (key.backspace) {
+				// Backspace deletes the character before the cursor. Since Ink 7 the
+				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f) set
+				// `key.backspace`, distinct from forward Delete (\x1b[3~) which sets
+				// `key.delete` — no raw-sequence disambiguation needed anymore.
+				// A supplementary character (emoji, rare CJK) spans two UTF-16
+				// units, so the delete span runs a whole code point, never half of
+				// one (which would leave an unpaired surrogate).
 				if (cursorOffsetRef.current > 0) {
+					const start = previousCodePointStart(
+						originalValueRef.current,
+						cursorOffsetRef.current,
+					);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
-						originalValueRef.current.slice(
-							cursorOffsetRef.current,
-							originalValueRef.current.length,
-						);
-					nextCursorOffset--;
+						originalValueRef.current.slice(0, start) +
+						originalValueRef.current.slice(cursorOffsetRef.current);
+					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
-				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
+				// Delete removes the character after the cursor (forward delete, '\x1b[3~').
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
+					const end = nextCodePointEnd(
+						originalValueRef.current,
+						cursorOffsetRef.current,
+					);
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +
-						originalValueRef.current.slice(
-							cursorOffsetRef.current + 1,
-							originalValueRef.current.length,
-						);
+						originalValueRef.current.slice(end);
 					// Cursor stays in place — forward delete doesn't move it.
 				}
 			} else {
@@ -541,6 +552,8 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			if (nextCursorOffset > nextValue.length) {
 				nextCursorOffset = nextValue.length;
 			}
+			// Never let the caret sit inside a surrogate pair.
+			nextCursorOffset = snapToCodePointStart(nextValue, nextCursorOffset);
 
 			// Update refs immediately so the next event in the same stdin.read()
 			// block sees the correct values (Ink doesn't re-render between events)
