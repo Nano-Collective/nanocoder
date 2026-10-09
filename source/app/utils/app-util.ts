@@ -42,6 +42,7 @@ import {
 	warningMsg,
 } from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
+import {clearSpanHandles} from '@/utils/span-handles';
 import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
@@ -843,6 +844,8 @@ export function createClearMessagesHandler(
 		clearReadTracker();
 		// Expandable tool results point into the transcript being cleared.
 		clearExpandableToolResults();
+		// Span handles point into tool output that is about to disappear.
+		clearSpanHandles();
 		// Undelivered session-start hook context belongs to the cleared
 		// conversation — don't graft it onto the next one.
 		clearPendingHookContext();

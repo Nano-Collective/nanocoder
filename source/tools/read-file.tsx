@@ -23,6 +23,7 @@ import {
 	matchReadContent,
 	rememberReadContent,
 } from '@/utils/read-tracker';
+import {registerSpanForRange} from '@/utils/span-handles';
 import {calculateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
@@ -157,8 +158,14 @@ const executeReadFile = async (args: {
 				args.start_line,
 				args.end_line,
 			);
+			const previewHandle = registerSpanForRange(
+				absPath,
+				1,
+				previewEndLine,
+				content,
+			);
 
-			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
+			return `${preview}\n\n[${previewHandle}]\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
 
 		// Line ranges specified - read and return content
@@ -181,8 +188,11 @@ const executeReadFile = async (args: {
 			args.end_line,
 		);
 
-		// Return content without line numbers for clean content-based editing
-		return linesToReturn.join('\n');
+		// Content stays without line numbers for clean content-based editing with
+		// string_replace; the handle on its own trailing line lets replace_span
+		// edit this exact range without retyping it.
+		const handle = registerSpanForRange(absPath, startLine, endLine, content);
+		return `${linesToReturn.join('\n')}\n\n[${handle}]`;
 	} catch (error: unknown) {
 		// Handle file not found and other filesystem errors
 		if (
@@ -200,7 +210,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again. The content ends with a handle such as [@span:k7]; pass it to replace_span to edit exactly that range without retyping the old text.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;

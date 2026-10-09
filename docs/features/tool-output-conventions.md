@@ -12,6 +12,8 @@ File-content tools use different model-facing representations depending on what 
 
 `read_file` returns raw file content without line numbers. This keeps the payload clean for content-based editing and makes it the canonical representation for exact text matching.
 
+The one addition is a handle on its own trailing line, such as `[@span:k7]`, which `replace_span` uses to edit exactly the range that was read without the model retyping it. It is separated from the content by a blank line and is never part of the file.
+
 ## Edit tools
 
 Bounded edit-tool responses, such as `string_replace` and `diff_edit`, return partial file windows. Those responses should keep line numbers because the excerpt needs to be placed inside the larger file.
