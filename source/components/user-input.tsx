@@ -359,7 +359,10 @@ export default function UserInput({
 			const cursorOffset = textInputRef.current?.getCursorOffset();
 			const result = insertPaste(payload, cursorOffset);
 			if (result && textInputRef.current) {
-				textInputRef.current.setCursorOffset(result.cursorOffset);
+				textInputRef.current.setCursorOffset(
+					result.cursorOffset,
+					currentStateRef.current.displayValue,
+				);
 				return true;
 			}
 			if (!result) {
@@ -370,7 +373,7 @@ export default function UserInput({
 			return true;
 		};
 		return registerPasteTarget(handleTerminalPaste);
-	}, [disabled, effectiveFocus, insertPaste]);
+	}, [disabled, effectiveFocus, insertPaste, currentStateRef]);
 
 	useEffect(() => {
 		if (

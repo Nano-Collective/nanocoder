@@ -1,16 +1,8 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
-import {
-	createXtermModifiedEnterRewriter,
-	rewriteXtermModifiedEnter,
-	splitControlKeypresses,
-} from '@/utils/terminal-keypress';
-import {
-	createUtf8InputDecoder,
-	stripMouseSequences,
-} from '@/utils/terminal-mouse';
-import {createPasteExtractor} from '@/utils/terminal-paste';
+import {createTerminalInputFilter} from '@/utils/terminal-input';
+import {rewriteXtermModifiedEnter} from '@/utils/terminal-keypress';
 import TextInput from './text-input';
 
 /**
@@ -76,24 +68,15 @@ const settle = () => new Promise<void>(resolve => setTimeout(resolve, 100));
 // Match the CLI filtering order, but feed each filtered piece directly into
 // ink-testing-library's readable stream instead of the CLI's PassThrough queue.
 function createInputProxy(stdin: ReturnType<typeof render>['stdin']) {
-	const decode = createUtf8InputDecoder();
-	const extractPastes = createPasteExtractor();
 	const pastes: string[] = [];
-	const rewriter = createXtermModifiedEnterRewriter(text => {
-		for (const piece of splitControlKeypresses(text)) stdin.write(piece);
-	});
-	let carry = '';
-	return {
-		push(chunk: Buffer | string) {
-			const split = extractPastes(decode(chunk));
-			pastes.push(...split.pastes);
-			const result = stripMouseSequences(split.clean, carry);
-			carry = result.carry;
-			rewriter.push(result.clean);
+	const filter = createTerminalInputFilter(
+		segment => {
+			if (segment.kind === 'paste') pastes.push(segment.payload);
+			else stdin.write(segment.text);
 		},
-		pastes,
-		dispose: () => rewriter.dispose(),
-	};
+		() => {},
+	);
+	return {...filter, pastes};
 }
 
 const newlineSequences: Array<[string, string]> = [

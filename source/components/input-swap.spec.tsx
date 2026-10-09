@@ -1,57 +1,51 @@
 import test from 'ava';
+import {Text, useInput} from 'ink';
 import {render} from 'ink-testing-library';
 import React from 'react';
-import {useInput} from 'ink';
 
 const wait = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Ink 8 regression witness: when a component with `useInput` unmounts in the
- * same React commit that mounts another (the wizard's step transitions), keys
- * written during a short window right after the swap are dropped entirely.
- * Writes that arrive >=100ms later flow normally, so this test pins both
- * sides of the boundary: an early write must be absent and a late one
- * present. If the drop ever turned into "lose all input forever" (or the
- * window grew unboundedly), the late-write assertion fails.
- */
-const seen: string[] = [];
-
-function Host() {
+// A same-commit unmount/mount of useInput must not leave the new step unable
+// to receive input. Wait for the rendered step instead of requiring Ink's
+// timing-dependent key-loss window to occur.
+function Host({seen}: {seen: string[]}) {
 	const [step, setStep] = React.useState<'a' | 'b'>('a');
-	React.useEffect(() => {
-		const timer = setTimeout(() => setStep('b'), 30);
-		return () => clearTimeout(timer);
-	}, []);
-	return step === 'a' ? <ChildA /> : <ChildB />;
+	return step === 'a' ? (
+		<ChildA onNext={() => setStep('b')} />
+	) : (
+		<ChildB seen={seen} />
+	);
 }
 
-function ChildA() {
-	useInput(() => {});
-	return null;
+function ChildA({onNext}: {onNext: () => void}) {
+	useInput((input, key) => {
+		if (key.return) onNext();
+	});
+	return <Text>Step A</Text>;
 }
 
-function ChildB() {
+function ChildB({seen}: {seen: string[]}) {
 	useInput(input => {
 		seen.push(input);
 	});
-	return null;
+	return <Text>Step B</Text>;
 }
 
 test.serial('same-commit useInput swap keeps input flowing', async t => {
-	seen.length = 0;
-	const {stdin, unmount} = render(<Host />);
-	// Inside the post-swap dead window (~100ms): must be dropped.
-	await wait(40);
-	stdin.write('e');
-	// Past the window: must be delivered.
-	await wait(300);
+	const seen: string[] = [];
+	const {stdin, lastFrame, unmount} = render(<Host seen={seen} />);
+	t.teardown(unmount);
+	await wait();
+	t.is(lastFrame(), 'Step A');
+	stdin.write('\r');
+	for (let attempt = 0; attempt < 50 && lastFrame() !== 'Step B'; attempt++) {
+		await wait(20);
+	}
+	t.is(lastFrame(), 'Step B', 'the input must transition to the new step');
+	await wait(150);
+	stdin.write('q');
+	await wait();
 	stdin.write('l');
-	await wait(200);
-	unmount();
-	t.deepEqual(
-		seen,
-		['l'],
-		'early key must be swallowed by the dead window, late key must flow',
-	);
+	await wait();
+	t.deepEqual(seen, ['q', 'l'], 'input must keep flowing after the step swap');
 });
-

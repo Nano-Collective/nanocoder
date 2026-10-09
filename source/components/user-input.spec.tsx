@@ -2089,7 +2089,7 @@ test.serial(
 		);
 
 		await wait(50);
-		pasteEvents.emit('paste', PASTE);
+		emitPaste(PASTE);
 		stdin.write('x');
 
 		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]x/);
@@ -2108,7 +2108,7 @@ test.serial(
 		);
 
 		await wait(50);
-		pasteEvents.emit('paste', PASTE);
+		emitPaste(PASTE);
 		stdin.write('x');
 		stdin.write('y');
 		stdin.write('z');
@@ -2131,7 +2131,7 @@ test.serial(
 		await wait(50);
 		stdin.write('abc');
 		await waitForFrame(lastFrame, /abc/);
-		pasteEvents.emit('paste', PASTE);
+		emitPaste(PASTE);
 		// The caret is parked after the placeholder, so the Backspace removes
 		// it whole - as it would once the paste is shown - and "abc" survives.
 		// It must not be swallowed (placeholder left behind) or applied to the
@@ -2165,7 +2165,7 @@ test.serial(
 		await wait(50);
 
 		// No await between the paste and the key.
-		pasteEvents.emit('paste', 'XY');
+		emitPaste('XY');
 		stdin.write('Z');
 
 		await waitForFrame(lastFrame, /aXYZbc/);
@@ -2191,7 +2191,7 @@ test.serial(
 		);
 
 		await wait(50);
-		pasteEvents.emit('paste', PASTE);
+		emitPaste(PASTE);
 		stdin.write('\r');
 
 		await waitForCondition(() => submittedDisplay !== undefined);

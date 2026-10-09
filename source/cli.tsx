@@ -816,20 +816,15 @@ async function main(): Promise<void> {
 			const {
 				ALTERNATE_SCROLL_OFF,
 				ALTERNATE_SCROLL_ON,
-				createUtf8InputDecoder,
 				MOUSE_REPORTING_OFF,
 				MOUSE_REPORTING_ON,
-				stripMouseSequences,
 				wheelEvents,
 			} = await import('@/utils/terminal-mouse');
-			const {
-				createPasteExtractor,
-				emitPaste,
-				DISABLE_BRACKETED_PASTE,
-				ENABLE_BRACKETED_PASTE,
-			} = await import('@/utils/terminal-paste');
-			const {splitControlKeypresses, createXtermModifiedEnterRewriter} =
-				await import('@/utils/terminal-keypress');
+			const {emitPaste, DISABLE_BRACKETED_PASTE, ENABLE_BRACKETED_PASTE} =
+				await import('@/utils/terminal-paste');
+			const {createTerminalInputFilter} = await import(
+				'@/utils/terminal-input'
+			);
 
 			// Bracketed paste in both screen modes. Without it the terminal
 			// sends a paste as bare bytes, so the CR at each line break
@@ -872,8 +867,6 @@ async function main(): Promise<void> {
 			// original stream order survives.
 			const {PassThrough} = await import('node:stream');
 			const filtered = new PassThrough();
-			const decodeInput = createUtf8InputDecoder();
-			const extractPastes = createPasteExtractor();
 			type InputWork =
 				| {kind: 'key'; text: string}
 				| {kind: 'paste'; payload: string};
@@ -903,43 +896,14 @@ async function main(): Promise<void> {
 					drainWork();
 				}
 			};
-			const rewriteEnter = createXtermModifiedEnterRewriter(text => {
-				// xterm modifyOtherKeys Enter (VS Code terminal) is unparseable
-				// by Ink and dropped outright in Ink 8 — rewrite it to the
-				// equivalent kitty CSI-u sequence so Shift/Alt+Enter survive,
-				// including when the sequence spans multiple stdin chunks.
-				// splitControlKeypresses keeps a run of control keys coalesced
-				// into one read as distinct events.
-				queueWork(
-					splitControlKeypresses(text).map(text => ({kind: 'key', text})),
-				);
-			});
-			let carry = '';
-			const forwardInput = (chunk: Buffer | string) => {
-				const text = decodeInput(chunk);
-				const split = extractPastes(text);
-				const result = stripMouseSequences(split.clean, carry);
-				carry = result.carry;
-				for (const direction of result.wheel) {
-					wheelEvents.emit('wheel', direction);
-				}
-				if (result.clean) {
-					rewriteEnter.push(result.clean);
-				}
-				if (split.pastes.length > 0) {
-					// rewriteEnter.push queues this chunk's keys synchronously —
-					// except a held-back partial sequence, which would not flush
-					// until its 20ms timer fires, i.e. after a paste that arrived
-					// later in the stream (a paste-only chunk never even reaches
-					// push). Flush the carry first so keys and pastes stay in
-					// original stream order.
-					rewriteEnter.flush();
-					queueWork(split.pastes.map(payload => ({kind: 'paste', payload})));
-				}
-			};
+			const inputFilter = createTerminalInputFilter(
+				segment => queueWork([segment]),
+				direction => wheelEvents.emit('wheel', direction),
+			);
+			const forwardInput = (chunk: Buffer | string) => inputFilter.push(chunk);
 			process.stdin.on('data', forwardInput);
 			stopInputForwarding = () => {
-				rewriteEnter.dispose();
+				inputFilter.dispose();
 				pendingWork.length = 0;
 				process.stdin.off('data', forwardInput);
 				process.stdin.pause();
