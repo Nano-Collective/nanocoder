@@ -45,6 +45,18 @@ const MAX_LINE_LENGTH = 240;
 const MAX_FAILURES = 200;
 
 /**
+ * jest/vitest failure tree: `● Suite › case`, indented once per `describe`
+ * level. Named so {@link NESTED_PATTERNS} can reference it by identity rather
+ * than by position, which a reordered list would silently invalidate.
+ */
+const TREE_BULLET = /^●\s+(.+?)\s*$/;
+
+/**
+ * The per-test row several runners use, likewise indented by nesting depth.
+ */
+const TEST_MARK = /^[✕✗×]\s+(.+?)\s*$/u;
+
+/**
  * A line that reports a failure, most specific convention first.
  *
  * Each pattern exposes one capture group holding the test's identity. Order is
@@ -63,7 +75,7 @@ const FAILURE_PATTERNS: RegExp[] = [
 	// cargo: `test module::test_name ... FAILED` / `---- module::name stdout ----`
 	/^test\s+(\S+::\S+)\s+\.\.\.\s+FAILED/,
 	// jest/vitest tree: `● Suite › case` (also `● case`)
-	/^●\s+(.+?)\s*$/,
+	TREE_BULLET,
 	// jest/vitest summary: `FAIL src/a.test.ts > suite > case`
 	/^FAIL\s+\S+\s+>\s+(.+?)\s*$/,
 	// tap: `not ok 7 - description`
@@ -73,8 +85,29 @@ const FAILURE_PATTERNS: RegExp[] = [
 	// junit5 / gradle: `testName FAILED` and `testName > something FAILED`
 	/^([\w$]+(?:\s*>\s*[\w$]+)*)\s+FAILED/,
 	// generic check marks, used by many runners for the per-test row
-	/^[✕✗×]\s+(.+?)\s*$/u,
+	TEST_MARK,
 ];
+
+/**
+ * The subset whose hierarchy is carried by indentation.
+ *
+ * jest and vitest print one marker per *level* of the failure tree, so a
+ * `describe` block and the case inside it are both marked. The other
+ * conventions each mark exactly one line, and their indentation is layout noise
+ * — treating a go test case nested under `--- FAIL:` as a container would drop
+ * real failures. Membership is by pattern identity rather than by index, so
+ * reordering {@link FAILURE_PATTERNS} cannot silently reclassify a convention.
+ */
+const NESTED_PATTERNS: readonly RegExp[] = [TREE_BULLET, TEST_MARK];
+
+/** A failure as extracted, with the indentation its convention was found at. */
+interface Candidate {
+	failure: Failure;
+	/** Leading whitespace width of the line the failure was extracted from. */
+	indent: number;
+	/** True when the convention carries its hierarchy in `indent`. */
+	nested: boolean;
+}
 
 /**
  * Words that mark a line as reporting a problem, for the fallback path.
@@ -154,14 +187,61 @@ const VOLATILE_NUMBER = /\b\d+(?:\.\d+)?\b/g;
  * one, because a missing key makes the failure invisible to the diff; a key
  * that shifts between runs is worse than both, because it fabricates a
  * resolved/introduced pair out of a single failure.
+ *
+ * `nested` reports whether the line came from one of the per-line marker
+ * conventions, whose hierarchy is expressed by indentation rather than by the
+ * text. {@link dropTreeAncestors} needs that distinction.
  */
-function keyOf(line: string): string | null {
+function keyOf(line: string): {key: string; nested: boolean} | null {
 	for (const pattern of FAILURE_PATTERNS) {
 		const match = pattern.exec(line);
-		if (match?.[1]) return normalizeForSignature(match[1]).trim();
+		if (match?.[1]) {
+			return {
+				key: normalizeForSignature(match[1]).trim(),
+				nested: NESTED_PATTERNS.includes(pattern),
+			};
+		}
 	}
 	if (!looksLikeFailure(line)) return null;
-	return normalizeForSignature(line).replace(VOLATILE_NUMBER, '<n>').trim();
+	return {
+		key: normalizeForSignature(line).replace(VOLATILE_NUMBER, '<n>').trim(),
+		nested: false,
+	};
+}
+
+/**
+ * Drop the container nodes of a nested failure tree.
+ *
+ * jest prints one bullet per *level*, not per failure:
+ *
+ * ```
+ *   ● Arithmetic
+ *     ● adds two numbers
+ * ```
+ *
+ * Both bullets match {@link FAILURE_PATTERNS}, so a single broken test is
+ * extracted as two failures. That is not cosmetic: the count is what the user
+ * is shown and what the model is told to act on, and a `describe` name is not
+ * something a fix can be written from. It also contradicts this module's own
+ * contract that a key identifies a failure — a container is not one.
+ *
+ * Nesting is expressed by indentation, so a bullet is a container exactly when
+ * a *later* bullet is indented deeper than it is. Document order matters: a
+ * deep bullet followed by a shallower one is two siblings' worth of leaves, not
+ * a parent and a child. A leaf at any depth is always kept, and a convention
+ * that carries no indentation is never touched.
+ */
+function dropTreeAncestors(found: Map<string, Candidate>): Failure[] {
+	const entries = [...found.values()];
+
+	return entries
+		.filter((candidate, index) => {
+			if (!candidate.nested) return true;
+			return !entries
+				.slice(index + 1)
+				.some(later => later.nested && later.indent > candidate.indent);
+		})
+		.map(candidate => candidate.failure);
 }
 
 /**
@@ -172,23 +252,36 @@ function keyOf(line: string): string | null {
  * output order between runs must not appear to have made progress.
  */
 export function failuresOf(output: string): Failure[] {
-	const found = new Map<string, Failure>();
+	const found = new Map<string, Candidate>();
 
 	for (const raw of output.split(/\r?\n/)) {
+		const indent = raw.length - raw.trimStart().length;
 		const line = raw.trim();
 		if (line === '') continue;
 
-		const key = keyOf(line);
-		if (key === null || key === '') continue;
+		const matched = keyOf(line);
+		if (matched === null || matched.key === '') continue;
 
-		// First occurrence wins: runners print the tree node before the
-		// detailed report, and the tree node is the more useful one-line label.
-		if (!found.has(key)) {
-			found.set(key, {key, line: truncate(line)});
+		const existing = found.get(matched.key);
+		if (!existing) {
+			// First occurrence wins for the *label*: runners print the tree node
+			// before the detailed report, and the tree node is the more useful
+			// one-line summary. Indentation takes the deepest sighting, so a name
+			// printed both flat and nested is still judged by its deepest form.
+			found.set(matched.key, {
+				failure: {key: matched.key, line: truncate(line)},
+				indent: matched.nested ? indent : 0,
+				nested: matched.nested,
+			});
+			continue;
+		}
+		if (matched.nested && indent > existing.indent) {
+			existing.indent = indent;
+			existing.nested = true;
 		}
 	}
 
-	return [...found.values()].sort((a, b) => a.key.localeCompare(b.key));
+	return dropTreeAncestors(found).sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /**

@@ -135,6 +135,84 @@ test('failuresOf: an explicitly-marked failure survives the summary guard', t =>
 	t.is(failuresOf('FAILED tests/test_a.py::test_one').length, 1);
 });
 
+// ---------------------------------------------------------------------------
+// Nested failure trees
+//
+// jest and vitest mark every *level* of the tree, so a `describe` block and the
+// case inside it are both marked. Both match a convention, so without a
+// container rule one broken test is counted as two - and the extra entry is a
+// name no fix can be written from.
+// ---------------------------------------------------------------------------
+
+test('failuresOf: a describe block is not a failure alongside its case', t => {
+	// The regression: this is jest's real shape for a single broken test, and
+	// it counted as two.
+	const output = [
+		'FAIL  src/a.test.ts',
+		'  ● Arithmetic',
+		'    ● adds two numbers',
+		'',
+		'      expect(received).toBe(expected)',
+		'',
+		'Test Suites: 1 failed, 1 passed, 2 total',
+		'Tests:       1 failed, 3 passed, 4 total',
+	].join('\n');
+
+	t.deepEqual(failuresOf(output), [
+		{key: 'adds two numbers', line: '● adds two numbers'},
+	]);
+});
+
+test('failuresOf: sibling cases under one describe are all kept', t => {
+	// The guard on the test above. A container rule that dropped the whole
+	// subtree instead of the container would silently hide real failures, which
+	// is worse than the inflation it fixes.
+	t.deepEqual(
+		failuresOf(
+			[
+				'  ● Arithmetic',
+				'    ● adds two numbers',
+				'    ● subtracts two numbers',
+			].join('\n'),
+		).map(f => f.key),
+		['adds two numbers', 'subtracts two numbers'],
+	);
+});
+
+test('failuresOf: a deeper leaf does not swallow a later shallower sibling', t => {
+	// Nesting is read in document order. `Outer` is a container because
+	// something after it is deeper; `Flat` is a leaf because nothing after it is.
+	t.deepEqual(
+		failuresOf(['  ● Outer', '      ● deep leaf', '  ● Flat'].join('\n')).map(
+			f => f.key,
+		),
+		['deep leaf', 'Flat'],
+	);
+});
+
+test('failuresOf: indentation outside a tree convention is not nesting', t => {
+	// The guard on all of the above. go test indents subtests under their
+	// parent, but its `--- FAIL:` convention marks exactly one line each, so
+	// treating indentation as a container signal there would delete real
+	// failures from the report.
+	t.deepEqual(
+		failuresOf(
+			[
+				'--- FAIL: TestAlpha (0.00s)',
+				'    --- FAIL: TestAlpha/sub (0.00s)',
+				'    --- FAIL: TestAlpha/other (0.00s)',
+			].join('\n'),
+		).map(f => f.key),
+		['TestAlpha', 'TestAlpha/other', 'TestAlpha/sub'],
+	);
+});
+
+test('failuresOf: a lone marked line is a leaf, not a container', t => {
+	t.deepEqual(failuresOf('● only one'), [
+		{key: 'only one', line: '● only one'},
+	]);
+});
+
 test('failuresOf: a section banner is not a failure in its own right', t => {
 	// pytest prints `=================== FAILURES ===================` and
 	// underlines each test with `____ test_add ____`. Both match the failure

@@ -7,7 +7,7 @@ import {
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {delimiter, join} from 'node:path';
 import test from 'ava';
 import {parseVerificationCommand, type ParsedCommand} from './command-parser.js';
 import {resolveWindowsExecutable, runVerificationCommand} from './runner.js';
@@ -210,6 +210,114 @@ test('the same argv is fine where no shell is involved', async t => {
 	// shell never saw the `&&`.
 	t.notRegex(planResult.spawnError ?? '', /cmd\.exe/);
 });
+
+// ============================================================================
+// The resolved argv[0]
+//
+// argv[1..] is screened against every metacharacter, but argv[0] comes out of a
+// PATH search, so it is not the user's to have written and the argv screen
+// never sees it. These are the tests for that gap: the assembled cmd.exe line
+// is the only place the directory portion can be checked, and a gap there is a
+// command injection driven by the environment rather than by the config.
+// ============================================================================
+
+/** Prepend `dir` to PATH for the duration of one run. */
+async function withPathPrefix<T>(dir: string, body: () => Promise<T>): Promise<T> {
+	const original = process.env.PATH;
+	process.env.PATH = dir;
+	try {
+		return await body();
+	} finally {
+		process.env.PATH = original;
+	}
+}
+
+/** A `.cmd` shim in `dir`, named `name`. */
+function shimIn(dir: string, name: string, body: string): void {
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(join(dir, name), body, 'utf8');
+}
+
+test.serial(
+	'runVerificationCommand: a PATH entry carrying a cmd.exe separator cannot inject a command',
+	async t => {
+		// Regression, and the reason argv[0] is screened separately. The shim
+		// lives in a directory whose name contains `&`, which cmd.exe treats as a
+		// command separator. Left unchecked, the assembled line
+		// `...\evil&calc\shim.cmd` splits in two: `...\evil` runs, then
+		// `calc\shim.cmd` runs. Both are real programs here, so the assertion is
+		// on what actually executed, not on an error message.
+		const hostileDir = join(workdir, 'evil&calc');
+		const decoy = join(workdir, 'evil.cmd');
+		writeFileSync(decoy, '@echo off\r\necho INJECTED-FIRST-SEGMENT\r\n', 'utf8');
+		shimIn(hostileDir, 'shim.cmd', '@echo off\r\necho SHIM-RAN\r\n');
+
+		// The tail after the `&` is `calc\shim.cmd`, resolved against cwd, so
+		// the second segment is runnable too rather than merely different.
+		shimIn(join(workdir, 'calc'), 'shim.cmd', '@echo off\r\necho SECOND\r\n');
+
+		const result = await withPathPrefix(
+			`${hostileDir}${delimiter}${workdir}${delimiter}${process.env.PATH ?? ''}`,
+			() =>
+				runVerificationCommand({
+					command: {command: 'shim', args: [], display: 'shim'},
+					cwd: workdir,
+					timeoutMs: 5_000,
+					maxOutputBytes: 4_000,
+					platform: 'win32',
+				}),
+		);
+
+		t.is(result.status, 'passed');
+		t.true(
+			result.output.includes('SHIM-RAN'),
+			`the configured command must still run, got: ${result.output}`,
+		);
+		t.false(
+			result.output.includes('INJECTED-FIRST-SEGMENT'),
+			`a command from the PATH directory name executed: ${result.output}`,
+		);
+		t.false(
+			result.output.includes('SECOND'),
+			`the line was split at "&": ${result.output}`,
+		);
+	},
+);
+
+test.serial(
+	'runVerificationCommand: a resolved path a cmd.exe PATH entry cannot poison still runs',
+	async t => {
+		// The guard on the test above, and the reason the screen is not simply
+		// widened to refuse every metacharacter in the path: `C:\Program Files
+		// (x86)\...` is a real install location and has to keep working. The
+		// parens are quoted, and inside double quotes cmd.exe treats them as
+		// literal, so the shim runs and its arguments arrive unquoted.
+		const tools = join(workdir, 'Program Files (x86)', 'nodejs');
+		const out = join(workdir, 'paren-argv.txt');
+		shimIn(
+			tools,
+			'npm.cmd',
+			`@echo off\r\necho [%~nx0] [%1] > "${out}"\r\n`,
+		);
+
+		const result = await withPathPrefix(`${tools}${delimiter}${process.env.PATH ?? ''}`, () =>
+			runVerificationCommand({
+				command: {
+					command: 'npm',
+					args: ['run', 'test:ci'],
+					display: 'npm run test:ci',
+				},
+				cwd: workdir,
+				timeoutMs: 5_000,
+				maxOutputBytes: 4_000,
+				platform: 'win32',
+			}),
+		);
+
+		t.is(result.status, 'passed', result.spawnError ?? result.output);
+		t.is(readFileSync(out, 'utf8').trim(), '[npm.cmd] [run]');
+	},
+);
 
 // ============================================================================
 // Exit statuses

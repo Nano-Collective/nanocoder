@@ -21,9 +21,9 @@
  *  3. **Only one run is in flight at a time.** A second concurrent run would
  *     double the cost and interleave two outputs the model then has to
  *     disentangle. The guard is in-process: it covers a `/verify` racing an
- *     automatic pass and any future parallel caller, but it is deliberately
- *     *not* a claim about other nanocoder processes pointed at the same
- *     repository.
+ *     automatic pass (both go through {@link runVerificationExclusive}) and any
+ *     future parallel caller, but it is deliberately *not* a claim about other
+ *     nanocoder processes pointed at the same repository.
  *
  * Nothing here throws. A verification feature that can break a session is worse
  * than no verification feature, so every failure becomes a reported outcome.
@@ -73,7 +73,10 @@ export type VerificationOutcome =
 			result: VerificationRunResult;
 	  }
 	/** Nothing ran, and that is correct. */
-	| {action: 'skipped'; reason: 'not-configured' | 'disabled' | 'busy'}
+	| {
+			action: 'skipped';
+			reason: 'not-configured' | 'disabled' | 'busy' | 'already-settled';
+	  }
 	/** The run threw rather than returning a result. */
 	| {action: 'error'; message: string};
 
@@ -116,6 +119,38 @@ async function runGuarded(
 	} finally {
 		inFlight--;
 	}
+}
+
+/** Whether a check is already running in this process. */
+export function verificationRunInFlight(): boolean {
+	return inFlight > 0;
+}
+
+/** The result of a manual run, or the fact that one was already happening. */
+export type ExclusiveVerificationRun =
+	| {ran: true; result: VerificationRunResult}
+	| {ran: false};
+
+/**
+ * Run one check through the same in-process guard the automatic loop uses.
+ *
+ * `/verify` is the reason this exists. Without it a manual run went straight to
+ * the runner and bypassed the guard entirely, so the two scenarios the guard
+ * exists to prevent were both live: a `/verify` typed while a turn was
+ * verifying paid for a second concurrent suite, and its output interleaved with
+ * the automatic one on the same terminal. Reporting `ran: false` rather than
+ * queueing is deliberate, and for the reason {@link inFlight} is a counter and
+ * not a queue — a queued manual run would finish after the automatic one and
+ * present its result as the current state of the repository.
+ */
+export async function runVerificationExclusive(
+	settings: VerificationSettings,
+	signal?: AbortSignal,
+	run: VerificationRunner = defaultRunner,
+): Promise<ExclusiveVerificationRun> {
+	if (inFlight > 0) return {ran: false};
+	const result = await runGuarded(run, settings, signal);
+	return {ran: true, result};
 }
 
 export class VerificationOrchestrator {
@@ -182,7 +217,12 @@ export class VerificationOrchestrator {
 	 * been told the outcome of.
 	 */
 	async afterEdits(signal?: AbortSignal): Promise<VerificationOutcome> {
-		if (this.settled) return {action: 'skipped', reason: 'not-configured'};
+		// Distinct from `not-configured`: the command *is* configured and has
+		// already been run and reported this turn. Reporting it as unconfigured
+		// would tell the user the feature is off when what actually happened is
+		// that it already finished, which is the one case where re-running would
+		// cost a check the user has already been given the answer to.
+		if (this.settled) return {action: 'skipped', reason: 'already-settled'};
 
 		if (inFlight > 0) return {action: 'skipped', reason: 'busy'};
 

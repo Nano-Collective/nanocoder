@@ -1,14 +1,15 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getRetryLimits} from '@/config/index';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getContainedSessionCwd} from '@/services/session-cwd';
 import {
-	runVerificationCommand,
-	type VerificationRunResult,
-} from '@/services/verification/runner';
+	runVerificationExclusive,
+	type VerificationSettings,
+} from '@/services/verification/orchestrator';
+import type {VerificationRunResult} from '@/services/verification/runner';
 import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/commands';
 
@@ -34,6 +35,12 @@ interface VerifyProps {
 	notConfigured?: boolean;
 	/** True when automatic post-edit verification is suppressed. */
 	automaticDisabled: boolean;
+	/**
+	 * True when a check was already running and this one was declined. Kept
+	 * separate from `notConfigured` because the two need opposite advice: one
+	 * tells the user to configure something, the other to wait.
+	 */
+	busy?: boolean;
 	cwd: string;
 }
 
@@ -70,6 +77,7 @@ export function Verify({
 	result,
 	notConfigured,
 	automaticDisabled,
+	busy,
 	cwd,
 }: VerifyProps) {
 	const boxWidth = useTerminalWidth();
@@ -114,6 +122,16 @@ export function Verify({
 					)}
 
 					{result && <VerifyResult result={result} />}
+
+					{busy && (
+						<Box flexDirection="column">
+							<Text color={colors.secondary}>
+								A verification run is already in flight. This one was not
+								started, so it cannot overwrite the result already on its way -
+								run /verify again once the current one finishes.
+							</Text>
+						</Box>
+					)}
 
 					{result?.status === 'passed' && (
 						<Box marginTop={1}>
@@ -214,24 +232,27 @@ export const verifyCommand: Command = {
 			});
 		}
 
-		const cwd = getContainedSessionCwd();
-		const [command, ...args] = verification.command;
-
-		const result = await runVerificationCommand({
-			command: {command, args, display: verification.command.join(' ')},
-			cwd,
+		const settings: VerificationSettings = {
+			command: verification.command,
 			timeoutMs: verification.timeoutMs,
 			maxOutputBytes: verification.maxOutputBytes,
-		});
+			maxAttempts: getRetryLimits().maxVerificationAttempts,
+			cwd: getContainedSessionCwd(),
+		};
+
+		// Shared guard, so a manual run cannot overlap an automatic one. See
+		// `runVerificationExclusive` for why declining beats queueing.
+		const exclusive = await runVerificationExclusive(settings);
 
 		return React.createElement(Verify, {
 			key: generateKey('verify'),
 			commandDisplay: verification.command.join(' '),
-			result,
+			result: exclusive.ran ? exclusive.result : null,
+			busy: !exclusive.ran,
 			// `enabled: false` suppresses the automatic post-edit loop, not the
 			// command. Someone typing /verify is asking for it by name.
 			automaticDisabled: !verification.enabled,
-			cwd,
+			cwd: settings.cwd,
 		});
 	},
 };

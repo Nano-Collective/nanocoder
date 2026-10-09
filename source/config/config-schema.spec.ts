@@ -563,7 +563,8 @@ test('maxVerificationAttempts is accepted under retries', t => {
 	});
 });
 
-test('definition names are clean (no TypeScript generics)', t => {	for (const name of Object.keys(schema.definitions)) {
+test('definition names are clean (no TypeScript generics)', t => {
+	for (const name of Object.keys(schema.definitions)) {
 		for (const pattern of ['<', '>', '%3C', '%3E']) {
 			t.false(
 				name.includes(pattern),

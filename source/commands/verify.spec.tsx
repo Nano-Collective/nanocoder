@@ -3,6 +3,12 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {clearAppConfig, getAppConfig, reloadAppConfig} from '@/config/index';
+import {
+	resetVerificationLock,
+	runVerificationExclusive,
+	type VerificationSettings,
+	verificationRunInFlight,
+} from '@/services/verification/orchestrator';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import type {VerificationRunResult} from '../services/verification/runner';
@@ -248,6 +254,75 @@ test.serial('handler surfaces an unconfigured feature without running anything',
 		reloadAppConfig();
 		if (existsSync(dir)) rmSync(dir, {recursive: true, force: true});
 	}
+});
+
+test.serial('handler declines rather than overlapping a run already in flight', async t => {
+	// The regression: `/verify` used to spawn straight from the handler, so it
+	// bypassed the process-wide guard entirely. Typing it while a turn was
+	// verifying paid for a second concurrent suite and interleaved two outputs
+	// on one terminal. The handler must now go through the shared guard, and the
+	// rendered text has to distinguish "wait" from "configure something" - the
+	// two need opposite advice from the user.
+	resetVerificationLock();
+	const settings: VerificationSettings = {
+		command: ['true'],
+		timeoutMs: 1_000,
+		maxOutputBytes: 1_024,
+		maxAttempts: 1,
+		cwd: process.cwd(),
+	};
+
+	// Hold the guard with a run that has not settled yet.
+	let release: () => void = () => {};
+	const held = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const holder = runVerificationExclusive(settings, undefined, async () => {
+		await held;
+		return {
+			status: 'passed' as const,
+			exitCode: 0,
+			signal: null,
+			durationMs: 1,
+			output: '',
+			truncated: false,
+		};
+	});
+
+	t.true(verificationRunInFlight(), 'the guard is held before the manual run');
+
+	const manual = await runVerificationExclusive(settings);
+	t.false(
+		manual.ran,
+		'a manual run overlapping an automatic one must be declined',
+	);
+
+	release();
+	await holder;
+	resetVerificationLock();
+
+	// And the guard is released, so a later manual run is not permanently lost.
+	const afterwards = await runVerificationExclusive(settings, undefined, async () => ({
+		status: 'passed' as const,
+		exitCode: 0,
+		signal: null,
+		durationMs: 1,
+		output: '',
+		truncated: false,
+	}));
+	t.true(afterwards.ran, 'the guard must be released once the first run ends');
+
+	const {lastFrame} = renderWithTheme(
+		<Verify
+			commandDisplay="npm test"
+			result={null}
+			busy
+			automaticDisabled={false}
+			cwd={process.cwd()}
+		/>,
+	);
+	t.regex(lastFrame()!, /already in flight/);
+	t.notRegex(lastFrame()!, /No verification command configured/);
 });
 
 test('the command declares the name the registry dispatches on', t => {

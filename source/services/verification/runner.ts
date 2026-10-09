@@ -83,6 +83,26 @@ const NATIVE_WINDOWS_EXECUTABLES = new Set(['.exe', '.com']);
 /** Windows' own default, used when PATHEXT is unset. */
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
 
+/**
+ * Characters that make an element of the assembled line *unquotable*.
+ *
+ * `cmd.exe` expands `%VAR%` even inside double quotes, so a `%` cannot be made
+ * safe by quoting. A `"` closes whichever quote is open, and `cmd /s` only
+ * strips the outermost pair - so a stray `"` hands the rest of the line to the
+ * parser as commands. Neither has a legitimate spelling in an executable path.
+ */
+const CMD_LINE_FATAL = /["%\r\n]/;
+
+/**
+ * Characters `cmd.exe` interprets as structure unless the element is quoted.
+ *
+ * Everything here *is* safe inside double quotes, which is what makes quoting
+ * the right response rather than refusal. Parens are in the set because
+ * `C:\Program Files (x86)\...` is a real, common install path and must run -
+ * see {@link quoteForCmdLine}.
+ */
+const CMD_LINE_STRUCTURE = /[\s"()<>&|^]/;
+
 export interface ExecutableLookup {
 	/** Absolute path to the executable, or `null` if it is not on PATH. */
 	path: string | null;
@@ -179,9 +199,20 @@ export function resolveWindowsExecutable(
  *
  * So the line is assembled explicitly: quote only the elements that need it,
  * then wrap the whole thing in the one extra pair of quotes that `/s` needs to
- * strip. Sound only because the screen above also rejects the double quote, so
- * no element can close the wrapper and append its own command. One screen, one
- * quoting rule, no way to route around either.
+ * strip. The safety of that rests on two separate guarantees, because there are
+ * two separate sources of elements:
+ *
+ *  - **argv, from the user** is screened against every `cmd.exe` metacharacter
+ *    below, so no argv element can be structural at all and therefore never
+ *    needs quoting for that reason.
+ *  - **argv[0], after PATH resolution** is *not* under the user's control. Its
+ *    directory comes from `PATH`, so a PATH entry carrying `&` or `|` would
+ *    otherwise split the line into two commands and both would run. It is
+ *    screened separately against {@link CMD_LINE_FATAL} and quoted whenever it
+ *    carries anything {@link CMD_LINE_STRUCTURE} would otherwise interpret.
+ *
+ * One rule for user input, one for resolved input, and neither can reach the
+ * shell in a shape the other has to defend against.
  *
  * This shape is only used once {@link resolveWindowsExecutable} has established
  * that a command interpreter is genuinely required; native executables are
@@ -224,10 +255,28 @@ function resolveSpawnPlan(
 
 	// Run the *resolved* path, not the bare name. `cmd.exe` searches the current
 	// directory before PATH, so a same-named `.cmd` sitting in the repository
-	// would otherwise shadow the tool that was just validated — meaning the
+	// would otherwise shadow the tool that was just validated - meaning the
 	// `unavailable` verdict and the screen above were both decided about a
 	// different file than the one that actually runs.
+	//
+	// A bare name is only reachable when there is no lookup (the pure-function
+	// tests), and it is the name the argv screen above already covered.
 	const file = lookup?.path ?? command.command;
+
+	const fatal = CMD_LINE_FATAL.exec(file);
+	if (fatal) {
+		return {
+			file: command.command,
+			args: command.args,
+			shell: false,
+			detached: false,
+			error:
+				`The resolved verification command path contains ` +
+				`"${fatal[0]}", which cmd.exe cannot be made to treat literally. ` +
+				`Nanocoder refuses to run it on Windows.`,
+		};
+	}
+
 	const line = [file, ...command.args].map(quoteForCmdLine).join(' ');
 
 	return {
@@ -240,17 +289,23 @@ function resolveSpawnPlan(
 }
 
 /**
- * Quote one element for a `cmd.exe` command line — and only if it needs it.
+ * Quote one element for a `cmd.exe` command line - and only if it needs it.
  *
  * Quoting an element that does not need it is not a no-op: the shim receives
  * the quote characters as part of the argument. An empty element still needs a
  * pair, or it disappears entirely.
  *
- * The screen in {@link resolveSpawnPlan} has already rejected `"` and every
- * `cmd.exe` metacharacter, so no element here can close its own wrapper.
+ * Both defences above run first, so an element reaching here is either a
+ * screened argv token - which can only ever need quoting for whitespace, if at
+ * all - or a resolved path, which may hold any of
+ * {@link CMD_LINE_STRUCTURE} and is quoted whenever it does. Inside double
+ * quotes `cmd.exe` treats all of those as literal, so quoting is sufficient and
+ * refusal would only break `C:\Program Files (x86)\...`.
  */
 function quoteForCmdLine(element: string): string {
-	return element === '' || /[\s"]/.test(element) ? `"${element}"` : element;
+	return element === '' || CMD_LINE_STRUCTURE.test(element)
+		? `"${element}"`
+		: element;
 }
 
 /**
@@ -398,18 +453,17 @@ export function runVerificationCommand(
 				),
 			);
 		}
-		plan = resolveSpawnPlan(command, platform, {
-			path: resolved,
-			needsShell: lookup.needsShell,
-		});
-		if (!lookup.needsShell) {
-			plan = {
-				file: resolved,
-				args: command.args,
-				shell: false,
-				detached: true,
-			};
-		}
+		plan = lookup.needsShell
+			? resolveSpawnPlan(command, platform, {
+					path: resolved,
+					needsShell: true,
+				})
+			: {
+					file: resolved,
+					args: command.args,
+					shell: false,
+					detached: true,
+				};
 	} else {
 		plan = resolveSpawnPlan(command, platform);
 	}

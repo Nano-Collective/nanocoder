@@ -212,8 +212,16 @@ test.serial('a pass is not re-run by a later edit in the same turn', async t => 
 	t.is((await orchestrator.afterEdits()).action, 'passed');
 
 	// Settled on a pass: the turn already has its answer, and re-running would
-	// charge the user for the same verdict.
-	t.is((await orchestrator.afterEdits()).action, 'skipped');
+	// charge the user for the same verdict. The reason has to say *that*, rather
+	// than claiming the feature is unconfigured - it is configured and has run,
+	// and "not configured" is the one answer that would send the user looking
+	// for a setting that is already correct.
+	const second = await orchestrator.afterEdits();
+	t.is(second.action, 'skipped');
+	t.is(
+		second.action === 'skipped' ? second.reason : null,
+		'already-settled',
+	);
 	t.is(run.count, 2);
 });
 
@@ -227,7 +235,12 @@ test.serial('a stop is not re-run by a later edit in the same turn', async t => 
 	await orchestrator.ensureBaseline();
 	t.is((await orchestrator.afterEdits()).action, 'stopped');
 
-	t.is((await orchestrator.afterEdits()).action, 'skipped');
+	const second = await orchestrator.afterEdits();
+	t.is(second.action, 'skipped');
+	t.is(
+		second.action === 'skipped' ? second.reason : null,
+		'already-settled',
+	);
 	t.is(run.count, 2);
 });
 

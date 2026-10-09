@@ -206,11 +206,15 @@ interface ProcessAssistantResponseParams {
 	// continuation, so user-facing counts report the true repetition streak.
 	repeatedToolCallTotal?: number;
 	walkthroughLifecycle?: WalkthroughLifecycle;
-	// Per-user-turn verification state, created by `startVerificationTurn` at
-	// the top of a turn and threaded forward only through the tool-execution
-	// continuation. Reset to undefined at every other recursion site, because
-	// each of those is a *new* turn and a stale orchestrator would carry a spent
-	// attempt budget into it.
+	// Per-user-turn verification state, created by `startVerificationTurn` when
+	// the user submits and carried for the whole of that turn.
+	//
+	// Deliberately *not* reset at the recursion sites: every one of them is
+	// still the same user turn, only continuing it (an auto-fix retry, an
+	// empty-response nudge, an auto-compact retry). `maxVerificationAttempts`
+	// is the bound on what this feature spends per turn, so a fresh orchestrator
+	// in any of them would restart that budget and let one request pay for it
+	// repeatedly. It is created once by the handler and dies with the turn.
 	verificationTurn?: VerificationTurn | null;
 }
 
@@ -1264,9 +1268,10 @@ export const processAssistantResponse = async (
 				repeatedToolCallCount: repeatedCountForNextTurn,
 				repeatedToolCallTotal: currentRepeatedTotal,
 				walkthroughLifecycle,
-				// Forwarded, not reset: the verification instruction is answered
-				// by the *next* turn, and a fresh orchestrator here would measure
-				// the retry against no baseline and spend a second attempt.
+				// Explicit only to be explicit: `...params` already carries it,
+				// which is the point — this continuation is still the same user
+				// turn. Named here so the reason is findable rather than implied
+				// by an omission three hundred lines away.
 				verificationTurn: params.verificationTurn ?? undefined,
 			});
 			return;
