@@ -441,6 +441,6 @@ test('source never reads key.raw, which stock Ink does not provide', t => {
 	const sourceDir = fileURLToPath(new URL('..', import.meta.url));
 	const offenders = readdirSync(sourceDir, {recursive: true, encoding: 'utf8'})
 		.filter(file => /\.tsx?$/.test(file) && !/\.spec\.tsx?$/.test(file))
-		.filter(file => /key\.raw/.test(readFileSync(join(sourceDir, file), 'utf8')));
+		.filter(file => /\bkey\.raw\b/.test(readFileSync(join(sourceDir, file), 'utf8')));
 	t.deepEqual(offenders, []);
 });
