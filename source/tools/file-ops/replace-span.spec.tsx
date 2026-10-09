@@ -263,6 +263,74 @@ test.serial(
 	},
 );
 
+// search_file_contents trims a match and clips it at 300 characters, so the
+// handle has to be hashed from the file's own line, not from the match text.
+test.serial(
+	'a handle from an indented search_file_contents match can be edited',
+	async t => {
+		const source =
+			'function f() {\n    if (cond) {\n        needle();   \n    }\n}\n';
+		await withTempFile(source, async path => {
+			const originalCwd = process.cwd();
+			try {
+				process.chdir(dirname(path));
+				const searchResult = await searchFileContentsTool.tool.execute!(
+					{query: 'needle'},
+					{toolCallId: 'test', messages: []},
+				);
+
+				const match = searchResult.match(/\[@span:([a-z0-9]+)\]/);
+				t.truthy(match, `expected a span handle: ${searchResult}`);
+
+				const result = await executeReplaceSpan({
+					handle: `@span:${match![1]}`,
+					new_content: '        replaced();',
+				});
+				t.regex(result, /Successfully replaced/);
+			} finally {
+				process.chdir(originalCwd);
+			}
+
+			t.is(
+				await readFile(path, 'utf-8'),
+				'function f() {\n    if (cond) {\n        replaced();\n    }\n}\n',
+			);
+		});
+	},
+);
+
+test.serial(
+	'a handle from a long, clipped search_file_contents match can be edited',
+	async t => {
+		const longLine = `${'x'.repeat(400)}needle${'y'.repeat(100)}`;
+		await withTempFile(`before\n${longLine}\nafter\n`, async path => {
+			const originalCwd = process.cwd();
+			try {
+				process.chdir(dirname(path));
+				const searchResult = await searchFileContentsTool.tool.execute!(
+					{query: 'needle'},
+					{toolCallId: 'test', messages: []},
+				);
+
+				// The match text is clipped, which is what used to break the hash.
+				t.false(searchResult.includes(longLine));
+				const match = searchResult.match(/\[@span:([a-z0-9]+)\]/);
+				t.truthy(match, `expected a span handle: ${searchResult}`);
+
+				const result = await executeReplaceSpan({
+					handle: `@span:${match![1]}`,
+					new_content: 'short',
+				});
+				t.regex(result, /Successfully replaced/);
+			} finally {
+				process.chdir(originalCwd);
+			}
+
+			t.is(await readFile(path, 'utf-8'), 'before\nshort\nafter\n');
+		});
+	},
+);
+
 // ============================================================================
 // Formatter Tests
 // ============================================================================

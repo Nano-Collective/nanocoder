@@ -210,7 +210,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again. The content ends with a handle such as [@span:k7]; pass it to replace_span to edit exactly that range without retyping the old text.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;

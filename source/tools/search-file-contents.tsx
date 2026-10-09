@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -18,7 +19,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
 import {isPathInside, isValidFilePath} from '@/utils/path-validation';
-import {registerSpanWithContent} from '@/utils/span-handles';
+import {registerSpanForRange} from '@/utils/span-handles';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -101,28 +102,40 @@ const executeSearchFileContents = async (
 		// happens on single-line files and when truncation drops every newline.
 		let output = `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ` (showing first ${maxResults})` : ''}:\n\n`;
 
-		// Span handles are only issued without context: match.content is then
-		// exactly that one line's raw text, so it can be hashed as-is. With
-		// context, match.content is a multi-line block the search already
-		// prefixes with its own line numbers, which would never hash-match the
-		// plain file content replace_span rereads — not worth a second file read
-		// per match just to re-derive the plain text.
-		output += contextLines
-			? matches
-					.map(match => `${match.file}:${match.line}-\n${match.content}`)
-					.join('\n\n')
-			: matches
-					.map(match => {
-						const absPath = path.resolve(searchRoot, match.file);
-						const handle = registerSpanWithContent(
-							absPath,
-							match.line,
-							match.line,
-							match.content,
-						);
-						return `${match.file}:${match.line}:${match.content} [${handle}]`;
-					})
-					.join('\n');
+		// Span handles are only issued without context: with context, match.content
+		// is a multi-line block the search already prefixes with its own line
+		// numbers, which would never hash-match the plain file text replace_span
+		// rereads.
+		//
+		// Without context, match.content is still not the file's line: the search
+		// trims it and clips it at 300 characters, so hashing it would make every
+		// indented or long line resolve as stale. The handle is hashed from the
+		// file itself instead, read once per file, with the same slicing
+		// replace_span uses to check it. A file that cannot be read gets no handle.
+		if (contextLines) {
+			output += matches
+				.map(match => `${match.file}:${match.line}-\n${match.content}`)
+				.join('\n\n');
+		} else {
+			const fileContents = new Map<string, string | null>();
+			const lines: string[] = [];
+			for (const match of matches) {
+				const absPath = path.resolve(searchRoot, match.file);
+				if (!fileContents.has(absPath)) {
+					fileContents.set(
+						absPath,
+						await readFile(absPath, 'utf-8').catch(() => null),
+					);
+				}
+				const fileContent = fileContents.get(absPath);
+				const handle =
+					typeof fileContent === 'string'
+						? ` [${registerSpanForRange(absPath, match.line, match.line, fileContent)}]`
+						: '';
+				lines.push(`${match.file}:${match.line}:${match.content}${handle}`);
+			}
+			output += lines.join('\n');
+		}
 
 		return output.trim();
 	} catch (error: unknown) {
