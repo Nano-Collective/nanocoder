@@ -1,4 +1,4 @@
-import {existsSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
 import {
@@ -23,6 +23,7 @@ export class ConfigurationError extends Error {
 		public configPath: string,
 		public cwdPath?: string,
 		public isEmptyConfig: boolean = false,
+		public unreadableError?: string,
 	) {
 		super(message);
 		this.name = 'ConfigurationError';
@@ -69,11 +70,23 @@ async function createAISDKClient(
 				false,
 			);
 		} else {
+			let unreadableError: string | undefined;
+			const targetFile = existsSync(join(cwd, 'agents.config.json'))
+				? join(cwd, 'agents.config.json')
+				: configPath;
+			if (existsSync(targetFile)) {
+				try {
+					JSON.parse(readFileSync(targetFile, 'utf-8'));
+				} catch (err) {
+					unreadableError = `unreadable: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
 			throw new ConfigurationError(
-				'No providers configured in agents.config.json',
+				unreadableError || 'No providers configured in agents.config.json',
 				configPath,
 				cwdPath,
-				true,
+				!unreadableError,
+				unreadableError,
 			);
 		}
 	}

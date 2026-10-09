@@ -83,6 +83,9 @@ export async function initializePlain(
 		actualProvider = result.actualProvider;
 	} catch (error) {
 		if (error instanceof ConfigurationError) {
+			if (error.unreadableError) {
+				throw new Error(error.unreadableError);
+			}
 			throw new Error(
 				error.isEmptyConfig || error.message.includes('No providers configured')
 					? 'No providers configured. Run nanocoder interactively to set them up.'

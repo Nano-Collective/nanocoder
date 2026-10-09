@@ -39,6 +39,10 @@ export function writeError(line: string): void {
 	process.stderr.write(color('red', line) + EOL);
 }
 
+export function writeWarning(line: string): void {
+	process.stderr.write(color('yellow', line) + EOL);
+}
+
 export function writeStatus(line: string): void {
 	process.stderr.write(color('gray', `[plain] ${line}`) + EOL);
 }

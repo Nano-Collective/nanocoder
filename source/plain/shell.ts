@@ -27,6 +27,7 @@ import {
 	writeError,
 	writeLine,
 	writeStatus,
+	writeWarning,
 } from '@/plain/writer';
 import {loadPlugins} from '@/plugins/host';
 import {
@@ -39,6 +40,7 @@ import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
+import {setMessageQueueSink} from '@/utils/message-queue';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -111,296 +113,314 @@ export async function runPlainShell(
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
 
 	const isJson = outputFormat === 'json';
-
-	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
-		loadPreferences: deps.loadPreferences,
-		savePreferences: deps.savePreferences,
-	});
-	if (trust.persisted) {
-		writeStatus(
-			`Marked ${path.resolve(process.cwd())} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
-		);
-	}
-	if (!trust.trusted) {
-		if (isJson) {
-			const cwd = path.resolve(process.cwd());
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			});
-		} else {
-			const cwd = path.resolve(process.cwd());
-			writeError(
-				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
-		return;
-	}
-
-	let init;
-	try {
-		init = await deps.initializePlain({cliProvider, cliModel});
-	} catch (error) {
-		const formattedErr = formatError(error);
-		if (isJson) {
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message: formattedErr,
-			});
-		} else {
-			writeError(formattedErr);
-		}
-		await deps.getShutdownManager().gracefulShutdown(1);
-		return;
-	}
-
-	const {client, toolManager, provider, model} = init;
-
-	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
-	writeBoot(provider, model, developmentMode);
-
-	const tune = resolveTune(
-		getAppConfig(),
-		client.getProviderConfig(),
-		deps.loadPreferences(),
-	);
-	applyTuneCompaction(tune);
-	const tuneToolMode = getTuneToolMode(tune);
-	const toolsDisabled =
-		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
-	const fallbackToolFormat: 'xml' | 'json' =
-		tuneToolMode === 'json' ? 'json' : 'xml';
-	const availableNames = toolManager.getAvailableToolNames(
-		tune,
-		developmentMode,
-		undefined,
-		model,
-	);
-	const basePrompt = buildSystemPrompt(
-		developmentMode,
-		tune,
-		availableNames,
-		toolsDisabled,
-		getAppConfig().systemPrompt,
-		model,
-	);
-	const toolsForPrompt = toolsDisabled
-		? toolManager.getFilteredTools(availableNames)
-		: {};
-	const toolPrompt = appendToolDefinitionsToPrompt(
-		basePrompt,
-		toolsDisabled,
-		fallbackToolFormat,
-		toolsForPrompt,
-	);
-
-	const projectContext = await deps.appendRelevantProjectContextWithCount(
-		toolPrompt,
-		prompt,
-		new SemanticMemoryManager(),
-		resolveProjectContextPreferences(deps.loadPreferences()),
-	);
-	const systemContent = projectContext.systemPrompt;
-	if (projectContext.memoryCount > 0) {
-		writeStatus(
-			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
-		);
-	}
-	setLastBuiltPrompt(systemContent);
-
-	const systemMessage: Message = {role: 'system', content: systemContent};
-
-	// `run` / --plain is a session too, so it fires the same lifecycle points
-	// as the TUI. session-end goes through the shutdown manager (priority -5)
-	// so it runs on every exit path, including SIGINT.
-	deps.getShutdownManager().register({
-		name: SESSION_END_HOOK_HANDLER,
-		priority: -5,
-		handler: async () => {
-			await runLifecycleHooks('session-end');
-		},
-	});
-
-	await loadPlugins(true);
-	await beginSessionStartHooks();
-
-	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
-	if (promptGate.blocked) {
-		const message = promptGate.reason ?? 'Prompt blocked by a hook.';
-		if (isJson) {
-			emitJsonReport({
-				kind: 'error',
-				exitCode: 1,
-				finalText: '',
-				reasoning: null,
-				toolCalls: [],
-				steps: 0,
-				filesChanged: [],
-				message,
-			});
-		} else {
+	const collectedWarnings: string[] = [];
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			collectedWarnings.push(message);
 			writeError(message);
+		} else if (type === 'warning') {
+			collectedWarnings.push(message);
+			writeWarning(message);
 		}
-		await deps.getShutdownManager().gracefulShutdown(1);
-		return;
-	}
-
-	const hookContext = [await takePendingHookContext(), promptGate.output]
-		.filter(Boolean)
-		.join('\n\n');
-	const initialMessages: Message[] = [
-		{
-			role: 'user',
-			content: hookContext
-				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
-				: prompt,
-		},
-	];
-
-	const abortController = new AbortController();
-	const sigint = () => abortController.abort();
-	process.on('SIGINT', sigint);
-	const sessionId = randomUUID();
-	await deps.artifacts.cleanupStaleEphemeralSessions();
-	await deps.artifacts.markEphemeralSession(sessionId);
-
-	const shutdownManager = deps.getShutdownManager();
-	const cleanupHandlerName = `plain-artifacts-${sessionId}`;
-	let conversationPromise:
-		| ReturnType<typeof deps.runPlainConversation>
-		| undefined;
-	let cleaned = false;
-	const cleanupArtifacts = async () => {
-		if (cleaned) return;
-		await deps.artifacts.deleteSessionArtifacts(sessionId);
-		cleaned = true;
-		shutdownManager.unregister(cleanupHandlerName);
-	};
-	shutdownManager.register({
-		name: cleanupHandlerName,
-		priority: 10,
-		handler: async () => {
-			abortController.abort();
-			await conversationPromise?.catch(() => undefined);
-			await cleanupArtifacts();
-		},
 	});
 
-	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
-
-	if (!isJson) {
-		writeLine();
-	}
-
-	let outcome;
 	try {
-		conversationPromise = deps.runPlainConversation({
-			client,
-			toolManager,
-			systemMessage,
-			initialMessages,
-			developmentMode,
-			nonInteractiveAlwaysAllow,
-			abortSignal: abortController.signal,
-			tune,
-			model,
-			outputFormat,
-			sessionId,
-			workingDirectory: process.cwd(),
+		const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
+			loadPreferences: deps.loadPreferences,
+			savePreferences: deps.savePreferences,
 		});
-		outcome = await conversationPromise;
-	} finally {
-		process.off('SIGINT', sigint);
-		await cleanupArtifacts();
-	}
-
-	if (isJson) {
-		const exitCode =
-			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
-
-		// Must match the registered names in source/tools/file-ops/. Any name
-		// listed here that isn't a real tool silently drops its edits from
-		// `filesChanged`.
-		const mutatingTools = [
-			'write_file',
-			'string_replace',
-			'diff_edit',
-			'lsp_format_document',
-		];
-		const filesChangedSet = new Set<string>();
-
-		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
-			if (mutatingTools.includes(tc.name)) {
-				const filePath = tc.arguments?.path || tc.arguments?.file_path;
-				// Only include file paths that are strings (type-safe extraction)
-				if (typeof filePath === 'string' && isValidFilePath(filePath)) {
-					filesChangedSet.add(filePath);
-				}
-			}
-			return {
-				name: tc.name,
-				arguments: tc.arguments || {},
-				result: tc.result ?? null,
-				error: tc.error ?? null,
-			};
-		});
-
-		// Build report with validated fields
-		const report = {
-			kind: outcome.kind,
-			exitCode,
-			finalText: sanitizeOutput(outcome.finalText || ''),
-			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
-			toolCalls: formattedToolCalls,
-			steps: outcome.steps,
-			filesChanged: Array.from(filesChangedSet),
-			...(outcome.usage && {
-				usage: outcome.usage,
-			}),
-			...(outcome.kind === 'error' && {
-				message: sanitizeOutput(outcome.message),
-			}),
-			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
-				toolNames: outcome.toolNames,
-			}),
-		};
-
-		emitJsonReport(report);
-
-		await deps.getShutdownManager().gracefulShutdown(exitCode);
-		return;
-	}
-
-	switch (outcome.kind) {
-		case 'success':
-			await shutdown(0, deps);
-			return;
-		case TOOL_APPROVAL_REQUIRED_KIND:
-			writeError(
-				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
-					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
-					`agents.config.json "alwaysAllow".`,
+		if (trust.persisted) {
+			writeStatus(
+				`Marked ${path.resolve(process.cwd())} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
 			);
-			await shutdown(2, deps);
+		}
+		if (!trust.trusted) {
+			if (isJson) {
+				const cwd = path.resolve(process.cwd());
+				emitJsonReport({
+					kind: 'error',
+					exitCode: 1,
+					finalText: '',
+					reasoning: null,
+					toolCalls: [],
+					steps: 0,
+					filesChanged: [],
+					message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+					warnings: collectedWarnings,
+				});
+			} else {
+				const cwd = path.resolve(process.cwd());
+				writeError(
+					`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
+						`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+				);
+			}
+			await deps.getShutdownManager().gracefulShutdown(1);
 			return;
-		case 'error':
-			writeError(outcome.message);
-			await shutdown(1, deps);
+		}
+
+		let init;
+		try {
+			init = await deps.initializePlain({cliProvider, cliModel});
+		} catch (error) {
+			const formattedErr = formatError(error);
+			if (isJson) {
+				emitJsonReport({
+					kind: 'error',
+					exitCode: 1,
+					finalText: '',
+					reasoning: null,
+					toolCalls: [],
+					steps: 0,
+					filesChanged: [],
+					message: formattedErr,
+					warnings: collectedWarnings,
+				});
+			} else {
+				writeError(formattedErr);
+			}
+			await deps.getShutdownManager().gracefulShutdown(1);
 			return;
+		}
+
+		const {client, toolManager, provider, model} = init;
+
+		// Traditional status writes go to stderr via plain/writer, leaving stdout clean
+		writeBoot(provider, model, developmentMode);
+
+		const tune = resolveTune(
+			getAppConfig(),
+			client.getProviderConfig(),
+			deps.loadPreferences(),
+		);
+		applyTuneCompaction(tune);
+		const tuneToolMode = getTuneToolMode(tune);
+		const toolsDisabled =
+			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
+		const fallbackToolFormat: 'xml' | 'json' =
+			tuneToolMode === 'json' ? 'json' : 'xml';
+		const availableNames = toolManager.getAvailableToolNames(
+			tune,
+			developmentMode,
+			undefined,
+			model,
+		);
+		const basePrompt = buildSystemPrompt(
+			developmentMode,
+			tune,
+			availableNames,
+			toolsDisabled,
+			getAppConfig().systemPrompt,
+			model,
+		);
+		const toolsForPrompt = toolsDisabled
+			? toolManager.getFilteredTools(availableNames)
+			: {};
+		const toolPrompt = appendToolDefinitionsToPrompt(
+			basePrompt,
+			toolsDisabled,
+			fallbackToolFormat,
+			toolsForPrompt,
+		);
+
+		const projectContext = await deps.appendRelevantProjectContextWithCount(
+			toolPrompt,
+			prompt,
+			new SemanticMemoryManager(),
+			resolveProjectContextPreferences(deps.loadPreferences()),
+		);
+		const systemContent = projectContext.systemPrompt;
+		if (projectContext.memoryCount > 0) {
+			writeStatus(
+				`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+			);
+		}
+		setLastBuiltPrompt(systemContent);
+
+		const systemMessage: Message = {role: 'system', content: systemContent};
+
+		// `run` / --plain is a session too, so it fires the same lifecycle points
+		// as the TUI. session-end goes through the shutdown manager (priority -5)
+		// so it runs on every exit path, including SIGINT.
+		deps.getShutdownManager().register({
+			name: SESSION_END_HOOK_HANDLER,
+			priority: -5,
+			handler: async () => {
+				await runLifecycleHooks('session-end');
+			},
+		});
+
+		await loadPlugins(true);
+		await beginSessionStartHooks();
+
+		const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
+		if (promptGate.blocked) {
+			const message = promptGate.reason ?? 'Prompt blocked by a hook.';
+			if (isJson) {
+				emitJsonReport({
+					kind: 'error',
+					exitCode: 1,
+					finalText: '',
+					reasoning: null,
+					toolCalls: [],
+					steps: 0,
+					filesChanged: [],
+					message,
+					warnings: collectedWarnings,
+				});
+			} else {
+				writeError(message);
+			}
+			await deps.getShutdownManager().gracefulShutdown(1);
+			return;
+		}
+
+		const hookContext = [await takePendingHookContext(), promptGate.output]
+			.filter(Boolean)
+			.join('\n\n');
+		const initialMessages: Message[] = [
+			{
+				role: 'user',
+				content: hookContext
+					? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
+					: prompt,
+			},
+		];
+
+		const abortController = new AbortController();
+		const sigint = () => abortController.abort();
+		process.on('SIGINT', sigint);
+		const sessionId = randomUUID();
+		await deps.artifacts.cleanupStaleEphemeralSessions();
+		await deps.artifacts.markEphemeralSession(sessionId);
+
+		const shutdownManager = deps.getShutdownManager();
+		const cleanupHandlerName = `plain-artifacts-${sessionId}`;
+		let conversationPromise:
+			| ReturnType<typeof deps.runPlainConversation>
+			| undefined;
+		let cleaned = false;
+		const cleanupArtifacts = async () => {
+			if (cleaned) return;
+			await deps.artifacts.deleteSessionArtifacts(sessionId);
+			cleaned = true;
+			shutdownManager.unregister(cleanupHandlerName);
+		};
+		shutdownManager.register({
+			name: cleanupHandlerName,
+			priority: 10,
+			handler: async () => {
+				abortController.abort();
+				await conversationPromise?.catch(() => undefined);
+				await cleanupArtifacts();
+			},
+		});
+
+		const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
+
+		if (!isJson) {
+			writeLine();
+		}
+
+		let outcome;
+		try {
+			conversationPromise = deps.runPlainConversation({
+				client,
+				toolManager,
+				systemMessage,
+				initialMessages,
+				developmentMode,
+				nonInteractiveAlwaysAllow,
+				abortSignal: abortController.signal,
+				tune,
+				model,
+				outputFormat,
+				sessionId,
+				workingDirectory: process.cwd(),
+			});
+			outcome = await conversationPromise;
+		} finally {
+			process.off('SIGINT', sigint);
+			await cleanupArtifacts();
+		}
+
+		if (isJson) {
+			const exitCode =
+				outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
+
+			// Must match the registered names in source/tools/file-ops/. Any name
+			// listed here that isn't a real tool silently drops its edits from
+			// `filesChanged`.
+			const mutatingTools = [
+				'write_file',
+				'string_replace',
+				'diff_edit',
+				'lsp_format_document',
+			];
+			const filesChangedSet = new Set<string>();
+
+			const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
+				if (mutatingTools.includes(tc.name)) {
+					const filePath = tc.arguments?.path || tc.arguments?.file_path;
+					// Only include file paths that are strings (type-safe extraction)
+					if (typeof filePath === 'string' && isValidFilePath(filePath)) {
+						filesChangedSet.add(filePath);
+					}
+				}
+				return {
+					name: tc.name,
+					arguments: tc.arguments || {},
+					result: tc.result ?? null,
+					error: tc.error ?? null,
+				};
+			});
+
+			// Build report with validated fields
+			const report = {
+				kind: outcome.kind,
+				exitCode,
+				finalText: sanitizeOutput(outcome.finalText || ''),
+				reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
+				toolCalls: formattedToolCalls,
+				steps: outcome.steps,
+				filesChanged: Array.from(filesChangedSet),
+				warnings: collectedWarnings,
+				...(outcome.usage && {
+					usage: outcome.usage,
+				}),
+				...(outcome.kind === 'error' && {
+					message: sanitizeOutput(outcome.message),
+				}),
+				...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
+					toolNames: outcome.toolNames,
+				}),
+			};
+
+			emitJsonReport(report);
+
+			await deps.getShutdownManager().gracefulShutdown(exitCode);
+			return;
+		}
+
+		switch (outcome.kind) {
+			case 'success':
+				await shutdown(0, deps);
+				return;
+			case TOOL_APPROVAL_REQUIRED_KIND:
+				writeError(
+					`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
+						`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
+						`agents.config.json "alwaysAllow".`,
+				);
+				await shutdown(2, deps);
+				return;
+			case 'error':
+				writeError(outcome.message);
+				await shutdown(1, deps);
+				return;
+		}
+	} finally {
+		setMessageQueueSink(null);
 	}
 }
 

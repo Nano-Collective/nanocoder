@@ -220,6 +220,14 @@ test('ConfigurationError: cwdPath property is optional', t => {
 	t.is(error3.cwdPath, undefined);
 });
 
+test('ConfigurationError: unreadableError property is optional and captured', t => {
+	const error1 = new ConfigurationError('Test', '/path');
+	const error2 = new ConfigurationError('unreadable: JSON syntax error', '/path', '/cwd', false, 'unreadable: JSON syntax error');
+
+	t.is(error1.unreadableError, undefined);
+	t.is(error2.unreadableError, 'unreadable: JSON syntax error');
+});
+
 // ============================================================================
 // createLLMClient - No Configuration Tests
 // ============================================================================
@@ -280,6 +288,31 @@ test.serial(
 
 		t.is(error.message, 'No providers configured in agents.config.json');
 		t.true(error.isEmptyConfig);
+	},
+);
+
+test.serial(
+	'createLLMClient: attaches unreadableError when agents.config.json has invalid JSON syntax',
+	async t => {
+		const invalidDir = join(testDir, 'invalid-json-test');
+		mkdirSync(invalidDir, {recursive: true});
+
+		writeFileSync(
+			join(invalidDir, 'agents.config.json'),
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		process.cwd = () => invalidDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.truthy(error.unreadableError);
+		t.true(error.unreadableError?.startsWith('unreadable: '));
+		t.true(error.message.includes('unreadable: '));
 	},
 );
 
