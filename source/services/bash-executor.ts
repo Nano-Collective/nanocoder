@@ -18,6 +18,7 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {shellArgs} from '@/custom-tools/handler';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -139,7 +140,13 @@ export class BashExecutor extends EventEmitter {
 			}
 			proc = spawnPlanned(planned, {cwd, env: childEnv});
 		} else if (cwdCaptureFile === undefined) {
-			proc = spawn('cmd', ['/c', command], {cwd});
+			// cmd.exe parses the command line itself; without verbatim arguments
+			// Node escapes each inner `"` as `\"`, which cmd does not understand.
+			const shell = process.env.ComSpec || 'cmd.exe';
+			proc = spawn(shell, shellArgs(shell, command), {
+				cwd,
+				windowsVerbatimArguments: true,
+			});
 		} else {
 			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
 			// codeql[js/shell-command-constructed-from-input]
