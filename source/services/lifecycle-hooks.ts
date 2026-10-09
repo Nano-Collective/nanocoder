@@ -512,6 +512,91 @@ function makeHookCapture(): {
 }
 
 /**
+ * Variables a command may reference by POSIX name (`$FILE`, `${FILE}`) and
+ * still have expanded under cmd.exe. Only path-valued variables qualify: a
+ * Windows path cannot contain `"`, so once wrapped in double quotes cmd.exe
+ * treats every other character in it (`&`, `|`, `^`, `%`...) as literal.
+ * Free-text variables like `NANOCODER_TOOL_ARGS` or `NANOCODER_PROMPT` can
+ * hold a `"` and are deliberately left out — reference them as `%VAR%` from a
+ * script, never inline.
+ */
+const CMD_PATH_VARIABLES: ReadonlySet<string> = new Set([
+	'FILE',
+	'NANOCODER_FILE',
+	'NANOCODER_CWD',
+	'NANOCODER_SESSION_CWD',
+]);
+
+/** True when a value would end a quoted cmd.exe argument or the command line. */
+function isUnsafeCmdPath(value: string): boolean {
+	return /["\r\n]/.test(value) || value.includes('\0');
+}
+
+const POSIX_VARIABLE_REFERENCE =
+	/^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/;
+
+/**
+ * Translate the documented `$FILE` / `$NANOCODER_FILE` references in a hook or
+ * formatter command into cmd.exe's `%FILE%` form on Windows, where `cmd.exe`
+ * does not expand `$VAR` and the command would otherwise receive the literal
+ * text `$FILE` (#1688). Other platforms get the command back unchanged.
+ *
+ * This only rewrites how the config-authored command NAMES a variable; the
+ * value still travels through `env` and is expanded by cmd.exe itself, so the
+ * invariant in runHookCommand holds — no model-influenced value is spliced
+ * into the command string. A reference outside double quotes is emitted
+ * quoted (`"%FILE%"`) so a path containing `&` stays one literal argument.
+ * A value that cmd.exe cannot hold literally inside quotes (a `"`, a line
+ * break or a null byte) is refused rather than run.
+ */
+export function toPlatformHookCommand(
+	command: string,
+	env: NodeJS.ProcessEnv,
+	platform: NodeJS.Platform = process.platform,
+): {command: string} | {failure: string} {
+	if (platform !== 'win32' || !command.includes('$')) return {command};
+
+	let out = '';
+	let inQuotes = false;
+	for (let i = 0; i < command.length; i++) {
+		const char = command[i];
+		if (char === '"') {
+			inQuotes = !inQuotes;
+			out += char;
+			continue;
+		}
+		// Outside quotes `^` escapes the next character, so `^"` does not open a
+		// quoted region. Inside quotes cmd.exe treats `^` literally.
+		if (char === '^' && !inQuotes && i + 1 < command.length) {
+			out += char + command[i + 1];
+			i++;
+			continue;
+		}
+		if (char === '$') {
+			const match = POSIX_VARIABLE_REFERENCE.exec(command.slice(i));
+			const name = match?.[1] ?? match?.[2];
+			if (match && name && CMD_PATH_VARIABLES.has(name)) {
+				const value = env[name];
+				if (value && isUnsafeCmdPath(value)) {
+					return {
+						failure: `$${name} contains a character cmd.exe cannot quote safely`,
+					};
+				}
+				// An unset variable expands to nothing, as it does under sh; cmd.exe
+				// would otherwise leave the literal `%NAME%` behind.
+				if (value) {
+					out += inQuotes ? `%${name}%` : `"%${name}%"`;
+				}
+				i += match[0].length - 1;
+				continue;
+			}
+		}
+		out += char;
+	}
+	return {command: out};
+}
+
+/**
  * Run one hook command to completion. Never rejects: a spawn failure or a
  * timeout resolves with `failure` set and no exit code, which callers treat as
  * "did not veto" so a broken script can't wedge the session.
@@ -522,6 +607,16 @@ export function runHookCommand(
 	cwd: string,
 	defaultTimeoutMs: number,
 ): Promise<HookRun> {
+	const prepared = toPlatformHookCommand(hook.command, env);
+	if ('failure' in prepared) {
+		return Promise.resolve({
+			exitCode: null,
+			stdout: '',
+			stderr: '',
+			failure: prepared.failure,
+		});
+	}
+	const command = prepared.command;
 	return new Promise<HookRun>(resolve => {
 		let settled = false;
 		const finish = (run: HookRun) => {
@@ -552,6 +647,9 @@ export function runHookCommand(
 		// interpolated into the command string, so a model-chosen path like
 		// `a.ts; rm -rf /` is inert here. Adding a template literal to this
 		// line would turn a config string into an injection sink.
+		// `command` is `hook.command` with, on Windows only, its `$FILE`-style
+		// references renamed to `%FILE%` by toPlatformHookCommand — still
+		// nothing but config text.
 		//
 		// `detached` puts the shell in its own process group on POSIX so the
 		// timeout below can signal the group rather than just `sh`. Without it a
@@ -560,7 +658,7 @@ export function runHookCommand(
 		// detach into, and `detached` there spawns a new console window, so it
 		// stays off and the taskkill path below does the reaping instead.
 		// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true, javascript.lang.security.detect-child-process.detect-child-process
-		const proc = spawn(hook.command, {
+		const proc = spawn(command, {
 			cwd,
 			env,
 			shell: true,
