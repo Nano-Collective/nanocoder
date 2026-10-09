@@ -172,16 +172,16 @@ export function savePreferences(preferences: UserPreferences): void {
 	}
 }
 
-/**
- * True if `directory` (or an equivalent absolute path) is recorded in
- * `preferences.trustedDirectories`. Shared by every trust-gated entry point
- * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
- * and the daemon boot path — so the resolution rule can't drift between them.
- */
-export function trustPath(entry: string | TrustedDirectoryRecord): string {
+function trustPath(entry: string | TrustedDirectoryRecord): string {
 	return typeof entry === 'string' ? entry : entry.path;
 }
 
+/**
+ * True if `directory` is recorded with a fingerprint that still matches
+ * what the folder will run. Shared by every trust-gated entry point —
+ * the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
+ * and the daemon boot path — so the resolution rule can't drift between them.
+ */
 export function isDirectoryTrusted(
 	directory: string,
 	preferences: UserPreferences,
