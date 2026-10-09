@@ -53,6 +53,7 @@ import {
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {
 	convertToModelMessages,
+	type ToolImageDelivery,
 	withCacheBreakpoints,
 } from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
@@ -201,7 +202,16 @@ export async function handleChat(
 
 			// Convert messages to AI SDK v5 ModelMessage format
 			const promptCaching = isPromptCachingEnabled(providerConfig);
-			const convertedMessages = convertToModelMessages(finalNonSystemMessages);
+			// `*.chat` is the SDK's Chat Completions model: openai-compatible
+			// providers and Copilot's non-GPT-5 route.
+			const toolImages: ToolImageDelivery =
+				typeof model !== 'string' && model.provider.endsWith('.chat')
+					? 'user-message'
+					: 'inline';
+			const convertedMessages = convertToModelMessages(
+				finalNonSystemMessages,
+				toolImages,
+			);
 			const modelMessages = promptCaching
 				? withCacheBreakpoints(convertedMessages, finalSystemContent)
 				: convertedMessages;

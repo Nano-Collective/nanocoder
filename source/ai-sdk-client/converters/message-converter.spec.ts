@@ -298,6 +298,47 @@ test('convertToModelMessages emits image-data parts for tool screenshots', t => 
 	]);
 });
 
+test('convertToModelMessages moves tool images after the whole run of tool results', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+				{id: 'call_read', function: {name: 'read_file', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+		{
+			role: 'tool',
+			content: 'file body',
+			tool_call_id: 'call_read',
+			name: 'read_file',
+		},
+		{role: 'user', content: 'next'},
+	];
+
+	const result = convertToModelMessages(messages, 'user-message');
+	t.deepEqual(
+		result.map(m => m.role),
+		['assistant', 'tool', 'tool', 'user', 'user'],
+	);
+	t.deepEqual(result[3], {
+		role: 'user',
+		content: [
+			{type: 'text', text: 'Images from the tool results above.'},
+			{type: 'image', image: 'data:image/jpeg;base64,abc', mediaType: 'image/jpeg'},
+		],
+	});
+	t.false(JSON.stringify(result.slice(0, 3)).includes('abc'));
+});
+
 test('convertToModelMessages emits a json output for structured tool results', t => {
 	const messages: Message[] = [
 		{
