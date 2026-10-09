@@ -1,5 +1,5 @@
 import test from 'ava';
-import {readFileSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import { BashExecutor } from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -746,4 +746,41 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 	t.false(isAliveAfter, 'Process must be killed by SIGKILL even when proc.killed was set by SIGTERM fallback');
 
 	await promise;
+});
+
+test('cancel preserves sandbox jail directory until child process exits and cleans up afterwards', async t => {
+	const executor = createExecutor();
+	const cmd =
+		'node -e "const fs = require(\'fs\'); const path = require(\'path\'); process.on(\'SIGTERM\', () => { try { fs.writeFileSync(path.join(process.env.TMPDIR || \'/tmp\', \'sigterm.txt\'), \'shutting down\'); } catch {} setTimeout(() => process.exit(0), 300); }); console.log(\'READY\'); setInterval(() => {}, 1000);"';
+	const { executionId, promise } = executor.execute(cmd);
+
+	for (let tick = 0; tick < 30; tick++) {
+		await new Promise(resolve => setTimeout(resolve, 100));
+		const state = executor.getState(executionId);
+		if (state?.fullOutput.includes('READY')) break;
+	}
+
+	const entry = (executor as any).executions.get(executionId);
+	const jailTmp = entry?.jailTmp;
+
+	const cancelled = executor.cancel(executionId);
+	t.true(cancelled);
+
+	if (jailTmp) {
+		t.true(
+			existsSync(jailTmp),
+			'jailTmp must still exist while process is handling SIGTERM',
+		);
+	}
+
+	const result = await promise;
+	t.true(result.isComplete);
+
+	await new Promise(resolve => setTimeout(resolve, 600));
+	if (jailTmp) {
+		t.false(
+			existsSync(jailTmp),
+			'jailTmp must be cleaned up after process terminates',
+		);
+	}
 });
