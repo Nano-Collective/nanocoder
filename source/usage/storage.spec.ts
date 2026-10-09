@@ -3,7 +3,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
 import type {SessionUsage, TokenBreakdown, UsageData} from '../types/usage.js';
-import {publishFileNoClobber, setLinkSyncForTests} from '../utils/atomic-write.js';
 import {
 	addSession,
 	clearUsageData,
@@ -149,7 +148,8 @@ test('migration skips when new file already exists', t => {
 		totalLifetime: 999,
 		lastUpdated: Date.now(),
 	};
-	fs.writeFileSync(newFilePath, JSON.stringify(newData), 'utf-8');
+	const newPayload = JSON.stringify(newData);
+	fs.writeFileSync(newFilePath, newPayload, 'utf-8');
 
 	process.env.NANOCODER_CONFIG_DIR = legacyConfigDir;
 
@@ -162,118 +162,11 @@ test('migration skips when new file already exists', t => {
 	// Legacy file should still exist (wasn't touched)
 	t.true(fs.existsSync(legacyFilePath));
 	t.true(fs.existsSync(newFilePath));
-});
-
-test('migration preserves an existing usage.json when a legacy file is also present', t => {
-	// Steady state, not the race: the destination already exists, so the
-	// migration fast path adopts it without entering the publish step.
-	// The concurrent-publish path itself (destination appearing between the
-	// exists check and the publish) cannot be staged single-threaded —
-	// link(2) atomicity is the arbiter there — so it is covered at the
-	// seam where old and new code differ: `publishFileNoClobber keeps the
-	// existing file when a peer won the race` fails against a copy-based
-	// implementation and passes against the link-based one.
-	const legacyConfigDir = path.join(os.tmpdir(), 'nanocoder-legacy-config-race');
-	fs.mkdirSync(legacyConfigDir, {recursive: true});
-	const legacyFilePath = path.join(legacyConfigDir, 'usage.json');
-	fs.writeFileSync(
-		legacyFilePath,
-		JSON.stringify({
-			sessions: [createMockSession('legacy', 'model', 111)],
-			dailyAggregates: [],
-			totalLifetime: 111,
-			lastUpdated: Date.now(),
-		}),
-		'utf-8',
-	);
-
-	const appDataHome = process.env.XDG_DATA_HOME!;
-	const appDataDir = path.join(appDataHome, 'nanocoder');
-	fs.mkdirSync(appDataDir, {recursive: true});
-	const newFilePath = path.join(appDataDir, 'usage.json');
-	const winnerPayload = JSON.stringify({
-		sessions: [createMockSession('winner', 'model', 999)],
-		dailyAggregates: [],
-		totalLifetime: 999,
-		lastUpdated: Date.now(),
-	});
-	fs.writeFileSync(newFilePath, winnerPayload, 'utf-8');
-
-	process.env.NANOCODER_CONFIG_DIR = legacyConfigDir;
-
-	const data = readUsageData();
-
-	// The winner's file must survive byte-identical: adopted, not overwritten.
-	t.is(data.totalLifetime, 999);
-	t.is(fs.readFileSync(newFilePath, 'utf-8'), winnerPayload);
-	// The loser must not consume a legacy file it did not publish from.
-	t.true(fs.existsSync(legacyFilePath));
-});
-
-test('publishFileNoClobber publishes when the destination is absent', t => {
-	const dir = path.join(os.tmpdir(), `nanocoder-publish-${Date.now()}`);
-	fs.mkdirSync(dir, {recursive: true});
-	const dest = path.join(dir, 'usage.json');
-
-	t.true(publishFileNoClobber(dest, '{"totalLifetime": 5}'));
-	t.is(fs.readFileSync(dest, 'utf-8'), '{"totalLifetime": 5}');
-	// No temp litter left behind.
-	t.deepEqual(
-		fs.readdirSync(dir).filter(name => name.includes('.tmp')),
-		[],
-	);
-});
-
-test('publishFileNoClobber keeps the existing file when a peer won the race', t => {
-	const dir = path.join(
-		os.tmpdir(),
-		`nanocoder-publish-race-${Date.now()}`,
-	);
-	fs.mkdirSync(dir, {recursive: true});
-	const dest = path.join(dir, 'usage.json');
-	fs.writeFileSync(dest, 'winner-data', 'utf-8');
-
-	t.false(publishFileNoClobber(dest, 'stale-data'));
-	t.is(fs.readFileSync(dest, 'utf-8'), 'winner-data');
-	t.deepEqual(
-		fs.readdirSync(dir).filter(name => name.includes('.tmp')),
-		[],
-	);
-});
-
-test('publishFileNoClobber falls back to exclusive write when hard links are unsupported', t => {
-	// Simulate FAT/exFAT or SMB/FUSE mounts where linkSync throws EPERM.
-	const linkError = new Error(
-		'operation not permitted, link',
-	) as NodeJS.ErrnoException;
-	linkError.code = 'EPERM';
-	setLinkSyncForTests(() => {
-		throw linkError;
-	});
-	try {
-		const dir = path.join(
-			os.tmpdir(),
-			`nanocoder-publish-nolink-${Date.now()}`,
-		);
-		fs.mkdirSync(dir, {recursive: true});
-		const dest = path.join(dir, 'usage.json');
-
-		// Absent destination: the exclusive-create fallback publishes.
-		t.true(publishFileNoClobber(dest, 'fallback-data'));
-		t.is(fs.readFileSync(dest, 'utf-8'), 'fallback-data');
-
-		// Present destination: EEXIST from the fallback likewise means a
-		// peer won — content stays untouched.
-		t.false(publishFileNoClobber(dest, 'stale-data'));
-		t.is(fs.readFileSync(dest, 'utf-8'), 'fallback-data');
-
-		t.deepEqual(
-			fs.readdirSync(dir).filter(name => name.includes('.tmp')),
-			[],
-		);
-	} finally {
-		setLinkSyncForTests();
-	}
+	// And the existing file must survive byte-identical: adoption means
+	// no write of any kind, not just preserved parsed values. (The
+	// concurrent-publish path itself is covered by the `publishFileNoClobber`
+	// unit tests in atomic-write.spec.ts.)
+	t.is(fs.readFileSync(newFilePath, 'utf-8'), newPayload);
 });
 
 test('migration handles missing legacy config directory gracefully', t => {
