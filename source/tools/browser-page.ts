@@ -1,9 +1,10 @@
 import type {Browser, Page} from 'playwright-core';
+import {isBlockedFetchHost} from '@/tools/fetch-url-guard';
 import {getShutdownManager} from '@/utils/shutdown';
 
 export type BrowserPage = Pick<
 	Page,
-	'goto' | 'click' | 'fill' | 'screenshot' | 'title' | 'url'
+	'goto' | 'click' | 'fill' | 'screenshot' | 'title' | 'url' | 'frames'
 >;
 
 export interface BrowserActionArgs {
@@ -37,6 +38,29 @@ type PlaywrightLike = {
 	};
 };
 
+/**
+ * fetch_url's private/metadata block, minus loopback: checking a local dev
+ * server is what this tool is for.
+ */
+function isBlockedBrowserUrl(url: string): boolean {
+	let hostname: string;
+	try {
+		hostname = new URL(url).hostname;
+	} catch {
+		return false;
+	}
+	const host = hostname
+		.toLowerCase()
+		.replace(/\.$/, '')
+		.replace(/^\[|\]$/g, '');
+	const loopback =
+		host === 'localhost' ||
+		host.endsWith('.localhost') ||
+		host === '::1' ||
+		/^127(\.\d{1,3}){3}$/.test(host);
+	return !loopback && isBlockedFetchHost(hostname);
+}
+
 async function loadPlaywright(): Promise<PlaywrightLike> {
 	try {
 		return (await import('playwright-core')) as PlaywrightLike;
@@ -60,7 +84,15 @@ async function launch(
 			await browser.close();
 		},
 	});
-	return browser.newPage({viewport: VIEWPORT});
+	const page = await browser.newPage({viewport: VIEWPORT});
+	// Covers subresources, iframes, fetch, and link clicks. Redirect hops skip
+	// routing, so runBrowserAction also checks where each frame landed.
+	await page.route('**/*', route =>
+		isBlockedBrowserUrl(route.request().url())
+			? route.abort('blockedbyclient')
+			: route.continue(),
+	);
+	return page;
 }
 
 export async function getBrowserPage(
@@ -76,6 +108,35 @@ export async function getBrowserPage(
 }
 
 export async function runBrowserAction(
+	page: BrowserPage,
+	args: BrowserActionArgs,
+): Promise<BrowserActionResult> {
+	await leaveBlockedFrames(page);
+	const result = await act(page, args);
+	await leaveBlockedFrames(page);
+	return result;
+}
+
+/**
+ * A redirect hop is not routed, so a public page can still land a frame on a
+ * private address. The request has gone out by then; drop the page before the
+ * model can read or screenshot it.
+ */
+async function leaveBlockedFrames(page: BrowserPage): Promise<void> {
+	const blocked = page
+		.frames()
+		.map(frame => frame.url())
+		.find(isBlockedBrowserUrl);
+	if (!blocked) {
+		return;
+	}
+	await page.goto('about:blank');
+	throw new Error(
+		`browser blocked a redirect to a private or internal address: ${new URL(blocked).hostname}`,
+	);
+}
+
+async function act(
 	page: BrowserPage,
 	args: BrowserActionArgs,
 ): Promise<BrowserActionResult> {
@@ -132,6 +193,11 @@ function requireHttpUrl(url: string | undefined): string {
 	}
 	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
 		throw new Error('navigate only accepts http and https URLs');
+	}
+	if (isBlockedBrowserUrl(url)) {
+		throw new Error(
+			`navigate cannot open a private or internal address: ${parsed.hostname}`,
+		);
 	}
 	return url;
 }

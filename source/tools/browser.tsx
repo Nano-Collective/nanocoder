@@ -13,7 +13,7 @@ import {jsonSchema, tool} from '@/types/core';
 
 const browserCoreTool = tool({
 	description:
-		'Drive one shared headless Chromium page. navigate opens an absolute http(s) URL (localhost is allowed). click and type take a CSS selector. type sets the field value. screenshot returns an image you can see. Call screenshot after navigate or a click before judging layout.',
+		'Drive one shared headless Chromium page. navigate opens an absolute http(s) URL (localhost is allowed; private network and cloud metadata addresses are blocked). click and type take a CSS selector. type sets the field value. screenshot returns an image you can see. Call screenshot after navigate or a click before judging layout.',
 	inputSchema: jsonSchema<BrowserActionArgs>({
 		type: 'object',
 		properties: {
