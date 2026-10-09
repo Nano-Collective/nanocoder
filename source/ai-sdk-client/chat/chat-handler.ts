@@ -7,6 +7,7 @@ import {
 	ToolCallRepairError,
 } from 'ai';
 import {MAX_TOOL_STEPS} from '@/constants';
+import {getModelAcceptsImages} from '@/models/models-dev-client';
 
 /**
  * Stop the SDK's step loop at a call to a tool that does not exist.
@@ -204,10 +205,15 @@ export async function handleChat(
 			const promptCaching = isPromptCachingEnabled(providerConfig);
 			// `*.chat` is the SDK's Chat Completions model: openai-compatible
 			// providers and Copilot's non-GPT-5 route.
+			const hasToolImages = finalNonSystemMessages.some(
+				m => m.role === 'tool' && !!m.images?.length,
+			);
 			const toolImages: ToolImageDelivery =
-				typeof model !== 'string' && model.provider.endsWith('.chat')
-					? 'user-message'
-					: 'inline';
+				hasToolImages && (await getModelAcceptsImages(currentModel)) === false
+					? 'omit'
+					: typeof model !== 'string' && model.provider.endsWith('.chat')
+						? 'user-message'
+						: 'inline';
 			const convertedMessages = convertToModelMessages(
 				finalNonSystemMessages,
 				toolImages,

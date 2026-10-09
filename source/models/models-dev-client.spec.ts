@@ -1,5 +1,6 @@
 import test from 'ava';
 import {
+	getModelAcceptsImages,
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
@@ -476,4 +477,16 @@ test('getModelPricing - returns consistent pricing on repeated calls', async t =
 
 	t.deepEqual(pricing2, pricing1);
 	t.truthy(pricing2);
+});
+
+test('getModelAcceptsImages - true for a vision model (models.dev)', async t => {
+	t.true(await getModelAcceptsImages('gpt-4o'));
+});
+
+test('getModelAcceptsImages - false for a text-only model (models.dev)', async t => {
+	t.false(await getModelAcceptsImages('deepseek-chat'));
+});
+
+test('getModelAcceptsImages - null for a local model not on models.dev', async t => {
+	t.is(await getModelAcceptsImages('llama3.2:3b'), null);
 });

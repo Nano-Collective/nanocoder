@@ -339,6 +339,35 @@ test('convertToModelMessages moves tool images after the whole run of tool resul
 	t.false(JSON.stringify(result.slice(0, 3)).includes('abc'));
 });
 
+test('convertToModelMessages drops tool images for a model without image input', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages, 'omit');
+	t.is(result.length, 2);
+	const serialized = JSON.stringify(result);
+	t.false(serialized.includes('abc'));
+	t.true(
+		serialized.includes(
+			'Screenshot\\n[Image not sent: this model does not accept image input.]',
+		),
+	);
+});
+
 test('convertToModelMessages emits a json output for structured tool results', t => {
 	const messages: Message[] = [
 		{
