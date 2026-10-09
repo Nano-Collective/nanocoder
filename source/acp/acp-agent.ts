@@ -37,6 +37,7 @@ import {
 	negotiateProtocolVersion,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
+import {acpCustomCommandText} from '@/acp/acp-custom-command';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
@@ -244,9 +245,10 @@ export class AcpAgent implements Agent {
 						this.initContext.customCommandLoader?.getCommand(commandName);
 
 					if (command) {
-						// Custom user-defined command  expand its instructions into the prompt
-						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+						contextualUserText = acpCustomCommandText(
+							trimmedUserText,
+							command,
+						);
 					} else {
 						// Check for built-in commands that have special ACP handling
 						const sendBuiltinReply = (msg: string) => {
