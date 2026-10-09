@@ -661,7 +661,7 @@ test('every key the config schema declares is visible to config list (#1692)', t
 					],
 					headless: {maxTurns: 5},
 					hooks: {'post-tool-use': [{command: 'echo hook'}]},
-					lspServers: {ts: {command: 'tsc'}},
+					lspServers: [{name: 'ts', command: 'tsc', languages: ['ts']}],
 					modeProviders: {},
 					nanocoderTools: {},
 					providers: [{name: 'probe', models: ['probe-model']}],
@@ -671,7 +671,7 @@ test('every key the config schema declares is visible to config list (#1692)', t
 					tune: {},
 				},
 			},
-			projectPreferences: {notifications: {enabled: true}},
+			globalPreferences: {notifications: {enabled: true}},
 		},
 		() => {
 			const config = resolveEffectiveConfig();
@@ -691,11 +691,19 @@ test('every key the config schema declares is visible to config list (#1692)', t
 				[],
 				'schema keys the config command cannot show',
 			);
-			// `notifications` lives in nanocoder-preferences.json, so the schema
-			// omits it on purpose; it still has to be visible to the command.
-			t.true(
-				isVisible('notifications'),
-				'nanocoder.notifications is missing from config list',
+			// `notifications` lives in nanocoder-preferences.json, and the schema
+			// omits it on purpose. It is already reported by
+			// `resolvePreferencesEntries` as `preferences.notifications`, so the
+			// command must show it exactly once. A second row named
+			// `nanocoder.notifications` would double-report the same setting in a
+			// different shape, so assert the exact set rather than mere presence.
+			const notificationRows = resolvedKeys.filter(key =>
+				key.includes('notifications'),
+			);
+			t.deepEqual(
+				notificationRows,
+				['preferences.notifications'],
+				'the notifications setting must be reported exactly once, as preferences.notifications',
 			);
 		},
 	);
@@ -711,7 +719,7 @@ test('config show and diff know the previously hidden keys (#1692)', t => {
 					sandbox: true,
 				},
 			},
-			projectPreferences: {notifications: {enabled: true}},
+			globalPreferences: {notifications: {enabled: true}},
 		},
 		() => {
 			for (const key of ['nanocoder.autoCommit', 'nanocoder.sandbox']) {
@@ -720,9 +728,21 @@ test('config show and diff know the previously hidden keys (#1692)', t => {
 			}
 
 			const list = runConfigCli('list');
+			// Assert the whole row (key, value, layer) rather than mere presence:
+			// a bare /nanocoder\.autoCommit/ match would also be satisfied by an
+			// entry that resolves to the wrong value or layer.
+			t.regex(list.output, /nanocoder\.autoCommit\s+true\s+project/);
+			t.regex(list.output, /nanocoder\.sandbox\s+true\s+project/);
+			// The command must also show what a cloned repository configures, so
+			// assert the settings were not merely visible but that they report
+			// the value from the generated commands they run.
 			t.regex(list.output, /nanocoder\.autoCommit/);
 			t.regex(list.output, /nanocoder\.sandbox/);
-			t.regex(list.output, /nanocoder\.notifications/);
+			// `notifications` is reported once, by the preferences resolver.
+			// Guard against re-introducing a duplicate `nanocoder.notifications`
+			// row that would show the same setting a second time.
+			t.regex(list.output, /preferences\.notifications/);
+			t.notRegex(list.output, /nanocoder\.notifications/);
 		},
 	);
 });

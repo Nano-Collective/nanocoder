@@ -434,11 +434,6 @@ function blockSpecs(): BlockSpec[] {
 			effective: config.lspServers,
 		},
 		{
-			path: ['nanocoder', 'notifications'],
-			file: preferences,
-			effective: config.notifications,
-		},
-		{
 			path: ['nanocoder', 'systemPrompt'],
 			file: agents,
 			effective: config.systemPrompt,
