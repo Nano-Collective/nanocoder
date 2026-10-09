@@ -196,6 +196,59 @@ test('initializeMCP - unregisters tools when a server becomes unhealthy', async 
 	t.false(manager.getToolNames().includes(toolName));
 });
 
+test('ToolManager re-registers MCP tools when server recovers to connected state', async t => {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
+		| undefined;
+	const toolName = 'mcp_health_server_tool';
+	const fakeClient = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return [{serverName: 'health-server', success: true, toolCount: 1}];
+		},
+		getToolEntries(_serverName?: string) {
+			return [
+				{
+					name: toolName,
+					tool: {description: 'health tool', execute: async () => 'ok'} as never,
+					handler: async () => 'ok',
+				},
+			];
+		},
+		getNativeToolsRegistry() {
+			return {[toolName]: {}};
+		},
+		getToolMapping() {
+			return new Map([
+				[
+					toolName,
+					{
+						serverName: 'health-server',
+						originalName: 'health_tool',
+						readOnly: true,
+					},
+				],
+			]);
+		},
+		disconnect: async () => {},
+	};
+	const manager = new HealthSeamToolManager(fakeClient);
+
+	await manager.initializeMCP([
+		{name: 'health-server', transport: 'http', url: 'http://localhost/mcp'},
+	]);
+	t.true(manager.getToolNames().includes(toolName));
+
+	healthListener?.({serverName: 'health-server', status: 'unhealthy'});
+	t.false(manager.getToolNames().includes(toolName));
+
+	healthListener?.({serverName: 'health-server', status: 'connected'});
+	t.true(manager.getToolNames().includes(toolName));
+});
+
 // ============================================================================
 // Tool Access Tests
 // ============================================================================

@@ -179,6 +179,10 @@ export class ToolManager {
 								change.serverName,
 						);
 						this.registry.unregisterMany(toolNames);
+					} else if (change.status === 'connected') {
+						const entries =
+							this.mcpClient?.getToolEntries(change.serverName) || [];
+						this.registry.registerMany(entries);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);

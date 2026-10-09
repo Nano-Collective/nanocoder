@@ -1444,6 +1444,133 @@ test('MCPClient health check marks a server unhealthy and removes its tools', as
 	clearInterval((client as any).healthTimers.get(serverName));
 });
 
+test('MCPClient health check retries unhealthy server and restores its tools when ping succeeds', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			if (pingCalls === 1) {
+				throw new Error('temporary network hiccup');
+			}
+			return {};
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'restored_tool',
+						description: 'restored tool description',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+	const serverName = 'recovering-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'restored_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	// Wait for first ping to fail and second ping to recover
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPings = () => {
+			if (pingCalls >= 2 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPings, 5);
+		};
+		waitForPings();
+	});
+
+	t.true(pingCalls >= 2);
+	t.true(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	const tools = client.getServerTools(serverName);
+	t.is(tools.length, 1);
+	t.is(tools[0].name, 'restored_tool');
+	clearInterval((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient health check treats JSON-RPC MethodNotFound as alive and recovers tools', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			const error = new Error('Method not found');
+			(error as any).code = -32601;
+			throw error;
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'alive_tool',
+						description: 'alive tool description',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+	const serverName = 'method-not-found-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+	});
+	(client as any).serverTools.set(serverName, []);
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPing = () => {
+			if (pingCalls > 0 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPing, 5);
+		};
+		waitForPing();
+	});
+
+	t.true(pingCalls > 0);
+	t.true(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	const tools = client.getServerTools(serverName);
+	t.is(tools.length, 1);
+	t.is(tools[0].name, 'alive_tool');
+	clearInterval((client as any).healthTimers.get(serverName));
+});
+
 test('MCPClient transport close marks a server unhealthy immediately', t => {
 	let previousCloseCalls = 0;
 	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {
