@@ -49,6 +49,7 @@ import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {runWithReadContentScope} from '@/utils/read-tracker';
 import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
@@ -174,12 +175,20 @@ export async function runAcpConversation(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
 	try {
-		return await withTrustedProjectPlugins(options.session.cwd, () =>
-			runTurn(options),
+		// One editor process can host several chats. A stub only makes sense
+		// in the chat whose history holds the earlier read.
+		return await runWithReadContentScope(
+			acpReadScope(options.session.sessionId),
+			() =>
+				withTrustedProjectPlugins(options.session.cwd, () => runTurn(options)),
 		);
 	} finally {
 		restoreApprovalHandler();
 	}
+}
+
+function acpReadScope(sessionId: string): string {
+	return `acp:${sessionId}`;
 }
 
 const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
