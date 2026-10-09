@@ -53,8 +53,17 @@ const TREE_BULLET = /^●\s+(.+?)\s*$/;
 
 /**
  * The per-test row several runners use, likewise indented by nesting depth.
+ *
+ * The trailing `(3 ms)` is timing noise that several of these runners append
+ * to every row. It is dropped here rather than normalised away later: a key
+ * carrying it would be stable but permanently distinguishable from the
+ * detail-tree spelling of the same test (`Suite › case`, no timing), so the
+ * two rows would never be recognised as one failure.
+ *
+ * Constrained to a bare number plus `m`/`s` so a test genuinely *named*
+ * `config (deprecated)` keeps its parentheses.
  */
-const TEST_MARK = /^[✕✗×]\s+(.+?)\s*$/u;
+const TEST_MARK = /^[✕✗×]\s+(.+?)(?:\s*\(\s*\d+(?:\.\d+)?\s*m?s\s*\))?\s*$/u;
 
 /**
  * A line that reports a failure, most specific convention first.
@@ -245,6 +254,51 @@ function dropTreeAncestors(found: Map<string, Candidate>): Failure[] {
 }
 
 /**
+ * Separators jest and vitest use to join a suite path to a case name.
+ *
+ * Deliberately narrow. `TestAlpha/sub` (go) and `a.py::test_add` (pytest) are
+ * also hierarchical keys, but they are *one* convention reporting *one*
+ * failure — the path is the test's own name, not a container joined to a case.
+ * Folding on those would delete real failures.
+ */
+const PATH_SEPARATORS = [' › ', ' > '];
+
+/**
+ * Collapse the two rows jest and vitest print for the same broken test.
+ *
+ * A real failing run reports each case twice, in two conventions and at two
+ * granularities:
+ *
+ * ```
+ *     ✕ subtracts two numbers (3 ms)      <- the summary tree, case only
+ *   ● Arithmetic › subtracts two numbers   <- the detail tree, full path
+ * ```
+ *
+ * The keys differ, so de-duplication by key does not catch it and every broken
+ * test is counted, listed and diffed twice. The count is what the user is shown
+ * and what the model is told to act on.
+ *
+ * A key that is a path-extension of another names the same test at a coarser
+ * granularity, so the longer one wins: it is both the accurate identity and the
+ * one that tells the model which suite to look in. The trade-off is that two
+ * genuinely different tests would have to collide on the joined-path spelling
+ * to be folded, and the cost of that is one undercount for a run, against a
+ * double count for every failure otherwise.
+ */
+function dropPathDuplicates(found: readonly Failure[]): Failure[] {
+	return found.filter(
+		candidate =>
+			!found.some(
+				other =>
+					other !== candidate &&
+					PATH_SEPARATORS.some(separator =>
+						other.key.endsWith(separator + candidate.key),
+					),
+			),
+	);
+}
+
+/**
  * Extract the failures from one run, de-duplicated by key and ordered.
  *
  * Deterministic ordering is required, not cosmetic: the result is compared
@@ -281,7 +335,9 @@ export function failuresOf(output: string): Failure[] {
 		}
 	}
 
-	return dropTreeAncestors(found).sort((a, b) => a.key.localeCompare(b.key));
+	return dropPathDuplicates(dropTreeAncestors(found)).sort((a, b) =>
+		a.key.localeCompare(b.key),
+	);
 }
 
 /**

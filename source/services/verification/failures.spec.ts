@@ -226,6 +226,79 @@ test('failuresOf: a section banner is not a failure in its own right', t => {
 	);
 });
 
+// ---------------------------------------------------------------------------
+// Two rows, one test
+//
+// jest and vitest report a failing case twice, at two granularities: once in
+// the summary tree (`✕ case`) and once in the detail tree with its full suite
+// path (`● Suite › case`). The keys differ, so de-duplication by key does not
+// catch it and every broken test is counted twice.
+// ---------------------------------------------------------------------------
+
+test('failuresOf: a case reported in both trees is one failure', t => {
+	// Verbatim shape of a real jest run with one broken test.
+	const output = [
+		' FAIL  src/math.test.ts',
+		'  Arithmetic',
+		'    ✓ adds two numbers (1 ms)',
+		'    ✕ subtracts two numbers (3 ms)',
+		'',
+		'  ● Arithmetic › subtracts two numbers',
+		'',
+		'    expect(received).toBe(expected)',
+		'',
+		'Tests:       1 failed, 1 passed, 2 total',
+	].join('\n');
+
+	t.deepEqual(failuresOf(output), [
+		{
+			key: 'Arithmetic › subtracts two numbers',
+			line: '● Arithmetic › subtracts two numbers',
+		},
+	]);
+});
+
+test('failuresOf: the joined-path key survives the fold, the bare one does not', t => {
+	// The longer key is the identity worth keeping: it names the suite as well
+	// as the case, so the model is told where to look.
+	t.deepEqual(
+		failuresOf(
+			['  ✕ case', '  ● Outer › Inner › case', 'Tests: 1 failed, 1 total'].join(
+				'\n',
+			),
+		).map(f => f.key),
+		['Outer › Inner › case'],
+	);
+});
+
+test('failuresOf: folding one tree does not touch a runner with one hierarchy', t => {
+	// The guard on both of the above. `TestAlpha/sub` is a single convention
+	// reporting a single failure — the path *is* the test's name, not a
+	// container joined to a case — so folding on `/` would delete it.
+	t.deepEqual(
+		failuresOf(
+			['--- FAIL: TestAlpha (0.00s)', '    --- FAIL: TestAlpha/sub (0.00s)'].join(
+				'\n',
+			),
+		).map(f => f.key),
+		['TestAlpha', 'TestAlpha/sub'],
+	);
+});
+
+test('failuresOf: two cases in one suite are both kept', t => {
+	t.deepEqual(
+		failuresOf(
+			[
+				'  ✕ subtracts two numbers',
+				'  ✕ divides evenly',
+				'  ● Arithmetic › subtracts two numbers',
+				'  ● Arithmetic › divides evenly',
+			].join('\n'),
+		).map(f => f.key),
+		['Arithmetic › divides evenly', 'Arithmetic › subtracts two numbers'],
+	);
+});
+
 // ============================================================================
 // Diffing
 // ============================================================================
