@@ -13,6 +13,8 @@ export interface WebSessionMessage {
 	content: string;
 	images?: {data: string; mediaType: string}[];
 	createdAt?: string;
+	/** Only the final assistant reply of a finished turn has a footer. */
+	footerVisible?: boolean;
 }
 
 export interface WebSettings {

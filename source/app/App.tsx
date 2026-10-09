@@ -57,6 +57,7 @@ import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 import {handleWebCommand} from '@/web/commands';
+import {prepareWebSession} from '@/web/session';
 import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
@@ -296,8 +297,8 @@ export default function App({
 		onError: error => {
 			webRuntimeBridge?.failTurn(error);
 		},
-		onAssistantContent: content => {
-			webRuntimeBridge?.publishAssistantContent(content);
+		onAssistantContent: (content, newResponse) => {
+			webRuntimeBridge?.publishAssistantContent(content, newResponse);
 		},
 		onReasoningContent: content => webRuntimeBridge?.publishReasoning(content),
 		// A turn that started in plan mode finished uninterrupted — a plan was
@@ -751,18 +752,11 @@ export default function App({
 					return;
 				}
 				const sessionId = webRuntimeStateRef.current.ensureSessionId();
-				await sessionManager.initialize();
-				if (!(await sessionManager.readSession(sessionId))) {
-					await sessionManager.createSession({
-						id: sessionId,
-						title: message.trim().slice(0, 50) || 'Image conversation',
-						provider: webRuntimeStateRef.current.settings.provider,
-						model: webRuntimeStateRef.current.settings.model,
-						workingDirectory: process.cwd(),
-						messageCount: 0,
-						messages: [],
-					});
-				}
+				await prepareWebSession(
+					sessionId,
+					message,
+					webRuntimeStateRef.current.settings,
+				);
 				await webRuntimeStateRef.current.submitMessage(
 					message,
 					undefined,

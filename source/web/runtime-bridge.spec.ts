@@ -15,6 +15,23 @@ const userMessage = (id: string, text = 'hello') => ({
 	text,
 });
 
+test('empty cleaned tool text is removed and only the final finished reply gets a footer', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	bridge.publishAssistantContent('<tool_call>read_file</tool_call>');
+	bridge.publishAssistantContent('');
+	t.true(events.some(event => event.type === 'assistant_content' && event.text === ''));
+	t.like(bridge.getStateEvents()[0], {messages: [{role: 'user'}]});
+	bridge.publishAssistantContent('Checking files');
+	bridge.publishAssistantContent('', true);
+	bridge.publishAssistantContent('Done');
+	t.like(bridge.getStateEvents()[0], {messages: [{role: 'user'}, {footerVisible: false}, {footerVisible: false}]});
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {messages: [{role: 'user'}, {footerVisible: false}, {footerVisible: true}]});
+});
+
 test('completion and delayed history commits cannot remove or shorten the streamed reply', async t => {
 	const bridge = createWebRuntimeBridge(() => {});
 	bridge.bindRuntimeHandlers(handlers({getSessionState: () => ({session: null, messages: []})}));
@@ -137,7 +154,7 @@ test('web runtime bridge publishes assistant deltas and completion for the activ
 	await bridge.handleClientEvent(userMessage('turn-1'));
 	bridge.publishAssistantContent('Hel');
 	bridge.publishAssistantContent('Hello');
-	bridge.publishAssistantContent('');
+	bridge.publishAssistantContent('', true);
 	bridge.publishAssistantContent('Again');
 	bridge.completeTurn();
 

@@ -1095,6 +1095,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.work-tool pre { max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
 		.work-tool .interaction-card { margin-top: 10px; }
 		.message-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+		.message-footer[hidden] { display: none; }
 		.message.user { position: relative; margin-bottom: 16px; }
 		.message.user .message-footer {
 			position: absolute;
@@ -1345,14 +1346,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			function updateWorkTool(turnId, tool) {
 				const work = ensureWorkSummary(turnId);
 				if (!work.tools) { work.tools = document.createElement('div'); work.tools.className = 'work-tools'; work.body.append(work.tools); }
-				let card = toolCards.get(tool.id);
+				const key = JSON.stringify([turnId, tool.id]);
+				let card = toolCards.get(key);
 				if (!card) {
 					const element = document.createElement('div'); element.className = 'work-tool';
 					const label = document.createElement('div'); label.className = 'work-tool-label';
 					const icon = document.createElement('span'); icon.className = 'work-tool-icon';
 					const title = document.createElement('span');
 					label.append(icon, title); element.append(label); work.tools.append(element);
-					card = {element, icon, title, work, args: null, output: null}; toolCards.set(tool.id, card);
+					card = {element, icon, title, work, args: null, output: null}; toolCards.set(key, card);
 				}
 				card.element.dataset.status = tool.status;
 				card.icon.textContent = tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'approval' ? '?' : '◌';
@@ -1360,6 +1362,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				card.title.textContent = tool.name.replace(/_/g, ' ') + (target ? ' · ' + String(target).slice(0, 160) : '') + ' — ' + (tool.status === 'approval' ? 'Needs permission' : tool.status);
 				if (tool.arguments && !card.args) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Arguments'; const pre = document.createElement('pre'); pre.textContent = formatToolArguments(tool.arguments); details.append(summary, pre); card.element.append(details); card.args = details; }
 				if (tool.output && !card.output) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Result'; const pre = document.createElement('pre'); pre.textContent = tool.output; details.append(summary, pre); card.element.append(details); card.output = details; }
+				else if (tool.output !== undefined && card.output) card.output.querySelector('pre').textContent = tool.output;
 				work.header.textContent = work.status === 'working' ? 'Working…' : work.header.textContent;
 				return card;
 			}
@@ -1764,6 +1767,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageElement.append(textElement);
 				if (role === 'user' || role === 'assistant') {
 					const footer = document.createElement('div'); footer.className = 'message-footer';
+					footer.hidden = role === 'assistant';
 					const copy = document.createElement('button'); copy.type = 'button'; copy.title = 'Copy message'; copy.setAttribute('aria-label', 'Copy message');
 					copy.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>';
 					copy.addEventListener('click', async () => {
@@ -1995,6 +1999,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			function appendAssistantDelta(id, text, replace = false) {
 				stopResponseLoader();
 				let messageElement = assistantMessages.get(id);
+				if (replace && !text) {
+					messageElement?.remove();
+					assistantMessages.delete(id);
+					messageElements.delete('assistant:' + id);
+					storedMessages = storedMessages.filter(message => message.role !== 'assistant' || message.id !== id);
+					dirtyAssistantMessages.delete(id);
+					return;
+				}
 				if (!messageElement) {
 					messageElement = appendMessage('assistant', '', '', true, [], id, false);
 					assistantMessages.set(id, messageElement);
@@ -2199,7 +2211,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 							else if (item.role !== 'assistant') content.textContent = item.content;
 						}
 						storedMessages.push({id: item.id, role: item.role, text: item.content, images: item.images ?? []});
-						setMessageTime(element, item.createdAt);
+					setMessageTime(element, item.createdAt);
+					if (item.role === 'assistant') element.querySelector('.message-footer').hidden = item.footerVisible !== true;
 						if (item.role === 'assistant' && item.id) assistantMessages.set(item.id, element);
 					}
 					for (const [key, element] of messageElements) {
@@ -2300,7 +2313,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 				if (message.type === 'turn_completed') {
 					const work = workSummaries.get(message.id);
-					const reply = assistantMessages.get(message.id);
+					const replies = [...assistantMessages].filter(([id]) => id === message.id || id.startsWith(message.id + ':response:'));
+					const reply = replies.at(-1)?.[1];
+					if (reply) {
+						reply.querySelector('.message-footer').hidden = false;
+						setMessageTime(reply, new Date().toISOString());
+					}
 					if (reply && work && !reply.querySelector('.message-duration')) {
 						const duration = document.createElement('span'); duration.className = 'message-duration';
 						duration.textContent = Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's';
@@ -2472,6 +2490,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					}
 				});
 				socket.addEventListener('close', () => {
+					if (settingsRequestId) {
+						settingsRequestId = null;
+						settingsStatus.textContent = 'Connection lost while saving. Check settings after reconnecting and retry if needed.';
+					}
 					setActiveTurn(null);
 					setComposerEnabled(false);
 					setStatus('Reconnecting…', '');
