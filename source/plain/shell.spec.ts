@@ -500,8 +500,12 @@ function assertTrustBypassWording(
 		),
 		message,
 	);
-	t.false(
-		/NANOCODER_TRUST_DIRECTORY=1[^.]*for this run/.test(message),
+	// "for this run" belongs to the flag alone: it appears once, before the
+	// variable is mentioned, however the sentences around it are split.
+	const perRun = [...message.matchAll(/for this run/gi)];
+	t.is(perRun.length, 1, message);
+	t.true(
+		(perRun[0]?.index ?? -1) < message.indexOf("NANOCODER_TRUST_DIRECTORY=1"),
 		message,
 	);
 }
