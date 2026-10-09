@@ -24,6 +24,24 @@ import {
 // Global message queue function - will be set by App component
 let globalAddToChatQueue: ((component: React.ReactNode) => void) | null = null;
 
+export type MessageQueueSink = (
+	type: MessageType,
+	message: string,
+	options?: {
+		correlationId?: string;
+		source?: string;
+		context?: Record<string, unknown>;
+		error?: unknown;
+		hideBox?: boolean;
+	},
+) => void;
+
+let globalMessageQueueSink: MessageQueueSink | null = null;
+
+export function setMessageQueueSink(sink: MessageQueueSink | null): void {
+	globalMessageQueueSink = sink;
+}
+
 // Get logger instance to avoid circular dependencies
 import {getLogger} from '@/utils/logging';
 
@@ -141,6 +159,20 @@ function addTypedMessage(
 		messageStats.lastMessageTime = timestamp;
 		if (type === 'error') {
 			messageStats.errorsLogged++;
+		}
+
+		if (globalMessageQueueSink) {
+			try {
+				globalMessageQueueSink(type, message, {
+					correlationId,
+					source: options?.source,
+					context: options?.context,
+					error: options?.error,
+					hideBox,
+				});
+			} catch (err) {
+				logger.error('Error in message queue sink', {err});
+			}
 		}
 
 		// Fallback to structured logging if queue not available

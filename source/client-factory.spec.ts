@@ -220,6 +220,14 @@ test('ConfigurationError: cwdPath property is optional', t => {
 	t.is(error3.cwdPath, undefined);
 });
 
+test('ConfigurationError: unreadableError property is optional and captured', t => {
+	const error1 = new ConfigurationError('Test', '/path');
+	const error2 = new ConfigurationError('unreadable: JSON syntax error', '/path', '/cwd', false, 'unreadable: JSON syntax error');
+
+	t.is(error1.unreadableError, undefined);
+	t.is(error2.unreadableError, 'unreadable: JSON syntax error');
+});
+
 // ============================================================================
 // createLLMClient - No Configuration Tests
 // ============================================================================
