@@ -1,6 +1,7 @@
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
@@ -614,3 +615,115 @@ test('runConfigCli --json emits parseable output', t => {
 		t.is(threshold?.layer, 'project');
 	});
 });
+
+
+/*
+ * Drift guard for #1692.
+ *
+ * `blockSpecs()` is a hand-written list of the keys `config list`/`show`/`diff`
+ * know about. It fell behind `AppConfig` once already, which hid the settings
+ * that run shell commands or create commits — `hooks`, `formatters`, `sandbox`,
+ * `autoCommit` — from `config diff`. Those are exactly the keys a person wants
+ * to see before running a cloned repository, so the command was quietest about
+ * the highest-consequence settings.
+ *
+ * Reading the schema instead of a second hand-written list means a key the
+ * loader reads can no longer be invisible to the command without a test
+ * failing, which is the part that stops this recurring.
+ *
+ * Resolved at module load, before any fixture chdir, following
+ * config-schema.spec.ts.
+ */
+const diskSchemaPath = join(process.cwd(), 'schemas/agents.config.schema.json');
+
+test('every key the config schema declares is visible to config list (#1692)', t => {
+	const schema = JSON.parse(readFileSync(diskSchemaPath, 'utf-8')) as {
+		definitions: Record<string, {properties?: Record<string, unknown>}>;
+	};
+	const disk = Object.entries(schema.definitions).find(
+		([, definition]) => definition.properties?.alwaysAllow !== undefined,
+	);
+	t.truthy(disk, 'the schema should define the on-disk nanocoder block');
+	const schemaKeys = Object.keys(disk?.[1].properties ?? {});
+	t.true(schemaKeys.length > 0, 'the schema should list nanocoder keys');
+
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					alwaysAllow: ['read_file'],
+					autoCommit: true,
+					autoCompact: {threshold: 80},
+					defaultMode: 'yolo',
+					disabledTools: ['execute_bash'],
+					formatters: [
+						{match: ['**/*.js'], command: 'echo formatted', name: 'fmt'},
+					],
+					headless: {maxTurns: 5},
+					hooks: {'post-tool-use': [{command: 'echo hook'}]},
+					lspServers: {ts: {command: 'tsc'}},
+					modeProviders: {},
+					nanocoderTools: {},
+					providers: [{name: 'probe', models: ['probe-model']}],
+					retries: {maxAttempts: 3},
+					sandbox: true,
+					systemPrompt: 'hello',
+					tune: {},
+				},
+			},
+			projectPreferences: {notifications: {enabled: true}},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const resolvedKeys = config.entries.map(candidate => candidate.key);
+			// A schema key is visible when the command resolves it directly or
+			// resolves entries beneath it: `providers` resolves one row per
+			// provider, as `nanocoder.providers.<name>`.
+			const isVisible = (key: string) =>
+				resolvedKeys.some(
+					candidate =>
+						candidate === `nanocoder.${key}` ||
+						candidate.startsWith(`nanocoder.${key}.`),
+				);
+			const invisible = schemaKeys.filter(key => !isVisible(key));
+			t.deepEqual(
+				invisible,
+				[],
+				'schema keys the config command cannot show',
+			);
+			// `notifications` lives in nanocoder-preferences.json, so the schema
+			// omits it on purpose; it still has to be visible to the command.
+			t.true(
+				isVisible('notifications'),
+				'nanocoder.notifications is missing from config list',
+			);
+		},
+	);
+});
+
+test('config show and diff know the previously hidden keys (#1692)', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					alwaysAllow: ['read_file'],
+					autoCommit: true,
+					sandbox: true,
+				},
+			},
+			projectPreferences: {notifications: {enabled: true}},
+		},
+		() => {
+			for (const key of ['nanocoder.autoCommit', 'nanocoder.sandbox']) {
+				const shown = runConfigCli('show', [key]);
+				t.is(shown.exitCode, 0, `config show ${key} should succeed`);
+			}
+
+			const list = runConfigCli('list');
+			t.regex(list.output, /nanocoder\.autoCommit/);
+			t.regex(list.output, /nanocoder\.sandbox/);
+			t.regex(list.output, /nanocoder\.notifications/);
+		},
+	);
+});
+
