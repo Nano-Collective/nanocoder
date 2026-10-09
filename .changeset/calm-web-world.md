@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": minor
 ---
 
-Add browser approvals, questions, and live tool status to local web mode so coding-agent turns can finish safely in the browser UI.
+Introduce local browser mode with `--web` and `--gui`, including streaming chat, browser tool approvals and questions, image attachments, provider/model settings, synchronized session history, task tracking, and per-file Git diffs. The token-protected localhost interface supports reconnecting and multiple tabs, cancellation, and live reasoning/tool summaries alongside the terminal UI.

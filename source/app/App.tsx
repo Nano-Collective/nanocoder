@@ -10,6 +10,7 @@ import {
 	useUserSubmit,
 	useVSCodePromptDispatcher,
 } from '@/app/hooks/useVSCodePromptHandling';
+import {useWebRuntime} from '@/app/hooks/useWebRuntime';
 import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
@@ -49,18 +50,12 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
-import {sessionManager} from '@/session/session-manager';
-import {loadTasks} from '@/tools/tasks/storage';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
-import {handleWebCommand} from '@/web/commands';
-import {prepareWebSession} from '@/web/session';
-import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
-import {getWorkspacePanel} from '@/web/workspace';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
 // top and bottom padding, plus the input footer below the chat viewport
@@ -601,305 +596,16 @@ export default function App({
 		if (appState.isConversationComplete && appState.messages.length > 0)
 			void flushSession();
 	}, [appState.isConversationComplete, appState.messages.length, flushSession]);
-	const getWebSessionState = React.useCallback(
-		() => ({
-			session: appState.currentSessionId
-				? {
-						id: appState.currentSessionId,
-						title:
-							appState.sessionName ||
-							appState.messages
-								.find(message => message.role === 'user')
-								?.content.slice(0, 80) ||
-							'New chat',
-						lastAccessedAt: new Date().toISOString(),
-						messageCount: appState.messages.length,
-					}
-				: null,
-			messages: appState.messages
-				.filter(
-					message =>
-						(message.role === 'user' || message.role === 'assistant') &&
-						(message.content.trim().length > 0 ||
-							(message.images?.length ?? 0) > 0),
-				)
-				.map(message => ({
-					role: message.role as 'user' | 'assistant',
-					content: message.content,
-					images: message.images,
-				})),
-		}),
-		[appState.currentSessionId, appState.sessionName, appState.messages],
-	);
-	const webRuntimeStateRef = React.useRef({
-		tasks: appState.liveTaskList,
+	useWebRuntime({
+		bridge: webRuntimeBridge,
+		state: appState,
+		handlers: appHandlers,
+		modes: modeHandlers,
 		isGenerating: chatHandler.isGenerating,
-		submitMessage: appHandlers.handleMessageSubmit,
-		cancel: appHandlers.handleCancel,
-		resetSession: appHandlers.clearMessages,
-		applySession: appHandlers.applySession,
-		getSessionState: getWebSessionState,
+		trusted: isEffectivelyTrusted,
+		trustError: isTrustedError,
 		flushSession,
-		selectModel: modeHandlers.handleModelSelect,
-		setMode: appState.setDevelopmentMode,
-		ensureSessionId: appState.ensureCurrentSessionId,
-		settings: {
-			provider: appState.currentProvider,
-			model: appState.currentModel,
-			mode: appState.developmentMode,
-		},
 	});
-	webRuntimeStateRef.current = {
-		tasks: appState.liveTaskList,
-		isGenerating: chatHandler.isGenerating,
-		submitMessage: appHandlers.handleMessageSubmit,
-		cancel: appHandlers.handleCancel,
-		resetSession: appHandlers.clearMessages,
-		applySession: appHandlers.applySession,
-		getSessionState: getWebSessionState,
-		flushSession,
-		selectModel: modeHandlers.handleModelSelect,
-		setMode: appState.setDevelopmentMode,
-		ensureSessionId: appState.ensureCurrentSessionId,
-		settings: {
-			provider: appState.currentProvider,
-			model: appState.currentModel,
-			mode: appState.developmentMode,
-		},
-	};
-	React.useEffect(
-		() =>
-			sessionManager.subscribeToSaves(session => {
-				if (
-					session.id ===
-					webRuntimeStateRef.current.getSessionState().session?.id
-				) {
-					appState.setSessionName(session.title);
-				}
-				if (webRuntimeBridge && session.workingDirectory === process.cwd()) {
-					void webRuntimeBridge
-						.handleClientEvent({
-							type: 'list_sessions',
-							id: `saved-${session.id}`,
-						})
-						.catch(() => {});
-				}
-			}),
-		[webRuntimeBridge, appState.setSessionName],
-	);
-	React.useEffect(() => {
-		webRuntimeBridge?.setRuntimeStatus(
-			isTrustedError
-				? `Directory trust check failed: ${isTrustedError}`
-				: !isEffectivelyTrusted
-					? 'Approve directory trust in the terminal to start web mode.'
-					: !appState.client || !appState.toolManager
-						? 'Configure a provider and model in the terminal to start web mode.'
-						: 'Ready',
-		);
-	}, [
-		webRuntimeBridge,
-		isTrustedError,
-		isEffectivelyTrusted,
-		appState.client,
-		appState.toolManager,
-	]);
-	React.useEffect(() => {
-		const snapshot = getWebSessionState();
-		webRuntimeBridge?.syncSession(snapshot.session, snapshot.messages);
-	}, [webRuntimeBridge, getWebSessionState]);
-	React.useEffect(() => {
-		webRuntimeBridge?.setSettings({
-			provider: appState.currentProvider,
-			model: appState.currentModel,
-			mode: appState.developmentMode,
-			providers: (getAppConfig().providers ?? []).map(provider => ({
-				name: provider.name,
-				models: provider.models,
-			})),
-			modes: ['normal', 'auto-accept', 'yolo', 'plan', 'architect'],
-		});
-	}, [
-		webRuntimeBridge,
-		appState.currentProvider,
-		appState.currentModel,
-		appState.developmentMode,
-	]);
-
-	React.useEffect(() => {
-		if (
-			!webRuntimeBridge ||
-			!isEffectivelyTrusted ||
-			!appState.client ||
-			!appState.toolManager
-		) {
-			return;
-		}
-
-		return webRuntimeBridge.bindRuntimeHandlers({
-			getWorkspacePanel: async (panel, path) => {
-				const current = webRuntimeStateRef.current;
-				const sessionId = current.getSessionState().session?.id;
-				return getWorkspacePanel(panel, path, {
-					root: process.cwd(),
-					tasks: current.tasks ?? (sessionId ? await loadTasks(sessionId) : []),
-				});
-			},
-			submitMessage: async (message, images) => {
-				if (webRuntimeStateRef.current.isGenerating) {
-					throw new Error('Nanocoder is already processing a turn.');
-				}
-
-				if (
-					await handleWebCommand(message, {
-						resetSession: async () => {
-							await webRuntimeStateRef.current.flushSession();
-							await webRuntimeStateRef.current.resetSession();
-						},
-						getSettings: () => webRuntimeStateRef.current.settings,
-						notice: text => webRuntimeBridge.publishNotice(text),
-					})
-				) {
-					await new Promise<void>(resolve => setImmediate(resolve));
-					return;
-				}
-				const sessionId = webRuntimeStateRef.current.ensureSessionId();
-				await prepareWebSession(
-					sessionId,
-					message,
-					webRuntimeStateRef.current.settings,
-				);
-				await webRuntimeStateRef.current.submitMessage(
-					message,
-					undefined,
-					images,
-				);
-				await new Promise<void>(resolve => setImmediate(resolve));
-			},
-			getSessionState: () => webRuntimeStateRef.current.getSessionState(),
-			updateSettings: async settings => {
-				const provider = getAppConfig().providers?.find(
-					provider => provider.name === settings.provider,
-				);
-				if (!provider?.models.includes(settings.model))
-					throw new Error('Select a configured provider and model.');
-				const modes = [
-					'normal',
-					'auto-accept',
-					'yolo',
-					'plan',
-					'architect',
-				] as const;
-				const mode = modes.find(mode => mode === settings.mode);
-				if (!mode) throw new Error('Unsupported development mode.');
-				const switched = await webRuntimeStateRef.current.selectModel(
-					settings.provider,
-					settings.model,
-					true,
-				);
-				if (!switched)
-					throw new Error(
-						`Unable to switch to ${settings.provider}. Check the provider configuration.`,
-					);
-				webRuntimeStateRef.current.setMode(mode);
-				await new Promise<void>(resolve => setImmediate(resolve));
-			},
-			cancel: () => webRuntimeStateRef.current.cancel(),
-			resetSession: async () => {
-				if (webRuntimeStateRef.current.isGenerating) {
-					throw new Error(
-						'Cannot start a new chat while Nanocoder is processing a turn.',
-					);
-				}
-
-				await webRuntimeStateRef.current.flushSession();
-				await webRuntimeStateRef.current.resetSession();
-				await new Promise<void>(resolve => setImmediate(resolve));
-			},
-			listSessions: async () => {
-				await sessionManager.initialize();
-				const sessions = await sessionManager.listSessions({
-					workingDirectory: process.cwd(),
-				});
-
-				return [...sessions]
-					.sort(
-						(a, b) =>
-							new Date(b.lastAccessedAt).getTime() -
-							new Date(a.lastAccessedAt).getTime(),
-					)
-					.map(session => ({
-						id: session.id,
-						title: session.title,
-						lastAccessedAt: session.lastAccessedAt,
-						messageCount: session.messageCount,
-					}));
-			},
-			deleteSession: async sessionId => {
-				await sessionManager.initialize();
-				await sessionManager.deleteSession(sessionId);
-			},
-			loadSession: async sessionId => {
-				if (webRuntimeStateRef.current.isGenerating) {
-					throw new Error(
-						'Cannot switch sessions while Nanocoder is processing a turn.',
-					);
-				}
-
-				await webRuntimeStateRef.current.flushSession();
-				await sessionManager.initialize();
-				const session = await sessionManager.loadSession(sessionId);
-				if (!session) {
-					return null;
-				}
-
-				webRuntimeStateRef.current.applySession(session);
-
-				return {
-					session: {
-						id: session.id,
-						title: session.title,
-						lastAccessedAt: session.lastAccessedAt,
-						messageCount: session.messageCount,
-					},
-					messages: session.messages
-						.filter(
-							message =>
-								(message.role === 'user' || message.role === 'assistant') &&
-								(message.content.trim().length > 0 ||
-									(message.images?.length ?? 0) > 0),
-						)
-						.map(message => ({
-							role: message.role as 'user' | 'assistant',
-							content: message.content,
-							images: message.images,
-						})),
-				};
-			},
-		});
-	}, [
-		webRuntimeBridge,
-		isEffectivelyTrusted,
-		appState.client,
-		appState.toolManager,
-	]);
-
-	React.useEffect(() => {
-		if (!webRuntimeBridge) {
-			return;
-		}
-
-		setWebToolLifecyclePublisher({
-			started: (id, name, args) =>
-				webRuntimeBridge.publishToolStarted(id, name, args),
-			finished: (id, name, ok, output) =>
-				webRuntimeBridge.publishToolFinished(id, name, ok, output),
-		});
-
-		return () => {
-			setWebToolLifecyclePublisher(null);
-		};
-	}, [webRuntimeBridge]);
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
 	// the picker for a bare --resume), once on mount. Reuses the exact same

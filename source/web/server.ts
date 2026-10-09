@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
 import {createServer, type Server} from 'node:http';
+import {isIP} from 'node:net';
 import type {Duplex} from 'node:stream';
 import {WebSocket, WebSocketServer} from 'ws';
 import {
@@ -23,6 +24,8 @@ export interface LocalWebServerOptions {
 	openBrowser?: boolean;
 	onClientEvent?: (event: WebClientEvent) => void | Promise<void>;
 	onAllClientsDisconnected?: () => void;
+	/** Maximum incoming event size, including base64 image attachments. */
+	maxPayload?: number;
 	getStateEvents?: () => WebServerEvent[];
 }
 
@@ -38,6 +41,7 @@ export interface LocalWebServer {
 }
 
 const DEFAULT_HOST = '127.0.0.1';
+const WEB_MAX_PAYLOAD = 16 * 1024 * 1024;
 function createLocalWebToken(): string {
 	return randomBytes(32).toString('hex');
 }
@@ -46,6 +50,15 @@ export async function startLocalWebServer(
 	options: LocalWebServerOptions = {},
 ): Promise<LocalWebServer> {
 	const host = options.host ?? DEFAULT_HOST;
+	if (
+		!(
+			host === 'localhost' ||
+			host === '::1' ||
+			(isIP(host) === 4 && host.startsWith('127.'))
+		)
+	)
+		throw new Error('Web mode must bind to a loopback address.');
+	const urlHost = host.includes(':') ? `[${host}]` : host;
 	const requestedPort = options.port ?? 0;
 	const token = options.token ?? createLocalWebToken();
 
@@ -53,7 +66,7 @@ export async function startLocalWebServer(
 		response.setHeader('x-content-type-options', 'nosniff');
 		response.setHeader('x-frame-options', 'DENY');
 
-		const requestUrl = new URL(request.url ?? '/', `http://${host}`);
+		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
 
 		if (requestUrl.pathname === '/health') {
 			response.writeHead(200, {'content-type': 'application/json'});
@@ -90,16 +103,33 @@ export async function startLocalWebServer(
 
 		const nonce = createPageNonce();
 		response.writeHead(200, {
+			'cache-control': 'no-store',
+			'referrer-policy': 'no-referrer',
 			'content-type': 'text/html; charset=utf-8',
-			'content-security-policy': buildContentSecurityPolicy(host, port, nonce),
+			'content-security-policy': buildContentSecurityPolicy(
+				urlHost,
+				port,
+				nonce,
+			),
 		});
 		response.end(renderWebModePage(nonce));
 	});
-	const webSocketServer = new WebSocketServer({noServer: true});
+	const webSocketServer = new WebSocketServer({
+		noServer: true,
+		maxPayload: options.maxPayload ?? WEB_MAX_PAYLOAD,
+	});
 	const connectedClients = new Set<WebSocket>();
 
 	server.on('upgrade', (request, socket, head) => {
-		const requestUrl = new URL(request.url ?? '/', `http://${host}`);
+		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
+		// Browsers send Origin; non-browser clients authenticate with the token.
+		if (
+			request.headers.origin &&
+			request.headers.origin !== `http://${urlHost}:${port}`
+		) {
+			rejectWebSocketUpgrade(socket);
+			return;
+		}
 		if (
 			requestUrl.pathname !== '/events' ||
 			requestUrl.searchParams.get('token') !== token
@@ -157,10 +187,10 @@ export async function startLocalWebServer(
 	}
 
 	const port = address.port;
-	const url = `http://${host}:${port}/?token=${token}`;
+	const url = `http://${urlHost}:${port}/?token=${token}`;
 	// Local-only WebSocket paired with the localhost HTTP page; using wss:// here
 	// would require local TLS certificate setup that this server does not provide.
-	const eventsUrl = `ws://${host}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+	const eventsUrl = `ws://${urlHost}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 
 	if (options.openBrowser !== false) {
 		openUrl(url);

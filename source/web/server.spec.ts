@@ -7,6 +7,37 @@ import {
 } from './protocol.js';
 import {startLocalWebServer} from './server.js';
 
+test('web mode rejects non-loopback bindings before opening a listener', async t => {
+	await t.throwsAsync(startLocalWebServer({host: '0.0.0.0', openBrowser: false}), {message: 'Web mode must bind to a loopback address.'});
+});
+
+test('WebSocket upgrade accepts the page origin and rejects foreign origins even with a token', async t => {
+	const server = await startLocalWebServer({openBrowser: false});
+	t.teardown(() => server.close());
+	const valid = new WebSocket(server.eventsUrl, {origin: new URL(server.url).origin});
+	await waitForWebSocketOpen(valid);
+	valid.terminate();
+	const invalid = new WebSocket(server.eventsUrl, {origin: 'https://example.com'});
+	const status = await new Promise<number | undefined>(resolve => {
+		invalid.once('unexpected-response', (request, response) => {resolve(response.statusCode); request.destroy();});
+		invalid.on('error', () => {});
+	});
+	t.is(status, 401);
+});
+
+test('oversized WebSocket events close only that client and do not reach the runtime', async t => {
+	let calls = 0;
+	const server = await startLocalWebServer({openBrowser: false, maxPayload: 1024, onClientEvent: () => {calls++;}});
+	t.teardown(() => server.close());
+	const client = new WebSocket(server.eventsUrl);
+	await waitForWebSocketOpen(client);
+	const closed = new Promise<number>(resolve => client.once('close', code => resolve(code)));
+	client.send('x'.repeat(1025));
+	t.is(await closed, 1009);
+	t.is(calls, 0);
+	t.is((await fetch(new URL('/health', server.url))).status, 200);
+});
+
 async function readText(url: string): Promise<{status: number; body: string}> {
 	const response = await fetch(url);
 	return {
@@ -112,6 +143,8 @@ test('local web server sets security headers, including a CSP scoped to the page
 
 	t.is(response.headers.get('x-content-type-options'), 'nosniff');
 	t.is(response.headers.get('x-frame-options'), 'DENY');
+	t.is(response.headers.get('referrer-policy'), 'no-referrer');
+	t.is(response.headers.get('cache-control'), 'no-store');
 
 	const csp = response.headers.get('content-security-policy');
 	t.truthy(csp);

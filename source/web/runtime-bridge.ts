@@ -86,6 +86,7 @@ export interface WebRuntimeBridge {
 	setRuntimeStatus: (status: string) => void;
 	setSettings: (settings: WebSettings) => void;
 	publishNotice: (message: string) => void;
+	refreshSessions: () => Promise<void>;
 }
 
 type PendingInteraction =
@@ -126,6 +127,15 @@ export function createWebRuntimeBridge(
 	let work: WebWorkSummary[] = [];
 	let reasoningId: string | null = null;
 	let reasoningCounter = 0;
+	let sessionListRevision = 0;
+	const publishSessionList = async (id: string) => {
+		const handlers = runtimeHandlers;
+		if (!handlers) return;
+		const revision = ++sessionListRevision;
+		const sessions = await handlers.listSessions();
+		if (revision === sessionListRevision && runtimeHandlers === handlers)
+			broadcastEvent({type: 'sessions', id, sessions});
+	};
 	const currentWork = () => {
 		let summary = work.find(item => item.id === activeTurnId);
 		if (!summary && activeTurnId) {
@@ -490,8 +500,7 @@ export function createWebRuntimeBridge(
 			}
 
 			if (event.type === 'list_sessions') {
-				const sessions = await runtimeHandlers.listSessions();
-				broadcastEvent({type: 'sessions', id: event.id, sessions});
+				await publishSessionList(event.id);
 				return;
 			}
 
@@ -554,11 +563,7 @@ export function createWebRuntimeBridge(
 						sessionRevision++;
 					}
 					await runtimeHandlers.deleteSession(event.sessionId);
-					broadcastEvent({
-						type: 'sessions',
-						id: event.id,
-						sessions: await runtimeHandlers.listSessions(),
-					});
+					await publishSessionList(event.id);
 				} finally {
 					sessionBusy = false;
 					publishState();
@@ -642,6 +647,9 @@ export function createWebRuntimeBridge(
 		publishNotice(message) {
 			notices.push({role: 'system', text: message, metaText: 'Local UI'});
 			broadcastEvent({type: 'notice', message});
+		},
+		refreshSessions() {
+			return publishSessionList('runtime-session-refresh');
 		},
 
 		publishAssistantContent(content, newResponse = false) {

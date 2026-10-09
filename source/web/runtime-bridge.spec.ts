@@ -15,6 +15,20 @@ const userMessage = (id: string, text = 'hello') => ({
 	text,
 });
 
+test('older session-list responses cannot overwrite a newer runtime refresh', async t => {
+	const events: WebServerEvent[] = [];
+	const pending: ((sessions: import('./protocol.js').WebSessionSummary[]) => void)[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers(handlers({listSessions: () => new Promise(resolve => pending.push(resolve))}));
+	const old = bridge.handleClientEvent({type: 'list_sessions', id: 'old'});
+	const fresh = bridge.refreshSessions();
+	pending[1]([{id: 'session', title: 'New title', lastAccessedAt: '', messageCount: 2}]);
+	await fresh;
+	pending[0]([{id: 'session', title: 'Old title', lastAccessedAt: '', messageCount: 1}]);
+	await old;
+	t.deepEqual(events.filter(event => event.type === 'sessions').map(event => event.sessions[0].title), ['New title']);
+});
+
 test('workspace panels remain available during a turn without submitting or cancelling it', async t => {
 	const events: WebServerEvent[] = [];
 	const bridge = createWebRuntimeBridge(event => events.push(event));
