@@ -281,9 +281,9 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 }
 ```
 
-- **Only the edited file is committed.** Your own staged or unstaged changes are left exactly as they were, and new files the agent creates are included.
+- **Only the edited file is committed.** Changes in other files (staged or unstaged) are left untouched. Note that because Git commits files atomically per path, any prior uncommitted changes in the *same edited file* are included in that file's commit. New files created by the agent are also included.
 - **Commit messages** are Conventional Commits (`feat: ...`, `fix: ...`) written by the current model from that file's diff, using the same prompt as `/commit`. If the model call fails or returns nothing, the message falls back to `chore: update <path>`.
-- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, no git identity) is logged as a warning and the edit stays in the working tree.
+- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, missing git identity) is logged as a warning, the file is un-staged if it was not previously staged, and the edit stays in the working tree.
 - Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
