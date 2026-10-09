@@ -39,6 +39,21 @@ test('ACP custom command with no arguments does not leave {{args}} literal', t =
 	t.false(text.includes('{{args}}'));
 });
 
+test('ACP custom command includes loaded resources', t => {
+	const command = review('Review {{args}}.');
+	command.loadedResources = [
+		{
+			name: 'checklist.md',
+			path: '/tmp/checklist.md',
+			type: 'document',
+		},
+	];
+
+	const text = acpCustomCommandText('/review main', command);
+	t.true(text.includes('Review main.'));
+	t.true(text.includes('[Available resources:\n  - checklist.md (document)]'));
+});
+
 test('an omitted ACP argument uses the parameter default', t => {
 	const text = acpCustomCommandText(
 		'/review',
