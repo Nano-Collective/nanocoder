@@ -1253,6 +1253,86 @@ test.serial(
 );
 
 test.serial(
+	'walkProjectEntries prunes an anchored ignore rule through a symlinked search root',
+	async t => {
+		const parentDir = createTempDir('test-file-search-symlink-root-parent');
+		const realDir = join(parentDir, 'real');
+		const linkedDir = join(parentDir, 'linked');
+
+		try {
+			mkdirSync(join(realDir, 'src', 'generated'), {recursive: true});
+			// Anchored, so it prunes only when rg can anchor the rule at the same
+			// directory its reported paths are relative to - the resolved root, not
+			// the symlink the caller walked in through.
+			writeFileSync(join(realDir, '.gitignore'), '/src/generated/\n');
+			for (let index = 0; index < 20; index++) {
+				writeFileSync(
+					join(
+						realDir,
+						'src',
+						'generated',
+						`f${String(index).padStart(2, '0')}.js`,
+					),
+					'x',
+				);
+			}
+			writeFileSync(join(realDir, 'src', 'main.ts'), 'x');
+			symlinkSync(realDir, linkedDir, 'junction');
+
+			const files: string[] = [];
+			const result = await walkProjectEntries(
+				linkedDir,
+				join(linkedDir, 'src'),
+				entry => {
+					if (!entry.isDirectory) files.push(entry.relativePath);
+					return false;
+				},
+				{includeDirectories: false, maxRawFilesScanned: 5},
+			);
+
+			t.deepEqual(files, ['src/main.ts']);
+			t.false(result.truncated);
+		} finally {
+			rmSync(parentDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'searchProjectContents reports paths relative to the caller cwd when it is symlinked',
+	async t => {
+		const parentDir = createTempDir('test-file-search-symlink-report-parent');
+		const realDir = join(parentDir, 'real');
+		const linkedDir = join(parentDir, 'linked');
+
+		try {
+			mkdirSync(join(realDir, 'src'), {recursive: true});
+			writeFileSync(join(realDir, 'src', 'kept.ts'), 'searchTarget');
+			writeFileSync(join(realDir, 'src', 'other.ts'), 'searchTarget');
+			symlinkSync(realDir, linkedDir, 'junction');
+
+			const result = await searchProjectContents(
+				'searchTarget',
+				linkedDir,
+				10,
+				false,
+				undefined,
+				join(linkedDir, 'src'),
+			);
+
+			// Relative to the cwd the caller passed, never to its realpath - the
+			// resolved parent must not leak into the reported path.
+			t.deepEqual(
+				result.matches.map(match => match.file),
+				['src/kept.ts', 'src/other.ts'],
+			);
+		} finally {
+			rmSync(parentDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'searchProjectContents respects a .gitignore nested in a subdirectory',
 	async t => {
 		const testDir = createTempDir('test-file-search-nested-gitignore-temp');

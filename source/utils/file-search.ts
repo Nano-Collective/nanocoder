@@ -6,6 +6,7 @@ import {
 	mkdtemp,
 	readdir,
 	readFile,
+	realpath,
 	rm,
 	writeFile,
 } from 'node:fs/promises';
@@ -370,6 +371,26 @@ async function withProjectIgnoreFile<T>(
 
 async function assertPathExists(candidatePath: string): Promise<void> {
 	await lstat(candidatePath);
+}
+
+/**
+ * rg anchors `--ignore-file` rules at the cwd it resolves for itself, which
+ * resolves symlinks: on macOS `tmpdir()` is `/var/folders/...` behind
+ * `/private/var/folders/...`, so a rule anchored with `/src/generated/` is
+ * matched against the real path while the search root is still the symlinked
+ * one and the rule prunes nothing. Resolving both sides to the same real path
+ * is what lets the traversal prune do what its doc comment claims; the JS-side
+ * filter stays the correctness backstop either way.
+ *
+ * Fails soft: an unresolvable path is still a valid search root, so keep the
+ * caller's spelling and let rg report on it.
+ */
+async function resolveRealPath(candidatePath: string): Promise<string> {
+	try {
+		return await realpath(candidatePath);
+	} catch {
+		return candidatePath;
+	}
 }
 
 // Possessive quantifiers parse under rg's default engine with different (wrong) semantics - the one case --engine auto can't self-detect.
@@ -836,6 +857,24 @@ export async function walkProjectEntries(
 	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
 
+	// rg reports paths under the root spelling it was handed, and anchors
+	// `--ignore-file` rules at its own resolved cwd. Resolving the root to match
+	// is what lets an anchored rule prune at all; see resolveRealPath.
+	const resolvedCwd = await resolveRealPath(cwd);
+	const resolvedRoot = startPath
+		? await resolveRealPath(rootPath)
+		: resolvedCwd;
+
+	// rg's paths are relative to the resolved root, so entries are derived
+	// against it and only the absolute path is mapped back to the caller's
+	// spelling - the file is the same either way.
+	const emitEntry: ProjectEntryVisitor = entry =>
+		onEntry({
+			absolutePath: path.join(cwd, entry.relativePath),
+			relativePath: entry.relativePath,
+			isDirectory: entry.isDirectory,
+		});
+
 	return withProjectIgnoreFile(cwd, async ignoreArgs => {
 		const args = [
 			'--files',
@@ -848,15 +887,15 @@ export async function walkProjectEntries(
 			...ignoreArgs,
 			...defaultIgnoreGlobs(projectIgnore),
 			'--',
-			rootPath,
+			resolvedRoot,
 		];
 
 		if (!sorted) {
 			return walkUnsortedFileStream(
-				cwd,
-				rootPath,
+				resolvedCwd,
+				resolvedRoot,
 				args,
-				onEntry,
+				emitEntry,
 				includeDirectories,
 				projectIgnore,
 				signal,
@@ -866,7 +905,7 @@ export async function walkProjectEntries(
 
 		const {stdout, hitMaxLines} = await runRipgrep(
 			args,
-			cwd,
+			resolvedCwd,
 			DEFAULT_SEARCH_TIMEOUT_MS,
 			signal,
 			maxRawFilesScanned,
@@ -882,7 +921,9 @@ export async function walkProjectEntries(
 				throw signal.reason ?? new Error('Walk aborted');
 			}
 
-			const relativeFile = normalizePathForMatch(path.relative(cwd, file));
+			const relativeFile = normalizePathForMatch(
+				path.relative(resolvedCwd, file),
+			);
 			if (projectIgnore.ignores(relativeFile)) {
 				continue;
 			}
@@ -898,8 +939,8 @@ export async function walkProjectEntries(
 						continue;
 					}
 					seenDirs.add(dirRelative);
-					const stop = await onEntry({
-						absolutePath: path.join(cwd, dirRelative),
+					const stop = await emitEntry({
+						absolutePath: path.join(resolvedCwd, dirRelative),
 						relativePath: dirRelative,
 						isDirectory: true,
 					});
@@ -909,8 +950,8 @@ export async function walkProjectEntries(
 				}
 			}
 
-			const stop = await onEntry({
-				absolutePath: path.join(cwd, relativeFile),
+			const stop = await emitEntry({
+				absolutePath: path.join(resolvedCwd, relativeFile),
 				relativePath: relativeFile,
 				isDirectory: false,
 			});
@@ -922,10 +963,10 @@ export async function walkProjectEntries(
 		let hitDirCap = false;
 		if (includeDirectories && !hitMaxLines) {
 			({truncated: hitDirCap} = await walkEmptyDirectories(
-				cwd,
-				rootPath,
+				resolvedCwd,
+				resolvedRoot,
 				seenDirs,
-				onEntry,
+				emitEntry,
 				projectIgnore,
 				signal,
 				maxRawFilesScanned,
@@ -983,7 +1024,7 @@ function formatMatchContent(content: string, maxLength: number): string {
 }
 
 // `data` is absent on rg's begin/end/summary records, so it must be optional
-// for a line to be narrowed on `type` alone.
+// for a line to be safely narrowed on `type` alone.
 interface RgJsonMatch {
 	type: string;
 	data?: {
@@ -1038,6 +1079,22 @@ type RgLine = ReturnType<typeof parseRgJsonLines>[number];
 function toRelativeFile(cwd: string, file: string): string {
 	const absolutePath = path.isAbsolute(file) ? file : path.join(cwd, file);
 	return normalizePathForMatch(path.relative(cwd, absolutePath));
+}
+
+/**
+ * A path relative to `fromCwd` re-expressed as one relative to `toCwd`.
+ *
+ * Both directories are the same place reached by different spellings (the
+ * caller's cwd and its realpath), so going via the shared relative path is the
+ * only way to stay correct: `path.relative(toCwd, absoluteUnderFromCwd)` would
+ * answer with a `../../..` escape.
+ */
+function rebaseRelativeFile(
+	fromCwd: string,
+	toCwd: string,
+	file: string,
+): string {
+	return toRelativeFile(toCwd, toRelativeFile(fromCwd, file));
 }
 
 function buildMatchesWithoutContext(
@@ -1166,6 +1223,14 @@ export async function searchProjectContents(
 
 	const projectIgnore = loadGitignore(cwd);
 
+	// rg anchors `--ignore-file` rules at its own resolved cwd, so a search root
+	// reached through a symlink stops them pruning - most visibly on macOS,
+	// where tmpdir() is a symlink. Resolving both sides puts them back in step.
+	const resolvedCwd = await resolveRealPath(cwd);
+	const resolvedRoot = searchPath
+		? await resolveRealPath(searchRoot)
+		: resolvedCwd;
+
 	const args = [
 		'--json',
 		'--hidden',
@@ -1209,10 +1274,9 @@ export async function searchProjectContents(
 		} catch {
 			return 'skip';
 		}
-		// rg also emits begin/end/summary records, which carry no `data`. Check the
-		// type first so a data-less line can't throw inside the stream handler,
-		// where an exception escapes as an uncaught error instead of failing the
-		// search.
+		// rg also emits begin/end/summary records, which carry no `data`. Check
+		// the type first so a data-less line can't throw inside the stream
+		// handler, where an exception escapes as an uncaught error.
 		if (parsed.type !== 'match' && parsed.type !== 'context') {
 			return 'skip';
 		}
@@ -1220,7 +1284,10 @@ export async function searchProjectContents(
 		if (file === undefined) {
 			return 'skip';
 		}
-		if (projectIgnore.ignores(toRelativeFile(cwd, file))) {
+		// rg reports paths under the resolved root, so the ignore check has to be
+		// made against it too - not the caller's spelling, which would resolve to
+		// a `../` escape and throw.
+		if (projectIgnore.ignores(toRelativeFile(resolvedCwd, file))) {
 			return 'skip';
 		}
 		if (parsed.type === 'match') {
@@ -1242,15 +1309,33 @@ export async function searchProjectContents(
 		if (normalizedContextLines > 0) {
 			searchArgs.push('--context', String(normalizedContextLines));
 		}
-		searchArgs.push('--regexp', query, '--', searchRoot);
+		searchArgs.push('--regexp', query, '--', resolvedRoot);
 
-		return runRipgrep(searchArgs, cwd, timeoutMs, signal, undefined, onLine);
+		return runRipgrep(
+			searchArgs,
+			resolvedCwd,
+			timeoutMs,
+			signal,
+			undefined,
+			onLine,
+		);
 	});
-	const rgLines = parseRgJsonLines(stdout).filter(
+	// rg reports paths under the resolved root; rebase them onto the caller's
+	// spelling so `file` is relative to the cwd it passed in, not to its realpath.
+	const rgLines = parseRgJsonLines(stdout).map(line => ({
+		...line,
+		file: rebaseRelativeFile(resolvedCwd, cwd, line.file),
+	}));
+	const keptLines = rgLines.filter(
 		line => !projectIgnore.ignores(toRelativeFile(cwd, line.file)),
 	);
 
 	return normalizedContextLines > 0
-		? buildMatchesWithContext(rgLines, cwd, maxResults, normalizedContextLines)
-		: buildMatchesWithoutContext(rgLines, cwd, maxResults);
+		? buildMatchesWithContext(
+				keptLines,
+				cwd,
+				maxResults,
+				normalizedContextLines,
+			)
+		: buildMatchesWithoutContext(keptLines, cwd, maxResults);
 }
