@@ -224,6 +224,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
 	},
 	{
+		name: 'macros',
+		description:
+			'Inspect repeated read-only tool sequences (/macros, /macros clear)',
+		load: () => import('@/commands/macros').then(m => m.macrosCommand),
+	},
+	{
 		name: 'schedule',
 		description:
 			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
