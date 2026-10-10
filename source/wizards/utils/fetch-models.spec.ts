@@ -43,3 +43,10 @@ test('uses the GitHub Models catalogue endpoint', t => {
 		'https://models.github.ai/catalog/models',
 	);
 });
+
+test('keeps the /compat path for the Opper models endpoint', t => {
+	t.is(
+		resolveOpenAICompatibleModelsEndpoint('https://api.opper.ai/v3/compat'),
+		'https://api.opper.ai/v3/compat/models',
+	);
+});

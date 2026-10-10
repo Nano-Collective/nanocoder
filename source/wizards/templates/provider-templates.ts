@@ -452,6 +452,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'opper',
+		name: 'Opper',
+		baseUrl: 'https://api.opper.ai/v3/compat',
+		apiKeyPrompt: 'API Key (from https://platform.opper.ai)',
+		modelDefault: 'claude-sonnet-4-6',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
