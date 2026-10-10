@@ -10,6 +10,7 @@ import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
 import {logError} from '@/utils/message-queue';
+import {signalProcessTree} from '@/utils/process-tree';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /** Ceiling on a single hook's runtime. Overridable per hook via `timeout`. */
@@ -373,69 +374,6 @@ export interface HookRun {
 const HOOK_SIGKILL_GRACE_MS = 1_000;
 
 /**
- * Kill a timed-out hook and anything it started.
- *
- * `shell: true` means the child is `sh` / `cmd.exe`, not the user's command —
- * signalling it alone leaves the grandchildren of a compound command (`a && b`,
- * a pipeline) running after the agent has moved on. On POSIX the child is
- * spawned `detached`, so it leads its own process group and a negative pid
- * signals the whole group. Windows has no equivalent, so `taskkill /T` walks
- * the tree instead.
- */
-function signalHookTree(
-	proc: ChildProcess,
-	signal: NodeJS.Signals = 'SIGTERM',
-): void {
-	const pid = proc.pid;
-	if (pid === undefined) return;
-
-	if (process.platform === 'win32') {
-		// /T kills the tree, /F forces it. Detached and unref'd so a slow
-		// taskkill can't itself hold the session open. Fixed argv, no shell,
-		// and the only interpolated value is a pid we minted ourselves.
-		// taskkill /F is already unconditional, so there is nothing to
-		// escalate to on this platform.
-		try {
-			// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-			const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-				stdio: 'ignore',
-				detached: true,
-			});
-			killer.on('error', () => {
-				// taskkill missing (a stripped image): fall back to the shell alone.
-				try {
-					proc.kill('SIGKILL');
-				} catch {
-					// Nothing left to kill.
-				}
-			});
-			killer.unref();
-		} catch {
-			try {
-				proc.kill('SIGKILL');
-			} catch {
-				// Nothing left to kill.
-			}
-		}
-		return;
-	}
-
-	try {
-		// Negative pid = "the whole process group", which the detached spawn
-		// above made this process the leader of.
-		process.kill(-pid, signal);
-	} catch {
-		// The group is already gone (or never formed) — fall back to the lone
-		// shell, which may still be there even when the group is not.
-		try {
-			proc.kill(signal);
-		} catch {
-			// Nothing left to kill.
-		}
-	}
-}
-
-/**
  * Terminate a timed-out hook, escalating if it refuses to go.
  *
  * SIGTERM alone is a request. A hook that traps it, or that blocks in an
@@ -446,7 +384,7 @@ function signalHookTree(
  * The escalation timer is deliberately never cancelled: unlike a single
  * process, the shell exiting does not mean its group is empty, and reaping a
  * descendant that ignored SIGTERM is the whole point. Firing against a group
- * that has already gone is harmless — `signalHookTree` swallows the ESRCH —
+ * that has already gone is harmless — `signalProcessTree` swallows the ESRCH —
  * and it is unref'd so it can never hold the process open.
  */
 function killHookTree(proc: ChildProcess): void {
@@ -457,11 +395,11 @@ function killHookTree(proc: ChildProcess): void {
 	proc.stdout?.destroy();
 	proc.stderr?.destroy();
 
-	signalHookTree(proc, 'SIGTERM');
+	signalProcessTree(proc, 'SIGTERM');
 
 	if (process.platform === 'win32') return;
 	setTimeout(() => {
-		signalHookTree(proc, 'SIGKILL');
+		signalProcessTree(proc, 'SIGKILL');
 	}, HOOK_SIGKILL_GRACE_MS).unref();
 }
 
