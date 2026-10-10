@@ -6,6 +6,7 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,
@@ -139,7 +140,14 @@ test.serial(
 	async t => {
 		await withIsolatedPreferences(async () => {
 			await withTempHome(async (home, project) => {
-				savePreferences({trustedDirectories: [project]});
+				savePreferences({
+					trustedDirectories: [
+						{
+							path: project,
+							fingerprint: describeProjectTrust(project).fingerprint,
+						},
+					],
+				});
 				const result = await installAutoStart({
 					projectRoot: project,
 					platform: 'linux',

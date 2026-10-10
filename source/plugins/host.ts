@@ -3,7 +3,7 @@ import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-import {loadPreferences} from '@/config/preferences';
+import {isDirectoryTrusted, loadPreferences} from '@/config/preferences';
 import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -58,15 +58,12 @@ export function loadTrustedProjectPlugins(): Promise<void> {
 }
 
 function isProjectTrusted(projectRoot: string): boolean {
-	const root = path.resolve(projectRoot);
-	let trusted = false;
 	try {
-		const listed = loadPreferences().trustedDirectories ?? [];
-		trusted = listed.some(dir => path.resolve(dir) === root);
+		return isDirectoryTrusted(projectRoot, loadPreferences());
 	} catch (error) {
 		logError(`Could not read directory trust: ${errorMessage(error)}`);
+		return false;
 	}
-	return trusted;
 }
 
 /** Keep concurrent ACP workspaces isolated, including their delegated tools. */

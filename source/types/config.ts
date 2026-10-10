@@ -673,6 +673,11 @@ export interface VoiceConfig {
 	ttsBackend: 'local' | 'cloud';
 }
 
+export interface TrustedDirectoryRecord {
+	path: string;
+	fingerprint: string;
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -687,7 +692,12 @@ export interface UserPreferences {
 	 * palette of its own. An unknown name falls back to `selectedTheme`.
 	 */
 	syntaxTheme?: ThemePreset;
-	trustedDirectories?: string[];
+	/**
+	 * Directories the user has trusted. A string is an older entry that
+	 * recorded only the path. A record also stores the fingerprint of the
+	 * plugins, hooks, formatters, and MCP servers in that folder.
+	 */
+	trustedDirectories?: Array<string | TrustedDirectoryRecord>;
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;

@@ -1,6 +1,6 @@
-import path from 'path';
 import {useCallback, useState} from 'react';
 import {
+	grantDirectoryTrust,
 	isDirectoryTrusted,
 	loadPreferences,
 	savePreferences,
@@ -65,16 +65,10 @@ export function useDirectoryTrust(
 
 			const preferences = loadPreferences();
 
-			// Only add if not already trusted, then store the normalized path
 			if (!isDirectoryTrusted(directory, preferences)) {
-				const normalizedDirectory = path.resolve(directory); // nosemgrep
-				preferences.trustedDirectories = [
-					...(preferences.trustedDirectories ?? []),
-					normalizedDirectory,
-				];
-				savePreferences(preferences);
-
-				logInfo(`Directory added to trusted list: ${normalizedDirectory}`);
+				const granted = grantDirectoryTrust(preferences, directory);
+				savePreferences(granted);
+				logInfo(`Directory added to trusted list: ${directory}`);
 			}
 
 			setIsTrusted(true);
