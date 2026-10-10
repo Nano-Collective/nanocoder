@@ -753,4 +753,8 @@ export interface UserPreferences {
 	 */
 	professionalTone?: boolean;
 	voice?: VoiceConfig;
+	modelCalibrations?: Record<
+		string,
+		import('@/types/calibration').CalibrationProfile
+	>;
 }

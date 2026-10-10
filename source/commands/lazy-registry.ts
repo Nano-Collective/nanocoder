@@ -224,6 +224,13 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
 	},
 	{
+		name: 'calibrate',
+		description:
+			'Benchmark active model capabilities and auto-tune tool profiles (use reset to clear, view to inspect)',
+		progressLabel: 'Calibrating model capabilities',
+		load: () => import('@/commands/calibrate').then(m => m.calibrateCommand),
+	},
+	{
 		name: 'schedule',
 		description:
 			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
