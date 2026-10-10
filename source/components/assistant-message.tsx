@@ -23,9 +23,8 @@ export function AssistantMessageBox({
 		<Box
 			flexDirection="column"
 			marginBottom={1}
-			backgroundColor={colors.base}
 			width={boxWidth}
-			padding={1}
+			paddingX={1}
 			borderStyle="bold"
 			borderLeft={true}
 			borderRight={false}
@@ -108,7 +107,7 @@ export default memo(function AssistantMessage({
 
 	return (
 		<>
-			<Box marginBottom={1} marginTop={1}>
+			<Box marginTop={1}>
 				<Text color={colors.info} bold>
 					{model}:
 				</Text>
