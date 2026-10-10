@@ -438,3 +438,15 @@ test.serial('a duplicate plugin name is skipped', async t => {
 
 	t.is(gate.reason, 'Blocked by plugin "same": first plugin');
 });
+
+test.serial('a plugin that throws on import is skipped and later plugins load', async t => {
+	withPlugins({
+		'1-broken.mjs': `throw new Error('boom');\n`,
+		'2-guard.mjs': BLOCK_BASH,
+	});
+
+	await loadPlugins(true);
+	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
+
+	t.true(gate.blocked);
+});
