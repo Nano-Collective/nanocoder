@@ -464,6 +464,41 @@ test('compressMessages detects success in tool results', t => {
 	t.true(toolMsg?.content?.includes('success') ?? false);
 });
 
+test('compressMessages keeps a log that mentions success but also reports failures', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'execute_bash',
+			'Build completed successfully\nfailures: 3\nsee report.txt',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.false(toolMsg?.content?.includes('Result: success') ?? true);
+});
+
+test('compressMessages treats a single "completed successfully" line as success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Build completed successfully'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.true(toolMsg?.content?.includes('Result: success') ?? false);
+});
+
 // ==================== keepRecentMessages option ====================
 
 test('compressMessages respects custom keepRecentMessages value', t => {
@@ -602,4 +637,23 @@ test('compressMessages preserves display-only messages in output but excludes th
 		0,
 	);
 	t.is(result.compressedTokenCount, expectedCompressedTokens);
+});
+
+test('compressMessages keeps the trailing detail of a one-line success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Operation completed successfully in 5s'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.is(
+		toolMsg?.content,
+		'Tool: execute_bash\nResult: Operation completed successfully in 5s',
+	);
 });
