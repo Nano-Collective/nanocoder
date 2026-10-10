@@ -1,5 +1,7 @@
 import test from 'ava';
-import {readFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import { BashExecutor } from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -749,8 +751,14 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 });
 
 // Also run on Windows CI, where the shell is `cmd /c` and only taskkill /T
-// reaches the program it started.
-const LONG_RUNNING_NODE = `node -e "console.log('PID:' + process.pid); setInterval(() => {}, 1000)"`;
+// reaches the program it started. A script file, because cmd.exe mangles the
+// quotes of an inline `node -e "..."`.
+const SLEEPER = join(mkdtempSync(join(tmpdir(), 'nc-sleeper-')), 'sleeper.js');
+writeFileSync(
+	SLEEPER,
+	"console.log('PID:' + process.pid); setInterval(() => {}, 1000);\n",
+);
+const LONG_RUNNING_NODE = `node ${SLEEPER}`;
 
 async function childPidOf(
 	executor: BashExecutor,
