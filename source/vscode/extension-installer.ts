@@ -42,23 +42,39 @@ export interface VSCodeStatus {
 let cachedAvailableClis: string[] | null = null;
 
 /**
+ * Resolve the path to the bundled VSIX file for a given module directory.
+ *
+ * The `assets/` folder always sits at the package root, but the compiled
+ * module does not:
+ *
+ * - tsc:      module in `dist/vscode/`  → `../../assets/nanocoder-vscode.vsix`
+ * - rolldown: module in the flat `dist/` → `../assets/nanocoder-vscode.vsix`
+ *
+ * The `../../../` candidate covers a nested install layout. The first
+ * candidate that exists wins; `null` means the VSIX was not packaged.
+ * Exported so tests can drive the candidate logic with a temporary directory.
+ */
+export function resolveVsixPath(moduleDir: string): string | null {
+	const candidates = [
+		join(moduleDir, '../../assets/nanocoder-vscode.vsix'), // tsc / development -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../../../assets/nanocoder-vscode.vsix'), // nested install -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../assets/nanocoder-vscode.vsix'), // rolldown flat dist -- nosemgrep: path-join-resolve-traversal
+	];
+
+	return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
+/**
  * Get the path to the bundled VSIX file
  */
 export function getVsixPath(): string {
-	// In development: assets folder is at project root
-	// In production (npm install): assets folder is in package root
-	const possiblePaths = [
-		join(__dirname, '../../assets/nanocoder-vscode.vsix'), // development
-		join(__dirname, '../../../assets/nanocoder-vscode.vsix'), // npm installed
-	];
+	const vsixPath = resolveVsixPath(__dirname);
 
-	for (const path of possiblePaths) {
-		if (existsSync(path)) {
-			return path;
-		}
+	if (!vsixPath) {
+		throw new Error('VS Code extension VSIX not found in package');
 	}
 
-	throw new Error('VS Code extension VSIX not found in package');
+	return vsixPath;
 }
 
 /**

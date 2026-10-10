@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import chalk from 'chalk';
@@ -14,8 +14,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Load themes from JSON at startup — keeps 50 theme definitions out of source code.
-// Path resolves from dist/config/ back to source/config/themes.json (included in package.json files).
-const themesPath = join(__dirname, '../../source/config/themes.json');
+// Path resolves from dist/config/ or dist/ back to source/config/themes.json (included in package.json files).
+/**
+ * Given the directory of the compiled module, return the path to
+ * `themes.json` by trying two candidate locations:
+ *
+ * - `../../source/config/themes.json` — tsc layout: module lands in `dist/config/`
+ * - `../source/config/themes.json`    — rolldown layout: everything compiles into a flat `dist/`
+ *
+ * The first candidate that exists on disk wins; if neither exists the first
+ * candidate is returned as-is (so the error surfaces at read time, not here).
+ *
+ * Exported so that tests can drive the resolution logic directly with a
+ * temporary directory, without relying on the module-load-time `__dirname`.
+ */
+export function resolveThemesPath(moduleDir: string): string {
+	const candidates = [
+		join(moduleDir, '../../source/config/themes.json'),
+		join(moduleDir, '../source/config/themes.json'),
+	];
+	return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
+const themesPath = resolveThemesPath(__dirname);
 export const themes: Record<ThemePreset, Theme> = JSON.parse(
 	readFileSync(themesPath, 'utf-8'),
 );

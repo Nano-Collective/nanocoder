@@ -1,3 +1,6 @@
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {
 	getExtensionStatus,
@@ -5,6 +8,7 @@ import {
 	installExtension,
 	isExtensionInstalled,
 	isVSCodeCliAvailable,
+	resolveVsixPath,
 } from './extension-installer.js';
 
 // ============================================================================
@@ -176,5 +180,53 @@ test('getVsixPath has correct return type when successful', t => {
 	} catch {
 		// Expected if VSIX doesn't exist
 		t.pass();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Candidate-layout resolution tests
+//
+// resolveVsixPath() is the find(p => existsSync(p)) logic that lets the bundled
+// VSIX be found from either build layout. A wrong relative depth makes
+// `nanocoder ide`/extension install fail with "VSIX not found in package".
+// ---------------------------------------------------------------------------
+
+/** Build a package-shaped tree with assets/nanocoder-vscode.vsix. */
+function makeVsixLayout(base: string): {vsixPath: string} {
+	const assetsDir = join(base, 'assets');
+	mkdirSync(assetsDir, {recursive: true});
+	const vsixPath = join(assetsDir, 'nanocoder-vscode.vsix');
+	writeFileSync(vsixPath, 'vsix');
+	return {vsixPath};
+}
+
+test('resolveVsixPath: uses ../../assets for the nested tsc layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-vsix-tsc-'));
+	try {
+		const {vsixPath} = makeVsixLayout(base);
+		t.is(resolveVsixPath(join(base, 'dist', 'vscode')), vsixPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveVsixPath: uses ../assets for the flat rolldown layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-vsix-rolldown-'));
+	try {
+		const {vsixPath} = makeVsixLayout(base);
+		t.is(resolveVsixPath(join(base, 'dist')), vsixPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveVsixPath: returns null when the VSIX is missing', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-vsix-empty-'));
+	try {
+		const moduleDir = join(base, 'dist');
+		mkdirSync(moduleDir, {recursive: true});
+		t.is(resolveVsixPath(moduleDir), null);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
 	}
 });

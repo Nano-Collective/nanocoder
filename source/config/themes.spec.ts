@@ -1,10 +1,10 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import {DEFAULT_THEME, highlight} from 'cli-highlight';
-import {getSyntaxTheme, themes} from '@/config/themes';
+import {getSyntaxTheme, resolveThemesPath, themes} from '@/config/themes';
 import {resetPreferencesCache, savePreferences} from '@/config/preferences';
 
 // AVA runs each spec in its own non-TTY process, where chalk disables colour and
@@ -265,3 +265,71 @@ for (const inherited of ['constructor', 'toString', 'valueOf', '__proto__']) {
 		t.true(output.includes(ansiFor(ui.primary)));
 	});
 }
+
+// ---------------------------------------------------------------------------
+// Candidate-layout resolution tests
+//
+// resolveThemesPath() is the find(p => existsSync(p)) logic that lets
+// themes.json be found from either build layout. A regression in the candidates
+// (wrong relative depth, misordering) makes the CLI fail at startup after a
+// bundler change — the exact risk the rolldown migration carried — so pin both
+// layouts and the no-candidate fallback here.
+// ---------------------------------------------------------------------------
+
+/** Build a repo-shaped tree and return the path themes.json is written to. */
+function writeThemesJson(base: string, ...segments: string[]): string {
+	const dir = join(base, ...segments);
+	mkdirSync(dir, {recursive: true});
+	const filePath = join(dir, 'themes.json');
+	writeFileSync(filePath, '{}');
+	return filePath;
+}
+
+test('resolveThemesPath: picks the tsc candidate for a nested dist/config layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-themes-tsc-'));
+	try {
+		// tsc layout: module lands in dist/config/, themes.json two levels up.
+		const themesJson = writeThemesJson(base, 'source', 'config');
+		t.is(resolveThemesPath(join(base, 'dist', 'config')), themesJson);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveThemesPath: falls through to the rolldown candidate for a flat dist layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-themes-rolldown-'));
+	try {
+		// rolldown layout: module lands in dist/, so only ../source/... exists.
+		const themesJson = writeThemesJson(base, 'source', 'config');
+		t.is(resolveThemesPath(join(base, 'dist')), themesJson);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveThemesPath: the tsc candidate wins when both layouts exist', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-themes-both-'));
+	try {
+		const tsc = writeThemesJson(base, 'source', 'config');
+		writeThemesJson(base, 'dist', 'source', 'config');
+
+		t.is(resolveThemesPath(join(base, 'dist')), tsc);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveThemesPath: falls back to the first candidate when neither exists', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-themes-empty-'));
+	try {
+		const moduleDir = join(base, 'dist');
+		mkdirSync(moduleDir, {recursive: true});
+
+		t.is(
+			resolveThemesPath(moduleDir),
+			join(moduleDir, '../../source/config/themes.json'),
+		);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
