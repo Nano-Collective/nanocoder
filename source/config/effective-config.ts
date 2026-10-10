@@ -407,6 +407,33 @@ function blockSpecs(): BlockSpec[] {
 			leaf: true,
 		},
 		{
+			path: ['nanocoder', 'autoCommit'],
+			file: agents,
+			effective: config.autoCommit,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'sandbox'],
+			file: agents,
+			effective: config.sandbox,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'formatters'],
+			file: agents,
+			effective: config.formatters,
+		},
+		{
+			path: ['nanocoder', 'hooks'],
+			file: agents,
+			effective: config.hooks,
+		},
+		{
+			path: ['nanocoder', 'lspServers'],
+			file: agents,
+			effective: config.lspServers,
+		},
+		{
 			path: ['nanocoder', 'systemPrompt'],
 			file: agents,
 			effective: config.systemPrompt,
