@@ -44,6 +44,9 @@ jobs:
       - name: Verify cmd.exe quoting
         run: pnpm run test:ava source/custom-tools/template.spec.ts source/custom-tools/handler.spec.ts
 
+      - name: Verify execute_bash stops the whole tree
+        run: pnpm run test:ava source/services/bash-executor.spec.ts --match "tree kill:*"
+
   # Tests and builds the VS Code extension.
   vscode-extension:
     name: VS Code Extension
