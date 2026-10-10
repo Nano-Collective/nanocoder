@@ -1,5 +1,6 @@
 import test from 'ava';
 import {validatePath, validatePathPair} from './path-validators';
+import {ToolValidationError, toolErrorToContent} from './tool-validation';
 
 // validatePath
 
@@ -55,4 +56,27 @@ test('validatePathPair rejects both invalid paths with source error first', t =>
 	if (!result.valid) {
 		t.true(result.error.includes('source path'));
 	}
+});
+
+// The path validators return a bare message. `toolErrorToContent` is what turns
+// it into the "Validation failed" text the model sees, so the prefix must appear
+// exactly once there (a validator that added its own made it appear twice).
+test('a path validation failure reaches the model with a single "Validation failed" prefix', t => {
+	const result = validatePath('../../../etc/passwd');
+	t.false(result.valid);
+	if (result.valid) return;
+	t.false(result.error.includes('Validation failed'));
+
+	const content = toolErrorToContent(new ToolValidationError(result.error));
+	t.is(content.split('Validation failed').length - 1, 1);
+	t.true(content.startsWith('! Validation failed: Invalid file path.'));
+});
+
+test('a path-pair validation failure reaches the model with a single "Validation failed" prefix', t => {
+	const result = validatePathPair('a.txt', '../../../etc/passwd');
+	t.false(result.valid);
+	if (result.valid) return;
+
+	const content = toolErrorToContent(new ToolValidationError(result.error));
+	t.is(content.split('Validation failed').length - 1, 1);
 });

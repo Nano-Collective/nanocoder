@@ -5,6 +5,7 @@ import {
 	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
+import {ICON_SUCCESS} from '@/components/ui/icons';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
@@ -169,7 +170,7 @@ async function loadCheckpoint(
 				{key: generateKey('load-success')},
 				React.createElement(SuccessMessage, {
 					key: 'success',
-					message: `✓ Checkpoint '${checkpointName}' files restored successfully`,
+					message: `${ICON_SUCCESS} Checkpoint '${checkpointName}' files restored successfully`,
 					hideBox: true,
 				}),
 				React.createElement(InfoMessage, {
@@ -248,7 +249,7 @@ async function loadCheckpoint(
 
 						addToMessageQueue(
 							successMsg(
-								`✓ Checkpoint '${selectedName}' restored successfully`,
+								`${ICON_SUCCESS} Checkpoint '${selectedName}' restored successfully`,
 								'restore-success',
 							),
 						);
@@ -305,7 +306,7 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 
 		// Show success with what was deleted
 		return successMsg(
-			`✓ Checkpoint '${checkpointName}' deleted successfully`,
+			`${ICON_SUCCESS} Checkpoint '${checkpointName}' deleted successfully`,
 			'delete-success',
 		);
 	} catch (error) {

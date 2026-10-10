@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {useState} from 'react';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {getColors} from '@/config/index';
 import type {DevelopmentMode} from '@/types/core';
 import type {ModeProviderConfig, ProviderConfig} from '../types/config';
@@ -49,7 +50,7 @@ function ProviderSummaryItems({items}: {items: ProviderWizardState}) {
 			<Text color={colors.secondary}>Providers ({providers.length}):</Text>
 			{providers.map((provider, index) => (
 				<Text key={index} color={colors.success}>
-					• {provider.name}
+					{ICON_BULLET} {provider.name}
 					<Text>
 						{' '}
 						({provider.models.length}{' '}
@@ -67,7 +68,7 @@ function ProviderSummaryItems({items}: {items: ProviderWizardState}) {
 					<Text color={colors.secondary}>Mode-Specific Providers:</Text>
 					{Object.entries(modeProviders).map(([mode, config]) => (
 						<Text key={mode} color={colors.success}>
-							• {mode}: {config.provider} ({config.model})
+							{ICON_BULLET} {mode}: {config.provider} ({config.model})
 						</Text>
 					))}
 				</Box>

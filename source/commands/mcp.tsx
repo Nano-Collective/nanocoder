@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React, {useEffect, useState} from 'react';
+import {ICON_BULLET, mcpTransportIcon} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -7,20 +8,6 @@ import {getToolManager} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
-
-// Helper function to get transport icons
-function getTransportIcon(transportType: string): string {
-	switch (transportType.toLowerCase()) {
-		case 'stdio':
-			return '💻';
-		case 'websocket':
-			return '🔄';
-		case 'http':
-			return '🌐';
-		default:
-			return '❓';
-	}
-}
 
 interface MCPProps {
 	toolManager: ToolManager | null;
@@ -106,7 +93,7 @@ export function MCP({toolManager}: MCPProps) {
 							mcpClient?.getServerResources(serverName) || [];
 						const serverPrompts = mcpClient?.getServerPrompts(serverName) || [];
 						const serverInfo = toolManager?.getServerInfo(serverName);
-						const transportIcon = getTransportIcon(
+						const transportIcon = mcpTransportIcon(
 							serverInfo?.transport || 'stdio',
 						);
 
@@ -114,13 +101,15 @@ export function MCP({toolManager}: MCPProps) {
 							<Box key={index} marginBottom={1}>
 								<Box flexDirection="column">
 									<Text color={colors.text}>
-										• {transportIcon}{' '}
+										{ICON_BULLET} {transportIcon}{' '}
 										<Text color={colors.primary}>{serverName}</Text>:{' '}
 										<Text color={colors.secondary}>
 											({serverInfo?.transport?.toUpperCase() || 'STDIO'})
 										</Text>{' '}
-										{serverInfo?.connected ? '• healthy' : '• unhealthy'} •{' '}
-										{serverTools.length} tool
+										{serverInfo?.connected
+											? `${ICON_BULLET} healthy`
+											: `${ICON_BULLET} unhealthy`}{' '}
+										{ICON_BULLET} {serverTools.length} tool
 										{serverTools.length !== 1 ? 's' : ''}
 										{serverResources.length > 0 &&
 											`, ${serverResources.length} resource${serverResources.length !== 1 ? 's' : ''}`}

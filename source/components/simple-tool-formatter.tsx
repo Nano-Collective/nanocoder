@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {ThemeContext} from '@/hooks/useTheme';
 
 /**
@@ -15,7 +16,7 @@ export interface ToolFormatterRow {
 }
 
 /**
- * Build a formatter for the common tool-output shape: a `⚒ <tool_name>` header
+ * Build a formatter for the common tool-output shape: a `» <tool_name>` header
  * followed by a column of `Label: value` rows, wrapped in a borderless
  * `ToolMessage`. Tools whose output needs richer rendering (syntax-highlighted
  * diffs, colour-coded stats, etc.) should keep their bespoke formatter.
@@ -37,7 +38,9 @@ export function makeSimpleToolFormatter<A>(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ {toolName}</Text>
+				<Text color={colors.tool}>
+					{ICON_TOOL} {toolName}
+				</Text>
 
 				{getRows(args, result).map(row =>
 					row.value === undefined ? null : (

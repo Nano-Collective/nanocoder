@@ -52,9 +52,9 @@ test('MCP command: displays transport type icons', t => {
 	t.truthy(output);
 
 	// Should show transport icons
-	t.regex(output!, /💻/); // stdio icon
-	t.regex(output!, /🔄/); // websocket icon
-	t.regex(output!, /🌐/); // http icon
+	t.regex(output!, /\u21C4/); // stdio icon (ASCII)
+	t.regex(output!, /\u223F/); // websocket icon (ASCII)
+	t.regex(output!, /\u2B7E/); // http icon (ASCII)
 
 	// Should show transport type names
 	t.regex(output!, /STDIO/);
@@ -287,10 +287,10 @@ test('MCP command: omits resource and prompt lines when a server has none (no ge
 test('MCP command: uses transport type getTransportIcon function correctly', t => {
 	// Test the helper function indirectly through component rendering
 	const testCases = [
-		{transport: 'stdio', expectedIcon: '💻'},
-		{transport: 'websocket', expectedIcon: '🔄'},
-		{transport: 'http', expectedIcon: '🌐'},
-		{transport: 'unknown', expectedIcon: '❓'},
+		{transport: 'stdio', expectedIcon: '\u21C4'},
+		{transport: 'websocket', expectedIcon: '\u223F'},
+		{transport: 'http', expectedIcon: '\u2B7E'},
+		{transport: 'unknown', expectedIcon: '?'},
 	];
 
 	for (const testCase of testCases) {
@@ -313,7 +313,7 @@ test('MCP command: uses transport type getTransportIcon function correctly', t =
 		// Should show the correct icon for the transport type
 		t.regex(
 			output!,
-			new RegExp(testCase.expectedIcon),
+			new RegExp(testCase.expectedIcon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
 			`Should show ${testCase.expectedIcon} for ${testCase.transport} transport`,
 		);
 	}

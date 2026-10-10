@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import {memo, useRef} from 'react';
+import {ICON_ELLIPSIS} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -79,7 +80,7 @@ export default memo(function StreamingMessage({
 	if (nonInteractive) {
 		return (
 			<Box flexDirection="column" marginBottom={1}>
-				{truncated && <Text>…</Text>}
+				{truncated && <Text>{ICON_ELLIPSIS}</Text>}
 				<Text>{displayText}</Text>
 			</Box>
 		);

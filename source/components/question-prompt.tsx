@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {ICON_SELECTION} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -183,7 +184,7 @@ export default function QuestionPrompt({
 									<Box flexDirection="row">
 										<Box flexShrink={0} marginRight={1}>
 											<Text color={colors.primary} bold>
-												{isSelected ? '❯' : ' '}
+												{isSelected ? ICON_SELECTION : ' '}
 											</Text>
 										</Box>
 										<Box

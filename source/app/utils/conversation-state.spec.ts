@@ -1,5 +1,6 @@
 import type {Message, ToolCall} from '@/types/core';
 import test from 'ava';
+import {ICON_WARNING} from '@/components/ui/icons';
 import {ConversationStateManager} from './conversation-state.js';
 
 console.log('\napp/utils/conversationState.spec.ts');
@@ -463,7 +464,7 @@ test('generateContinuationContext: includes repetition warning', t => {
 
 	const context = manager.generateContinuationContext();
 
-	t.true(context.includes('⚠️ Warning'));
+	t.true(context.includes(`${ICON_WARNING} Warning`));
 	t.true(context.includes('repeating'));
 });
 

@@ -2,6 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {FilterableSelectList} from '@/components/filterable-select-list';
 import type {ItemSelectorOption} from '@/components/item-selector';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -91,13 +92,14 @@ export default function CheckpointSelector({
 								<Text color={colors.primary}>{checkpoint.name}</Text>
 							</Text>
 							<Text color={colors.secondary}>
-								• {checkpoint.metadata.messageCount} messages
+								{ICON_BULLET} {checkpoint.metadata.messageCount} messages
 							</Text>
 							<Text color={colors.secondary}>
-								• {checkpoint.metadata.filesChanged.length} files
+								{ICON_BULLET} {checkpoint.metadata.filesChanged.length} files
 							</Text>
 							<Text color={colors.secondary}>
-								• Created {formatRelativeTime(checkpoint.metadata.timestamp)}
+								{ICON_BULLET} Created{' '}
+								{formatRelativeTime(checkpoint.metadata.timestamp)}
 							</Text>
 						</Box>
 					)}

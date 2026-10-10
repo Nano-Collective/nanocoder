@@ -1,3 +1,4 @@
+import {ICON_WARNING} from '@/components/ui/icons';
 import type {Message, ToolCall} from '@/types/core';
 
 interface ConversationProgress {
@@ -117,7 +118,7 @@ export class ConversationStateManager {
 		}
 
 		if (progress.isRepeatingAction) {
-			context += `⚠️ Warning: You may be repeating a similar action. Consider a different approach or move to the next step.\n\n`;
+			context += `${ICON_WARNING} Warning: You may be repeating a similar action. Consider a different approach or move to the next step.\n\n`;
 		}
 
 		// Suggest next logical step

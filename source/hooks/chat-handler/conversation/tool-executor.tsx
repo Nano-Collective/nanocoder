@@ -167,7 +167,7 @@ export const displayExecutedTool = async (
 		// tool activity in chronological order.
 		//
 		// Failures don't fold into the count tally; they render as a
-		// condensed red one-liner ("⚒ write_file failed") instead of the
+		// condensed red one-liner ("› write_file failed") instead of the
 		// full error. The model still receives the full error in
 		// conversation history — share displayToolResult's detection, so a
 		// command that merely exited non-zero cannot read as a success.

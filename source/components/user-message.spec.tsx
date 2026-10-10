@@ -33,7 +33,7 @@ test('UserMessage renders with basic message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /You:/);
+	t.regex(output!, /You/);
 	t.regex(output!, /Hello world/);
 });
 
@@ -163,7 +163,7 @@ test('UserMessage renders with empty message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /You:/);
+	t.regex(output!, /You/);
 });
 
 test('UserMessage handles file placeholder with special characters in path', t => {

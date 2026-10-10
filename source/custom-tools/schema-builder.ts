@@ -81,7 +81,7 @@ export function buildValidator(metadata: CustomToolMetadata): ToolValidator {
 				if (def.required) {
 					return Promise.resolve({
 						valid: false as const,
-						error: `⚒ Missing required parameter: ${name}`,
+						error: `! Missing required parameter: ${name}`,
 						details: [
 							{path: name, expected: 'required', received: 'undefined'},
 						],
@@ -113,7 +113,7 @@ function checkValue(
 ): {message: string; detail: ValidationErrorDetail} | null {
 	if (!matchesType(def.type, value)) {
 		return {
-			message: `⚒ Parameter "${name}" has wrong type — expected ${def.type}, got ${describeType(value)}`,
+			message: `! Parameter "${name}" has wrong type — expected ${def.type}, got ${describeType(value)}`,
 			detail: {path: name, expected: def.type, received: describeType(value)},
 		};
 	}
@@ -121,7 +121,7 @@ function checkValue(
 	if (def.enum && !def.enum.some(v => v === value)) {
 		const choices = def.enum.map(v => JSON.stringify(v)).join(', ');
 		return {
-			message: `⚒ Parameter "${name}" must be one of: ${choices}`,
+			message: `! Parameter "${name}" must be one of: ${choices}`,
 			detail: {
 				path: name,
 				expected: `one of ${choices}`,
@@ -134,7 +134,7 @@ function checkValue(
 		const s = value as string;
 		if (def.minLength !== undefined && s.length < def.minLength) {
 			return {
-				message: `⚒ Parameter "${name}" is too short (min ${def.minLength} chars)`,
+				message: `! Parameter "${name}" is too short (min ${def.minLength} chars)`,
 				detail: {
 					path: name,
 					expected: `length >= ${def.minLength}`,
@@ -144,7 +144,7 @@ function checkValue(
 		}
 		if (def.maxLength !== undefined && s.length > def.maxLength) {
 			return {
-				message: `⚒ Parameter "${name}" is too long (max ${def.maxLength} chars)`,
+				message: `! Parameter "${name}" is too long (max ${def.maxLength} chars)`,
 				detail: {
 					path: name,
 					expected: `length <= ${def.maxLength}`,
@@ -160,7 +160,7 @@ function checkValue(
 			const re = new RegExp(def.pattern);
 			if (!re.test(s)) {
 				return {
-					message: `⚒ Parameter "${name}" does not match pattern ${def.pattern}`,
+					message: `! Parameter "${name}" does not match pattern ${def.pattern}`,
 					detail: {path: name, expected: `match /${def.pattern}/`},
 				};
 			}
@@ -171,13 +171,13 @@ function checkValue(
 		const n = value as number;
 		if (def.min !== undefined && n < def.min) {
 			return {
-				message: `⚒ Parameter "${name}" is below minimum (${def.min})`,
+				message: `! Parameter "${name}" is below minimum (${def.min})`,
 				detail: {path: name, expected: `>= ${def.min}`, received: String(n)},
 			};
 		}
 		if (def.max !== undefined && n > def.max) {
 			return {
-				message: `⚒ Parameter "${name}" is above maximum (${def.max})`,
+				message: `! Parameter "${name}" is above maximum (${def.max})`,
 				detail: {path: name, expected: `<= ${def.max}`, received: String(n)},
 			};
 		}
@@ -188,7 +188,7 @@ function checkValue(
 		for (let i = 0; i < arr.length; i++) {
 			if (!matchesType(def.items.type, arr[i])) {
 				return {
-					message: `⚒ Parameter "${name}[${i}]" has wrong type — expected ${def.items.type}, got ${describeType(arr[i])}`,
+					message: `! Parameter "${name}[${i}]" has wrong type — expected ${def.items.type}, got ${describeType(arr[i])}`,
 					detail: {
 						path: `${name}[${i}]`,
 						expected: def.items.type,

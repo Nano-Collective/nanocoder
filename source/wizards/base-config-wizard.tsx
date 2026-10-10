@@ -10,6 +10,7 @@ import {dirname, join} from 'node:path';
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useCallback, useEffect, useState} from 'react';
+import {ICON_BULLET, ICON_SUCCESS} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
@@ -314,9 +315,13 @@ export function BaseConfigWizard<T>({
 						</Box>
 						{renderSummaryItems(items)}
 						<Box marginTop={1} flexDirection="column">
-							<Text color={colors.secondary}>• Enter: Save configuration</Text>
-							<Text color={colors.secondary}>• Shift+Tab: Go back</Text>
-							<Text color={colors.secondary}>• Esc: Cancel</Text>
+							<Text color={colors.secondary}>
+								{ICON_BULLET} Enter: Save configuration
+							</Text>
+							<Text color={colors.secondary}>
+								{ICON_BULLET} Shift+Tab: Go back
+							</Text>
+							<Text color={colors.secondary}>{ICON_BULLET} Esc: Cancel</Text>
 						</Box>
 					</Box>
 				);
@@ -371,7 +376,7 @@ export function BaseConfigWizard<T>({
 					<Box flexDirection="column">
 						<Box marginBottom={1}>
 							<Text color={colors.success} bold>
-								✓ Configuration saved!
+								{ICON_SUCCESS} Configuration saved!
 							</Text>
 						</Box>
 						<Box marginBottom={1}>

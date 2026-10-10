@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {DEVELOPMENT_MODE_LABELS} from '@/components/ui/icons';
 import WelcomeMessage from '@/components/welcome-message';
 import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -9,7 +10,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
-import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
+import type {DevelopmentMode} from '@/types/core';
 import {homeRelative} from '@/utils/path';
 
 /**

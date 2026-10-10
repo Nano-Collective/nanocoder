@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {commandRegistry} from '@/commands';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -69,15 +70,28 @@ function Help({
 			</Box>
 			<Text color={colors.text}>
 				{' '}
-				• Ask questions about your codebase {'>'} How does foo.py work?
+				{ICON_BULLET} Ask questions about your codebase {'>'} How does foo.py
+				work?
 			</Text>
-			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
-			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
-			<Text color={colors.text}> • Run commands {'>'} /help</Text>
-			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
 			<Text color={colors.text}>
 				{' '}
-				• Keyboard shortcuts {'>'} press ? in an empty prompt
+				{ICON_BULLET} Edit files {'>'} Update bar.ts to...
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Fix errors {'>'} cargo build
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Run commands {'>'} /help
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Resume sessions {'>'} /resume
+			</Text>
+			<Text color={colors.text}>
+				{' '}
+				{ICON_BULLET} Keyboard shortcuts {'>'} press ? in an empty prompt
 			</Text>
 
 			{selectedCommand ? (
@@ -106,7 +120,7 @@ function CommandList({commands}: {commands: Command[]}) {
 						{group.commands.map(command => (
 							<Text key={command.name} color={colors.text}>
 								{' '}
-								• /{command.name} - {command.description}
+								{ICON_BULLET} /{command.name} - {command.description}
 							</Text>
 						))}
 					</Box>
@@ -140,7 +154,7 @@ function CommandDetails({command}: {command: Command}) {
 					</Text>
 					{details.options.map(option => (
 						<Text key={option} color={colors.text}>
-							• {option}
+							{ICON_BULLET} {option}
 						</Text>
 					))}
 				</Box>
@@ -152,7 +166,7 @@ function CommandDetails({command}: {command: Command}) {
 					</Text>
 					{details.examples.map(example => (
 						<Text key={example} color={colors.text}>
-							• {example}
+							{ICON_BULLET} {example}
 						</Text>
 					))}
 				</Box>

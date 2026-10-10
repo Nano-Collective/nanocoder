@@ -5,6 +5,7 @@ import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {type TextInputHandle} from '@/components/text-input';
+import {ICON_SELECTION} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -1248,7 +1249,7 @@ export default function UserInput({
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
 		// Truncate against the true terminal width like tool result rows do, not
 		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
+		// overhead covers the box border + padding (2), the ICON_SELECTION plus a trailing space (2 columns),
 		// and a right-edge safety margin.
 		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
 		const text = truncate(singleLine, maxLength);
@@ -1395,7 +1396,7 @@ export default function UserInput({
 										}
 										bold={isSelected}
 									>
-										{isSelected ? '▸ ' : '  '}/{completion.name}
+										{isSelected ? ICON_SELECTION + ' ' : '  '}/{completion.name}
 									</Text>
 								);
 							})}
@@ -1421,7 +1422,7 @@ export default function UserInput({
 										color={isSelected ? colors.info : colors.primary}
 										bold={isSelected}
 									>
-										{isSelected ? '▸ ' : '  '}
+										{isSelected ? ICON_SELECTION + ' ' : '  '}
 										{decodeMCPResourcePath(file.path)
 											? file.displayPath
 											: file.path}
@@ -1449,7 +1450,7 @@ export default function UserInput({
 										color={isSelected ? colors.info : colors.primary}
 										bold={isSelected}
 									>
-										{isSelected ? '▸ ' : '  '}
+										{isSelected ? ICON_SELECTION + ' ' : '  '}
 										{formatQueuedMessage(message)}
 									</Text>
 								);

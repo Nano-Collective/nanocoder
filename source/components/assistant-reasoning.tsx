@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
+import {ICON_THOUGHT} from '@/components/ui/icons';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -8,7 +9,7 @@ import type {AssistantReasoningProps} from '@/types/index';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
-// Indent applied to the expanded body so the "⚙ Thought" header acts as a
+// Indent applied to the expanded body so the "∴ Thought" header acts as a
 // section header with its body (and any tool summary that follows) grouped
 // beneath it. Keep in sync with the marginLeft used in
 // displayCompactCountsSummary.
@@ -54,7 +55,7 @@ export default memo(function AssistantReasoning({
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			<Box>
-				<Text color={colors.tool}>{'\u2699'} Thought</Text>
+				<Text color={colors.tool}>{ICON_THOUGHT} Thought</Text>
 				{!expand && !nonInteractive && (
 					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
 				)}

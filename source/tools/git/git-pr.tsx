@@ -6,6 +6,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_ERROR, ICON_SUCCESS, ICON_TOOL} from '@/components/ui/icons';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -312,7 +313,7 @@ function GitPrFormatter({
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
-			<Text color={colors.tool}>⚒ git_pr</Text>
+			<Text color={colors.tool}>{ICON_TOOL} git_pr</Text>
 
 			<Box>
 				<Text color={colors.secondary}>Action: </Text>
@@ -384,13 +385,17 @@ function GitPrFormatter({
 
 			{result?.includes('created successfully') && (
 				<Box marginTop={1}>
-					<Text color={colors.success}>✓ PR created successfully</Text>
+					<Text color={colors.success}>
+						{ICON_SUCCESS} PR created successfully
+					</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && (
 				<Box marginTop={1}>
-					<Text color={colors.error}>✗ {result}</Text>
+					<Text color={colors.error}>
+						{ICON_ERROR} {result}
+					</Text>
 				</Box>
 			)}
 		</Box>

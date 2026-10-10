@@ -274,13 +274,23 @@ test('collectEditedPaths skips failed or cancelled edits', t => {
 		],
 		[
 			toolResult('call_1', 'write_file', 'Error: no permissions'),
-			toolResult('call_2', 'string_replace', '⚒ Validation failed: old_str'),
+			toolResult('call_2', 'string_replace', '! Validation failed: old_str'),
 			toolResult(
 				'call_3',
 				'write_file',
 				'Tool execution was cancelled by the user.',
 			),
 		],
+	);
+
+	t.deepEqual(paths, []);
+});
+
+test('collectEditedPaths skips a failed edit saved by an older version (⚒ prefix)', t => {
+	// Resumed sessions keep the tool results exactly as they were stored.
+	const paths = collectEditedPaths(
+		[toolCall('call_1', 'string_replace', {path: 'source/a.ts'})],
+		[toolResult('call_1', 'string_replace', '⚒ Validation failed: old_str')],
 	);
 
 	t.deepEqual(paths, []);

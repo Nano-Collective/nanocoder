@@ -8,6 +8,7 @@ import {
 	useState,
 } from 'react';
 import TextInput from '@/components/text-input';
+import {ICON_DIRTY} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -420,7 +421,7 @@ export function JsonViewer({
 				<Text color={colors.secondary}>
 					{filePath ? `${filePath}  ` : ''}
 					{rows.length} line{rows.length !== 1 ? 's' : ''}
-					{isDirty ? '  ● modified' : ''}
+					{isDirty ? `  ${ICON_DIRTY} modified` : ''}
 					{readOnly ? '  (read-only)' : ''}
 				</Text>
 			</Box>

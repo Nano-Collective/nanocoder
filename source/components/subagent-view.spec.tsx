@@ -10,6 +10,7 @@ import {
 	cleanupSubagentSession,
 	initSubagentSession,
 } from '../services/subagent-session-store';
+import {ICON_TOOL} from './ui/icons';
 import {SubagentView} from './subagent-view';
 
 const themeValue = {
@@ -156,7 +157,7 @@ test.serial(
 		await tick();
 
 		const output = allOutput(frames);
-		t.regex(output, /⚒ list_directory: OK/);
+		t.regex(output, new RegExp(`${ICON_TOOL} list_directory: OK`));
 		t.notRegex(output, /OK\.\.\./);
 		unmount();
 	},
@@ -188,7 +189,7 @@ test.serial('long tool results keep the truncation ellipsis', async t => {
 	// Isolate the tool line and its wrapped continuation: the status bar
 	// after it carries its own x in the agent name.
 	const toolOutput = output.slice(
-		output.indexOf('⚒ read_file:'),
+		output.indexOf(`${ICON_TOOL} read_file:`),
 		output.indexOf('Main Session'),
 	);
 	t.is((toolOutput.match(/x/g) ?? []).length, 100);

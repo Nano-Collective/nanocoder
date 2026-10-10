@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {ThemeContext} from '@/hooks/useTheme';
 import {checkSkillBundle, formatSkillCheckReport} from '@/skills/check';
 import type {NanocoderToolExport} from '@/types/core';
@@ -60,7 +61,7 @@ const CheckSkillFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ check_skill</Text>
+				<Text color={colors.tool}>{ICON_TOOL} check_skill</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Skill: </Text>

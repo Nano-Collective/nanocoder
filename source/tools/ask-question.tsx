@@ -1,7 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -131,7 +131,7 @@ const AskQuestionFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ ask_user</Text>
+				<Text color={colors.tool}>{ICON_TOOL} ask_user</Text>
 				<Box flexDirection="column" marginBottom={1}>
 					<Text color={colors.secondary}>Question:</Text>
 					<Box marginLeft={2}>

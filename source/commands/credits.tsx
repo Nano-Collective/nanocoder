@@ -3,6 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_BULLET} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -84,7 +85,7 @@ function Credits({
 				contributors.map((name, index) => (
 					<Text key={index} color={colors.text}>
 						{' '}
-						• {name}
+						{ICON_BULLET} {name}
 					</Text>
 				))
 			)}
@@ -97,7 +98,8 @@ function Credits({
 			{dependencies.map((dep, index) => (
 				<Text key={index} color={colors.text}>
 					{' '}
-					• <Text color={colors.secondary}>{dep.name}</Text> {dep.version}
+					{ICON_BULLET} <Text color={colors.secondary}>{dep.name}</Text>{' '}
+					{dep.version}
 				</Text>
 			))}
 		</TitledBoxWithPreferences>

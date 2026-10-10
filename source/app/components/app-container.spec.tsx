@@ -125,7 +125,7 @@ test('createStaticComponents renders boot summary with mode in non-interactive m
 	t.truthy(output);
 	t.regex(output!, /test-provider/);
 	t.regex(output!, /test-model/);
-	// Mode label (e.g. "⏵⏵⏵ yolo mode on") is surfaced.
+	// Mode label (e.g. "››› yolo mode on") is surfaced.
 	t.regex(output!, /yolo/);
 	unmount();
 });

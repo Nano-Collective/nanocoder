@@ -3,6 +3,7 @@ import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
 import stringWidth from 'string-width';
+import {ICON_GIT_BRANCH} from '@/components/ui/icons';
 import {
 	getNanocoderShape,
 	getPreferencesVersion,
@@ -201,9 +202,9 @@ export default memo(function WelcomeMessage({
 		}
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
-		const branchPart = `⎇ ${shortBranch} · `;
+		const branchPart = `${ICON_GIT_BRANCH} ${shortBranch} · `;
 		// branchPart already includes the separator, so the trailing 3 is not it:
-		// it is slack, kept from the original budget, for fonts that draw ⎇ and ·
+		// it is slack, kept from the original budget, for fonts that draw the branch glyph and ·
 		// wider than string-width reports.
 		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
@@ -253,7 +254,7 @@ export default memo(function WelcomeMessage({
 					{locationDisplay.branchLabel ? (
 						<>
 							<Text color={colors.primary}>
-								⎇ {locationDisplay.branchLabel}
+								{ICON_GIT_BRANCH} {locationDisplay.branchLabel}
 							</Text>
 							<Text color={colors.secondary}> · </Text>
 							<Text color={colors.secondary}>{locationDisplay.cwd}</Text>

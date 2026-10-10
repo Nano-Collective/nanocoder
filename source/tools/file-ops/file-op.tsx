@@ -118,10 +118,10 @@ const fileOpValidator = async (
 	args: FileOpArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	if (!args.operation) {
-		return {valid: false, error: '⚒ operation is required'};
+		return {valid: false, error: '! operation is required'};
 	}
 	if (!args.path) {
-		return {valid: false, error: '⚒ path is required'};
+		return {valid: false, error: '! path is required'};
 	}
 
 	// Directory creation: only path validation, parents are created.
@@ -138,7 +138,7 @@ const fileOpValidator = async (
 		try {
 			await access(absPath, constants.F_OK);
 		} catch {
-			return {valid: false, error: `⚒ File does not exist: "${args.path}"`};
+			return {valid: false, error: `! File does not exist: "${args.path}"`};
 		}
 		return {valid: true};
 	}
@@ -148,7 +148,7 @@ const fileOpValidator = async (
 	if (!args.destination) {
 		return {
 			valid: false,
-			error: `⚒ destination is required for ${args.operation}`,
+			error: `! destination is required for ${args.operation}`,
 		};
 	}
 
@@ -161,7 +161,7 @@ const fileOpValidator = async (
 	} catch {
 		return {
 			valid: false,
-			error: `⚒ Source file does not exist: "${args.path}"`,
+			error: `! Source file does not exist: "${args.path}"`,
 		};
 	}
 
@@ -169,7 +169,7 @@ const fileOpValidator = async (
 	if (fileStat.isDirectory()) {
 		return {
 			valid: false,
-			error: `⚒ Source is a directory, not a file: "${args.path}"`,
+			error: `! Source is a directory, not a file: "${args.path}"`,
 		};
 	}
 
@@ -179,7 +179,7 @@ const fileOpValidator = async (
 	} catch {
 		return {
 			valid: false,
-			error: `⚒ Destination parent directory does not exist: "${parentDir}"`,
+			error: `! Destination parent directory does not exist: "${parentDir}"`,
 		};
 	}
 
