@@ -1,5 +1,7 @@
 import test from 'ava';
-import {readFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import { BashExecutor } from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -746,4 +748,67 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 	t.false(isAliveAfter, 'Process must be killed by SIGKILL even when proc.killed was set by SIGTERM fallback');
 
 	await promise;
+});
+
+// Also run on Windows CI, where the shell is `cmd /c` and only taskkill /T
+// reaches the program it started. A script file, because cmd.exe mangles the
+// quotes of an inline `node -e "..."`.
+const SLEEPER = join(mkdtempSync(join(tmpdir(), 'nc-sleeper-')), 'sleeper.js');
+writeFileSync(
+	SLEEPER,
+	"console.log('PID:' + process.pid); setInterval(() => {}, 1000);\n",
+);
+const LONG_RUNNING_NODE = `node ${SLEEPER}`;
+
+async function childPidOf(
+	executor: BashExecutor,
+	executionId: string,
+): Promise<number | undefined> {
+	for (let tick = 0; tick < 50; tick++) {
+		const match = executor.getState(executionId)?.fullOutput.match(/PID:(\d+)/);
+		if (match) return Number(match[1]);
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+	return undefined;
+}
+
+async function isGoneWithin(pid: number, ms: number): Promise<boolean> {
+	const deadline = Date.now() + ms;
+	while (Date.now() < deadline) {
+		if (!isLiveProcess(pid)) return true;
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+	return !isLiveProcess(pid);
+}
+
+test('tree kill: aborting stops the program the shell started', async t => {
+	const executor = createExecutor();
+	const controller = new AbortController();
+	const {executionId, promise} = executor.execute(LONG_RUNNING_NODE, {
+		signal: controller.signal,
+	});
+
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
+
+	controller.abort();
+	const result = await promise;
+
+	t.is(result.error, 'Cancelled via AbortSignal');
+	t.true(await isGoneWithin(childPid!, 5000), 'child node process must not survive the abort');
+});
+
+test('tree kill: a timeout stops the program the shell started', async t => {
+	const executor = createExecutor();
+	const {executionId, promise} = executor.execute(LONG_RUNNING_NODE, {
+		timeoutMs: 1500,
+	});
+
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
+
+	const result = await promise;
+
+	t.is(result.error, 'Command timed out after 1500ms');
+	t.true(await isGoneWithin(childPid!, 5000), 'child node process must not survive the timeout');
 });
