@@ -199,7 +199,7 @@ A hook that prints nothing injects nothing.
 
 ## In-process plugins
 
-A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A file that has not finished loading after 30 seconds is skipped, and the files after it still load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
 
 The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
 
