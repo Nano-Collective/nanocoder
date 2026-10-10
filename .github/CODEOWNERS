@@ -7,4 +7,4 @@
 # and skip team entries, so a team-only line silently disabled stale-PR
 # escalation. It now derives maintainer status from author_association instead
 # and does not read this file at all.
-* @will-lamerton @akramcodez
+* @will-lamerton @akramcodez @addyCooks

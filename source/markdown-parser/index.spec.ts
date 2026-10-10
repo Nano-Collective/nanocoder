@@ -198,6 +198,15 @@ test('parseMarkdown handles code blocks without language', t => {
 	t.true(result.includes('Plain code'));
 });
 
+test('parseMarkdown preserves HTML inside code blocks', t => {
+	const text = '```html\n<div>Hello<br>World</div>\n&lt;span&gt;test&lt;/span&gt;\n```';
+	const result = parseMarkdown(text, mockColors);
+	const plainResult = stripAnsi(result);
+
+	t.true(plainResult.includes('<br>'));
+	t.true(plainResult.includes('&lt;span&gt;test&lt;/span&gt;'));
+});
+
 // Code blocks used to render in cli-highlight's own palette: the parser passed
 // `theme: 'default'`, a string where the library expects a token -> formatter
 // map, so the option was dropped. Colour must come from the caller's palette.

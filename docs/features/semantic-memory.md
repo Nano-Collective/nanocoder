@@ -47,6 +47,16 @@ A memory is kept when it covers at least 10% of the query's keywords, and either
 
 Retrieval is keyword-based, not a true embeddings/vector search. The "semantic" in the name refers to the kind of facts stored (durable project knowledge), not the matching technique.
 
+### Staleness warnings
+
+Inside a git repository, saving a memory also records the current commit, the branch, and a content hash of every tracked file the memory mentions (for example `src/auth.ts`, or a bare `auth.ts` when exactly one tracked file has that name). When the memory is recalled, those files are hashed again. If any has been edited since, uncommitted edits included, or deleted, the memory is injected with a warning in front of it:
+
+```
+- [WARNING: recorded at 8c21a3f, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the token before retrying.
+```
+
+The warning counts against the same token budget as the memories. New commits that don't touch a memory's files don't trigger it. Memories saved outside a git repository, before the first commit, or before this check existed are recalled without warnings.
+
 ### Where recall is active
 
 Recall runs on:

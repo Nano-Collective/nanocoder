@@ -327,6 +327,52 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	});
 });
 
+function answersFor(template: McpTemplate): Record<string, string> {
+	const answers: Record<string, string> = {};
+	for (const field of template.fields) {
+		answers[field.name] = field.sensitive
+			? 'secret'
+			: (field.default ?? 'placeholder');
+	}
+	return answers;
+}
+
+test('templates with a serverName field stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.id === 'custom') continue;
+		if (!template.fields.some(field => field.name === 'serverName')) continue;
+
+		const answers = answersFor(template);
+		answers.serverName = `${template.id}-renamed`;
+		const built = template.buildConfig(answers);
+
+		t.is(built.name, `${template.id}-renamed`, template.id);
+		t.is(built.templateId, template.id, template.id);
+		t.is(resolveMcpTemplateId(built), template.id, template.id);
+	}
+});
+
+test('templates without a serverName field do not stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.fields.some(field => field.name === 'serverName')) continue;
+
+		const built = template.buildConfig(answersFor(template));
+		t.is(built.templateId, undefined, template.id);
+	}
+});
+
+test('resolveMcpTemplateId: legacy github-remote without templateId keeps its template', t => {
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-work',
+			transport: 'http',
+			url: 'https://api.githubcopilot.com/mcp/',
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		}),
+		'github-remote',
+	);
+});
+
 test('you template: builds authenticated HTTP config with API key', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'you');
 	t.truthy(template);
@@ -464,6 +510,102 @@ test('serply template: stamps templateId so edits resolve under a custom name', 
 
 	t.is(config.templateId, 'serply');
 	t.is(resolveMcpTemplateId(config), 'serply');
+});
+
+test('fxmacrodata template: is listed as a remote HTTP template', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	t.is(template!.name, 'FXMacroData');
+	t.is(template!.category, 'remote');
+	t.is(template!.transportType, 'http');
+});
+
+test('fxmacrodata template: builds keyless config without an auth header', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'fxmacrodata');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://mcp.fxmacrodata.com');
+	t.is(config.timeout, 30000);
+	t.is(config.headers, undefined);
+	t.deepEqual(config.tags, [
+		'fxmacrodata',
+		'finance',
+		'macro',
+		'forex',
+		'http',
+	]);
+});
+
+test('fxmacrodata template: sends a bearer token when an API key is set', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'fxmacrodata',
+		apiKey: 'test-key',
+	});
+
+	t.is(config.url, 'https://mcp.fxmacrodata.com');
+	t.deepEqual(config.headers, {Authorization: 'Bearer test-key'});
+});
+
+test('fxmacrodata template: trims the API key and drops a blank one', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	t.deepEqual(template!.buildConfig({apiKey: '  test-key  '}).headers, {
+		Authorization: 'Bearer test-key',
+	});
+	t.is(template!.buildConfig({apiKey: '   '}).headers, undefined);
+	t.is(template!.buildConfig({apiKey: ''}).headers, undefined);
+});
+
+test('fxmacrodata template: API key field is optional and sensitive', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.truthy(apiKeyField);
+	t.false(apiKeyField!.required);
+	t.true(apiKeyField!.sensitive);
+});
+
+test('fxmacrodata template: validator rejects keys that are not a single header token', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	const validator = template!.fields.find(
+		f => f.name === 'apiKey',
+	)!.validator;
+	t.truthy(validator);
+
+	t.is(validator!('test-key'), undefined);
+	// Space, tab, LF, CR, NUL, DEL and a non-breaking space inside the key.
+	const badKeys = [0x20, 0x09, 0x0a, 0x0d, 0x00, 0x7f, 0xa0].map(
+		code => `test${String.fromCharCode(code)}key`,
+	);
+	for (const bad of badKeys) {
+		const error = validator!(bad);
+		t.truthy(error, JSON.stringify(bad));
+		t.false(error!.includes('test'), 'error must not echo the key');
+	}
+});
+
+test('fxmacrodata template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'fxmacrodata-work',
+		apiKey: 'test-key',
+	});
+
+	t.is(config.name, 'fxmacrodata-work');
+	t.is(config.templateId, 'fxmacrodata');
+	t.is(resolveMcpTemplateId(config), 'fxmacrodata');
 });
 
 test('resolveMcpTemplateId: prefers templateId over tags and name', t => {

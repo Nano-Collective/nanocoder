@@ -1,4 +1,6 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -76,7 +78,6 @@ export async function processToolUse(
 			toolCall.function.arguments,
 			{strict: true},
 		);
-
 		// Lifecycle gate: a pre-tool-use hook that exits non-zero denies the
 		// call outright, and its output goes back to the model as the reason so
 		// it can adapt instead of retrying blindly.
@@ -92,37 +93,67 @@ export async function processToolUse(
 		}
 
 		const result = await handler(parsedArgs, options);
+		// Image bytes stay off `content` so truncation cannot chew them up
+		// and the model receives them as image parts, not a base64 blob.
+		const isVisual =
+			!!result && typeof result === 'object' && 'images' in result;
 		// Handlers may return a plain string or structured output. Only an
 		// object carrying `llmContent` is treated as structured; anything else
 		// (string, or a legacy undefined) passes through as the content.
 		const isStructured =
-			result && typeof result === 'object' && 'llmContent' in result;
-		const rawContent = isStructured ? result.llmContent : result;
-		const content =
+			!!result &&
+			typeof result === 'object' &&
+			'llmContent' in result &&
+			!isVisual;
+		const rawContent = isStructured || isVisual ? result.llmContent : result;
+		const truncated =
 			typeof rawContent === 'string'
 				? truncateToolResult(rawContent)
 				: (rawContent as string);
+		const failed =
+			typeof result === 'object' &&
+			result !== null &&
+			'isError' in result &&
+			result.isError === true;
+		// Formatters run on a successful write only, and before post-tool-use
+		// so its hooks see the formatted file.
+		const content =
+			typeof truncated === 'string' && !failed
+				? await formatWrittenFile(toolCall.function.name, parsedArgs, truncated)
+				: truncated;
+
+		// Only string content is extended; a structured payload passes through
+		// untouched.
+		const withHooks =
+			typeof content === 'string'
+				? await appendPostToolUseOutput(
+						toolCall.function.name,
+						parsedArgs,
+						content,
+					)
+				: content;
+
+		// Commit after post-tool-use hooks, so a formatter hook's rewrite of the
+		// file lands in the same commit instead of being left behind.
+		const commitNote = failed
+			? null
+			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
 
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			// Only string content is extended; a structured payload passes
-			// through untouched.
 			content:
-				typeof content === 'string'
-					? await appendPostToolUseOutput(
-							toolCall.function.name,
-							parsedArgs,
-							content,
-						)
-					: content,
+				commitNote && typeof withHooks === 'string'
+					? `${withHooks}\n\n${commitNote}`
+					: withHooks,
 			...(isStructured && result.structured !== undefined
 				? {structuredContent: result.structured}
 				: {}),
+			...(isVisual && result.images.length > 0 ? {images: result.images} : {}),
 			// A handler can report failure without throwing (a non-zero shell exit
 			// returns normally); surface it so --json and ACP see a failed call.
-			...(isStructured && result.isError ? {isError: true} : {}),
+			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the

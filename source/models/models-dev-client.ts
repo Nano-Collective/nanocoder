@@ -510,6 +510,30 @@ export async function getModelContextLimit(
 }
 
 /**
+ * Whether models.dev lists image input for this exact model id. Providers
+ * can disagree, so any listing with image input wins. null when the model is
+ * not listed (most local models), so callers can still try.
+ */
+export async function getModelAcceptsImages(
+	modelId: string,
+): Promise<boolean | null> {
+	let listed = false;
+	try {
+		const data = await getModelsData();
+		for (const provider of Object.values(data ?? {})) {
+			const input = provider?.models?.[modelId]?.modalities?.input;
+			if (input?.includes('image')) {
+				return true;
+			}
+			listed ||= !!input;
+		}
+	} catch {
+		// Lookup failure is the same as an unlisted model.
+	}
+	return listed ? false : null;
+}
+
+/**
  * Per-model pricing memo. Both lookups below scan the whole database (and a
  * miss scans it twice), so the result — including the negative one for local
  * models that will never be on models.dev — is cached for the process.

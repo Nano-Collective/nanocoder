@@ -1,19 +1,10 @@
 import clipboard from 'clipboardy';
+import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, hasStagedChanges, truncateDiff} from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
-
-const COMMIT_SYSTEM_PROMPT = `You write Git commit messages using the Conventional Commits specification.
-
-Rules:
-
-- Output ONLY the commit message.
-- No markdown.
-- No explanation.
-- Use types like feat, fix, chore, docs, refactor, test, style, perf, build, ci.
-- Base the message only on the provided staged diff.`;
 
 type CommitDependencies = {
 	hasStagedChanges: () => Promise<boolean>;

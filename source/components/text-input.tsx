@@ -68,7 +68,14 @@ export type Props = {
  */
 export type TextInputHandle = {
 	getCursorOffset: () => number;
-	setCursorOffset: (offset: number) => void;
+	/**
+	 * Move the caret. Pass `value` when the parent has just changed the value
+	 * out of band (a terminal paste) and `offset` is in that new value's
+	 * coordinates: keys arriving before the next render then edit the new
+	 * value at the new caret, instead of the old value at an offset that does
+	 * not fit it.
+	 */
+	setCursorOffset: (offset: number, value?: string) => void;
 };
 
 const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
@@ -100,13 +107,16 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		ref,
 		() => ({
 			getCursorOffset: () => cursorOffsetRef.current,
-			setCursorOffset: (offset: number) => {
+			setCursorOffset: (offset: number, value?: string) => {
 				// Don't clamp against originalValueRef.current here: the parent
 				// typically calls this in the same tick it schedules the new
 				// `value`, so the ref is stale. The next render's effect clamps
 				// the offset against the real newValue.length. We trust the
 				// caller to pass a sane offset; out-of-bounds requests are
 				// still corrected, just one render later.
+				if (value !== undefined) {
+					originalValueRef.current = value;
+				}
 				cursorOffsetRef.current = offset;
 				skipNextCursorResetRef.current = true;
 				setState({cursorOffset: offset, cursorWidth: 0});
@@ -266,6 +276,19 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		return i;
 	}
 
+	// Logical-line boundaries around the cursor, for readline's Ctrl+A/E/U/K.
+	// A "line" is the text between the \n before the cursor and the \n at or
+	// after it, so multi-line input keeps these scoped to the current line
+	// instead of the whole buffer.
+	function startOfLine(value: string, offset: number): number {
+		return value.lastIndexOf('\n', offset - 1) + 1;
+	}
+
+	function endOfLine(value: string, offset: number): number {
+		const next = value.indexOf('\n', offset);
+		return next === -1 ? value.length : next;
+	}
+
 	const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
 	const value = mask ? mask.repeat(originalValue.length) : originalValue;
 	let renderedValue = value;
@@ -398,17 +421,23 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					// Readline keybinds
 					switch (input) {
 						case 'a': {
-							// Move cursor to start of line
+							// Move cursor to start of the current line
 							if (showCursor) {
-								nextCursorOffset = 0;
+								nextCursorOffset = startOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
 							}
 							break;
 						}
 
 						case 'e': {
-							// Move cursor to end of line
+							// Move cursor to end of the current line
 							if (showCursor) {
-								nextCursorOffset = originalValueRef.current.length;
+								nextCursorOffset = endOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
 							}
 							break;
 						}
@@ -457,20 +486,27 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						}
 
 						case 'u': {
-							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(
+							// Delete from cursor to start of the current line
+							const start = startOfLine(
+								originalValueRef.current,
 								cursorOffsetRef.current,
 							);
-							nextCursorOffset = 0;
+							nextValue =
+								originalValueRef.current.slice(0, start) +
+								originalValueRef.current.slice(cursorOffsetRef.current);
+							nextCursorOffset = start;
 							break;
 						}
 
 						case 'k': {
-							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(
-								0,
+							// Delete from cursor to end of the current line
+							const end = endOfLine(
+								originalValueRef.current,
 								cursorOffsetRef.current,
 							);
+							nextValue =
+								originalValueRef.current.slice(0, cursorOffsetRef.current) +
+								originalValueRef.current.slice(end);
 							break;
 						}
 

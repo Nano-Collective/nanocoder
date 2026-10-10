@@ -7,12 +7,31 @@ import {getAppDataPath} from '@/config/paths';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Git state captured when a memory is saved, so a later recall can tell
+ * whether the files the memory talks about have changed since.
+ */
+export interface MemoryGitSnapshot {
+	/** The commit HEAD pointed at when the memory was saved. */
+	commit: string;
+	/** The checked-out branch. Absent on a detached HEAD. */
+	branch?: string;
+	/** Repo-relative paths of tracked files the memory mentions, mapped to their content hash at save time. */
+	files: Record<string, string>;
+}
+
 export interface SemanticMemory {
 	id: string;
 	content: string;
 	category: string;
 	timestamp: string;
 	sourceSessionId?: string;
+	git?: MemoryGitSnapshot;
+}
+
+export interface MemoryFileChange {
+	path: string;
+	status: 'modified' | 'deleted';
 }
 
 export interface CreateMemoryInput {
@@ -194,6 +213,44 @@ function isSemanticMemory(value: unknown): value is SemanticMemory {
 	);
 }
 
+/**
+ * Snapshot paths are later read from disk, so only repo-relative paths that
+ * stay inside the repository are accepted from the store.
+ */
+function isSafeRelativePath(file: string): boolean {
+	return (
+		file.length > 0 &&
+		!path.isAbsolute(file) &&
+		!file.split(/[\\/]/u).includes('..')
+	);
+}
+
+function isMemoryGitSnapshot(value: unknown): value is MemoryGitSnapshot {
+	if (!isRecord(value) || typeof value.commit !== 'string') return false;
+	if (value.branch !== undefined && typeof value.branch !== 'string') {
+		return false;
+	}
+	const {files} = value;
+	return (
+		isRecord(files) &&
+		Object.entries(files).every(
+			([file, hash]) => typeof hash === 'string' && isSafeRelativePath(file),
+		)
+	);
+}
+
+/**
+ * The snapshot only feeds the staleness warning, so a malformed one costs the
+ * memory its warning, never the memory itself.
+ */
+function withValidGitSnapshot(memory: SemanticMemory): SemanticMemory {
+	if (memory.git === undefined || isMemoryGitSnapshot(memory.git)) {
+		return memory;
+	}
+	const {git: _invalid, ...rest} = memory;
+	return rest;
+}
+
 async function atomicWriteFile(filePath: string, data: string): Promise<void> {
 	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
 	try {
@@ -346,6 +403,30 @@ function tokenize(value: string): Set<string> {
 	);
 }
 
+const GIT_TIMEOUT_MS = 5_000;
+const MAX_FILE_CANDIDATES = 20;
+const MAX_SNAPSHOT_FILES = 10;
+const FILE_REFERENCE_PATTERN = /^(?:[\w.-]+\/)*[\w-][\w.-]*\.[A-Za-z][\w]*$/u;
+
+/**
+ * Path-like words in a memory ("auth.ts", "src/lib/db.py"). Only candidates:
+ * they are matched against the tracked files before anything is recorded.
+ */
+function extractFileCandidates(content: string): string[] {
+	const candidates = new Set<string>();
+	for (const word of content.split(/[^\w./-]+/u)) {
+		const candidate = word.replace(/^(?:\.\/|\/)+/u, '').replace(/[./]+$/u, '');
+		if (
+			FILE_REFERENCE_PATTERN.test(candidate) &&
+			!candidate.split('/').includes('..')
+		) {
+			candidates.add(candidate);
+			if (candidates.size >= MAX_FILE_CANDIDATES) break;
+		}
+	}
+	return [...candidates];
+}
+
 export class SemanticMemoryManager {
 	private readonly memoryDir: string;
 	private readonly cwd: string;
@@ -376,6 +457,7 @@ export class SemanticMemoryManager {
 		}
 
 		const category = input.category?.trim() || 'project';
+		const git = await this.captureGitSnapshot(content);
 		const memory: SemanticMemory = {
 			id: crypto.randomUUID(),
 			content,
@@ -384,6 +466,7 @@ export class SemanticMemoryManager {
 			...(input.sourceSessionId
 				? {sourceSessionId: input.sourceSessionId}
 				: {}),
+			...(git ? {git} : {}),
 		};
 
 		return this.mutate(async () => {
@@ -400,7 +483,7 @@ export class SemanticMemoryManager {
 			const data = await fs.readFile(filePath, 'utf-8');
 			const parsed: unknown = JSON.parse(data);
 			if (!Array.isArray(parsed)) return [];
-			return parsed.filter(isSemanticMemory);
+			return parsed.filter(isSemanticMemory).map(withValidGitSnapshot);
 		} catch (error) {
 			if (
 				error instanceof SyntaxError ||
@@ -468,6 +551,44 @@ export class SemanticMemoryManager {
 			.map(result => result.memory);
 	}
 
+	/**
+	 * Which files referenced by these memories have changed or been deleted
+	 * since each memory was saved, keyed by memory id. Memories with nothing
+	 * changed are left out. Compares working-tree content, so uncommitted edits
+	 * count, and a commit moving on by itself does not mark anything stale.
+	 */
+	async findChangedFiles(
+		memories: SemanticMemory[],
+	): Promise<Map<string, MemoryFileChange[]>> {
+		const changes = new Map<string, MemoryFileChange[]>();
+		const tracked = memories.filter(
+			memory => memory.git && Object.keys(memory.git.files).length > 0,
+		);
+		if (tracked.length === 0) return changes;
+
+		const root = await this.getRepositoryRoot();
+		const paths = [
+			...new Set(
+				tracked.flatMap(memory => Object.keys(memory.git?.files ?? {})),
+			),
+		];
+		const current = await this.hashExistingFiles(root, paths);
+
+		for (const memory of tracked) {
+			const changed: MemoryFileChange[] = [];
+			for (const [file, savedHash] of Object.entries(memory.git?.files ?? {})) {
+				const currentHash = current.get(file);
+				if (currentHash === undefined) {
+					changed.push({path: file, status: 'deleted'});
+				} else if (currentHash !== savedHash) {
+					changed.push({path: file, status: 'modified'});
+				}
+			}
+			if (changed.length > 0) changes.set(memory.id, changed);
+		}
+		return changes;
+	}
+
 	private async getMemoryFilePath(): Promise<string> {
 		if (this.memoryFilePath) return this.memoryFilePath;
 
@@ -491,6 +612,115 @@ export class SemanticMemoryManager {
 		}
 
 		return path.resolve(this.cwd);
+	}
+
+	private async git(args: string[], cwd: string): Promise<string> {
+		const {stdout} = await execFileAsync('git', args, {
+			cwd,
+			timeout: GIT_TIMEOUT_MS,
+		});
+		return stdout;
+	}
+
+	private async getRepositoryRoot(): Promise<string> {
+		return (await this.git(['rev-parse', '--show-toplevel'], this.cwd)).trim();
+	}
+
+	/**
+	 * Commit, branch and hashes of the tracked files the memory mentions.
+	 * Undefined outside a git repository or before the first commit; a save
+	 * never fails because git did.
+	 */
+	private async captureGitSnapshot(
+		content: string,
+	): Promise<MemoryGitSnapshot | undefined> {
+		try {
+			const root = await this.getRepositoryRoot();
+			const commit = (await this.git(['rev-parse', 'HEAD'], root)).trim();
+			if (!commit) return undefined;
+			const branch = (
+				await this.git(['branch', '--show-current'], root)
+			).trim();
+			const referenced = await this.resolveReferencedFiles(root, content);
+			const hashes = await this.hashExistingFiles(root, referenced);
+			return {
+				commit,
+				...(branch ? {branch} : {}),
+				files: Object.fromEntries(hashes),
+			};
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * Map path-like words to tracked files. A bare name ("auth.ts") counts
+	 * only when exactly one tracked file has it: guessing between several
+	 * would put warnings on memories about a different file.
+	 */
+	private async resolveReferencedFiles(
+		root: string,
+		content: string,
+	): Promise<string[]> {
+		const candidates = extractFileCandidates(content);
+		if (candidates.length === 0) return [];
+
+		const output = await this.git(
+			[
+				'ls-files',
+				'-z',
+				'--',
+				...candidates.map(candidate => `:(glob)**/${candidate}`),
+			],
+			root,
+		);
+		const trackedFiles = output.split('\0').filter(Boolean);
+
+		const resolved = new Set<string>();
+		for (const candidate of candidates) {
+			const matches = trackedFiles.filter(
+				file => file === candidate || file.endsWith(`/${candidate}`),
+			);
+			if (matches.length === 1 && matches[0]) resolved.add(matches[0]);
+			if (resolved.size >= MAX_SNAPSHOT_FILES) break;
+		}
+		return [...resolved];
+	}
+
+	/**
+	 * Content hashes for the files that exist, in one `git hash-object` call.
+	 * Missing files are left out of the result, which is how a deletion shows.
+	 * `--no-filters` hashes the bytes on disk without running any configured
+	 * clean filter; the hash is only ever compared with another one made the
+	 * same way.
+	 */
+	private async hashExistingFiles(
+		root: string,
+		files: string[],
+	): Promise<Map<string, string>> {
+		const existing: string[] = [];
+		for (const file of files) {
+			try {
+				if ((await fs.stat(path.join(root, file))).isFile()) {
+					existing.push(file);
+				}
+			} catch {
+				// Deleted or unreadable: reported as missing.
+			}
+		}
+		if (existing.length === 0) return new Map();
+
+		const output = await this.git(
+			['hash-object', '--no-filters', '--', ...existing],
+			root,
+		);
+		const hashes = output.trim().split('\n');
+		return new Map(
+			existing.flatMap((file, index) => {
+				const hash = hashes[index]?.trim();
+				return hash ? [[file, hash] as const] : [];
+			}),
+		);
 	}
 
 	private capMemories(memories: SemanticMemory[]): SemanticMemory[] {

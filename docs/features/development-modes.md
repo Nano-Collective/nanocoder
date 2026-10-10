@@ -104,7 +104,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
