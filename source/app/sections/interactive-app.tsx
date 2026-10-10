@@ -26,6 +26,7 @@ import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {hasStagedChanges} from '@/tools/git/utils';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
+import {errorMsg} from '@/utils/message-factory';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -281,6 +282,14 @@ export function InteractiveApp({
 		appState.pendingPlanProceed !== null;
 	const queuedMessageCount = userMessageQueue.queuedMessages.length;
 	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
+	const reportFailedDrain = React.useCallback(() => {
+		appState.addToChatQueue(
+			errorMsg(
+				'Queued prompt failed. Use Up/Down to select it, then Enter to edit and try again.',
+				'queued-prompt-failed',
+			),
+		);
+	}, [appState.addToChatQueue]);
 
 	React.useEffect(() => {
 		// Re-run after a successful dispatch settles, once its queue update has
@@ -304,7 +313,7 @@ export function InteractiveApp({
 		let started = false;
 		const timeout = setTimeout(() => {
 			started = true;
-			let drainedMessageId = queuedMessageId ?? null;
+			let drainedMessageId: string | null = null;
 			void Promise.resolve()
 				.then(() =>
 					userMessageQueue.drainNextMessage(async message => {
@@ -324,6 +333,7 @@ export function InteractiveApp({
 							// Keep a failed head queued, but do not immediately re-enter
 							// the effect while it still has the same identity.
 							lastFailedDrainIdRef.current = drainedMessageId;
+							reportFailedDrain();
 							return;
 						}
 						lastFailedDrainIdRef.current = null;
@@ -334,7 +344,10 @@ export function InteractiveApp({
 					},
 					() => {
 						drainInProgressRef.current = false;
-						lastFailedDrainIdRef.current = drainedMessageId;
+						// Keep the captured queue head blocked even if the drain rejects
+						// before its dispatch callback receives the message.
+						lastFailedDrainIdRef.current = drainedMessageId ?? queuedMessageId;
+						reportFailedDrain();
 					},
 				);
 		}, 0);
@@ -355,6 +368,7 @@ export function InteractiveApp({
 		queuedMessageCount,
 		queuedMessageId,
 		drainAttempt,
+		reportFailedDrain,
 	]);
 
 	const recallableSubmittedDraft =
