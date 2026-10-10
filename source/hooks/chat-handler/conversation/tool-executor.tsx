@@ -4,6 +4,7 @@ import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
 import {getShowAgentBashOutput} from '@/config/preferences';
+import {getSequenceTracker} from '@/macros/sequence-tracker';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -87,6 +88,7 @@ export interface ToolDisplayOptions {
 	onCompactToolCount?: (toolName: string) => void;
 	onLiveTaskUpdate?: (tasks?: Task[]) => void;
 	nonInteractiveMode?: boolean;
+	isParallelBatch?: boolean;
 }
 
 /**
@@ -140,6 +142,34 @@ export const displayExecutedTool = async (
 		toolCall,
 		result.content,
 	);
+
+	try {
+		const tracker = getSequenceTracker();
+		const isReadOnly = toolManager?.isReadOnly(result.name) ?? false;
+		const isError = isToolResultError(result);
+
+		if (!isReadOnly || isError) {
+			tracker.breakChain();
+		} else {
+			const parsedArgs = parseToolArguments(toolCall.function.arguments);
+			const inputArgs =
+				typeof parsedArgs === 'object' && parsedArgs !== null
+					? (parsedArgs as Record<string, unknown>)
+					: {};
+
+			tracker.recordExecution({
+				toolName: result.name,
+				inputArgs,
+				success: true,
+				readOnly: true,
+				parallelBatch: options?.isParallelBatch,
+				timestamp: Date.now(),
+			});
+		}
+	} catch {
+		// Non-fatal tracking fallback
+	}
+
 	const expandId = recordExpandableToolResult(toolCall, result, bashState);
 
 	if (
@@ -561,6 +591,11 @@ export const executeToolsDirectly = async (
 					result.content,
 				);
 			}
+			try {
+				getSequenceTracker().breakChain();
+			} catch {
+				// Non-fatal tracking fallback
+			}
 			continue;
 		}
 
@@ -585,6 +620,11 @@ export const executeToolsDirectly = async (
 			}
 		}
 
+		const isParallelBatch = type === 'readOnly' && group.length > 1;
+		const displayOpts = isParallelBatch
+			? {...options, isParallelBatch: true}
+			: options;
+
 		// Display results in order
 		for (const execution of executions) {
 			directResults.push(execution.result);
@@ -593,7 +633,7 @@ export const executeToolsDirectly = async (
 				toolManager,
 				addToChatQueue,
 				conversationStateManager,
-				options,
+				displayOpts,
 			);
 		}
 	}
