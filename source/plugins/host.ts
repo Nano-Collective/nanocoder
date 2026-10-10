@@ -28,8 +28,10 @@ const PLUGIN_EVENT_FOR: Partial<Record<HookEvent, PluginEvent>> = {
 };
 
 const PLUGIN_HOOK_TIMEOUT_MS = 30_000;
+let pluginLoadTimeoutMs = PLUGIN_HOOK_TIMEOUT_MS;
 
 const FAILED = Symbol('failed');
+const TIMED_OUT = Symbol('timed out');
 
 interface PluginState {
 	plugins: NanocoderPlugin[];
@@ -88,9 +90,28 @@ export async function withTrustedProjectPlugins<T>(
 	return pluginScope.run(state, run);
 }
 
-export function resetPluginsForTests(): void {
+export function resetPluginsForTests({
+	loadTimeoutMs = PLUGIN_HOOK_TIMEOUT_MS,
+} = {}): void {
 	defaultState = {plugins: [], loading: null};
 	projectStates.clear();
+	pluginLoadTimeoutMs = loadTimeoutMs;
+}
+
+async function importWithin(url: string, ms: number): Promise<unknown> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			import(url),
+			// Not unref'd. A top-level await on a promise nothing settles leaves
+			// the event loop empty, and Node would exit silently instead.
+			new Promise(resolve => {
+				timer = setTimeout(resolve, ms, TIMED_OUT);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 async function importPlugins(root: string, state: PluginState): Promise<void> {
@@ -110,16 +131,23 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 	}
 
 	for (const file of files) {
-		let exported: unknown;
+		let mod: unknown;
 		try {
-			const mod = (await import(pathToFileURL(path.join(dir, file)).href)) as {
-				default?: unknown;
-			};
-			exported = mod.default;
+			mod = await importWithin(
+				pathToFileURL(path.join(dir, file)).href,
+				pluginLoadTimeoutMs,
+			);
 		} catch (error) {
 			logError(`Plugin ${file} failed to load: ${errorMessage(error)}`);
 			continue;
 		}
+		if (mod === TIMED_OUT) {
+			logError(
+				`Plugin ${file} did not finish loading within ${pluginLoadTimeoutMs / 1000}s and was skipped.`,
+			);
+			continue;
+		}
+		const exported = (mod as {default?: unknown}).default;
 
 		const problem = validatePlugin(exported);
 		if (problem) {
