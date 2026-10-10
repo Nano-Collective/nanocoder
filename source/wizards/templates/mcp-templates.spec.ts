@@ -305,6 +305,33 @@ test('context7 template: builds correct HTTP config', t => {
 	t.deepEqual(config.tags, ['remote', 'context', 'information', 'http']);
 });
 
+test('parallel-search template: builds correct HTTP config', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'parallel-search');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'parallel-search');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://search.parallel.ai/mcp');
+	t.is(config.timeout, 30000);
+	t.is(
+		config.description,
+		'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel.',
+	);
+	t.deepEqual(config.tags, ['remote', 'search', 'web', 'fetch', 'http']);
+});
+
+test('parallel-search template: keeps the default URL when the wizard supplies none', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'parallel-search');
+	t.truthy(template);
+
+	const config = template!.buildConfig({serverName: '', url: ''});
+
+	t.is(config.name, 'parallel-search');
+	t.is(config.url, 'https://search.parallel.ai/mcp');
+});
+
 test('github-remote template: builds correct HTTP config with headers', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'github-remote');
 	t.truthy(template);

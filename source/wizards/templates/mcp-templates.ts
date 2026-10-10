@@ -289,6 +289,15 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		defaultUrl: 'https://mcp.context7.com/mcp',
 		tags: ['remote', 'context', 'information', 'http'],
 	}),
+	remoteHttpTemplate({
+		id: 'parallel-search',
+		name: 'Parallel Search',
+		description:
+			'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel.',
+		defaultServerName: 'parallel-search',
+		defaultUrl: 'https://search.parallel.ai/mcp',
+		tags: ['remote', 'search', 'web', 'fetch', 'http'],
+	}),
 	{
 		id: 'github-remote',
 		name: 'GitHub (Remote)',
