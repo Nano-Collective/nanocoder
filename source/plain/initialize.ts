@@ -9,6 +9,7 @@ import {
 	updateLastUsed,
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
+import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {
@@ -32,6 +33,7 @@ export interface PlainInitResult {
 	client: LLMClient;
 	toolManager: ToolManager;
 	customCommandLoader: CustomCommandLoader;
+	customCommandExecutor: CustomCommandExecutor;
 	provider: string;
 	model: string;
 }
@@ -52,6 +54,7 @@ export async function initializePlain(
 ): Promise<PlainInitResult> {
 	const toolManager = new ToolManager();
 	const customCommandLoader = new CustomCommandLoader();
+	const customCommandExecutor = new CustomCommandExecutor();
 	const preferences = loadPreferences();
 
 	setToolRegistryGetter(() => toolManager.getToolRegistry());
@@ -168,6 +171,7 @@ export async function initializePlain(
 		client,
 		toolManager,
 		customCommandLoader,
+		customCommandExecutor,
 		provider: actualProvider,
 		model: finalModel,
 	};

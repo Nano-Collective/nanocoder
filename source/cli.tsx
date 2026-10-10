@@ -12,6 +12,7 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import type {WebRuntimeBridge} from '@/web/runtime-bridge';
 import {parseRunPrompt} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
@@ -40,6 +41,7 @@ const version = ((): string => {
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
+const webMode = args.includes('--web') || args.includes('--gui');
 
 // Storage diagnostics are independent of chat startup. JSON mode does not load Ink.
 if (args[0] === 'storage') {
@@ -930,6 +932,46 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
+		let webRuntimeBridge: WebRuntimeBridge | undefined;
+		let webUrl: string | undefined;
+		if (webMode) {
+			const [
+				{createWebRuntimeBridge},
+				{startLocalWebServer},
+				{getShutdownManager},
+			] = await Promise.all([
+				import('@/web/runtime-bridge'),
+				import('@/web/server'),
+				import('@/utils/shutdown'),
+			]);
+			let broadcastEvent: Parameters<typeof createWebRuntimeBridge>[0] =
+				() => {};
+			webRuntimeBridge = createWebRuntimeBridge(event => {
+				broadcastEvent(event);
+			});
+			const webServer = await startLocalWebServer({
+				onClientEvent: webRuntimeBridge.handleClientEvent,
+				getStateEvents: webRuntimeBridge.getStateEvents,
+				onAllClientsDisconnected: () => {
+					webRuntimeBridge?.handleDisconnect();
+				},
+			});
+			broadcastEvent = webServer.broadcastEvent;
+			webUrl = webServer.url;
+
+			getShutdownManager().register({
+				name: 'web-server',
+				priority: 10,
+				handler: webServer.close,
+			});
+
+			if (!useAltScreen) {
+				console.log('Nanocoder web mode started.');
+				console.log(`Local URL: ${webServer.url}`);
+				console.log('Press Ctrl+C to stop.');
+			}
+		}
+
 		const result = render(
 			<App
 				vscodeMode={vscodeMode}
@@ -943,6 +985,8 @@ async function main(): Promise<void> {
 				altScreenActive={useAltScreen}
 				initialSession={initialSession}
 				openSessionSelectorOnStart={openSessionSelectorOnStart}
+				webRuntimeBridge={webRuntimeBridge}
+				webUrl={webUrl}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown

@@ -87,6 +87,9 @@ export function useChatHandler({
 	developmentModeRef,
 	nonInteractiveMode = false,
 	onConversationComplete,
+	onError,
+	onAssistantContent,
+	onReasoningContent,
 	onPlanTurnComplete,
 	onArchitectTurnComplete,
 	reasoningExpandedRef,
@@ -268,6 +271,8 @@ export function useChatHandler({
 					setIsGenerating,
 					setStreamingReasoning,
 					setStreamingContent,
+					onAssistantContent,
+					onReasoningContent,
 					setTokenCount,
 					setMessages,
 					addToChatQueue,
@@ -307,6 +312,7 @@ export function useChatHandler({
 					},
 				});
 			} catch (error) {
+				onError?.(error);
 				displayError(error, 'chat-error');
 				// Signal completion on error to avoid hanging in non-interactive mode
 				onConversationComplete?.();
@@ -327,6 +333,9 @@ export function useChatHandler({
 			developmentModeRef,
 			nonInteractiveMode,
 			onConversationComplete,
+			onError,
+			onAssistantContent,
+			onReasoningContent,
 			reasoningExpandedRef,
 			compactToolDisplayRef,
 			compactToolCountsRef,
@@ -526,6 +535,7 @@ export function useChatHandler({
 				onArchitectTurnComplete?.(architectCheckpointState.name);
 			}
 		} catch (error) {
+			onError?.(error);
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
 		} finally {

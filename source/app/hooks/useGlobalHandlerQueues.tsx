@@ -15,10 +15,12 @@ import {
 	type PendingVoiceInstall,
 	setGlobalVoiceInstallHandler,
 } from '@/utils/voice-install-queue';
+import type {WebRuntimeBridge} from '@/web/runtime-bridge';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
 	setIsQuestionMode: (mode: boolean) => void;
+	webRuntimeBridge?: WebRuntimeBridge;
 }
 
 interface GlobalHandlerQueues {
@@ -73,6 +75,7 @@ function useHandlerQueue<TInput, TResult>(
 	 * approval is a denial.
 	 */
 	abandoned: (input: TInput) => TResult,
+	route?: (input: TInput, signal?: AbortSignal) => Promise<TResult> | undefined,
 ): (result: TResult) => void {
 	const queueRef = useRef<QueuedRequest<TInput, TResult>[]>([]);
 
@@ -87,41 +90,46 @@ function useHandlerQueue<TInput, TResult>(
 	useEffect(() => {
 		abandonedRef.current = abandoned;
 	}, [abandoned]);
+	const routeRef = useRef(route);
+	useEffect(() => {
+		routeRef.current = route;
+	}, [route]);
 
 	useEffect(() => {
-		install(
-			(input: TInput, abortSignal?: AbortSignal) =>
-				new Promise<TResult>(resolve => {
-					const entry: QueuedRequest<TInput, TResult> = {input, resolve};
-					queueRef.current.push(entry);
-					// Only the head is on screen; later arrivals wait their turn.
-					if (queueRef.current.length === 1) {
-						presentRef.current(input);
-					}
+		install((input: TInput, abortSignal?: AbortSignal) => {
+			const routed = routeRef.current?.(input, abortSignal);
+			if (routed) return routed;
+			return new Promise<TResult>(resolve => {
+				const entry: QueuedRequest<TInput, TResult> = {input, resolve};
+				queueRef.current.push(entry);
+				// Only the head is on screen; later arrivals wait their turn.
+				if (queueRef.current.length === 1) {
+					presentRef.current(input);
+				}
 
-					if (!abortSignal) return;
-					// A cancelled turn has to release its own request. Nothing
-					// else can: the queue only advances when a human answers, so
-					// a caller left here after its turn died waits forever, and
-					// the user is shown a prompt belonging to work that is over.
-					abortSignal.addEventListener(
-						'abort',
-						() => {
-							const index = queueRef.current.indexOf(entry);
-							// Already answered — its result is the user's, not ours.
-							if (index === -1) return;
-							queueRef.current.splice(index, 1);
-							resolve(abandonedRef.current(input));
-							// Only the head is rendered, so only removing the head
-							// changes what is on screen.
-							if (index === 0) {
-								presentRef.current(queueRef.current[0]?.input ?? null);
-							}
-						},
-						{once: true},
-					);
-				}),
-		);
+				if (!abortSignal) return;
+				// A cancelled turn has to release its own request. Nothing
+				// else can: the queue only advances when a human answers, so
+				// a caller left here after its turn died waits forever, and
+				// the user is shown a prompt belonging to work that is over.
+				abortSignal.addEventListener(
+					'abort',
+					() => {
+						const index = queueRef.current.indexOf(entry);
+						// Already answered — its result is the user's, not ours.
+						if (index === -1) return;
+						queueRef.current.splice(index, 1);
+						resolve(abandonedRef.current(input));
+						// Only the head is rendered, so only removing the head
+						// changes what is on screen.
+						if (index === 0) {
+							presentRef.current(queueRef.current[0]?.input ?? null);
+						}
+					},
+					{once: true},
+				);
+			});
+		});
 	}, [install]);
 
 	// Answering with an empty queue only clears the slot, which is what the UI
@@ -139,12 +147,16 @@ function useHandlerQueue<TInput, TResult>(
  *  - tool-confirm-queue (the main agent's tool calls) drives the confirmation
  *    the conversation loop suspends on
  *
+ * During an active browser-owned turn, requests route through the web runtime
+ * bridge instead of the terminal Ink prompts so the browser can resolve them.
+ *
  * Each slot keeps its own queue so they never collide — a subagent's tool can
  * need approval while the parent agent is mid-conversation.
  */
 export function useGlobalHandlerQueues({
 	setPendingQuestion,
 	setIsQuestionMode,
+	webRuntimeBridge,
 }: UseGlobalHandlerQueuesProps): GlobalHandlerQueues {
 	const presentQuestion = useCallback(
 		(next: PendingQuestion | null) => {
@@ -157,6 +169,19 @@ export function useGlobalHandlerQueues({
 		setGlobalQuestionHandler,
 		presentQuestion,
 		ABANDONED_QUESTION,
+		(question, signal) => {
+			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
+				return webRuntimeBridge.requestQuestion(
+					{
+						question: question.question,
+						options: question.options,
+						allowFreeform: question.allowFreeform,
+					},
+					signal,
+				);
+			}
+			return undefined;
+		},
 	);
 
 	// The tool-approval queue uses a dedicated state slot so it doesn't conflict
@@ -169,6 +194,20 @@ export function useGlobalHandlerQueues({
 		setGlobalToolApprovalHandler,
 		setPendingSubagentApproval,
 		ABANDONED_APPROVAL,
+		(approval, signal) => {
+			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
+				return webRuntimeBridge.requestApproval(
+					{
+						toolName: approval.toolCall.function.name,
+						toolCallId: approval.toolCall.id,
+						arguments: approval.toolCall.function.arguments,
+						context: `Subagent: ${approval.subagentName}`,
+					},
+					signal,
+				);
+			}
+			return undefined;
+		},
 	);
 
 	const [pendingToolConfirmation, setPendingToolConfirmation] =
@@ -177,6 +216,19 @@ export function useGlobalHandlerQueues({
 		setGlobalToolConfirmHandler,
 		setPendingToolConfirmation,
 		ABANDONED_APPROVAL,
+		(confirmation, signal) => {
+			if (webRuntimeBridge?.hasActiveBrowserTurn()) {
+				return webRuntimeBridge.requestApproval(
+					{
+						toolName: confirmation.toolCall.function.name,
+						toolCallId: confirmation.toolCall.id,
+						arguments: confirmation.toolCall.function.arguments,
+					},
+					signal,
+				);
+			}
+			return undefined;
+		},
 	);
 
 	const [pendingVoiceInstall, setPendingVoiceInstall] =

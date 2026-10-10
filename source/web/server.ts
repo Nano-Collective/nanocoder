@@ -1,0 +1,335 @@
+import {spawn} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
+import {createServer, type Server} from 'node:http';
+import {isIP} from 'node:net';
+import type {Duplex} from 'node:stream';
+import {WebSocket, WebSocketServer} from 'ws';
+import {
+	createPageNonce,
+	nanocoderLogoPngBuffer,
+	renderWebModePage,
+} from './page.js';
+import {
+	parseWebClientEvent,
+	serializeWebServerEvent,
+	WEB_PROTOCOL_VERSION,
+	type WebClientEvent,
+	type WebServerEvent,
+} from './protocol.js';
+
+export interface LocalWebServerOptions {
+	host?: string;
+	port?: number;
+	token?: string;
+	openBrowser?: boolean;
+	onClientEvent?: (event: WebClientEvent) => void | Promise<void>;
+	onAllClientsDisconnected?: () => void;
+	/** Maximum incoming event size, including base64 image attachments. */
+	maxPayload?: number;
+	getStateEvents?: () => WebServerEvent[];
+}
+
+export interface LocalWebServer {
+	server: Server;
+	host: string;
+	port: number;
+	token: string;
+	url: string;
+	eventsUrl: string;
+	broadcastEvent: (event: WebServerEvent) => void;
+	close: () => Promise<void>;
+}
+
+const DEFAULT_HOST = '127.0.0.1';
+const WEB_MAX_PAYLOAD = 16 * 1024 * 1024;
+function createLocalWebToken(): string {
+	return randomBytes(32).toString('hex');
+}
+
+export async function startLocalWebServer(
+	options: LocalWebServerOptions = {},
+): Promise<LocalWebServer> {
+	const host = options.host ?? DEFAULT_HOST;
+	if (
+		!(
+			host === 'localhost' ||
+			host === '::1' ||
+			(isIP(host) === 4 && host.startsWith('127.'))
+		)
+	)
+		throw new Error('Web mode must bind to a loopback address.');
+	const urlHost = host.includes(':') ? `[${host}]` : host;
+	const requestedPort = options.port ?? 0;
+	const token = options.token ?? createLocalWebToken();
+
+	const server = createServer((request, response) => {
+		response.setHeader('x-content-type-options', 'nosniff');
+		response.setHeader('x-frame-options', 'DENY');
+
+		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
+
+		if (requestUrl.pathname === '/health') {
+			response.writeHead(200, {'content-type': 'application/json'});
+			response.end(JSON.stringify({ok: true, mode: 'web'}));
+			return;
+		}
+
+		if (requestUrl.pathname === '/assets/nanocoder-icon.png') {
+			response.writeHead(200, {
+				'cache-control': 'public, max-age=3600',
+				'content-type': 'image/png',
+			});
+			response.end(nanocoderLogoPngBuffer);
+			return;
+		}
+
+		if (requestUrl.pathname === '/favicon.ico') {
+			response.writeHead(302, {location: '/assets/nanocoder-icon.png'});
+			response.end();
+			return;
+		}
+
+		if (requestUrl.pathname !== '/' && requestUrl.pathname !== '/index.html') {
+			response.writeHead(404, {'content-type': 'text/plain; charset=utf-8'});
+			response.end('Not found');
+			return;
+		}
+
+		if (requestUrl.searchParams.get('token') !== token) {
+			response.writeHead(401, {'content-type': 'text/plain; charset=utf-8'});
+			response.end('Access token required');
+			return;
+		}
+
+		const nonce = createPageNonce();
+		response.writeHead(200, {
+			'cache-control': 'no-store',
+			'referrer-policy': 'no-referrer',
+			'content-type': 'text/html; charset=utf-8',
+			'content-security-policy': buildContentSecurityPolicy(
+				urlHost,
+				port,
+				nonce,
+			),
+		});
+		response.end(renderWebModePage(nonce));
+	});
+	const webSocketServer = new WebSocketServer({
+		noServer: true,
+		maxPayload: options.maxPayload ?? WEB_MAX_PAYLOAD,
+	});
+	const connectedClients = new Set<WebSocket>();
+
+	server.on('upgrade', (request, socket, head) => {
+		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
+		// Browsers send Origin; non-browser clients authenticate with the token.
+		if (
+			request.headers.origin &&
+			request.headers.origin !== `http://${urlHost}:${port}`
+		) {
+			rejectWebSocketUpgrade(socket);
+			return;
+		}
+		if (
+			requestUrl.pathname !== '/events' ||
+			requestUrl.searchParams.get('token') !== token
+		) {
+			rejectWebSocketUpgrade(socket);
+			return;
+		}
+
+		webSocketServer.handleUpgrade(request, socket, head, clientSocket => {
+			webSocketServer.emit('connection', clientSocket, request);
+		});
+	});
+
+	webSocketServer.on('connection', clientSocket => {
+		connectedClients.add(clientSocket);
+		// Protocol and transport failures are emitted on the socket itself.
+		// Without a listener Node treats them as fatal unhandled errors.
+		clientSocket.on('error', () => clientSocket.terminate());
+		sendServerEvent(clientSocket, {
+			type: 'ready',
+			protocolVersion: WEB_PROTOCOL_VERSION,
+		});
+		for (const event of options.getStateEvents?.() ?? []) {
+			sendServerEvent(clientSocket, event);
+		}
+
+		clientSocket.on('message', message => {
+			void handleClientMessage(
+				clientSocket,
+				message.toString(),
+				options.onClientEvent,
+			);
+		});
+
+		clientSocket.on('close', () => {
+			connectedClients.delete(clientSocket);
+			if (connectedClients.size === 0) {
+				options.onAllClientsDisconnected?.();
+			}
+		});
+	});
+
+	await new Promise<void>((resolve, reject) => {
+		server.once('error', reject);
+		server.listen(requestedPort, host, () => {
+			server.off('error', reject);
+			resolve();
+		});
+	});
+
+	const address = server.address();
+	if (!address || typeof address === 'string') {
+		await closeServer(server);
+		throw new Error('Unable to determine local web server address.');
+	}
+
+	const port = address.port;
+	const url = `http://${urlHost}:${port}/?token=${token}`;
+	// Local-only WebSocket paired with the localhost HTTP page; using wss:// here
+	// would require local TLS certificate setup that this server does not provide.
+	const eventsUrl = `ws://${urlHost}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+
+	if (options.openBrowser !== false) {
+		openUrl(url);
+	}
+
+	return {
+		server,
+		host,
+		port,
+		token,
+		url,
+		eventsUrl,
+		broadcastEvent: event => {
+			for (const clientSocket of connectedClients) {
+				sendServerEvent(clientSocket, event);
+			}
+		},
+		close: () =>
+			closeWebServerWithClients(server, webSocketServer, connectedClients),
+	};
+}
+
+async function handleClientMessage(
+	clientSocket: WebSocket,
+	rawMessage: string,
+	onClientEvent: LocalWebServerOptions['onClientEvent'],
+): Promise<void> {
+	let event: WebClientEvent;
+	try {
+		event = parseWebClientEvent(rawMessage);
+	} catch (error) {
+		sendServerEvent(clientSocket, {
+			type: 'error',
+			message: error instanceof Error ? error.message : 'Invalid web event.',
+		});
+		return;
+	}
+
+	if (event.type === 'hello') {
+		sendServerEvent(clientSocket, {
+			type: 'ready',
+			protocolVersion: WEB_PROTOCOL_VERSION,
+		});
+		return;
+	}
+
+	try {
+		await onClientEvent?.(event);
+	} catch (error) {
+		sendServerEvent(clientSocket, {
+			type: 'error',
+			id: event.id,
+			message:
+				error instanceof Error
+					? error.message
+					: 'Unable to handle browser event.',
+		});
+		return;
+	}
+
+	sendServerEvent(clientSocket, {
+		type: 'ack',
+		id: event.id,
+	});
+}
+
+function sendServerEvent(clientSocket: WebSocket, event: WebServerEvent): void {
+	if (clientSocket.readyState !== WebSocket.OPEN) {
+		return;
+	}
+
+	clientSocket.send(serializeWebServerEvent(event));
+}
+
+function buildContentSecurityPolicy(
+	host: string,
+	port: number,
+	nonce: string,
+): string {
+	return [
+		"default-src 'self'",
+		`script-src 'self' 'nonce-${nonce}'`,
+		`style-src 'self' 'nonce-${nonce}'`,
+		"img-src 'self' data:",
+		// This CSP permits the WebSocket paired with our local HTTP server.
+		// wss:// requires TLS, which this localhost server does not provide.
+		`connect-src 'self' ws://${host}:${port}`, // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+		"base-uri 'none'",
+		"form-action 'none'",
+		"frame-ancestors 'none'",
+	].join('; ');
+}
+
+function rejectWebSocketUpgrade(socket: Duplex): void {
+	socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+	socket.destroy();
+}
+
+function openUrl(url: string): void {
+	const platform = process.platform;
+	const command =
+		platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
+	const args = platform === 'win32' ? ['/c', 'start', '', url] : [url];
+	// The URL is generated locally from host/port/token and is passed without a shell.
+	const child = spawn(command, args, {
+		detached: true,
+		stdio: 'ignore',
+	}); // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+	child.on('error', () => {});
+	child.unref();
+}
+
+async function closeServer(server: Server): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		server.close(error => {
+			if (error) {
+				reject(error);
+				return;
+			}
+			resolve();
+		});
+	});
+}
+
+async function closeWebServerWithClients(
+	server: Server,
+	webSocketServer: WebSocketServer,
+	connectedClients: Set<WebSocket>,
+): Promise<void> {
+	for (const clientSocket of connectedClients) {
+		clientSocket.close();
+	}
+	connectedClients.clear();
+
+	await new Promise<void>(resolve => {
+		webSocketServer.close(() => {
+			resolve();
+		});
+	});
+
+	await closeServer(server);
+}

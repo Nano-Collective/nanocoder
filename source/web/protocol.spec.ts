@@ -1,0 +1,153 @@
+import test from 'ava';
+import {parseWebClientEvent, WEB_PROTOCOL_VERSION} from './protocol.js';
+
+test('workspace requests validate panels and optional paths', t => {
+	t.like(parseWebClientEvent(JSON.stringify({type: 'workspace_panel', id: 'files', panel: 'files', path: 'src'})), {panel: 'files', path: 'src'});
+	for (const invalid of [{panel: 'shell'}, {panel: 'skills'}, {panel: 'files', path: 123}, {panel: 'tasks', id: ''}]) {
+		t.throws(() => parseWebClientEvent(JSON.stringify({type: 'workspace_panel', id: 'request', ...invalid})));
+	}
+});
+
+test('parseWebClientEvent accepts approval and question responses', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'approval_response',
+				id: 'approval-1',
+				approved: true,
+			}),
+		),
+		{type: 'approval_response', id: 'approval-1', approved: true},
+	);
+
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'question_response',
+				id: 'question-1',
+				answer: 'Use the existing bridge',
+			}),
+		),
+		{
+			type: 'question_response',
+			id: 'question-1',
+			answer: 'Use the existing bridge',
+		},
+	);
+});
+
+test('parseWebClientEvent still accepts the phase 4 handshake events', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'hello',
+				protocolVersion: WEB_PROTOCOL_VERSION,
+			}),
+		),
+		{type: 'hello', protocolVersion: WEB_PROTOCOL_VERSION},
+	);
+
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'user_message',
+				id: 'turn-1',
+				text: 'hello',
+			}),
+		),
+		{id: 'turn-1', text: 'hello', type: 'user_message', images: undefined},
+	);
+});
+
+test('parseWebClientEvent accepts a reset_session event', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'reset_session',
+				id: 'browser-reset-1',
+			}),
+		),
+		{type: 'reset_session', id: 'browser-reset-1'},
+	);
+
+	t.throws(
+		() => parseWebClientEvent(JSON.stringify({type: 'reset_session'})),
+		{message: 'Reset session id is required.'},
+	);
+});
+
+test('parseWebClientEvent accepts list_sessions and load_session events', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({type: 'list_sessions', id: 'list-1'}),
+		),
+		{type: 'list_sessions', id: 'list-1'},
+	);
+
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'load_session',
+				id: 'load-1',
+				sessionId: '18d51c0d-becb-4efc-8d0d-b8c1f3b61802',
+			}),
+		),
+		{
+			type: 'load_session',
+			id: 'load-1',
+			sessionId: '18d51c0d-becb-4efc-8d0d-b8c1f3b61802',
+		},
+	);
+
+	t.throws(
+		() => parseWebClientEvent(JSON.stringify({type: 'list_sessions'})),
+		{message: 'List sessions id is required.'},
+	);
+
+	t.throws(
+		() =>
+			parseWebClientEvent(
+				JSON.stringify({type: 'load_session', id: 'load-1'}),
+			),
+		{message: 'Load session sessionId is required.'},
+	);
+});
+
+test('parseWebClientEvent rejects malformed interaction responses', t => {
+	t.throws(
+		() =>
+			parseWebClientEvent(
+				JSON.stringify({type: 'approval_response', id: 'a', approved: 'yes'}),
+			),
+		{message: 'Approval response approved flag is required.'},
+	);
+
+	t.throws(
+		() =>
+			parseWebClientEvent(
+				JSON.stringify({type: 'question_response', id: 'q', answer: 12}),
+			),
+		{message: 'Question response answer is required.'},
+	);
+
+	t.throws(
+		() =>
+			parseWebClientEvent(
+				JSON.stringify({type: 'approval_response', approved: false}),
+			),
+		{message: 'Approval response id is required.'},
+	);
+});
+
+test('settings updates validate required fields', t => {
+	const event = {type: 'update_settings', id: 'settings', provider: 'local', model: 'small', mode: 'normal'};
+	t.deepEqual(parseWebClientEvent(JSON.stringify(event)), event);
+	for (const key of ['id', 'provider', 'model', 'mode']) {
+		t.throws(() => parseWebClientEvent(JSON.stringify({...event, [key]: ''})), {message: 'Settings id, provider, model and mode are required.'});
+	}
+});
+
+test('browser image data URLs are normalized to raw base64 for the runtime', t => {
+	const event = parseWebClientEvent(JSON.stringify({type: 'user_message', id: 'image', text: 'describe', images: [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}]}));
+	t.like(event, {images: [{data: 'AA==', mediaType: 'image/png'}]});
+});

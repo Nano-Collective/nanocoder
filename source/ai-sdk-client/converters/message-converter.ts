@@ -286,7 +286,9 @@ export function convertToModelMessages(
 				for (const image of msg.images) {
 					content.push({
 						type: 'image',
-						image: `data:${image.mediaType};base64,${image.data}`,
+						image: image.data.startsWith('data:')
+							? image.data
+							: `data:${image.mediaType};base64,${image.data}`,
 						mediaType: image.mediaType,
 					} as ImagePart);
 				}

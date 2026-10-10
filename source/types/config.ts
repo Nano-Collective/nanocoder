@@ -455,7 +455,7 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
-		/** Generate a title once per session. ACP clients only. Default true. */
+		/** Generate a title once per session in terminal/web and ACP clients. Default true. */
 		smartTitles?: boolean;
 		/** Title generation model. Defaults to the session's. */
 		titleModel?: string;
