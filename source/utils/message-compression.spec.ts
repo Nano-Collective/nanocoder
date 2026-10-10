@@ -638,3 +638,22 @@ test('compressMessages preserves display-only messages in output but excludes th
 	);
 	t.is(result.compressedTokenCount, expectedCompressedTokens);
 });
+
+test('compressMessages keeps the trailing detail of a one-line success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Operation completed successfully in 5s'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.is(
+		toolMsg?.content,
+		'Tool: execute_bash\nResult: Operation completed successfully in 5s',
+	);
+});
