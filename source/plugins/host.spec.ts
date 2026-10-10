@@ -12,6 +12,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {
 	consultPluginPermission,
 	loadPlugins,
@@ -449,4 +450,28 @@ test.serial('a plugin that throws on import is skipped and later plugins load', 
 	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
 
 	t.true(gate.blocked);
+});
+
+test.serial('a plugin whose import never finishes is skipped after the timeout', async t => {
+	resetPluginsForTests({loadTimeoutMs: 1_000});
+	withPlugins({
+		'1-slow.mjs': `await new Promise(() => {});\nexport default {apiVersion: 1, name: 'slow'};\n`,
+		'2-guard.mjs': BLOCK_BASH,
+	});
+	const errors: string[] = [];
+	setGlobalMessageQueue(component => {
+		errors.push((component as {props: {message: string}}).props.message);
+	});
+
+	try {
+		await loadPlugins(true);
+	} finally {
+		setGlobalMessageQueue(() => {});
+	}
+	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
+
+	t.true(gate.blocked);
+	t.deepEqual(errors, [
+		'Plugin 1-slow.mjs did not finish loading within 1s and was skipped.',
+	]);
 });
