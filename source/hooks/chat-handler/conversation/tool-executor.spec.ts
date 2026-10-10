@@ -1,6 +1,7 @@
 import test from 'ava';
 import {displayExecutedTool, executeToolsDirectly} from './tool-executor.js';
 import type {ToolCall, ToolResult} from '@/types/core';
+import {getSequenceTracker} from '@/macros/sequence-tracker';
 
 // ============================================================================
 // Test Helpers
@@ -1209,3 +1210,111 @@ test.serial(
 		setToolRegistryGetter(createMockToolRegistry);
 	},
 );
+
+test.serial(
+	'executeToolsDirectly - records read-only tool executions into SequenceTracker',
+	async t => {
+		const tracker = getSequenceTracker();
+		tracker.clear();
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_ro_1',
+				function: {
+					name: 'test_tool',
+					arguments: JSON.stringify({path: 'source/test.ts'}),
+				},
+			},
+		];
+
+		const mockToolManager = createMockToolManager({
+			readOnlyTools: ['test_tool'],
+		});
+
+		await executeToolsDirectly(
+			toolCalls,
+			mockToolManager as any,
+			createMockConversationStateManager() as any,
+			() => {},
+		);
+
+		const history = tracker.getHistory();
+		t.true(history.length >= 1);
+		const last = history[history.length - 1];
+		t.is(last.toolName, 'test_tool');
+		t.is((last.inputArgs as any).path, 'source/test.ts');
+		t.true(last.readOnly);
+		t.true(last.success);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - breaks chain on non-read-only tool call',
+	async t => {
+		const tracker = getSequenceTracker();
+		tracker.clear();
+
+		// Execute read-only tool first
+		await executeToolsDirectly(
+			[
+				{
+					id: 'call_ro',
+					function: {name: 'test_tool', arguments: '{"path": "a"}'},
+				},
+			],
+			createMockToolManager({readOnlyTools: ['test_tool']}) as any,
+			createMockConversationStateManager() as any,
+			() => {},
+		);
+
+		t.is(tracker.getCurrentChain().length, 1);
+
+		// Execute non-read-only tool
+		await executeToolsDirectly(
+			[
+				{
+					id: 'call_mut',
+					function: {name: 'mutating_tool', arguments: '{"content": "b"}'},
+				},
+			],
+			createMockToolManager({readOnlyTools: []}) as any,
+			createMockConversationStateManager() as any,
+			() => {},
+		);
+
+		// Chain must be broken
+		t.is(tracker.getCurrentChain().length, 0);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - tags concurrent read-only tools with parallelBatch',
+	async t => {
+		const tracker = getSequenceTracker();
+		tracker.clear();
+
+		// Two read-only tools executed together
+		await executeToolsDirectly(
+			[
+				{
+					id: 'call_ro_1',
+					function: {name: 'tool1', arguments: '{}'},
+				},
+				{
+					id: 'call_ro_2',
+					function: {name: 'tool2', arguments: '{}'},
+				},
+			],
+			createMockToolManager({readOnlyTools: ['tool1', 'tool2']}) as any,
+			createMockConversationStateManager() as any,
+			() => {},
+		);
+
+		const chain = tracker.getCurrentChain();
+		t.is(chain.length, 2);
+		t.true(chain[0].parallelBatch);
+		t.true(chain[1].parallelBatch);
+	},
+);
+
+
