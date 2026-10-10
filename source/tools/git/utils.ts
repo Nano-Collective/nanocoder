@@ -506,25 +506,39 @@ export async function isLastCommitPushed(): Promise<boolean> {
 }
 
 /**
+ * Which commits to walk: a revision range (`main..HEAD`) or a single branch.
+ * Not both - git would read them as two separate revisions and log the union.
+ */
+type CommitSelection =
+	| {range?: string; branch?: never}
+	| {branch?: string; range?: never};
+
+/**
  * Get commits with various filters
  */
-export async function getCommits(options: {
-	count?: number;
-	range?: string;
-	file?: string;
-	author?: string;
-	since?: string;
-	grep?: string;
-}): Promise<CommitInfo[]> {
+export async function getCommits(
+	options: CommitSelection & {
+		count?: number;
+		file?: string;
+		author?: string;
+		since?: string;
+		grep?: string;
+	},
+): Promise<CommitInfo[]> {
 	try {
 		const args = ['log', '--format=%H|%h|%an|%ae|%ad|%ar|%s', '--date=short'];
 
 		if (options.count) args.push(`-n`, options.count.toString());
 		if (options.range) args.push(options.range);
+		if (options.branch) args.push(options.branch);
 		if (options.author) args.push(`--author=${options.author}`);
 		if (options.since) args.push(`--since=${options.since}`);
 		if (options.grep) args.push(`--grep=${options.grep}`);
-		if (options.file) args.push('--', options.file);
+		// Always close the revisions with `--`: a branch that shares its name
+		// with a file or folder (a `docs` branch next to `docs/`) is otherwise
+		// rejected as ambiguous, which would surface here as "no commits".
+		args.push('--');
+		if (options.file) args.push(options.file);
 
 		const output = await execGit(args);
 		if (!output.trim()) return [];

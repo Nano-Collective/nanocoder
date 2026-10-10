@@ -68,7 +68,7 @@ const METADATA_HOSTS = new Set([
 	'metadata.google.internal',
 ]);
 
-function isBlockedFetchHost(hostname: string): boolean {
+export function isBlockedFetchHost(hostname: string): boolean {
 	// Trailing-dot FQDNs (`localhost.`, `metadata.google.internal.`) are a
 	// different hostname string; Node does not strip them.
 	const host = hostname.toLowerCase().replace(/\.$/, '');

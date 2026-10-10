@@ -1379,6 +1379,66 @@ test.serial('invalid project sandbox does not fall through to global true', asyn
 	}
 });
 
+test.serial('autoCommit defaults to off and reads true from project config', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const offDir = join(sandboxConfigTestDir, 'auto-commit-default');
+	const onDir = join(sandboxConfigTestDir, 'auto-commit-on');
+	mkdirSync(offDir, {recursive: true});
+	mkdirSync(onDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(onDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {autoCommit: true}}),
+			'utf-8',
+		);
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+
+		process.chdir(offDir);
+		process.env.NANOCODER_CONFIG_DIR = join(offDir, 'no-global');
+		reload();
+		t.false(getAppConfig().autoCommit);
+
+		process.chdir(onDir);
+		process.env.NANOCODER_CONFIG_DIR = join(onDir, 'no-global');
+		reload();
+		t.true(getAppConfig().autoCommit);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('non-boolean autoCommit is treated as off', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(sandboxConfigTestDir, 'auto-commit-bad');
+	mkdirSync(projectDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {autoCommit: 'yes'}}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = join(projectDir, 'no-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.false(getAppConfig().autoCommit);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
 // ============================================================================
 // lspServers
 // ============================================================================

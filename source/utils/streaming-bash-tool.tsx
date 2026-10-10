@@ -6,7 +6,11 @@ import {
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {
+	bashRunFailed,
+	distillBashResultForLLM,
+	executeBashCommand,
+} from '@/tools/execute-bash';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -104,10 +108,30 @@ export async function runStreamingBashTool(
 	const bashState = await promise;
 	setLiveComponent(null);
 
+	const llmContent = await distillBashResultForLLM(bashState, {
+		rerun: async narrowCommand => {
+			if (signal?.aborted) return null;
+			const rerun = executeBashCommand(narrowCommand, {signal});
+			setLiveComponent(
+				<BashProgress
+					key={generateKey(`${keyPrefix}-${toolCall.id}-rerun`)}
+					executionId={rerun.executionId}
+					command={narrowCommand}
+					isLive={true}
+				/>,
+			);
+			try {
+				return await rerun.promise;
+			} finally {
+				setLiveComponent(null);
+			}
+		},
+	});
+
 	const content = await appendPostToolUseOutput(
 		toolCall.function.name,
 		parsedArgs,
-		formatBashResultForLLM(bashState),
+		llmContent,
 	);
 
 	return {
@@ -117,6 +141,7 @@ export async function runStreamingBashTool(
 			role: 'tool' as const,
 			name: toolCall.function.name,
 			content,
+			isError: bashRunFailed(bashState),
 		},
 		bashState,
 	};
