@@ -4,7 +4,8 @@
  */
 
 import {EventEmitter} from 'node:events';
-import {ChildProcess, spawn} from 'child_process';
+import type {ChildProcess} from 'child_process';
+import spawn from 'cross-spawn';
 import {createChildLogger} from '@/utils/logging';
 import {
 	CodeAction,
