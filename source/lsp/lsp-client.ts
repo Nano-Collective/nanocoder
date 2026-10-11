@@ -45,6 +45,19 @@ interface PendingRequest {
 	timeoutId: NodeJS.Timeout;
 }
 
+/**
+ * What an unexpected server exit looked like. `stderrTail` is the last output
+ * the server wrote before dying — usually the stack trace that explains why.
+ */
+export interface LSPCrashInfo {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+	stderrTail: string;
+}
+
+/** How much of a server's stderr is kept for crash reports. */
+const MAX_STDERR_TAIL_CHARS = 4 * 1024;
+
 const logger = createChildLogger({module: 'lsp-client'});
 
 export class LSPClient extends EventEmitter {
@@ -55,6 +68,9 @@ export class LSPClient extends EventEmitter {
 	private initialized: boolean = false;
 	private serverCapabilities: ServerCapabilities | null = null;
 	private openDocuments: Map<string, number> = new Map(); // uri -> version
+	private stderrTail: string = '';
+	/** Set by stop(), so an exit we asked for is not reported as a crash. */
+	private stopping: boolean = false;
 
 	constructor(private config: LSPServerConfig) {
 		super();
@@ -66,26 +82,49 @@ export class LSPClient extends EventEmitter {
 	async start(): Promise<InitializeResult> {
 		return new Promise((resolve, reject) => {
 			try {
-				this.process = spawn(this.config.command, this.config.args || [], {
+				this.stopping = false;
+				this.stderrTail = '';
+				const child = spawn(this.config.command, this.config.args || [], {
 					stdio: ['pipe', 'pipe', 'pipe'],
 					env: {...process.env, ...this.config.env},
 				});
+				this.process = child;
 
-				this.process.stdout?.on('data', (data: Buffer) => {
+				child.stdout?.on('data', (data: Buffer) => {
 					this.handleData(data.toString());
 				});
 
-				this.process.stderr?.on('data', (_data: Buffer) => {});
+				// Kept rather than discarded: when a server dies, its last stderr
+				// is usually the only explanation of why.
+				child.stderr?.on('data', (data: Buffer) => {
+					this.stderrTail = (this.stderrTail + data.toString()).slice(
+						-MAX_STDERR_TAIL_CHARS,
+					);
+				});
 
-				this.process.on('error', error => {
-					this.emit('error', error);
+				// Writing to a server that has just died fails with EPIPE on stdin.
+				// Unhandled, that error event would take the whole process down;
+				// the exit handler below already reports the death itself.
+				child.stdin?.on('error', error => {
+					logger.debug(
+						{err: error, server: this.config.name},
+						'LSP stdin write failed',
+					);
+				});
+
+				child.on('error', error => {
+					this.failPendingRequests(
+						new Error(
+							`LSP server "${this.config.name}" failed: ${error.message}`,
+						),
+					);
+					// An 'error' emit with no listener throws, which would turn a
+					// missing binary into an uncaught exception.
+					if (this.listenerCount('error') > 0) this.emit('error', error);
 					reject(error);
 				});
 
-				this.process.on('exit', code => {
-					this.emit('exit', code);
-					this.initialized = false;
-				});
+				child.on('exit', (code, signal) => this.handleExit(code, signal));
 
 				// Initialize the server
 				this.initialize()
@@ -94,7 +133,15 @@ export class LSPClient extends EventEmitter {
 						this.initialized = true;
 						resolve(result);
 					})
-					.catch(reject);
+					.catch(error => {
+						// A server that failed to initialize can stay running (it
+						// may refuse `initialize` and keep waiting). Nobody will use
+						// it, so end it here — as a deliberate stop, so its exit is
+						// never reported as a crash of a server that never started.
+						this.stopping = true;
+						if (!child.killed) child.kill();
+						reject(error);
+					});
 			} catch (error) {
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
@@ -106,6 +153,7 @@ export class LSPClient extends EventEmitter {
 	 */
 	async stop(): Promise<void> {
 		if (!this.process) return;
+		this.stopping = true;
 
 		try {
 			// Send shutdown request
@@ -141,6 +189,11 @@ export class LSPClient extends EventEmitter {
 	 */
 	isReady(): boolean {
 		return this.initialized && this.process !== null && !this.process.killed;
+	}
+
+	/** The last stderr the server wrote, trimmed. */
+	getStderrTail(): string {
+		return this.stderrTail.trim();
 	}
 
 	/**
@@ -295,6 +348,9 @@ export class LSPClient extends EventEmitter {
 				})) as {items?: Diagnostic[]} | null;
 				return result?.items || [];
 			} catch (error) {
+				// A dead server is not "no diagnostics": let the crash surface
+				// instead of reporting the file as clean.
+				if (!this.isReady()) throw error;
 				// Fall back to cached diagnostics if pull not supported
 				logger.debug(
 					{err: error, uri},
@@ -307,6 +363,49 @@ export class LSPClient extends EventEmitter {
 	}
 
 	// Private methods
+
+	/**
+	 * The server process is gone. Anything still waiting on it will never get
+	 * an answer, so fail it now rather than at the 30s timeout, and report an
+	 * exit we did not ask for as a crash.
+	 */
+	private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+		const crashed = !this.stopping;
+		this.initialized = false;
+		this.process = null;
+		this.openDocuments.clear();
+
+		const status = signal ? `signal ${signal}` : `exit code ${code}`;
+		this.failPendingRequests(
+			new Error(
+				crashed
+					? `LSP server "${this.config.name}" crashed (${status})`
+					: `LSP server "${this.config.name}" stopped`,
+			),
+		);
+
+		if (crashed) {
+			const info: LSPCrashInfo = {
+				code,
+				signal,
+				stderrTail: this.getStderrTail(),
+			};
+			logger.warn(
+				{server: this.config.name, ...info},
+				'LSP server exited unexpectedly',
+			);
+			this.emit('crash', info);
+		}
+		this.emit('exit', code);
+	}
+
+	private failPendingRequests(error: Error): void {
+		for (const pending of this.pendingRequests.values()) {
+			clearTimeout(pending.timeoutId);
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+	}
 
 	private async initialize(): Promise<InitializeResult> {
 		const params: InitializeParams = {

@@ -983,6 +983,9 @@ test('LSPClient - getDiagnostics with capabilities handles errors', async t => {
 	(client as any).serverCapabilities = {
 		diagnosticProvider: {},
 	};
+	// A live server that rejects the pull request: falls back to [].
+	(client as any).initialized = true;
+	(client as any).process = {killed: false};
 
 	(client as any).sendRequest = async () => {
 		throw new Error('Not supported');
