@@ -996,6 +996,22 @@ test('LSPClient - getDiagnostics with capabilities handles errors', async t => {
 	t.deepEqual(result, []);
 });
 
+test('LSPClient - getDiagnostics rethrows when the server is gone', async t => {
+	const client = new LSPClient(createMockConfig());
+
+	(client as any).serverCapabilities = {
+		diagnosticProvider: {},
+	};
+	// Never started, or crashed: not ready, so the failure is not "no diagnostics".
+	(client as any).sendRequest = async () => {
+		throw new Error('LSP server "test-server" crashed (signal SIGKILL)');
+	};
+
+	await t.throwsAsync(client.getDiagnostics('file:///test.ts'), {
+		message: /crashed/,
+	});
+});
+
 // Additional edge cases
 test('LSPClient - handleMessage ignores response with non-existent request ID', t => {
 	const client = new LSPClient(createMockConfig());

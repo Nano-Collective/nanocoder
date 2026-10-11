@@ -4,7 +4,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {type LSPCrashInfo, LSPClient, type LSPServerConfig} from './lsp-client';
-import {LSPManager} from './lsp-manager';
+import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
+import {getLSPManager, LSPManager, resetLSPManager} from './lsp-manager';
 
 console.log(`\nlsp-crash.spec.ts`);
 
@@ -27,7 +28,9 @@ process.stdin.on('data', chunk => {
 		if (buf.length < end + 4 + len) return;
 		const msg = JSON.parse(buf.slice(end + 4, end + 4 + len));
 		buf = buf.slice(end + 4 + len);
-		if (msg.method === 'initialize' && process.env.FAKE_LSP_REFUSE_INIT) {
+		if (msg.method === 'initialize' && process.env.FAKE_LSP_DIE_ON_INIT) {
+			process.exit(3);
+		} else if (msg.method === 'initialize' && process.env.FAKE_LSP_REFUSE_INIT) {
 			// Like typescript-language-server without a usable TypeScript: refuse,
 			// but keep running.
 			reply(msg.id, undefined, {code: 1, message: 'no tsserver.js'});
@@ -154,6 +157,25 @@ test.serial(
 );
 
 test.serial(
+	'a server that dies during startup fails start(), not a crash',
+	async t => {
+		const client = new LSPClient({
+			...serverConfig,
+			env: {FAKE_LSP_DIE_ON_INIT: '1'},
+		});
+		let crashed = false;
+		client.on('crash', () => {
+			crashed = true;
+		});
+
+		await t.throwsAsync(client.start(), {
+			message: /fake-lsp" exited during startup \(exit code 3\)/,
+		});
+		t.false(crashed);
+	},
+);
+
+test.serial(
 	'the manager restarts a crashed server once, then leaves it down',
 	async t => {
 		const manager = new LSPManager({rootUri: `file://${fixtureDir}`});
@@ -168,6 +190,8 @@ test.serial(
 			return current !== undefined && current !== first && current.isReady();
 		});
 		t.true(manager.hasLanguageSupport('a.fake'));
+		// Restarted, so nothing is reported as down.
+		t.is(manager.getUnavailableReason('a.fake'), undefined);
 
 		serverProcess(clients.get('fake-lsp')!).kill('SIGKILL');
 		await waitFor(() => !clients.has('fake-lsp'));
@@ -176,6 +200,12 @@ test.serial(
 
 		t.deepEqual(manager.getConnectedServers(), []);
 		t.false(manager.hasLanguageSupport('a.fake'));
+		t.is(
+			manager.getUnavailableReason('a.fake'),
+			'Language server "fake-lsp" crashed (signal SIGKILL) and was not restarted.',
+		);
+		// A file type no server ever covered has no reason to report.
+		t.is(manager.getUnavailableReason('a.py'), undefined);
 		await manager.shutdown();
 	},
 );
@@ -209,3 +239,34 @@ test.serial('a crash drops the diagnostics that server published', async t => {
 	t.true(internals.diagnosticsCache.has('file:///x/b.ts'));
 	await manager.shutdown();
 });
+
+test.serial(
+	'lsp_get_diagnostics reports a crashed server, not an unsupported type',
+	async t => {
+		await resetLSPManager();
+		const manager = await getLSPManager({rootUri: `file://${fixtureDir}`});
+		await manager.initialize({autoDiscover: false, servers: [serverConfig]});
+		const clients = (manager as unknown as {clients: Map<string, LSPClient>})
+			.clients;
+
+		// Crash it past its one restart.
+		const first = clients.get('fake-lsp')!;
+		serverProcess(first).kill('SIGKILL');
+		await waitFor(() => {
+			const current = clients.get('fake-lsp');
+			return current !== undefined && current !== first && current.isReady();
+		});
+		serverProcess(clients.get('fake-lsp')!).kill('SIGKILL');
+		await waitFor(() => !clients.has('fake-lsp'));
+
+		const execute = getDiagnosticsTool.tool.execute as (
+			args: {path: string},
+			options: unknown,
+		) => Promise<string>;
+		const result = await execute({path: join(fixtureDir, 'a.fake')}, {});
+
+		t.regex(result, /fake-lsp" crashed \(signal SIGKILL\) and was not restarted/);
+		t.notRegex(result, /No language server available for file type/);
+		await resetLSPManager();
+	},
+);

@@ -62,6 +62,9 @@ export class LSPManager extends EventEmitter {
 	private rootUri: string;
 	private initialized: boolean = false;
 	private restartCounts: Map<string, number> = new Map(); // serverName -> restarts
+	// extension -> why its server is down, so a diagnostics call can say so
+	// instead of looking like the file type was never supported.
+	private unavailableReasons: Map<string, string> = new Map();
 	private shuttingDown: boolean = false;
 
 	constructor(config: LSPManagerConfig = {}) {
@@ -205,6 +208,14 @@ export class LSPManager extends EventEmitter {
 			.join('\n');
 		const restarts = this.restartCounts.get(config.name) ?? 0;
 		const canRestart = restarts < MAX_CRASH_RESTARTS && !this.shuttingDown;
+		this.markUnavailable(
+			config.languages,
+			`Language server "${config.name}" crashed (${status})${
+				canRestart
+					? ' and is restarting; try again shortly.'
+					: ' and was not restarted.'
+			}`,
+		);
 
 		logError(
 			`Language server "${config.name}" crashed (${status}).${
@@ -224,12 +235,33 @@ export class LSPManager extends EventEmitter {
 			return;
 		}
 		if (result.success) {
+			this.markAvailable(config.languages);
 			logInfo(`Language server "${config.name}" restarted.`);
 		} else {
+			this.markUnavailable(
+				config.languages,
+				`Language server "${config.name}" crashed (${status}) and could not be restarted: ${result.error}`,
+			);
 			logError(
 				`Language server "${config.name}" could not be restarted: ${result.error}`,
 			);
 		}
+	}
+
+	private markUnavailable(languages: string[], reason: string): void {
+		for (const lang of languages) this.unavailableReasons.set(lang, reason);
+	}
+
+	private markAvailable(languages: string[]): void {
+		for (const lang of languages) this.unavailableReasons.delete(lang);
+	}
+
+	/**
+	 * Why the language server for this file is down, when it crashed. Undefined
+	 * when it is running, or when no server was ever configured for the type.
+	 */
+	getUnavailableReason(filePath: string): string | undefined {
+		return this.unavailableReasons.get(extname(filePath).slice(1));
 	}
 
 	private dropDiagnosticsFor(languages: string[]): void {
@@ -256,6 +288,7 @@ export class LSPManager extends EventEmitter {
 		this.documentServers.clear();
 		this.diagnosticsCache.clear();
 		this.restartCounts.clear();
+		this.unavailableReasons.clear();
 		this.initialized = false;
 	}
 

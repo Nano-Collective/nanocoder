@@ -113,6 +113,9 @@ export class LSPClient extends EventEmitter {
 				});
 
 				child.on('error', error => {
+					// Node may still fire 'exit' after a spawn error; that exit is
+					// part of this failure, not a crash.
+					this.stopping = true;
 					this.failPendingRequests(
 						new Error(
 							`LSP server "${this.config.name}" failed: ${error.message}`,
@@ -368,19 +371,28 @@ export class LSPClient extends EventEmitter {
 	 * The server process is gone. Anything still waiting on it will never get
 	 * an answer, so fail it now rather than at the 30s timeout, and report an
 	 * exit we did not ask for as a crash.
+	 *
+	 * Only a server that finished starting can crash. One that dies during
+	 * startup (or never spawned) already failed start() through the rejected
+	 * `initialize` request; reporting it again as a crash would trigger a
+	 * restart of a server that never worked.
 	 */
 	private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
-		const crashed = !this.stopping;
+		const wasRunning = this.initialized;
+		const crashed = !this.stopping && wasRunning;
 		this.initialized = false;
 		this.process = null;
 		this.openDocuments.clear();
 
 		const status = signal ? `signal ${signal}` : `exit code ${code}`;
+		const name = `LSP server "${this.config.name}"`;
 		this.failPendingRequests(
 			new Error(
-				crashed
-					? `LSP server "${this.config.name}" crashed (${status})`
-					: `LSP server "${this.config.name}" stopped`,
+				this.stopping
+					? `${name} stopped`
+					: wasRunning
+						? `${name} crashed (${status})`
+						: `${name} exited during startup (${status})`,
 			),
 		);
 
