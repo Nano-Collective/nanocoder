@@ -41,8 +41,11 @@ interface FileToolApprovalOptions<Args> {
  * Creates an approval policy for file-mutation tools.
  * Returns false (no approval) if the tool is always-allowed or the current
  * mode is auto-accept/headless/architect; otherwise requires approval. In
- * auto-accept, a call `isIrreversible` flags still requires approval. (Yolo is
- * bypassed centrally by resolveToolApproval.)
+ * auto-accept, a call `isIrreversible` flags still requires approval.
+ * `alwaysAllow` deliberately wins over `isIrreversible`: pre-authorizing a
+ * tool covers all of its calls. resolveToolApproval checks the list before it
+ * reaches this policy, and the check here covers callers that skip it. (Yolo
+ * is bypassed centrally by resolveToolApproval.)
  *
  * Mode is supplied by the caller (the central approval resolver), never read
  * from a global.

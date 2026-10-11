@@ -198,7 +198,8 @@ const isIrreversibleFileOp = (args: FileOpArgs): boolean => {
 	if (typeof args.destination !== 'string') return false;
 
 	// lstat, so a symlink at the destination counts even when it dangles:
-	// rename replaces the link itself.
+	// rename replaces the link itself. This is read when approval is decided,
+	// not when the call runs, so it belongs here and not in the validator.
 	const destAbsPath = resolve(getSafeSessionCwd(), args.destination);
 	return lstatSync(destAbsPath, {throwIfNoEntry: false}) !== undefined;
 };
