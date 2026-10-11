@@ -1,4 +1,4 @@
-import {constants, existsSync} from 'node:fs';
+import {constants, existsSync, lstatSync} from 'node:fs';
 import {access, copyFile, mkdir, rename, rm, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {makeSimpleToolFormatter} from '@/components/simple-tool-formatter';
@@ -186,10 +186,29 @@ const fileOpValidator = async (
 	return {valid: true};
 };
 
+/**
+ * The calls auto-accept still confirms: a delete, and a move or copy that
+ * replaces whatever already sits at the destination. Neither shows a diff, and
+ * neither can be undone. Unknown operations fall through to move/copy, as they
+ * do in `executeFileOp`.
+ */
+const isIrreversibleFileOp = (args: FileOpArgs): boolean => {
+	if (args.operation === 'delete') return true;
+	if (args.operation === 'mkdir') return false;
+	if (typeof args.destination !== 'string') return false;
+
+	// lstat, so a symlink at the destination counts even when it dangles:
+	// rename replaces the link itself.
+	const destAbsPath = resolve(getSafeSessionCwd(), args.destination);
+	return lstatSync(destAbsPath, {throwIfNoEntry: false}) !== undefined;
+};
+
 export const fileOpTool: NanocoderToolExport = {
 	name: 'file_op' as const,
 	tool: fileOpCoreTool,
 	formatter: fileOpFormatter,
 	validator: fileOpValidator,
-	approval: createFileToolApproval('file_op'),
+	approval: createFileToolApproval('file_op', {
+		isIrreversible: isIrreversibleFileOp,
+	}),
 };

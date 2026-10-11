@@ -25,24 +25,37 @@ export function isFileMutationTool(toolName: string): boolean {
 	return fileMutationToolNames.has(toolName);
 }
 
+interface FileToolApprovalOptions<Args> {
+	/**
+	 * Whether a call destroys something that cannot be reviewed or undone, such
+	 * as a delete or an overwrite of an existing file. Auto-accept waives
+	 * approval for file edits, but these calls still prompt there, the same as
+	 * `execute_bash` (an `rm` through bash already asks). Headless has no one to
+	 * ask, and architect checkpoints every file mutation before it runs, so
+	 * neither is affected.
+	 */
+	isIrreversible?: (args: Args) => boolean;
+}
+
 /**
  * Creates an approval policy for file-mutation tools.
  * Returns false (no approval) if the tool is always-allowed or the current
- * mode is auto-accept/headless/architect; otherwise requires approval. (Yolo is
+ * mode is auto-accept/headless/architect; otherwise requires approval. In
+ * auto-accept, a call `isIrreversible` flags still requires approval. (Yolo is
  * bypassed centrally by resolveToolApproval.)
  *
  * Mode is supplied by the caller (the central approval resolver), never read
  * from a global.
  */
-export function createFileToolApproval(
+export function createFileToolApproval<Args = unknown>(
 	toolName: string,
-): (args: unknown, mode: DevelopmentMode) => boolean {
+	{isIrreversible}: FileToolApprovalOptions<Args> = {},
+): (args: Args, mode: DevelopmentMode) => boolean {
 	fileMutationToolNames.add(toolName);
 
-	return (_args, mode) => {
+	return (args, mode) => {
 		if (isNanocoderToolAlwaysAllowed(toolName)) return false;
-		return (
-			mode !== 'auto-accept' && mode !== 'headless' && mode !== 'architect'
-		);
+		if (mode === 'auto-accept') return isIrreversible?.(args) ?? false;
+		return mode !== 'headless' && mode !== 'architect';
 	};
 }
