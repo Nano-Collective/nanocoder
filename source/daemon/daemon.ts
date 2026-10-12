@@ -219,9 +219,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		// can await the same shutdown rather than racing it.
 		if (stopPromise) return stopPromise;
 		stopPromise = (async () => {
-			await watcher.stop();
-			cron.stop();
+			// Close admission synchronously, before awaiting watcher teardown.
+			// Already queued router callbacks must not start another run.
 			backpressure.dispose();
+			cron.stop();
+			const draining = skillDispatcher.stop();
+			await watcher.stop();
+			await draining;
 			await ipcServer.stop();
 			// MCP stdio servers are child processes with open pipes; left
 			// connected they keep the event loop alive and the daemon never

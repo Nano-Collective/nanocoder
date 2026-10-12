@@ -29,6 +29,24 @@ test.serial('getShutdownManager returns singleton', (t) => {
 	t.is(a, b);
 });
 
+test.serial('explicit timeout updates an existing singleton without losing handlers', async t => {
+	const manager = getShutdownManager({timeoutMs: 1});
+	let completed = false;
+	manager.register({
+		name: 'daemon-drain',
+		priority: 10,
+		async handler() {
+			await new Promise(resolve => setTimeout(resolve, 20));
+			completed = true;
+		},
+	});
+	t.is(getShutdownManager({timeoutMs: 100}), manager);
+	t.is(getShutdownManager(), manager);
+	await manager.gracefulShutdown();
+	t.true(completed);
+	t.is(exitCalled, 0);
+});
+
 test.serial('resetShutdownManager creates new instance', (t) => {
 	const a = getShutdownManager();
 	resetShutdownManager();
