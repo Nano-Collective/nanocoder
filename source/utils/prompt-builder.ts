@@ -3,6 +3,7 @@ import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
 import {getProfessionalTone} from '@/config/preferences';
+import {getProjectRoot} from '@/services/session-cwd';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -94,7 +95,7 @@ function generateSystemInfo(slim = false): string {
 
 	if (slim) {
 		return `## SYSTEM
-OS: ${getOSName()} | Shell: ${getDefaultShell()} | CWD: ${process.cwd()} | Date: ${dateStr}`;
+OS: ${getOSName()} | Shell: ${getDefaultShell()} | CWD: ${getProjectRoot()} | Date: ${dateStr}`;
 	}
 
 	return `## SYSTEM INFORMATION
@@ -104,12 +105,14 @@ OS Version: ${release()}
 Platform: ${platform()}
 Default Shell: ${getDefaultShell()}
 Home Directory: ${homedir()}
-Current Working Directory: ${process.cwd()}
+Current Working Directory: ${getProjectRoot()}
 Current Date: ${dateStr}`;
 }
 
+// The project root is the launch directory everywhere except inside an ACP
+// session's scope, where it is the `cwd` the client named for the session.
 function appendAgentsMd(prompt: string): string {
-	const agentsPath = join(process.cwd(), 'AGENTS.md');
+	const agentsPath = join(getProjectRoot(), 'AGENTS.md');
 	if (existsSync(agentsPath)) {
 		try {
 			const agentsContent = readFileSync(agentsPath, 'utf-8');

@@ -28,6 +28,7 @@ import {
 	consultPluginPermission,
 	withTrustedProjectPlugins,
 } from '@/plugins/host';
+import {runInSessionCwdScope} from '@/services/session-cwd';
 import {
 	getAllSubagentProgress,
 	type SubagentEvent,
@@ -174,8 +175,8 @@ export async function runAcpConversation(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
 	try {
-		return await withTrustedProjectPlugins(options.session.cwd, () =>
-			runTurn(options),
+		return await runInSessionCwdScope(options.session.cwdScope, () =>
+			withTrustedProjectPlugins(options.session.cwd, () => runTurn(options)),
 		);
 	} finally {
 		restoreApprovalHandler();
