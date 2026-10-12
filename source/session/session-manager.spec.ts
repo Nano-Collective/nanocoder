@@ -4,6 +4,7 @@ import {
 	readdir,
 	rm,
 	unlink,
+	utimes,
 	writeFile,
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -794,6 +795,40 @@ test.serial(
 		const sessions = await mgr2.listSessions();
 		t.is(sessions.length, 1);
 		t.is(sessions[0].title, 'Recent session');
+	},
+);
+
+test.serial(
+	'cleanupOrphanedArtifacts keeps artifacts of saved sessions without initialize()',
+	async t => {
+		const session = await manager.createSession({
+			title: 'Saved session',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+		const orphanId = '00000000-0000-4000-8000-000000000000';
+		const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+		await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+		await artifacts.writeArtifact(orphanId, 'implementation_plan', '# Orphan\n');
+
+		// Both directories are past the one-day grace period.
+		const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+		for (const id of [session.id, orphanId]) {
+			await utimes(join(testDir, 'artifacts', id), twoDaysAgo, twoDaysAgo);
+		}
+
+		// A fresh manager that never ran initialize(), as at startup with autosave off.
+		const fresh = new SessionManager(sessionsDir, artifacts);
+		await fresh.cleanupOrphanedArtifacts();
+
+		t.is(
+			await artifacts.readArtifact(session.id, 'implementation_plan'),
+			'# Plan\n',
+		);
+		t.is(await artifacts.readArtifact(orphanId, 'implementation_plan'), null);
 	},
 );
 

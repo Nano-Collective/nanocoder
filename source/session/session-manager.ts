@@ -288,6 +288,11 @@ export class SessionManager {
 	 */
 	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
 		try {
+			// The sessions directory is only resolved by initialize(), which a run
+			// with autosave off never calls. Without it the index cannot be read,
+			// every saved session looks unknown and its artifacts are swept.
+			if (!this.initialized) this.resolveSessionsDir();
+
 			let known: string[] = [];
 			try {
 				known = (await this.readIndex()).map(session => session.id);
