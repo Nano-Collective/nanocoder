@@ -3,7 +3,10 @@ import {
 	appendRelevantProjectContextWithCount,
 	type ProjectContextOptions,
 } from './project-context.js';
-import type {SemanticMemory} from './semantic-memory-manager.js';
+import type {
+	MemoryFileChange,
+	SemanticMemory,
+} from './semantic-memory-manager.js';
 
 const memory = (content: string): SemanticMemory => ({
 	id: content,
@@ -11,6 +14,33 @@ const memory = (content: string): SemanticMemory => ({
 	category: 'project',
 	timestamp: '2026-07-17T00:00:00.000Z',
 });
+
+const COMMIT = '8c21a3f9d0e4b5c6a7f8e9d0c1b2a3f4e5d6c7b8';
+
+const trackedMemory = (content: string, files: string[]): SemanticMemory => ({
+	...memory(content),
+	git: {
+		commit: COMMIT,
+		branch: 'main',
+		files: Object.fromEntries(files.map(file => [file, 'saved-hash'])),
+	},
+});
+
+async function injectWithChanges(
+	memories: SemanticMemory[],
+	changes: Record<string, MemoryFileChange[]>,
+	options: ProjectContextOptions = {},
+) {
+	return appendRelevantProjectContextWithCount(
+		'base prompt',
+		'auth',
+		{
+			findRelevantMemories: async () => memories,
+			findChangedFiles: async () => new Map(Object.entries(changes)),
+		},
+		options,
+	);
+}
 
 async function inject(
 	memories: SemanticMemory[],
@@ -175,4 +205,93 @@ test('appendRelevantProjectContextWithCount keeps the standard fence when conten
 		result.systemPrompt,
 		'base prompt\n\n## Project Context\n\n```\n- Auth uses Clerk.\n```',
 	);
+});
+
+test('appendRelevantProjectContextWithCount warns on a memory whose file changed since it was recorded', async t => {
+	const stale = trackedMemory('auth.ts refreshes tokens.', ['src/auth.ts']);
+	const fresh = trackedMemory('db.ts owns the pool.', ['src/db.ts']);
+
+	const result = await injectWithChanges([stale, fresh], {
+		[stale.id]: [{path: 'src/auth.ts', status: 'modified'}],
+	});
+
+	t.is(
+		result.systemPrompt,
+		'base prompt\n\n## Project Context\n\n```\n- [WARNING: recorded at 8c21a3f, src/auth.ts has changed since. Verify before trusting.] auth.ts refreshes tokens.\n- db.ts owns the pool.\n```',
+	);
+	t.is(result.memoryCount, 2);
+});
+
+test('appendRelevantProjectContextWithCount names deleted files and caps the listed ones', async t => {
+	const stale = trackedMemory('The data layer spans several modules.', [
+		'a.ts',
+		'b.ts',
+		'c.ts',
+		'd.ts',
+		'old.ts',
+	]);
+
+	const result = await injectWithChanges([stale], {
+		[stale.id]: [
+			{path: 'a.ts', status: 'modified'},
+			{path: 'b.ts', status: 'modified'},
+			{path: 'c.ts', status: 'modified'},
+			{path: 'd.ts', status: 'modified'},
+			{path: 'old.ts', status: 'deleted'},
+		],
+	});
+
+	t.is(
+		result.systemPrompt,
+		'base prompt\n\n## Project Context\n\n```\n- [WARNING: recorded at 8c21a3f, a.ts, b.ts, c.ts and 1 more have changed and old.ts has been deleted since. Verify before trusting.] The data layer spans several modules.\n```',
+	);
+});
+
+test('appendRelevantProjectContextWithCount counts the warning against the token budget', async t => {
+	const stale = trackedMemory('Use adapters.', ['src/auth.ts']);
+
+	const result = await injectWithChanges(
+		[stale],
+		{[stale.id]: [{path: 'src/auth.ts', status: 'modified'}]},
+		{tokenBudget: 14},
+	);
+
+	t.is(result.systemPrompt, 'base prompt');
+	t.is(result.memoryCount, 0);
+});
+
+test('appendRelevantProjectContextWithCount still injects memories when the freshness check fails', async t => {
+	const result = await appendRelevantProjectContextWithCount(
+		'base prompt',
+		'auth',
+		{
+			findRelevantMemories: async () => [
+				trackedMemory('Auth uses Clerk.', ['src/auth.ts']),
+			],
+			findChangedFiles: async () => {
+				throw new Error('git unavailable');
+			},
+		},
+	);
+
+	t.is(
+		result.systemPrompt,
+		'base prompt\n\n## Project Context\n\n```\n- Auth uses Clerk.\n```',
+	);
+	t.is(result.memoryCount, 1);
+});
+
+test('appendRelevantProjectContextWithCount skips the freshness check when nothing was recalled', async t => {
+	const result = await appendRelevantProjectContextWithCount(
+		'base prompt',
+		'auth',
+		{
+			findRelevantMemories: async () => [],
+			findChangedFiles: async () => {
+				throw new Error('should not check freshness without memories');
+			},
+		},
+	);
+
+	t.is(result.systemPrompt, 'base prompt');
 });

@@ -1,4 +1,4 @@
-import {type ChildProcess, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
@@ -6,6 +6,7 @@ import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
+import {signalProcessTree} from '@/utils/process-tree';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -105,7 +106,7 @@ export function runScript(
 			// process group.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
-			killProcessTree(child);
+			signalProcessTree(child);
 
 			// Force-kill the group if it refuses to die within a grace window.
 			// No `!child.killed` guard: Node sets that flag the moment a signal
@@ -114,11 +115,13 @@ export function runScript(
 			// the single-process case, the shell exiting does not mean its group
 			// is empty, and reaping a descendant that ignored SIGTERM is the
 			// whole point. Firing against an already-dead group is harmless:
-			// killProcessTree swallows the ESRCH, and it is unref'd so it never
-			// holds the process open.
-			setTimeout(() => {
-				killProcessTree(child, 'SIGKILL');
-			}, 1_000).unref();
+			// signalProcessTree swallows the ESRCH, and it is unref'd so it never
+			// holds the process open. Windows already used taskkill /F.
+			if (process.platform !== 'win32') {
+				setTimeout(() => {
+					signalProcessTree(child, 'SIGKILL');
+				}, 1_000).unref();
+			}
 
 			// Settle now rather than waiting for `exit`/`close`: neither is
 			// guaranteed to be prompt while a descendant holds an inherited
@@ -170,45 +173,6 @@ export function runScript(
 			});
 		});
 	});
-}
-
-/**
- * Terminate the spawned shell and its descendants.
- *
- * The child is spawned `detached` on Unix, making it the leader of its own
- * process group; signalling the negative PID kills the whole tree, so work the
- * tool backgrounded cannot survive the shell's timeout. Windows has no process
- * groups here, so we fall back to the single process: a descendant the tool
- * backgrounded keeps running to completion (the promise already settled, so
- * this leaks a stray process rather than hanging the call — documented
- * limitation; a Job Object / `taskkill /T` could close it).
- */
-function killProcessTree(
-	child: ChildProcess,
-	signal: NodeJS.Signals = 'SIGTERM',
-): void {
-	const pid = child.pid;
-	if (pid === undefined) return;
-
-	if (process.platform === 'win32') {
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-		return;
-	}
-
-	try {
-		process.kill(-pid, signal);
-	} catch {
-		// Group already gone (or never formed) — fall back to the lone process.
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-	}
 }
 
 /**
