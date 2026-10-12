@@ -1,9 +1,13 @@
 import childProcess from 'child_process';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {
 	buildDarwinNotificationArgs,
 	buildWindowsNotificationPayload,
 	getNotificationsConfig,
+	resolveNotificationIconPath,
 	sendNotification,
 	setNotificationsConfig,
 	setTerminalNotifierPathForTests,
@@ -596,4 +600,93 @@ test.serial('sendNotification logs to console when NANOCODER_DAEMON_PROCESS is s
 // Reset config after all tests
 test.after.always(() => {
 	setNotificationsConfig({enabled: false});
+});
+
+// ---------------------------------------------------------------------------
+// Candidate-layout resolution tests
+//
+// resolveNotificationIconPath() is the find(p => existsSync(p)) logic that lets
+// the optional notification icon be found from either build layout. A wrong
+// relative depth silently drops the icon (sendNotification falls back to the
+// notifier's own artwork), which is why it is easy to miss.
+// ---------------------------------------------------------------------------
+
+/** Build a package-shaped tree with plugins/vscode/media/icon.png. */
+function makeIconLayout(base: string): {iconPath: string} {
+	const mediaDir = join(base, 'plugins', 'vscode', 'media');
+	mkdirSync(mediaDir, {recursive: true});
+	const iconPath = join(mediaDir, 'icon.png');
+	writeFileSync(iconPath, 'png');
+	return {iconPath};
+}
+
+/** Build a package-shaped tree with assets/nanocoder-icon.png. */
+function makeAssetIconLayout(base: string): {iconPath: string} {
+	const assetsDir = join(base, 'assets');
+	mkdirSync(assetsDir, {recursive: true});
+	const iconPath = join(assetsDir, 'nanocoder-icon.png');
+	writeFileSync(iconPath, 'png');
+	return {iconPath};
+}
+
+test('resolveNotificationIconPath: uses ../../plugins for the nested tsc layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-tsc-'));
+	try {
+		const {iconPath} = makeIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist', 'utils')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: uses ../plugins for the flat rolldown layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-rolldown-'));
+	try {
+		const {iconPath} = makeIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: uses ../../assets for the nested tsc layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-tsc-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist', 'utils')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: uses ../assets for the flat rolldown layout', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-rolldown-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: prefers assets over plugins at the same depth', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-assets-pref-'));
+	try {
+		const {iconPath} = makeAssetIconLayout(base);
+		makeIconLayout(base);
+		t.is(resolveNotificationIconPath(join(base, 'dist', 'utils')), iconPath);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveNotificationIconPath: returns null when the icon is missing', t => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-icon-empty-'));
+	try {
+		const moduleDir = join(base, 'dist');
+		mkdirSync(moduleDir, {recursive: true});
+		t.is(resolveNotificationIconPath(moduleDir), null);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
 });

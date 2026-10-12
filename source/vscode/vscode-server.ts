@@ -3,11 +3,14 @@
  */
 
 import {readFile} from 'node:fs/promises';
+import {dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'crypto';
 import {WebSocket, WebSocketServer} from 'ws';
 import {BoundedMap} from '@/utils/bounded-map';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {resolvePackageJsonPath} from '@/utils/package-version';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	clearDiscoveryFile,
@@ -50,7 +53,7 @@ async function getCliVersion(): Promise<string> {
 
 	try {
 		const content = await readFile(
-			new URL('../../package.json', import.meta.url),
+			resolvePackageJsonPath(dirname(fileURLToPath(import.meta.url))),
 			'utf-8',
 		);
 		const packageJson = JSON.parse(content) as {version?: string};

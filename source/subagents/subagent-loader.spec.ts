@@ -1,8 +1,8 @@
 import test from 'ava';
-import {mkdirSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {SubagentLoader} from './subagent-loader.js';
+import {resolveBuiltInAgentsDir, SubagentLoader} from './subagent-loader.js';
 
 console.log('\nsubagent-loader.spec.ts');
 
@@ -155,5 +155,68 @@ Custom explore prompt.`,
 		t.false(agent?.source.isBuiltIn, 'Should not be marked as built-in');
 	} finally {
 		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Candidate-layout resolution tests
+//
+// resolveBuiltInAgentsDir() is the find(p => existsSync(p)) logic that lets the
+// built-in .md definitions be found from source, tsc, and flat-rolldown module
+// directories. The .md files are never compiled, so a wrong relative depth
+// silently drops the built-in `explore` agent from the TUI.
+// ---------------------------------------------------------------------------
+
+/** Build a repo-shaped tree with source/subagents/built-in/explore.md. */
+function makeBuiltInTree(base: string): {builtInDir: string} {
+	const builtInDir = join(base, 'source', 'subagents', 'built-in');
+	mkdirSync(builtInDir, {recursive: true});
+	writeFileSync(
+		join(builtInDir, 'explore.md'),
+		'---\nname: explore\ndescription: x\nmodel: inherit\n---\nbody',
+		'utf8',
+	);
+	return {builtInDir};
+}
+
+test('resolveBuiltInAgentsDir: prefers ./built-in when running from source', (t) => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-agents-src-'));
+	try {
+		const {builtInDir} = makeBuiltInTree(base);
+		t.is(resolveBuiltInAgentsDir(join(base, 'source', 'subagents')), builtInDir);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveBuiltInAgentsDir: finds source/ from the nested tsc dist layout', (t) => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-agents-tsc-'));
+	try {
+		const {builtInDir} = makeBuiltInTree(base);
+		t.is(resolveBuiltInAgentsDir(join(base, 'dist', 'subagents')), builtInDir);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveBuiltInAgentsDir: finds source/ from the flat rolldown dist layout', (t) => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-agents-rolldown-'));
+	try {
+		const {builtInDir} = makeBuiltInTree(base);
+		t.is(resolveBuiltInAgentsDir(join(base, 'dist')), builtInDir);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test('resolveBuiltInAgentsDir: falls back to the first candidate when missing', (t) => {
+	const base = mkdtempSync(join(tmpdir(), 'nanocoder-agents-empty-'));
+	try {
+		const moduleDir = join(base, 'dist');
+		mkdirSync(moduleDir, {recursive: true});
+
+		t.is(resolveBuiltInAgentsDir(moduleDir), join(moduleDir, 'built-in'));
+	} finally {
+		rmSync(base, {recursive: true, force: true});
 	}
 });

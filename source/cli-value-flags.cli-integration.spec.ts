@@ -22,9 +22,21 @@ const runtimeModules = {
 	}`,
 };
 const loader = `const modules = ${JSON.stringify(runtimeModules)};
+function matchModule(specifier) {
+	if (Object.hasOwn(modules, specifier)) return modules[specifier];
+	for (const [key, val] of Object.entries(modules)) {
+		if (key.startsWith('@/')) {
+			const sub = key.slice(2);
+			const regex = new RegExp(\`[/\\\\\\\\]source[/\\\\\\\\]\${sub}(?:[/\\\\\\\\]index)?(?:\\\\.[a-zA-Z]+)?$\`);
+			if (regex.test(specifier)) return val;
+		}
+	}
+	return undefined;
+}
 export function resolve(specifier, context, nextResolve) {
-	if (Object.hasOwn(modules, specifier)) {
-		return {url: 'data:text/javascript,' + encodeURIComponent(modules[specifier]), shortCircuit: true};
+	const matched = matchModule(specifier);
+	if (matched !== undefined) {
+		return {url: 'data:text/javascript,' + encodeURIComponent(matched), shortCircuit: true};
 	}
 	return nextResolve(specifier, context);
 }`;

@@ -60,6 +60,27 @@ const EVENT_MESSAGES: Record<
 	},
 };
 
+/**
+ * Resolve the optional notification icon across both build layouts and both
+ * package layouts:
+ *
+ * - assets/ ships in the npm package; plugins/ only exists in a checkout.
+ * - tsc:      module in `dist/utils/`    → `../../assets/…` or `../../plugins/…`
+ * - rolldown: module in the flat `dist/` → `../assets/…` or `../plugins/…`
+ *
+ * The icon is cosmetic, so a miss returns `null` rather than throwing.
+ * Exported so tests can drive the candidate logic with a temporary directory.
+ */
+export function resolveNotificationIconPath(moduleDir: string): string | null {
+	const candidates = [
+		join(moduleDir, '../../assets/nanocoder-icon.png'), // tsc, packaged asset -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../assets/nanocoder-icon.png'), // rolldown flat dist, packaged asset -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../../plugins/vscode/media/icon.png'), // tsc, checkout -- nosemgrep: path-join-resolve-traversal
+		join(moduleDir, '../plugins/vscode/media/icon.png'), // rolldown flat dist, checkout -- nosemgrep: path-join-resolve-traversal
+	];
+	return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
 // Resolve the icon path relative to this module's location
 let _iconPath: string | null | undefined;
 function getIconPath(): string | null {
@@ -69,12 +90,7 @@ function getIconPath(): string | null {
 	try {
 		const __filename = fileURLToPath(import.meta.url);
 		const __dirname = dirname(__filename);
-		// assets/ ships in the npm package; plugins/ only exists in a checkout.
-		const candidates = [
-			join(__dirname, '../../assets/nanocoder-icon.png'),
-			join(__dirname, '../../plugins/vscode/media/icon.png'),
-		];
-		_iconPath = candidates.find(candidate => existsSync(candidate)) ?? null;
+		_iconPath = resolveNotificationIconPath(__dirname);
 	} catch {
 		_iconPath = null;
 	}

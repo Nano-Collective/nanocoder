@@ -50,3 +50,13 @@ if [[ "$got" != "$version" ]]; then
 	exit 1
 fi
 echo "$bin --version = $version"
+
+# Verify contributors.json was copied into dist/commands/ by build.
+# /credits silently returns [] when this file is missing, so --version alone
+# would never catch it.
+contributors="$(dirname "$bin")/commands/contributors.json"
+if [[ ! -f "$contributors" ]]; then
+	echo "missing $contributors — run pnpm run build first" >&2
+	exit 1
+fi
+echo "data-file check: $contributors present"
