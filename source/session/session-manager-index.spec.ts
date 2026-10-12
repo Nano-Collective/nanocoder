@@ -1,6 +1,9 @@
+import {spawn} from 'node:child_process';
+import {existsSync} from 'node:fs';
 import {mkdtemp, readdir, readFile, rm, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {type Session, SessionManager} from './session-manager.js';
 
@@ -46,6 +49,67 @@ test.serial('concurrent saves from separate managers keep every index entry', as
 	t.deepEqual(await indexedIds(), saved.map(s => s.id).sort());
 	const entries = await readdir(sessionsDir);
 	t.false(entries.includes('sessions.json.lock'), 'the lock is released');
+});
+
+// The same race through real OS processes: each worker loads the production
+// SessionManager, waits at a file barrier until all of them are ready, then
+// saves one session at once.
+const WORKER = `
+import {existsSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const [managerPath, sessionsDir, barrierDir, tag] = process.argv.slice(2);
+const {SessionManager} = await import(pathToFileURL(managerPath).href);
+const manager = new SessionManager(sessionsDir);
+await manager.initialize();
+writeFileSync(join(barrierDir, tag + '.ready'), '');
+while (!existsSync(join(barrierDir, 'go'))) {
+	await new Promise(resolve => setTimeout(resolve, 2));
+}
+await manager.createSession({
+	title: tag,
+	messageCount: 1,
+	provider: 'test',
+	model: 'test-model',
+	workingDirectory: '/tmp/project',
+	messages: [{role: 'user', content: tag}],
+});
+`;
+
+test.serial('concurrent saves from separate processes keep every index entry', async t => {
+	t.timeout(120_000);
+	const workDir = await mkdtemp(join(tmpdir(), 'session-index-procs-'));
+	t.teardown(() => rm(workDir, {recursive: true, force: true}));
+	const workerPath = join(workDir, 'worker.mjs');
+	await writeFile(workerPath, WORKER);
+	const managerPath = fileURLToPath(new URL('./session-manager.ts', import.meta.url));
+	const tsx = fileURLToPath(import.meta.resolve('tsx'));
+	const tags = ['p0', 'p1', 'p2', 'p3'];
+
+	const exits = tags.map(
+		tag =>
+			new Promise<number | null>(resolveExit => {
+				const child = spawn(
+					process.execPath,
+					['--import', tsx, workerPath, managerPath, sessionsDir, workDir, tag],
+					{
+						env: {...process.env, NANOCODER_CONFIG_DIR: workDir},
+						stdio: 'ignore',
+					},
+				);
+				child.on('exit', resolveExit);
+			}),
+	);
+	while (!tags.every(tag => existsSync(join(workDir, `${tag}.ready`)))) {
+		await new Promise(resolveWait => setTimeout(resolveWait, 20));
+	}
+	await writeFile(join(workDir, 'go'), '');
+
+	t.deepEqual(await Promise.all(exits), [0, 0, 0, 0]);
+	const index = JSON.parse(
+		await readFile(join(sessionsDir, 'sessions.json'), 'utf-8'),
+	) as Session[];
+	t.deepEqual(index.map(s => s.title).sort(), tags);
 });
 
 test.serial('startup re-indexes a session file the index lost', async t => {
