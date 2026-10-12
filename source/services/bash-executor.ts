@@ -259,10 +259,7 @@ export class BashExecutor extends EventEmitter {
 				}
 
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) {
-					cleanupJailTmp();
-					return;
-				}
+				if (!this.executions.has(executionId)) return;
 
 				flushStreams();
 
@@ -284,10 +281,7 @@ export class BashExecutor extends EventEmitter {
 				}
 
 				// Only process if not already handled by cancel()
-				if (!this.executions.has(executionId)) {
-					cleanupJailTmp();
-					return;
-				}
+				if (!this.executions.has(executionId)) return;
 
 				flushStreams();
 
@@ -408,32 +402,50 @@ export class BashExecutor extends EventEmitter {
 			return;
 		}
 
-		if (onExit) {
-			proc.once('close', () => onExit());
-		}
-
 		// Initial SIGTERM
 		sendKillSignal('SIGTERM');
+
+		let pollInterval: NodeJS.Timeout | null = null;
+		let sigkillTimer: NodeJS.Timeout | null = null;
+		let safetyTimer: NodeJS.Timeout | null = null;
+		let completed = false;
+
+		const finish = () => {
+			if (completed) return;
+			completed = true;
+			if (pollInterval) clearInterval(pollInterval);
+			if (sigkillTimer) clearTimeout(sigkillTimer);
+			if (safetyTimer) clearTimeout(safetyTimer);
+			onExit?.();
+		};
+
+		// Poll liveness every 50ms so cleanup triggers as soon as all processes
+		// in the process group have exited.
+		pollInterval = setInterval(() => {
+			if (!isAlive()) {
+				finish();
+			}
+		}, 50);
+		pollInterval.unref();
 
 		// SIGKILL fallback after 2 seconds for anything that trapped or ignored
 		// SIGTERM. Gate on liveness only, not proc.killed: Node sets proc.killed
 		// on any successful proc.kill() call, including the SIGTERM above.
-		const sigkillTimer = setTimeout(() => {
+		sigkillTimer = setTimeout(() => {
 			if (isAlive()) {
 				sendKillSignal('SIGKILL');
-				const reapPoll = setInterval(() => {
-					if (!isAlive()) {
-						clearInterval(reapPoll);
-						onExit?.();
-					}
-				}, 50);
-				reapPoll.unref();
-				setTimeout(() => clearInterval(reapPoll), 1000).unref();
 			} else {
-				onExit?.();
+				finish();
 			}
 		}, 2000);
 		sigkillTimer.unref();
+
+		// Safety backstop: ensure cleanup runs even if a stubborn process
+		// or zombie remains alive/unreaped after SIGKILL.
+		safetyTimer = setTimeout(() => {
+			finish();
+		}, 10000);
+		safetyTimer.unref();
 	}
 
 	/**
