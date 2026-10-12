@@ -187,6 +187,12 @@ const executeGetDiagnostics = async (
 	if (args.path) {
 		// Check if we have LSP support for this file type
 		if (!lspManager.hasLanguageSupport(args.path)) {
+			// A crashed server is not the same as an unsupported file type: say
+			// so, rather than suggesting the type was never covered.
+			const reason = lspManager.getUnavailableReason(args.path);
+			if (reason) {
+				return `No diagnostics available for ${args.path}: ${reason}`;
+			}
 			return `No language server available for file type: ${args.path}. Try running with --vscode flag to use VS Code's TypeScript diagnostics.`;
 		}
 

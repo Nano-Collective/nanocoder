@@ -18,6 +18,7 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {signalProcessTree} from '@/utils/process-tree';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -344,8 +345,8 @@ export class BashExecutor extends EventEmitter {
 	 *
 	 * On Unix the child is spawned `detached`, so it leads its own process
 	 * group; signalling the negative PID reaches the whole group (the command
-	 * plus anything it spawned). Windows has no process groups here, so we fall
-	 * back to killing the single process.
+	 * plus anything it spawned). On Windows the child is `cmd.exe`, so
+	 * `taskkill /T` stops the program it started too.
 	 *
 	 * Sends SIGTERM first. If the process has not exited after a grace period
 	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
@@ -357,28 +358,6 @@ export class BashExecutor extends EventEmitter {
 			onExit?.();
 			return;
 		}
-
-		const sendKillSignal = (sig: 'SIGTERM' | 'SIGKILL') => {
-			if (isWindows) {
-				try {
-					proc.kill(sig);
-				} catch {
-					// Ignore if already dead
-				}
-				return;
-			}
-
-			try {
-				process.kill(-pid, sig);
-			} catch {
-				// Group already gone (or never formed) - fall back to the lone process.
-				try {
-					proc.kill(sig);
-				} catch {
-					// Process already exited; nothing to terminate.
-				}
-			}
-		};
 
 		// On Unix, probe the process group rather than the leader. Every command
 		// runs under a wrapping `sh`, which can exit (on SIGTERM, or on its own
@@ -403,7 +382,7 @@ export class BashExecutor extends EventEmitter {
 		}
 
 		// Initial SIGTERM
-		sendKillSignal('SIGTERM');
+		signalProcessTree(proc, 'SIGTERM');
 
 		let pollInterval: NodeJS.Timeout | null = null;
 		let sigkillTimer: NodeJS.Timeout | null = null;
@@ -433,7 +412,7 @@ export class BashExecutor extends EventEmitter {
 		// on any successful proc.kill() call, including the SIGTERM above.
 		sigkillTimer = setTimeout(() => {
 			if (isAlive()) {
-				sendKillSignal('SIGKILL');
+				signalProcessTree(proc, 'SIGKILL');
 			} else {
 				finish();
 			}

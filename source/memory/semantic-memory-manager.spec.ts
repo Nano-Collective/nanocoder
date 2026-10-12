@@ -1,7 +1,9 @@
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
+import {appendRelevantProjectContextWithCount} from './project-context.js';
 import {
 	isLockAbandoned,
 	SemanticMemoryManager,
@@ -9,6 +11,56 @@ import {
 
 async function createTempDir(): Promise<string> {
 	return fs.mkdtemp(path.join(os.tmpdir(), 'nanocoder-memory-'));
+}
+
+/** Runs git with the contributor's global and system config kept out. */
+function git(cwd: string, ...args: string[]): string {
+	return execFileSync('git', args, {
+		cwd,
+		encoding: 'utf8',
+		stdio: 'pipe',
+		env: {...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1'},
+	}).trim();
+}
+
+function commitAll(repo: string, message: string): void {
+	git(repo, 'add', '-A');
+	git(
+		repo,
+		'-c',
+		'user.email=test@example.com',
+		'-c',
+		'user.name=Test',
+		'-c',
+		'commit.gpgsign=false',
+		'commit',
+		'-q',
+		'-m',
+		message,
+	);
+}
+
+async function writeFiles(
+	root: string,
+	files: Record<string, string>,
+): Promise<void> {
+	for (const [file, content] of Object.entries(files)) {
+		await fs.mkdir(path.dirname(path.join(root, file)), {recursive: true});
+		await fs.writeFile(path.join(root, file), content, 'utf8');
+	}
+}
+
+/** A committed repo at `<dir>/repo`; memories are stored in `<dir>`. */
+async function createGitRepo(
+	files: Record<string, string>,
+): Promise<{dir: string; repo: string}> {
+	const dir = await createTempDir();
+	const repo = path.join(dir, 'repo');
+	await fs.mkdir(repo);
+	git(repo, 'init', '-q', '-b', 'main');
+	await writeFiles(repo, files);
+	commitAll(repo, 'init');
+	return {dir, repo};
 }
 
 test('SemanticMemoryManager stores and reloads repo-scoped memories', async t => {
@@ -274,6 +326,233 @@ test('SemanticMemoryManager rewrites a corrupt store on the next write', async t
 
 	const repaired = await manager.addMemory({content: 'Use adapters.'});
 	t.deepEqual(await manager.listMemories(), [repaired]);
+});
+
+// --- git snapshots and freshness -------------------------------------------
+// A memory about a file is only as current as that file. Each save records
+// the commit, branch and the content hash of every tracked file the memory
+// mentions, so recall can flag memories whose files have since changed.
+
+test('SemanticMemoryManager records commit, branch and hashes of tracked files a memory mentions', async t => {
+	const {dir, repo} = await createGitRepo({
+		'src/auth.ts': 'export const refresh = () => token;\n',
+		'src/db.ts': 'export const pool = createPool();\n',
+		'README.md': '# Project\n',
+	});
+	await writeFiles(repo, {'notes.md': 'untracked scratch notes\n'});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+
+	const memory = await manager.addMemory({
+		content:
+			'src/auth.ts refreshes tokens before retrying, and `db.ts` owns the pool. See notes.md and Node.js docs.',
+	});
+
+	t.deepEqual(memory.git, {
+		commit: git(repo, 'rev-parse', 'HEAD'),
+		branch: 'main',
+		files: {
+			'src/auth.ts': git(repo, 'hash-object', 'src/auth.ts'),
+			'src/db.ts': git(repo, 'hash-object', 'src/db.ts'),
+		},
+	});
+	const reloaded = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+	t.deepEqual(await reloaded.listMemories(), [memory]);
+});
+
+test('SemanticMemoryManager resolves file references from a subdirectory to repo-relative paths', async t => {
+	const {dir, repo} = await createGitRepo({
+		'packages/api/src/auth.ts': 'export const refresh = 1;\n',
+	});
+	const manager = new SemanticMemoryManager({
+		memoryDir: dir,
+		cwd: path.join(repo, 'packages', 'api'),
+	});
+
+	const memory = await manager.addMemory({
+		content: 'auth.ts refreshes tokens.',
+	});
+
+	t.deepEqual(Object.keys(memory.git?.files ?? {}), [
+		'packages/api/src/auth.ts',
+	]);
+});
+
+test('SemanticMemoryManager skips a bare file name that matches several tracked files', async t => {
+	const {dir, repo} = await createGitRepo({
+		'web/index.ts': 'export * from "./app";\n',
+		'server/index.ts': 'export * from "./main";\n',
+	});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+
+	const ambiguous = await manager.addMemory({
+		content: 'index.ts re-exports everything.',
+	});
+	const explicit = await manager.addMemory({
+		content: 'server/index.ts re-exports the server entry point.',
+	});
+
+	t.deepEqual(ambiguous.git?.files, {});
+	t.deepEqual(Object.keys(explicit.git?.files ?? {}), ['server/index.ts']);
+});
+
+test('SemanticMemoryManager saves without a git snapshot outside a repository', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const memory = await manager.addMemory({content: 'auth.ts uses Clerk.'});
+
+	t.is(memory.git, undefined);
+	t.deepEqual(await manager.listMemories(), [memory]);
+});
+
+test('SemanticMemoryManager saves without a git snapshot before the first commit', async t => {
+	const dir = await createTempDir();
+	const repo = path.join(dir, 'repo');
+	await fs.mkdir(repo);
+	git(repo, 'init', '-q', '-b', 'main');
+	await writeFiles(repo, {'auth.ts': 'export {};\n'});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+
+	const memory = await manager.addMemory({content: 'auth.ts uses Clerk.'});
+
+	t.is(memory.git, undefined);
+});
+
+test('SemanticMemoryManager leaves the branch out on a detached HEAD', async t => {
+	const {dir, repo} = await createGitRepo({'auth.ts': 'export {};\n'});
+	git(repo, 'checkout', '-q', '--detach');
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+
+	const memory = await manager.addMemory({content: 'auth.ts uses Clerk.'});
+
+	t.is(memory.git?.commit, git(repo, 'rev-parse', 'HEAD'));
+	t.is(memory.git?.branch, undefined);
+});
+
+test('findChangedFiles reports edited and deleted files, uncommitted ones included', async t => {
+	const {dir, repo} = await createGitRepo({
+		'src/auth.ts': 'export const refresh = 1;\n',
+		'src/db.ts': 'export const pool = 1;\n',
+		'src/cache.ts': 'export const cache = 1;\n',
+		'src/other.ts': 'export const other = 1;\n',
+	});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+	const edited = await manager.addMemory({content: 'src/auth.ts refreshes.'});
+	const deleted = await manager.addMemory({content: 'src/db.ts owns the pool.'});
+	const untouched = await manager.addMemory({
+		content: 'src/cache.ts is in-memory only.',
+	});
+
+	await writeFiles(repo, {
+		'src/auth.ts': 'export const refresh = 2;\n',
+		'src/other.ts': 'export const other = 2;\n',
+	});
+	await fs.unlink(path.join(repo, 'src/db.ts'));
+
+	const changes = await manager.findChangedFiles([edited, deleted, untouched]);
+
+	t.deepEqual(
+		[...changes],
+		[
+			[edited.id, [{path: 'src/auth.ts', status: 'modified'}]],
+			[deleted.id, [{path: 'src/db.ts', status: 'deleted'}]],
+		],
+	);
+});
+
+test('findChangedFiles does not flag a memory just because HEAD moved on', async t => {
+	const {dir, repo} = await createGitRepo({
+		'src/auth.ts': 'export const refresh = 1;\n',
+		'src/other.ts': 'export const other = 1;\n',
+	});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+	const memory = await manager.addMemory({content: 'src/auth.ts refreshes.'});
+
+	await writeFiles(repo, {'src/other.ts': 'export const other = 2;\n'});
+	commitAll(repo, 'unrelated change');
+
+	t.is((await manager.findChangedFiles([memory])).size, 0);
+});
+
+test('findChangedFiles ignores memories saved without a snapshot', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const memory = await manager.addMemory({content: 'auth.ts uses Clerk.'});
+
+	t.is((await manager.findChangedFiles([memory])).size, 0);
+});
+
+test('listMemories keeps a memory whose git snapshot is malformed and drops the snapshot', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	await manager.addMemory({content: 'Seed the store.'});
+	const store = (await fs.readdir(dir)).find(name => name.endsWith('.json'));
+	t.truthy(store);
+
+	const base = {category: 'project', timestamp: '2026-10-06T00:00:00.000Z'};
+	await fs.writeFile(
+		path.join(dir, store!),
+		JSON.stringify([
+			{...base, id: 'a', content: 'Wrong type.', git: {commit: 42, files: {}}},
+			{
+				...base,
+				id: 'b',
+				content: 'Escapes the repo.',
+				git: {commit: 'abc', files: {'../outside.ts': 'abc'}},
+			},
+			{
+				...base,
+				id: 'c',
+				content: 'Valid.',
+				git: {commit: 'abc', files: {'src/auth.ts': 'def'}},
+			},
+		]),
+		'utf8',
+	);
+
+	t.deepEqual(await manager.listMemories(), [
+		{...base, id: 'a', content: 'Wrong type.'},
+		{...base, id: 'b', content: 'Escapes the repo.'},
+		{
+			...base,
+			id: 'c',
+			content: 'Valid.',
+			git: {commit: 'abc', files: {'src/auth.ts': 'def'}},
+		},
+	]);
+});
+
+test('recalled project context warns about a memory whose file changed after it was saved', async t => {
+	const {dir, repo} = await createGitRepo({
+		'src/auth.ts': 'export const refresh = () => token;\n',
+	});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+	await manager.addMemory({
+		content: 'src/auth.ts refreshes the auth token before retrying.',
+	});
+	const recall = () =>
+		appendRelevantProjectContextWithCount('base prompt', 'auth token', manager);
+
+	t.is(
+		(await recall()).systemPrompt,
+		'base prompt\n\n## Project Context\n\n```\n- src/auth.ts refreshes the auth token before retrying.\n```',
+	);
+
+	await writeFiles(repo, {
+		'src/auth.ts': 'export const refresh = () => rotate(token);\n',
+	});
+	const commit = git(repo, 'rev-parse', '--short=7', 'HEAD');
+
+	t.is(
+		(await recall()).systemPrompt,
+		`base prompt\n\n## Project Context\n\n\`\`\`\n- [WARNING: recorded at ${commit}, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the auth token before retrying.\n\`\`\``,
+	);
 });
 
 // --- lock reclaim ----------------------------------------------------------

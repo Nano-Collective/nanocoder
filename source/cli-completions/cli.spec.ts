@@ -136,6 +136,18 @@ test.serial('enum flag values are completed by every shell', t => {
 	}
 });
 
+test.serial('bash does not offer subcommands as arbitrary flag values', t => {
+	const script = renderBashCompletion();
+	for (const flag of COMPLETION_FLAGS.filter(f => f.takesValue)) {
+		const patterns = [`--${flag.name}`, ...(flag.short ? [`-${flag.short}`] : [])];
+		const reply = flag.values?.length
+			? `COMPREPLY=( $(compgen -W "${flag.values.join(' ')}" -- "$cur") )`
+			: 'COMPREPLY=()';
+		const branch = `\t\t${patterns.join('|')})\n\t\t\t${reply}\n\t\t\treturn\n\t\t\t;;`;
+		t.true(script.includes(branch), `missing value handling for ${patterns.join('/')}`);
+	}
+});
+
 test.serial('scripts are rendered standalone for direct use', t => {
 	t.true(renderBashCompletion().endsWith('complete -F _nanocoder nanocoder\n'));
 	t.true(renderZshCompletion().startsWith('#compdef nanocoder'));
