@@ -1534,7 +1534,9 @@ test.serial(
 			t.true(lastRead().includes('kept = 1'));
 
 			(agent as any).sessions.delete(sessionId);
+			t.false((agent as any).sessions.has(sessionId));
 			await agent.loadSession({sessionId, cwd: dir, mcpServers: []});
+			t.true((agent as any).sessions.has(sessionId));
 			await sendText(agent, sessionId, 'read it');
 			t.true(lastRead().includes('kept = 1'));
 		});

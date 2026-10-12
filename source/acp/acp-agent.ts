@@ -617,6 +617,7 @@ export class AcpAgent implements Agent {
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
+		clearAcpReadStubs(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
