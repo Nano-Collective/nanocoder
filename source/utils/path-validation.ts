@@ -25,7 +25,9 @@ import path from 'node:path';
  * This function performs multiple security checks to ensure the path:
  * - Is not empty
  * - Does not contain directory traversal sequences (..)
- * - Is not an absolute path (Unix or Windows style)
+ * - Is not an absolute path (Unix or Windows style), unless it is inside
+ *   `containmentRoot`. That check resolves real paths, so absolute paths
+ *   touch the filesystem. Relative paths stay a pure string check.
  * - Does not contain null bytes (security exploit)
  * - Does not start with path separators
  *

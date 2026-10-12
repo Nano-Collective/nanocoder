@@ -418,6 +418,8 @@ test.serial('resolveFilePath: a symlinked root still rejects paths really outsid
 		symlinkSync(real, alias, 'junction');
 
 		t.false(isValidFilePath(join(base, 'outside', 'x.ts'), alias));
+		// A root that doesn't exist keeps its own path, it doesn't become `/`.
+		t.false(isValidFilePath(join(base, 'outside', 'x.ts'), join(base, 'gone')));
 		t.throws(() => resolveFilePath(join(base, 'outside', 'x.ts'), alias), {
 			message: /Invalid file path/,
 		});
