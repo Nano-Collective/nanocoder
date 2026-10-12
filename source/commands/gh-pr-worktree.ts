@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {lstatSync, mkdirSync, rmSync} from 'node:fs';
 import {basename, dirname, join, resolve} from 'node:path';
 import {execGh, execGit} from '@/tools/git/utils';
@@ -179,15 +180,28 @@ export async function createPrWorktree(
 		);
 	}
 
+	const fetchRef = `refs/nanocoder/pr-fetch/${randomUUID()}`;
+	let prHead: string;
 	try {
-		await git([
-			'-C',
-			root,
-			'fetch',
-			'--no-tags',
-			remote,
-			`refs/pull/${prNumber}/head`,
-		]);
+		try {
+			await git([
+				'-C',
+				root,
+				'fetch',
+				'--no-tags',
+				remote,
+				`refs/pull/${prNumber}/head:${fetchRef}`,
+			]);
+			prHead = await git([
+				'-C',
+				root,
+				'rev-parse',
+				'--verify',
+				`${fetchRef}^{commit}`,
+			]);
+		} finally {
+			await git(['-C', root, 'update-ref', '-d', fetchRef]);
+		}
 	} catch (error) {
 		throw new Error(
 			`Could not fetch PR #${prNumber} from ${repo}: ${errorMessage(error)}`,
@@ -203,7 +217,7 @@ export async function createPrWorktree(
 		mkdirSync(worktreePath);
 		directoryCreated = true;
 		phase = 'create local PR branch';
-		await git(['-C', root, 'branch', branch, 'FETCH_HEAD']);
+		await git(['-C', root, 'branch', branch, prHead]);
 		branchCreated = true;
 		phase = 'add Git worktree';
 		await git(['-C', root, 'worktree', 'add', worktreePath, branch]);

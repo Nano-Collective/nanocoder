@@ -349,6 +349,54 @@ test.serial('real Git worktree makes relative file reads use the PR head and pre
 	}
 });
 
+test.serial('another fetch cannot change the requested PR worktree head', async t => {
+	const f = localGitFixture();
+	try {
+		const otherHead = f.git(['-C', f.repo, 'rev-parse', 'main']);
+		await createPrWorktree('42', f.repo, {
+			execGit: async args => {
+				const result = await f.execGit(args);
+				if (args[2] === 'fetch') {
+					// Another terminal or worktree overwrites the shared FETCH_HEAD.
+					await f.execGit(['-C', f.repo, 'fetch', '--no-tags', '.', 'main']);
+				}
+				return result;
+			},
+			execGh: f.execGh,
+			changeDirectory: () => {},
+		});
+		t.is(f.git(['-C', f.repo, 'rev-parse', 'FETCH_HEAD']), otherHead);
+		t.is(f.git(['-C', f.worktree, 'rev-parse', 'HEAD']), f.prHead);
+		t.is(f.git(['-C', f.repo, 'for-each-ref', 'refs/nanocoder/pr-fetch/']), '');
+		t.is(f.git(['-C', f.repo, 'status', '--porcelain']), f.originalStatus);
+	} finally {
+		f.clean();
+	}
+});
+
+test.serial('failed PR head capture cleans up only its temporary fetch ref', async t => {
+	const f = localGitFixture();
+	const existingRef = 'refs/nanocoder/pr-fetch/existing';
+	try {
+		f.git(['-C', f.repo, 'update-ref', existingRef, f.prHead]);
+		await t.throwsAsync(createPrWorktree('42', f.repo, {
+			execGit: async args => {
+				const result = await f.execGit(args);
+				if (args[2] === 'fetch') throw new Error('fetch interrupted after updating ref');
+				return result;
+			},
+			execGh: f.execGh,
+			changeDirectory: () => {},
+		}), {message: /fetch interrupted after updating ref/});
+		t.is(f.git(['-C', f.repo, 'for-each-ref', '--format=%(refname)', 'refs/nanocoder/pr-fetch/']), existingRef);
+		t.false(existsSync(f.worktree));
+		t.is(f.git(['-C', f.repo, 'branch', '--list', 'nanocoder/pr-42']), '');
+		t.is(f.git(['-C', f.repo, 'status', '--porcelain']), f.originalStatus);
+	} finally {
+		f.clean();
+	}
+});
+
 test.serial('partial real Git setup failure removes its worktree but keeps pre-existing files', async t => {
 	const f = localGitFixture();
 	const preexisting = join(f.fixtureRoot, 'keep this folder');
@@ -372,6 +420,7 @@ test.serial('partial real Git setup failure removes its worktree but keeps pre-e
 		);
 		t.false(existsSync(f.worktree));
 		t.is(f.git(['-C', f.repo, 'branch', '--list', 'nanocoder/pr-42']), '');
+		t.is(f.git(['-C', f.repo, 'for-each-ref', 'refs/nanocoder/pr-fetch/']), '');
 		t.is(f.git(['-C', f.repo, 'status', '--porcelain']), f.originalStatus);
 		t.is(readFileSync(marker, 'utf8'), 'pre-existing data');
 	} finally {
