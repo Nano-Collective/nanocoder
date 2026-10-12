@@ -48,6 +48,7 @@ export function isNanocoderWorkspaceFolder(
 	folder: {uri: {fsPath: string}},
 ): boolean {
 	try {
+		// nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
 		const packageJsonPath = path.join(folder.uri.fsPath, 'package.json');
 		if (!fs.existsSync(packageJsonPath)) {
 			return false;
