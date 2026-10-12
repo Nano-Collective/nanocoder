@@ -6,7 +6,7 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, Webv
 
 
 import { NanocoderAcpClient } from './acp-client';
-import { DiffManager } from './diff-manager';
+import { DiffManager, diffChangeId } from './diff-manager';
 import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
@@ -107,6 +107,9 @@ export class ChatWebviewProvider
 		};
 
 		this._acpClient.onConnectionReady = () => {
+			// A fresh handshake means a new agent process; diffs recorded against
+			// the previous connection can no longer be applied to its session.
+			void this._diffManager.clearPendingChanges();
 			this._initializeSessionIfReady();
 		};
 	}
@@ -116,9 +119,10 @@ export class ChatWebviewProvider
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
+					const toolCallId = update.toolCallId || payload.toolCallId || 'change';
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
+						id: diffChangeId(toolCallId, block.path),
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -204,6 +208,7 @@ export class ChatWebviewProvider
 		this._planReview.reset();
 		this._artifacts.reset();
 		this.postArtifacts();
+		void this._diffManager.clearPendingChanges();
 	}
 
 	private postArtifacts(): void {
@@ -324,8 +329,9 @@ export class ChatWebviewProvider
 						this._acpClient.resolvePermission(message.toolCallId, message.optionId);
 						break;
 					case 'showDiff':
-						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
-						this._diffManager.showDiff(message.toolCallId);
+						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId} (${message.filePath})`);
+						// Chat-initiated: keep focus where the user is, not the terminal.
+						this._diffManager.showDiff(diffChangeId(message.toolCallId, message.filePath), false);
 						break;
 
 					case 'setMode':
@@ -363,6 +369,7 @@ export class ChatWebviewProvider
 						this._planReview.reset();
 						this._artifacts.reset();
 						this.postArtifacts();
+						void this._diffManager.clearPendingChanges();
 						this._discardQueuedPrompts('resume session');
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {

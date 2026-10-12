@@ -305,6 +305,8 @@ export interface WebviewMessageResolveTool {
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
+	/** The file this card represents; one tool call can carry several diffs. */
+	filePath: string;
 }
 
 
