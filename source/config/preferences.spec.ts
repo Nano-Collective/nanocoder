@@ -2212,7 +2212,24 @@ test.serial(
 				t.fail('should not persist when refusing');
 			},
 		});
-		t.deepEqual(result, {trusted: false, persisted: false});
+		t.deepEqual(result, {trusted: false, persisted: false, changed: false});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({
+				trustedDirectories: [{path: dir, fingerprint: 'old'}],
+			}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, changed: true});
 	},
 );
 

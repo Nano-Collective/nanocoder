@@ -1,6 +1,8 @@
 import {Box, Text} from 'ink';
+import {useMemo} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {loadPreferences, wasDirectoryTrusted} from '@/config/preferences';
 import {describeProjectTrust} from '@/config/project-trust';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -23,7 +25,13 @@ export default function SecurityDisclaimer({
 }: SecurityDisclaimerProps) {
 	const boxWidth = useTerminalWidth();
 	const colors = getThemeColors(defaultTheme);
-	const summary = describeProjectTrust(directory).summary;
+	const {summary, changed} = useMemo(
+		() => ({
+			summary: describeProjectTrust(directory).summary,
+			changed: wasDirectoryTrusted(directory, loadPreferences()),
+		}),
+		[directory],
+	);
 
 	// Inline item type kept close to usage to limit scope and improve readability
 	const items: {label: string; value: SecurityDisclaimerOption}[] = [
@@ -59,6 +67,11 @@ export default function SecurityDisclaimer({
 				flexDirection="column"
 				marginBottom={1}
 			>
+				{changed ? (
+					<Text color={colors.warning}>
+						This folder changed since you trusted it.
+					</Text>
+				) : null}
 				<Text bold color={colors.warning}>
 					Do you trust the files in this folder?
 				</Text>

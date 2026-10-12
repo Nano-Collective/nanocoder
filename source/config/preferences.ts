@@ -199,6 +199,21 @@ export function isDirectoryTrusted(
 	});
 }
 
+/**
+ * True if `directory` has any trust entry, even one whose fingerprint no
+ * longer matches. Lets callers say "changed since you trusted it" instead
+ * of a plain "not trusted".
+ */
+export function wasDirectoryTrusted(
+	directory: string,
+	preferences: UserPreferences,
+): boolean {
+	const resolved = path.resolve(directory); // nosemgrep
+	return (preferences.trustedDirectories ?? []).some(
+		entry => path.resolve(trustPath(entry)) === resolved, // nosemgrep
+	);
+}
+
 /** Record this folder, including a fingerprint of what it will run. */
 export function grantDirectoryTrust(
 	preferences: UserPreferences,
@@ -217,6 +232,8 @@ export interface DirectoryTrustResult {
 	trusted: boolean;
 	/** True if this call persisted a new trust entry (env-var bypass only). */
 	persisted: boolean;
+	/** True if the folder was trusted before but has changed since. */
+	changed?: boolean;
 }
 
 export interface DirectoryTrustDeps {
@@ -232,8 +249,9 @@ export interface DirectoryTrustDeps {
  * `--trust-directory` flag); it never persists, matching the interactive
  * disclaimer's per-run nature. A directory is trusted only when its saved
  * fingerprint still matches what the folder will run (see
- * `describeProjectTrust`). A path with no fingerprint, or an old fingerprint, is not
- * trusted. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
+ * `describeProjectTrust`). A path with no fingerprint, or an old
+ * fingerprint, is not trusted, and `changed` is set so the caller can say
+ * so. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(
 	directory: string,
@@ -252,7 +270,11 @@ export function ensureDirectoryTrust(
 		return {trusted: true, persisted: true};
 	}
 
-	return {trusted: false, persisted: false};
+	return {
+		trusted: false,
+		persisted: false,
+		changed: wasDirectoryTrusted(directory, preferences),
+	};
 }
 
 export function updateLastUsed(provider: string, model: string): void {

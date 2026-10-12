@@ -27,7 +27,11 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
-import {isDirectoryTrusted, loadPreferences} from '@/config/preferences';
+import {
+	isDirectoryTrusted,
+	loadPreferences,
+	wasDirectoryTrusted,
+} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
@@ -246,10 +250,15 @@ export async function installAutoStart(
 	// trustedDirectories, that start will fail its own trust gate forever.
 	// Install still succeeds - the file is useful once the project is
 	// trusted - but the result names both ways to fix it.
-	const trusted = isDirectoryTrusted(opts.projectRoot, loadPreferences());
+	const preferences = loadPreferences();
+	const trusted = isDirectoryTrusted(opts.projectRoot, preferences);
 	const trustWarning = trusted
 		? ''
-		: ` Warning: ${resolve(opts.projectRoot)} is not trusted, so the ` +
+		: ` Warning: ${resolve(opts.projectRoot)} ` +
+			(wasDirectoryTrusted(opts.projectRoot, preferences)
+				? 'changed since you trusted it'
+				: 'is not trusted') +
+			`, so the ` +
 			`installed service will fail to start until you run \`nanocoder\` here ` +
 			`once to accept the trust disclaimer, or pass --trust-directory to ` +
 			`\`nanocoder daemon start\`.`;
