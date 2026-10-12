@@ -112,3 +112,24 @@ test('editing a plugin changes the fingerprint without changing the count', t =>
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('editing a hook matcher or timeout changes the fingerprint', t => {
+	const root = tempRoot();
+	try {
+		const file = join(root, 'agents.config.json');
+		const write = (hook: object) =>
+			writeFileSync(
+				file,
+				JSON.stringify({nanocoder: {hooks: {'post-tool-use': [hook]}}}),
+			);
+		write({command: 'echo hi', matchTools: ['read_file']});
+		const before = describeProjectTrust(root);
+		write({command: 'echo hi', matchTools: ['execute_bash'], timeout: 60000});
+		const after = describeProjectTrust(root);
+
+		t.is(after.otherHooks, 1);
+		t.not(before.fingerprint, after.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});

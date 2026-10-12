@@ -91,12 +91,13 @@ function listHooks(
 	let sessionStart = 0;
 	let other = 0;
 	for (const event of HOOK_EVENTS) {
-		const commands = hookCommands(hooks[event]);
-		for (const command of commands) {
-			lines.push(`hook ${event} ${command}`);
+		const entries = hookEntries(hooks[event]);
+		// The whole entry: matchTools, matchFiles, and timeout change what runs.
+		for (const entry of entries) {
+			lines.push(`hook ${event} ${JSON.stringify(entry)}`);
 		}
-		if (event === 'session-start') sessionStart += commands.length;
-		else other += commands.length;
+		if (event === 'session-start') sessionStart += entries.length;
+		else other += entries.length;
 	}
 	return {sessionStart, other};
 }
@@ -154,17 +155,15 @@ function listMcpServers(root: string, lines: string[]): number {
 	return Object.keys(servers).length;
 }
 
-function hookCommands(entries: unknown): string[] {
+function hookEntries(entries: unknown): object[] {
 	if (!Array.isArray(entries)) return [];
-	const commands: string[] = [];
-	for (const entry of entries) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const command = (entry as {command?: unknown}).command;
-		if (typeof command === 'string' && command.trim() !== '') {
-			commands.push(command);
+	return entries.filter((entry): entry is object => {
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+			return false;
 		}
-	}
-	return commands;
+		const command = (entry as {command?: unknown}).command;
+		return typeof command === 'string' && command.trim() !== '';
+	});
 }
 
 interface ProjectConfig {
