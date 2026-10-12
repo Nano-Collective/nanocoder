@@ -39,6 +39,26 @@ export async function resolveSpawnEnv(): Promise<NodeJS.ProcessEnv> {
 	return {...process.env, PATH: await resolveShellPath()};
 }
 
+/**
+ * Whether `folder` is the nanocoder repository itself, so its `dist/cli.js`
+ * is safe to run as the local development fallback. Any other project that
+ * happens to compile a script to `dist/cli.js` must not be picked up.
+ */
+export function isNanocoderWorkspaceFolder(
+	folder: {uri: {fsPath: string}},
+): boolean {
+	try {
+		const packageJsonPath = path.join(folder.uri.fsPath, 'package.json');
+		if (!fs.existsSync(packageJsonPath)) {
+			return false;
+		}
+		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+		return packageJson?.name === '@nanocollective/nanocoder';
+	} catch {
+		return false;
+	}
+}
+
 export async function findCliPath(): Promise<string | null> {
 	// 1. Check for a custom configured path
 	const config = vscode.workspace.getConfiguration('nanocoder');
@@ -51,6 +71,9 @@ export async function findCliPath(): Promise<string | null> {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (workspaceFolders) {
 		for (const folder of workspaceFolders) {
+			if (!isNanocoderWorkspaceFolder(folder)) {
+				continue;
+			}
 			const localCliPath = path.join(folder.uri.fsPath, 'dist', 'cli.js');
 			if (fs.existsSync(localCliPath)) {
 				// Use node to run the local JS file
