@@ -110,7 +110,18 @@ export function useSessionAutosave({
 	// initPromiseRef await (i.e. at execution time, not effect-fire time) so
 	// it sees the ID written by any prior save in the same chain.
 	const currentSessionIdRef = useRef<string | null>(currentSessionId);
+
+	// A /rename waiting to be written. It goes through runSave on the save
+	// chain, so a rename and an autosave can never overwrite each other.
+	const pendingTitleRef = useRef<string | null>(null);
+
 	useEffect(() => {
+		// runSave updates the ref before setting a session it created, so a
+		// mismatch here means /resume or /clear switched sessions. A rename
+		// meant for the old conversation must not land on the new one.
+		if (currentSessionIdRef.current !== currentSessionId) {
+			pendingTitleRef.current = null;
+		}
 		currentSessionIdRef.current = currentSessionId;
 	}, [currentSessionId]);
 
@@ -219,7 +230,9 @@ export function useSessionAutosave({
 				// rolling mirror of whatever was typed most recently.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
-				const title = deriveSessionTitle(persistedMessages);
+				const pendingTitle = pendingTitleRef.current;
+				const title = pendingTitle ?? deriveSessionTitle(persistedMessages);
+				const titleManuallySet = pendingTitle !== null ? true : undefined;
 
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);
@@ -230,7 +243,10 @@ export function useSessionAutosave({
 						// A manually-renamed title, or one the ACP agent generated,
 						// sticks - don't let the auto-derived title clobber either.
 						// Both flags are written to the same store this hook saves to.
-						if (!session.titleManuallySet && !session.titleGenerated) {
+						if (pendingTitle !== null) {
+							session.title = pendingTitle;
+							session.titleManuallySet = true;
+						} else if (!session.titleManuallySet && !session.titleGenerated) {
 							session.title = title;
 						}
 						session.provider = capturedProvider;
@@ -244,6 +260,7 @@ export function useSessionAutosave({
 						const newSession = await sessionManager.createSession({
 							id: liveSessionId,
 							title,
+							titleManuallySet,
 							messageCount: persistedMessages.length,
 							provider: capturedProvider,
 							model: capturedModel,
@@ -268,6 +285,7 @@ export function useSessionAutosave({
 					// conversation even if it's invoked several times in a row.
 					const newSession = await sessionManager.createSession({
 						title,
+						titleManuallySet,
 						messageCount: persistedMessages.length,
 						provider: capturedProvider,
 						model: capturedModel,
@@ -286,6 +304,10 @@ export function useSessionAutosave({
 					}
 				}
 
+				// A newer /rename that arrived mid-save stays pending.
+				if (pendingTitleRef.current === pendingTitle) {
+					pendingTitleRef.current = null;
+				}
 				lastSaveRef.current = Date.now();
 			} catch (error) {
 				console.warn('Failed to auto-save session:', error);
@@ -380,5 +402,17 @@ export function useSessionAutosave({
 		return () => manager.unregister(SHUTDOWN_HANDLER_NAME);
 	}, [flush]);
 
-	return {isSaving};
+	// Persist a /rename now. With no messages yet it stays pending and
+	// names the session when the first save creates it.
+	const renameSession = useCallback(
+		(name: string) => {
+			pendingTitleRef.current = name;
+			const save = () =>
+				runSave(messagesRef.current, providerRef.current, modelRef.current);
+			saveChainRef.current = saveChainRef.current.then(save, save);
+		},
+		[runSave],
+	);
+
+	return {isSaving, renameSession};
 }
