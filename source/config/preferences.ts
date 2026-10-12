@@ -231,8 +231,8 @@ export interface DirectoryTrustDeps {
  * `bypass` is the caller's own one-shot override (each entry point's own
  * `--trust-directory` flag); it never persists, matching the interactive
  * disclaimer's per-run nature. A directory is trusted only when its saved
- * fingerprint still matches the plugins, hooks, formatters, and MCP servers
- * in the folder. A path with no fingerprint, or an old fingerprint, is not
+ * fingerprint still matches what the folder will run (see
+ * `describeProjectTrust`). A path with no fingerprint, or an old fingerprint, is not
  * trusted. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(

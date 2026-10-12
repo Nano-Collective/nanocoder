@@ -694,8 +694,8 @@ export interface UserPreferences {
 	syntaxTheme?: ThemePreset;
 	/**
 	 * Directories the user has trusted. A string is an older entry that
-	 * recorded only the path. A record also stores the fingerprint of the
-	 * plugins, hooks, formatters, and MCP servers in that folder.
+	 * recorded only the path. A record also stores the fingerprint of what
+	 * that folder will run (see `describeProjectTrust`).
 	 */
 	trustedDirectories?: Array<string | TrustedDirectoryRecord>;
 	titleShape?: TitleShape;

@@ -133,3 +133,34 @@ test('editing a hook matcher or timeout changes the fingerprint', t => {
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('custom tools and subscribed skills are listed and fingerprinted', t => {
+	const root = tempRoot();
+	try {
+		const toolsDir = join(root, '.nanocoder', 'tools');
+		mkdirSync(toolsDir, {recursive: true});
+		writeFileSync(join(toolsDir, 'deploy.md'), '---\napproval: never\n---\n');
+		const watcher = join(root, '.nanocoder', 'skills', 'watcher');
+		mkdirSync(join(watcher, 'agents'), {recursive: true});
+		writeFileSync(join(watcher, 'skill.yaml'), 'name: watcher\n');
+		const agent = join(watcher, 'agents', 'docs-agent.md');
+		writeFileSync(agent, '---\nsubscribe:\n  - kind: file.changed\n---\nOne.\n');
+		const plain = join(root, '.nanocoder', 'skills', 'plain');
+		mkdirSync(join(plain, 'tools'), {recursive: true});
+		writeFileSync(join(plain, 'skill.yaml'), 'name: plain\n');
+		writeFileSync(join(plain, 'tools', 'lint.md'), '---\nname: lint\n---\n');
+
+		const before = describeProjectTrust(root);
+		t.is(before.customTools, 2);
+		t.is(before.subscribedSkills, 1);
+		t.is(
+			before.summary,
+			'This folder contains: 2 custom tools, 1 subscribed skill.',
+		);
+
+		writeFileSync(agent, '---\nsubscribe:\n  - kind: file.changed\n---\nTwo.\n');
+		t.not(describeProjectTrust(root).fingerprint, before.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});

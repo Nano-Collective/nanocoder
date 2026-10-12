@@ -9,6 +9,8 @@ export interface ProjectTrustSurface {
 	otherHooks: number;
 	mcpServers: number;
 	formatters: number;
+	customTools: number;
+	subscribedSkills: number;
 	fingerprint: string;
 	/** Null when this folder will not run any of the above. */
 	summary: string | null;
@@ -16,7 +18,8 @@ export interface ProjectTrustSurface {
 
 /**
  * What this folder will run once it is trusted: in-process plugins, hooks,
- * formatters, and project MCP servers. The fingerprint covers those files,
+ * formatters, project MCP servers, custom tools, and skills the daemon
+ * triggers on its own. The fingerprint covers those files,
  * so a later edit is visible even when the counts stay the same.
  */
 export function describeProjectTrust(directory: string): ProjectTrustSurface {
@@ -28,6 +31,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const hooks = listHooks(config, lines);
 	const formatters = listFormatters(config, lines);
 	const mcpServers = listMcpServers(root, lines);
+	const customTools = listCustomTools(root, lines);
+	const subscribedSkills = listSubscribedSkills(root, lines);
 
 	const parts = [
 		countLabel(plugins, 'plugin', 'plugins'),
@@ -35,6 +40,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(hooks.other, 'other hook', 'other hooks'),
 		countLabel(mcpServers, 'MCP server', 'MCP servers'),
 		countLabel(formatters, 'formatter', 'formatters'),
+		countLabel(customTools, 'custom tool', 'custom tools'),
+		countLabel(subscribedSkills, 'subscribed skill', 'subscribed skills'),
 	].filter((part): part is string => part !== null);
 
 	return {
@@ -43,6 +50,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		otherHooks: hooks.other,
 		mcpServers,
 		formatters,
+		customTools,
+		subscribedSkills,
 		fingerprint: createHash('sha256').update(lines.join('\n')).digest('hex'),
 		summary:
 			parts.length > 0 ? `This folder contains: ${parts.join(', ')}.` : null,
@@ -153,6 +162,70 @@ function listMcpServers(root: string, lines: string[]): number {
 		return 0;
 	}
 	return Object.keys(servers).length;
+}
+
+function listCustomTools(root: string, lines: string[]): number {
+	const skillsDir = path.join(root, '.nanocoder', 'skills');
+	const dirs = [
+		path.join(root, '.nanocoder', 'tools'),
+		...listDirs(skillsDir).map(name => path.join(skillsDir, name, 'tools')),
+	];
+	let count = 0;
+	for (const dir of dirs) {
+		for (const name of listFiles(dir).filter(file => file.endsWith('.md'))) {
+			const file = path.join(dir, name);
+			lines.push(`tool ${path.relative(root, file)} ${hashFile(file)}`);
+			count++;
+		}
+	}
+	return count;
+}
+
+/**
+ * Skill bundles with a `subscribe:` trigger, in `skill.yaml` or a member's
+ * frontmatter. The daemon runs those without asking, so the whole bundle
+ * is fingerprinted.
+ */
+function listSubscribedSkills(root: string, lines: string[]): number {
+	const skillsDir = path.join(root, '.nanocoder', 'skills');
+	let count = 0;
+	for (const name of listDirs(skillsDir)) {
+		const bundle = path.join(skillsDir, name);
+		const files = listFiles(bundle, true).map(file => path.join(bundle, file));
+		const contents = files.map(file => {
+			try {
+				return readFileSync(file, 'utf8');
+			} catch (error) {
+				return String(error);
+			}
+		});
+		if (!contents.some(text => /^\s*subscribe:/m.test(text))) continue;
+		lines.push(`skill ${name} ${hashText(contents.join('\0'))}`);
+		count++;
+	}
+	return count;
+}
+
+function listDirs(dir: string): string[] {
+	try {
+		return readdirSync(dir, {withFileTypes: true})
+			.filter(entry => entry.isDirectory())
+			.map(entry => entry.name)
+			.sort();
+	} catch {
+		return [];
+	}
+}
+
+function listFiles(dir: string, recursive = false): string[] {
+	try {
+		return readdirSync(dir, {withFileTypes: true, recursive})
+			.filter(entry => entry.isFile())
+			.map(entry => path.relative(dir, path.join(entry.parentPath, entry.name)))
+			.sort();
+	} catch {
+		return [];
+	}
 }
 
 function hookEntries(entries: unknown): object[] {
