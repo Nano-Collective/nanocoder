@@ -166,3 +166,71 @@ test.serial('sandbox on linux with bwrap writes inside the project and TMPDIR, b
 	}
 	await assertJail(t, 'linux');
 });
+
+test.serial(
+	'cancel preserves sandbox jail directory until child process group exits and cleans up afterwards',
+	async t => {
+		if (platform === 'win32' || (platform === 'linux' && !findBwrap())) {
+			t.pass();
+			return;
+		}
+
+		const previousSandbox = getAppConfig().sandbox;
+		const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'nc-test-jail-')));
+		getAppConfig().sandbox = true;
+		setProjectRoot(tmpDir);
+		setSessionCwd(tmpDir);
+
+		try {
+			const executor = createExecutor();
+			// Launch node in background (& wait) so the wrapper shell does not execve
+			// directly into node. When SIGTERM is sent to the group, sh exits immediately
+			// while the descendant traps SIGTERM, delays 300ms, and writes to $TMPDIR.
+			const cmd =
+				'node -e \'const fs = require("fs"); const path = require("path"); process.on("SIGTERM", () => { setTimeout(() => { try { fs.writeFileSync(path.join(process.env.TMPDIR || "/tmp", "sigterm.txt"), "done"); } catch {} process.exit(0); }, 300); }); console.log("READY"); setInterval(() => {}, 1000);\' & wait';
+			const {executionId, promise} = executor.execute(cmd);
+
+			for (let tick = 0; tick < 30; tick++) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+				const state = executor.getState(executionId);
+				if (state?.fullOutput.includes('READY')) break;
+			}
+
+			const jailTmp = executor.getJailTmp(executionId);
+			t.truthy(jailTmp, 'jailTmp must be defined when sandbox is enabled');
+
+			const cancelled = executor.cancel(executionId);
+			t.true(cancelled);
+
+			t.true(
+				existsSync(jailTmp!),
+				'jailTmp must still exist while background descendant is handling SIGTERM',
+			);
+
+			const result = await promise;
+			t.true(result.isComplete);
+
+			// Immediately after cancel resolves, the shell has closed but node is still in its 300ms delay.
+			t.true(
+				existsSync(jailTmp!),
+				'jailTmp must not be removed prematurely when wrapper shell exits before descendants',
+			);
+
+			// Wait for the background node process to write and exit (300ms delay + reap poll)
+			await new Promise(resolve => setTimeout(resolve, 700));
+
+			t.false(
+				existsSync(jailTmp!),
+				'jailTmp must be cleaned up after process group terminates',
+			);
+		} finally {
+			getAppConfig().sandbox = previousSandbox;
+			resetSessionCwd();
+			try {
+				rmSync(tmpDir, {recursive: true, force: true});
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	},
+);
