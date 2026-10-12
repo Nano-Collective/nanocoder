@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {ICON_CONTINUATION} from '@/components/ui/icons';
 import {useTheme} from '@/hooks/useTheme';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import {formatRelativeTime} from '@/utils/checkpoint-utils';
@@ -123,7 +124,7 @@ export function CheckpointListDisplay({
 									{isTrigger && (
 										<Box marginLeft={2}>
 											<Text color={colors.secondary}>
-												↳ {checkpoint.metadata.provider.model}
+												{ICON_CONTINUATION} {checkpoint.metadata.provider.model}
 											</Text>
 										</Box>
 									)}

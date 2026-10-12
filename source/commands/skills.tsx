@@ -11,6 +11,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {ICON_ERROR, ICON_LIST_ROW, ICON_WARNING} from '@/components/ui/icons';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -89,7 +90,7 @@ function SkillsListView({skills}: {skills: Skill[]}) {
 				>
 					<Box>
 						<Text color={colors.text} bold>
-							› {skill.name}
+							{ICON_LIST_ROW} {skill.name}
 						</Text>
 						<Text color={colors.secondary}>
 							{' '}
@@ -165,18 +166,18 @@ function SkillDetailView({skill}: {skill: Skill}) {
 					<>
 						{(skill.commands ?? []).map(c => (
 							<Text key={c.command.fullName} color={colors.secondary}>
-								› command: /{c.command.fullName} ({c.filePath})
+								{ICON_LIST_ROW} command: /{c.command.fullName} ({c.filePath})
 							</Text>
 						))}
 						{skill.subagent ? (
 							<Text color={colors.secondary}>
-								› agent: {skill.subagent.subagent.name} (
+								{ICON_LIST_ROW} agent: {skill.subagent.subagent.name} (
 								{skill.subagent.filePath})
 							</Text>
 						) : null}
 						{(skill.tools ?? []).map(t => (
 							<Text key={t.tool.name} color={colors.secondary}>
-								› tool: {t.tool.name} ({t.filePath})
+								{ICON_LIST_ROW} tool: {t.tool.name} ({t.filePath})
 							</Text>
 						))}
 					</>
@@ -190,7 +191,7 @@ function SkillDetailView({skill}: {skill: Skill}) {
 					</Text>
 					{skill.subscribe.map((trig, i) => (
 						<Text key={`${trig.kind}-${i}`} color={colors.secondary}>
-							› {trig.kind} → {trig.target ?? '(self)'}
+							{ICON_LIST_ROW} {trig.kind} → {trig.target ?? '(self)'}
 							{trig.confirm ? ' [confirm: plan mode]' : ''}
 						</Text>
 					))}
@@ -230,7 +231,9 @@ function SkillCheckView({report}: {report: SkillCheckReport}) {
 						<Text
 							color={issue.severity === 'error' ? colors.error : colors.warning}
 						>
-							{issue.severity === 'error' ? '✗ ' : '! '}{' '}
+							{issue.severity === 'error'
+								? `${ICON_ERROR} `
+								: `${ICON_WARNING} `}{' '}
 						</Text>
 						<Text color={colors.text}>{issue.message}</Text>
 					</Box>

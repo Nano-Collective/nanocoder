@@ -4,6 +4,7 @@ import {basename, dirname, join, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/index';
 import type {FormattingOptions, TextEdit} from '@/lsp/protocol';
@@ -362,7 +363,7 @@ const FormatDocumentFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ format_document</Text>
+				<Text color={colors.tool}>{ICON_TOOL} format_document</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>

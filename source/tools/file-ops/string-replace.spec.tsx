@@ -821,7 +821,7 @@ test('string_replace validator: handles file read errors', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		t.true(result.error.includes('does not exist') || result.error.includes('⚒'));
+		t.regex(result.error, /does not exist|Invalid file path/);
 	}
 });
 

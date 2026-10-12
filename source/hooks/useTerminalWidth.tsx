@@ -142,10 +142,11 @@ export const useResponsiveTerminal = () => {
 	const truncatePath = (
 		pathStr: string | undefined,
 		maxLength: number,
-	): string => {
-		if (!pathStr || pathStr.length <= maxLength) return pathStr || '';
-		return '...' + pathStr.slice(-(maxLength - 3));
-	};
+	): string =>
+		cliTruncate(pathStr ?? '', maxLength, {
+			position: 'start',
+			truncationCharacter: '...',
+		});
 
 	return {
 		boxWidth,

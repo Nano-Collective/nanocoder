@@ -4,6 +4,7 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
+import {ICON_TOOL} from '@/components/ui/icons';
 import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -11,6 +12,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Message, ToolCall} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {isValidationFailure} from '@/utils/tool-validation';
 
 /**
  * Cap on how many trailing messages are replayed into scrollback on resume.
@@ -76,14 +78,12 @@ function describeToolCall(toolCall: ToolCall): string {
 /** True when a tool result string represents an error the user should notice. */
 function isErrorResult(content: string | undefined): boolean {
 	if (!content) return false;
-	return (
-		content.startsWith('Error: ') || content.startsWith('⚒ Validation failed')
-	);
+	return content.startsWith('Error: ') || isValidationFailure(content);
 }
 
 /**
  * Compact one-line summary of a historical tool call and its result. Mirrors the
- * live compact-tool look (the ⚒ glyph in tool color) without re-running the
+ * live compact-tool look (the tool glyph in tool color) without re-running the
  * tool's formatter — replaying history must be side-effect free (formatters can
  * touch VS Code, the filesystem, etc.) and cheap.
  */
@@ -105,7 +105,7 @@ const HistoryToolSummary = memo(function HistoryToolSummary({
 	return (
 		<Box width={boxWidth}>
 			<Text color={failed ? colors.error : colors.tool}>
-				{'⚒'} {label}
+				{ICON_TOOL} {label}
 				{failed ? ' (failed)' : ''}
 			</Text>
 		</Box>

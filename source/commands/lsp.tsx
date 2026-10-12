@@ -1,5 +1,10 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {
+	ICON_BULLET,
+	ICON_LSP_NOT_READY,
+	ICON_LSP_READY,
+} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -74,15 +79,20 @@ export function LSP({status}: LSPProps) {
 					</Box>
 
 					{servers.map((server, index) => {
-						// Determine status icon and text based on readiness
-						const statusIcon = server.ready ? '🟢' : '🔴';
+						// Determine status icon and text based on readiness. We
+						// reuse the success/warning glyphs (single column) so the
+						// server row never inflates to 2 columns in CJK locales —
+						// the prior `🟢`/`🔴` were variable-width emoji.
+						const statusIcon = server.ready
+							? ICON_LSP_READY
+							: ICON_LSP_NOT_READY;
 						const statusText = server.ready ? 'Ready' : 'Initializing';
 
 						return (
 							<Box key={index} marginBottom={1}>
 								<Box flexDirection="column">
 									<Text color={colors.text}>
-										• {statusIcon}{' '}
+										{ICON_BULLET} {statusIcon}{' '}
 										<Text color={colors.primary}>{server.name}</Text>:{' '}
 										<Text color={colors.secondary}>({statusText})</Text>
 									</Text>

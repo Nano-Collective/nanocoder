@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {ICON_WARNING} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -166,7 +167,9 @@ function MemoryProposals({proposals}: {proposals: readonly MemoryProposal[]}) {
 						<ProposalEvidence proposal={proposal} />
 						{proposal.warnings.map(warning => (
 							<Box key={warning} marginLeft={2}>
-								<Text color={colors.warning}>⚠ {warning}</Text>
+								<Text color={colors.warning}>
+									{ICON_WARNING} {warning}
+								</Text>
 							</Box>
 						))}
 					</Box>

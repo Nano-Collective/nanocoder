@@ -209,7 +209,7 @@ const SearchFileContentsFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ search_file_contents</Text>
+				<Text color={colors.tool}>› search_file_contents</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Query: </Text>

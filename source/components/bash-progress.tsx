@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import {useContext, useEffect, useState} from 'react';
 
 import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {TOOL_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -114,7 +115,7 @@ export default function BashProgress({
 
 	const messageContent = (
 		<Box flexDirection="column">
-			<Text color={colors.tool}>⚒ execute_bash</Text>
+			<Text color={colors.tool}>{ICON_TOOL} execute_bash</Text>
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>

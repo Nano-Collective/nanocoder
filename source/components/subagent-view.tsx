@@ -5,6 +5,7 @@ import ChatQueue from '@/components/chat-queue';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTheme} from '@/hooks/useTheme';
@@ -75,7 +76,7 @@ export function SubagentView({
 				return (
 					<ToolMessage
 						key={`tool-${index}`}
-						message={`⚒ ${msg.name}: ${
+						message={`${ICON_TOOL} ${msg.name}: ${
 							msg.content.length > 100
 								? `${msg.content.slice(0, 100)}...`
 								: msg.content

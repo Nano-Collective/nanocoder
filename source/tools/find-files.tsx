@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
+import {ICON_TOOL} from '@/components/ui/icons';
 import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getContainedSessionCwd} from '@/services/session-cwd';
@@ -113,7 +114,7 @@ const FindFilesFormatter = React.memo(
 
 		const messageContent = (
 			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ find_files</Text>
+				<Text color={colors.tool}>{ICON_TOOL} find_files</Text>
 
 				<Box>
 					<Text color={colors.secondary}>Pattern: </Text>

@@ -282,6 +282,40 @@ test('useResponsiveTerminal truncatePath utility works correctly', t => {
 	process.stdout.columns = originalColumns;
 });
 
+test('useResponsiveTerminal truncatePath never splits an emoji or a colour code', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	let capturedTerminal: ReturnType<typeof useResponsiveTerminal> | null = null;
+
+	render(
+		React.createElement(ResponsiveTerminalConsumer, {
+			onRender: terminal => {
+				capturedTerminal = terminal;
+			},
+		}),
+	);
+
+	t.truthy(capturedTerminal);
+
+	// Slicing by UTF-16 unit used to leave half an emoji (a lone surrogate).
+	const loneSurrogate =
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+	const emojiPath = `/proj/${'\u{1F600}'.repeat(8)}`;
+	const truncatedEmoji = capturedTerminal!.truncatePath(emojiPath, 10);
+	t.false(loneSurrogate.test(truncatedEmoji));
+	t.true(truncatedEmoji.startsWith('...'));
+
+	// A colour code must not be cut in half or left open.
+	const coloured = '\u001B[31m/a/b/c/d/e/f/g\u001B[39m';
+	const truncatedColour = capturedTerminal!.truncatePath(coloured, 8);
+	t.true(truncatedColour.includes('e/f/g'));
+	t.true(truncatedColour.startsWith('\u001B[31m'));
+	t.true(truncatedColour.endsWith('\u001B[39m'));
+
+	process.stdout.columns = originalColumns;
+});
+
 test('useResponsiveTerminal provides boxWidth and actualWidth', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;

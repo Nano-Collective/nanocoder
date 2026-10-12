@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import {useEffect, useReducer} from 'react';
 
 import ToolMessage from '@/components/tool-message';
+import {ICON_CONTINUATION, ICON_TOOL, Icons} from '@/components/ui/icons';
 import {useTheme} from '@/hooks/useTheme';
 import {
 	getSubagentProgress,
@@ -98,7 +99,9 @@ export default function AgentProgress({
 
 	const messageContent = (
 		<Box flexDirection="column">
-			<Text color={colors.tool}>⚒ agent: {subagentName}</Text>
+			<Text color={colors.tool}>
+				{ICON_TOOL} agent: {subagentName}
+			</Text>
 
 			<Box flexShrink={1}>
 				<Text wrap="truncate-end" color={colors.primary}>
@@ -129,7 +132,7 @@ export default function AgentProgress({
 				<>
 					<Box>
 						<Text color={colors.secondary}>Status: </Text>
-						<Text color={dotColor}>●</Text>
+						<Text color={dotColor}>{Icons.statusDot}</Text>
 					</Box>
 					<Box>
 						<Text color={colors.secondary}>
@@ -144,12 +147,12 @@ export default function AgentProgress({
 				<Box flexDirection="column" marginLeft={2}>
 					{hiddenEarlierCount > 0 && (
 						<Text color={colors.secondary}>
-							↳ + {hiddenEarlierCount} earlier
+							{ICON_CONTINUATION} + {hiddenEarlierCount} earlier
 						</Text>
 					)}
 					{toolGroups.map((g, i) => (
 						<Text key={`${g.name}-${i}`} color={colors.secondary}>
-							↳ {g.name}
+							{ICON_CONTINUATION} {g.name}
 							{g.count > 1 ? ` (×${g.count})` : ''}
 						</Text>
 					))}

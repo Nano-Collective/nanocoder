@@ -1,5 +1,6 @@
 import React from 'react';
 import {InfoMessage} from '@/components/message-box';
+import {ICON_GOODBYE} from '@/components/ui/icons';
 import {Command} from '@/types/index';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -13,7 +14,7 @@ function createExitCommand(name: string, description: string): Command {
 
 			return Promise.resolve(
 				React.createElement(InfoMessage, {
-					message: 'Goodbye! 👋',
+					message: `Goodbye! ${ICON_GOODBYE}`,
 					hideTitle: true,
 				}),
 			);

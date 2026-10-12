@@ -1,3 +1,4 @@
+import {ICON_LIST_ROW} from '@/components/ui/icons';
 /**
  * /tools Command
  *
@@ -117,7 +118,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 			) : (
 				mcp.map(t => (
 					<Text key={t.name} color={colors.text}>
-						› {t.name}
+						{ICON_LIST_ROW} {t.name}
 						{t.server ? (
 							<Text color={colors.secondary}> ({t.server})</Text>
 						) : null}
@@ -135,7 +136,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 			) : (
 				custom.map(t => (
 					<Text key={t.name} color={colors.text}>
-						› {t.name}{' '}
+						{ICON_LIST_ROW} {t.name}{' '}
 						<Text color={colors.secondary}>
 							({t.ownerSkill ? `skill:${t.ownerSkill}, ` : ''}
 							{t.source})

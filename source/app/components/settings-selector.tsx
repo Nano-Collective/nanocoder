@@ -2,6 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import {type ReactNode, useMemo, useState} from 'react';
+import {Icons} from '@/components/ui/icons';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -169,11 +170,13 @@ function ThemeMiniPreview({
 			</Box>
 
 			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
-				<Text color={colors.tool}>⚒ read_file source/app.tsx</Text>
-				<Text color={colors.success}>⚒ Completed successfully</Text>
+				<Text color={colors.tool}>{Icons.tool} read_file source/app.tsx</Text>
+				<Text color={colors.success}>
+					{Icons.success} Completed successfully
+				</Text>
 				{!compact && (
 					<Text color={colors.warning}>
-						⚠ Review generated changes before commit
+						{Icons.warning} Review generated changes before commit
 					</Text>
 				)}
 			</Box>

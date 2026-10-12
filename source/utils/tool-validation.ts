@@ -22,6 +22,27 @@ export class ToolValidationError extends Error {
 	}
 }
 
+/** Opening words of every validation failure sent to the model. */
+const VALIDATION_FAILED_PREFIX = '! Validation failed';
+
+/**
+ * The prefix older versions wrote (`⚒ Validation failed`). Sessions saved
+ * before the change still contain it in their stored tool results, so a
+ * resumed session must keep recognising it.
+ */
+const LEGACY_VALIDATION_FAILED_PREFIX = '⚒ Validation failed';
+
+/**
+ * Whether tool-result content is a validation failure, in the current format
+ * or the one saved sessions from earlier versions use.
+ */
+export function isValidationFailure(content: string): boolean {
+	return (
+		content.startsWith(VALIDATION_FAILED_PREFIX) ||
+		content.startsWith(LEGACY_VALIDATION_FAILED_PREFIX)
+	);
+}
+
 /**
  * Render a validation failure into the string that goes back to the model.
  * Appends one line per structured detail when present.
@@ -30,7 +51,7 @@ export function formatValidationError(
 	error: string,
 	details?: ValidationErrorDetail[],
 ): string {
-	const base = `⚒ Validation failed: ${error}`;
+	const base = `${VALIDATION_FAILED_PREFIX}: ${error}`;
 	if (!details || details.length === 0) {
 		return base;
 	}

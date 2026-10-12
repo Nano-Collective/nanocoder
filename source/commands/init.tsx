@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
+import {ICON_BULLET, ICON_ERROR, ICON_SUCCESS} from '@/components/ui/icons';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -43,10 +44,14 @@ function InitSuccess({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.primary} bold>
-					✓ Nanocoder project initialized successfully!
+					{ICON_SUCCESS} Nanocoder project initialized successfully!
 				</Text>
 			</Box>
-			{preset && <Text color={colors.secondary}>• Preset: {preset}</Text>}
+			{preset && (
+				<Text color={colors.secondary}>
+					{ICON_BULLET} Preset: {preset}
+				</Text>
+			)}
 
 			{analysis && (
 				<>
@@ -55,17 +60,20 @@ function InitSuccess({
 							Project Analysis:
 						</Text>
 					</Box>
-					<Text color={colors.secondary}>• Type: {analysis.projectType}</Text>
 					<Text color={colors.secondary}>
-						• Primary Language: {analysis.primaryLanguage}
+						{ICON_BULLET} Type: {analysis.projectType}
+					</Text>
+					<Text color={colors.secondary}>
+						{ICON_BULLET} Primary Language: {analysis.primaryLanguage}
 					</Text>
 					{analysis.frameworks.length > 0 && (
 						<Text color={colors.secondary}>
-							• Frameworks: {analysis.frameworks.slice(0, 3).join(', ')}
+							{ICON_BULLET} Frameworks:{' '}
+							{analysis.frameworks.slice(0, 3).join(', ')}
 						</Text>
 					)}
 					<Text color={colors.secondary}>
-						• Files Analyzed: {analysis.totalFiles}
+						{ICON_BULLET} Files Analyzed: {analysis.totalFiles}
 					</Text>
 					<Box marginBottom={1} />
 				</>
@@ -79,7 +87,7 @@ function InitSuccess({
 
 			{created.map((item, index) => (
 				<Text key={index} color={colors.secondary}>
-					• {item}
+					{ICON_BULLET} {item}
 				</Text>
 			))}
 
@@ -92,7 +100,7 @@ function InitSuccess({
 					</Box>
 					{preserved.map(item => (
 						<Text key={item} color={colors.secondary}>
-							• {item}
+							{ICON_BULLET} {item}
 						</Text>
 					))}
 				</>
@@ -113,7 +121,7 @@ function InitSuccess({
 }
 
 function InitError({message}: {message: string}) {
-	return <ErrorMessage hideBox={true} message={`✗ ${message}`} />;
+	return <ErrorMessage hideBox={true} message={`${ICON_ERROR} ${message}`} />;
 }
 
 export const initCommand: Command = {
