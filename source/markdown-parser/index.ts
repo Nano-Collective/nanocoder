@@ -44,8 +44,8 @@ function _parseMarkdownCore(
 	text: string;
 	codeBlocks: string[];
 	inlineCodes: string[];
-	codePrefix: string;
-	inlinePrefix: string;
+	codeMarkers: string[];
+	inlineMarkers: string[];
 } {
 	// First decode HTML entities
 	let result = decodeHtmlEntities(text);
@@ -68,6 +68,8 @@ function _parseMarkdownCore(
 	// Step 3: Extract and protect code blocks and inline code with placeholders
 	const codeBlocks: string[] = [];
 	const inlineCodes: string[] = [];
+	const codeMarkers: string[] = [];
+	const inlineMarkers: string[] = [];
 
 	// Extract fenced code blocks (```language\ncode\n```) — also handles
 	// the case where there is no language tag and the opening fence is immediately
@@ -96,6 +98,7 @@ function _parseMarkdownCore(
 					theme: getSyntaxTheme(themeColors),
 				});
 				const placeholder = `${codePrefix}${codeBlocks.length}__`;
+				codeMarkers.push(placeholder);
 				codeBlocks.push(highlighted);
 				return placeholder;
 			} catch {
@@ -104,6 +107,7 @@ function _parseMarkdownCore(
 					dedented.trim().replace(/\t/g, '  '),
 				);
 				const placeholder = `${codePrefix}${codeBlocks.length}__`;
+				codeMarkers.push(placeholder);
 				codeBlocks.push(formatted);
 				return placeholder;
 			}
@@ -115,6 +119,7 @@ function _parseMarkdownCore(
 	result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {
 		const formatted = chalk.hex(themeColors.tool)(String(code).trim());
 		const placeholder = `${inlinePrefix}${inlineCodes.length}__`;
+		inlineMarkers.push(placeholder);
 		inlineCodes.push(formatted);
 		return placeholder;
 	});
@@ -163,7 +168,25 @@ function _parseMarkdownCore(
 		return chalk.hex(themeColors.secondary).italic(`> ${text}`);
 	});
 
-	return {text: result, codeBlocks, inlineCodes, codePrefix, inlinePrefix};
+	return {text: result, codeBlocks, inlineCodes, codeMarkers, inlineMarkers};
+}
+
+function _replaceMarkers(
+	text: string,
+	markers: string[],
+	values: string[],
+): string {
+	let result = '';
+	let cursor = 0;
+	for (const [index, marker] of markers.entries()) {
+		const markerIndex = text.indexOf(marker, cursor);
+		if (markerIndex === -1) continue;
+
+		result += text.slice(cursor, markerIndex);
+		result += values[index] ?? '';
+		cursor = markerIndex + marker.length;
+	}
+	return result + text.slice(cursor);
 }
 
 // Basic markdown parser for terminal — returns a single flat string
@@ -176,18 +199,11 @@ export function parseMarkdown(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
-		codePrefix,
-		inlinePrefix,
+		codeMarkers,
+		inlineMarkers,
 	} = _parseMarkdownCore(text, themeColors, width);
-	let result = processed;
-	result = result.replace(
-		new RegExp(`${codePrefix}(\\d+)__`, 'g'),
-		(_match, index: string) => codeBlocks[parseInt(index, 10)] || '',
-	);
-	result = result.replace(
-		new RegExp(`${inlinePrefix}(\\d+)__`, 'g'),
-		(_match, index: string) => inlineCodes[parseInt(index, 10)] || '',
-	);
+	let result = _replaceMarkers(processed, codeMarkers, codeBlocks);
+	result = _replaceMarkers(result, inlineMarkers, inlineCodes);
 	return result;
 }
 
@@ -202,33 +218,30 @@ export function parseMarkdownParts(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
-		codePrefix,
-		inlinePrefix,
+		codeMarkers,
+		inlineMarkers,
 	} = _parseMarkdownCore(text, themeColors, width);
 
 	// Restore inline code inside text segments (they stay with the text)
-	const withInline = processed.replace(
-		new RegExp(`${inlinePrefix}(\\d+)__`, 'g'),
-		(_match, index: string) => inlineCodes[parseInt(index, 10)] || '',
-	);
-
-	// Split on code block markers; split() with a capture group interleaves
-	// text and index strings: [text, idx, text, idx, ...]
-	const segments = withInline.split(new RegExp(`${codePrefix}(\\d+)__`));
+	const withInline = _replaceMarkers(processed, inlineMarkers, inlineCodes);
 	const parts: MarkdownPart[] = [];
+	let cursor = 0;
 
-	for (let i = 0; i < segments.length; i++) {
-		if (i % 2 === 0) {
-			// Even indices are text segments
-			const content = segments[i];
-			if (content) parts.push({type: 'text', content});
-		} else {
-			// Odd indices are captured code block indices
-			const idx = parseInt(segments[i] ?? '0', 10);
-			const codeContent = codeBlocks[idx];
-			if (codeContent) parts.push({type: 'code', content: codeContent});
-		}
+	for (const [index, marker] of codeMarkers.entries()) {
+		const markerIndex = withInline.indexOf(marker, cursor);
+		if (markerIndex === -1) continue;
+
+		const textContent = withInline.slice(cursor, markerIndex);
+		if (textContent) parts.push({type: 'text', content: textContent});
+
+		const codeContent = codeBlocks[index];
+		if (codeContent) parts.push({type: 'code', content: codeContent});
+
+		cursor = markerIndex + marker.length;
 	}
+
+	const trailingText = withInline.slice(cursor);
+	if (trailingText) parts.push({type: 'text', content: trailingText});
 
 	return parts;
 }

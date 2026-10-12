@@ -403,3 +403,30 @@ test('parseMarkdownParts preserves literal placeholder tokens alongside real cod
 	t.true(codeContent.includes('const value = "real code";'));
 	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_'));
 });
+
+test('parseMarkdownParts preserves namespaced literal markers after entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__ and __NANOCODER_MD_1__INLINE_CODE_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__NANOCODER_MD_1__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('real code'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_2__'));
+});
