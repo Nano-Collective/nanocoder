@@ -5,6 +5,8 @@ import type {
 	AuthenticateResponse,
 	CancelNotification,
 	ClientCapabilities,
+	CloseSessionRequest,
+	CloseSessionResponse,
 	DeleteSessionRequest,
 	DeleteSessionResponse,
 	DidFocusDocumentNotification,
@@ -210,6 +212,13 @@ export class AcpAgent implements Agent {
 		await ticket.ready;
 		if (!ticket.immediate) {
 			session.beginTurn();
+		}
+
+		// A prompt queued behind a turn that session/close cancelled must not
+		// start once the lock frees up: the client has already let go of it.
+		if (session.closed) {
+			session.releaseTurn();
+			return {stopReason: 'cancelled'};
 		}
 
 		// Both the cancel early-return below and the rethrow after it still run
@@ -499,6 +508,24 @@ export class AcpAgent implements Agent {
 			logger.info(`ACP cancel: session=${params.sessionId}`);
 			session.cancel();
 		}
+	}
+
+	/**
+	 * Cancels any in-flight turn and frees the session's in-memory state. The
+	 * session stays on disk, so the client can load or resume it later.
+	 */
+	async closeSession(
+		params: CloseSessionRequest,
+	): Promise<CloseSessionResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) {
+			return {};
+		}
+		logger.info(`ACP closeSession: session=${params.sessionId}`);
+		session.close();
+		this.sessions.delete(params.sessionId);
+		await session.timeline.dispose();
+		return {};
 	}
 
 	async setSessionMode(
