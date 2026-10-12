@@ -263,12 +263,8 @@ function findCommand(command: string): string | null {
 		process.platform === 'win32' ? ['.exe', '.cmd', '.bat'] : [''];
 
 	for (const extension of extensions) {
-		const localBinPath = join(
-			process.cwd(),
-			'node_modules',
-			'.bin',
-			`${command}${extension}`,
-		); // nosemgrep
+		const binName = `${command}${extension}`;
+		const localBinPath = join(process.cwd(), 'node_modules', '.bin', binName); // nosemgrep
 
 		if (existsSync(localBinPath)) {
 			return localBinPath;
