@@ -96,7 +96,7 @@ test.serial('/expand pads the id column so tool names stay aligned', async t => 
 	t.is(shortRow.indexOf('read_file'), longRow.indexOf('read_file'));
 });
 
-function summaryAtColumns(columns: number, longPath: string): Promise<string> {
+function summaryAtColumns(columns: number): Promise<string> {
 	const original = process.stdout.columns;
 	process.stdout.columns = columns;
 	return runExpand([]).finally(() => {
@@ -108,8 +108,8 @@ test.serial('/expand cuts the argument to the terminal width', async t => {
 	const longPath = `src/${'deep/'.repeat(40)}file.ts`;
 	const id = record('read_file', {path: longPath}, 'contents');
 
-	const narrow = await summaryAtColumns(60, longPath);
-	const wide = await summaryAtColumns(160, longPath);
+	const narrow = await summaryAtColumns(60);
+	const wide = await summaryAtColumns(160);
 
 	// 60 columns: box 56, text 50. The row prefix "  <id>  read_file" and the
 	// space before the argument leave 50 - 13 - idLength - 1 characters.
@@ -149,7 +149,7 @@ test.serial('/expand keeps emoji and CJK arguments to one row', async t => {
 	const emojiId = record('read_file', {path: emojiPath}, 'contents');
 	const cjkId = record('read_file', {path: cjkPath}, 'contents');
 
-	const lines = (await summaryAtColumns(60, emojiPath)).split('\n');
+	const lines = (await summaryAtColumns(60)).split('\n');
 	const emojiRow = lines.find(line => line.includes(` ${emojiId}  read_file`));
 	const cjkRow = lines.find(line => line.includes(` ${cjkId}  read_file`));
 
