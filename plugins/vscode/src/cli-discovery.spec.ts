@@ -13,12 +13,9 @@ function makeTempDir(): string {
 }
 
 function writeWorkspacePackage(dir: string, name: string | null): void {
-	if (name === null) {
-		return;
-	}
 	fs.writeFileSync(
 		path.join(dir, 'package.json'),
-		JSON.stringify({name}, null, '\t'),
+		name === null ? '{}' : JSON.stringify({name}, null, '	'),
 	);
 }
 
@@ -76,17 +73,20 @@ test('isNanocoderWorkspaceFolder - matches the package name only', t => {
 	const foreignDir = makeTempDir();
 	const noPackageDir = makeTempDir();
 	const brokenDir = makeTempDir();
+	const noNameDir = makeTempDir();
 	t.teardown(() => {
-		for (const dir of [nanoDir, foreignDir, noPackageDir, brokenDir]) {
+		for (const dir of [nanoDir, foreignDir, noPackageDir, brokenDir, noNameDir]) {
 			fs.rmSync(dir, {recursive: true, force: true});
 		}
 	});
 	writeWorkspacePackage(nanoDir, '@nanocollective/nanocoder');
 	writeWorkspacePackage(foreignDir, 'some-other-tool');
+	writeWorkspacePackage(noNameDir, null);
 	fs.writeFileSync(path.join(brokenDir, 'package.json'), '{ not json');
 
 	t.true(isNanocoderWorkspaceFolder({uri: {fsPath: nanoDir}}));
 	t.false(isNanocoderWorkspaceFolder({uri: {fsPath: foreignDir}}));
 	t.false(isNanocoderWorkspaceFolder({uri: {fsPath: noPackageDir}}));
+	t.false(isNanocoderWorkspaceFolder({uri: {fsPath: noNameDir}}));
 	t.false(isNanocoderWorkspaceFolder({uri: {fsPath: brokenDir}}));
 });
