@@ -1,5 +1,6 @@
 import test from 'ava';
 import type React from 'react';
+import stringWidth from 'string-width';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {
@@ -140,4 +141,29 @@ test('/expand warns about a number it does not know', async t => {
 test('tools that are never collapsed get no /expand number', t => {
 	t.is(record('write_tasks', {}, 'tasks'), undefined);
 	t.is(record('ask_user', {}, 'answer'), undefined);
+});
+
+test.serial('/expand keeps emoji and CJK arguments to one row', async t => {
+	const emojiPath = `notes/${'a'.repeat(27)}\u{1F680}-launch.md`;
+	const cjkPath = `docs/${'部署说明文档'.repeat(3)}更新日志.md`;
+	const emojiId = record('read_file', {path: emojiPath}, 'contents');
+	const cjkId = record('read_file', {path: cjkPath}, 'contents');
+
+	const lines = (await summaryAtColumns(60, emojiPath)).split('\n');
+	const emojiRow = lines.find(line => line.includes(` ${emojiId}  read_file`));
+	const cjkRow = lines.find(line => line.includes(` ${cjkId}  read_file`));
+
+	// 60 columns: box 56, text 50. A cut by UTF-16 units split the rocket's
+	// surrogate pair and let the CJK path run to 67 columns and wrap.
+	t.truthy(emojiRow);
+	t.truthy(cjkRow);
+	t.true(emojiRow?.isWellFormed());
+	t.false(emojiRow?.includes('\uFFFD'));
+	t.true(cjkRow?.includes('read_file docs/'));
+	t.true(cjkRow?.includes('…'));
+	t.false(lines.some(line => line.startsWith('docs/')));
+	for (const row of [emojiRow, cjkRow]) {
+		// The box adds a border and 2 columns of padding on each side.
+		t.true(stringWidth(row ?? '') <= 56);
+	}
 });
