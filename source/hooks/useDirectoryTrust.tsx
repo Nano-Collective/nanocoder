@@ -1,3 +1,4 @@
+import path from 'path';
 import {useCallback, useState} from 'react';
 import {
 	grantDirectoryTrust,
@@ -68,7 +69,9 @@ export function useDirectoryTrust(
 			if (!isDirectoryTrusted(directory, preferences)) {
 				const granted = grantDirectoryTrust(preferences, directory);
 				savePreferences(granted);
-				logInfo(`Directory added to trusted list: ${directory}`);
+				logInfo(
+					`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
+				);
 			}
 
 			setIsTrusted(true);
