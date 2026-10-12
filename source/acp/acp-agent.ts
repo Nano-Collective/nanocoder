@@ -217,7 +217,12 @@ export class AcpAgent implements Agent {
 		const turnStart = Date.now();
 
 		try {
-			const {text: userText, images} = await acpContentToUserMessage(
+			const {
+				text: userText,
+				typedText,
+				sections,
+				images,
+			} = await acpContentToUserMessage(
 				params.prompt,
 				{
 					conn: this.conn,
@@ -246,8 +251,9 @@ export class AcpAgent implements Agent {
 
 					if (command) {
 						contextualUserText = acpCustomCommandText(
-							trimmedUserText,
+							typedText,
 							command,
+							sections,
 						);
 					} else {
 						// Check for built-in commands that have special ACP handling

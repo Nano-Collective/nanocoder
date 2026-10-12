@@ -29,6 +29,10 @@ export interface AcpContentContext {
 /** A resolved ACP prompt: model-visible text plus any image attachments. */
 export interface AcpUserMessage {
 	text: string;
+	/** What the user typed, without the attachment sections. */
+	typedText: string;
+	/** Attachment sections that `text` appends after `typedText`. */
+	sections: string[];
 	images: ImageAttachment[];
 }
 
@@ -88,7 +92,7 @@ export async function acpContentToUserMessage(
 			? text
 			: [text, ...sections].filter(part => part.length > 0).join('\n\n');
 
-	return {text: resolvedText, images};
+	return {text: resolvedText, typedText: text, sections, images};
 }
 
 /**

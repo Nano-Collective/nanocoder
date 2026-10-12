@@ -210,7 +210,7 @@ test('expandCustomCommandPrompt fills {{args}} from the typed line', t => {
 		content: 'Review {{args}} now.',
 	});
 
-	const result = expandCustomCommandPrompt(command, '/review main');
+	const result = expandCustomCommandPrompt(command, '/review main', executor);
 	t.true(result.includes('Review main now.'));
 	t.false(result.includes('{{args}}'));
 });
@@ -226,6 +226,7 @@ test('expandCustomCommandPrompt keeps quotes in {{args}} and parsed tokens in pa
 	const result = expandCustomCommandPrompt(
 		command,
 		`/review "src/app.ts" don't`,
+		executor,
 	);
 	t.true(result.includes('File src/app.ts.'));
 	t.true(result.includes(`Raw "src/app.ts" don't.`));

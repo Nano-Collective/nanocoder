@@ -108,7 +108,7 @@ export class CustomCommandExecutor {
 export function expandCustomCommandPrompt(
 	command: CustomCommand,
 	invocation: string,
-	executor = new CustomCommandExecutor(),
+	executor: CustomCommandExecutor,
 ): string {
 	const trimmed = invocation.trim();
 	const commandName = trimmed.slice(1).split(/\s+/)[0] ?? '';
