@@ -1082,6 +1082,30 @@ test('toPlatformHookCommand renames path references for cmd.exe', t => {
 	}
 });
 
+// A closing quote straight after a trailing backslash is an escaped quote to
+// most programs' argument parser: `"C:\proj\" next` arrives as the single
+// argument `C:\proj" next`. A drive root (`C:\`) is the usual way to get here.
+test('toPlatformHookCommand keeps a trailing backslash from escaping the closing quote', t => {
+	const cases: Array<[string, string, string]> = [
+		['C:\\proj\\', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%." next'],
+		['C:\\', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%." next'],
+		// Unquoted references get quotes of their own, so they are covered too.
+		['C:\\', 'tool $NANOCODER_CWD next', 'tool "%NANOCODER_CWD%." next'],
+		['C:\\', 'tool ${NANOCODER_CWD} next', 'tool "%NANOCODER_CWD%." next'],
+		// More path text after the reference: no quote follows it, so no suffix.
+		['C:\\proj\\', 'tool "$NANOCODER_CWD\\sub" next', 'tool "%NANOCODER_CWD%\\sub" next'],
+		// No trailing backslash: the path is left exactly as it was.
+		['C:\\proj', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%" next'],
+	];
+	for (const [cwd, input, expected] of cases) {
+		t.deepEqual(
+			toPlatformHookCommand(input, {NANOCODER_CWD: cwd}, 'win32'),
+			{command: expected},
+			`${cwd} | ${input}`,
+		);
+	}
+});
+
 test('toPlatformHookCommand expands an unset path variable to nothing', t => {
 	t.deepEqual(
 		toPlatformHookCommand('echo "$NANOCODER_SESSION_CWD" $NANOCODER_SESSION_CWD.', PATH_ENV, 'win32'),

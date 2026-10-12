@@ -585,7 +585,14 @@ export function toPlatformHookCommand(
 				// An unset variable expands to nothing, as it does under sh; cmd.exe
 				// would otherwise leave the literal `%NAME%` behind.
 				if (value) {
-					out += inQuotes ? `%${name}%` : `"%${name}%"`;
+					// A closing quote right after a trailing backslash is read by most
+					// programs' argument parser as an escaped quote, so `"C:\proj\" next`
+					// reaches the program as the single argument `C:\proj" next`. That
+					// happens for a drive root such as `C:\`. `\.` names the same
+					// directory and keeps the quote a quote.
+					const closesQuote = !inQuotes || command[i + match[0].length] === '"';
+					const suffix = value.endsWith('\\') && closesQuote ? '.' : '';
+					out += inQuotes ? `%${name}%${suffix}` : `"%${name}%${suffix}"`;
 				}
 				i += match[0].length - 1;
 				continue;
