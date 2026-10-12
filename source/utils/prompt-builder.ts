@@ -278,6 +278,10 @@ export function buildSystemPrompt(
 		sections.push(loadSection('web-tools'));
 	}
 
+	if (toolSet.has('browser')) {
+		sections.push(loadSection('browser'));
+	}
+
 	// Diagnostics — only if lsp_get_diagnostics is available
 	if (toolSet.has('lsp_get_diagnostics')) {
 		// Plan mode: check for existing issues, not "fix what you introduce"
