@@ -199,6 +199,8 @@ export function useSessionAutosave({
 			try {
 				// Wait for initialization to complete before saving
 				const initialized = await initPromiseRef.current;
+				// Returning here also keeps a pending /rename: with no messages
+				// there is nothing to save yet, and the first real save applies it.
 				if (!initialized || capturedMessages.length === 0) return;
 
 				// The walkthrough nudge is a transient in-loop protocol message. It
