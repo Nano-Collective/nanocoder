@@ -188,7 +188,12 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 	};
 
 	try {
-		await toolManager.initializeMCP(config.mcpServers, onProgress);
+		await toolManager.initializeMCP(
+			config.mcpServers,
+			onProgress,
+			undefined,
+			config.tune,
+		);
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}
