@@ -48,6 +48,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'file_op',
 		'lsp_format_document',
 		'execute_bash',
+		'browser',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
 		'write_walkthrough',

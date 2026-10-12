@@ -27,10 +27,10 @@ The modes differ along two axes: whether each tool call is gated, and whether an
 | Mode | Per-tool approval | Reaches disk | Review point |
 |------|------------------|--------------|--------------|
 | **Normal** | Every tool that can change something | Yes | Before each call |
-| **Auto-accept** | Bash, `git_commit`, `git_pr` create, and custom tools with `approval: always` | Yes | Before risky calls |
+| **Auto-accept** | Bash, `git_commit`, `git_pr` create, `file_op` deletes and overwrites, and custom tools with `approval: always` | Yes | Before risky calls |
 | **Yolo** | None | Yes | None |
 | **Plan** | N/A - cannot mutate | No | The plan, before any work |
-| **Architect** | Same as auto-accept, plus MCP tools | Yes | The whole turn, after it runs |
+| **Architect** | Same as auto-accept, plus MCP tools, minus `file_op` (the checkpoint covers it) | Yes | The whole turn, after it runs |
 
 In every mode, tools listed in the top-level [`nanocoder.alwaysAllow`](../configuration/index.md#tool-auto-approval) skip the prompt.
 
@@ -56,7 +56,8 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 - Significantly faster for iterative workflows
 - All tool execution results are still displayed — you can see what happened
 - The AI can chain multiple actions without waiting for approval
-- Still prompts: `execute_bash`, `git_commit`, `git_pr` when it creates a pull request, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
+- Still prompts: `execute_bash`, `git_commit`, `git_pr` when it creates a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
+- A delete or an overwrite shows no diff and cannot be undone, so `file_op` asks first, the same as `rm` through `execute_bash`. Creating directories, and moving or copying to a path that does not exist yet, still run without a prompt
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
 
@@ -104,7 +105,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 

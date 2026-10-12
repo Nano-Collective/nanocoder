@@ -47,37 +47,20 @@ function _parseMarkdownCore(
 	codeMarkers: string[];
 	inlineMarkers: string[];
 } {
-	// First decode HTML entities
-	let result = decodeHtmlEntities(text);
-	const {codePrefix, inlinePrefix} = _getPlaceholderPrefixes(result);
+	// Pick markers against decoded input while keeping fenced code untouched
+	// until after its placeholders have been inserted.
+	const decodedSource = decodeHtmlEntities(text);
+	const {codePrefix, inlinePrefix} = _getPlaceholderPrefixes(decodedSource);
 
-	// Step 1: Parse tables FIRST (before <br> conversion and code extraction)
-	// A row ends at a newline or at the end of the text: replies are trimmed,
-	// so a table that closes the message has no newline after its last row,
-	// and requiring one left that row outside the table as raw `| a | b |`.
-	result = result.replace(
-		/(?:^|\n)((?:\|.+\|[ \t]*(?:\n|(?![\s\S])))+)/gm,
-		(_match, tableText: string) => {
-			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
-		},
-	);
+	// Initialize markdown processing
+	let result = text;
 
-	// Step 2: Convert <br> and <br/> tags to newlines (AFTER table parsing)
-	result = result.replace(/<br\s*\/?>/gi, '\n');
-
-	// Step 3: Extract and protect code blocks and inline code with placeholders
 	const codeBlocks: string[] = [];
 	const inlineCodes: string[] = [];
 	const codeMarkers: string[] = [];
 	const inlineMarkers: string[] = [];
 
-	// Extract fenced code blocks (```language\ncode\n```) — also handles
-	// the case where there is no language tag and the opening fence is immediately
-	// followed by a newline (``` \n code \n ```). Both fences must sit at the
-	// start of a line (after optional spaces/tabs only) so fences nested inside
-	// a blockquote (`> \`\`\``) are not extracted as copyable code. Leading
-	// whitespace on the opening fence is stripped from each content line so
-	// indented fences (e.g. inside a list item) render cleanly.
+	// Extract and protect fenced code blocks BEFORE HTML processing
 	result = result.replace(
 		/^([ \t]*)```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)^\1```/gm,
 		(_match, indent: string, lang: string | undefined, code: string) => {
@@ -114,6 +97,19 @@ function _parseMarkdownCore(
 		},
 	);
 
+	// Decode HTML entities AFTER code blocks are protected
+	result = decodeHtmlEntities(result);
+
+	// Parse tables
+	result = result.replace(
+		/(?:^|\n)((?:\|.+\|[ \t]*(?:\n|(?![\s\S])))+)/gm,
+		(_match, tableText: string) => {
+			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
+		},
+	);
+
+	// Convert <br> and <br/> tags to newlines (AFTER table parsing)
+	result = result.replace(/<br\s*\/?>/gi, '\n');
 	// Extract inline code (`code`) — single-line only, so stray backticks from
 	// unextracted fenced blocks (e.g. inside a blockquote) don't form a span.
 	result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {

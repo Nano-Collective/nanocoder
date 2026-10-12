@@ -69,6 +69,9 @@ importers:
       croner:
         specifier: ^10.0.1
         version: 10.0.1
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       diff:
         specifier: ^9.0.0
         version: 9.0.0
@@ -111,6 +114,9 @@ importers:
       pino-roll:
         specifier: ^4.0.0
         version: 4.0.0
+      playwright-core:
+        specifier: ^1.63.0
+        version: 1.63.0
       react:
         specifier: ^19.0.0
         version: 19.3.0
@@ -151,6 +157,9 @@ importers:
       '@nanocollective/nanocoder-voice':
         specifier: workspace:*
         version: link:plugins/voice
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
@@ -1613,6 +1622,9 @@ packages:
 
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
@@ -3717,6 +3729,11 @@ packages:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   plimit-lit@1.6.1:
     resolution: {integrity: sha512-B7+VDyb8Tl6oMJT9oSO2CW8XC/T4UcJGrwOVoNGwOQsQYhlpfajmrMj5xeejqaASq3V/EqThyOeATEOMuSEXiA==}
     engines: {node: '>=12'}
@@ -5727,6 +5744,10 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 26.2.0
 
   '@types/esrecurse@4.3.1': {}
 
@@ -7891,6 +7912,8 @@ snapshots:
       thread-stream: 4.2.0
 
   pkce-challenge@5.0.1: {}
+
+  playwright-core@1.63.0: {}
 
   plimit-lit@1.6.1:
     dependencies:
