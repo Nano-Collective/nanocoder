@@ -359,7 +359,7 @@ Set the initial development mode for all new interactive sessions. Without this 
 | Value | Description |
 |-------|-------------|
 | `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
-| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash and tools marked as always needing approval still prompt |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
 | `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |
