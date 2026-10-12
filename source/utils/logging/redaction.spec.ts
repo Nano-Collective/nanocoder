@@ -11,6 +11,7 @@ import {
 	createRedactionRules,
 	redactEmail,
 	redactLogEntry,
+	redactUrlForDisplay,
 	redactUserId,
 	redactValue,
 	validateRedactionRules,
@@ -487,4 +488,42 @@ test('redactLogEntry recognizes various PII patterns', t => {
 
 	// Non-PII should be preserved
 	t.is(redacted.regularField, 'not sensitive data', 'Should preserve non-PII');
+});
+
+test('redactUrlForDisplay strips embedded credentials', t => {
+	t.is(
+		redactUrlForDisplay('https://user:SECRET@host/v1'),
+		'https://***@host/v1',
+	);
+	t.is(
+		redactUrlForDisplay('https://user@host/v1'),
+		'https://***@host/v1',
+	);
+});
+
+test('redactUrlForDisplay blanks sensitive query parameter values', t => {
+	t.is(
+		redactUrlForDisplay('https://host/v1?key=SECRET&model=x'),
+		'https://host/v1?key=&model=x',
+	);
+	t.is(
+		redactUrlForDisplay('https://host/v1?api_key=SECRET&token=SECRET'),
+		'https://host/v1?api_key=&token=',
+	);
+});
+
+test('redactUrlForDisplay leaves credential-free URLs unchanged', t => {
+	t.is(
+		redactUrlForDisplay('http://localhost:11434/v1'),
+		'http://localhost:11434/v1',
+	);
+	t.is(
+		redactUrlForDisplay('https://openrouter.ai/api/v1'),
+		'https://openrouter.ai/api/v1',
+	);
+});
+
+test('redactUrlForDisplay strips userinfo from unparseable URLs', t => {
+	const redacted = redactUrlForDisplay('https://user:SECRET@not a url');
+	t.false(redacted.includes('SECRET'));
 });

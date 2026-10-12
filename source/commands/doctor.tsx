@@ -19,6 +19,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {redactUrlForDisplay} from '@/utils/logging/redaction';
 import {getPackageVersion} from '@/utils/package-version';
 import {isLocalURL} from '@/utils/url-utils';
 
@@ -363,7 +364,9 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={provider.name} color={colors.text}>
 						• {provider.name}: {provider.modelCount} model
 						{provider.modelCount === 1 ? '' : 's'} • {provider.location}
-						{provider.baseURL ? ` • ${provider.baseURL}` : ''}
+						{provider.baseURL
+							? ` • ${redactUrlForDisplay(provider.baseURL)}`
+							: ''}
 						{provider.location === 'local' ? ` • ${provider.reachability}` : ''}
 					</Text>
 				))
@@ -408,7 +411,7 @@ export function Doctor({report}: {report: DoctorReport}) {
 						{server.promptCount > 0
 							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
 							: ''}
-						{server.url ? ` • ${server.url}` : ''}
+						{server.url ? ` • ${redactUrlForDisplay(server.url)}` : ''}
 					</Text>
 				))
 			)}

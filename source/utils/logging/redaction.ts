@@ -177,6 +177,36 @@ export function redactUserId(userId: string | number): string {
 }
 
 /**
+ * Redact a URL for display (e.g. in diagnostic reports that users are
+ * encouraged to paste into bug reports). Strips embedded credentials
+ * (userinfo) and blanks the values of sensitive query parameters, while
+ * keeping the scheme, host, path, and non-sensitive parameters intact so
+ * the URL stays useful for debugging.
+ */
+export function redactUrlForDisplay(url: string): string {
+	try {
+		const parsed = new URL(url);
+
+		if (parsed.username || parsed.password) {
+			parsed.username = '***';
+			parsed.password = '';
+		}
+
+		for (const key of [...parsed.searchParams.keys()]) {
+			if (shouldRedactKey(key)) {
+				parsed.searchParams.set(key, '');
+			}
+		}
+
+		return parsed.toString();
+	} catch {
+		// Not a parseable URL: still strip anything that looks like
+		// userinfo so a credential is never echoed back verbatim.
+		return url.replace(/^([a-zA-Z][a-zA-Z\d+.-]*:\/\/)[^/@\s]+@/, '$1***@');
+	}
+}
+
+/**
  * Create redaction rules based on configuration
  */
 export function createRedactionRules(

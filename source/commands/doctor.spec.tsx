@@ -177,6 +177,50 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.notRegex(output, /apiKey/);
 });
 
+test('Doctor redacts credentials embedded in provider and MCP URLs', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const withCredentialedUrls = {
+		...report,
+		providers: {
+			status: 'ok' as const,
+			data: [
+				{
+					name: 'Credentialed',
+					modelCount: 1,
+					baseURL: 'https://user:provider-secret@example.com/v1?key=query-secret',
+					location: 'hosted' as const,
+					reachability: 'not-local' as const,
+				},
+			],
+		},
+		mcp: {
+			status: 'ok' as const,
+			data: [
+				{
+					name: 'remote-docs',
+					transport: 'http',
+					toolCount: 1,
+					resourceCount: 0,
+					promptCount: 0,
+					url: 'https://mcp-user:mcp-secret@example.com/mcp',
+				},
+			],
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(
+		<Doctor report={withCredentialedUrls} />,
+	);
+	const output = lastFrame()!;
+
+	t.regex(output, /https:\/\/\*\*\*@example\.com\/v1\?key=/);
+	t.regex(output, /https:\/\/\*\*\*@example\.com\/mcp/);
+	t.notRegex(output, /provider-secret/);
+	t.notRegex(output, /query-secret/);
+	t.notRegex(output, /mcp-secret/);
+});
+
 test('Doctor reports LSP MCP and daemon details', async t => {
 	const report = await collectDoctorReport(createDependencies());
 
