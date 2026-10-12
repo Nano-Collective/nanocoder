@@ -1,12 +1,25 @@
 import {randomUUID} from 'node:crypto';
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '@/services/session-cwd';
+import {fileOpTool} from '@/tools/file-ops/file-op';
 import {readFileTool} from '@/tools/read-file';
+import {ToolRegistry} from '@/tools/tool-registry';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {
@@ -2435,3 +2448,202 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// file_op approval in auto-accept (#1683)
+// ============================================================================
+
+// ACP sessions start in auto-accept. A file_op delete, or a move/copy onto an
+// existing file, must still reach the client for permission there, the same
+// as `rm` through execute_bash. These drive the real file_op tool so the file
+// on disk is the evidence.
+
+const createFileOpWorkspace = (t: any): string => {
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-file-op-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	writeFileSync(join(cwd, 'greet.py'), "print('Hello, Agent!')\n");
+	writeFileSync(join(cwd, 'other.py'), "print('other')\n");
+	setProjectRoot(cwd);
+	setSessionCwd(cwd);
+	t.teardown(() => {
+		resetSessionCwd();
+		rmSync(cwd, {recursive: true, force: true});
+	});
+	return cwd;
+};
+
+const runFileOpTurn = async (
+	cwd: string,
+	args: Record<string, unknown>,
+	outcome: {outcome: 'selected'; optionId: string} | {outcome: 'cancelled'},
+) => {
+	const permissionRequests: any[] = [];
+	const {conn, updates} = createMockConn();
+	(conn as any).requestPermission = async (request: any) => {
+		permissionRequests.push(request);
+		return {outcome};
+	};
+
+	// Left at the ACP default mode, as an editor client that never changes it.
+	const session = createMockSession(conn, {cwd});
+	const registry = ToolRegistry.fromToolExports([fileOpTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: (name: string) => registry.hasTool(name),
+		getToolEntry: (name: string) => registry.getEntry(name),
+		isReadOnly: () => false,
+	};
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [createMockToolCall('file_op', args, 'call-op')],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const statuses = updates
+		.filter((u: any) => u.update.toolCallId === 'call-op')
+		.map((u: any) => u.update.status);
+
+	return {result, session, permissionRequests, statuses};
+};
+
+const allow = {outcome: 'selected', optionId: 'allow'} as const;
+const deny = {outcome: 'selected', optionId: 'deny'} as const;
+const cancel = {outcome: 'cancelled'} as const;
+
+test('runAcpConversation - an auto-accept session asks before file_op deletes, and approval runs it', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		allow,
+	);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(permissionRequests.length, 1);
+	t.is(permissionRequests[0].toolCall.toolCallId, 'call-op');
+	t.is(permissionRequests[0].toolCall.kind, 'delete');
+	t.true(statuses.includes('completed'));
+	t.false(existsSync(join(cwd, 'greet.py')));
+});
+
+test('runAcpConversation - a denied file_op delete leaves the file intact', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, session, permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		deny,
+	);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(permissionRequests.length, 1);
+	t.true(statuses.includes('failed'));
+	t.true(
+		session.messages.some(
+			(m: any) => m.role === 'tool' && m.content === 'Tool call denied by user',
+		),
+	);
+	t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+});
+
+test('runAcpConversation - a cancelled file_op delete leaves the file intact', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, permissionRequests} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		cancel,
+	);
+
+	t.is(result.stopReason, 'cancelled');
+	t.is(permissionRequests.length, 1);
+	t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+});
+
+for (const operation of ['move', 'copy']) {
+	test(`runAcpConversation - an auto-accept session asks before a file_op ${operation} overwrites, and approval runs it`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {permissionRequests, statuses} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			allow,
+		);
+
+		t.is(permissionRequests.length, 1);
+		t.true(statuses.includes('completed'));
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('Hello, Agent!')\n");
+	});
+
+	test(`runAcpConversation - a denied file_op ${operation} onto an existing file leaves both files intact`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {permissionRequests} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			deny,
+		);
+
+		t.is(permissionRequests.length, 1);
+		t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('other')\n");
+	});
+
+	test(`runAcpConversation - a cancelled file_op ${operation} onto an existing file leaves both files intact`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {result, permissionRequests} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			cancel,
+		);
+
+		t.is(result.stopReason, 'cancelled');
+		t.is(permissionRequests.length, 1);
+		t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('other')\n");
+	});
+}
+
+test('runAcpConversation - a file_op move to a new path still runs unprompted in auto-accept', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'move', path: 'greet.py', destination: 'hello.py'},
+		deny,
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.true(statuses.includes('completed'));
+	t.false(existsSync(join(cwd, 'greet.py')));
+	t.true(existsSync(join(cwd, 'hello.py')));
+});
