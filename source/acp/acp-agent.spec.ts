@@ -1,4 +1,10 @@
-import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -525,6 +531,63 @@ test('AcpAgent.setSessionConfigOption - throws on unknown config option', async 
 		{message: 'Unknown config option: does-not-exist'},
 	);
 });
+
+test.serial(
+	'AcpAgent.setSessionConfigOption - does not fall back when provider fails',
+	async t => {
+		const configPath = join(testConfigDir, 'agents.config.json');
+		const originalConfig = existsSync(configPath)
+			? readFileSync(configPath, 'utf8')
+			: undefined;
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				nanocoder: {
+					providers: [
+						{
+							name: 'Fallback Provider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['fallback-model'],
+						},
+						{
+							name: 'Failing Copilot Provider',
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['copilot-model'],
+						},
+					],
+				},
+			}),
+		);
+		clearAppConfig();
+
+		try {
+			const {agent} = createAgent();
+			const session = await agent.newSession({cwd: '/tmp'});
+			const originalClient = agent['initContext'].client;
+
+			await t.throwsAsync(
+				agent.setSessionConfigOption({
+					sessionId: session.sessionId,
+					configId: 'provider',
+					value: 'Failing Copilot Provider',
+				}),
+				{
+					message: /Explicitly requested provider 'Failing Copilot Provider' failed/,
+				},
+			);
+			t.is(agent['initContext'].provider, 'test-provider');
+			t.is(agent['initContext'].client, originalClient);
+		} finally {
+			if (originalConfig === undefined) {
+				rmSync(configPath, {force: true});
+			} else {
+				writeFileSync(configPath, originalConfig);
+			}
+			clearAppConfig();
+		}
+	},
+);
 
 test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
 	const {agent} = createAgent();
