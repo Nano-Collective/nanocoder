@@ -15,8 +15,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getModelPricing} from '../../source/models/index';
+import {parseRunnerArgs, RUNNER_USAGE} from './args';
 import {
-	DEFAULT_RUNS_PER_TASK,
 	FIXTURE_PACK_ID,
 	type Fixture,
 	hashTree,
@@ -30,38 +30,6 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const fixturesDir = path.join(__dirname, 'fixtures');
-
-interface Options {
-	cliPath: string;
-	runs: number;
-	model?: string;
-	provider?: string;
-	fixture?: string;
-	outPath: string;
-}
-
-function parseArgs(argv: string[]): Options {
-	const value = (flag: string): string | undefined => {
-		const index = argv.indexOf(flag);
-		return index === -1 ? undefined : argv[index + 1];
-	};
-	const runs = Number(value('--runs') ?? DEFAULT_RUNS_PER_TASK);
-	if (!Number.isInteger(runs) || runs < 1) {
-		throw new Error('--runs must be a positive integer');
-	}
-	return {
-		cliPath: path.resolve(
-			value('--cli') ?? path.join(repoRoot, 'dist', 'cli.js'),
-		),
-		runs,
-		model: value('--model') ?? process.env.NANOCODER_AGENT_EVAL_MODEL,
-		provider: value('--provider') ?? process.env.NANOCODER_AGENT_EVAL_PROVIDER,
-		fixture: value('--fixture'),
-		outPath: path.resolve(
-			value('--out') ?? path.join(__dirname, 'results.json'),
-		),
-	};
-}
 
 function formatSpread(spread: {median: number; iqr: number}): string {
 	const round = (value: number) =>
@@ -97,58 +65,95 @@ function printTable(summaries: TaskSummary[]): void {
 }
 
 async function main(): Promise<void> {
-	const options = parseArgs(process.argv.slice(2));
+	const parsed = parseRunnerArgs(process.argv.slice(2), {
+		cliPath: path.join(repoRoot, 'dist', 'cli.js'),
+		outPath: path.join(__dirname, 'results.json'),
+	});
+	if (parsed.help) {
+		console.log(RUNNER_USAGE);
+		return;
+	}
+	const options = parsed.options;
+	const controller = new AbortController();
+	let exitCode = 0;
+	const onSigint = () => {
+		exitCode = 130;
+		controller.abort();
+	};
+	const onSigterm = () => {
+		exitCode = 143;
+		controller.abort();
+	};
+	process.once('SIGINT', onSigint);
+	process.once('SIGTERM', onSigterm);
 
 	try {
-		await fs.access(options.cliPath);
-	} catch {
-		throw new Error(
-			`no CLI at ${options.cliPath} — run \`pnpm run build\` or pass --cli`,
-		);
-	}
-
-	const all = await loadFixtures(fixturesDir);
-	const fixtures: Fixture[] = options.fixture
-		? all.filter(fixture => fixture.name === options.fixture)
-		: all;
-	if (fixtures.length === 0) {
-		throw new Error(`no fixture named ${options.fixture}`);
-	}
-
-	const summaries: TaskSummary[] = [];
-	for (const fixture of fixtures) {
-		const runs: TaskRun[] = [];
-		for (let run = 1; run <= options.runs; run++) {
-			process.stderr.write(`${fixture.name} ${run}/${options.runs}\n`);
-			runs.push(
-				await runOnce({
-					cliPath: options.cliPath,
-					fixture,
-					model: options.model,
-					provider: options.provider,
-					getPricing: getModelPricing,
-				}),
+		try {
+			await fs.access(options.cliPath);
+		} catch {
+			throw new Error(
+				`no CLI at ${options.cliPath} — run \`pnpm run build\` or pass --cli`,
 			);
 		}
-		summaries.push(summarize(fixture, runs));
+
+		const all = await loadFixtures(fixturesDir);
+		const fixtures: Fixture[] = options.fixture
+			? all.filter(fixture => fixture.name === options.fixture)
+			: all;
+		if (fixtures.length === 0) {
+			throw new Error(`no fixture named ${options.fixture}`);
+		}
+
+		const summaries: TaskSummary[] = [];
+		for (const fixture of fixtures) {
+			const runs: TaskRun[] = [];
+			for (let run = 1; run <= options.runs; run++) {
+				if (controller.signal.aborted) break;
+				process.stderr.write(`${fixture.name} ${run}/${options.runs}\n`);
+				runs.push(
+					await runOnce({
+						cliPath: options.cliPath,
+						fixture,
+						model: options.model,
+						provider: options.provider,
+						getPricing: getModelPricing,
+						signal: controller.signal,
+					}),
+				);
+			}
+			if (controller.signal.aborted) break;
+			summaries.push(summarize(fixture, runs));
+		}
+
+		if (controller.signal.aborted) {
+			process.exitCode = exitCode;
+			return;
+		}
+		printTable(summaries);
+
+		// Every result records what produced it, so a fixture edit or a model swap
+		// can never be mistaken for a change in the agent loop.
+		const results = {
+			generatedAt: new Date().toISOString(),
+			cliPath: options.cliPath,
+			model: options.model ?? null,
+			provider: options.provider ?? null,
+			runsPerTask: options.runs,
+			fixturePackId: FIXTURE_PACK_ID,
+			fixtureSetHash: await hashTree(fixturesDir),
+			tasks: summaries,
+		};
+		await fs.writeFile(
+			options.outPath,
+			`${JSON.stringify(results, null, 2)}\n`,
+		);
+		console.log(`\nwrote ${path.relative(repoRoot, options.outPath)}`);
+	} catch (error) {
+		if (!controller.signal.aborted) throw error;
+	} finally {
+		process.off('SIGINT', onSigint);
+		process.off('SIGTERM', onSigterm);
 	}
-
-	printTable(summaries);
-
-	// Every result records what produced it, so a fixture edit or a model swap
-	// can never be mistaken for a change in the agent loop.
-	const results = {
-		generatedAt: new Date().toISOString(),
-		cliPath: options.cliPath,
-		model: options.model ?? null,
-		provider: options.provider ?? null,
-		runsPerTask: options.runs,
-		fixturePackId: FIXTURE_PACK_ID,
-		fixtureSetHash: await hashTree(fixturesDir),
-		tasks: summaries,
-	};
-	await fs.writeFile(options.outPath, `${JSON.stringify(results, null, 2)}\n`);
-	console.log(`\nwrote ${path.relative(repoRoot, options.outPath)}`);
 }
 
 main().catch((error: unknown) => {
