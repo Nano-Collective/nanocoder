@@ -11,6 +11,7 @@ import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
+import { resolveExtensionCwd } from './workspace-utils';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
 import { PromptQueue, type QueuedPrompt } from './prompt-queue';
 import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
@@ -509,8 +510,7 @@ export class ChatWebviewProvider
 			return;
 		}
 		try {
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (sessionId) {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
@@ -554,7 +554,7 @@ export class ChatWebviewProvider
 	}
 
 	private _handleRequestSettings() {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = resolveExtensionCwd();
 		const settings = this._readWebviewSettings(cwd);
 		this.postMessage({type: 'settingsData', settings});
 	}
@@ -567,7 +567,7 @@ export class ChatWebviewProvider
 	}
 
 	private async _handleUpdateSetting(key: string, value: unknown) {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = resolveExtensionCwd();
 		try {
 			const result =
 				key === 'showTokenUsage'
@@ -602,7 +602,7 @@ export class ChatWebviewProvider
 
 	private async _handleAddProvider(provider: WebviewMessageAddProvider['provider']): Promise<void> {
 		try {
-			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 			const result = this._settingsManager.addProvider(cwd, provider);
 
 			if (result.success) {
@@ -676,7 +676,7 @@ export class ChatWebviewProvider
 	}
 
 	private async _handleOpenConfigFile(file: string) {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = resolveExtensionCwd();
 		const paths = this._settingsManager.getConfigPaths(cwd);
 		const filePath =
 			file === 'agents.config.json' ? paths.agentsConfig
@@ -744,9 +744,9 @@ export class ChatWebviewProvider
 	 * unit-testable without an extension host.
 	 */
 	private _mentionSearchDeps(): MentionSearchDeps {
-		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
-		const exclude = this._mentionExcludeGlob(workspaceFolder?.uri);
+		const workspaceRoot = resolveExtensionCwd();
+		const searchRoot = vscode.Uri.file(workspaceRoot);
+		const exclude = this._mentionExcludeGlob(searchRoot);
 
 		return {
 			workspaceRoot,
@@ -764,7 +764,7 @@ export class ChatWebviewProvider
 			},
 			findFiles: async (glob, limit) => {
 				const uris = await vscode.workspace.findFiles(
-					workspaceFolder ? new vscode.RelativePattern(workspaceFolder, glob) : glob,
+					new vscode.RelativePattern(searchRoot, glob),
 					exclude,
 					limit,
 				);
@@ -881,8 +881,7 @@ export class ChatWebviewProvider
 			const expandedText = this._expandContextAttachments(entry.text);
 
 			// Make sure we have a session
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (!sessionId) {
