@@ -12,7 +12,8 @@ import {defaultTheme, getThemeColors} from '@/config/themes';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 
 interface SecurityDisclaimerProps {
-	onConfirm: () => void;
+	/** Receives the fingerprint of what the prompt listed. */
+	onConfirm: (fingerprint: string) => void;
 	onExit: () => void;
 	directory?: string;
 }
@@ -29,9 +30,9 @@ export default function SecurityDisclaimer({
 }: SecurityDisclaimerProps) {
 	const boxWidth = useTerminalWidth();
 	const colors = getThemeColors(defaultTheme);
-	const {summary, recheck} = useMemo(
+	const {summary, fingerprint, recheck} = useMemo(
 		() => ({
-			summary: describeProjectTrust(directory).summary,
+			...describeProjectTrust(directory),
 			recheck: trustRecheck(directory, loadPreferences()),
 		}),
 		[directory],
@@ -54,7 +55,7 @@ export default function SecurityDisclaimer({
 		value: SecurityDisclaimerOption;
 	}) => {
 		if (item.value === SecurityDisclaimerOption.Yes) {
-			onConfirm();
+			onConfirm(fingerprint);
 		} else {
 			onExit();
 		}

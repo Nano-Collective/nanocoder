@@ -234,13 +234,17 @@ export function untrustedReason(recheck: TrustRecheck | null | undefined) {
 	return 'is not trusted';
 }
 
-/** Record this folder, including a fingerprint of what it will run. */
+/**
+ * Record this folder, including a fingerprint of what it will run. The
+ * prompt passes the fingerprint it showed, so a file that lands while it
+ * is open is asked about on the next start instead of trusted unseen.
+ */
 export function grantDirectoryTrust(
 	preferences: UserPreferences,
 	directory: string,
+	fingerprint = describeProjectTrust(directory).fingerprint,
 ): UserPreferences {
 	const resolved = path.resolve(directory); // nosemgrep
-	const fingerprint = describeProjectTrust(resolved).fingerprint;
 	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
 		entry => {
 			const entryPath = trustPath(entry);

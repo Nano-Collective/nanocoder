@@ -1,9 +1,10 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve, sep} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import {writeFileSync} from 'node:fs';
 import {describeProjectTrust} from '@/config/project-trust';
 import {
 	isDirectoryTrusted,
@@ -142,6 +143,31 @@ test.serial(
 			unmount();
 			resetPreferencesCache();
 			t.deepEqual(loadPreferences().trustedDirectories, [stored]);
+		});
+	},
+);
+
+test.serial(
+	'handleConfirmTrust saves the fingerprint the prompt showed',
+	async t => {
+		await withIsolatedPreferences(async root => {
+			const shown = describeProjectTrust(root).fingerprint;
+			const {hook, unmount} = mountHook(root);
+
+			// A plugin lands while the prompt is still open.
+			const plugins = join(root, '.nanocoder', 'plugins');
+			await mkdir(plugins, {recursive: true});
+			writeFileSync(join(plugins, 'late.mjs'), 'export default {}\n');
+
+			hook.current?.handleConfirmTrust(shown);
+			await flush();
+			unmount();
+			resetPreferencesCache();
+
+			t.deepEqual(loadPreferences().trustedDirectories, [
+				{path: resolve(root), fingerprint: shown},
+			]);
+			t.false(isDirectoryTrusted(root, loadPreferences()));
 		});
 	},
 );

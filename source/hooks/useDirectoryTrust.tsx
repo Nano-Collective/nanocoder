@@ -11,7 +11,7 @@ import {logError, logInfo} from '@/utils/message-queue';
 
 interface UseDirectoryTrustReturn {
 	isTrusted: boolean;
-	handleConfirmTrust: () => void;
+	handleConfirmTrust: (shownFingerprint?: string) => void;
 	isTrustLoading: boolean;
 	isTrustedError: string | null;
 }
@@ -60,28 +60,35 @@ export function useDirectoryTrust(
 	const [error, setError] = useState<string | null>(initial.error);
 
 	// Handler to confirm trust for the current directory
-	const handleConfirmTrust = useCallback(() => {
-		try {
-			setError(null);
+	const handleConfirmTrust = useCallback(
+		(shownFingerprint?: string) => {
+			try {
+				setError(null);
 
-			const preferences = loadPreferences();
+				const preferences = loadPreferences();
 
-			if (!isDirectoryTrusted(directory, preferences)) {
-				const granted = grantDirectoryTrust(preferences, directory);
-				savePreferences(granted);
-				logInfo(
-					`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
-				);
+				if (!isDirectoryTrusted(directory, preferences)) {
+					const granted = grantDirectoryTrust(
+						preferences,
+						directory,
+						shownFingerprint,
+					);
+					savePreferences(granted);
+					logInfo(
+						`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
+					);
+				}
+
+				setIsTrusted(true);
+			} catch (err) {
+				const errorMessage = formatError(err);
+				setError(`Failed to save directory trust: ${errorMessage}`);
+
+				logError(`${errorMessage}`);
 			}
-
-			setIsTrusted(true);
-		} catch (err) {
-			const errorMessage = formatError(err);
-			setError(`Failed to save directory trust: ${errorMessage}`);
-
-			logError(`${errorMessage}`);
-		}
-	}, [directory]);
+		},
+		[directory],
+	);
 
 	return {
 		isTrusted,
