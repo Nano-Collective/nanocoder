@@ -241,6 +241,16 @@ function shimIn(dir: string, name: string, body: string): void {
 test.serial(
 	'runVerificationCommand: a PATH entry carrying a cmd.exe separator cannot inject a command',
 	async t => {
+		// Windows-only, and not merely because the shims are `.cmd`: the PATH
+		// built below is joined with `delimiter`, which is `:` off Windows,
+		// while `resolveWindowsExecutable` splits on `;` because it is modelling
+		// `cmd.exe`. Off Windows the whole string is therefore read as one
+		// directory, the shim is never found, and the test fails as
+		// `unavailable` rather than testing anything about injection.
+		if (process.platform !== 'win32') {
+			t.pass('cmd.exe is Windows-only');
+			return;
+		}
 		// Regression, and the reason argv[0] is screened separately. The shim
 		// lives in a directory whose name contains `&`, which cmd.exe treats as a
 		// command separator. Left unchecked, the assembled line
@@ -287,6 +297,12 @@ test.serial(
 test.serial(
 	'runVerificationCommand: a resolved path a cmd.exe PATH entry cannot poison still runs',
 	async t => {
+		// Windows-only for the same reason as the test above: a `delimiter`-joined
+		// PATH cannot be parsed by a resolver that models `cmd.exe`'s `;`.
+		if (process.platform !== 'win32') {
+			t.pass('cmd.exe is Windows-only');
+			return;
+		}
 		// The guard on the test above, and the reason the screen is not simply
 		// widened to refuse every metacharacter in the path: `C:\Program Files
 		// (x86)\...` is a real install location and has to keep working. The
