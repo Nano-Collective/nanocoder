@@ -157,7 +157,7 @@ function FirewallStatusView({config}: {config: FirewallConfig}) {
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary} bold>
-					Active AST & Safety Rules:
+					Active Syntax & Safety Rules:
 				</Text>
 				<Text>
 					• Block explicit 'any' types:{' '}

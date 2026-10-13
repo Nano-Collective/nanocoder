@@ -28,15 +28,7 @@ export const FIREWALL_DEFAULTS: FirewallConfig = {
 	blockAnyTypes: true,
 	protectTestCases: true,
 	preserveExportSignatures: true,
-	protectedPatterns: [
-		'package.json',
-		'pnpm-lock.yaml',
-		'package-lock.json',
-		'yarn.lock',
-		'.github/workflows/**',
-		'tsconfig*.json',
-		'biome.json',
-	],
+	protectedPatterns: [],
 };
 
 export interface FirewallEvaluationResult {

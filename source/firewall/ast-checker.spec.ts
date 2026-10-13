@@ -50,6 +50,38 @@ test('detectAnyTypeInjections skips non-js/ts files', (t) => {
 	t.is(violations.length, 0);
 });
 
+test('detectAnyTypeInjections skips empty oldContent (new file creation)', (t) => {
+	const newCode = `export const value: any = 1;`;
+	const violations = detectAnyTypeInjections('source/new-file.ts', '', newCode);
+	t.is(violations.length, 0);
+});
+
+test('detectAnyTypeInjections ignores any in multi-line block comments and template literals', (t) => {
+	const oldCode = `const x = 1;`;
+	const newCode = `
+		/**
+		 * @param {any} val - documentation mention
+		 */
+		/* multi-line comment:
+		   x: any
+		*/
+		const msg = \`value is \${x} : any\`;
+		const x = 1;
+	`;
+
+	const violations = detectAnyTypeInjections('source/comments.ts', oldCode, newCode);
+	t.is(violations.length, 0);
+});
+
+test('detectAnyTypeInjections counts any[] exactly once without overlap', (t) => {
+	const oldCode = `const list: number[] = [];`;
+	const newCode = `const list: any[] = [];`;
+
+	const violations = detectAnyTypeInjections('source/arrays.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].message.includes('Injected 1 explicit \'any\''));
+});
+
 test('detectDeletedTestBlocks flags removal of test cases in test files', (t) => {
 	const oldTest = `
 		test('adds two numbers', (t) => {

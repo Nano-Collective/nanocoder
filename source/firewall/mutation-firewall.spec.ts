@@ -20,6 +20,7 @@ test('allows harmless mutations without violations', (t) => {
 });
 
 test('blocks modification to protected configuration files', (t) => {
+	setFirewallConfig({ protectedPatterns: ['package.json'] });
 	const oldContent = `{"name": "test"}`;
 	const newContent = `{"name": "test", "version": "1.0.0"}`;
 
@@ -29,13 +30,30 @@ test('blocks modification to protected configuration files', (t) => {
 	t.is(result.violations[0].rule, 'protect_config_files');
 });
 
+test('anchors protected patterns and does not match unanchored suffixes', (t) => {
+	setFirewallConfig({ protectedPatterns: ['package.json'] });
+	const result = evaluateMutationEnvelope('my-package.json', '{}', '{"a": 1}');
+	t.true(result.allowed);
+	t.is(result.violations.length, 0);
+});
+
+test('setFirewallConfig synchronizes enabled when mode changes', (t) => {
+	setFirewallConfig({ mode: 'disabled' });
+	t.false(getFirewallConfig().enabled);
+	t.is(getFirewallConfig().mode, 'disabled');
+
+	setFirewallConfig({ mode: 'strict' });
+	t.true(getFirewallConfig().enabled);
+	t.is(getFirewallConfig().mode, 'strict');
+});
+
 test('allows protected config files when disabled or lenient', (t) => {
-	setFirewallConfig({ mode: 'lenient' });
+	setFirewallConfig({ protectedPatterns: ['package.json'], mode: 'lenient' });
 	const result = evaluateMutationEnvelope('package.json', '{}', '{"a": 1}');
 	t.true(result.allowed);
 	t.is(result.violations.length, 1);
 
-	setFirewallConfig({ mode: 'disabled' });
+	setFirewallConfig({ protectedPatterns: ['package.json'], mode: 'disabled' });
 	const disabledResult = evaluateMutationEnvelope('package.json', '{}', '{"a": 1}');
 	t.true(disabledResult.allowed);
 	t.is(disabledResult.violations.length, 0);

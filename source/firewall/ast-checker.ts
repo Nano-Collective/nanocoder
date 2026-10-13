@@ -3,14 +3,14 @@ import type {FirewallViolation} from '@/types/firewall';
 const TEST_FILE_PATTERN = /\.(spec|test)\.[jt]sx?$/i;
 
 /**
- * Removes comments and string literals to avoid false positives when analyzing syntax.
+ * Removes comments and string literals across lines while preserving line numbers.
  */
 function stripCommentsAndStrings(code: string): string {
 	return code
-		.replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
-		.replace(/\/\/.*$/gm, match => ' '.repeat(match.length))
+		.replace(/\/\*[\s\S]*?\*\//g, match => match.replace(/[^\r\n]/g, ' '))
+		.replace(/\/\/.*$/gm, match => match.replace(/[^\r\n]/g, ' '))
 		.replace(/(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, match =>
-			' '.repeat(match.length),
+			match.replace(/[^\r\n]/g, ' '),
 		);
 }
 
@@ -18,19 +18,22 @@ function stripCommentsAndStrings(code: string): string {
  * Finds all occurrences of explicit `any` type keyword in code.
  */
 function findAnyOccurrences(code: string): {count: number; lines: number[]} {
-	const lines = code.split('\n');
+	const cleanedCode = stripCommentsAndStrings(code);
+	const lines = cleanedCode.split('\n');
 	const matchedLines: number[] = [];
 	let count = 0;
 
-	// Pattern matches : any, as any, <any>, <..., any>, (x: any), etc.
+	// Mutually exclusive patterns for explicit any:
+	// 1. Array form: \bany\s*\[\s*\]
+	// 2. Type annotation: :\s*any\b(?!\s*\[)
+	// 3. Type assertion: as\s+any\b(?!\s*\[)
+	// 4. Generic argument: [,<]\s*any\s*[,>]
 	const anyPattern =
-		/(?::\s*any\b|as\s+any\b|<\s*any\s*[>,]|,\s*any\s*[>,]|\bany\s*\[\])/g;
+		/(?::\s*any\b(?!\s*\[)|as\s+any\b(?!\s*\[)|[,<]\s*any\s*[,>]|\bany\s*\[\s*\])/g;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-		// Skip line if it is purely comment or string
-		const cleaned = stripCommentsAndStrings(line);
-		const matches = cleaned.match(anyPattern);
+		const matches = line.match(anyPattern);
 		if (matches) {
 			count += matches.length;
 			matchedLines.push(i + 1);
@@ -48,7 +51,7 @@ export function detectAnyTypeInjections(
 	oldContent: string,
 	newContent: string,
 ): FirewallViolation[] {
-	if (!/\.[jt]sx?$/i.test(filePath)) {
+	if (!/\.[jt]sx?$/i.test(filePath) || oldContent.length === 0) {
 		return [];
 	}
 

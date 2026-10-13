@@ -10,6 +10,7 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {resetFirewallConfig} from '../../firewall/mutation-firewall.js';
 
 // ============================================================================
 // Test Helpers
@@ -39,6 +40,7 @@ test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'write-file-test-'));
 	// Read-before-overwrite state is process-global; reset between serial tests.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -1137,6 +1139,26 @@ test('write_file formatter: does not render description when omitted', async t =
 
 	t.notRegex(output, /Description:/);
 	t.regex(output, /Path:\s*config\.json/);
+});
+
+test('write_file: throws when mutation firewall blocks test deletion', async t => {
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
+
+	await t.throwsAsync(
+		async () => {
+			await executeWriteFile({
+				path: filePath,
+				content: "test('preserves behavior', () => {});\n",
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('old test'));
 });
 
 
