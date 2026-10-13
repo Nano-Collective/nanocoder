@@ -155,3 +155,127 @@ test('detectExportSignatureModifications ignores new exports or test files', (t)
 	const testViolations = detectExportSignatureModifications('source/math.spec.ts', oldCode, '');
 	t.is(testViolations.length, 0);
 });
+
+test('detectExportSignatureModifications detects function parameter type changes', (t) => {
+	const oldCode = `export function greet(name: string): string { return name; }`;
+	const newCode = `export function greet(name: number): string { return String(name); }`;
+	const violations = detectExportSignatureModifications('source/greet.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('greet'));
+});
+
+test('detectExportSignatureModifications detects function return type changes', (t) => {
+	const oldCode = `export function getValue(): string { return 'ok'; }`;
+	const newCode = `export function getValue(): number { return 1; }`;
+	const violations = detectExportSignatureModifications('source/val.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('getValue'));
+});
+
+test('detectExportSignatureModifications detects generic type parameter changes', (t) => {
+	const oldCode = `export function identity<T extends string>(val: T): T { return val; }`;
+	const newCode = `export function identity<T extends number>(val: T): T { return val; }`;
+	const violations = detectExportSignatureModifications('source/id.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('identity'));
+});
+
+test('detectExportSignatureModifications detects interface member changes', (t) => {
+	const oldCode = `export interface User { id: string; name: string; }`;
+	const newCode = `export interface User { id: string; name: number; }`;
+	const violations = detectExportSignatureModifications('source/user.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('User'));
+});
+
+test('detectExportSignatureModifications detects type alias changes', (t) => {
+	const oldCode = `export type ID = string | number;`;
+	const newCode = `export type ID = string;`;
+	const violations = detectExportSignatureModifications('source/id.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('ID'));
+});
+
+test('detectExportSignatureModifications detects exported variable type changes', (t) => {
+	const oldCode = `export const timeout: number = 5000;`;
+	const newCode = `export const timeout: string = '5000';`;
+	const violations = detectExportSignatureModifications('source/config.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('timeout'));
+});
+
+test('detectExportSignatureModifications allows implementation-only changes', (t) => {
+	const oldCode = `export function compute(a: number, b: number): number {\n  const sum = a + b;\n  return sum;\n}`;
+	const newCode = `export function compute(a: number, b: number): number {\n  return a + b;\n}`;
+	const violations = detectExportSignatureModifications('source/compute.ts', oldCode, newCode);
+	t.is(violations.length, 0);
+});
+
+test('detectExportSignatureModifications detects removal in export { a, b } block', (t) => {
+	const oldCode = `function foo() {}\nfunction bar() {}\nexport { foo, bar };`;
+	const newCode = `function foo() {}\nfunction bar() {}\nexport { foo };`;
+	const violations = detectExportSignatureModifications('source/mod.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].details?.includes('bar'));
+});
+
+test('detectExportSignatureModifications supports multiline declarations and overloads', (t) => {
+	const oldCode = `
+export function parse(
+	input: string,
+	options?: {
+		strict: boolean;
+	}
+): boolean;
+export function parse(input: string, options?: any): boolean {
+	return true;
+}
+`;
+	const newCode = `
+export function parse(
+	input: string,
+	options?: {
+		strict: boolean;
+	}
+): boolean;
+export function parse(input: string, options?: any): boolean {
+	const res = Boolean(input);
+	return res;
+}
+`;
+	const violations = detectExportSignatureModifications('source/parser.ts', oldCode, newCode);
+	t.is(violations.length, 0);
+});
+
+test('detectDeletedTestBlocks detects deletion among duplicate test titles', (t) => {
+	const oldCode = `
+test('parses config', () => {});
+test('parses config', () => {});
+test('validates schema', () => {});
+`;
+	const newCode = `
+test('parses config', () => {});
+test('validates schema', () => {});
+`;
+	const violations = detectDeletedTestBlocks('source/parser.spec.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].message.includes('deletion of 1 test case(s)'));
+	t.true(violations[0].details?.includes('"parses config"'));
+});
+
+test('detectAnyTypeInjections flags newly injected any even if another any was deleted', (t) => {
+	const oldCode = `
+function process(a: any, b: number) {
+	return b;
+}
+`;
+	const newCode = `
+function process(a: string, b: any) {
+	return b;
+}
+`;
+	const violations = detectAnyTypeInjections('source/process.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].message.includes("Injected 1 explicit 'any'"));
+});
+

@@ -2,6 +2,7 @@ import test from 'ava';
 import {
 	evaluateMutationEnvelope,
 	getFirewallConfig,
+	isProtectedPath,
 	resetFirewallConfig,
 	setFirewallConfig,
 } from './mutation-firewall';
@@ -88,4 +89,18 @@ test('can configure custom protected patterns', (t) => {
 	const result = evaluateMutationEnvelope('secrets/prod.env', 'A=1', 'A=2');
 	t.false(result.allowed);
 	t.is(result.violations[0].rule, 'protect_config_files');
+});
+
+test('isProtectedPath table-driven path validation', (t) => {
+	t.true(isProtectedPath('package.json', ['package.json']));
+	t.true(isProtectedPath('./package.json', ['package.json']));
+	t.false(isProtectedPath('my-package.json', ['package.json']));
+	t.true(isProtectedPath('package.json', ['/package.json']));
+	t.false(isProtectedPath('src/package.json', ['/package.json']));
+	t.true(isProtectedPath('.github/workflows/ci.yml', ['.github/workflows/**']));
+	t.true(isProtectedPath('.github\\workflows\\ci.yml', ['.github/workflows/**']));
+	t.true(isProtectedPath('deep/nested/yarn.lock', ['**/*.lock']));
+	t.false(isProtectedPath('deep/nested/yarn.lock.backup', ['**/*.lock']));
+	t.false(isProtectedPath('docs/readme.md', ['docs/**', '!docs/readme.md']));
+	t.false(isProtectedPath('any/path.ts', ['[invalid-glob']));
 });

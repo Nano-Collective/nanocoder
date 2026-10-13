@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -1159,6 +1159,40 @@ test('write_file: throws when mutation firewall blocks test deletion', async t =
 
 	const content = await readFile(filePath, 'utf-8');
 	t.true(content.includes('old test'));
+});
+
+test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
+	const filePath = await createTestFile('protected.txt', 'secret original content');
+	await chmod(filePath, 0o000);
+
+	try {
+		await t.throwsAsync(
+			async () => {
+				await executeWriteFile({
+					path: filePath,
+					content: 'overwritten content',
+				});
+			},
+			{message: /\[Mutation Firewall\] Blocked mutation: failed to read existing file/},
+		);
+	} finally {
+		await chmod(filePath, 0o644);
+	}
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'secret original content');
+});
+
+test('write_file: genuinely new file write succeeds without read failure', async t => {
+	const filePath = join(testDir, 'new-file.txt');
+	const output = await executeWriteFile({
+		path: filePath,
+		content: 'brand new content',
+	});
+
+	t.truthy(output);
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'brand new content');
 });
 
 
