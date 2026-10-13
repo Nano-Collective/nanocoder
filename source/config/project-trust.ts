@@ -17,6 +17,7 @@ export interface ProjectTrustSurface {
 	otherHooks: number;
 	mcpServers: number;
 	formatters: number;
+	lspServers: number;
 	customTools: number;
 	subscribedSkills: number;
 	subscribedAgents: number;
@@ -28,7 +29,7 @@ export interface ProjectTrustSurface {
 
 /**
  * What this folder will run once it is trusted: in-process plugins, hooks,
- * formatters, project MCP servers, custom tools, and the skills, agents,
+ * formatters, LSP servers, project MCP servers, custom tools, and the skills, agents,
  * and commands the daemon triggers on its own. The fingerprint covers those files,
  * so a later edit is visible even when the counts stay the same.
  */
@@ -40,6 +41,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const config = readProjectConfig(root, lines);
 	const hooks = listHooks(config, lines);
 	const formatters = listFormatters(config, lines);
+	const lspServers = listLspServers(config, lines);
 	const mcpServers = listMcpServers(root, lines);
 	const customTools = listCustomTools(root, lines);
 	const subscribedSkills = listSubscribedSkills(root, lines);
@@ -52,6 +54,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(hooks.other, 'other hook', 'other hooks'),
 		countLabel(mcpServers, 'MCP server', 'MCP servers'),
 		countLabel(formatters, 'formatter', 'formatters'),
+		countLabel(lspServers, 'LSP server', 'LSP servers'),
 		countLabel(customTools, 'custom tool', 'custom tools'),
 		countLabel(subscribedSkills, 'subscribed skill', 'subscribed skills'),
 		countLabel(subscribedAgents, 'subscribed agent', 'subscribed agents'),
@@ -64,6 +67,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		otherHooks: hooks.other,
 		mcpServers,
 		formatters,
+		lspServers,
 		customTools,
 		subscribedSkills,
 		subscribedAgents,
@@ -149,6 +153,31 @@ function listFormatters(
 		// The whole entry, so `prettier` + `--write *.ts` and
 		// `prettier --write` + `*.ts` can't produce the same line.
 		lines.push(`formatter ${JSON.stringify(entry)}`);
+		count++;
+	}
+	return count;
+}
+
+/**
+ * `nanocoder.lspServers` entries start a `command` when Nanocoder launches.
+ * Counts the entries the config loader keeps (a name, a command, and a
+ * languages list) and fingerprints each whole, so an `args` or `env` edit
+ * is a different program.
+ */
+function listLspServers(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const servers = config?.nanocoder?.lspServers;
+	if (!Array.isArray(servers)) return 0;
+
+	let count = 0;
+	for (const entry of servers) {
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+		const {name, command, languages} = entry as Record<string, unknown>;
+		if (typeof name !== 'string' || typeof command !== 'string') continue;
+		if (command.trim() === '' || !Array.isArray(languages)) continue;
+		lines.push(`lsp ${JSON.stringify(entry)}`);
 		count++;
 	}
 	return count;
@@ -328,6 +357,7 @@ interface ProjectConfig {
 	nanocoder?: {
 		hooks?: Partial<Record<HookEvent, unknown>>;
 		formatters?: unknown[];
+		lspServers?: unknown[];
 	};
 }
 

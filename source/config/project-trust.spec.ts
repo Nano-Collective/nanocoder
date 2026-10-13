@@ -227,6 +227,39 @@ test('formatter entries are fingerprinted whole, so split points differ', t => {
 	}
 });
 
+test('LSP servers from the project config are listed and fingerprinted', t => {
+	const root = tempRoot();
+	try {
+		const write = (lspServers: unknown[]) =>
+			writeFileSync(
+				join(root, 'agents.config.json'),
+				JSON.stringify({nanocoder: {lspServers}}),
+			);
+		const server = {name: 'ts', command: 'node', languages: ['typescript']};
+		const empty = describeProjectTrust(root);
+
+		write([{...server, args: ['a.js']}]);
+		const first = describeProjectTrust(root);
+		t.is(first.lspServers, 1);
+		t.is(first.summary, 'This folder contains: 1 LSP server.');
+		t.not(first.fingerprint, empty.fingerprint);
+
+		// An args edit is a different program, with the count unchanged.
+		write([{...server, args: ['b.js']}]);
+		const second = describeProjectTrust(root);
+		t.is(second.lspServers, 1);
+		t.not(second.fingerprint, first.fingerprint);
+
+		// An entry the config loader drops (no languages) never runs.
+		write([{name: 'ts', command: 'node'}]);
+		const dropped = describeProjectTrust(root);
+		t.is(dropped.lspServers, 0);
+		t.is(dropped.fingerprint, empty.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('symlinked command folders and skill bundles are followed', t => {
 	const root = tempRoot();
 	const shared = tempRoot();
