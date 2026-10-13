@@ -786,6 +786,22 @@ export class AcpAgent implements Agent {
 			return {ok: true, messagesCount: session.messages.length};
 		}
 
+		// The editor has no active document (e.g. all editors closed). ACP's
+		// didFocusDocument requires a non-null URI, so clearing focus goes
+		// through this extension method instead.
+		if (method === 'clearFocusDocument') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('clearFocusDocument requires string sessionId');
+			}
+			const session = this.sessions.get(sessionId);
+			if (session) {
+				session.activeFile = undefined;
+				logger.info(`ACP extMethod clearFocusDocument: session=${sessionId}`);
+			}
+			return {ok: true};
+		}
+
 		throw new Error(`Unknown extension method: ${method}`);
 	}
 

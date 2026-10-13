@@ -76,21 +76,42 @@ export class NanocoderAcpClient {
 	}
 
 	notifyActiveEditorChanged(editor: vscode.TextEditor | undefined) {
-		if (editor && this.connection && this._sessionId) {
-			const uri = editor.document.uri.toString();
-			const cursorPos = editor.selection.active;
-			const visibleRange = editor.visibleRanges[0];
-			const range = visibleRange ?? new vscode.Range(cursorPos, cursorPos);
-			this.connection.unstable_didFocusDocument({
+		if (!this.connection || !this._sessionId) return;
+
+		if (!editor) {
+			// All editors closed: tell the backend focus is gone so it stops
+			// attributing the last file to subsequent prompts.
+			this.connection.extMethod('clearFocusDocument', {
 				sessionId: this._sessionId,
-				uri,
-				version: editor.document.version,
-				position: { line: cursorPos.line, character: cursorPos.character },
-				visibleRange: {
-					start: { line: range.start.line, character: range.start.character },
-					end: { line: range.end.line, character: range.end.character },
-				},
 			}).catch(() => { /* best-effort */ });
+			return;
+		}
+
+		const uri = editor.document.uri.toString();
+		const cursorPos = editor.selection.active;
+		const visibleRange = editor.visibleRanges[0];
+		const range = visibleRange ?? new vscode.Range(cursorPos, cursorPos);
+		this.connection.unstable_didFocusDocument({
+			sessionId: this._sessionId,
+			uri,
+			version: editor.document.version,
+			position: { line: cursorPos.line, character: cursorPos.character },
+			visibleRange: {
+				start: { line: range.start.line, character: range.start.character },
+				end: { line: range.end.line, character: range.end.character },
+			},
+		}).catch(() => { /* best-effort */ });
+	}
+
+	/**
+	 * Push the currently focused editor to a freshly created or resumed session,
+	 * which starts with no focused file. Skipped when nothing is open: a new
+	 * session has no focus to clear.
+	 */
+	private syncActiveEditor(): void {
+		const editor = vscode.window.activeTextEditor;
+		if (editor) {
+			this.notifyActiveEditorChanged(editor);
 		}
 	}
 
@@ -253,6 +274,7 @@ export class NanocoderAcpClient {
 			}
 
 			this.notifyStateSync();
+			this.syncActiveEditor();
 
 			return this._sessionId;
 		} catch (error) {
@@ -486,6 +508,7 @@ export class NanocoderAcpClient {
 			}
 			this.onSessionArtifacts?.(result._meta);
 			this.notifyStateSync();
+			this.syncActiveEditor();
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
