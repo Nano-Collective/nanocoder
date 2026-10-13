@@ -36,6 +36,9 @@ const IN_PROGRESS_MARKERS = [
 	'rebase-apply',
 ];
 
+/** Avoid repeating the same detached-HEAD warning for every edited file. */
+const warnedDetachedHeadRoots = new Set<string>();
+
 let activeClient: LLMClient | null = null;
 
 /**
@@ -132,6 +135,15 @@ async function commitFile(absPath: string): Promise<string | null> {
 		);
 		return null;
 	}
+	if (await isDetachedHead(git)) {
+		if (!warnedDetachedHeadRoots.has(root)) {
+			warnedDetachedHeadRoots.add(root);
+			logWarning(
+				`Auto-commit skipped for ${pathspec}: HEAD is detached or could not be verified. Check out a branch to keep agent commits reachable.`,
+			);
+		}
+		return null;
+	}
 
 	if (await isIgnored(git, pathspec)) return null;
 
@@ -185,7 +197,15 @@ async function commitFile(absPath: string): Promise<string | null> {
 		}
 
 		const message = await generateMessage(diff, pathspec);
-		const output = await git('commit', '-m', message, '--', pathspec);
+		const output = await git(
+			'commit',
+			'-m',
+			message,
+			'-m',
+			'Nanocoder-Auto-Commit: true',
+			'--',
+			pathspec,
+		);
 
 		const hash = output.match(/\[[^\]]*?([a-f0-9]{7,})\]/)?.[1] ?? '';
 		const subject = message.split('\n')[0];
@@ -229,6 +249,19 @@ async function isOperationInProgress(
 		}
 	}
 	return false;
+}
+
+async function isDetachedHead(
+	git: (...args: string[]) => Promise<string>,
+): Promise<boolean> {
+	try {
+		await git('symbolic-ref', '--quiet', 'HEAD');
+		return false;
+	} catch {
+		// A detached HEAD makes a new commit reachable only from HEAD, so skip
+		// rather than risk leaving an agent-authored commit behind at checkout.
+		return true;
+	}
 }
 
 async function isIgnored(

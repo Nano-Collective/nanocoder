@@ -8,9 +8,11 @@ import {
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import type {ReactElement, ReactNode} from 'react';
 import test from 'ava';
 import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
+import {setGlobalMessageQueue} from '../utils/message-queue';
 import {getProjectRoot, setProjectRoot} from './session-cwd';
 import {
 	cleanMessage,
@@ -85,8 +87,44 @@ test.serial('commits the edited file with the generated message', async t => {
 		t.regex(note ?? '', /^\[auto-commit\] [a-f0-9]{7,} feat: add a constant$/);
 		t.is(commitCount(dir), 2);
 		t.is(git(dir, 'log -1 --format=%s'), 'feat: add a constant');
+		t.is(
+			git(dir, 'log -1 --format=%B'),
+			'feat: add a constant\n\nNanocoder-Auto-Commit: true',
+		);
 		t.is(git(dir, 'show --name-only --format= HEAD'), 'a.ts');
 	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('skips auto-commit on detached HEAD without touching the index', async t => {
+	const dir = makeRepo();
+	const messages: ReactNode[] = [];
+	setGlobalMessageQueue(component => messages.push(component));
+	try {
+		git(dir, 'checkout -q --detach HEAD');
+
+		const staged = join(dir, 'staged.txt');
+		writeFileSync(staged, 'user staged\n');
+		git(dir, 'add staged.txt');
+
+		const file = join(dir, 'agent.ts');
+		writeFileSync(file, 'export const agent = true;\n');
+
+		t.is(await maybeAutoCommit('write_file', {path: file}), null);
+		t.is(commitCount(dir), 1);
+		const status = git(dir, 'status --porcelain');
+		t.true(status.includes('A  staged.txt'), status);
+		t.true(status.includes('?? agent.ts'), status);
+
+		writeFileSync(file, 'export const agent = false;\n');
+		t.is(await maybeAutoCommit('write_file', {path: file}), null);
+		t.is(messages.length, 1, 'detached-HEAD warning is shown only once');
+		const warning = messages[0] as ReactElement<{message: string}>;
+		t.true(warning.props.message.includes('HEAD is detached or could not be verified'));
+		t.true(warning.props.message.includes('Check out a branch to keep agent commits reachable'));
+	} finally {
+		setGlobalMessageQueue(() => {});
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
@@ -428,4 +466,3 @@ test.serial(
 		}
 	},
 );
-
