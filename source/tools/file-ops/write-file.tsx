@@ -76,8 +76,10 @@ const executeWriteFile = async (args: {
 			try {
 				originalContent = await readFile(absPath, 'utf-8');
 				previousContentCache.set(absPath, originalContent);
-			} catch {
-				originalContent = '';
+			} catch (readError) {
+				throw new Error(
+					`[Mutation Firewall] Blocked mutation: failed to read existing file '${args.path}' for validation: ${formatError(readError)}`,
+				);
 			}
 		}
 	}
