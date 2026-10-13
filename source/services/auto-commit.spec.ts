@@ -91,6 +91,10 @@ test.serial('commits the edited file with the generated message', async t => {
 			git(dir, 'log -1 --format=%B'),
 			'feat: add a constant\n\nNanocoder-Auto-Commit: true',
 		);
+		t.is(
+			git(dir, 'log -1 --format=%H --grep=Nanocoder-Auto-Commit'),
+			git(dir, 'rev-parse HEAD'),
+		);
 		t.is(git(dir, 'show --name-only --format= HEAD'), 'a.ts');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
