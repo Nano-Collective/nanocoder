@@ -9,6 +9,7 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {resetFirewallConfig} from '../../firewall/mutation-firewall.js';
 import {readFileTool} from '../read-file.js';
 import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
@@ -41,6 +42,7 @@ test.beforeEach(async () => {
 	// Read-before-edit state is process-global; reset it between serial tests
 	// so a file "seen" by one test can't authorize an edit in another.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -1290,5 +1292,27 @@ test('string_replace: formatter does not render description when omitted', async
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+test('string_replace: throws when mutation firewall blocks test deletion', async t => {
+	const filePath = await createTestFile(
+		'feature.spec.ts',
+		"test('feature A', () => {});\ntest('feature B', () => {});\n",
+	);
+	markFileSeen(filePath);
+
+	await t.throwsAsync(
+		async () => {
+			await executeStringReplace({
+				path: filePath,
+				old_str: "test('feature B', () => {});\n",
+				new_str: '',
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('feature B'));
 });
 

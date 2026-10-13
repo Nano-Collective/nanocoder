@@ -67,10 +67,20 @@ const executeWriteFile = async (args: {
 	// Type guard: ensure content is string for write operation
 	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
 	const contentStr = ensureString(args.content);
-	const originalContent =
-		fileExists && previousContentCache.get(absPath) !== null
-			? (previousContentCache.get(absPath) ?? '')
-			: '';
+	let originalContent = '';
+	if (fileExists) {
+		const cached = previousContentCache.get(absPath);
+		if (cached !== null && cached !== undefined) {
+			originalContent = cached;
+		} else {
+			try {
+				originalContent = await readFile(absPath, 'utf-8');
+				previousContentCache.set(absPath, originalContent);
+			} catch {
+				originalContent = '';
+			}
+		}
+	}
 
 	const firewallResult = evaluateMutationEnvelope(
 		args.path,
