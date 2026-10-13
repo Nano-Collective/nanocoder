@@ -635,6 +635,58 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
 });
 
+const promptCustomCommandWithFile = async (
+	content: string,
+	parameters?: string[],
+): Promise<string> => {
+	const {agent} = createAgent();
+	agent['initContext'].customCommandLoader = {
+		getAllCommands: () => [],
+		getCommand: (name: string) =>
+			name === 'review'
+				? {
+						name: 'review',
+						fullName: 'review',
+						path: '/tmp/review.md',
+						content,
+						metadata: parameters ? {parameters} : {},
+					}
+				: undefined,
+	} as any;
+	let sent = '';
+	agent['initContext'].client.chat = async (messages: any[]) => {
+		sent = String(messages.findLast(m => m.role === 'user')?.content ?? '');
+		return {choices: [{message: {content: 'ok'}}]};
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{type: 'text', text: '/review'},
+			{
+				type: 'resource',
+				resource: {uri: 'src/auth.ts', text: 'export const auth = 1;'},
+			},
+		],
+	});
+	return sent;
+};
+
+test('AcpAgent.prompt - custom command keeps an attached file after the body', async t => {
+	const sent = await promptCustomCommandWithFile('Review the code.');
+	t.true(sent.includes('Review the code.'));
+	t.true(sent.includes('export const auth = 1;'));
+	t.true(sent.indexOf('Review the code.') < sent.indexOf('Contents of'));
+});
+
+test('AcpAgent.prompt - an attached file does not fill a custom command parameter', async t => {
+	const sent = await promptCustomCommandWithFile('Review {{target}}.', [
+		'target=HEAD',
+	]);
+	t.true(sent.includes('Review HEAD.'));
+	t.true(sent.includes('export const auth = 1;'));
+});
+
 test('AcpAgent.prompt - serializes overlapping prompts instead of throwing', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});

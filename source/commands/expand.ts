@@ -3,6 +3,7 @@
  * Prints one tool result in full, past the transcript's line cap. Without a
  * number it lists the recent results that can be expanded.
  */
+import cliTruncate from 'cli-truncate';
 import {DEFAULT_TERMINAL_COLUMNS, TOOL_OUTPUT_DISPLAY_LINES} from '@/constants';
 import {calculateBoxWidth} from '@/hooks/useTerminalWidth';
 import {getToolManager} from '@/message-handler';
@@ -38,12 +39,12 @@ function summarizeToolCall(toolCall: ToolCall, maxLength: number): string {
 		);
 		if (!value) return '';
 		// Collapse whitespace so multi-line commands stay on one row, and cut
-		// to the room left on the row so a long argument cannot wrap it.
+		// to the room left on the row so a long argument cannot wrap it. The
+		// room is in terminal columns, so cut by columns too: an emoji or CJK
+		// character takes 2, and a surrogate pair must not be split in half.
 		const collapsed = value.replace(/\s+/g, ' ').trim();
 		const cap = Math.max(maxLength, MIN_SUMMARY_LENGTH);
-		const truncated =
-			collapsed.length > cap ? `${collapsed.slice(0, cap - 1)}…` : collapsed;
-		return ` ${truncated}`;
+		return ` ${cliTruncate(collapsed, cap)}`;
 	} catch {
 		return '';
 	}
