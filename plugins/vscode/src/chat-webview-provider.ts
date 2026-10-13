@@ -107,6 +107,7 @@ export class ChatWebviewProvider
 		};
 
 		this._acpClient.onConnectionReady = () => {
+			this._diffManager.clearPendingChanges();
 			this._initializeSessionIfReady();
 		};
 	}
@@ -116,9 +117,11 @@ export class ChatWebviewProvider
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
+					const toolCallId = update.toolCallId || payload.toolCallId;
+					const id = toolCallId ? `${toolCallId}_${path.normalize(block.path)}` : block.path;
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
+						id,
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -203,6 +206,7 @@ export class ChatWebviewProvider
 	public resetSessionState(): void {
 		this._planReview.reset();
 		this._artifacts.reset();
+		this._diffManager.clearPendingChanges();
 		this.postArtifacts();
 	}
 
@@ -362,6 +366,7 @@ export class ChatWebviewProvider
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
 						this._planReview.reset();
 						this._artifacts.reset();
+						this._diffManager.clearPendingChanges();
 						this.postArtifacts();
 						this._discardQueuedPrompts('resume session');
 						this.postMessage({type: 'clear', isLoading: true});
