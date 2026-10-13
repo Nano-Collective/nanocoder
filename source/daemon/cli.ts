@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ensureDirectoryTrust} from '@/config/preferences';
+import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
@@ -158,7 +158,7 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 			exitCode: 1,
 			output:
 				`Directory ${resolve(opts.projectRoot)} ` +
-				(trust.changed ? 'changed since you trusted it' : 'is not trusted') +
+				untrustedReason(trust.recheck) +
 				`. The daemon runs ` +
 				`triggered skills unattended with no confirmation prompts, so it refuses ` +
 				`to start here. Run \`nanocoder\` interactively in this directory once to ` +

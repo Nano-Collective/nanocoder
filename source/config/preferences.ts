@@ -172,8 +172,14 @@ export function savePreferences(preferences: UserPreferences): void {
 	}
 }
 
-function trustPath(entry: string | TrustedDirectoryRecord): string {
-	return typeof entry === 'string' ? entry : entry.path;
+/** The path a trust entry names, or null for a hand-edited entry with none. */
+function trustPath(entry: unknown): string | null {
+	if (typeof entry === 'string') return entry;
+	if (entry && typeof entry === 'object') {
+		const entryPath = (entry as {path?: unknown}).path;
+		if (typeof entryPath === 'string') return entryPath;
+	}
+	return null;
 }
 
 /**
@@ -189,29 +195,43 @@ export function isDirectoryTrusted(
 	const resolved = path.resolve(directory); // nosemgrep
 	const fingerprint = describeProjectTrust(resolved).fingerprint;
 	return (preferences.trustedDirectories ?? []).some(entry => {
-		if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-			return false;
-		}
+		const entryPath = trustPath(entry);
 		return (
-			path.resolve(entry.path) === resolved && // nosemgrep
+			typeof entry === 'object' &&
+			entryPath !== null &&
+			path.resolve(entryPath) === resolved && // nosemgrep
 			entry.fingerprint === fingerprint
 		);
 	});
 }
 
 /**
- * True if `directory` has any trust entry, even one whose fingerprint no
- * longer matches. Lets callers say "changed since you trusted it" instead
- * of a plain "not trusted".
+ * Why a folder with a trust entry is asked again: its fingerprint changed,
+ * or the entry is a bare path saved before fingerprints existed.
  */
-export function wasDirectoryTrusted(
+export type TrustRecheck = 'changed' | 'upgrade';
+
+/** Null when `directory` has no trust entry at all. */
+export function trustRecheck(
 	directory: string,
 	preferences: UserPreferences,
-): boolean {
+): TrustRecheck | null {
 	const resolved = path.resolve(directory); // nosemgrep
-	return (preferences.trustedDirectories ?? []).some(
-		entry => path.resolve(trustPath(entry)) === resolved, // nosemgrep
-	);
+	let recheck: TrustRecheck | null = null;
+	for (const entry of preferences.trustedDirectories ?? []) {
+		const entryPath = trustPath(entry);
+		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
+		if (typeof entry !== 'string') return 'changed';
+		recheck = 'upgrade';
+	}
+	return recheck;
+}
+
+/** Shared wording for "Directory X ..." and "This folder ...". */
+export function untrustedReason(recheck: TrustRecheck | null | undefined) {
+	if (recheck === 'changed') return 'changed since you trusted it';
+	if (recheck === 'upgrade') return 'needs re-approval after the upgrade';
+	return 'is not trusted';
 }
 
 /** Record this folder, including a fingerprint of what it will run. */
@@ -222,7 +242,10 @@ export function grantDirectoryTrust(
 	const resolved = path.resolve(directory); // nosemgrep
 	const fingerprint = describeProjectTrust(resolved).fingerprint;
 	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
-		entry => path.resolve(trustPath(entry)) !== resolved, // nosemgrep
+		entry => {
+			const entryPath = trustPath(entry);
+			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
+		},
 	);
 	trustedDirectories.push({path: resolved, fingerprint});
 	return {...preferences, trustedDirectories};
@@ -232,8 +255,8 @@ export interface DirectoryTrustResult {
 	trusted: boolean;
 	/** True if this call persisted a new trust entry (env-var bypass only). */
 	persisted: boolean;
-	/** True if the folder was trusted before but has changed since. */
-	changed?: boolean;
+	/** Set when refusing a folder that has a trust entry. */
+	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
@@ -250,8 +273,8 @@ export interface DirectoryTrustDeps {
  * disclaimer's per-run nature. A directory is trusted only when its saved
  * fingerprint still matches what the folder will run (see
  * `describeProjectTrust`). A path with no fingerprint, or an old
- * fingerprint, is not trusted, and `changed` is set so the caller can say
- * so. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
+ * fingerprint, is not trusted, and `recheck` says which so the caller can
+ * word it. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(
 	directory: string,
@@ -273,7 +296,7 @@ export function ensureDirectoryTrust(
 	return {
 		trusted: false,
 		persisted: false,
-		changed: wasDirectoryTrusted(directory, preferences),
+		recheck: trustRecheck(directory, preferences),
 	};
 }
 

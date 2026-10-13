@@ -30,7 +30,8 @@ import {promisify} from 'node:util';
 import {
 	isDirectoryTrusted,
 	loadPreferences,
-	wasDirectoryTrusted,
+	trustRecheck,
+	untrustedReason,
 } from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 
@@ -255,9 +256,7 @@ export async function installAutoStart(
 	const trustWarning = trusted
 		? ''
 		: ` Warning: ${resolve(opts.projectRoot)} ` +
-			(wasDirectoryTrusted(opts.projectRoot, preferences)
-				? 'changed since you trusted it'
-				: 'is not trusted') +
+			untrustedReason(trustRecheck(opts.projectRoot, preferences)) +
 			`, so the ` +
 			`installed service will fail to start until you run \`nanocoder\` here ` +
 			`once to accept the trust disclaimer, or pass --trust-directory to ` +

@@ -11,6 +11,8 @@ import {
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
+	type TrustRecheck,
+	untrustedReason,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {
@@ -90,10 +92,12 @@ const defaultDeps: RunPlainShellDeps = {
  * the variable saves the directory to `trustedDirectories` - so the message
  * names which is which. Shared by the text and `--json` outputs.
  */
-function untrustedDirectoryMessage(cwd: string, changed = false): string {
+function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
 	return (
-		`Directory ${cwd} ` +
-		(changed ? 'changed since you trusted it' : 'is not trusted') +
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
 		`. Pass --trust-directory to bypass the ` +
 		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
 		`trust this directory permanently.`
@@ -139,7 +143,7 @@ export async function runPlainShell(
 	if (!trust.trusted) {
 		const message = untrustedDirectoryMessage(
 			path.resolve(process.cwd()),
-			trust.changed,
+			trust.recheck,
 		);
 		if (isJson) {
 			emitJsonReport({

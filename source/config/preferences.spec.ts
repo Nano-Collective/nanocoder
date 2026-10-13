@@ -13,6 +13,7 @@ import {
 } from '@/memory/project-context';
 import {
 	ensureDirectoryTrust,
+	grantDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -45,6 +46,7 @@ import {
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
+	trustRecheck,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
@@ -2212,7 +2214,7 @@ test.serial(
 				t.fail('should not persist when refusing');
 			},
 		});
-		t.deepEqual(result, {trusted: false, persisted: false, changed: false});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: null});
 	},
 );
 
@@ -2229,9 +2231,35 @@ test.serial(
 				t.fail('should not persist when refusing');
 			},
 		});
-		t.deepEqual(result, {trusted: false, persisted: false, changed: true});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
 	},
 );
+
+test.serial(
+	'ensureDirectoryTrust says a path-only entry needs re-approval after the upgrade',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({trustedDirectories: [dir]}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'upgrade'});
+	},
+);
+
+test('trust checks skip malformed entries instead of throwing', t => {
+	const dir = process.cwd();
+	const preferences = {
+		trustedDirectories: [null, {}, {path: 5}, 7],
+	} as unknown as UserPreferences;
+	t.false(isDirectoryTrusted(dir, preferences));
+	t.is(trustRecheck(dir, preferences), null);
+	const granted = grantDirectoryTrust(preferences, dir);
+	t.true(isDirectoryTrusted(dir, granted));
+});
 
 test.serial(
 	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
