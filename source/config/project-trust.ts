@@ -1,5 +1,12 @@
 import {createHash} from 'node:crypto';
-import {existsSync, readdirSync, readFileSync} from 'node:fs';
+import {
+	existsSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	type Stats,
+	statSync,
+} from 'node:fs';
 import path from 'node:path';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
@@ -139,7 +146,9 @@ function listFormatters(
 				? [match]
 				: [];
 		if (globs.length === 0) continue;
-		lines.push(`formatter ${command} ${globs.join(',')}`);
+		// The whole entry, so `prettier` + `--write *.ts` and
+		// `prettier --write` + `*.ts` can't produce the same line.
+		lines.push(`formatter ${JSON.stringify(entry)}`);
 		count++;
 	}
 	return count;
@@ -254,25 +263,53 @@ function declaresSubscribe(file: string, text: string): boolean {
 	return parseYamlObject(yaml)?.subscribe !== undefined;
 }
 
+// The listings follow symlinks, as the tool, command, and skill loaders do.
+
 function listDirs(dir: string): string[] {
+	return listNames(dir).filter(name =>
+		statOrNull(path.join(dir, name))?.isDirectory(),
+	);
+}
+
+function listFiles(
+	dir: string,
+	recursive = false,
+	seen = new Set<string>(),
+): string[] {
 	try {
-		return readdirSync(dir, {withFileTypes: true})
-			.filter(entry => entry.isDirectory())
-			.map(entry => entry.name)
-			.sort();
+		const real = realpathSync(dir);
+		if (seen.has(real)) return [];
+		seen.add(real);
+	} catch {
+		return [];
+	}
+	const files: string[] = [];
+	for (const name of listNames(dir)) {
+		const stat = statOrNull(path.join(dir, name));
+		if (stat?.isFile()) {
+			files.push(name);
+		} else if (recursive && stat?.isDirectory()) {
+			for (const file of listFiles(path.join(dir, name), true, seen)) {
+				files.push(path.join(name, file));
+			}
+		}
+	}
+	return files;
+}
+
+function listNames(dir: string): string[] {
+	try {
+		return readdirSync(dir).sort();
 	} catch {
 		return [];
 	}
 }
 
-function listFiles(dir: string, recursive = false): string[] {
+function statOrNull(file: string): Stats | null {
 	try {
-		return readdirSync(dir, {withFileTypes: true, recursive})
-			.filter(entry => entry.isFile())
-			.map(entry => path.relative(dir, path.join(entry.parentPath, entry.name)))
-			.sort();
+		return statSync(file);
 	} catch {
-		return [];
+		return null;
 	}
 }
 

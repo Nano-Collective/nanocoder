@@ -1,4 +1,10 @@
-import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -201,5 +207,57 @@ test('agents and commands with subscribe: are fingerprinted', t => {
 		t.not(describeProjectTrust(root).fingerprint, before.fingerprint);
 	} finally {
 		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('formatter entries are fingerprinted whole, so split points differ', t => {
+	const root = tempRoot();
+	try {
+		const write = (formatter: object) =>
+			writeFileSync(
+				join(root, 'agents.config.json'),
+				JSON.stringify({nanocoder: {formatters: [formatter]}}),
+			);
+		write({command: 'prettier', match: '--write *.ts'});
+		const first = describeProjectTrust(root).fingerprint;
+		write({command: 'prettier --write', match: '*.ts'});
+		t.not(describeProjectTrust(root).fingerprint, first);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('symlinked command folders and skill bundles are followed', t => {
+	const root = tempRoot();
+	const shared = tempRoot();
+	try {
+		mkdirSync(join(shared, 'cmds'));
+		writeFileSync(
+			join(shared, 'cmds', 'watch.md'),
+			'---\nsubscribe: [{kind: file.changed, paths: ["**"]}]\n---\nGo.\n',
+		);
+		mkdirSync(join(shared, 'bundle', 'tools'), {recursive: true});
+		writeFileSync(join(shared, 'bundle', 'skill.yaml'), 'name: linked\n');
+		writeFileSync(join(shared, 'bundle', 'tools', 'run.md'), '---\n---\n');
+
+		mkdirSync(join(root, '.nanocoder', 'commands'), {recursive: true});
+		mkdirSync(join(root, '.nanocoder', 'skills'), {recursive: true});
+		symlinkSync(
+			join(shared, 'cmds'),
+			join(root, '.nanocoder', 'commands', 'shared'),
+			'junction',
+		);
+		symlinkSync(
+			join(shared, 'bundle'),
+			join(root, '.nanocoder', 'skills', 'linked'),
+			'junction',
+		);
+
+		const surface = describeProjectTrust(root);
+		t.is(surface.subscribedCommands, 1);
+		t.is(surface.customTools, 1);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(shared, {recursive: true, force: true});
 	}
 });
