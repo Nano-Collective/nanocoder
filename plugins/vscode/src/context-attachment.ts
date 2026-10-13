@@ -108,10 +108,15 @@ export interface OpenDocument {
 	getText(): string;
 }
 
+/**
+ * Both sides are absolute (`uri.fsPath` and the attached path VS Code
+ * supplied), so normalizing is enough to compare them: it collapses `..` and
+ * duplicate separators, and on Windows also unifies `/` and `\`.
+ */
 function samePath(a: string, b: string): boolean {
 	const normalize = (p: string) => {
-		const resolved = path.resolve(p);
-		return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+		const normalized = path.normalize(p);
+		return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 	};
 	return normalize(a) === normalize(b);
 }
