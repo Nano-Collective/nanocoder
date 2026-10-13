@@ -4,7 +4,10 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
-import TextInput, {type TextInputHandle} from '@/components/text-input';
+import TextInput, {
+	type TextInputHandle,
+	useRawInput,
+} from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -947,6 +950,8 @@ export default function UserInput({
 		onRemoveQueuedMessage,
 	]);
 
+	const rawInputRef = useRawInput();
+
 	useInput((inputChar, key) => {
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
 		// every other key until `?` or Escape closes it.
@@ -1129,7 +1134,7 @@ export default function UserInput({
 		// offset, so the newline lands where the caret is. Bail out here before
 		// any of the Enter handling below, since ESC+CR and the kitty CSI-u
 		// encoding of Shift+Enter both arrive with `key.return` set.
-		if (isNewlineKey(inputChar, key)) {
+		if (isNewlineKey(inputChar, key, rawInputRef.current)) {
 			return;
 		}
 

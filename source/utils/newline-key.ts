@@ -13,6 +13,8 @@ const XTERM_MODIFIED_ENTER = /^\x1b\[27;[23];13~$/;
 
 /**
  * True when a keypress means "insert a newline" rather than "submit".
+ * `raw` is the byte sequence behind the keypress (see `useRawInput`); stock
+ * Ink does not put it on `Key`.
  *
  * Shared by `UserInput` (which must not submit on these) and `TextInput`
  * (which does the actual insertion at the cursor). Both components see every
@@ -32,7 +34,7 @@ const XTERM_MODIFIED_ENTER = /^\x1b\[27;[23];13~$/;
  * `\r`, byte-identical to Enter, so it cannot be told apart from submit. Those
  * terminals need a keybinding (or the kitty protocol) to send one of the above.
  */
-export function isNewlineKey(input: string, key: Key): boolean {
+export function isNewlineKey(input: string, key: Key, raw = ''): boolean {
 	if (input === '\n' && !key.return) {
 		return true;
 	}
@@ -45,5 +47,5 @@ export function isNewlineKey(input: string, key: Key): boolean {
 		return true;
 	}
 
-	return XTERM_MODIFIED_ENTER.test(key.raw ?? '');
+	return XTERM_MODIFIED_ENTER.test(raw);
 }
