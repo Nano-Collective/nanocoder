@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import path from 'node:path';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
+import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 
 export interface ProjectTrustSurface {
 	plugins: number;
@@ -11,6 +12,8 @@ export interface ProjectTrustSurface {
 	formatters: number;
 	customTools: number;
 	subscribedSkills: number;
+	subscribedAgents: number;
+	subscribedCommands: number;
 	fingerprint: string;
 	/** Null when this folder will not run any of the above. */
 	summary: string | null;
@@ -18,8 +21,8 @@ export interface ProjectTrustSurface {
 
 /**
  * What this folder will run once it is trusted: in-process plugins, hooks,
- * formatters, project MCP servers, custom tools, and skills the daemon
- * triggers on its own. The fingerprint covers those files,
+ * formatters, project MCP servers, custom tools, and the skills, agents,
+ * and commands the daemon triggers on its own. The fingerprint covers those files,
  * so a later edit is visible even when the counts stay the same.
  */
 export function describeProjectTrust(directory: string): ProjectTrustSurface {
@@ -33,6 +36,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const mcpServers = listMcpServers(root, lines);
 	const customTools = listCustomTools(root, lines);
 	const subscribedSkills = listSubscribedSkills(root, lines);
+	const subscribedAgents = listSubscribedFiles(root, 'agents', false, lines);
+	const subscribedCommands = listSubscribedFiles(root, 'commands', true, lines);
 
 	const parts = [
 		countLabel(plugins, 'plugin', 'plugins'),
@@ -42,6 +47,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(formatters, 'formatter', 'formatters'),
 		countLabel(customTools, 'custom tool', 'custom tools'),
 		countLabel(subscribedSkills, 'subscribed skill', 'subscribed skills'),
+		countLabel(subscribedAgents, 'subscribed agent', 'subscribed agents'),
+		countLabel(subscribedCommands, 'subscribed command', 'subscribed commands'),
 	].filter((part): part is string => part !== null);
 
 	return {
@@ -52,6 +59,8 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		formatters,
 		customTools,
 		subscribedSkills,
+		subscribedAgents,
+		subscribedCommands,
 		fingerprint: createHash('sha256').update(lines.join('\n')).digest('hex'),
 		summary:
 			parts.length > 0 ? `This folder contains: ${parts.join(', ')}.` : null,
@@ -199,11 +208,50 @@ function listSubscribedSkills(root: string, lines: string[]): number {
 				return String(error);
 			}
 		});
-		if (!contents.some(text => /^\s*subscribe:/m.test(text))) continue;
+		if (!files.some((file, i) => declaresSubscribe(file, contents[i] ?? ''))) {
+			continue;
+		}
 		lines.push(`skill ${name} ${hashText(contents.join('\0'))}`);
 		count++;
 	}
 	return count;
+}
+
+/**
+ * Flat `.nanocoder/agents/*.md` and `.nanocoder/commands/**\/*.md` files with
+ * a `subscribe:` trigger. Walked the way their loaders walk them: agents
+ * one level deep, commands recursively.
+ */
+function listSubscribedFiles(
+	root: string,
+	kind: 'agents' | 'commands',
+	recursive: boolean,
+	lines: string[],
+): number {
+	const dir = path.join(root, '.nanocoder', kind);
+	let count = 0;
+	for (const name of listFiles(dir, recursive).filter(f => f.endsWith('.md'))) {
+		const file = path.join(dir, name);
+		let text: string;
+		try {
+			text = readFileSync(file, 'utf8');
+		} catch {
+			continue;
+		}
+		if (!declaresSubscribe(file, text)) continue;
+		lines.push(`${kind} ${name} ${hashText(text)}`);
+		count++;
+	}
+	return count;
+}
+
+/**
+ * Same parse the loaders use, so a quoted or escaped key can't hide a
+ * trigger from the fingerprint while the loader still registers it.
+ */
+function declaresSubscribe(file: string, text: string): boolean {
+	const yaml = file.endsWith('.md') ? splitFrontmatter(text).frontmatter : text;
+	return parseYamlObject(yaml)?.subscribe !== undefined;
 }
 
 function listDirs(dir: string): string[] {

@@ -164,3 +164,42 @@ test('custom tools and subscribed skills are listed and fingerprinted', t => {
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('agents and commands with subscribe: are fingerprinted', t => {
+	const root = tempRoot();
+	try {
+		const agents = join(root, '.nanocoder', 'agents');
+		const commands = join(root, '.nanocoder', 'commands', 'ops');
+		mkdirSync(agents, {recursive: true});
+		mkdirSync(commands, {recursive: true});
+		writeFileSync(join(agents, 'plain.md'), '---\nname: plain\n---\nHi.\n');
+		const clean = describeProjectTrust(root);
+
+		const evil = join(agents, 'evil.md');
+		writeFileSync(
+			evil,
+			'---\nname: evil\nsubscribe: [{kind: file.changed, paths: ["**"]}]\n---\nOne.\n',
+		);
+		// A quoted, escaped key still parses as `subscribe` in YAML.
+		writeFileSync(
+			join(commands, 'deploy.md'),
+			'---\n"subscr\\x69be": [{kind: file.changed, paths: ["**"]}]\n---\nGo.\n',
+		);
+		const before = describeProjectTrust(root);
+		t.is(before.subscribedAgents, 1);
+		t.is(before.subscribedCommands, 1);
+		t.not(before.fingerprint, clean.fingerprint);
+		t.is(
+			before.summary,
+			'This folder contains: 1 subscribed agent, 1 subscribed command.',
+		);
+
+		writeFileSync(
+			evil,
+			'---\nname: evil\nsubscribe: [{kind: file.changed, paths: ["**"]}]\n---\nTwo.\n',
+		);
+		t.not(describeProjectTrust(root).fingerprint, before.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
