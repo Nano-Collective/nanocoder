@@ -276,3 +276,18 @@ test('ChatWebviewProvider - onConnectionReady clears pending diff changes', asyn
 	acpClient.onConnectionReady?.();
 	t.is(getClearPendingChangesCalls(), 1, 'clearPendingChanges must be called on onConnectionReady');
 });
+
+
+test('ChatWebviewProvider - showDiff message from webview requests diff preview without terminal focus restoration', async (t) => {
+	const {provider, getShowDiffCalls} = makeStubs();
+
+	await (provider as any)._handleWebviewMessage({
+		type: 'showDiff',
+		toolCallId: 'tool-call-webview',
+	});
+
+	const calls = getShowDiffCalls();
+	t.is(calls.length, 1);
+	t.is(calls[0].id, 'tool-call-webview');
+	t.falsy(calls[0].options?.restoreTerminalFocus, 'Webview showDiff must not set restoreTerminalFocus: true');
+});

@@ -293,7 +293,13 @@ export class ChatWebviewProvider
 
 		webviewView.webview.onDidReceiveMessage(
 			async (message: WebviewToExtensionMessage) => {
-				switch (message.type) {
+				await this._handleWebviewMessage(message);
+			},
+		);
+	}
+
+	private async _handleWebviewMessage(message: WebviewToExtensionMessage): Promise<void> {
+		switch (message.type) {
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
@@ -468,8 +474,6 @@ export class ChatWebviewProvider
 						void this._handleAddProvider(message.provider);
 						break;
 				}
-			}
-		);
 	}
 
 	public postMessage(message: ExtensionToWebviewMessage) {

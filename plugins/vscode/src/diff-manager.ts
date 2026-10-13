@@ -108,7 +108,8 @@ export class DiffManager {
 	/**
 	 * Show diff preview for a pending change
 	 * Uses virtual documents to prevent linters from running
-	 * Optionally preserves terminal focus by restoring it after showing the diff (default: false)
+	 * Optionally preserves terminal focus by restoring it after showing the diff (default: false).
+	 * If given a bare toolCallId matching multiple compound-keyed changes, fans out and opens all matching diff tabs.
 	 */
 	async showDiff(id: string, options?: { restoreTerminalFocus?: boolean }): Promise<void> {
 		const change = this.pendingChanges.get(id);
@@ -191,7 +192,11 @@ export class DiffManager {
 	async clearPendingChanges(): Promise<void> {
 		const ids = Array.from(this.pendingChanges.keys());
 		for (const id of ids) {
-			await this.closeEditors(id);
+			try {
+				await this.closeEditors(id);
+			} catch {
+				// Ignore errors from individual editor closures to ensure all entries are processed
+			}
 		}
 		this.pendingChanges.clear();
 		this.notifyChanges();
@@ -202,7 +207,11 @@ export class DiffManager {
 	 */
 	async closeDiff(id: string): Promise<void> {
 		if (this.pendingChanges.has(id)) {
-			await this.closeEditors(id);
+			try {
+				await this.closeEditors(id);
+			} catch {
+				// Ignore errors if editors were already closed
+			}
 			this.removePendingChange(id);
 			return;
 		}
@@ -211,7 +220,11 @@ export class DiffManager {
 			k.startsWith(`${id}_`),
 		);
 		for (const mid of matchingIds) {
-			await this.closeEditors(mid);
+			try {
+				await this.closeEditors(mid);
+			} catch {
+				// Ignore errors if editors were already closed
+			}
 			this.removePendingChange(mid);
 		}
 	}
@@ -243,7 +256,11 @@ export class DiffManager {
 			}
 
 			if (shouldClose) {
-				await vscode.window.tabGroups.close(tab);
+				try {
+					await vscode.window.tabGroups.close(tab);
+				} catch {
+					// Ignore errors if tab was already closed or disposed
+				}
 			}
 		}
 
