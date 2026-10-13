@@ -1,4 +1,4 @@
-import fs from 'node:fs/promises';
+import fs, {type FileHandle} from 'node:fs/promises';
 
 /**
  * A lock file shared by processes that read-modify-write the same JSON file.
@@ -90,57 +90,131 @@ async function isHeartbeatStale(lockPath: string): Promise<boolean> {
 	}
 }
 
-export async function withExclusiveLock<T>(
-	lockPath: string,
-	operation: () => Promise<T>,
-): Promise<T> {
+/**
+ * `open(..., 'wx')` failures that mean "someone else has the lock right now"
+ * rather than "this can never work". EEXIST is the ordinary case. Windows
+ * reports a lock file that another process is in the middle of deleting as
+ * EPERM (sometimes EACCES or EBUSY) until the delete completes, so those are
+ * waited out too instead of failing the save.
+ */
+const CONTENDED_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+
+function errorCode(error: unknown): string | undefined {
+	return error instanceof Error && 'code' in error
+		? (error as NodeJS.ErrnoException).code
+		: undefined;
+}
+
+/** Delete a lock or guard file only if this process wrote it. */
+async function removeIfOwned(filePath: string): Promise<void> {
+	try {
+		const owner = (await fs.readFile(filePath, 'utf8')).trim();
+		if (owner === String(process.pid)) {
+			await fs.unlink(filePath);
+		}
+	} catch {
+		// Already gone or taken over.
+	}
+}
+
+/**
+ * Remove a lock judged abandoned, without racing other waiters that judged
+ * the same thing.
+ *
+ * Checking and deleting are two steps, so two waiters that both saw the dead
+ * lock could interleave: one deletes it and takes a fresh lock, then the other
+ * deletes that fresh lock, and both run the critical section. Reclaiming
+ * therefore happens under a short guard lock (`<lock>.reclaim`), and while it
+ * is held the lock is checked again - still abandoned, and still the same file
+ * - so a lock taken since the waiter's first look is left alone. A guard left
+ * behind by a waiter that died mid-reclaim is removed once it goes stale.
+ *
+ * Returns whether the lock was removed.
+ */
+async function reclaimAbandonedLock(lockPath: string): Promise<boolean> {
+	const guardPath = `${lockPath}.reclaim`;
+	let guard: FileHandle;
+	try {
+		guard = await fs.open(guardPath, 'wx', 0o600);
+	} catch (error) {
+		const code = errorCode(error);
+		if (code === undefined || !CONTENDED_CODES.has(code)) throw error;
+		// Another waiter is reclaiming; leave it to them unless it died there.
+		if (await isHeartbeatStale(guardPath)) {
+			await fs.unlink(guardPath).catch(() => {});
+		}
+		return false;
+	}
+	try {
+		await guard.writeFile(String(process.pid), 'utf8');
+		const judged = await fs.stat(lockPath);
+		if (!(await isLockAbandoned(lockPath))) return false;
+		const current = await fs.stat(lockPath);
+		if (current.ino !== judged.ino || current.mtimeMs !== judged.mtimeMs) {
+			return false;
+		}
+		await fs.unlink(lockPath);
+		return true;
+	} catch {
+		// The lock went away or changed under us; the caller just retries.
+		return false;
+	} finally {
+		await guard.close().catch(() => {});
+		await removeIfOwned(guardPath);
+	}
+}
+
+async function acquireLock(lockPath: string): Promise<FileHandle> {
 	const deadline = Date.now() + LOCK_WAIT_MS;
 	while (true) {
 		try {
-			const handle = await fs.open(lockPath, 'wx', 0o600);
-			// Keep the lock's mtime moving for as long as we hold it, so a
-			// waiter can tell "still working" from "abandoned". Unref'd: this
-			// must never be the thing keeping the process alive.
-			const heartbeat = setInterval(() => {
-				const now = new Date();
-				fs.utimes(lockPath, now, now).catch(() => {
-					// Lock removed under us; the release below notices.
-				});
-			}, LOCK_HEARTBEAT_MS);
-			heartbeat.unref();
-			try {
-				await handle.writeFile(String(process.pid), 'utf8');
-				return await operation();
-			} finally {
-				clearInterval(heartbeat);
-				await handle.close();
-				try {
-					const owner = (await fs.readFile(lockPath, 'utf8')).trim();
-					if (owner === String(process.pid)) {
-						await fs.unlink(lockPath);
-					}
-				} catch {
-					// Lock already gone or stolen.
-				}
-			}
+			return await fs.open(lockPath, 'wx', 0o600);
 		} catch (error) {
-			const code =
-				error instanceof Error && 'code' in error
-					? (error as NodeJS.ErrnoException).code
-					: undefined;
-			if (code !== 'EEXIST') throw error;
+			const code = errorCode(error);
+			if (code === undefined || !CONTENDED_CODES.has(code)) throw error;
 			if (Date.now() >= deadline) {
-				throw new Error(`Timed out waiting for file lock: ${lockPath}`);
+				throw new Error(
+					`Timed out waiting for file lock: ${lockPath} (${code})`,
+				);
 			}
-			if (await isLockAbandoned(lockPath)) {
-				try {
-					await fs.unlink(lockPath);
-				} catch {
-					// Someone else reclaimed it first; retry the create.
-				}
+			if (
+				(await isLockAbandoned(lockPath)) &&
+				(await reclaimAbandonedLock(lockPath))
+			) {
 				continue;
 			}
 			await new Promise(resolve => setTimeout(resolve, 20));
 		}
+	}
+}
+
+/**
+ * Run `operation` while holding the lock file at `lockPath`.
+ *
+ * Only creating the lock is retried. An error thrown by `operation` itself is
+ * never mistaken for contention: it releases the lock and propagates.
+ */
+export async function withExclusiveLock<T>(
+	lockPath: string,
+	operation: () => Promise<T>,
+): Promise<T> {
+	const handle = await acquireLock(lockPath);
+	// Keep the lock's mtime moving for as long as we hold it, so a waiter can
+	// tell "still working" from "abandoned". Unref'd: this must never be the
+	// thing keeping the process alive.
+	const heartbeat = setInterval(() => {
+		const now = new Date();
+		fs.utimes(lockPath, now, now).catch(() => {
+			// Lock removed under us; the release below notices.
+		});
+	}, LOCK_HEARTBEAT_MS);
+	heartbeat.unref();
+	try {
+		await handle.writeFile(String(process.pid), 'utf8');
+		return await operation();
+	} finally {
+		clearInterval(heartbeat);
+		await handle.close();
+		await removeIfOwned(lockPath);
 	}
 }
