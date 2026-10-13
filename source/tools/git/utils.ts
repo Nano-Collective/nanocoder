@@ -8,6 +8,7 @@
 import {execSync, spawn} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 import {isAbsolute, join} from 'node:path';
+import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -281,7 +282,10 @@ function execProcess(
 	label: string,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
+		// The project root, not the live process cwd: inside an ACP session it is
+		// the session's own directory (see services/session-cwd).
 		const proc = spawn(command, args, {
+			cwd: getProjectRoot(),
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: GIT_ENV,
 		});

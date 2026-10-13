@@ -55,6 +55,7 @@ import {
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {setAutoCommitClient} from '@/services/auto-commit';
+import {runInSessionCwdScope} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -1020,13 +1021,17 @@ export class AcpAgent implements Agent {
 			undefined,
 			model,
 		);
-		const basePrompt = buildSystemPrompt(
-			session.developmentMode,
-			tune,
-			availableNames,
-			toolsDisabled,
-			getAppConfig().systemPrompt,
-			model,
+		// Inside the session's scope, so the working directory the prompt reports
+		// and the AGENTS.md it appends come from the session's `cwd`.
+		const basePrompt = runInSessionCwdScope(session.cwdScope, () =>
+			buildSystemPrompt(
+				session.developmentMode,
+				tune,
+				availableNames,
+				toolsDisabled,
+				getAppConfig().systemPrompt,
+				model,
+			),
 		);
 		const toolsForPrompt = toolsDisabled
 			? toolManager.getFilteredTools(availableNames)

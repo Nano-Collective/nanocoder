@@ -78,7 +78,8 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 
 - Nanocoder installed and on your `PATH` (a global install puts `nanocoder` on `PATH`).
 - A configured provider. The ACP server resolves provider and model the same way the CLI does — from the project's `agents.config.json` (or your global config). See [Providers](../configuration/providers/index.md).
-- The editor spawns the agent in your **project directory**, so project-level config and relative paths resolve against the open folder.
+- Each session works in the directory the editor names for it (the `cwd` in `session/new`), even if the agent process was started somewhere else. Relative paths, `execute_bash`, the git tools, the project boundary for file tools, the system prompt and `AGENTS.md` all follow that directory, and a `cd` in one session does not move another.
+- Project-level configuration (`agents.config.json`, MCP servers, custom tools and skills) is read once, from the directory the agent process starts in, so editors should still spawn the agent in your **project directory**. Plugins are the exception: each session loads `.nanocoder/plugins/` from its own directory (see [Hooks](hooks.md)).
 
 ## Limitations
 
