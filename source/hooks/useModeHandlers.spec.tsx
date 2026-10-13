@@ -1,4 +1,4 @@
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -15,6 +15,8 @@ resetPreferencesCache();
 
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {ActiveMode} from '@/hooks/useAppState';
+import {readFileTool} from '@/tools/read-file';
+import {clearReadTracker} from '@/utils/read-tracker';
 import type {LLMClient, Message} from '@/types/core';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {useModeHandlers} from './useModeHandlers';
@@ -306,6 +308,66 @@ test('reloadProviders leaves the conversation and settings panel intact', async 
 	t.is(setIsSettingsMode.calls.length, 0, 'leaves the settings panel open');
 	t.is(addToChatQueue.calls.length, 1, 'reports the outcome exactly once');
 });
+
+async function withReadStub(
+	t: import('ava').ExecutionContext,
+	clearHistory: () => Promise<unknown>,
+) {
+	clearReadTracker();
+	const dir = join(process.cwd(), `mode-read-stub-${Date.now()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	const read = () =>
+		readFileTool.tool.execute!(
+			{path: file},
+			{toolCallId: 'read', messages: []},
+		) as Promise<string>;
+	try {
+		t.true((await read()).includes('kept = 1'));
+		t.true((await read()).includes('already in context'));
+		await clearHistory();
+		t.true((await read()).includes('kept = 1'));
+	} finally {
+		clearReadTracker();
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('handleTuneSelect makes the next read_file return the file', async t => {
+	const {handlers} = setup();
+	await withReadStub(t, () =>
+		handlers.handleTuneSelect({
+			enabled: false,
+			toolProfile: 'minimal',
+			aggressiveCompact: false,
+		} as unknown as TuneConfig),
+	);
+});
+
+test.serial(
+	'handleConfigWizardComplete makes the next read_file return the file',
+	async t => {
+		process.env.NANOCODER_PROVIDERS = JSON.stringify({
+			providers: [
+				{
+					name: 'LocalTest',
+					baseUrl: 'http://localhost:8000/v1',
+					models: ['test-model'],
+				},
+			],
+		});
+		const {handlers, setMessages} = setup();
+		try {
+			await withReadStub(t, () =>
+				handlers.handleConfigWizardComplete('agents.config.json'),
+			);
+			t.deepEqual(setMessages.calls, [[[]]]);
+		} finally {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	},
+);
 
 test('enterSettingsMode forwards the requested tab', t => {
 	const {handlers, setSettingsActiveTab} = setup();

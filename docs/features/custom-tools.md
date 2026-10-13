@@ -113,7 +113,7 @@ parameters:
 
 - `approval: never` — runs without confirmation (still subject to mode-based overrides).
 - `approval: always` (default) — always prompts the user.
-- `approval: destructive` - prompts in `normal` mode but auto-approves in `auto-accept`, `architect` and `yolo` modes, matching how built-in file-mutation tools behave.
+- `approval: destructive` - prompts in `normal` mode but auto-approves in `auto-accept`, `architect` and `yolo` modes, matching how built-in file edits behave.
 
 Tools listed in the top-level `alwaysAllow` config field skip the prompt regardless. Tools listed in `disabledTools` don't load at all.
 

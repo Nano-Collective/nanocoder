@@ -281,9 +281,9 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 }
 ```
 
-- **Only the edited file is committed.** Your own staged or unstaged changes are left exactly as they were, and new files the agent creates are included.
+- **Only the edited file is committed.** Changes in other files (staged or unstaged) are left untouched. Note that prior uncommitted changes in the *same edited file* are included in that file's commit. New files created by the agent are also included.
 - **Commit messages** are Conventional Commits (`feat: ...`, `fix: ...`) written by the current model from that file's diff, using the same prompt as `/commit`. If the model call fails or returns nothing, the message falls back to `chore: update <path>`.
-- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, no git identity) is logged as a warning and the edit stays in the working tree.
+- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, missing git identity) is logged as a warning, the exact prior staging state of the file is restored (un-staging it if it was not previously staged, or restoring its prior staged version), and the edit stays in the working tree.
 - Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
@@ -359,7 +359,7 @@ Set the initial development mode for all new interactive sessions. Without this 
 | Value | Description |
 |-------|-------------|
 | `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
-| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash and tools marked as always needing approval still prompt |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
 | `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |
@@ -459,7 +459,7 @@ Run a code formatter on every file the agent writes, so its diffs come out in yo
 }
 ```
 
-Each entry takes `match` (required; globs relative to the project root, same dialect as hook `matchPaths`; a single string is accepted), `command` (required), plus optional `timeout` (ms, default 30000) and `name` (label used in messages and `/doctor`). `/doctor` lists every formatter that loaded, so you can check your config was picked up. The written file's absolute path is in `$FILE` (also `$NANOCODER_FILE`); quote it, and the command runs from the project root.
+Each entry takes `match` (required; globs relative to the project root, same dialect as hook `matchPaths`; a single string is accepted), `command` (required), plus optional `timeout` (ms, default 30000) and `name` (label used in messages and `/doctor`). `/doctor` lists every formatter that loaded, so you can check your config was picked up. The written file's absolute path is in `$FILE` (also `$NANOCODER_FILE`); quote it, and the command runs from the project root. Commands run through `sh -c`, or `cmd.exe` on Windows; there `$FILE` and `${FILE}` are rewritten to cmd.exe's `%FILE%` (quoted if you left them unquoted), so the same command works on both.
 
 Formatters run after a successful `write_file`, `string_replace` or `diff_edit` (in the main agent and in subagents), in config order, and before any `post-tool-use` hooks, so a hook that commits or lints sees the formatted file. Built-in auto-commit runs after both formatters and hooks. If a formatter changes the file, the tool result tells the model to re-read it before its next edit. A formatter that fails or times out is logged without failing the write; any partial changes it made remain on disk and are reported to the model. Files outside the project root are never formatted.
 

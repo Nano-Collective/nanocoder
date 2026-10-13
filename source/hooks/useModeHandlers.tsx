@@ -17,6 +17,7 @@ import {generateKey} from '@/session/key-generator';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
 import {applyTuneCompaction} from '@/utils/auto-compact';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -234,6 +235,7 @@ export function useModeHandlers({
 				setCurrentModel(newModel);
 
 				setMessages([]);
+				bumpReadContentGeneration();
 				await newClient.clearContext();
 
 				const toolManager = getToolManager();
@@ -358,6 +360,7 @@ export function useModeHandlers({
 
 		// Clear conversation when toggling — tool profiles change what's available
 		setMessages([]);
+		bumpReadContentGeneration();
 		if (client) {
 			await client.clearContext();
 		}

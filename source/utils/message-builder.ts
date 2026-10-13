@@ -36,6 +36,9 @@ export class MessageBuilder {
 			tool_call_id: result.tool_call_id,
 			name: result.name,
 			structuredContent: result.structuredContent,
+			...(result.images && result.images.length > 0
+				? {images: result.images}
+				: {}),
 		}));
 		this.messages.push(...toolMessages);
 		return this;

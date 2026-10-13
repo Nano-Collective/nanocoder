@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "ava";
+import test, { type ExecutionContext } from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
+import { describeProjectTrust } from "@/config/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -480,6 +481,36 @@ test.serial(
 	},
 );
 
+/**
+ * The two bypasses last different lengths of time: the flag covers one run,
+ * the variable saves the directory as trusted (see the persistence test
+ * below). The message has to say so, or a CI job exporting the variable
+ * "for this run" trusts every checkout it touches.
+ */
+function assertTrustBypassWording(
+	t: ExecutionContext,
+	message: string,
+): void {
+	t.true(
+		message.includes("--trust-directory to bypass the disclaimer for this run only"),
+		message,
+	);
+	t.true(
+		message.includes(
+			"NANOCODER_TRUST_DIRECTORY=1 to trust this directory permanently",
+		),
+		message,
+	);
+	// "for this run" belongs to the flag alone: it appears once, before the
+	// variable is mentioned, however the sentences around it are split.
+	const perRun = [...message.matchAll(/for this run/gi)];
+	t.is(perRun.length, 1, message);
+	t.true(
+		(perRun[0]?.index ?? -1) < message.indexOf("NANOCODER_TRUST_DIRECTORY=1"),
+		message,
+	);
+}
+
 test.serial(
 	"untrusted directory short-circuits with exit code 1 and no initializePlain call",
 	async (t) => {
@@ -510,6 +541,7 @@ test.serial(
 		t.is(report.kind, "error");
 		t.is(report.exitCode, 1);
 		t.regex(report.message, /not trusted/i);
+		assertTrustBypassWording(t, report.message);
 		t.is(report.steps, 0);
 		t.is(shutdown.code, 1);
 		t.false(
@@ -532,7 +564,15 @@ test.serial(
 				trustDirectory: false,
 				outputFormat: "json",
 				deps: baseDeps({
-					loadPreferences: () => ({ trustedDirectories: [cwd] }) as never,
+					loadPreferences: () =>
+						({
+							trustedDirectories: [
+								{
+									path: cwd,
+									fingerprint: describeProjectTrust(cwd).fingerprint,
+								},
+							],
+						}) as never,
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: "success",
@@ -559,7 +599,11 @@ test.serial(
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
-		let savedWith: { trustedDirectories?: string[] } | null = null;
+		let savedWith: {
+			trustedDirectories?: Array<
+				string | {path: string; fingerprint: string}
+			>;
+		} | null = null;
 		process.env.NANOCODER_TRUST_DIRECTORY = "1";
 		try {
 			await runPlainShell({
@@ -570,7 +614,11 @@ test.serial(
 				deps: baseDeps({
 					loadPreferences: () => ({ trustedDirectories: [] }) as never,
 					savePreferences: (prefs) => {
-						savedWith = prefs as { trustedDirectories?: string[] };
+						savedWith = prefs as {
+							trustedDirectories?: Array<
+								string | {path: string; fingerprint: string}
+							>;
+						};
 					},
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
@@ -592,11 +640,12 @@ test.serial(
 		t.is(report.kind, "success");
 		t.is(shutdown.code, 0);
 		t.truthy(savedWith);
-		t.true(
-			(savedWith?.trustedDirectories ?? []).some(
-				(dir) => dir === process.cwd(),
-			),
-		);
+		t.deepEqual(savedWith?.trustedDirectories, [
+			{
+				path: process.cwd(),
+				fingerprint: describeProjectTrust(process.cwd()).fingerprint,
+			},
+		]);
 	},
 );
 
@@ -860,6 +909,7 @@ test.serial(
 		}
 
 		t.regex(stderr.get(), /not trusted/i);
+		assertTrustBypassWording(t, stderr.get());
 		t.is(shutdown.code, 1);
 		t.false(initCalled);
 	},
