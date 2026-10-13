@@ -96,6 +96,52 @@ test('showDiff from chat does not move focus to the terminal', async t => {
 	t.false(commandsRun.includes('workbench.action.terminal.focus'));
 });
 
+test('showDiff for a new file from chat does not move focus to the terminal', async t => {
+	const diffManager = new DiffManager(makeContext());
+	const commandsRun: string[] = [];
+	stub.__test.executeCommand = async (command: string) => {
+		commandsRun.push(command);
+	};
+	(vscode.window as any).activeTerminal = {name: 'shell'};
+
+	(diffManager as any).addPendingChange({
+		type: 'file_change',
+		id: diffChangeId('call-1', '/repo/new.ts'),
+		filePath: '/repo/new.ts',
+		originalContent: '',
+		newContent: 'export const x = 1;',
+		toolName: 'write',
+		toolArgs: {},
+	});
+
+	await diffManager.showDiff(diffChangeId('call-1', '/repo/new.ts'), false);
+
+	t.false(commandsRun.includes('workbench.action.terminal.focus'));
+});
+
+test('showDiff for a new file with default focus behaviour still restores the terminal', async t => {
+	const diffManager = new DiffManager(makeContext());
+	const commandsRun: string[] = [];
+	stub.__test.executeCommand = async (command: string) => {
+		commandsRun.push(command);
+	};
+	(vscode.window as any).activeTerminal = {name: 'shell'};
+
+	(diffManager as any).addPendingChange({
+		type: 'file_change',
+		id: 'new-change-1',
+		filePath: '/repo/new.ts',
+		originalContent: '',
+		newContent: 'export const x = 1;',
+		toolName: 'write',
+		toolArgs: {},
+	});
+
+	await diffManager.showDiff('new-change-1');
+
+	t.true(commandsRun.includes('workbench.action.terminal.focus'));
+});
+
 test('showDiff with default focus behaviour still restores the terminal', async t => {
 	const diffManager = new DiffManager(makeContext());
 	const commandsRun: string[] = [];
@@ -137,12 +183,13 @@ test('clearPendingChanges drops every change and notifies listeners', async t =>
 			toolArgs: {},
 		});
 	}
-	const before = notified;
+	// Count only the clear's notifications; the adds above are not under test.
+	notified = 0;
 
 	await diffManager.clearPendingChanges();
 
 	t.is(diffManager.getPendingChanges().length, 0);
-	t.true(notified > before);
+	t.is(notified, 1, 'clearing a non-empty set notifies exactly once');
 });
 
 test('clearPendingChanges is a no-op when nothing is pending', async t => {
