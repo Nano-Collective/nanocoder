@@ -25,6 +25,7 @@ import {fileOpTool} from '@/tools/file-ops/file-op';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
+import {clearReadTracker} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
@@ -2358,6 +2359,100 @@ test('runAcpConversation - the approval handler does not outlive the turn', asyn
 	t.false(afterTurn);
 	t.is(permissionRequests.length, 1);
 });
+
+async function readThroughAcp(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	path: string,
+): Promise<string> {
+	setToolRegistryGetter(() => ({
+		read_file: (args: any) =>
+			readFileTool.tool.execute!(args, {toolCallId: 'read', messages: []}),
+	}));
+	let calls = 0;
+	const client = {
+		chat: async () => {
+			calls++;
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [createMockToolCall('read_file', {path})],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+	const result = session.messages.findLast(
+		(m: Message) => m.role === 'tool' && m.name === 'read_file',
+	);
+	return String(result?.content ?? '');
+}
+
+test.serial(
+	'runAcpConversation - one ACP chat does not get read stubs from another',
+	async t => {
+		clearReadTracker();
+		const dir = join(process.cwd(), `test-acp-read-scope-${randomUUID()}`);
+		mkdirSync(dir, {recursive: true});
+		const file = join(dir, 'shared.ts');
+		writeFileSync(file, 'export const shared = 1;\n');
+		try {
+			const {conn} = createMockConn();
+			const first = createMockSession(conn, {devMode: 'yolo'});
+			const second = createMockSession(conn, {devMode: 'yolo'});
+
+			t.true(
+				(await readThroughAcp(first, conn, file)).includes('shared = 1'),
+			);
+			const other = await readThroughAcp(second, conn, file);
+			t.true(other.includes('shared = 1'));
+			t.false(other.includes('already in context'));
+		} finally {
+			clearReadTracker();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'runAcpConversation - a repeat read in the same ACP chat still stubs',
+	async t => {
+		clearReadTracker();
+		const dir = join(process.cwd(), `test-acp-read-scope-${randomUUID()}`);
+		mkdirSync(dir, {recursive: true});
+		const file = join(dir, 'same.ts');
+		writeFileSync(file, 'export const same = 1;\n');
+		try {
+			const {conn} = createMockConn();
+			const session = createMockSession(conn, {devMode: 'yolo'});
+
+			t.true(
+				(await readThroughAcp(session, conn, file)).includes('same = 1'),
+			);
+			t.true(
+				(await readThroughAcp(session, conn, file)).includes(
+					'already in context',
+				),
+			);
+		} finally {
+			clearReadTracker();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // file_op approval in auto-accept (#1683)
