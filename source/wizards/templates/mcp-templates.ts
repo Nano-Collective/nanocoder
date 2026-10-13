@@ -293,7 +293,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		id: 'parallel-search',
 		name: 'Parallel Search',
 		description:
-			'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel.',
+			'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel. Anonymous access is subject to rate limits.',
 		defaultServerName: 'parallel-search',
 		defaultUrl: 'https://search.parallel.ai/mcp',
 		tags: ['remote', 'search', 'web', 'fetch', 'http'],

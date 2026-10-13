@@ -317,7 +317,7 @@ test('parallel-search template: builds correct HTTP config', t => {
 	t.is(config.timeout, 30000);
 	t.is(
 		config.description,
-		'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel.',
+		'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel. Anonymous access is subject to rate limits.',
 	);
 	t.deepEqual(config.tags, ['remote', 'search', 'web', 'fetch', 'http']);
 });
