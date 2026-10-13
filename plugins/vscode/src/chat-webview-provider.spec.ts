@@ -74,6 +74,32 @@ test('ChatWebviewProvider - an @[file] attachment sends the open editor\'s unsav
 	t.false(expanded.includes('export const saved = 1;'), expanded);
 });
 
+test('ChatWebviewProvider - an @[file] attachment ignores open documents that are not the file on disk', t => {
+	const {provider} = makeStubs();
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-attach-'));
+	const filePath = path.join(dir, 'draft.ts');
+	fs.writeFileSync(filePath, 'export const saved = 1;\n');
+
+	const originalDocuments = vscode.workspace.textDocuments;
+	// Same path, but an untitled buffer and a git diff view, not the file itself.
+	(vscode.workspace as any).textDocuments = [
+		{uri: {scheme: 'untitled', fsPath: filePath}, getText: () => 'untitled buffer'},
+		{uri: {scheme: 'git', fsPath: filePath}, getText: () => 'git diff view'},
+	];
+	t.teardown(() => {
+		(vscode.workspace as any).textDocuments = originalDocuments;
+		fs.rmSync(dir, {recursive: true, force: true});
+	});
+
+	const expanded = (provider as any)._expandContextAttachments(
+		`What does this export?\n\n@[file] ${filePath}`,
+	);
+
+	t.true(expanded.includes('export const saved = 1;'), expanded);
+	t.false(expanded.includes('untitled buffer'), expanded);
+	t.false(expanded.includes('git diff view'), expanded);
+});
+
 test('ChatWebviewProvider - _handleSubmit queues a follow-up while a turn is in flight', async (t) => {
 	const {provider, acpClient, getPostedMessages} = makeStubs();
 

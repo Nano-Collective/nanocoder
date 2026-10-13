@@ -87,6 +87,8 @@ function withTruncationMarker(
 /**
  * Cap in-memory text exactly as {@link readCappedFile} caps a file on disk:
  * same byte limit, same binary check, same truncation marker.
+ *
+ * @internal Exported for tests; callers use {@link readAttachedFile}.
  */
 export function capText(
 	text: string,
