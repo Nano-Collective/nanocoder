@@ -310,3 +310,50 @@ test('NanocoderAcpClient - creating a session syncs the current active editor', 
 	t.is((focused[0] as any).uri, 'file:///workspace/foo.ts');
 	t.is((focused[0] as any).sessionId, 'session-1');
 });
+
+test('NanocoderAcpClient - resuming a session syncs the current active editor', async (t) => {
+	const focused: any[] = [];
+	const client = new NanocoderAcpClient({ appendLine: () => {} } as any, new AcpStateManager());
+	client.setConnection({
+		resumeSession: async () => ({}),
+		unstable_didFocusDocument: async (params: unknown) => {
+			focused.push(params);
+		},
+	} as any);
+
+	const editor = {
+		document: { uri: { toString: () => 'file:///workspace/bar.ts' }, version: 7 },
+		selection: { active: { line: 5, character: 2 } },
+		visibleRanges: [],
+	};
+	(vscode.window as any).activeTextEditor = editor;
+	try {
+		await client.resumeSession('session-resumed');
+	} finally {
+		(vscode.window as any).activeTextEditor = undefined;
+	}
+
+	t.is(focused.length, 1, 'resumed session should receive the current editor as focus');
+	t.is(focused[0].sessionId, 'session-resumed', 'focus must target the resumed session');
+	t.is(focused[0].uri, 'file:///workspace/bar.ts');
+});
+
+test('NanocoderAcpClient - resuming with no open editor sends no focus notification', async (t) => {
+	const focused: unknown[] = [];
+	const client = new NanocoderAcpClient({ appendLine: () => {} } as any, new AcpStateManager());
+	client.setConnection({
+		resumeSession: async () => ({}),
+		unstable_didFocusDocument: async (params: unknown) => {
+			focused.push(params);
+		},
+		extMethod: async () => {
+			t.fail('a fresh resume with nothing focused has nothing to clear');
+			return {};
+		},
+	} as any);
+
+	(vscode.window as any).activeTextEditor = undefined;
+	await client.resumeSession('session-resumed');
+
+	t.deepEqual(focused, []);
+});

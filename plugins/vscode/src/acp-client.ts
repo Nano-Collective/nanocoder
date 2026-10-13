@@ -6,6 +6,15 @@ import {PromptAttempt} from './prompt-attempt';
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
 
+/**
+ * The one definition of "the editor the user is focused on". The per-session
+ * sync and the extension's editor-change handlers both read it from here, so a
+ * change to the rule (e.g. multi-root windows) lands in one place.
+ */
+export function currentFocusedEditor(): vscode.TextEditor | undefined {
+	return vscode.window.activeTextEditor;
+}
+
 export interface StateSyncPayload {
 	mode?: string;
 	availableModes: string[];
@@ -109,7 +118,7 @@ export class NanocoderAcpClient {
 	 * session has no focus to clear.
 	 */
 	private syncActiveEditor(): void {
-		const editor = vscode.window.activeTextEditor;
+		const editor = currentFocusedEditor();
 		if (editor) {
 			this.notifyActiveEditorChanged(editor);
 		}
