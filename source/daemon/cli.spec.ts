@@ -10,6 +10,7 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
+import {describeProjectTrust} from '@/config/project-trust';
 import {runDaemonCli} from './cli';
 import {getLockfilePath, writeLockfile} from './lockfile';
 
@@ -225,7 +226,14 @@ test.serial(
 		const root = await tempProject();
 		try {
 			await withIsolatedPreferences(async () => {
-				savePreferences({trustedDirectories: [root]});
+				savePreferences({
+					trustedDirectories: [
+						{
+							path: root,
+							fingerprint: describeProjectTrust(root).fingerprint,
+						},
+					],
+				});
 				let launched = false;
 				const result = await runDaemonCli('start', {
 					projectRoot: root,
