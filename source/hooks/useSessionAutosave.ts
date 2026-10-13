@@ -248,6 +248,30 @@ export function useSessionAutosave({
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);
 					if (session) {
+						// Resuming a chat is navigation, not new conversation activity.
+						if (
+							session.provider === capturedProvider &&
+							session.model === capturedModel &&
+							JSON.stringify(session.messages) ===
+								JSON.stringify(persistedMessages)
+						) {
+							lastSaveRef.current = Date.now();
+							lastSavedRef.current = {
+								messages: capturedMessages,
+								provider: capturedProvider,
+								model: capturedModel,
+								sessionId: liveSessionId,
+								complete: titleContextRef.current.isConversationComplete,
+							};
+							const context = titleContextRef.current;
+							if (context.client && context.isConversationComplete)
+								void maybeGenerateTitle({
+									sessionId: liveSessionId,
+									messages: persistedMessages,
+									client: context.client,
+								});
+							return;
+						}
 						// Write the full history — no truncation.
 						session.messages = persistedMessages;
 						session.messageCount = persistedMessages.length;
