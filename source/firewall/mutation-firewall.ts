@@ -56,37 +56,41 @@ export function resetFirewallConfig(): FirewallConfig {
 }
 
 /**
- * Checks if a relative file path matches any protected patterns.
+ * Checks if a file path matches any protected patterns using gitignore-style glob semantics.
+ * Handles Windows paths, absolute paths, leading './', nested paths, and negated patterns.
  */
-function isProtectedPath(filePath: string, patterns: string[]): boolean {
-	if (patterns.length === 0) return false;
+export function isProtectedPath(filePath: string, patterns: string[]): boolean {
+	if (!patterns || patterns.length === 0) return false;
 
+	// Normalize separators and strip leading ./
 	const normalized = filePath.replace(/\\/g, '/');
-	const relativePath = normalized.startsWith('/')
-		? relative(process.cwd(), resolve(filePath)).replace(/\\/g, '/')
-		: normalized;
+	const clean = normalized.replace(/^\.\//, '');
 
-	if (relativePath.startsWith('..')) {
-		return patterns.some(p => {
-			const cleanP = p.replace(/^\.\//, '');
-			return normalized === cleanP || normalized.endsWith(`/${cleanP}`);
-		});
-	}
+	// Resolve absolute paths relative to current working directory
+	const abs = resolve(clean);
+	const rel = relative(process.cwd(), abs).replace(/\\/g, '/');
+	const targetPath = (rel.startsWith('..') ? clean : rel).replace(
+		/^\.?\/+/,
+		'',
+	);
+	if (!targetPath) return false;
 
 	try {
 		const ig = ignore().add(patterns);
-		return (
-			ig.ignores(relativePath) ||
-			patterns.some(p => {
-				const cleanP = p.replace(/^\.\//, '');
-				return relativePath === cleanP || relativePath.endsWith(`/${cleanP}`);
-			})
-		);
+		return ig.ignores(targetPath);
 	} catch {
-		return patterns.some(p => {
-			const cleanP = p.replace(/^\.\//, '');
-			return relativePath === cleanP || relativePath.endsWith(`/${cleanP}`);
-		});
+		// Filter out invalid patterns and test against valid ones
+		try {
+			const ig = ignore();
+			for (const p of patterns) {
+				try {
+					ig.add(p);
+				} catch {}
+			}
+			return ig.ignores(targetPath);
+		} catch {
+			return false;
+		}
 	}
 }
 
