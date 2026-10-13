@@ -47,6 +47,24 @@ test.serial('explicit timeout updates an existing singleton without losing handl
 	t.is(exitCalled, 0);
 });
 
+test.serial('setTimeoutMs shortens the budget for a later shutdown', async t => {
+	const manager = getShutdownManager({timeoutMs: 5000});
+	let completed = false;
+	manager.register({
+		name: 'slow-drain',
+		priority: 10,
+		async handler() {
+			await new Promise(resolve => setTimeout(resolve, 200));
+			completed = true;
+		},
+	});
+	manager.setTimeoutMs(20);
+	await manager.gracefulShutdown();
+	// The 20ms budget ends the wait long before the 200ms handler finishes.
+	t.false(completed);
+	t.is(exitCalled, 0);
+});
+
 test.serial('resetShutdownManager creates new instance', (t) => {
 	const a = getShutdownManager();
 	resetShutdownManager();

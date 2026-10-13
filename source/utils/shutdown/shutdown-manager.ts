@@ -76,7 +76,11 @@ export class ShutdownManager {
 		this.handlers.delete(name);
 	}
 
-	/** Apply an explicit timeout even if another subsystem created the singleton. */
+	/**
+	 * Apply an explicit timeout even if another subsystem created the singleton.
+	 * Applies to shutdowns that start after this call; a shutdown already in
+	 * flight keeps the timeout it started with.
+	 */
 	setTimeoutMs(timeoutMs: number): void {
 		this.timeoutMs = timeoutMs;
 	}

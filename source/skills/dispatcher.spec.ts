@@ -23,6 +23,7 @@ test('stop waits for a pending checkpoint and prevents its executor from startin
 	const checkpoint = deferred();
 	const started = deferred();
 	let executed = false;
+	let activity = 0;
 	const dispatcher = new SkillDispatcher({
 		checkpointer: {
 			async create() {
@@ -34,6 +35,9 @@ test('stop waits for a pending checkpoint and prevents its executor from startin
 		buildExecutor: () => {
 			executed = true;
 			throw new Error('Executor must not start during shutdown');
+		},
+		onActivity: () => {
+			activity++;
 		},
 	});
 	const run = dispatcher.dispatch(
@@ -48,8 +52,11 @@ test('stop waits for a pending checkpoint and prevents its executor from startin
 	await new Promise(resolve => setImmediate(resolve));
 	t.false(stopped);
 	checkpoint.resolve();
-	await Promise.all([run, stopping]);
+	const [runResult] = await Promise.all([run, stopping]);
+	// The abort path returns normally: no rejection, and no activity reported.
+	t.is(runResult, undefined);
 	t.false(executed);
+	t.is(activity, 0);
 	t.true(stopped);
 });
 
