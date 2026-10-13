@@ -1,4 +1,5 @@
 import test from 'ava';
+import {get} from 'node:http';
 import {WebSocket} from 'ws';
 import {
 	WEB_PROTOCOL_VERSION,
@@ -6,6 +7,21 @@ import {
 	type WebServerEvent,
 } from './protocol.js';
 import {startLocalWebServer} from './server.js';
+
+test('HTTP and WebSocket reject foreign Host headers even with the token', async t => {
+	const server = await startLocalWebServer({openBrowser: false});
+	t.teardown(() => server.close());
+	for (const host of ['attacker.example', `localhost:${server.port}`, '127.0.0.1:1']) {
+		const status = await new Promise<number | undefined>((resolve, reject) => {
+			get(server.url, {headers: {host}}, response => {response.resume(); resolve(response.statusCode);}).on('error', reject);
+		});
+		t.is(status, 403);
+		const client = new WebSocket(server.eventsUrl, {headers: {host}});
+		const error = await new Promise<Error>(resolve => client.once('error', resolve));
+		t.true(error.message.includes('401'));
+	}
+	t.is((await fetch(server.url)).status, 200);
+});
 
 test('web mode rejects non-loopback bindings before opening a listener', async t => {
 	await t.throwsAsync(startLocalWebServer({host: '0.0.0.0', openBrowser: false}), {message: 'Web mode must bind to a loopback address.'});
@@ -35,7 +51,7 @@ test('oversized WebSocket events close only that client and do not reach the run
 	client.send('x'.repeat(1025));
 	t.is(await closed, 1009);
 	t.is(calls, 0);
-	t.is((await fetch(new URL('/health', server.url))).status, 200);
+	t.is((await fetch(new URL(`/health?token=${server.token}`, server.url))).status, 200);
 });
 
 async function readText(url: string): Promise<{status: number; body: string}> {
@@ -175,13 +191,14 @@ test('local web server rejects placeholder page without valid token', async t =>
 	t.is(response.body, 'Access token required');
 });
 
-test('local web server exposes health endpoint without token', async t => {
+test('local web server requires a token for health', async t => {
 	const webServer = await startLocalWebServer({openBrowser: false});
 	t.teardown(() => {
 		return webServer.close();
 	});
 
-	const response = await fetch(`http://127.0.0.1:${webServer.port}/health`);
+	t.is((await fetch(`http://127.0.0.1:${webServer.port}/health`)).status, 401);
+	const response = await fetch(`http://127.0.0.1:${webServer.port}/health?token=${webServer.token}`);
 	const body = (await response.json()) as {ok: boolean; mode: string};
 
 	t.is(response.status, 200);
@@ -443,6 +460,6 @@ test('invalid WebSocket frames close the client without taking down the HTTP ser
 	// Reserved opcode 3 is invalid; this bypasses ws's outgoing validation.
 	(client as unknown as {_socket: {write: (data: Buffer) => void}})._socket.write(Buffer.from([0x83, 0x80, 0, 0, 0, 0]));
 	await closed;
-	const response = await fetch(`http://127.0.0.1:${webServer.port}/health`);
+	const response = await fetch(`http://127.0.0.1:${webServer.port}/health?token=${webServer.token}`);
 	t.is(response.status, 200);
 });

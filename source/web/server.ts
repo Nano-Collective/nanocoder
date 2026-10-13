@@ -36,6 +36,7 @@ export interface LocalWebServer {
 	token: string;
 	url: string;
 	eventsUrl: string;
+	openBrowser: () => void;
 	broadcastEvent: (event: WebServerEvent) => void;
 	close: () => Promise<void>;
 }
@@ -61,14 +62,26 @@ export async function startLocalWebServer(
 	const urlHost = host.includes(':') ? `[${host}]` : host;
 	const requestedPort = options.port ?? 0;
 	const token = options.token ?? createLocalWebToken();
+	const validHost = (value: string | undefined) =>
+		value === `${urlHost}:${port}`;
 
 	const server = createServer((request, response) => {
 		response.setHeader('x-content-type-options', 'nosniff');
 		response.setHeader('x-frame-options', 'DENY');
+		if (!validHost(request.headers.host)) {
+			response.writeHead(403);
+			response.end('Invalid Host header');
+			return;
+		}
 
 		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
 
 		if (requestUrl.pathname === '/health') {
+			if (requestUrl.searchParams.get('token') !== token) {
+				response.writeHead(401);
+				response.end('Access token required');
+				return;
+			}
 			response.writeHead(200, {'content-type': 'application/json'});
 			response.end(JSON.stringify({ok: true, mode: 'web'}));
 			return;
@@ -121,6 +134,10 @@ export async function startLocalWebServer(
 	const connectedClients = new Set<WebSocket>();
 
 	server.on('upgrade', (request, socket, head) => {
+		if (!validHost(request.headers.host)) {
+			rejectWebSocketUpgrade(socket);
+			return;
+		}
 		const requestUrl = new URL(request.url ?? '/', `http://${urlHost}`);
 		// Browsers send Origin; non-browser clients authenticate with the token.
 		if (
@@ -192,9 +209,13 @@ export async function startLocalWebServer(
 	// would require local TLS certificate setup that this server does not provide.
 	const eventsUrl = `ws://${urlHost}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 
-	if (options.openBrowser !== false) {
+	let browserOpened = false;
+	const openBrowser = () => {
+		if (browserOpened) return;
+		browserOpened = true;
 		openUrl(url);
-	}
+	};
+	if (options.openBrowser !== false) openBrowser();
 
 	return {
 		server,
@@ -203,6 +224,7 @@ export async function startLocalWebServer(
 		token,
 		url,
 		eventsUrl,
+		openBrowser,
 		broadcastEvent: event => {
 			for (const clientSocket of connectedClients) {
 				sendServerEvent(clientSocket, event);

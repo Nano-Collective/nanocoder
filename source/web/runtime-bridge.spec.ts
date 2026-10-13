@@ -15,6 +15,31 @@ const userMessage = (id: string, text = 'hello') => ({
 	text,
 });
 
+test('invalid images never enter browser history and the next turn still works', async t => {
+	let calls = 0;
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers({submitMessage: () => {calls++;}}));
+	await t.throwsAsync(bridge.handleClientEvent({...userMessage('bad'), images: [{data: '!', mediaType: 'image/png'}]}));
+	t.is(calls, 0);
+	t.like(bridge.getStateEvents()[0], {messages: [], activeTurnId: null});
+	await bridge.handleClientEvent(userMessage('good'));
+	t.is(calls, 1);
+});
+
+test('denied tool and concurrent subagent progress survive state restoration', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers(handlers());
+	await bridge.handleClientEvent(userMessage('turn'));
+	for (const id of ['one', 'two']) bridge.publishSubagentProgress(id, {subagentName: 'explore', status: 'tool_call', currentTool: 'read_file', toolCallCount: 1, turnCount: 2, tokenCount: 42, toolHistory: ['read_file']});
+	const approval = bridge.requestApproval({toolCallId: 'write', toolName: 'write_file', arguments: {path: 'test.txt'}});
+	const request = bridge.getStateEvents().find(event => event.type === 'approval_required')!;
+	if (request.type !== 'approval_required') throw new Error('Missing approval');
+	await bridge.handleClientEvent({type: 'approval_response', id: request.id, approved: false});
+	t.false(await approval);
+	bridge.completeTurn();
+	t.like(bridge.getStateEvents()[0], {work: [{tools: [{status: 'denied'}], agents: [{id: 'one', currentTool: 'read_file'}, {id: 'two', tokenCount: 42}]}]});
+});
+
 test('older session-list responses cannot overwrite a newer runtime refresh', async t => {
 	const events: WebServerEvent[] = [];
 	const pending: ((sessions: import('./protocol.js').WebSessionSummary[]) => void)[] = [];
@@ -122,7 +147,27 @@ test('reconnect snapshots retain tool failures and provider errors', async t => 
 	await bridge.handleClientEvent(userMessage('turn'));
 	bridge.publishToolFinished('tool', 'write_file', false);
 	bridge.failTurn(new Error('Provider failed'));
-	t.like(bridge.getStateEvents()[0], {notices: [{role: 'system error', text: 'Provider failed'}], work: [{status: 'failed', tools: [{id: 'tool', name: 'write_file', status: 'failed'}]}]});
+	const snapshot = bridge.getStateEvents()[0];
+	t.like(snapshot, {notices: [{role: 'system error', text: 'Provider failed', turnId: 'turn'}], work: [{status: 'failed', tools: [{id: 'tool', name: 'write_file', status: 'failed'}]}]});
+	t.is(typeof snapshot.notices[0].createdAt, 'string');
+});
+
+test('failed-turn errors are matched by the runtime-side user message id, not just the bridge id', async t => {
+	let resolveSubmit: (() => void) | undefined;
+	const bridge = createWebRuntimeBridge(() => {});
+	const runtimeMessages = [{id: 'browser-message-1', role: 'user' as const, content: 'first'}];
+	bridge.bindRuntimeHandlers(
+		handlers({
+			getSessionState: () => ({session: null, messages: runtimeMessages}),
+			submitMessage: () => new Promise<void>(resolve => {resolveSubmit = resolve;}),
+		}),
+	);
+	await bridge.handleClientEvent(userMessage('browser-message-1', 'first'));
+	bridge.failTurn(new Error('Bad request: messages[1].content must be a string'));
+	const snapshot = bridge.getStateEvents()[0];
+	t.is(snapshot.messages[0]?.id, 'browser-message-1');
+	t.like(snapshot, {notices: [{turnId: 'browser-message-1', text: 'Bad request: messages[1].content must be a string'}]});
+	resolveSubmit?.();
 });
 
 test('web runtime bridge rejects messages until the runtime is ready', async t => {
@@ -620,7 +665,7 @@ test('reconnect snapshots include the active prompt, full replies, images and pe
 	const approval = bridge.requestApproval({toolName: 'write_file', arguments: {}});
 	const snapshot = bridge.getStateEvents();
 	t.like(snapshot[0], {type: 'state', activeTurnId: 'turn', messages: [
-		{id: 'turn', role: 'user', content: 'hello', images},
+		{id: 'turn', role: 'user', content: 'hello', images: [{data: 'AA==', mediaType: 'image/png'}]},
 		{id: 'turn', role: 'assistant', content: 'Hello world'},
 	]});
 	t.like(snapshot[1], {type: 'approval_required', toolName: 'write_file'});

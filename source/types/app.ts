@@ -41,6 +41,7 @@ export interface MessageSubmissionOptions {
 		displayValue?: string,
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
+		externalId?: string,
 	) => Promise<void>;
 	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
 	onAddToChatQueue: (component: React.ReactNode) => void;

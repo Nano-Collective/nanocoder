@@ -1,5 +1,17 @@
 import type {ModelMessage} from 'ai';
 import test from 'ava';
+
+test('invalid persisted images cannot poison subsequent provider requests', t => {
+	const messages = convertToModelMessages([
+		{role: 'user', content: 'broken picture', images: [{data: '%%%invalid', mediaType: 'image/png'}]},
+		{role: 'assistant', content: 'Previous reply'},
+		{role: 'user', content: 'Continue'},
+	]);
+	t.deepEqual(messages[0], {role: 'user', content: [{type: 'text', text: 'broken picture'}]});
+	t.deepEqual(messages[2], {role: 'user', content: 'Continue'});
+	const imageOnly = convertToModelMessages([{role: 'user', content: '', images: [{data: '!', mediaType: 'image/png'}]}]);
+	t.like(imageOnly[0], {content: [{type: 'text', text: '[Invalid image attachment omitted]'}]});
+});
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import type {Message} from '@/types/index';
 import {
@@ -92,7 +104,7 @@ test('convertToModelMessages emits image parts for a user message with attachmen
 		{
 			role: 'user',
 			content: 'what is in this screenshot?',
-			images: [{data: 'BASE64DATA', mediaType: 'image/png'}],
+			images: [{data: 'AA==', mediaType: 'image/png'}],
 		},
 	];
 
@@ -104,7 +116,7 @@ test('convertToModelMessages emits image parts for a user message with attachmen
 	t.is(content[0].type, 'text');
 	t.is(content[0].text, 'what is in this screenshot?');
 	t.is(content[1].type, 'image');
-	t.is(content[1].image, 'data:image/png;base64,BASE64DATA');
+	t.is(content[1].image, 'data:image/png;base64,AA==');
 	t.is(content[1].mediaType, 'image/png');
 });
 
@@ -113,7 +125,7 @@ test('convertToModelMessages keeps image-only user messages without a text part'
 		{
 			role: 'user',
 			content: '',
-			images: [{data: 'IMG', mediaType: 'image/jpeg'}],
+			images: [{data: 'AA==', mediaType: 'image/jpeg'}],
 		},
 	];
 

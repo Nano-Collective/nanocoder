@@ -950,13 +950,18 @@ async function main(): Promise<void> {
 				broadcastEvent(event);
 			});
 			const webServer = await startLocalWebServer({
+				openBrowser: false,
 				onClientEvent: webRuntimeBridge.handleClientEvent,
 				getStateEvents: webRuntimeBridge.getStateEvents,
 				onAllClientsDisconnected: () => {
 					webRuntimeBridge?.handleDisconnect();
 				},
 			});
-			broadcastEvent = webServer.broadcastEvent;
+			broadcastEvent = event => {
+				webServer.broadcastEvent(event);
+				if (event.type === 'state' && event.runtimeReady)
+					webServer.openBrowser();
+			};
 			webUrl = webServer.url;
 
 			getShutdownManager().register({

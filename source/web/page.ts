@@ -288,6 +288,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.diff-line.addition { background: rgba(46, 160, 67, 0.15); }
 		.diff-line.deletion { background: rgba(248, 81, 73, 0.15); }
 		.diff-line.hunk { background: rgba(56, 139, 253, 0.12); color: #58a6ff; }
+		.work-agent { padding: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+		.work-tool[data-status="denied"] .work-tool-label { color: #e05260; }
 		.diff-number { display: inline-block; width: 42px; text-align: right; flex-shrink: 0; padding-right: 8px; color: var(--muted-foreground); user-select: none; }
 		.diff-text { padding-right: 16px; }
 		@media (max-width: 720px) { #workspacePanelModal { padding: 10px; } #workspacePanelModal .modal-content { height: calc(100dvh - 20px); } .source-control-layout { grid-template-columns: 1fr; grid-template-rows: minmax(90px, 30%) minmax(0, 1fr); } .source-control-files { border-right: 0; border-bottom: 1px solid var(--border); } .source-control-diff { padding: 12px 0 0; } }
@@ -385,11 +387,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			justify-content: space-between;
 			min-height: 56px;
 			padding: 0 22px;
+			gap: 16px;
 		}
 		.session-note {
-			position: absolute;
-			left: 50%;
-			transform: translateX(-50%);
+			flex: 1;
+			min-width: 0;
+			text-align: center;
 			margin: 0;
 			color: var(--muted-foreground);
 			font-size: 13px;
@@ -401,6 +404,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 10px;
 		}
 		.status {
+			max-width: 50%;
+			overflow-wrap: anywhere;
 			display: inline-flex;
 			align-items: center;
 			gap: 6px;
@@ -414,6 +419,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			font-weight: 600;
 		}
 		.status::before {
+			flex-shrink: 0;
 			content: "";
 			width: 8px;
 			height: 8px;
@@ -1080,6 +1086,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.custom-dropdown { position: relative; }
 		.dropdown-trigger { display: flex; justify-content: space-between; gap: 12px; text-align: left; }
 		.dropdown-trigger::after { content: '⌄'; }
+		.settings-warning { color: var(--destructive); margin: 0 0 8px; }
 		.dropdown-menu {
 			position: absolute;
 			top: calc(100% + 6px);
@@ -1288,6 +1295,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					<div class="custom-dropdown"><span id="providerLabel">Provider</span><button type="button" class="dropdown-trigger" id="providerSelect" aria-labelledby="providerLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="providerOptions" role="listbox" hidden></div></div>
 					<div class="custom-dropdown"><span id="modelLabel">Model</span><button type="button" class="dropdown-trigger" id="modelSelect" aria-labelledby="modelLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="modelOptions" role="listbox" hidden></div></div>
 					<div class="custom-dropdown"><span id="modeLabel">Development mode</span><button type="button" class="dropdown-trigger" id="modeSelect" aria-labelledby="modeLabel" aria-haspopup="listbox" aria-expanded="false"></button><div class="dropdown-menu" id="modeOptions" role="listbox" hidden></div></div>
+					<p id="yoloWarning" class="settings-warning" role="note" hidden>YOLO runs every tool without approval prompts. Save settings to apply it to the shared terminal and browser session.</p>
 					<p id="settingsStatus">Waiting for the runtime.</p>
 					<button type="submit" id="saveSettingsButton">Save settings</button>
 				</form>
@@ -1417,6 +1425,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const modelSelect = document.querySelector('#modelSelect');
 			const modeSelect = document.querySelector('#modeSelect');
 			const settingsStatus = document.querySelector('#settingsStatus');
+			const yoloWarning = document.querySelector('#yoloWarning');
 			const saveSettingsButton = document.querySelector('#saveSettingsButton');
 			const imageViewer = document.querySelector('#imageViewer');
 			const expandedImage = document.querySelector('#expandedImage');
@@ -1503,7 +1512,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					card = {element, icon, title, work, args: null, output: null}; toolCards.set(key, card);
 				}
 				card.element.dataset.status = tool.status;
-				card.icon.textContent = tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'approval' ? '?' : '◌';
+				if (tool.status === 'denied') { work.denied = true; work.header.textContent = 'Tool denied'; }
+				card.icon.textContent = tool.status === 'completed' ? '✓' : tool.status === 'failed' || tool.status === 'denied' ? '×' : tool.status === 'approval' ? '?' : '◌';
 				const target = tool.arguments?.path ?? tool.arguments?.file_path ?? tool.arguments?.command ?? '';
 				card.title.textContent = tool.name.replace(/_/g, ' ') + (target ? ' · ' + String(target).slice(0, 160) : '') + ' — ' + (tool.status === 'approval' ? 'Needs permission' : tool.status);
 				if (tool.arguments && !card.args) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Arguments'; const pre = document.createElement('pre'); pre.textContent = formatToolArguments(tool.arguments); details.append(summary, pre); card.element.append(details); card.args = details; }
@@ -1513,7 +1523,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				return card;
 			}
 			function renderWorkSummary(summary) {
-				if (!summary.reasoning.length && !summary.tools.length) return;
+				if (!summary.reasoning.length && !summary.tools.length && !summary.agents?.length) return;
 				const work = ensureWorkSummary(summary.id);
 				for (const thought of summary.reasoning) {
 					let element = work.thoughts.get(thought.id);
@@ -1521,11 +1531,17 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					element.textContent = thought.text;
 				}
 				for (const tool of summary.tools) updateWorkTool(summary.id, tool);
+				for (const agent of summary.agents ?? []) {
+					let element = work.thoughts.get('agent:' + agent.id);
+					if (!element) { element = document.createElement('div'); element.className = 'work-agent'; work.body.append(element); work.thoughts.set('agent:' + agent.id, element); }
+					element.textContent = 'Agent · ' + agent.name + ' — ' + agent.status + (agent.currentTool ? ' · ' + agent.currentTool : '') + ' · ' + agent.toolCallCount + ' tools · ' + agent.turnCount + ' turns · ' + agent.tokenCount + ' tokens' + (agent.toolHistory.length ? '\\n' + agent.toolHistory.join(' → ') : '');
+				}
 				work.status = summary.status;
 				work.startedAt = summary.startedAt;
 				const seconds = Math.max(1, Math.round((Date.now() - summary.startedAt) / 1000));
-				work.header.textContent = summary.status === 'working' ? (summary.tools.length ? 'Working…' : 'Thinking…') : (summary.status === 'failed' ? 'Work failed' : 'Worked') + ' · ' + seconds + 's' + (summary.tools.length ? ' · ' + summary.tools.length + ' tools' : '');
-				if (summary.status !== 'working' && !work.userToggled) work.element.open = false;
+				work.header.textContent = summary.status === 'working' ? (summary.tools.length || summary.agents?.length ? 'Working…' : 'Thinking…') : (summary.status === 'failed' ? 'Work failed' : 'Worked') + ' · ' + seconds + 's' + (summary.tools.length ? ' · ' + summary.tools.length + ' tools' : '') + (summary.agents?.length ? ' · ' + summary.agents.length + ' agents' : '');
+				if (work.denied) work.header.textContent = 'Tool denied · ' + seconds + 's';
+				if (summary.status !== 'working' && !work.userToggled) work.element.open = !!work.denied;
 			}
 			function readPreference(key) {
 				try { return window.localStorage.getItem(key); } catch { return null; }
@@ -1627,13 +1643,16 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				});
 			}
 			document.addEventListener('click', event => { if (!event.target.closest('.custom-dropdown')) closeDropdowns(); });
+			function updateYoloWarning() { yoloWarning.hidden = modeSelect.value !== 'yolo'; }
+			modeSelect.addEventListener('change', updateYoloWarning);
 			function applyRuntimeSettings(settings) {
 				if (JSON.stringify(settings) === JSON.stringify(runtimeSettings)) return;
 				runtimeSettings = settings;
 				fillSelect(providerSelect, settings.providers.map(provider => provider.name), settings.provider);
 				fillSelect(modelSelect, settings.providers.find(provider => provider.name === settings.provider)?.models ?? [], settings.model);
 				fillSelect(modeSelect, settings.modes, settings.mode);
-				settingsStatus.textContent = 'Changes apply to this local session.';
+				updateYoloWarning();
+				settingsStatus.textContent = 'Changes apply to the shared terminal/browser session. YOLO runs tools without approval; auto-accept skips approval for file edits.';
 			}
 
 			function updateComposer() {
@@ -1748,6 +1767,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				while (remainingText) {
 					const linkMatch = /^\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/.exec(remainingText);
 					if (linkMatch) {
+						let safe = false;
+						try { safe = ['http:', 'https:', 'mailto:'].includes(new URL(linkMatch[2], window.location.href).protocol); } catch {}
+						if (!safe) { appendInlineMarkdown(element, linkMatch[1]); remainingText = remainingText.slice(linkMatch[0].length); continue; }
 						const anchor = document.createElement('a');
 						anchor.href = linkMatch[2];
 						anchor.target = '_blank';
@@ -2218,7 +2240,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 				const args = document.createElement('pre');
 				args.textContent = formatToolArguments(message.arguments);
-				card.append(args);
+				if (message.toolName === 'string_replace' && typeof message.arguments.old_str === 'string' && typeof message.arguments.new_str === 'string') {
+					const heading = document.createElement('div'); heading.className = 'meta'; heading.textContent = 'Replacement preview · ' + (message.arguments.path ?? '') + ' (excerpt)'; card.append(heading);
+					const diff = document.createElement('div'); diff.className = 'diff-lines';
+					for (const [kind, text] of [['deletion', message.arguments.old_str], ['addition', message.arguments.new_str]]) {
+						text.split('\\n').forEach((text, index) => { const line = document.createElement('div'); line.className = 'diff-line ' + kind; line.textContent = (kind === 'addition' ? '+ ' : '- ') + (index + 1) + '  ' + text; diff.append(line); });
+					}
+					card.append(diff);
+				} else card.append(args);
 
 				const actions = document.createElement('div');
 				actions.className = 'interaction-actions';
@@ -2239,7 +2268,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				const respond = (approved) => {
 					if (!sendClientEvent({type: 'approval_response', id: message.id, approved})) return;
 					disableInteractionCard(card);
-					if (tool) { tool.element.dataset.status = approved ? 'running' : 'failed'; tool.title.textContent = message.toolName.replace(/_/g, ' ') + (approved ? ' — Approved' : ' — Denied'); }
+					if (tool) { tool.element.dataset.status = approved ? 'running' : 'denied'; tool.title.textContent = message.toolName.replace(/_/g, ' ') + (approved ? ' — Approved' : ' — Denied'); if (!approved) {tool.work.denied = true; tool.work.header.textContent = 'Tool denied';} }
 					const meta = document.createElement('div');
 					meta.className = 'meta';
 					meta.textContent = approved ? 'Approved' : 'Denied';
@@ -2346,13 +2375,52 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					if (message.session) {
 						const existing = currentSessions.find(session => session.id === message.session.id);
 						if (!existing) currentSessions = [message.session, ...currentSessions];
-						else Object.assign(existing, message.session);
+						else { const timestamp = existing.lastAccessedAt; Object.assign(existing, message.session); if (!message.session.lastAccessedAt) existing.lastAccessedAt = timestamp; }
 					}
 					sessionBusy = message.busy;
 					if (sessionChanged) { stopResponseLoader(); messageList.replaceChildren(); messageElements.clear(); assistantMessages.clear(); workSummaries.clear(); toolCards.clear(); }
 					const keep = new Set();
 					storedMessages = [];
+					if (message.notices) transientMessages = message.notices;
+					else if (sessionChanged || previousSession !== activeSessionId) transientMessages = [];
+					const noticeSnapshot = JSON.stringify(transientMessages);
+					const noticeByTurnId = new Map();
+					const strayNotices = [];
+					for (const notice of transientMessages) {
+						if (notice.turnId) {
+							const list = noticeByTurnId.get(notice.turnId) ?? [];
+							list.push(notice);
+							noticeByTurnId.set(notice.turnId, list);
+						} else strayNotices.push(notice);
+					}
+					const noticeChanged = sessionChanged || noticeSnapshot !== previousNoticeSnapshot;
+					if (noticeChanged) {
+						for (const node of messageList.querySelectorAll('.system')) { if (!node.classList.contains('interaction')) node.remove(); }
+					}
+					// Existing message nodes are never moved, so a notice must be placed
+					// relative to its turn's element rather than appended to the list.
+					const placeAfter = (node, reference) => {
+						node.remove();
+						const siblings = [...messageList.children];
+						const index = siblings.indexOf(reference);
+						messageList.insertBefore(node, index === -1 ? null : (siblings[index + 1] ?? null));
+					};
+					const appendNotice = (notice, after) => {
+						const element = appendMessage(notice.role, notice.text, notice.metaText, false, [], undefined, false);
+						if (after) placeAfter(element, after);
+						return element;
+					};
+					// A turn's notices go after its last message (assistant output or tool
+					// steps can sit between the prompt and the failure), before the next prompt.
+					let openTurn = null;
+					const closeOpenTurn = () => {
+						if (!openTurn) return;
+						let anchor = openTurn.last;
+						for (const notice of openTurn.notices) anchor = appendNotice(notice, anchor);
+						openTurn = null;
+					};
 					for (const item of message.messages) {
+						if (item.role === 'user') closeOpenTurn();
 						const key = item.role + ':' + item.id;
 						keep.add(key);
 						let element = messageElements.get(key);
@@ -2366,16 +2434,18 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					setMessageTime(element, item.createdAt);
 					if (item.role === 'assistant') element.querySelector('.message-footer').hidden = item.footerVisible !== true;
 						if (item.role === 'assistant' && item.id) assistantMessages.set(item.id, element);
+						if (item.role === 'user') {
+							const inline = noticeChanged ? noticeByTurnId.get(item.id) : undefined;
+							if (inline) openTurn = {notices: inline, last: element};
+						} else if (openTurn) openTurn.last = element;
 					}
+					closeOpenTurn();
 					for (const [key, element] of messageElements) {
 						if (!keep.has(key)) { element.remove(); messageElements.delete(key); }
 					}
-					if (message.notices) transientMessages = message.notices;
-					else if (sessionChanged || previousSession !== activeSessionId) transientMessages = [];
-					const noticeSnapshot = JSON.stringify(transientMessages);
-					if (sessionChanged || noticeSnapshot !== previousNoticeSnapshot) {
-						for (const node of messageList.querySelectorAll('.system')) { if (!node.classList.contains('interaction')) node.remove(); }
-						for (const notice of transientMessages) appendMessage(notice.role, notice.text, notice.metaText, false, [], undefined, false);
+					if (noticeChanged) {
+						if (message.messages.length === 0) for (const notice of transientMessages) appendNotice(notice);
+						else for (const notice of strayNotices) appendNotice(notice);
 						previousNoticeSnapshot = noticeSnapshot;
 					}
 					writeStoredMessages();
@@ -2476,7 +2546,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						duration.textContent = Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's';
 						reply.querySelector('.message-footer')?.append(duration);
 					}
-					if (work) { work.status = 'completed'; work.header.textContent = 'Worked · ' + Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's'; if (!work.userToggled) work.element.open = false; }
+					if (work) { work.status = 'completed'; work.header.textContent = (work.denied ? 'Tool denied' : 'Worked') + ' · ' + Math.max(1, Math.round((Date.now() - work.startedAt) / 1000)) + 's'; if (!work.userToggled) work.element.open = !!work.denied; }
 					flushAssistantRendering();
 					writeStoredMessages();
 					if (message.id === activeTurnId) {

@@ -175,6 +175,7 @@ export interface AppHandlers {
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		externalId?: string,
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
@@ -870,6 +871,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			message: string,
 			displayValue?: string,
 			images?: ImageAttachment[],
+			externalId?: string,
 		) => {
 			props.ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
@@ -990,6 +992,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				// the raw message so the user still sees what they typed.
 				displayValue ?? message,
 				images,
+				externalId,
 			);
 		},
 		[

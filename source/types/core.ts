@@ -40,6 +40,13 @@ export interface Message {
 	durationMs?: number;
 	outcome?: 'completed' | 'cancelled' | 'failed';
 	/**
+	 * External id supplied by the originator (e.g. the web browser sends a
+	 * `browser-message-…` id so the page can correlate the runtime's view of
+	 * the message with the prompt the user actually typed). Not used by any
+	 * provider payload — purely an internal correlation handle.
+	 */
+	id?: string;
+	/**
 	 * Harness-authored chrome: rendered in chat and persisted with session
 	 * history, but filtered out of the provider payload (see
 	 * `convertToModelMessages`) so the model is never handed nanocoder's own

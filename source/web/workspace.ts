@@ -8,9 +8,30 @@ import type {WebPanel, WebPanelData} from './protocol.js';
 const execute = promisify(execFile);
 const hiddenDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage']);
 
+function isPrivatePath(requested: string): boolean {
+	return requested
+		.split(/[\\/]/)
+		.some(
+			part =>
+				hiddenDirectories.has(part.toLowerCase()) ||
+				/^\.env(?:\.|$)/i.test(part) ||
+				/^(?:agents\.config\.(?:json|jsonc)|\.npmrc|\.netrc|credentials(?:\..*)?|id_(?:rsa|ed25519)|.*\.(?:pem|key|p12|pfx))$/i.test(
+					part,
+				),
+		);
+}
+
 async function projectPath(root: string, requested: string): Promise<string> {
+	if (isPrivatePath(requested))
+		throw new Error(
+			'Private configuration and credential files cannot be previewed.',
+		);
 	const resolved = await realpath(path.resolve(root, requested));
 	const relative = path.relative(root, resolved);
+	if (isPrivatePath(relative))
+		throw new Error(
+			'Private configuration and credential files cannot be previewed.',
+		);
 	if (
 		relative === '..' ||
 		relative.startsWith(`..${path.sep}`) ||
@@ -36,8 +57,7 @@ export async function getWorkspacePanel(
 				path: path.relative(root, target),
 				items: entries
 					.filter(
-						entry =>
-							!hiddenDirectories.has(entry.name) && !entry.isSymbolicLink(),
+						entry => !isPrivatePath(entry.name) && !entry.isSymbolicLink(),
 					)
 					.sort(
 						(a, b) =>
@@ -89,6 +109,7 @@ export async function getWorkspacePanel(
 				const code = entry.slice(0, 2);
 				const file = entry.slice(3);
 				if (/[RC]/.test(code)) index++;
+				if (isPrivatePath(file)) continue;
 				items.push({
 					name: path.basename(file),
 					path: file,
@@ -106,6 +127,7 @@ export async function getWorkspacePanel(
 				};
 			const selected = items.find(item => item.path === requested);
 			if (!selected) throw new Error('Select a changed file from the list.');
+			if (!selected.status?.includes('D')) await projectPath(root, requested);
 			if (selected.status === 'U') {
 				const preview = await getWorkspacePanel('files', requested, options);
 				if (preview.content === undefined)

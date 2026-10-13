@@ -21,6 +21,26 @@ export interface SubagentEvent {
 
 /** Map of agent instance ID → progress state for concurrent agents */
 const subagentProgressMap = new Map<string, SubagentEvent>();
+const listeners = new Set<(id: string, progress: SubagentEvent) => void>();
+
+export function subscribeToSubagentProgress(
+	listener: (id: string, progress: SubagentEvent) => void,
+): () => void {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+}
+
+function notifyProgress(id: string, progress: SubagentEvent): void {
+	for (const listener of listeners) {
+		try {
+			listener(id, progress);
+		} catch {
+			/* UI observers must not interrupt agent execution. */
+		}
+	}
+}
 
 /**
  * Legacy single-agent progress state.
@@ -67,6 +87,7 @@ export function updateSubagentProgressById(
 	} else {
 		subagentProgressMap.set(agentId, {...event, toolHistory: []});
 	}
+	notifyProgress(agentId, getSubagentProgress(agentId));
 }
 
 /** Update progress — called by the executor (legacy single-agent path) */
@@ -77,6 +98,7 @@ export function updateSubagentProgress(event: SubagentEventInput): void {
 	subagentProgress.toolCallCount = event.toolCallCount;
 	subagentProgress.turnCount = event.turnCount;
 	subagentProgress.tokenCount = event.tokenCount;
+	notifyProgress('legacy', subagentProgress);
 }
 
 /**
@@ -92,9 +114,11 @@ export function appendSubagentTool(
 		const existing = subagentProgressMap.get(agentId);
 		if (existing) {
 			existing.toolHistory.push(toolName);
+			notifyProgress(agentId, existing);
 		}
 	} else {
 		subagentProgress.toolHistory.push(toolName);
+		notifyProgress('legacy', subagentProgress);
 	}
 }
 

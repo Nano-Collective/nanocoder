@@ -1,3 +1,5 @@
+import type {SubagentEvent} from '@/services/subagent-events';
+import {normalizeImageAttachment} from '@/utils/image-attachment';
 import type {
 	WebClientEvent,
 	WebNotice,
@@ -16,10 +18,11 @@ export interface WebSessionLoadResult {
 }
 
 export interface WebRuntimeHandlers {
-	getWorkspacePanel?: (panel: WebPanel, path?: string) => Promise<WebPanelData>;
+	getWorkspacePanel: (panel: WebPanel, path?: string) => Promise<WebPanelData>;
 	submitMessage: (
 		text: string,
 		images?: {data: string; mediaType: string}[],
+		externalId?: string,
 	) => void | Promise<void>;
 	cancel: () => void;
 	resetSession: () => void | Promise<void>;
@@ -55,6 +58,7 @@ export interface WebRuntimeBridge {
 	bindRuntimeHandlers: (handlers: WebRuntimeHandlers) => () => void;
 	publishAssistantContent: (content: string, newResponse?: boolean) => void;
 	publishReasoning: (content: string) => void;
+	publishSubagentProgress: (id: string, progress: SubagentEvent) => void;
 	publishToolStarted: (
 		id: string,
 		name: string,
@@ -359,16 +363,22 @@ export function createWebRuntimeBridge(
 			error instanceof Error
 				? error.message
 				: 'Nanocoder could not complete this turn.';
+		const failedTurnId = activeTurnId;
 		broadcastEvent({
 			type: 'error',
-			id: activeTurnId,
+			id: failedTurnId,
 			message,
 		});
 		const summary = currentWork();
 		if (summary) summary.status = 'failed';
 		clearActiveTurn();
 		refreshSession();
-		notices.push({role: 'system error', text: message});
+		notices.push({
+			role: 'system error',
+			text: message,
+			turnId: failedTurnId,
+			createdAt: new Date().toISOString(),
+		});
 		publishState();
 	};
 
@@ -403,6 +413,24 @@ export function createWebRuntimeBridge(
 				}
 
 				const pending = pendingInteraction;
+				if (!event.approved && pending.event.type === 'approval_required') {
+					const summary = currentWork();
+					const toolId = pending.event.toolCallId ?? pending.id;
+					const tool = summary?.tools.find(tool => tool.id === toolId);
+					if (tool) tool.status = 'denied';
+					else
+						summary?.tools.push({
+							id: toolId,
+							name: pending.event.toolName,
+							status: 'denied',
+							arguments: pending.event.arguments,
+						});
+					if (summary)
+						broadcastEvent({
+							type: 'work_update',
+							work: structuredClone(summary),
+						});
+				}
 				removeInteraction(pending);
 				pending.resolve(event.approved);
 				return;
@@ -575,6 +603,7 @@ export function createWebRuntimeBridge(
 				throw new Error('Nanocoder is already processing a browser turn.');
 			}
 
+			const images = event.images?.map(normalizeImageAttachment);
 			activeTurnId = event.id;
 			previousAssistantContent = '';
 			assistantId = null;
@@ -588,7 +617,7 @@ export function createWebRuntimeBridge(
 					id: event.id,
 					role: 'user',
 					content: event.text,
-					images: event.images,
+					images,
 					createdAt: new Date().toISOString(),
 				});
 			publishState();
@@ -596,7 +625,8 @@ export function createWebRuntimeBridge(
 			try {
 				const submission = runtimeHandlers.submitMessage(
 					event.text,
-					event.images,
+					images,
+					event.id,
 				);
 				void Promise.resolve(submission).then(
 					() => completeActiveTurn(event.id),
@@ -645,7 +675,13 @@ export function createWebRuntimeBridge(
 			publishState();
 		},
 		publishNotice(message) {
-			notices.push({role: 'system', text: message, metaText: 'Local UI'});
+			notices.push({
+				role: 'system',
+				text: message,
+				metaText: 'Local UI',
+				turnId: activeTurnId ?? undefined,
+				createdAt: new Date().toISOString(),
+			});
 			broadcastEvent({type: 'notice', message});
 		},
 		refreshSessions() {
@@ -714,6 +750,20 @@ export function createWebRuntimeBridge(
 			if (thought) thought.text = content;
 			broadcastEvent({type: 'work_update', work: structuredClone(summary)});
 		},
+		publishSubagentProgress(id, progress) {
+			const summary = currentWork();
+			if (!summary) return;
+			const agents = (summary.agents ??= []);
+			const agent = {
+				id,
+				name: progress.subagentName,
+				...structuredClone(progress),
+			};
+			const index = agents.findIndex(item => item.id === id);
+			if (index < 0) agents.push(agent);
+			else agents[index] = agent;
+			broadcastEvent({type: 'work_update', work: structuredClone(summary)});
+		},
 
 		publishToolStarted(id, name, arguments_) {
 			if (!activeTurnId) {
@@ -738,7 +788,7 @@ export function createWebRuntimeBridge(
 			const summary = currentWork();
 			const tool = summary?.tools.find(tool => tool.id === id);
 			if (tool) {
-				tool.status = ok ? 'completed' : 'failed';
+				if (tool.status !== 'denied') tool.status = ok ? 'completed' : 'failed';
 				tool.output = output?.slice(0, 12000);
 			} else
 				summary?.tools.push({

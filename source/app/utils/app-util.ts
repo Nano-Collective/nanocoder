@@ -806,6 +806,7 @@ export async function handleMessageSubmission(
 	options: MessageSubmissionOptions,
 	displayValue?: string,
 	images?: ImageAttachment[],
+	externalId?: string,
 ): Promise<void> {
 	const parsedInput = parseInput(message);
 
@@ -824,7 +825,13 @@ export async function handleMessageSubmission(
 		return;
 	}
 
-	await options.onHandleChatMessage(message, displayValue, images);
+	await options.onHandleChatMessage(
+		message,
+		displayValue,
+		images,
+		undefined,
+		externalId,
+	);
 }
 
 export function createClearMessagesHandler(

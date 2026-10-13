@@ -56,6 +56,43 @@ test('browser boots without CDN globals and persists the full streamed reply', t
 	t.is(browser.get('#messageList').querySelector('.message-content')!.textContent, 'Corrected');
 });
 
+test('Markdown strips executable links but preserves safe links', t => {
+	const browser = bootBrowser();
+	browser.event({type: 'assistant_delta', id: 'turn', text: '[bad](javascript:alert) [data](data:text/html,test) [good](https://example.com)'});
+	browser.run('flushAssistantRendering();');
+	const links = browser.get('#messageList').querySelectorAll('a');
+	t.is(links.length, 1);
+	t.is(links[0].textContent, 'good');
+	t.true(browser.get('#messageList').textContent.includes('bad'));
+});
+
+test('replacement approvals show a colored diff and denials remain visible after completion', t => {
+	const browser = bootBrowser();
+	browser.run("setActiveTurn('turn');");
+	browser.event({type: 'approval_required', id: 'approval', toolCallId: 'replace', toolName: 'string_replace', arguments: {path: 'README.md', old_str: 'old\nline', new_str: 'new\nline'}});
+	t.is(browser.get('#messageList').querySelectorAll('.deletion').length, 2);
+	t.is(browser.get('#messageList').querySelectorAll('.addition').length, 2);
+	const deny = browser.get('#messageList').querySelectorAll('button').find(button => button.textContent === 'Deny')!;
+	deny.click();
+	browser.event({type: 'turn_completed', id: 'turn'});
+	t.true(browser.get('#messageList').textContent.includes('Tool denied'));
+	t.is(browser.run("workSummaries.get('turn').element.open"), true);
+	browser.event({type: 'state', activeTurnId: null, messages: [], session: null, work: [{id: 'turn', status: 'completed', startedAt: Date.now(), reasoning: [], tools: [{id: 'replace', name: 'string_replace', status: 'denied'}]}]});
+	t.true(browser.get('#messageList').textContent.includes('Tool denied'));
+});
+
+test('subagents render current progress and restore concurrent agents from a snapshot', t => {
+	const browser = bootBrowser();
+	const work = {id: 'turn', status: 'working', startedAt: Date.now(), tools: [], reasoning: [], agents: ['one', 'two'].map(id => ({id, name: 'explore', status: 'tool_call', currentTool: 'read_file', toolCallCount: 2, turnCount: 3, tokenCount: 50, toolHistory: ['read_file']}))};
+	browser.event({type: 'work_update', work});
+	t.is(browser.get('#messageList').querySelectorAll('.work-agent').length, 2);
+	t.true(browser.get('#messageList').textContent.includes('50 tokens'));
+	work.agents[0].tokenCount = 100;
+	browser.event({type: 'work_update', work});
+	t.is(browser.get('#messageList').querySelectorAll('.work-agent').length, 2);
+	t.true(browser.get('#messageList').textContent.includes('100 tokens'));
+});
+
 test('panel navigation ignores stale replies and shows compact per-file source control', t => {
 	const browser = bootBrowser();
 	browser.run('runtimeReady = true; setComposerEnabled(true);');
@@ -195,6 +232,61 @@ test('completion snapshots preserve errors and tool failure notices and reset cl
 	t.true(browser.get('#messageList').textContent.includes('write file — failed'));
 	browser.event({...state, activeTurnId: null, messages: [], sessionRevision: 1});
 	t.is(browser.get('#messageList').textContent, '');
+});
+
+test('per-turn errors render next to the prompt that caused them, matching the TUI ordering', t => {
+	const browser = bootBrowser();
+	const messages = [
+		{role: 'user', id: 'a', content: 'first prompt', createdAt: '2025-01-01T00:00:00.000Z'},
+		{role: 'user', id: 'b', content: 'second prompt', createdAt: '2025-01-01T00:00:01.000Z'},
+		{role: 'user', id: 'c', content: 'third prompt', createdAt: '2025-01-01T00:00:02.000Z'},
+	];
+	browser.event({
+		type: 'state',
+		activeTurnId: null,
+		busy: false,
+		session: null,
+		sessionRevision: 0,
+		runtimeReady: true,
+		messages,
+		notices: [
+			{role: 'system error', text: 'first failed', turnId: 'a', createdAt: '2025-01-01T00:00:00.500Z'},
+			{role: 'system error', text: 'second failed', turnId: 'b', createdAt: '2025-01-01T00:00:01.500Z'},
+			{role: 'system error', text: 'third failed', turnId: 'c', createdAt: '2025-01-01T00:00:02.500Z'},
+		],
+	});
+	const contents = Array.from(browser.get('#messageList').querySelectorAll('.message-content')).map(element => element.textContent);
+	t.deepEqual(contents, ['first prompt', 'first failed', 'second prompt', 'second failed', 'third prompt', 'third failed']);
+});
+
+test('a later turn failure keeps earlier errors after their own prompt, not at the bottom', t => {
+	const browser = bootBrowser();
+	const sync = (messages: unknown[], notices: unknown[] = []) => browser.event({type: 'state', activeTurnId: null, busy: false, session: null, sessionRevision: 0, runtimeReady: true, messages, notices});
+	const first = {role: 'user', id: 'a', content: 'first prompt', createdAt: '2025-01-01T00:00:00.000Z'};
+	const second = {role: 'user', id: 'b', content: 'second prompt', createdAt: '2025-01-01T00:00:01.000Z'};
+	const reply = {role: 'assistant', id: 'b-reply', content: 'partial reply', footerVisible: false, createdAt: '2025-01-01T00:00:02.000Z'};
+	const firstFailed = {role: 'system error', text: 'first failed', turnId: 'a', createdAt: '2025-01-01T00:00:00.500Z'};
+	const secondFailed = {role: 'system error', text: 'second failed', turnId: 'b', createdAt: '2025-01-01T00:00:02.500Z'};
+	sync([first]);
+	sync([first], [firstFailed]);
+	sync([first, second, reply], [firstFailed]);
+	sync([first, second, reply], [firstFailed, secondFailed]);
+	const contents = Array.from(browser.get('#messageList').querySelectorAll('.message-content')).map(element => element.textContent);
+	t.deepEqual(contents, ['first prompt', 'first failed', 'second prompt', 'partial reply', 'second failed']);
+});
+
+test('choosing yolo shows a warning until another development mode is chosen', t => {
+	const browser = bootBrowser();
+	browser.event({type: 'ready', protocolVersion: 1});
+	browser.event({type: 'state', activeTurnId: null, busy: false, session: null, messages: [], sessionRevision: 0, runtimeReady: true,
+		settings: {provider: 'local', model: 'small', mode: 'normal', providers: [{name: 'local', models: ['small']}], modes: ['normal', 'auto-accept', 'yolo', 'plan']}});
+	const warning = browser.get('#yoloWarning');
+	const choose = (mode: string) => browser.get('#modeOptions').querySelectorAll('button').find(button => button.textContent === mode)!.click();
+	t.true(warning.hidden);
+	choose('yolo');
+	t.false(warning.hidden);
+	choose('plan');
+	t.true(warning.hidden);
 });
 
 test('blocked browser storage does not prevent boot or chat', t => {

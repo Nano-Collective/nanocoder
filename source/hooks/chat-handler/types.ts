@@ -81,6 +81,7 @@ export interface ChatHandlerReturn {
 		displayValue?: string,
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
+		externalId?: string,
 	) => Promise<void>;
 	processAssistantResponse: (
 		systemMessage: Message,

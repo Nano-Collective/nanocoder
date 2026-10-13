@@ -151,3 +151,15 @@ test('browser image data URLs are normalized to raw base64 for the runtime', t =
 	const event = parseWebClientEvent(JSON.stringify({type: 'user_message', id: 'image', text: 'describe', images: [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}]}));
 	t.like(event, {images: [{data: 'AA==', mediaType: 'image/png'}]});
 });
+
+test('invalid attachments are rejected before runtime dispatch', t => {
+	for (const image of [
+		{data: '%%%broken', mediaType: 'image/png'},
+		{data: 'a===', mediaType: 'image/png'},
+		{data: '', mediaType: 'image/png'},
+		{data: 'data:image/jpeg;base64,AA==', mediaType: 'image/png'},
+		{data: 'AA==', mediaType: 'text/html'},
+	]) {
+		t.throws(() => parseWebClientEvent(JSON.stringify({type: 'user_message', id: 'bad', text: 'picture', images: [image]})));
+	}
+});

@@ -40,6 +40,36 @@ test('parseAPIError handles APICallError with 401 status', t => {
 	t.is(result, 'Authentication failed: Invalid API key or credentials');
 });
 
+test('parseAPIError handles APICallError with 402 quota error as quota message', t => {
+	const error = new APICallError({
+		message: 'Payment Required',
+		url: 'https://api.groq.com/openai/v1/chat/completions',
+		requestBodyValues: {},
+		statusCode: 402,
+		responseBody: JSON.stringify({error: {message: 'You have exceeded your free tier quota.'}}),
+		responseHeaders: {},
+		isRetryable: false,
+	});
+
+	const result = parseAPIError(error);
+	t.is(result, 'Quota exceeded: You have exceeded your free tier quota.');
+});
+
+test('parseAPIError handles APICallError with 402 payment error as payment message', t => {
+	const error = new APICallError({
+		message: 'Payment Required',
+		url: 'https://api.groq.com/openai/v1/chat/completions',
+		requestBodyValues: {},
+		statusCode: 402,
+		responseBody: JSON.stringify({error: {message: 'Account deactivated, contact billing.'}}),
+		responseHeaders: {},
+		isRetryable: false,
+	});
+
+	const result = parseAPIError(error);
+	t.is(result, 'Payment required: Account deactivated, contact billing.');
+});
+
 test('parseAPIError handles APICallError with 404 status', t => {
 	const error = new APICallError({
 		message: 'Not found',

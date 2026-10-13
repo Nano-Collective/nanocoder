@@ -53,3 +53,22 @@ test('Tasks uses the supplied current-session list and handles empty projects', 
 	t.truthy((await getWorkspacePanel('tasks', '', {root, tasks: []})).message);
 	t.is((await getWorkspacePanel('changes', '', {root, tasks: []})).message, 'This project is not a Git repository.');
 });
+
+test('private files are excluded from listings, direct previews, aliases and Git diffs', async t => {
+	const root = await mkdtemp(path.join(os.tmpdir(), 'nano-web-private-'));
+	t.teardown(() => rm(root, {recursive: true, force: true}));
+	const git = (args: string[]) => promisify(execFile)('git', args, {cwd: root});
+	await git(['init']);
+	for (const name of ['.env', '.env.local', 'agents.config.json', 'secret.pem']) {
+		await writeFile(path.join(root, name), 'private apiKey');
+		await t.throwsAsync(getWorkspacePanel('files', name, {root, tasks: []}));
+		await t.throwsAsync(getWorkspacePanel('changes', name, {root, tasks: []}));
+	}
+	await t.throwsAsync(getWorkspacePanel('files', '.git/config', {root, tasks: []}));
+	await symlink(path.join(root, '.env'), path.join(root, 'innocent.txt'));
+	await t.throwsAsync(getWorkspacePanel('files', 'innocent.txt', {root, tasks: []}));
+	const listing = await getWorkspacePanel('files', '', {root, tasks: []});
+	t.deepEqual(listing.items, []);
+	const changes = await getWorkspacePanel('changes', '', {root, tasks: []});
+	t.false(changes.items.some(item => item.name === '.env' || item.name === 'agents.config.json'));
+});

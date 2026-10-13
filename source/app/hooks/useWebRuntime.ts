@@ -3,6 +3,7 @@ import {getAppConfig} from '@/config/index';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
+import {subscribeToSubagentProgress} from '@/services/subagent-events';
 import {sessionManager} from '@/session/session-manager';
 import {loadTasks} from '@/tools/tasks/storage';
 import {handleWebCommand} from '@/web/commands';
@@ -51,9 +52,11 @@ const visibleMessages = (
 				(message.content.trim() || message.images?.length),
 		)
 		.map(message => ({
+			id: message.id,
 			role: message.role as 'user' | 'assistant',
 			content: message.content,
 			images: message.images,
+			createdAt: undefined,
 		}));
 const sessionSummary = (session: {
 	id: string;
@@ -71,6 +74,7 @@ const sessionSummary = (session: {
 export function useWebRuntime(props: WebRuntimeProps): void {
 	const {bridge, state, trusted, trustError} = props;
 	const latest = React.useRef(props);
+	const sessionActivity = React.useRef(new Map<string, string>());
 	latest.current = props;
 	const snapshot = React.useCallback(() => {
 		const current = latest.current.state;
@@ -84,7 +88,8 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 								.find(message => message.role === 'user')
 								?.content.slice(0, 80) ||
 							'New chat',
-						lastAccessedAt: new Date().toISOString(),
+						lastAccessedAt:
+							sessionActivity.current.get(current.currentSessionId) ?? '',
 						messageCount: current.messages.length,
 					}
 				: null,
@@ -94,6 +99,7 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 	React.useEffect(
 		() =>
 			sessionManager.subscribeToSaves(session => {
+				sessionActivity.current.set(session.id, session.lastAccessedAt);
 				if (session.id === latest.current.state.currentSessionId)
 					latest.current.state.setSessionName(session.title);
 				if (bridge && session.workingDirectory === process.cwd())
@@ -170,7 +176,7 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 							: []),
 				});
 			},
-			submitMessage: async (text, images) => {
+			submitMessage: async (text, images, externalId) => {
 				if (latest.current.isGenerating)
 					throw new Error('Nanocoder is already processing a turn.');
 				if (
@@ -196,6 +202,7 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 					text,
 					undefined,
 					images,
+					externalId,
 				);
 				await settleRender();
 			},
@@ -249,8 +256,9 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 					);
 				await latest.current.flushSession();
 				await sessionManager.initialize();
-				const session = await sessionManager.loadSession(id);
+				const session = await sessionManager.readSession(id);
 				if (!session) return null;
+				sessionActivity.current.set(session.id, session.lastAccessedAt);
 				latest.current.handlers.applySession(session);
 				return {
 					session: sessionSummary(session),
@@ -259,6 +267,10 @@ export function useWebRuntime(props: WebRuntimeProps): void {
 			},
 		});
 	}, [bridge, trusted, state.client, state.toolManager, snapshot]);
+	React.useEffect(() => {
+		if (!bridge) return;
+		return subscribeToSubagentProgress(bridge.publishSubagentProgress);
+	}, [bridge]);
 	React.useEffect(() => {
 		if (!bridge) return;
 		setWebToolLifecyclePublisher({

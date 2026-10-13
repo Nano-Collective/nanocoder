@@ -1,3 +1,5 @@
+import {normalizeImageAttachment} from '@/utils/image-attachment';
+
 export const WEB_PROTOCOL_VERSION = 1;
 
 export type WebPanel = 'files' | 'tasks' | 'changes';
@@ -46,6 +48,9 @@ export interface WebNotice {
 	role: string;
 	text: string;
 	metaText?: string;
+	/** Browser turn this notice was generated for. Lets the UI show the notice next to the user prompt that triggered it. */
+	turnId?: string;
+	createdAt?: string;
 }
 
 export interface WebWorkSummary {
@@ -56,9 +61,19 @@ export interface WebWorkSummary {
 	tools: {
 		id: string;
 		name: string;
-		status: 'running' | 'completed' | 'failed';
+		status: 'running' | 'completed' | 'failed' | 'denied';
 		arguments?: Record<string, unknown>;
 		output?: string;
+	}[];
+	agents?: {
+		id: string;
+		name: string;
+		status: string;
+		currentTool?: string;
+		toolCallCount: number;
+		turnCount: number;
+		tokenCount: number;
+		toolHistory: string[];
 	}[];
 }
 
@@ -212,12 +227,7 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 				text: parsed.text,
 				images: (
 					parsed.images as {data: string; mediaType: string}[] | undefined
-				)?.map(image => ({
-					...image,
-					data: image.data.startsWith('data:')
-						? image.data.slice(image.data.indexOf(',') + 1)
-						: image.data,
-				})),
+				)?.map(normalizeImageAttachment),
 			};
 		case 'cancel':
 			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {

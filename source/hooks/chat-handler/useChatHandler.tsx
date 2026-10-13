@@ -358,6 +358,7 @@ export function useChatHandler({
 		displayValue?: string,
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
+		externalId?: string,
 	) => {
 		if (!client || !toolManager) {
 			// handleMessageSubmit marks a turn as incomplete before reaching this
@@ -407,7 +408,7 @@ export function useChatHandler({
 		for (const historyMessage of historyMessages ?? []) {
 			builder.addMessage(historyMessage);
 		}
-		builder.addUserMessage(message, images);
+		builder.addUserMessage(message, images, externalId);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 
