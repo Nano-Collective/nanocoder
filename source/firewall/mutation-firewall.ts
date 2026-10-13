@@ -27,9 +27,19 @@ export function getFirewallConfig(): FirewallConfig {
 export function setFirewallConfig(
 	config: Partial<FirewallConfig>,
 ): FirewallConfig {
+	const nextMode = config.mode ?? currentConfig.mode;
+	const nextEnabled =
+		config.enabled !== undefined
+			? config.enabled
+			: config.mode !== undefined
+				? config.mode !== 'disabled'
+				: currentConfig.enabled;
+
 	currentConfig = {
 		...currentConfig,
 		...config,
+		enabled: nextEnabled,
+		mode: nextMode,
 		protectedPatterns: config.protectedPatterns
 			? [...config.protectedPatterns]
 			: currentConfig.protectedPatterns,
@@ -59,11 +69,7 @@ function isProtectedPath(filePath: string, patterns: string[]): boolean {
 	if (relativePath.startsWith('..')) {
 		return patterns.some(p => {
 			const cleanP = p.replace(/^\.\//, '');
-			return (
-				normalized === cleanP ||
-				normalized.endsWith(`/${cleanP}`) ||
-				normalized.endsWith(cleanP)
-			);
+			return normalized === cleanP || normalized.endsWith(`/${cleanP}`);
 		});
 	}
 
