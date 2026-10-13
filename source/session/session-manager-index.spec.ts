@@ -83,29 +83,54 @@ test.serial('concurrent saves from separate processes keep every index entry', a
 	const workerPath = join(workDir, 'worker.mjs');
 	await writeFile(workerPath, WORKER);
 	const managerPath = fileURLToPath(new URL('./session-manager.ts', import.meta.url));
-	const tsx = fileURLToPath(import.meta.resolve('tsx'));
+	// A file URL, not a path: on Windows `--import` rejects a bare `C:\...`.
+	const tsx = import.meta.resolve('tsx');
 	const tags = ['p0', 'p1', 'p2', 'p3'];
 
-	const exits = tags.map(
-		tag =>
-			new Promise<number | null>(resolveExit => {
-				const child = spawn(
-					process.execPath,
-					['--import', tsx, workerPath, managerPath, sessionsDir, workDir, tag],
-					{
-						env: {...process.env, NANOCODER_CONFIG_DIR: workDir},
-						stdio: 'ignore',
-					},
-				);
-				child.on('exit', resolveExit);
-			}),
-	);
-	while (!tags.every(tag => existsSync(join(workDir, `${tag}.ready`)))) {
+	const workers = tags.map(tag => {
+		const child = spawn(
+			process.execPath,
+			['--import', tsx, workerPath, managerPath, sessionsDir, workDir, tag],
+			{
+				env: {...process.env, NANOCODER_CONFIG_DIR: workDir},
+				stdio: ['ignore', 'ignore', 'pipe'],
+			},
+		);
+		let stderr = '';
+		child.stderr?.on('data', chunk => {
+			stderr += String(chunk);
+		});
+		let exitCode: number | null | undefined;
+		const exited = new Promise<number | null>(resolveExit => {
+			const finish = (code: number | null) => {
+				exitCode = code;
+				resolveExit(code);
+			};
+			child.on('exit', finish);
+			child.on('error', () => finish(null));
+		});
+		return {tag, child, exited, exitCode: () => exitCode, stderr: () => stderr};
+	});
+	t.teardown(() => {
+		for (const {child} of workers) child.kill();
+	});
+
+	const isReady = (tag: string) => existsSync(join(workDir, `${tag}.ready`));
+	while (!tags.every(isReady)) {
+		// A worker that dies before it is ready would otherwise leave this loop
+		// waiting for the whole timeout.
+		const dead = workers.find(w => w.exitCode() !== undefined && !isReady(w.tag));
+		if (dead) {
+			t.fail(
+				`worker ${dead.tag} exited (${dead.exitCode()}) before it was ready:\n${dead.stderr()}`,
+			);
+			return;
+		}
 		await new Promise(resolveWait => setTimeout(resolveWait, 20));
 	}
 	await writeFile(join(workDir, 'go'), '');
 
-	t.deepEqual(await Promise.all(exits), [0, 0, 0, 0]);
+	t.deepEqual(await Promise.all(workers.map(w => w.exited)), [0, 0, 0, 0]);
 	const index = JSON.parse(
 		await readFile(join(sessionsDir, 'sessions.json'), 'utf-8'),
 	) as Session[];
