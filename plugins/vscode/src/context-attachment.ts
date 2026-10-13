@@ -9,6 +9,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 
 /** Largest slice of a single attached file that gets inlined. */
 export const MAX_CONTEXT_FILE_BYTES = 100 * 1024;
@@ -61,12 +62,7 @@ export function readCappedFile(
 			return null;
 		}
 
-		const content = slice.toString('utf8');
-		if (size > readLength) {
-			const omitted = size - readLength;
-			return `${content}\n... [truncated: ${omitted} of ${size} bytes omitted]`;
-		}
-		return content;
+		return withTruncationMarker(slice.toString('utf8'), size, readLength);
 	} catch {
 		return null;
 	} finally {
@@ -76,6 +72,76 @@ export function readCappedFile(
 			} catch {}
 		}
 	}
+}
+
+function withTruncationMarker(
+	content: string,
+	totalBytes: number,
+	keptBytes: number,
+): string {
+	if (totalBytes <= keptBytes) return content;
+	const omitted = totalBytes - keptBytes;
+	return `${content}\n... [truncated: ${omitted} of ${totalBytes} bytes omitted]`;
+}
+
+/**
+ * Cap in-memory text exactly as {@link readCappedFile} caps a file on disk:
+ * same byte limit, same binary check, same truncation marker.
+ */
+export function capText(
+	text: string,
+	maxBytes: number = MAX_CONTEXT_FILE_BYTES,
+): string | null {
+	const buffer = Buffer.from(text, 'utf8');
+	const slice = buffer.subarray(0, maxBytes);
+	if (isBinary(slice)) {
+		return null;
+	}
+	return withTruncationMarker(slice.toString('utf8'), buffer.length, slice.length);
+}
+
+/** The parts of a `vscode.TextDocument` needed to match it to a path. */
+export interface OpenDocument {
+	uri: { scheme: string; fsPath: string };
+	getText(): string;
+}
+
+function samePath(a: string, b: string): boolean {
+	const normalize = (p: string) => {
+		const resolved = path.resolve(p);
+		return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+	};
+	return normalize(a) === normalize(b);
+}
+
+/**
+ * Text of the editor that has `filePath` open, or undefined when no editor
+ * does. Only `file:` documents count; an untitled buffer or a git diff view
+ * is not the file the user attached.
+ */
+export function findOpenDocumentText(
+	filePath: string,
+	documents: readonly OpenDocument[],
+): string | undefined {
+	return documents
+		.find(doc => doc.uri.scheme === 'file' && samePath(doc.uri.fsPath, filePath))
+		?.getText();
+}
+
+/**
+ * Content for an `@[file]` attachment. An open editor's buffer wins over the
+ * disk, so unsaved edits are what the model sees; otherwise the file is read
+ * from disk. Both are capped the same way.
+ */
+export function readAttachedFile(
+	filePath: string,
+	openDocumentText: (filePath: string) => string | undefined,
+	maxBytes: number = MAX_CONTEXT_FILE_BYTES,
+): string | null {
+	const buffer = openDocumentText(filePath);
+	return buffer === undefined
+		? readCappedFile(filePath, maxBytes)
+		: capText(buffer, maxBytes);
 }
 
 /**
