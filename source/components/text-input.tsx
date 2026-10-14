@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import {Text, useInput} from 'ink';
+import {type Key, Text, useInput, useStdin} from 'ink';
 import {
 	forwardRef,
 	useEffect,
@@ -13,6 +13,43 @@ import {
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/utils/text-wrapping';
+
+/**
+ * The raw byte sequence behind the keypress a `useInput` handler is running
+ * for. Read `.current` inside the handler, not during render.
+ *
+ * Ink maps physical Backspace (`\x7f`) and forward Delete (`\x1b[3~`) to the
+ * same `key.delete`, and does not recognise xterm's modified Enter at all, so
+ * telling them apart needs the sequence itself. Stock Ink never puts it on
+ * `Key`. A pnpm patch used to add a `raw` field to `Key`, but pnpm patches only
+ * apply inside this repo: the published package depends on plain Ink, so
+ * npm installs lost the field and Backspace became forward Delete (#1505).
+ *
+ * The sequence comes from the stdin emitter Ink exposes through `useStdin`,
+ * the stream `useInput` itself listens to. The listener is prepended so it
+ * always runs before any `useInput` handler, whatever order those
+ * re-subscribe in.
+ */
+export function useRawInput() {
+	const {internal_eventEmitter: emitter} = useStdin();
+	const rawRef = useRef('');
+
+	useEffect(() => {
+		const onInput = (data: unknown) => {
+			rawRef.current = String(data);
+		};
+		emitter.prependListener('input', onInput);
+		return () => {
+			emitter.removeListener('input', onInput);
+		};
+	}, [emitter]);
+
+	return rawRef;
+}
+
+/** Physical Backspace (`\x7f`) or Option/Alt+Backspace (`\x1b\x7f`). */
+export const isBackspaceKey = (key: Key, raw: string) =>
+	key.backspace || (key.delete && (raw === '\x7f' || raw === '\x1b\x7f'));
 
 /**
  * How the value effect should treat an incoming `value`, given the values
@@ -84,7 +121,14 @@ export type Props = {
  */
 export type TextInputHandle = {
 	getCursorOffset: () => number;
-	setCursorOffset: (offset: number) => void;
+	/**
+	 * Move the caret. Pass `value` when the parent has just changed the value
+	 * out of band (a terminal paste) and `offset` is in that new value's
+	 * coordinates: keys arriving before the next render then edit the new
+	 * value at the new caret, instead of the old value at an offset that does
+	 * not fit it.
+	 */
+	setCursorOffset: (offset: number, value?: string) => void;
 };
 
 const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
@@ -115,13 +159,16 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		ref,
 		() => ({
 			getCursorOffset: () => cursorOffsetRef.current,
-			setCursorOffset: (offset: number) => {
+			setCursorOffset: (offset: number, value?: string) => {
 				// Don't clamp against originalValueRef.current here: the parent
 				// typically calls this in the same tick it schedules the new
 				// `value`, so the ref is stale. The next render's effect clamps
 				// the offset against the real newValue.length. We trust the
 				// caller to pass a sane offset; out-of-bounds requests are
 				// still corrected, just one render later.
+				if (value !== undefined) {
+					originalValueRef.current = value;
+				}
 				cursorOffsetRef.current = offset;
 				skipNextCursorResetRef.current = true;
 				setState({cursorOffset: offset, cursorWidth: 0});
@@ -244,6 +291,19 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		return i;
 	}
 
+	// Logical-line boundaries around the cursor, for readline's Ctrl+A/E/U/K.
+	// A "line" is the text between the \n before the cursor and the \n at or
+	// after it, so multi-line input keeps these scoped to the current line
+	// instead of the whole buffer.
+	function startOfLine(value: string, offset: number): number {
+		return value.lastIndexOf('\n', offset - 1) + 1;
+	}
+
+	function endOfLine(value: string, offset: number): number {
+		const next = value.indexOf('\n', offset);
+		return next === -1 ? value.length : next;
+	}
+
 	const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
 	const value = mask ? mask.repeat(originalValue.length) : originalValue;
 	let renderedValue = value;
@@ -280,6 +340,8 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			renderedValue += chalk.inverse(' ');
 		}
 	}
+
+	const rawInputRef = useRawInput();
 
 	useInput(
 		(input, key) => {
@@ -323,7 +385,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			// the wrong place when the cursor was mid-text and left the cursor
 			// stranded in front of it. Checked before `key.return` because several
 			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
-			if (isNewlineKey(input, key)) {
+			if (isNewlineKey(input, key, rawInputRef.current)) {
 				const currentValue = originalValueRef.current;
 				const offset = cursorOffsetRef.current;
 				const withNewline =
@@ -384,17 +446,23 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					// Readline keybinds
 					switch (input) {
 						case 'a': {
-							// Move cursor to start of line
+							// Move cursor to start of the current line
 							if (showCursor) {
-								nextCursorOffset = 0;
+								nextCursorOffset = startOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
 							}
 							break;
 						}
 
 						case 'e': {
-							// Move cursor to end of line
+							// Move cursor to end of the current line
 							if (showCursor) {
-								nextCursorOffset = originalValueRef.current.length;
+								nextCursorOffset = endOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
 							}
 							break;
 						}
@@ -443,20 +511,27 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						}
 
 						case 'u': {
-							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(
+							// Delete from cursor to start of the current line
+							const start = startOfLine(
+								originalValueRef.current,
 								cursorOffsetRef.current,
 							);
-							nextCursorOffset = 0;
+							nextValue =
+								originalValueRef.current.slice(0, start) +
+								originalValueRef.current.slice(cursorOffsetRef.current);
+							nextCursorOffset = start;
 							break;
 						}
 
 						case 'k': {
-							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(
-								0,
+							// Delete from cursor to end of the current line
+							const end = endOfLine(
+								originalValueRef.current,
 								cursorOffsetRef.current,
 							);
+							nextValue =
+								originalValueRef.current.slice(0, cursorOffsetRef.current) +
+								originalValueRef.current.slice(end);
 							break;
 						}
 
@@ -473,16 +548,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				if (showCursor) {
 					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
-			} else if (
-				key.backspace ||
-				(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-			) {
+			} else if (isBackspaceKey(key, rawInputRef.current)) {
 				// Backspace deletes the character before the cursor.
 				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
 				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence: '\x7f' and the Option/Alt+Backspace variant '\x1b\x7f'
-				// (macOS/Linux terminals) are backward deletes, while '\x1b[3~'
-				// is the forward Delete key. Kitty keyboard protocol encodes
+				// sequence (see useRawInput): '\x7f' and the Option/Alt+Backspace
+				// variant '\x1b\x7f' (macOS/Linux terminals) are backward deletes,
+				// while '\x1b[3~' is the forward Delete key. Kitty keyboard protocol encodes
 				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
 				// it is dormant here because nanocoder does not enable
 				// kittyKeyboard — if that changes, this guard needs the

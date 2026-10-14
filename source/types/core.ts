@@ -72,6 +72,8 @@ export interface ToolResult {
 	name: string;
 	content: string;
 	structuredContent?: JSONValue;
+	/** Raw base64. Sent as image parts, not copied into `content`. */
+	images?: ImageAttachment[];
 	isError?: boolean;
 }
 
@@ -105,7 +107,17 @@ export interface StructuredToolOutput {
 	isError?: boolean;
 }
 
-export type ToolExecuteResult = string | StructuredToolOutput;
+export interface VisualToolOutput {
+	llmContent: string;
+	images: ImageAttachment[];
+	/** Same failure flag as `StructuredToolOutput`. A throw still becomes `isError` in the catch path. */
+	isError?: boolean;
+}
+
+export type ToolExecuteResult =
+	| string
+	| StructuredToolOutput
+	| VisualToolOutput;
 
 export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
@@ -312,7 +324,7 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	headless: '⏵⏵ headless',
 };
 
-export type ConnectionStatus = 'connected' | 'failed' | 'pending';
+export type ConnectionStatus = 'connected' | 'failed' | 'pending' | 'unhealthy';
 
 export interface MCPConnectionStatus {
 	name: string;

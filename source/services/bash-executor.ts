@@ -18,6 +18,7 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {signalProcessTree} from '@/utils/process-tree';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -53,6 +54,7 @@ interface ExecutionEntry {
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
 	jailTmp?: string;
+	cleanupJailTmp?: () => void;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -108,10 +110,14 @@ export class BashExecutor extends EventEmitter {
 			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
 		};
 
+		let jailTmpCleaned = false;
 		const cleanupJailTmp = () => {
-			if (!jailTmp) return;
+			if (!jailTmp || jailTmpCleaned) return;
+			jailTmpCleaned = true;
 			try {
-				rmSync(jailTmp, {recursive: true, force: true});
+				if (existsSync(jailTmp)) {
+					rmSync(jailTmp, {recursive: true, force: true});
+				}
 			} catch {
 				// best-effort cleanup
 			}
@@ -168,7 +174,6 @@ export class BashExecutor extends EventEmitter {
 				} catch {
 					// best-effort cleanup
 				}
-				cleanupJailTmp();
 			}
 		};
 
@@ -222,6 +227,7 @@ export class BashExecutor extends EventEmitter {
 				signal: options?.signal,
 				cwdCaptureFile,
 				jailTmp,
+				cleanupJailTmp,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -260,6 +266,7 @@ export class BashExecutor extends EventEmitter {
 
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.exitCode = code;
@@ -280,6 +287,7 @@ export class BashExecutor extends EventEmitter {
 				flushStreams();
 
 				applyCapturedCwd();
+				cleanupJailTmp();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.error = error.message;
@@ -310,20 +318,13 @@ export class BashExecutor extends EventEmitter {
 		execution.process.stderr?.destroy();
 		execution.process.stdin?.destroy();
 
-		this.killProcessTree(execution.process);
+		this.killProcessTree(execution.process, execution.cleanupJailTmp);
 		// Drop the cwd temp file; a killed command must not move the session cwd.
 		if (execution.cwdCaptureFile) {
 			try {
 				if (existsSync(execution.cwdCaptureFile)) {
 					unlinkSync(execution.cwdCaptureFile);
 				}
-			} catch {
-				// best-effort cleanup
-			}
-		}
-		if (execution.jailTmp) {
-			try {
-				rmSync(execution.jailTmp, {recursive: true, force: true});
 			} catch {
 				// best-effort cleanup
 			}
@@ -344,28 +345,93 @@ export class BashExecutor extends EventEmitter {
 	 *
 	 * On Unix the child is spawned `detached`, so it leads its own process
 	 * group; signalling the negative PID reaches the whole group (the command
-	 * plus anything it spawned). Windows has no process groups here, so we fall
-	 * back to killing the single process.
+	 * plus anything it spawned). On Windows the child is `cmd.exe`, so
+	 * `taskkill /T` stops the program it started too.
+	 *
+	 * Sends SIGTERM first. If the process has not exited after a grace period
+	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
+	 * trapped or ignored.
 	 */
-	private killProcessTree(proc: ChildProcess): void {
+	private killProcessTree(proc: ChildProcess, onExit?: () => void): void {
 		const pid = proc.pid;
-		if (pid === undefined) return;
-
-		if (isWindows) {
-			proc.kill('SIGTERM');
+		if (pid === undefined) {
+			onExit?.();
 			return;
 		}
 
-		try {
-			process.kill(-pid, 'SIGTERM');
-		} catch {
-			// Group already gone (or never formed) - fall back to the lone process.
-			try {
-				proc.kill('SIGTERM');
-			} catch {
-				// Process already exited; nothing to terminate.
+		// On Unix, probe the process group rather than the leader. Every command
+		// runs under a wrapping `sh`, which can exit (on SIGTERM, or on its own
+		// after backgrounding a job) while descendants live on in the group. The
+		// PGID cannot be recycled while any member is alive, so a successful
+		// probe means the signal reaches our own processes.
+		const isAlive = (): boolean => {
+			if (isWindows) {
+				return proc.exitCode === null && proc.signalCode === null;
 			}
+			try {
+				process.kill(-pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		if (!isAlive()) {
+			onExit?.();
+			return;
 		}
+
+		// Initial SIGTERM
+		signalProcessTree(proc, 'SIGTERM');
+
+		let pollInterval: NodeJS.Timeout | null = null;
+		let sigkillTimer: NodeJS.Timeout | null = null;
+		let safetyTimer: NodeJS.Timeout | null = null;
+		let completed = false;
+
+		const finish = () => {
+			if (completed) return;
+			completed = true;
+			if (pollInterval) clearInterval(pollInterval);
+			if (sigkillTimer) clearTimeout(sigkillTimer);
+			if (safetyTimer) clearTimeout(safetyTimer);
+			onExit?.();
+		};
+
+		// Poll liveness every 50ms so cleanup triggers as soon as all processes
+		// in the process group have exited.
+		pollInterval = setInterval(() => {
+			if (!isAlive()) {
+				finish();
+			}
+		}, 50);
+		pollInterval.unref();
+
+		// SIGKILL fallback after 2 seconds for anything that trapped or ignored
+		// SIGTERM. Gate on liveness only, not proc.killed: Node sets proc.killed
+		// on any successful proc.kill() call, including the SIGTERM above.
+		sigkillTimer = setTimeout(() => {
+			if (isAlive()) {
+				signalProcessTree(proc, 'SIGKILL');
+			} else {
+				finish();
+			}
+		}, 2000);
+		sigkillTimer.unref();
+
+		// Safety backstop: ensure cleanup runs even if a stubborn process
+		// or zombie remains alive/unreaped after SIGKILL.
+		safetyTimer = setTimeout(() => {
+			finish();
+		}, 10000);
+		safetyTimer.unref();
+	}
+
+	/**
+	 * Get the temporary jail directory path for an active execution, if sandboxed.
+	 */
+	getJailTmp(executionId: string): string | undefined {
+		return this.executions.get(executionId)?.jailTmp;
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {

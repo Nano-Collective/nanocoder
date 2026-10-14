@@ -85,6 +85,7 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Review a branch or PR diff for bugs, security issues, and style violations',
 		progressLabel: 'Reviewing code',
+		echoInvocation: true,
 		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
 	{
@@ -264,5 +265,10 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
+	},
+	{
+		name: 'voice',
+		description: 'Toggle voice mode and configure voice settings',
+		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
 ];

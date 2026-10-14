@@ -205,6 +205,7 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
+  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start refuses to run in an untrusted directory; pass
@@ -274,6 +275,7 @@ Examples:
   nanocoder review main
   nanocoder review feature/auth
   nanocoder review 42
+  nanocoder worktree 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -292,6 +294,19 @@ async function main(): Promise<void> {
 	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
+	if (args[0] === 'worktree') {
+		const {createPrWorktree, parseWorktreePrNumber} = await import(
+			'./commands/gh-pr-worktree'
+		);
+		const prNumber = parseWorktreePrNumber(args.slice(1));
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			throw new Error(
+				'`nanocoder worktree` requires an interactive terminal (TTY).',
+			);
+		}
+		const worktreePath = await createPrWorktree(prNumber);
+		console.log(`Starting Nanocoder in ${worktreePath}`);
+	}
 
 	const vscodeMode = args.includes('--vscode');
 
@@ -577,7 +592,7 @@ async function main(): Promise<void> {
 	const trustDirectoryRequested = args.includes('--trust-directory');
 	if (trustDirectoryRequested && !isRunCommand) {
 		console.error(
-			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && isRunCommand;

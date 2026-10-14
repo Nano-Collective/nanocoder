@@ -3,6 +3,7 @@ import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -13,13 +14,14 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import type {TuneConfig} from '@/types/config';
-import type {UserPreferences} from '@/types/index';
+import type {TrustedDirectoryRecord, UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
+let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
 
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
@@ -36,6 +38,7 @@ function getPreferencesPath(): string {
 export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
+	cachedVoicePreference = undefined;
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -52,7 +55,9 @@ function isProjectPreferencesPath(preferencesPath: string): boolean {
 	);
 }
 
-function readGlobalTrustedDirectories(): string[] | undefined {
+function readGlobalTrustedDirectories():
+	| Array<string | TrustedDirectoryRecord>
+	| undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
@@ -66,7 +71,9 @@ function readGlobalTrustedDirectories(): string[] | undefined {
 	}
 }
 
-function writeGlobalTrustedDirectories(trustedDirectories: string[]): void {
+function writeGlobalTrustedDirectories(
+	trustedDirectories: Array<string | TrustedDirectoryRecord>,
+): void {
 	const globalPath = getGlobalPreferencesPath();
 	let data: UserPreferences = {};
 	if (existsSync(globalPath)) {
@@ -159,15 +166,26 @@ export function savePreferences(preferences: UserPreferences): void {
 	}
 
 	preferencesVersion++;
+	cachedVoicePreference = preferences.voice;
 	for (const listener of preferencesListeners) {
 		listener();
 	}
 }
 
+/** The path a trust entry names, or null for a hand-edited entry with none. */
+function trustPath(entry: unknown): string | null {
+	if (typeof entry === 'string') return entry;
+	if (entry && typeof entry === 'object') {
+		const entryPath = (entry as {path?: unknown}).path;
+		if (typeof entryPath === 'string') return entryPath;
+	}
+	return null;
+}
+
 /**
- * True if `directory` (or an equivalent absolute path) is recorded in
- * `preferences.trustedDirectories`. Shared by every trust-gated entry point
- * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
+ * True if `directory` is recorded with a fingerprint that still matches
+ * what the folder will run. Shared by every trust-gated entry point —
+ * the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
  * and the daemon boot path — so the resolution rule can't drift between them.
  */
 export function isDirectoryTrusted(
@@ -175,15 +193,74 @@ export function isDirectoryTrusted(
 	preferences: UserPreferences,
 ): boolean {
 	const resolved = path.resolve(directory); // nosemgrep
-	return (preferences.trustedDirectories ?? []).some(
-		dir => path.resolve(dir) === resolved, // nosemgrep
+	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	return (preferences.trustedDirectories ?? []).some(entry => {
+		const entryPath = trustPath(entry);
+		return (
+			typeof entry === 'object' &&
+			entryPath !== null &&
+			path.resolve(entryPath) === resolved && // nosemgrep
+			entry.fingerprint === fingerprint
+		);
+	});
+}
+
+/**
+ * Why a folder with a trust entry is asked again: its fingerprint changed,
+ * or the entry is a bare path saved before fingerprints existed.
+ */
+export type TrustRecheck = 'changed' | 'upgrade';
+
+/** Null when `directory` has no trust entry at all. */
+export function trustRecheck(
+	directory: string,
+	preferences: UserPreferences,
+): TrustRecheck | null {
+	const resolved = path.resolve(directory); // nosemgrep
+	let recheck: TrustRecheck | null = null;
+	for (const entry of preferences.trustedDirectories ?? []) {
+		const entryPath = trustPath(entry);
+		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
+		if (typeof entry !== 'string') return 'changed';
+		recheck = 'upgrade';
+	}
+	return recheck;
+}
+
+/** Shared wording for "Directory X ..." and "This folder ...". */
+export function untrustedReason(recheck: TrustRecheck | null | undefined) {
+	if (recheck === 'changed') return 'changed since you trusted it';
+	if (recheck === 'upgrade') return 'needs re-approval after the upgrade';
+	return 'is not trusted';
+}
+
+/**
+ * Record this folder, including a fingerprint of what it will run. The
+ * prompt passes the fingerprint it showed, so a file that lands while it
+ * is open is asked about on the next start instead of trusted unseen.
+ */
+export function grantDirectoryTrust(
+	preferences: UserPreferences,
+	directory: string,
+	fingerprint = describeProjectTrust(directory).fingerprint,
+): UserPreferences {
+	const resolved = path.resolve(directory); // nosemgrep
+	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
+		entry => {
+			const entryPath = trustPath(entry);
+			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
+		},
 	);
+	trustedDirectories.push({path: resolved, fingerprint});
+	return {...preferences, trustedDirectories};
 }
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
 	/** True if this call persisted a new trust entry (env-var bypass only). */
 	persisted: boolean;
+	/** Set when refusing a folder that has a trust entry. */
+	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
@@ -197,11 +274,11 @@ export interface DirectoryTrustDeps {
  *
  * `bypass` is the caller's own one-shot override (each entry point's own
  * `--trust-directory` flag); it never persists, matching the interactive
- * disclaimer's per-run nature. Absent that, a directory already recorded in
- * `trustedDirectories` (from a prior interactive run, or a previous
- * `NANOCODER_TRUST_DIRECTORY=1` run) is trusted as-is. A first-time
- * `NANOCODER_TRUST_DIRECTORY=1` run persists the directory so later runs
- * don't need the env var again.
+ * disclaimer's per-run nature. A directory is trusted only when its saved
+ * fingerprint still matches what the folder will run (see
+ * `describeProjectTrust`). A path with no fingerprint, or an old
+ * fingerprint, is not trusted, and `recheck` says which so the caller can
+ * word it. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(
 	directory: string,
@@ -216,15 +293,15 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const resolved = path.resolve(directory); // nosemgrep
-		deps.savePreferences({
-			...preferences,
-			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
-		});
+		deps.savePreferences(grantDirectoryTrust(preferences, directory));
 		return {trusted: true, persisted: true};
 	}
 
-	return {trusted: false, persisted: false};
+	return {
+		trusted: false,
+		persisted: false,
+		recheck: trustRecheck(directory, preferences),
+	};
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -555,5 +632,31 @@ export function getProfessionalTone(): boolean {
 export function updateProfessionalTone(value: boolean): void {
 	const preferences = loadPreferences();
 	preferences.professionalTone = value;
+	savePreferences(preferences);
+}
+
+/**
+ * Get the voice configuration from preferences
+ */
+export function getVoicePreference(): import('@/types/config').VoiceConfig {
+	if (cachedVoicePreference) return cachedVoicePreference;
+	const preferences = loadPreferences();
+	cachedVoicePreference = preferences.voice ?? {
+		enabled: false,
+		activationMode: 'push-to-talk',
+		sttBackend: 'local',
+		ttsBackend: 'local',
+	};
+	return cachedVoicePreference;
+}
+
+/**
+ * Save the voice configuration to preferences
+ */
+export function updateVoicePreference(
+	config: import('@/types/config').VoiceConfig,
+): void {
+	const preferences = loadPreferences();
+	preferences.voice = config;
 	savePreferences(preferences);
 }

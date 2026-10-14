@@ -1,5 +1,5 @@
 import test from 'ava';
-import {executeToolsDirectly} from './tool-executor.js';
+import {displayExecutedTool, executeToolsDirectly} from './tool-executor.js';
 import type {ToolCall, ToolResult} from '@/types/core';
 
 // ============================================================================
@@ -539,6 +539,56 @@ test('executeToolsDirectly - compact display calls onCompactToolCount instead of
 	t.deepEqual(compactCounts, ['tool1', 'tool1', 'tool2']);
 });
 
+// A command that ran but exited non-zero is the case issue #1371 reported: it
+// used to fold into the "Ran N commands" tally and look exactly like a clean
+// run. `isError` is the only thing that separates the two, since the content is
+// the command's own output with no "Error: " prefix to sniff for.
+const bashExecution = (isError?: boolean) => ({
+	toolCall: {
+		id: 'call_bash',
+		function: {name: 'execute_bash', arguments: '{"command":"exit 1"}'},
+	} as ToolCall,
+	result: {
+		tool_call_id: 'call_bash',
+		role: 'tool' as const,
+		name: 'execute_bash',
+		content: 'EXIT_CODE: 1\nSTDERR:\nbuild failed\nSTDOUT:\n',
+		...(isError === undefined ? {} : {isError}),
+	} as ToolResult,
+});
+
+test('displayExecutedTool - a non-zero exit is not folded into the compact tally', async t => {
+	const counts: string[] = [];
+	const queue: unknown[] = [];
+
+	await displayExecutedTool(
+		bashExecution(true),
+		null,
+		c => queue.push(c),
+		createMockConversationStateManager() as any,
+		{compactDisplay: true, onCompactToolCount: n => counts.push(n)},
+	);
+
+	t.deepEqual(counts, [], 'a failed command must not count as a clean run');
+	t.is(queue.length, 1, 'it renders its own failure one-liner instead');
+});
+
+test('displayExecutedTool - a clean run still folds into the compact tally', async t => {
+	const counts: string[] = [];
+	const queue: unknown[] = [];
+
+	await displayExecutedTool(
+		bashExecution(undefined),
+		null,
+		c => queue.push(c),
+		createMockConversationStateManager() as any,
+		{compactDisplay: true, onCompactToolCount: n => counts.push(n)},
+	);
+
+	t.deepEqual(counts, ['execute_bash']);
+	t.is(queue.length, 0);
+});
+
 test('executeToolsDirectly - non-interactive compact mode pushes one-liner per tool and skips onCompactToolCount', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
@@ -1036,3 +1086,126 @@ test('executeToolsDirectly - compact mode renders errors instead of counting the
 test('executeToolsDirectly passes privacy options to rehydrate tools', async t => {
 t.pass(); // Add proper structural verification if stream testing is hard
 });
+
+test.serial(
+	'executeToolsDirectly - threads AbortSignal into read-only tool batches during rapid repeated cancellation',
+	async t => {
+		const receivedSignals: (AbortSignal | undefined)[] = [];
+
+		setToolRegistryGetter(() => ({
+			read_tool_1: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
+				receivedSignals.push(options?.abortSignal);
+				if (options?.abortSignal?.aborted) {
+					throw new Error('Aborted mid-flight');
+				}
+				return 'content 1';
+			}) as any,
+			read_tool_2: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
+				receivedSignals.push(options?.abortSignal);
+				if (options?.abortSignal?.aborted) {
+					throw new Error('Aborted mid-flight');
+				}
+				return 'content 2';
+			}) as any,
+		}));
+
+		const toolManager = createMockToolManager({
+			readOnlyTools: ['read_tool_1', 'read_tool_2'],
+		});
+
+		const toolCalls: ToolCall[] = [
+			{id: 'r1', function: {name: 'read_tool_1', arguments: '{}'}},
+			{id: 'r2', function: {name: 'read_tool_2', arguments: '{}'}},
+		];
+
+		// Rapid repeated cancellation loop (simulating repeated barge-in stress pattern)
+		for (let i = 0; i < 5; i++) {
+			const controller = new AbortController();
+			controller.abort(); // Cancel before execution starts or mid-flight
+
+			const results = await executeToolsDirectly(
+				toolCalls,
+				toolManager,
+				createMockConversationStateManager() as any,
+				() => {},
+				{compactDisplay: true, signal: controller.signal},
+			);
+
+			t.is(results.length, 2);
+			t.true(results[0].content.includes('Aborted mid-flight'));
+			t.true(results[1].content.includes('Aborted mid-flight'));
+		}
+
+		t.is(receivedSignals.length, 10);
+		for (const sig of receivedSignals) {
+			t.truthy(sig, 'AbortSignal must be threaded into read-only tool handler');
+		}
+
+		// Restore default mock tool handler registry
+		setToolRegistryGetter(createMockToolRegistry);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - in-flight cancellation aborts actively executing read-only tools',
+	async t => {
+		let toolStarted = false;
+		let toolAborted = false;
+
+		setToolRegistryGetter(() => ({
+			slow_read_tool: (async (_args: any, options?: {abortSignal?: AbortSignal}) => {
+				toolStarted = true;
+				return new Promise((resolve, reject) => {
+					if (options?.abortSignal?.aborted) {
+						toolAborted = true;
+						return reject(new Error('Aborted mid-flight'));
+					}
+					const onAbort = () => {
+						toolAborted = true;
+						reject(new Error('Aborted mid-flight'));
+					};
+					options?.abortSignal?.addEventListener('abort', onAbort);
+					setTimeout(() => {
+						resolve('slow read content');
+					}, 200);
+				});
+			}) as any,
+		}));
+
+		const toolManager = createMockToolManager({
+			readOnlyTools: ['slow_read_tool'],
+		});
+
+		const toolCalls: ToolCall[] = [
+			{id: 'sr1', function: {name: 'slow_read_tool', arguments: '{}'}},
+		];
+
+		const controller = new AbortController();
+
+		// Start executing the slow read tool
+		const executePromise = executeToolsDirectly(
+			toolCalls,
+			toolManager,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true, signal: controller.signal},
+		);
+
+		// Poll until the handler has started (dynamic import overhead varies)
+		for (let tick = 0; tick < 20 && !toolStarted; tick++) {
+			await new Promise(r => setTimeout(r, 20));
+		}
+		t.true(toolStarted, 'Tool should have already started executing');
+		t.false(toolAborted, 'Tool should not be aborted before signal fires');
+
+		// Trigger in-flight cancellation mid-execution
+		controller.abort();
+
+		const results = await executePromise;
+		t.true(toolAborted, 'Tool should have caught abort event mid-flight');
+		t.is(results.length, 1);
+		t.true(results[0].content.includes('Aborted mid-flight'));
+
+		setToolRegistryGetter(createMockToolRegistry);
+	},
+);

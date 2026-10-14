@@ -29,13 +29,8 @@ function fishEscape(text: string): string {
 	return text.replace(/\\/g, `\\\\`).replace(/'/g, `\\'`);
 }
 
-function flagsWithValues(): Array<{
-	name: string;
-	values: readonly string[];
-}> {
-	return COMPLETION_FLAGS.flatMap(f =>
-		f.values ? [{name: f.name, values: f.values}] : [],
-	);
+function flagsTakingValues(): CompletionFlag[] {
+	return COMPLETION_FLAGS.filter(f => f.takesValue);
 }
 
 function subcommandsWithChildren(): Array<{
@@ -48,11 +43,14 @@ function subcommandsWithChildren(): Array<{
 }
 
 function bashValueCases(): string {
-	return flagsWithValues()
-		.map(
-			f =>
-				`\t\t--${f.name})\n\t\t\tCOMPREPLY=( $(compgen -W "${f.values.join(' ')}" -- "$cur") )\n\t\t\treturn\n\t\t\t;;`,
-		)
+	return flagsTakingValues()
+		.map(f => {
+			const patterns = [`--${f.name}`, ...(f.short ? [`-${f.short}`] : [])];
+			const reply = f.values?.length
+				? `COMPREPLY=( $(compgen -W "${f.values.join(' ')}" -- "$cur") )`
+				: 'COMPREPLY=()';
+			return `\t\t${patterns.join('|')})\n\t\t\t${reply}\n\t\t\treturn\n\t\t\t;;`;
+		})
 		.join('\n');
 }
 

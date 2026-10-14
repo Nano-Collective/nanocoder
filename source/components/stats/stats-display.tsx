@@ -100,17 +100,20 @@ export function StatsDisplay({
 				return;
 			}
 			// Match Settings tabs: left/right only (no letter shortcut).
-			if (key.leftArrow) {
-				const idx = STATS_RANGES.indexOf(range);
-				const prev =
-					STATS_RANGES[(idx - 1 + STATS_RANGES.length) % STATS_RANGES.length];
-				if (prev) setRange(prev);
-				return;
-			}
-			if (key.rightArrow) {
-				const idx = STATS_RANGES.indexOf(range);
-				const next = STATS_RANGES[(idx + 1) % STATS_RANGES.length];
-				if (next) setRange(next);
+			// Step from the range React holds, not the one this closure captured:
+			// Ink re-registers the handler in a passive effect that runs after the
+			// frame is painted, so a press arriving right after a range change is
+			// still dispatched here with the previous render's value.
+			if (key.leftArrow || key.rightArrow) {
+				const delta = key.rightArrow ? 1 : -1;
+				setRange(prev => {
+					const idx = STATS_RANGES.indexOf(prev);
+					return (
+						STATS_RANGES[
+							(idx + delta + STATS_RANGES.length) % STATS_RANGES.length
+						] ?? prev
+					);
+				});
 			}
 		},
 		{isActive: interactive},

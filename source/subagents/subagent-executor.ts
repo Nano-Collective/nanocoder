@@ -15,6 +15,9 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {consultPluginPermission} from '@/plugins/host';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -47,6 +50,10 @@ import type {
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
@@ -264,15 +271,19 @@ export class SubagentExecutor {
 			};
 
 			try {
-				const output = await this.runSubagentConversation(
-					client,
-					messages,
-					filteredTools,
-					config,
-					signal,
-					agentId,
-					executionContext,
-					recordUsage,
+				const output = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.runSubagentConversation(
+							client,
+							messages,
+							filteredTools,
+							config,
+							signal,
+							agentId,
+							executionContext,
+							recordUsage,
+						),
 				);
 
 				// Read the final estimated progress count. Provider-reported usage is
@@ -292,6 +303,7 @@ export class SubagentExecutor {
 				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
+					clearReadContentScope(agentId);
 				}
 				restoreParent();
 			}
@@ -753,21 +765,26 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				const toolResult = await this.executeToolCall(
-					toolName,
-					toolCall.function.arguments,
-					toolCall.id,
-					config,
-					signal,
-					executionContext,
+				const toolResult = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.executeToolCall(
+							toolName,
+							toolCall.function.arguments,
+							toolCall.id,
+							config,
+							signal,
+							executionContext,
+						),
 				);
 
 				// Count tokens from tool results
-				totalTokens += estimateTokens(toolResult);
+				totalTokens += estimateTokens(toolResult.content);
 
 				messages.push({
 					role: 'tool',
-					content: toolResult,
+					content: toolResult.content,
+					...(toolResult.images ? {images: toolResult.images} : {}),
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
@@ -809,9 +826,9 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
-	): Promise<string> {
+	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
-			return 'Error: Execution was cancelled';
+			return {content: 'Error: Execution was cancelled'};
 		}
 
 		// Enforce the allow-list at the execution boundary, not just when
@@ -822,15 +839,16 @@ export class SubagentExecutor {
 		// files, and let any subagent overwrite the parent session's plan, task
 		// list, or walkthrough (subagents run with the parent's session id).
 		if (!this.getAvailableToolNames(config).includes(toolName)) {
-			return (
-				`Error: Tool '${toolName}' is not available to this subagent. ` +
-				'Use only the tools listed in your instructions.'
-			);
+			return {
+				content:
+					`Error: Tool '${toolName}' is not available to this subagent. ` +
+					'Use only the tools listed in your instructions.',
+			};
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
-			return `Error: Tool '${toolName}' not found`;
+			return {content: `Error: Tool '${toolName}' not found`};
 		}
 
 		// One ToolCall object for this call, shared by the approval prompt and
@@ -853,7 +871,7 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return `Error: ${gate.reason}`;
+			return {content: `Error: ${gate.reason}`};
 		}
 
 		// Check if this tool needs user approval
@@ -862,6 +880,11 @@ export class SubagentExecutor {
 			rawArguments,
 		);
 		if (needsApproval) {
+			const vote = await consultPluginPermission(toolName, parsedArgs);
+			if (vote.decision === 'deny') {
+				return {content: `Error: ${vote.reason}`};
+			}
+
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
 			// them and joins with `Promise.allSettled`, so one subagent parked
@@ -876,7 +899,7 @@ export class SubagentExecutor {
 			);
 
 			if (!approved) {
-				return 'Tool execution was denied by the user.';
+				return {content: 'Tool execution was denied by the user.'};
 			}
 		}
 
@@ -891,22 +914,47 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
+			const images =
+				typeof result === 'object' &&
+				result !== null &&
+				'images' in result &&
+				Array.isArray(result.images)
+					? result.images
+					: undefined;
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const failed =
+				typeof result !== 'string' && 'isError' in result && result.isError;
+			const formatted = failed
+				? truncated
+				: await formatWrittenFile(toolName, parsedArgs, truncated);
+			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
-				truncateToolResult(content),
+				formatted,
 			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return {
+				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+				...(images && images.length > 0 ? {images} : {}),
+			};
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return appendPostToolUseOutput(
-				toolName,
-				parsedArgs,
-				truncateToolResult(toolErrorToContent(error)),
-			);
+			return {
+				content: await appendPostToolUseOutput(
+					toolName,
+					parsedArgs,
+					truncateToolResult(toolErrorToContent(error)),
+				),
+			};
 		}
 	}
 }

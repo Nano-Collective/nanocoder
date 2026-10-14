@@ -1,4 +1,4 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -8,7 +8,11 @@ import {
 	getAppConfig,
 	reloadAppConfig,
 } from '@/config/index.js';
-import {setProjectRoot} from '@/services/session-cwd.js';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host.js';
+import {resetSessionCwd, setProjectRoot, setSessionCwd} from '@/services/session-cwd.js';
+import {setToolRegistryGetter} from '@/message-handler.js';
+import {fileOpTool} from '@/tools/file-ops/file-op.js';
+import {ToolRegistry} from '@/tools/tool-registry.js';
 import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
@@ -114,6 +118,67 @@ const createMockToolManager = (config: {
 	},
 	isReadOnly: () => false,
 });
+
+for (const scenario of [
+	{label: 'denied', approved: false, mode: 'auto-accept', nonInteractive: false, expected: 'first file', prompts: 1},
+	{label: 'approved', approved: true, mode: 'auto-accept', nonInteractive: false, expected: 'second file', prompts: 1},
+	{label: 'non-interactive', approved: false, mode: 'auto-accept', nonInteractive: true, expected: 'first file', prompts: 0},
+	{label: 'yolo', approved: false, mode: 'yolo', nonInteractive: false, expected: 'second file', prompts: 0},
+	{label: 'headless', approved: false, mode: 'headless', nonInteractive: false, expected: 'second file', prompts: 0},
+	{label: 'architect', approved: false, mode: 'architect', nonInteractive: false, expected: 'second file', prompts: 0},
+	{label: 'alwaysAllow', approved: false, mode: 'auto-accept', nonInteractive: false, expected: 'second file', prompts: 0},
+] as const) {
+	test.serial(`batched file_op overwrite is ${scenario.label} at execution time`, async t => {
+		const cwd = mkdtempSync(join(tmpdir(), 'file-op-batch-'));
+		const configDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = cwd;
+		writeFileSync(join(cwd, 'agents.config.json'), JSON.stringify({nanocoder: {
+			alwaysAllow: scenario.label === 'alwaysAllow' ? ['file_op'] : [],
+		}}));
+		setProjectRoot(cwd);
+		setSessionCwd(cwd);
+		reloadAppConfig();
+		writeFileSync(join(cwd, 'first.txt'), 'first file');
+		writeFileSync(join(cwd, 'second.txt'), 'second file');
+		const registry = ToolRegistry.fromToolExports([fileOpTool]);
+		setToolRegistryGetter(() => registry.getHandlers());
+		let prompts = 0;
+		setGlobalToolConfirmHandler(async () => {
+			prompts++;
+			return scenario.approved;
+		});
+		let calls = 0;
+		const client = {chat: async () => {
+			calls++;
+			return {choices: [{message: calls === 1 ? {
+				role: 'assistant', content: '', tool_calls: ['first.txt', 'second.txt'].map((path, index) => ({
+					id: `copy-${index}`, function: {name: 'file_op', arguments: JSON.stringify({operation: 'copy', path, destination: 'target.txt'})},
+				})),
+			} : {role: 'assistant', content: 'done'}}]};
+		}};
+		try {
+			await processAssistantResponse(createDefaultParams({
+				client,
+				toolManager: {
+					...createMockToolManager({tools: ['file_op']}),
+					getToolEntry: (name: string) => registry.getEntry(name),
+					getToolFormatter: () => undefined,
+				},
+				developmentMode: scenario.mode,
+				nonInteractiveMode: scenario.nonInteractive,
+			}) as never);
+			t.is(prompts, scenario.prompts);
+			t.is(readFileSync(join(cwd, 'target.txt'), 'utf8'), scenario.expected);
+		} finally {
+			if (configDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+			else process.env.NANOCODER_CONFIG_DIR = configDir;
+			clearAppConfig();
+			setGlobalToolConfirmHandler(async () => true);
+			resetSessionCwd();
+			rmSync(cwd, {recursive: true, force: true});
+		}
+	});
+}
 
 // Mock parseToolCalls function - imported from tool-parsing
 const mockParseToolCalls = (result: {
@@ -272,6 +337,125 @@ test.serial('processAssistantResponse - marks the non-interactive approval notic
 	t.regex(notice.content, /Tool approval required for: some_tool/);
 	t.true(notice.displayOnly, 'the approval notice must never reach the model');
 });
+
+const PERMISSION_PLUGIN = `export default {
+	apiVersion: 1,
+	name: 'guard',
+	hooks: {
+		'permission.asked': ({toolArgs}) =>
+			String(toolArgs.command).includes('--force')
+				? {decision: 'deny', reason: 'no force push'}
+				: {decision: 'defer'},
+	},
+};
+`;
+
+async function withPermissionPlugin(
+	run: () => Promise<void>,
+): Promise<void> {
+	const root = join(tmpdir(), `nanocoder-loop-plugins-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	writeFileSync(
+		join(root, '.nanocoder', 'plugins', 'guard.mjs'),
+		PERMISSION_PLUGIN,
+		'utf-8',
+	);
+	setProjectRoot(root);
+	resetPluginsForTests();
+	await loadPlugins(true);
+	try {
+		await run();
+	} finally {
+		resetPluginsForTests();
+		resetSessionCwd();
+	}
+}
+
+test.serial(
+	'processAssistantResponse - a plugin deny refuses the tool before the approval prompt',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return true;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_force',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git push --force'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.false(asked);
+		t.true(shown.includes('no force push'));
+	},
+);
+
+test.serial(
+	'processAssistantResponse - a plugin defer still asks for approval',
+	async t => {
+		let asked = false;
+		const restore = setGlobalToolConfirmHandler(async () => {
+			asked = true;
+			return false;
+		});
+		const shown: string[] = [];
+		try {
+			await withPermissionPlugin(async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: createMockClient({
+							toolCalls: [
+								{
+									id: 'call_status',
+									function: {
+										name: 'execute_bash',
+										arguments: {command: 'git status'},
+									},
+								},
+							],
+						}),
+						toolManager: createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						addToChatQueue: (node: {props?: {message?: string}}) => {
+							if (node?.props?.message) shown.push(node.props.message);
+						},
+					}),
+				);
+			});
+		} finally {
+			restore();
+		}
+
+		t.true(asked);
+		t.false(shown.includes('no force push'));
+	},
+);
 
 // ============================================================================
 // Auto-Nudge Tests (lines 469-506)

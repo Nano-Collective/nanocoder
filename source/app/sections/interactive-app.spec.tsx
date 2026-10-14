@@ -1044,6 +1044,49 @@ test('plan review bar tolerates an invalid external session ID', t => {
 	t.notRegex(lastFrame()!, /implementation_plan\.md/);
 });
 
+// ============================================================================
+// Architect review bar
+// ============================================================================
+
+// Regression (#1532): PlanReviewPrompt, FileExplorer, IdeSelector and
+// ModalSelectors are each wrapped in a Box that shifts them to share the
+// composer's left edge across both fullscreen and inline layouts.
+// ArchitectReviewPrompt was missing that wrapper, so its accent border stayed
+// put regardless of fullscreen instead of moving with its siblings.
+test('architect review bar shares the same left-edge wrapper as its sibling modals', t => {
+	const indentOf = (frame: string) => {
+		const line = stripAnsi(frame)
+			.split('\n')
+			.find(l => l.includes('Architect turn complete.'));
+		if (!line) throw new Error('architect review bar line not found');
+		return line.length - line.trimStart().length;
+	};
+
+	const architectReviewState = {
+		show: true,
+		checkpointName: 'architect-checkpoint',
+		filesChanged: ['source/a.ts'],
+		filesMissing: [],
+	};
+
+	const fullscreenFrame = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({architectReviewState, altScreenActive: true})}
+		/>,
+	).lastFrame()!;
+
+	const inlineFrame = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({architectReviewState, altScreenActive: false})}
+		/>,
+	).lastFrame()!;
+
+	// The shared wrapper moves the bar 3 columns right in fullscreen
+	// (paddingLeft 2, marginLeft 0) versus inline (paddingLeft 0, marginLeft
+	// -1) — the same offset every other footer modal already uses.
+	t.is(indentOf(fullscreenFrame) - indentOf(inlineFrame), 3);
+});
+
 test('plan review bar shows when the planTurnCompleted signal fires', async t => {
 	let shown: {show: boolean; originalMessage: string} | null = null;
 	let resetToFalse = false;

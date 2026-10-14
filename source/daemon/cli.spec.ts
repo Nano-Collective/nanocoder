@@ -5,10 +5,12 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	isDirectoryTrusted,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
+import {describeProjectTrust} from '@/config/project-trust';
 import {runDaemonCli} from './cli';
 import {getLockfilePath, writeLockfile} from './lockfile';
 
@@ -224,7 +226,14 @@ test.serial(
 		const root = await tempProject();
 		try {
 			await withIsolatedPreferences(async () => {
-				savePreferences({trustedDirectories: [root]});
+				savePreferences({
+					trustedDirectories: [
+						{
+							path: root,
+							fingerprint: describeProjectTrust(root).fingerprint,
+						},
+					],
+				});
 				let launched = false;
 				const result = await runDaemonCli('start', {
 					projectRoot: root,
@@ -261,7 +270,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.false(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					isDirectoryTrusted(root, loadPreferences()),
 					'--trust-directory is a one-shot bypass and must not persist',
 				);
 			});
@@ -289,7 +298,7 @@ test.serial(
 				t.true(launched);
 				t.is(result.exitCode, 0);
 				t.true(
-					(loadPreferences().trustedDirectories ?? []).includes(root),
+					isDirectoryTrusted(root, loadPreferences()),
 				);
 			});
 		} finally {

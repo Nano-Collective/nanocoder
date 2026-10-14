@@ -49,6 +49,8 @@ export interface AIProviderConfig {
 		apiKey?: string;
 		caCertPath?: string;
 		headers?: Record<string, string>;
+		// Request streaming usage from OpenAI-compatible providers (defaults to true)
+		includeUsage?: boolean;
 		[key: string]: unknown;
 	};
 }
@@ -88,6 +90,8 @@ export interface ProviderConfig {
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
 	headers?: Record<string, string>;
+	// Whether to request streaming usage from OpenAI-compatible endpoints (defaults to true)
+	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
 	// OpenRouter-specific request body fields. Only applied when the provider
@@ -241,6 +245,32 @@ export interface HookDefinition {
 /** Lifecycle hooks keyed by event. Every event is optional. */
 export type HooksConfig = Partial<Record<HookEvent, HookDefinition[]>>;
 
+/**
+ * A code formatter run on every file the agent writes whose path matches
+ * `match`, after the edit succeeds and before the `post-tool-use` hooks.
+ */
+export interface FormatterConfig {
+	/**
+	 * Globs the written file must match, relative to the project root. Same
+	 * dialect as `matchPaths` on hooks — e.g. `["**\/*.{ts,tsx}"]`.
+	 */
+	match: string | string[];
+	/**
+	 * Shell command to run from the project root. The written file's absolute
+	 * path is in `$FILE` (also `$NANOCODER_FILE`) — quote it: `"$FILE"`.
+	 */
+	command: string;
+	/** Milliseconds before the formatter is killed. Defaults to 30s. */
+	timeout?: number;
+	/** Optional label used in messages instead of the command. */
+	name?: string;
+}
+
+/** Runtime form: single globs from disk are normalized to arrays. */
+export interface FormatterDefinition extends Omit<FormatterConfig, 'match'> {
+	match: string[];
+}
+
 // Note: temperature is intentionally excluded from this interface.
 // It cannot be applied during a mode switch without proper integration into
 // the tune/ModelParameters pipeline (tune.ts). Tracked as a follow-up.
@@ -321,6 +351,11 @@ export interface DiskNanocoderConfig {
 	 * `mcpServers` above.
 	 */
 	hooks?: HooksConfig;
+	/**
+	 * Code formatters run on files the agent writes (write_file,
+	 * string_replace, diff_edit), before the `post-tool-use` hooks fire.
+	 */
+	formatters?: FormatterConfig[];
 	/** Nanocoder-specific tool configurations. */
 	nanocoderTools?: {
 		webSearch?: {
@@ -336,6 +371,8 @@ export interface DiskNanocoderConfig {
 	retries?: Partial<RetryLimitsConfig>;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
+	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
+	autoCommit?: boolean;
 }
 
 /**
@@ -391,6 +428,10 @@ export interface AppConfig {
 	// `mcpServers`, gated by the same directory-trust prompt.
 	hooks?: HooksConfig;
 
+	// Formatters run on files the agent writes, before post-tool-use hooks.
+	// Same code-execution weight and trust gating as `hooks`.
+	formatters?: FormatterDefinition[];
+
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
 		webSearch?: {
@@ -439,6 +480,9 @@ export interface AppConfig {
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
 	sandbox?: boolean;
 
+	// Commit each successful agent file edit, one commit per edited file.
+	autoCommit?: boolean;
+
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
 }
@@ -453,6 +497,8 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/** Period between MCP ping health checks, in milliseconds. */
+	healthCheckInterval?: number;
 	alwaysAllow?: string[];
 	description?: string;
 	tags?: string[];
@@ -623,6 +669,19 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+export interface VoiceConfig {
+	enabled: boolean;
+	activationMode: 'push-to-talk' | 'hands-free';
+	voiceName?: string;
+	sttBackend: 'local' | 'cloud';
+	ttsBackend: 'local' | 'cloud';
+}
+
+export interface TrustedDirectoryRecord {
+	path: string;
+	fingerprint: string;
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -637,7 +696,12 @@ export interface UserPreferences {
 	 * palette of its own. An unknown name falls back to `selectedTheme`.
 	 */
 	syntaxTheme?: ThemePreset;
-	trustedDirectories?: string[];
+	/**
+	 * Directories the user has trusted. A string is an older entry that
+	 * recorded only the path. A record also stores the fingerprint of what
+	 * that folder will run (see `describeProjectTrust`).
+	 */
+	trustedDirectories?: Array<string | TrustedDirectoryRecord>;
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
@@ -702,4 +766,5 @@ export interface UserPreferences {
 	 * model to be terse — no filler, no preamble, no celebratory wrap-ups.
 	 */
 	professionalTone?: boolean;
+	voice?: VoiceConfig;
 }
