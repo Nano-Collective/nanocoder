@@ -355,6 +355,24 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			apiKey: 'private-key',
 		},
 	];
+	const environmentProviders = [
+		{
+			name: 'Ollama',
+			models: ['env-model'],
+			baseUrl: 'http://localhost:11435/v1',
+			apiKey: '${OLLAMA_ENV_API_KEY}',
+		},
+		{name: 'EnvironmentProvider', models: ['private-env-model']},
+	];
+	const fileEnvironmentProviders = [
+		{
+			name: 'Ollama',
+			models: ['file-env-model'],
+			baseUrl: 'http://localhost:11436/v1',
+			apiKey: '${OLLAMA_FILE_API_KEY}',
+		},
+		{name: 'PrivateFileProvider', models: ['private-file-model']},
+	];
 	const userConfig = {
 		nanocoder: {
 			providers,
@@ -369,6 +387,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		sourceConfigDir,
 		'nanocoder-preferences.json',
 	);
+	const providersFilePath = path.join(sourceConfigDir, 'private-providers.json');
 	const preferencesContents = JSON.stringify({
 		lastProvider: 'PrivateProvider',
 		lastModel: 'private-model',
@@ -378,19 +397,27 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		userConfigContents,
 	);
 	await fs.writeFile(preferencesPath, preferencesContents);
+	await fs.writeFile(
+		providersFilePath,
+		JSON.stringify(fileEnvironmentProviders),
+	);
 
 	const capturePath = path.join(tempRoot, 'captured-run-config.json');
+	const fileCapturePath = path.join(
+		tempRoot,
+		'captured-run-config-from-file.json',
+	);
 	const previousEnvironment = {
 		configDir: process.env.NANOCODER_CONFIG_DIR,
 		providers: process.env.NANOCODER_PROVIDERS,
+		providersFile: process.env.NANOCODER_PROVIDERS_FILE,
 		mcpServers: process.env.NANOCODER_MCPSERVERS,
 		mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE,
 		capturePath: process.env.AGENT_EVAL_CAPTURE_PATH,
 	};
 	process.env.NANOCODER_CONFIG_DIR = sourceConfigDir;
-	process.env.NANOCODER_PROVIDERS = JSON.stringify([
-		{name: 'EnvironmentProvider', models: ['env-model']},
-	]);
+	process.env.NANOCODER_PROVIDERS = JSON.stringify(environmentProviders);
+	process.env.NANOCODER_PROVIDERS_FILE = providersFilePath;
 	process.env.NANOCODER_MCPSERVERS = '[{"name":"private-env-server"}]';
 	process.env.NANOCODER_MCPSERVERS_FILE = path.join(
 		sourceConfigDir,
@@ -410,6 +437,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 				config: JSON.parse(readFileSync(configPath, 'utf8')),
 				preferencesExisted: existsSync(preferencesPath),
 				providersEnv: process.env.NANOCODER_PROVIDERS ?? null,
+				providersFile: process.env.NANOCODER_PROVIDERS_FILE ?? null,
 				mcpServers: process.env.NANOCODER_MCPSERVERS ?? null,
 				mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE ?? null,
 			};
@@ -430,16 +458,17 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			config: unknown;
 			preferencesExisted: boolean;
 			providersEnv: string | null;
+			providersFile: string | null;
 			mcpServers: string | null;
 			mcpServersFile: string | null;
 		};
 		t.not(captured.configDir, sourceConfigDir);
-		t.deepEqual(captured.config, {nanocoder: {providers: [providers[0]]}});
+		t.deepEqual(captured.config, {
+			nanocoder: {providers: [environmentProviders[0]]},
+		});
 		t.false(captured.preferencesExisted);
-		t.is(
-			captured.providersEnv,
-			JSON.stringify([{name: 'EnvironmentProvider', models: ['env-model']}]),
-		);
+		t.is(captured.providersEnv, null);
+		t.is(captured.providersFile, null);
 		t.is(captured.mcpServers, null);
 		t.is(captured.mcpServersFile, null);
 		t.is(
@@ -448,6 +477,29 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		);
 		t.is(await fs.readFile(preferencesPath, 'utf8'), preferencesContents);
 		await t.throwsAsync(() => fs.stat(captured.configDir), {code: 'ENOENT'});
+
+		delete process.env.NANOCODER_PROVIDERS;
+		process.env.AGENT_EVAL_CAPTURE_PATH = fileCapturePath;
+		const fileRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+		t.true(fileRun.pass);
+		const capturedFromFile = JSON.parse(
+			await fs.readFile(fileCapturePath, 'utf8'),
+		) as typeof captured;
+		t.deepEqual(capturedFromFile.config, {
+			nanocoder: {providers: [fileEnvironmentProviders[0]]},
+		});
+		t.is(capturedFromFile.providersEnv, null);
+		t.is(capturedFromFile.providersFile, null);
+		t.is(capturedFromFile.mcpServers, null);
+		t.is(capturedFromFile.mcpServersFile, null);
+		await t.throwsAsync(() => fs.stat(capturedFromFile.configDir), {
+			code: 'ENOENT',
+		});
 	} finally {
 		if (previousEnvironment.configDir === undefined) {
 			delete process.env.NANOCODER_CONFIG_DIR;
@@ -458,6 +510,12 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			delete process.env.NANOCODER_PROVIDERS;
 		} else {
 			process.env.NANOCODER_PROVIDERS = previousEnvironment.providers;
+		}
+		if (previousEnvironment.providersFile === undefined) {
+			delete process.env.NANOCODER_PROVIDERS_FILE;
+		} else {
+			process.env.NANOCODER_PROVIDERS_FILE =
+				previousEnvironment.providersFile;
 		}
 		if (previousEnvironment.mcpServers === undefined) {
 			delete process.env.NANOCODER_MCPSERVERS;

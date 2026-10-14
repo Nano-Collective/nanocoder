@@ -122,6 +122,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function getProviderList(config: unknown): unknown[] | undefined {
+	if (Array.isArray(config)) return config;
+	if (!isRecord(config)) return undefined;
+
+	const nested = isRecord(config.nanocoder)
+		? config.nanocoder.providers
+		: undefined;
+	if (Array.isArray(nested)) return nested;
+	return Array.isArray(config.providers) ? config.providers : undefined;
+}
+
+async function readEnvironmentProviders(): Promise<unknown[]> {
+	let source = process.env.NANOCODER_PROVIDERS;
+	if (!source && process.env.NANOCODER_PROVIDERS_FILE) {
+		try {
+			source = await fs.readFile(
+				path.resolve(process.env.NANOCODER_PROVIDERS_FILE),
+				'utf8',
+			);
+		} catch {
+			return [];
+		}
+	}
+	if (!source) return [];
+
+	try {
+		return getProviderList(JSON.parse(source)) ?? [];
+	} catch {
+		return [];
+	}
+}
+
 /**
  * Copy just the provider block into the per-run config directory. The CLI
  * needs provider details to construct its client, but benchmark runs must not
@@ -144,15 +176,23 @@ async function copyProviderConfig(
 	const parsed: unknown = JSON.parse(source);
 	if (!isRecord(parsed)) return;
 
-	const nested = isRecord(parsed.nanocoder)
-		? parsed.nanocoder.providers
-		: undefined;
-	const providers = Array.isArray(nested)
-		? nested
-		: Array.isArray(parsed.providers)
-			? parsed.providers
-			: undefined;
-	if (!providers?.length) return;
+	const configuredProviders = getProviderList(parsed) ?? [];
+	const providersByName = new Map<string, unknown>();
+	for (const provider of configuredProviders) {
+		if (isRecord(provider) && typeof provider.name === 'string') {
+			providersByName.set(provider.name, provider);
+		}
+	}
+	// Provider environment config overrides file config in Nanocoder. Fold it
+	// into the isolated file so the original config variables and file path do
+	// not escape into the benchmark child process.
+	for (const provider of await readEnvironmentProviders()) {
+		if (isRecord(provider) && typeof provider.name === 'string') {
+			providersByName.set(provider.name, provider);
+		}
+	}
+	const providers = Array.from(providersByName.values());
+	if (!providers.length) return;
 	const providersForRun = requestedProvider
 		? providers.filter(
 				provider =>
@@ -442,9 +482,11 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 			FORCE_COLOR: '0',
 		};
 		// MCP server environment variables are user configuration too; only
-		// provider environment overrides are needed to run the selected model.
+		// provider settings were copied into this run's config above.
 		delete env.NANOCODER_MCPSERVERS;
 		delete env.NANOCODER_MCPSERVERS_FILE;
+		delete env.NANOCODER_PROVIDERS;
+		delete env.NANOCODER_PROVIDERS_FILE;
 		try {
 			const result = await execFileAsync('node', args, {
 				cwd: workspace,

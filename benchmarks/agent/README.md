@@ -62,12 +62,14 @@ Runs happen in a throwaway copy of the tree, so a task can edit freely and the
 vendored fixture is never touched.
 
 Each run also gets a private temporary config directory. The harness copies
-only provider entries from `agents.config.json` so it can connect to the
-requested model; when `--provider` is supplied, only the matching entry is
-copied. User preferences, hooks, system prompts, formatters and MCP server
-configuration are not copied. Environment-based MCP server settings are
-ignored too, while provider environment overrides and credentials remain
-available. Any preferences written by the CLI are discarded with the
+only provider entries from `agents.config.json` and merges provider entries
+from `NANOCODER_PROVIDERS` (or `NANOCODER_PROVIDERS_FILE`) using Nanocoder's
+normal environment-over-file precedence. When `--provider` is supplied, only
+that provider is copied. The original provider-config environment variables,
+user preferences, hooks, system prompts, formatters and MCP server
+configuration are not exposed to the CLI. Environment-based MCP server
+settings are ignored too, while provider credential environment variables
+remain available. Any preferences written by the CLI are discarded with the
 temporary directory. Pass `--provider` and `--model` when comparing runs so
 they do not depend on a user's saved defaults.
 
