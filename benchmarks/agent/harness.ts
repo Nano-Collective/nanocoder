@@ -163,20 +163,18 @@ async function readEnvironmentProviders(): Promise<unknown[]> {
 async function copyProviderConfig(
 	configDir: string,
 	requestedProvider?: string,
-): Promise<void> {
+): Promise<string | undefined> {
 	const sourcePath = path.join(getConfigPath(), 'agents.config.json');
-	let source: string;
+	let source: string | undefined;
 	try {
 		source = await fs.readFile(sourcePath, 'utf8');
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-		throw error;
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 	}
 
-	const parsed: unknown = JSON.parse(source);
-	if (!isRecord(parsed)) return;
-
-	const configuredProviders = getProviderList(parsed) ?? [];
+	const configuredProviders = source
+		? (getProviderList(JSON.parse(source) as unknown) ?? [])
+		: [];
 	const providersByName = new Map<string, unknown>();
 	for (const provider of configuredProviders) {
 		if (isRecord(provider) && typeof provider.name === 'string') {
@@ -201,13 +199,17 @@ async function copyProviderConfig(
 					provider.name.toLowerCase() === requestedProvider.toLowerCase(),
 			)
 		: providers;
-	if (!providersForRun.length) return;
+	if (requestedProvider && !providersForRun.length) {
+		return `Requested provider "${requestedProvider}" is not configured. Add it to agents.config.json or NANOCODER_PROVIDERS(_FILE), or choose a configured provider.`;
+	}
+	if (!providersForRun.length) return undefined;
 
 	await fs.writeFile(
 		path.join(configDir, 'agents.config.json'),
 		JSON.stringify({nanocoder: {providers: providersForRun}}, null, 2),
 		{mode: 0o600},
 	);
+	return undefined;
 }
 
 /**
@@ -455,7 +457,13 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		configDir = await fs.mkdtemp(
 			path.join(tempRoot, `agent-eval-config-${fixture.name}-`),
 		);
-		await copyProviderConfig(configDir, options.provider);
+		const providerConfigFailure = await copyProviderConfig(
+			configDir,
+			options.provider,
+		);
+		if (providerConfigFailure) {
+			return failedRun(fixture.name, 0, providerConfigFailure);
+		}
 		await copyFixture(fixture.dir, workspace);
 		const before = await hashTree(workspace);
 

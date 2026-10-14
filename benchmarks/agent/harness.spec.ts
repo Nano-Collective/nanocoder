@@ -407,6 +407,10 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		tempRoot,
 		'captured-run-config-from-file.json',
 	);
+	const unmatchedCapturePath = path.join(
+		tempRoot,
+		'captured-run-config-unmatched-provider.json',
+	);
 	const previousEnvironment = {
 		configDir: process.env.NANOCODER_CONFIG_DIR,
 		providers: process.env.NANOCODER_PROVIDERS,
@@ -498,6 +502,19 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		t.is(capturedFromFile.mcpServers, null);
 		t.is(capturedFromFile.mcpServersFile, null);
 		await t.throwsAsync(() => fs.stat(capturedFromFile.configDir), {
+			code: 'ENOENT',
+		});
+
+		process.env.AGENT_EVAL_CAPTURE_PATH = unmatchedCapturePath;
+		const missingProviderRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'missing-provider',
+			workspaceRoot: tempRoot,
+		});
+		t.false(missingProviderRun.pass);
+		t.regex(missingProviderRun.failure ?? '', /Requested provider "missing-provider"/);
+		await t.throwsAsync(() => fs.stat(unmatchedCapturePath), {
 			code: 'ENOENT',
 		});
 	} finally {
