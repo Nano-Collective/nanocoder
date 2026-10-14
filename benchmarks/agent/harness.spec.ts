@@ -339,6 +339,144 @@ test('runOnce passes and records the reported steps and tokens', async t => {
 	t.true(run.durationMs >= 0);
 });
 
+test.serial('runOnce isolates user config and carries over only providers', async t => {
+	const sourceConfigDir = path.join(tempRoot, 'user-config');
+	await fs.mkdir(sourceConfigDir, {recursive: true});
+	const providers = [
+		{
+			name: 'Ollama',
+			models: ['qwen2.5:1.5b'],
+			baseUrl: 'http://localhost:11434/v1',
+			apiKey: '${OLLAMA_API_KEY}',
+		},
+		{
+			name: 'PrivateProvider',
+			models: ['private-model'],
+			apiKey: 'private-key',
+		},
+	];
+	const userConfig = {
+		nanocoder: {
+			providers,
+			hooks: {'session-start': [{command: 'touch private-hook-marker'}]},
+			systemPrompt: {content: 'private user prompt'},
+			formatters: [{command: 'private formatter', match: ['**/*']}],
+			mcpServers: [{name: 'private-server', command: 'private-mcp'}],
+		},
+	};
+	const userConfigContents = JSON.stringify(userConfig, null, 2);
+	const preferencesPath = path.join(
+		sourceConfigDir,
+		'nanocoder-preferences.json',
+	);
+	const preferencesContents = JSON.stringify({
+		lastProvider: 'PrivateProvider',
+		lastModel: 'private-model',
+	});
+	await fs.writeFile(
+		path.join(sourceConfigDir, 'agents.config.json'),
+		userConfigContents,
+	);
+	await fs.writeFile(preferencesPath, preferencesContents);
+
+	const capturePath = path.join(tempRoot, 'captured-run-config.json');
+	const previousEnvironment = {
+		configDir: process.env.NANOCODER_CONFIG_DIR,
+		providers: process.env.NANOCODER_PROVIDERS,
+		mcpServers: process.env.NANOCODER_MCPSERVERS,
+		mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE,
+		capturePath: process.env.AGENT_EVAL_CAPTURE_PATH,
+	};
+	process.env.NANOCODER_CONFIG_DIR = sourceConfigDir;
+	process.env.NANOCODER_PROVIDERS = JSON.stringify([
+		{name: 'EnvironmentProvider', models: ['env-model']},
+	]);
+	process.env.NANOCODER_MCPSERVERS = '[{"name":"private-env-server"}]';
+	process.env.NANOCODER_MCPSERVERS_FILE = path.join(
+		sourceConfigDir,
+		'private-mcp.json',
+	);
+	process.env.AGENT_EVAL_CAPTURE_PATH = capturePath;
+
+	try {
+		const cliPath = await stubCli(`
+			import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+			import {join} from 'node:path';
+			const configDir = process.env.NANOCODER_CONFIG_DIR;
+			const configPath = join(configDir, 'agents.config.json');
+			const preferencesPath = join(configDir, 'nanocoder-preferences.json');
+			const capture = {
+				configDir,
+				config: JSON.parse(readFileSync(configPath, 'utf8')),
+				preferencesExisted: existsSync(preferencesPath),
+				providersEnv: process.env.NANOCODER_PROVIDERS ?? null,
+				mcpServers: process.env.NANOCODER_MCPSERVERS ?? null,
+				mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE ?? null,
+			};
+			writeFileSync(process.env.AGENT_EVAL_CAPTURE_PATH, JSON.stringify(capture));
+			writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'Ollama', lastModel: 'changed'}));
+			process.stdout.write(JSON.stringify({kind: 'success', exitCode: 0, finalText: 'done', steps: 1}));
+		`);
+		const run = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+
+		t.true(run.pass);
+		const captured = JSON.parse(await fs.readFile(capturePath, 'utf8')) as {
+			configDir: string;
+			config: unknown;
+			preferencesExisted: boolean;
+			providersEnv: string | null;
+			mcpServers: string | null;
+			mcpServersFile: string | null;
+		};
+		t.not(captured.configDir, sourceConfigDir);
+		t.deepEqual(captured.config, {nanocoder: {providers: [providers[0]]}});
+		t.false(captured.preferencesExisted);
+		t.is(
+			captured.providersEnv,
+			JSON.stringify([{name: 'EnvironmentProvider', models: ['env-model']}]),
+		);
+		t.is(captured.mcpServers, null);
+		t.is(captured.mcpServersFile, null);
+		t.is(
+			await fs.readFile(path.join(sourceConfigDir, 'agents.config.json'), 'utf8'),
+			userConfigContents,
+		);
+		t.is(await fs.readFile(preferencesPath, 'utf8'), preferencesContents);
+		await t.throwsAsync(() => fs.stat(captured.configDir), {code: 'ENOENT'});
+	} finally {
+		if (previousEnvironment.configDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousEnvironment.configDir;
+		}
+		if (previousEnvironment.providers === undefined) {
+			delete process.env.NANOCODER_PROVIDERS;
+		} else {
+			process.env.NANOCODER_PROVIDERS = previousEnvironment.providers;
+		}
+		if (previousEnvironment.mcpServers === undefined) {
+			delete process.env.NANOCODER_MCPSERVERS;
+		} else {
+			process.env.NANOCODER_MCPSERVERS = previousEnvironment.mcpServers;
+		}
+		if (previousEnvironment.mcpServersFile === undefined) {
+			delete process.env.NANOCODER_MCPSERVERS_FILE;
+		} else {
+			process.env.NANOCODER_MCPSERVERS_FILE = previousEnvironment.mcpServersFile;
+		}
+		if (previousEnvironment.capturePath === undefined) {
+			delete process.env.AGENT_EVAL_CAPTURE_PATH;
+		} else {
+			process.env.AGENT_EVAL_CAPTURE_PATH = previousEnvironment.capturePath;
+		}
+	}
+});
+
 test('runOnce fails the run when an assertion does not hold', async t => {
 	const cliPath = await stubCli(`
 		process.stdout.write(JSON.stringify({

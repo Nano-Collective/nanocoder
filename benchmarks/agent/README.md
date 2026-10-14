@@ -61,6 +61,16 @@ merely finishing cheaper. A token count alone cannot catch that.
 Runs happen in a throwaway copy of the tree, so a task can edit freely and the
 vendored fixture is never touched.
 
+Each run also gets a private temporary config directory. The harness copies
+only provider entries from `agents.config.json` so it can connect to the
+requested model; when `--provider` is supplied, only the matching entry is
+copied. User preferences, hooks, system prompts, formatters and MCP server
+configuration are not copied. Environment-based MCP server settings are
+ignored too, while provider environment overrides and credentials remain
+available. Any preferences written by the CLI are discarded with the
+temporary directory. Pass `--provider` and `--model` when comparing runs so
+they do not depend on a user's saved defaults.
+
 A task passes only when the CLI reports success, exits successfully, and every
 assertion holds. Error and approval-required runs retain reported measurements
 but count as failures, even if their partial edits satisfy the assertions.
