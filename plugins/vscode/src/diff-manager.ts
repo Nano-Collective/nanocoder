@@ -84,7 +84,12 @@ export class DiffManager {
 	 * Get a specific pending change
 	 */
 	getPendingChange(id: string): PendingChange | undefined {
-		return this.pendingChanges.get(id);
+		return (
+			this.pendingChanges.get(id) ??
+			Array.from(this.pendingChanges.values()).find(c =>
+				c.id.startsWith(`${id}_`),
+			)
+		);
 	}
 
 	/**
@@ -103,17 +108,28 @@ export class DiffManager {
 	/**
 	 * Show diff preview for a pending change
 	 * Uses virtual documents to prevent linters from running
-	 * Preserves terminal focus by restoring it after showing the diff
+	 * Optionally preserves terminal focus by restoring it after showing the diff (default: false).
+	 * If given a bare toolCallId matching multiple compound-keyed changes, fans out and opens all matching diff tabs.
 	 */
-	async showDiff(id: string): Promise<void> {
+	async showDiff(id: string, options?: { restoreTerminalFocus?: boolean }): Promise<void> {
 		const change = this.pendingChanges.get(id);
 		if (!change) {
+			const matchingChanges = Array.from(this.pendingChanges.values()).filter(c =>
+				c.id.startsWith(`${id}_`),
+			);
+			if (matchingChanges.length > 0) {
+				for (const match of matchingChanges) {
+					await this.showDiff(match.id, options);
+				}
+				return;
+			}
 			vscode.window.showErrorMessage(`Change ${id} not found`);
 			return;
 		}
 
+		const restoreTerminal = options?.restoreTerminalFocus ?? false;
 		// Remember the active terminal before showing diff
-		const activeTerminal = vscode.window.activeTerminal;
+		const activeTerminal = restoreTerminal ? vscode.window.activeTerminal : undefined;
 
 		const fileName = path.basename(change.filePath);
 		const isNewFile = change.originalContent === '';
@@ -133,9 +149,9 @@ export class DiffManager {
 			await vscode.window.showTextDocument(doc, {
 				preview: true,
 				preserveFocus: true,
-				});
+			});
 
-			// Restore terminal focus
+			// Restore terminal focus only if explicitly requested
 			if (activeTerminal) {
 				await vscode.commands.executeCommand('workbench.action.terminal.focus');
 			}
@@ -164,18 +180,53 @@ export class DiffManager {
 			{preview: true, preserveFocus: true},
 		);
 
-		// Restore terminal focus after diff opens
+		// Restore terminal focus only if explicitly requested
 		if (activeTerminal) {
 			await vscode.commands.executeCommand('workbench.action.terminal.focus');
 		}
 	}
 
 	/**
+	 * Clear all pending changes and close associated virtual diff editors
+	 */
+	async clearPendingChanges(): Promise<void> {
+		const ids = Array.from(this.pendingChanges.keys());
+		for (const id of ids) {
+			try {
+				await this.closeEditors(id);
+			} catch {
+				// Ignore errors from individual editor closures to ensure all entries are processed
+			}
+		}
+		this.pendingChanges.clear();
+		this.notifyChanges();
+	}
+
+	/**
 	 * Close diff for a pending change (called when CLI confirms/rejects)
 	 */
 	async closeDiff(id: string): Promise<void> {
-		await this.closeEditors(id);
-		this.removePendingChange(id);
+		if (this.pendingChanges.has(id)) {
+			try {
+				await this.closeEditors(id);
+			} catch {
+				// Ignore errors if editors were already closed
+			}
+			this.removePendingChange(id);
+			return;
+		}
+
+		const matchingIds = Array.from(this.pendingChanges.keys()).filter(k =>
+			k.startsWith(`${id}_`),
+		);
+		for (const mid of matchingIds) {
+			try {
+				await this.closeEditors(mid);
+			} catch {
+				// Ignore errors if editors were already closed
+			}
+			this.removePendingChange(mid);
+		}
 	}
 
 	/**
@@ -205,7 +256,11 @@ export class DiffManager {
 			}
 
 			if (shouldClose) {
-				await vscode.window.tabGroups.close(tab);
+				try {
+					await vscode.window.tabGroups.close(tab);
+				} catch {
+					// Ignore errors if tab was already closed or disposed
+				}
 			}
 		}
 

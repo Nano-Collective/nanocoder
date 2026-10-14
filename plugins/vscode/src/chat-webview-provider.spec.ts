@@ -5,7 +5,21 @@ import { NanocoderAcpClient } from './acp-client';
 
 function makeStubs() {
 	const outputChannel = {appendLine: () => {}} as any;
-	const diffManager = {} as any;
+	const pendingChangesAdded: any[] = [];
+	let clearPendingChangesCalls = 0;
+	const showDiffCalls: any[] = [];
+	const diffManager = {
+		addPendingChange: (change: any) => {
+			pendingChangesAdded.push(change);
+		},
+		clearPendingChanges: async () => {
+			clearPendingChangesCalls++;
+		},
+		showDiff: async (id: string, options?: any) => {
+			showDiffCalls.push({id, options});
+		},
+		getPendingChanges: () => pendingChangesAdded,
+	} as any;
 
 	const acpClient = {
 		hasPendingPermissions: () => false,
@@ -39,6 +53,10 @@ function makeStubs() {
 	return {
 		provider,
 		acpClient,
+		diffManager,
+		getPendingChangesAdded: () => pendingChangesAdded.slice(),
+		getClearPendingChangesCalls: () => clearPendingChangesCalls,
+		getShowDiffCalls: () => showDiffCalls.slice(),
 		getPostMessageCalls: () => postMessageCalls,
 		getPostedMessages: () => postedMessages.slice(),
 		resetPostedMessages: () => {
@@ -138,4 +156,67 @@ test('ChatWebviewProvider - _handleSubmit warns and drops a submit when idle but
 		),
 		'the webview must clear its loading state via a failed prompt_response',
 	);
+});
+
+test('ChatWebviewProvider - handleDiffs keys pending changes uniquely when multiple diffs share toolCallId', async (t) => {
+	const {provider, getPendingChangesAdded} = makeStubs();
+
+	(provider as any).handleDiffs({
+		update: {
+			toolCallId: 'tool-call-123',
+			title: 'edit',
+			content: [
+				{
+					type: 'diff',
+					path: 'src/foo.ts',
+					oldText: 'const a = 1;',
+					newText: 'const a = 2;',
+				},
+				{
+					type: 'diff',
+					path: 'src/bar.ts',
+					oldText: 'const b = 1;',
+					newText: 'const b = 2;',
+				},
+			],
+		},
+	});
+
+	const added = getPendingChangesAdded();
+	t.is(added.length, 2, 'both diff blocks must be added as pending changes');
+	t.not(added[0].id, added[1].id, 'diff IDs must be unique even when sharing toolCallId');
+	t.true(added[0].id.startsWith('tool-call-123_'));
+	t.true(added[1].id.startsWith('tool-call-123_'));
+	t.is(added[0].filePath, 'src/foo.ts');
+	t.is(added[1].filePath, 'src/bar.ts');
+});
+
+test('ChatWebviewProvider - resetSessionState clears pending diff changes', async (t) => {
+	const {provider, getClearPendingChangesCalls} = makeStubs();
+
+	t.is(getClearPendingChangesCalls(), 0);
+	provider.resetSessionState();
+	t.is(getClearPendingChangesCalls(), 1, 'clearPendingChanges must be called on resetSessionState');
+});
+
+test('ChatWebviewProvider - onConnectionReady clears pending diff changes', async (t) => {
+	const {acpClient, getClearPendingChangesCalls} = makeStubs();
+
+	t.is(getClearPendingChangesCalls(), 0);
+	acpClient.onConnectionReady?.();
+	t.is(getClearPendingChangesCalls(), 1, 'clearPendingChanges must be called on onConnectionReady');
+});
+
+test('ChatWebviewProvider - showDiff message from webview requests diff preview without terminal focus restoration', async (t) => {
+	const {provider, getShowDiffCalls} = makeStubs();
+
+	await (provider as any)._handleWebviewMessage({
+		type: 'showDiff',
+		toolCallId: 'tool-call-webview',
+	});
+
+	const calls = getShowDiffCalls();
+	t.is(calls.length, 1);
+	t.is(calls[0].id, 'tool-call-webview');
+	t.falsy(calls[0].options?.restoreTerminalFocus, 'Webview showDiff must not set restoreTerminalFocus: true');
 });
