@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
+import { resolveExtensionCwd } from './workspace-utils';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -473,8 +474,7 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
 			this._sessionId = sessionId;
 			if (result.modes) {
