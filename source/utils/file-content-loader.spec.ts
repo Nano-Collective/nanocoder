@@ -106,7 +106,7 @@ test('handles non-existent file', async t => {
 	t.is(result.metadata.lineCount, 0);
 });
 
-test('formats content with path header', async t => {
+test('formats content with path header and line range', async t => {
 	const testFilePath = join(testDir, 'test.txt');
 	const result = await loadFileContent(testFilePath, {
 		start: 2,
@@ -115,10 +115,34 @@ test('formats content with path header', async t => {
 
 	t.true(result.success);
 	t.truthy(result.content);
-	// Should have path header and content without line numbers
-	t.true(result.content!.startsWith(`Path: ${testFilePath}`));
+	// Should have path header with line range and content without line numbers
+	t.true(result.content!.startsWith(`Path: ${testFilePath} (lines 2-3)`));
+	t.true(result.content!.includes(' (lines 2-3)'));
 	t.true(result.content!.includes('Line 2'));
 	t.true(result.content!.includes('Line 3'));
+});
+
+test('formats content with path header for single line range', async t => {
+	const testFilePath = join(testDir, 'test.txt');
+	const result = await loadFileContent(testFilePath, {
+		start: 3,
+	});
+
+	t.true(result.success);
+	t.truthy(result.content);
+	t.true(result.content!.startsWith(`Path: ${testFilePath} (lines 3)`));
+	t.true(result.content!.includes(' (lines 3)'));
+	t.true(result.content!.includes('Line 3'));
+});
+
+test('formats content with path header without line range', async t => {
+	const testFilePath = join(testDir, 'test.txt');
+	const result = await loadFileContent(testFilePath);
+
+	t.true(result.success);
+	t.truthy(result.content);
+	t.true(result.content!.startsWith(`Path: ${testFilePath}\n\n`));
+	t.false(result.content!.includes('(lines'));
 });
 
 test('calculates token estimate', async t => {
