@@ -87,7 +87,7 @@ Or from the repo root: `pnpm run build:vscode` builds and packages to `assets/na
 
 ### Sidebar Chat
 
-1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used.
+1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used. Nothing is started until you open the chat.
 2. Chat. Responses stream in; thinking appears in a collapsible section.
 3. Read-only tools group into an activity card; file edits get their own card - click it to open VS Code's diff viewer.
 4. In modes that require confirmation, tool cards show Approve / Deny inline. Questions from the AI (`ask_user`) show the full question with one button per answer.

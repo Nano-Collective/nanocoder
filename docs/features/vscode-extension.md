@@ -61,7 +61,7 @@ nanocoder --vscode
 
 ## Using the Sidebar Chat
 
-1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder. In a folder Nanocoder has never trusted, or one whose trusted setup has changed since, the CLI refuses to start and the status bar shows **Failed** (see [Troubleshooting](#troubleshooting)).
+1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. Nothing is started until you open the chat, so VS Code windows where you don't use Nanocoder never run the CLI. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder. In a folder Nanocoder has never trusted, or one whose trusted setup has changed since, the CLI refuses to start and the status bar shows **Failed** (see [Troubleshooting](#troubleshooting)).
 
 2. **Chat**: Responses stream in as they generate, with a blinking cursor at the end of the text still being written. Code blocks are syntax-highlighted as soon as the fence opens, in colours that follow your light or dark VS Code theme. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 
@@ -177,7 +177,7 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show `Explain Code` / `Generate Tests` lenses above symbols            |
-| `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
+| `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion when the extension activates (opening the Nanocoder view or running a Nanocoder command) |
 | `nanocoder.showTokenUsage`  | `false`       | Show token usage and estimated cost below chat responses (hidden by default; also a toggle in the Settings tab) |
 | `nanocoder.serverPort`      | `51820`       | Legacy companion port, used only as a fallback when the discovery file is missing or stale |
 | `nanocoder.serverToken`     | (empty)       | Legacy companion bearer token, for when the discovery file is unreachable (e.g. SSH) |

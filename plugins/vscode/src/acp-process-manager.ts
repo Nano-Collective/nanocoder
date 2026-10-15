@@ -21,11 +21,24 @@ export class AcpProcessManager {
 	private lastStderr = '';
 	private retryTimer: NodeJS.Timeout | null = null;
 	private currentLaunch: Promise<void> | null = null;
+	private hasStarted = false;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager, acpClient: NanocoderAcpClient) {
 		this.outputChannel = outputChannel;
 		this.stateManager = stateManager;
 		this.acpClient = acpClient;
+	}
+
+	/**
+	 * Start the agent process unless this manager already has. The extension
+	 * spawns `nanocoder --acp` lazily, the first time something needs it (the
+	 * chat view opening), so this is safe to call from every such path; crash
+	 * retries and a manual restart go through {@link start} instead.
+	 */
+	ensureStarted(): void {
+		if (!this.hasStarted) {
+			void this.start();
+		}
 	}
 
 	async start(): Promise<void> {
@@ -35,6 +48,7 @@ export class AcpProcessManager {
 		if (this.isDisposed) {
 			return;
 		}
+		this.hasStarted = true;
 		if (this.currentLaunch) {
 			return this.currentLaunch;
 		}
