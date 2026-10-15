@@ -124,6 +124,7 @@ test('parseToolCalls: finds JSON tool calls inside wrapper objects', t => {
 		{tool_calls: [call]},
 		{tool_call: call},
 		{response: {action: call}},
+		{name: 'plan', steps: [call]},
 	]) {
 		const content = JSON.stringify(wrapper);
 		const result = parseToolCalls(content);
@@ -161,18 +162,23 @@ test('parseToolCalls: finds every JSON tool call in a tool_calls array', t => {
 });
 
 test('parseToolCalls: many unterminated JSON openers do not stall parsing', t => {
-	// ~315 KB: rescanning to the end from every opener takes seconds here.
-	const content = `{"${'x'.repeat(61)}`.repeat(5000);
+	// ~315 KB each: rescanning to the end from every opener takes seconds.
+	for (const opener of [
+		`{"${'x'.repeat(61)}`,
+		'{"name":"read_file","arguments":{"path":"a.ts"}'.padEnd(63),
+	]) {
+		const content = opener.repeat(5000);
 
-	const started = Date.now();
-	const result = parseToolCalls(content);
-	const elapsed = Date.now() - started;
+		const started = Date.now();
+		const result = parseToolCalls(content);
+		const elapsed = Date.now() - started;
 
-	t.true(result.success);
-	if (result.success) {
-		t.is(result.toolCalls.length, 0);
+		t.true(result.success, opener);
+		if (result.success) {
+			t.is(result.toolCalls.length, 0, opener);
+		}
+		t.true(elapsed < 500, `${opener.trim()}: ${elapsed}ms`);
 	}
-	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
 });
 
 test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {

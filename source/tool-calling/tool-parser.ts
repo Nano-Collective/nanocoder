@@ -35,13 +35,20 @@ type ParseResult =
 	  };
 
 const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
-// Only objects that open like a call are scanned: scanning from every `{"`
-// is quadratic when many of them never close.
 const JSON_OBJECT_START_REGEX = /\{\s*"(?:name|arguments)"\s*:/g;
 
-// Braces inside JSON strings must not end the enclosing tool call.
-function findJSONObjectEnd(content: string, start: number): number | null {
-	let depth = 0;
+// Braces inside JSON strings must not end the enclosing tool call. Each scan
+// also records in `ends` where every nested object it passes ends (null if it
+// never closes), so many unclosed openers cost one scan instead of one each.
+function findJSONObjectEnd(
+	content: string,
+	start: number,
+	ends: Map<number, number | null>,
+): number | null {
+	const known = ends.get(start);
+	if (known !== undefined) return known;
+
+	const openers: number[] = [];
 	let inString = false;
 	let escaped = false;
 
@@ -61,13 +68,15 @@ function findJSONObjectEnd(content: string, start: number): number | null {
 		if (char === '"') {
 			inString = true;
 		} else if (char === '{') {
-			depth++;
+			openers.push(index);
 		} else if (char === '}') {
-			depth--;
-			if (depth === 0) return index + 1;
+			const opener = openers.pop();
+			if (opener !== undefined) ends.set(opener, index + 1);
+			if (openers.length === 0) return index + 1;
 		}
 	}
 
+	for (const opener of openers) ends.set(opener, null);
 	return null;
 }
 
@@ -126,12 +135,13 @@ function parseJSONToolCalls(content: string): {
 		}
 	}
 
+	const ends = new Map<number, number | null>();
 	let inlineMatch: RegExpExecArray | null;
 	const inlinePattern = new RegExp(JSON_OBJECT_START_REGEX);
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
-		const end = findJSONObjectEnd(content, start);
+		const end = findJSONObjectEnd(content, start, ends);
 		if (end === null) continue;
 		const call = tryParseJSONToolCall(content.slice(start, end));
 		if (call) {
