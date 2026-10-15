@@ -330,6 +330,11 @@ export interface DiskNanocoderConfig {
 		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
 		maxTurns?: number;
 	};
+	/** Language server behavior. Auto-discovery is enabled by default. */
+	lsp?: {
+		/** Disable scanning PATH for installed language servers at startup. */
+		autoDiscover?: boolean;
+	};
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
 		name: string;
@@ -401,6 +406,11 @@ export interface AppConfig {
 	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
 	mcpServers?: MCPServerConfig[];
+
+	// Language server behavior (auto-discovery is enabled by default).
+	lsp?: {
+		autoDiscover?: boolean;
+	};
 
 	// LSP server configurations (optional - auto-discovery enabled by default)
 	lspServers?: {

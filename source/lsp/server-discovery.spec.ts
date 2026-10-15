@@ -1,5 +1,13 @@
 import test from 'ava';
-import {mkdtempSync, writeFileSync, rmSync} from 'fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {join} from 'path';
 import {tmpdir} from 'os';
 import type { LSPServerConfig } from './lsp-client';
@@ -10,10 +18,104 @@ import {
 	getMissingServerHints,
 	getOrderedServers,
 	getServerForLanguage,
+	findCommand,
+	discoverLanguageServers,
 	isDenoProject,
 } from './server-discovery';
 
 console.log(`\nserver-discovery.spec.ts`);
+
+test.serial('findCommand scans PATH without spawning where or which', async t => {
+	const originalPath = process.env.PATH;
+	const originalPathExt = process.env.PATHEXT;
+	const binDirectory = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-path-'));
+	const commandExtension = process.platform === 'win32' ? '.CMD' : '';
+	const commandPath = join(binDirectory, `fake-language-server${commandExtension}`);
+
+	try {
+		if (process.platform === 'win32') {
+			writeFileSync(commandPath, '@echo off\r\nexit /b 0\r\n', 'utf-8');
+			process.env.PATHEXT = '.CMD';
+		} else {
+			writeFileSync(commandPath, '#!/bin/sh\nexit 0\n', 'utf-8');
+			chmodSync(commandPath, 0o755);
+			const whichMarker = join(binDirectory, 'which-was-spawned');
+			const fakeWhich = join(binDirectory, 'which');
+			writeFileSync(
+				fakeWhich,
+				`#!/bin/sh\n: > "${whichMarker}"\nexit 0\n`,
+				'utf-8',
+			);
+			chmodSync(fakeWhich, 0o755);
+			process.env.PATHEXT = originalPathExt;
+		}
+		process.env.PATH = binDirectory;
+
+		t.is(await findCommand('fake-language-server'), 'fake-language-server');
+		if (process.platform !== 'win32') {
+			t.false(existsSync(join(binDirectory, 'which-was-spawned')));
+		}
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		if (originalPathExt === undefined) delete process.env.PATHEXT;
+		else process.env.PATHEXT = originalPathExt;
+		rmSync(binDirectory, {recursive: true, force: true});
+	}
+});
+
+test.serial('discovery verifies installed servers asynchronously and deduplicates commands', async t => {
+	const originalPath = process.env.PATH;
+	const originalPathExt = process.env.PATHEXT;
+	const tempRoot = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-discovery-'));
+	const binDirectory = join(tempRoot, 'bin');
+	mkdirSync(binDirectory);
+	const extension = process.platform === 'win32' ? '.cmd' : '';
+	const marker = join(tempRoot, 'graphql-version-checks');
+
+	try {
+		if (process.platform === 'win32') {
+			process.env.PATHEXT = '.CMD';
+			writeFileSync(
+				join(binDirectory, `typescript-language-server${extension}`),
+				'@echo off\r\nexit /b 0\r\n',
+				'utf-8',
+			);
+			writeFileSync(
+				join(binDirectory, `graphql-lsp${extension}`),
+				`@echo off\r\necho checked>>"${marker}"\r\nexit /b 1\r\n`,
+				'utf-8',
+			);
+		} else {
+			const typescriptServer = join(binDirectory, 'typescript-language-server');
+			const graphqlServer = join(binDirectory, 'graphql-lsp');
+			writeFileSync(typescriptServer, '#!/bin/sh\nexit 0\n', 'utf-8');
+			writeFileSync(
+				graphqlServer,
+				`#!/bin/sh\necho checked >> "${marker}"\nexit 1\n`,
+				'utf-8',
+			);
+			chmodSync(typescriptServer, 0o755);
+			chmodSync(graphqlServer, 0o755);
+		}
+		process.env.PATH = binDirectory;
+
+		const discovered = await discoverLanguageServers(tempRoot);
+		const typescriptServer = discovered.find(
+			server => server.name === 'typescript-language-server',
+		);
+		t.deepEqual(typescriptServer?.languages, ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
+		t.false(discovered.some(server => server.name.includes('graphql')));
+		t.true(existsSync(marker), 'the GraphQL server version check should run');
+		t.is(readFileSync(marker, 'utf-8').trim().split(/\r?\n/).length, 1);
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		if (originalPathExt === undefined) delete process.env.PATHEXT;
+		else process.env.PATHEXT = originalPathExt;
+		rmSync(tempRoot, {recursive: true, force: true});
+	}
+});
 
 // getLanguageId tests
 test('getLanguageId - returns typescript for ts extension', t => {
@@ -360,8 +462,8 @@ test('getServerForLanguage - finds markdown server for mdx extension', t => {
 	t.is(result?.name, 'vscode-markdown-language-server');
 });
 
-test('getKnownServersStatus - includes graphql-lsp-server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes graphql-lsp-server', async t => {
+	const result = await getKnownServersStatus();
 	const graphqlServer = result.find(s => s.name === 'graphql-lsp-server');
 
 	t.truthy(graphqlServer, 'GraphQL server should be defined in KNOWN_SERVERS');
@@ -370,8 +472,8 @@ test('getKnownServersStatus - includes graphql-lsp-server', t => {
 	t.true(graphqlServer!.installHint!.includes('@graphql-tools/lsp-server'), 'Should point to the correct npm package');
 });
 
-test('getKnownServersStatus - includes graphql-language-server-cli', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes graphql-language-server-cli', async t => {
+	const result = await getKnownServersStatus();
 	const graphqlServer = result.find(s => s.name === 'graphql-language-server-cli');
 
 	t.truthy(graphqlServer);
@@ -380,30 +482,30 @@ test('getKnownServersStatus - includes graphql-language-server-cli', t => {
 });
 
 // getMissingServerHints tests
-test('getMissingServerHints - returns array', t => {
-	const result = getMissingServerHints(['ts']);
+test('getMissingServerHints - returns array', async t => {
+	const result = await getMissingServerHints(['ts']);
 	t.true(Array.isArray(result));
 });
 
-test('getMissingServerHints - handles extension with leading dot', t => {
-	const result = getMissingServerHints(['.ts', '.py']);
+test('getMissingServerHints - handles extension with leading dot', async t => {
+	const result = await getMissingServerHints(['.ts', '.py']);
 	t.true(Array.isArray(result));
 });
 
-test('getMissingServerHints - handles empty extensions array', t => {
-	const result = getMissingServerHints([]);
+test('getMissingServerHints - handles empty extensions array', async t => {
+	const result = await getMissingServerHints([]);
 	t.deepEqual(result, []);
 });
 
-test('getMissingServerHints - returns hints for unknown extensions only if server exists', t => {
+test('getMissingServerHints - returns hints for unknown extensions only if server exists', async t => {
 	// Unknown extensions won't have hints because there's no known server
-	const result = getMissingServerHints(['xyz']);
+	const result = await getMissingServerHints(['xyz']);
 	t.true(Array.isArray(result));
 });
 
-test('getMissingServerHints - does not duplicate hints for same server', t => {
+test('getMissingServerHints - does not duplicate hints for same server', async t => {
 	// ts and tsx are handled by the same server
-	const result = getMissingServerHints(['ts', 'tsx', 'js', 'jsx']);
+	const result = await getMissingServerHints(['ts', 'tsx', 'js', 'jsx']);
 	// Should have at most one hint for typescript-language-server
 	const tsHints = result.filter(h => h.includes('typescript-language-server'));
 	t.true(tsHints.length <= 1);
@@ -430,14 +532,14 @@ test('findLocalServer - searches in node_modules/.bin', t => {
 });
 
 // getKnownServersStatus tests
-test('getKnownServersStatus - returns array of server status', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - returns array of server status', async t => {
+	const result = await getKnownServersStatus();
 	t.true(Array.isArray(result));
 	t.true(result.length > 0);
 });
 
-test('getKnownServersStatus - each item has required properties', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - each item has required properties', async t => {
+	const result = await getKnownServersStatus();
 
 	for (const server of result) {
 		t.truthy(server.name);
@@ -447,60 +549,60 @@ test('getKnownServersStatus - each item has required properties', t => {
 	}
 });
 
-test('getKnownServersStatus - includes typescript server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes typescript server', async t => {
+	const result = await getKnownServersStatus();
 	const tsServer = result.find(s => s.name === 'typescript-language-server');
 	t.truthy(tsServer);
 	t.true(tsServer!.languages.includes('ts'));
 	t.true(tsServer!.languages.includes('tsx'));
 });
 
-test('getKnownServersStatus - includes deno server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes deno server', async t => {
+	const result = await getKnownServersStatus();
 	const denoServer = result.find(s => s.name === 'deno');
 	t.truthy(denoServer);
 	t.true(denoServer!.languages.includes('ts'));
 	t.true(denoServer!.languages.includes('js'));
 });
 
-test('getKnownServersStatus - includes pyright server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes pyright server', async t => {
+	const result = await getKnownServersStatus();
 	const pyServer = result.find(s => s.name === 'pyright');
 	t.truthy(pyServer);
 	t.true(pyServer!.languages.includes('py'));
 });
 
-test('getKnownServersStatus - includes rust-analyzer', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes rust-analyzer', async t => {
+	const result = await getKnownServersStatus();
 	const rustServer = result.find(s => s.name === 'rust-analyzer');
 	t.truthy(rustServer);
 	t.true(rustServer!.languages.includes('rs'));
 });
 
-test('getKnownServersStatus - includes gopls', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes gopls', async t => {
+	const result = await getKnownServersStatus();
 	const goServer = result.find(s => s.name === 'gopls');
 	t.truthy(goServer);
 	t.true(goServer!.languages.includes('go'));
 });
 
-test('getKnownServersStatus - includes clangd', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes clangd', async t => {
+	const result = await getKnownServersStatus();
 	const cppServer = result.find(s => s.name === 'clangd');
 	t.truthy(cppServer);
 	t.true(cppServer!.languages.includes('c'));
 	t.true(cppServer!.languages.includes('cpp'));
 });
 
-test('getKnownServersStatus - has install hints', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - has install hints', async t => {
+	const result = await getKnownServersStatus();
 	// At least some servers should have install hints
 	const withHints = result.filter(s => s.installHint);
 	t.true(withHints.length > 0);
 });
 
-test('getKnownServersStatus - install hint contains useful info', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - install hint contains useful info', async t => {
+	const result = await getKnownServersStatus();
 	const tsServer = result.find(s => s.name === 'typescript-language-server');
 	t.truthy(tsServer?.installHint);
 	t.true(tsServer!.installHint!.includes('npm'));
@@ -509,8 +611,8 @@ test('getKnownServersStatus - install hint contains useful info', t => {
 // discoverLanguageServers is harder to test as it depends on system state
 // We can test the structure of what it returns
 
-test('getKnownServersStatus - includes all major language servers', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes all major language servers', async t => {
+	const result = await getKnownServersStatus();
 	const serverNames = result.map(s => s.name);
 
 	// Check for presence of major servers
@@ -522,8 +624,8 @@ test('getKnownServersStatus - includes all major language servers', t => {
 	t.true(serverNames.includes('clangd'));
 });
 
-test('getKnownServersStatus - includes web servers', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes web servers', async t => {
+	const result = await getKnownServersStatus();
 	const serverNames = result.map(s => s.name);
 
 	t.true(serverNames.includes('vscode-json-languageserver'));
@@ -531,31 +633,31 @@ test('getKnownServersStatus - includes web servers', t => {
 	t.true(serverNames.includes('vscode-css-languageserver'));
 });
 
-test('getKnownServersStatus - includes yaml server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes yaml server', async t => {
+	const result = await getKnownServersStatus();
 	const yamlServer = result.find(s => s.name === 'yaml-language-server');
 	t.truthy(yamlServer);
 	t.true(yamlServer!.languages.includes('yaml'));
 	t.true(yamlServer!.languages.includes('yml'));
 });
 
-test('getKnownServersStatus - includes bash server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes bash server', async t => {
+	const result = await getKnownServersStatus();
 	const bashServer = result.find(s => s.name === 'bash-language-server');
 	t.truthy(bashServer);
 	t.true(bashServer!.languages.includes('sh'));
 	t.true(bashServer!.languages.includes('bash'));
 });
 
-test('getKnownServersStatus - includes lua server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes lua server', async t => {
+	const result = await getKnownServersStatus();
 	const luaServer = result.find(s => s.name === 'lua-language-server');
 	t.truthy(luaServer);
 	t.true(luaServer!.languages.includes('lua'));
 });
 
-test('getKnownServersStatus - includes vscode-markdown-language-server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes vscode-markdown-language-server', async t => {
+	const result = await getKnownServersStatus();
 	const mdServer = result.find(s => s.name === 'vscode-markdown-language-server');
 	t.truthy(mdServer);
 	t.true(mdServer!.languages.includes('md'));
@@ -564,8 +666,8 @@ test('getKnownServersStatus - includes vscode-markdown-language-server', t => {
 	t.is(mdServer!.installHint, 'npm install -g @microsoft/vscode-mdx-language-server or vscode-langservers-extracted');
 });
 
-test('getKnownServersStatus - includes marksman', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes marksman', async t => {
+	const result = await getKnownServersStatus();
 	const marksmanServer = result.find(s => s.name === 'marksman');
 	t.truthy(marksmanServer);
 	t.true(marksmanServer!.languages.includes('md'));
@@ -697,8 +799,8 @@ test('getOrderedServers - defaults to process.cwd() when no projectRoot provided
 	t.is(servers[0].name, 'typescript-language-server', 'Should default to TypeScript first when cwd is not Deno project');
 });
 
-test('getKnownServersStatus - includes docker-language-server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes docker-language-server', async t => {
+	const result = await getKnownServersStatus();
 	const dockerServer = result.find(s => s.name === 'docker-language');
 
 	t.truthy(dockerServer, 'Docker server should be registered');
@@ -709,8 +811,8 @@ test('getKnownServersStatus - includes docker-language-server', t => {
 	);
 });
 
-test('getKnownServersStatus - includes docker-compose-language-server', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - includes docker-compose-language-server', async t => {
+	const result = await getKnownServersStatus();
 	const composeServer = result.find(s => s.name === 'docker-compose-language');
 
 	t.truthy(composeServer, 'Docker Compose server should be registered');
@@ -723,8 +825,8 @@ test('getKnownServersStatus - includes docker-compose-language-server', t => {
 });
 
 // Tests for verificationMethod functionality
-test('getKnownServersStatus - all servers have proper structure', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - all servers have proper structure', async t => {
+	const result = await getKnownServersStatus();
 
 	// Check that servers have proper structure
 	for (const server of result) {
@@ -734,8 +836,8 @@ test('getKnownServersStatus - all servers have proper structure', t => {
 	}
 });
 
-test('getKnownServersStatus - key servers are present with correct names', t => {
-	const result = getKnownServersStatus();
+test('getKnownServersStatus - key servers are present with correct names', async t => {
+	const result = await getKnownServersStatus();
 
 	// Check that key servers are present with their correct names
 	const keyServers = [
