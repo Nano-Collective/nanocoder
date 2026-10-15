@@ -2,6 +2,7 @@ import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
+import {pasteEvents} from '@/utils/terminal-paste';
 import type {TemplateField} from '../templates/provider-templates';
 import {
 	FieldInputView,
@@ -277,4 +278,21 @@ test('renders narrow keyboard hints when isNarrow is true', t => {
 	t.regex(output, /Shift\+Tab: go back/);
 	t.notRegex(output, /Press Enter to continue \|/);
 	unmount();
+});
+
+test('a terminal paste reaches a wizard field, masked or not', async t => {
+	// cli.tsx lifts bracketed pastes off stdin, so this field only gets one if
+	// its TextInput subscribes to pasteEvents; before, only the composer did.
+	for (const sensitive of [false, true]) {
+		const {changes, unmount} = renderField({
+			currentField: {name: 'apiKey', prompt: 'API key', sensitive},
+		});
+
+		await wait(50);
+		pasteEvents.emit('paste', 'sk-pasted-key');
+		await wait(50);
+
+		t.deepEqual(changes, ['sk-pasted-key'], `sensitive=${sensitive}`);
+		unmount();
+	}
 });
