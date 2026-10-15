@@ -266,7 +266,6 @@ test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', a
 	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
 });
 
-<<<<<<< HEAD
 test('NanocoderAcpClient - closing all editors sends clearFocusDocument', (t) => {
 	const calls: Array<{ method: string; params: unknown }> = [];
 	const client = makeClient({
