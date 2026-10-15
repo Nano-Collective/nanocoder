@@ -11,7 +11,7 @@ import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
-import { resolveExtensionCwd } from './workspace-utils';
+import { resolveExtensionCwd, resolveProjectCwd } from './workspace-utils';
 import { readCappedFile, readCappedDirectory } from './context-attachment';
 import { PromptQueue, type QueuedPrompt } from './prompt-queue';
 import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
@@ -744,7 +744,8 @@ export class ChatWebviewProvider
 	 * unit-testable without an extension host.
 	 */
 	private _mentionSearchDeps(): MentionSearchDeps {
-		const workspaceRoot = resolveExtensionCwd();
+		const projectCwd = resolveProjectCwd();
+		const workspaceRoot = projectCwd ?? resolveExtensionCwd();
 		const searchRoot = vscode.Uri.file(workspaceRoot);
 		const exclude = this._mentionExcludeGlob(searchRoot);
 
@@ -763,6 +764,11 @@ export class ChatWebviewProvider
 				return paths;
 			},
 			findFiles: async (glob, limit) => {
+				// No folder open and no `nanocoder.cwd`: there is nothing to search,
+				// and the home-directory fallback must not be crawled.
+				if (!projectCwd) {
+					return [];
+				}
 				const uris = await vscode.workspace.findFiles(
 					new vscode.RelativePattern(searchRoot, glob),
 					exclude,

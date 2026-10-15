@@ -2,7 +2,7 @@
 import test from 'ava';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import {resolveExtensionCwd} from './workspace-utils';
+import {resolveExtensionCwd, resolveProjectCwd} from './workspace-utils';
 
 test.beforeEach(() => {
     (vscode as any).__test.reset();
@@ -47,5 +47,36 @@ test('resolveExtensionCwd falls back to home without cwd or workspace', t => {
         fallback: unknown,
     ) => fallback;
 
+    t.is(resolveExtensionCwd(), os.homedir());
+});
+
+test('resolveProjectCwd prefers configured cwd over workspace folder', t => {
+    (vscode.workspace as any).workspaceFolders = [
+        {uri: vscode.Uri.file('/workspace')},
+    ];
+
+    (vscode as any).__test.configuration = (section: string, key: string, fallback: unknown) =>
+        section === 'nanocoder' && key === 'cwd'
+            ? '/custom/project'
+            : fallback;
+
+    t.is(resolveProjectCwd(), '/custom/project');
+});
+
+test('resolveProjectCwd uses the workspace folder for an empty cwd setting', t => {
+    (vscode.workspace as any).workspaceFolders = [
+        {uri: vscode.Uri.file('/workspace')},
+    ];
+
+    (vscode as any).__test.configuration = (section: string, key: string, fallback: unknown) =>
+        section === 'nanocoder' && key === 'cwd'
+            ? ''
+            : fallback;
+
+    t.is(resolveProjectCwd(), '/workspace');
+});
+
+test('resolveProjectCwd is undefined without cwd or workspace, unlike resolveExtensionCwd', t => {
+    t.is(resolveProjectCwd(), undefined);
     t.is(resolveExtensionCwd(), os.homedir());
 });
