@@ -11,6 +11,7 @@ test('cli-highlight is loaded only when syntax highlighting is requested', t => 
 			throw new Error('cli-highlight loaded before syntax highlighting was requested');
 		}
 		const output = highlightCode('const answer = 42;', {language: 'javascript'});
+		// cli-highlight wraps tokens in ANSI codes but preserves the original source text.
 		if (!output.includes('const answer = 42;')) {
 			throw new Error('highlightCode did not preserve the source text');
 		}
