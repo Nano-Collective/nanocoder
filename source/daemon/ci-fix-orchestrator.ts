@@ -22,14 +22,23 @@ import {
 	createCiFixWorktree,
 	removeCiFixWorktree,
 } from './ci-fix-worktree';
+import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
 
 export interface CiFixOrchestratorDeps {
 	createWorktree: typeof createCiFixWorktree;
 	removeWorktree: typeof removeCiFixWorktree;
-	spawnFixRunner: (input: CiFixRunnerInput) => Promise<CiFixRunnerResult>;
+	spawnFixRunner: (
+		input: CiFixRunnerInput,
+		opts?: {signal?: AbortSignal; cwd?: string},
+	) => Promise<CiFixRunnerResult>;
 	pushBranch: typeof pushBranch;
 	createDraftPr: typeof createDraftPr;
+	/** SHAs of commits this daemon already published as CI fixes. */
+	readAutoFixedShas: (projectRoot: string) => Promise<string[]>;
+	recordAutoFixedShas: (projectRoot: string, shas: string[]) => Promise<void>;
 }
+
+const MAX_TRACKED_AUTO_FIXED_SHAS = 50;
 
 function extractCiPayload(task: SubagentTask): CiJobFailedPayload | undefined {
 	const trigger = task.context?.trigger as
@@ -41,6 +50,7 @@ function extractCiPayload(task: SubagentTask): CiJobFailedPayload | undefined {
 
 function defaultSpawnFixRunner(
 	input: CiFixRunnerInput,
+	opts: {signal?: AbortSignal; cwd?: string} = {},
 ): Promise<CiFixRunnerResult> {
 	return new Promise((resolve, reject) => {
 		const runnerEntry = fileURLToPath(
@@ -55,7 +65,11 @@ function defaultSpawnFixRunner(
 
 		let child: ChildProcess;
 		try {
+			// The runner chdirs into the clone itself, but starts in the project
+			// root so it resolves the project's agents.config.json (providers are
+			// often defined in an uncommitted local config).
 			child = spawn(process.execPath, [runnerEntry], {
+				cwd: opts.cwd,
 				env: {
 					...process.env,
 					NANOCODER_CI_FIX_INPUT_PATH: inputPath,
@@ -69,21 +83,30 @@ function defaultSpawnFixRunner(
 			return;
 		}
 
-		const timer = setTimeout(() => {
+		const terminate = () => {
 			child.kill('SIGTERM');
 			const forceKill = setTimeout(() => child.kill('SIGKILL'), 5000);
 			forceKill.unref();
-		}, TIMEOUT_CI_FIX_RUNNER_MS);
+		};
+		const timer = setTimeout(terminate, TIMEOUT_CI_FIX_RUNNER_MS);
 		timer.unref();
+
+		// Daemon shutdown: stop the runner now instead of orphaning it. The
+		// runner writes a failure result on SIGTERM, so `close` still resolves.
+		const onAbort = () => terminate();
+		if (opts.signal?.aborted) onAbort();
+		else opts.signal?.addEventListener('abort', onAbort, {once: true});
 
 		child.on('error', err => {
 			clearTimeout(timer);
+			opts.signal?.removeEventListener('abort', onAbort);
 			cleanupIoDir();
 			reject(err);
 		});
 
 		child.on('close', () => {
 			clearTimeout(timer);
+			opts.signal?.removeEventListener('abort', onAbort);
 			try {
 				const result = JSON.parse(
 					readFileSync(resultPath, 'utf-8'),
@@ -112,6 +135,16 @@ const defaultDeps: CiFixOrchestratorDeps = {
 	spawnFixRunner: defaultSpawnFixRunner,
 	pushBranch,
 	createDraftPr,
+	readAutoFixedShas: async projectRoot =>
+		(await readCiWatchState(projectRoot)).autoFixedShas ?? [],
+	recordAutoFixedShas: async (projectRoot, shas) => {
+		const state = await readCiWatchState(projectRoot);
+		await writeCiWatchState(projectRoot, {
+			autoFixedShas: [...(state.autoFixedShas ?? []), ...shas].slice(
+				-MAX_TRACKED_AUTO_FIXED_SHAS,
+			),
+		});
+	},
 };
 
 function toSubagentResult(
@@ -133,6 +166,7 @@ export async function runCiAutoFixFlow(
 	trustLevel: Extract<TrustLevel, 'auto-fix' | 'full-commit'>,
 	projectRoot: string,
 	deps: Partial<CiFixOrchestratorDeps> = {},
+	signal?: AbortSignal,
 ): Promise<SubagentResult> {
 	const {
 		createWorktree,
@@ -140,6 +174,8 @@ export async function runCiAutoFixFlow(
 		spawnFixRunner,
 		pushBranch,
 		createDraftPr,
+		readAutoFixedShas,
+		recordAutoFixedShas,
 	} = {...defaultDeps, ...deps};
 	const startTime = Date.now();
 
@@ -148,6 +184,32 @@ export async function runCiAutoFixFlow(
 		return toSubagentResult(task.subagent_type, startTime, {
 			error: 'ci-fix-orchestrator: task carries no ci.job.failed payload',
 		});
+	}
+
+	if (signal?.aborted) {
+		return toSubagentResult(task.subagent_type, startTime, {
+			error: 'CI-fix run cancelled: the daemon is shutting down',
+		});
+	}
+
+	// Loop guard: if the run that failed was triggered by a commit this daemon
+	// itself published as a fix, another automated attempt would just chase its
+	// own tail (especially at full-commit, where every push re-runs CI).
+	try {
+		const fixedShas = await readAutoFixedShas(projectRoot);
+		if (fixedShas.includes(payload.headSha)) {
+			return toSubagentResult(task.subagent_type, startTime, {
+				error:
+					`CI is still failing on ${payload.headSha.slice(0, 7)}, a commit an earlier ` +
+					'automated fix published. Not attempting another automated fix; this needs a human.',
+			});
+		}
+	} catch (err) {
+		console.error(
+			`Could not read auto-fix history, continuing: ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
 	}
 
 	let worktree: CiFixWorktree;
@@ -169,12 +231,15 @@ export async function runCiAutoFixFlow(
 	try {
 		let runnerResult: CiFixRunnerResult;
 		try {
-			runnerResult = await spawnFixRunner({
-				worktreePath: worktree.path,
-				trustLevel,
-				payload,
-				taskDescription: task.description,
-			});
+			runnerResult = await spawnFixRunner(
+				{
+					worktreePath: worktree.path,
+					trustLevel,
+					payload,
+					taskDescription: task.description,
+				},
+				{signal, cwd: projectRoot},
+			);
 		} catch (err) {
 			return toSubagentResult(task.subagent_type, startTime, {
 				error: `CI-fix subprocess failed to run: ${
@@ -187,6 +252,14 @@ export async function runCiAutoFixFlow(
 			return toSubagentResult(task.subagent_type, startTime, {
 				output: runnerResult.output,
 				error: runnerResult.error ?? 'CI-fix subprocess did not succeed',
+			});
+		}
+
+		if (signal?.aborted) {
+			return toSubagentResult(task.subagent_type, startTime, {
+				output: runnerResult.output,
+				error:
+					'CI-fix run cancelled: the daemon is shutting down; nothing was pushed',
 			});
 		}
 
@@ -205,6 +278,9 @@ export async function runCiAutoFixFlow(
 					cwd: worktree.path,
 				});
 				pushed = true;
+				await recordAutoFixedShas(projectRoot, runnerResult.commitShas).catch(
+					() => undefined,
+				);
 				const prUrl = await createDraftPr({
 					title: `fix(ci): ${payload.workflowName} failed on ${payload.branch}`,
 					body: runnerResult.output,
@@ -219,6 +295,9 @@ export async function runCiAutoFixFlow(
 			}
 
 			await pushBranch(worktree.branch, {cwd: worktree.path});
+			await recordAutoFixedShas(projectRoot, runnerResult.commitShas).catch(
+				() => undefined,
+			);
 			return toSubagentResult(task.subagent_type, startTime, {
 				success: true,
 				fixApplied: true,

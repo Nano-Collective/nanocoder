@@ -58,3 +58,25 @@ behind an explicit trust level.
 - [semgrep](https://semgrep.dev/) installed to get static-analysis findings
   — optional; `verify` degrades gracefully and notes it was skipped if
   semgrep isn't on `PATH`.
+
+## Running in CI
+
+`verify` compares your checkout's commit with the PR's head commit. On a
+`pull_request` workflow, `actions/checkout` checks out a synthetic merge
+commit by default, so that check would always fail. Check out the PR head
+instead:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    ref: ${{ github.event.pull_request.head.sha }}
+- run: nanocoder verify --pr ${{ github.event.pull_request.number }} --post-review
+```
+
+## Related: CI watch
+
+The per-project daemon can also watch GitHub Actions for failures and
+investigate them (`ciWatch` in preferences, `daemon start --trust ...`); see
+[Preferences](../configuration/preferences.md#ci-watch-configuration). A
+daemon installed with `nanocoder daemon install` always autostarts at the
+default `comment-only` trust level.

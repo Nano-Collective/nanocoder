@@ -113,7 +113,7 @@ async function main(): Promise<void> {
 					return executor.execute(task, signal);
 				}
 				if (trustLevel !== 'comment-only') {
-					return runCiAutoFixFlow(task, trustLevel, projectRoot);
+					return runCiAutoFixFlow(task, trustLevel, projectRoot, {}, signal);
 				}
 				return executor.execute(
 					task,

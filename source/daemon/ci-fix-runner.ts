@@ -17,6 +17,7 @@
 
 import {readFileSync, writeFileSync} from 'node:fs';
 import {createLLMClient} from '@/client-factory';
+import {getAppConfig} from '@/config/index';
 import type {CiJobFailedPayload} from '@/events/types';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentTask} from '@/subagents/types';
@@ -82,13 +83,20 @@ async function main(): Promise<void> {
 		readFileSync(inputPath, 'utf-8'),
 	) as CiFixRunnerInput;
 
-	// Safe here — this process has no other concurrent work sharing its cwd,
-	// which is the entire reason it's a separate process from the daemon.
-	process.chdir(input.worktreePath);
-
 	let result: CiFixRunnerResult;
 	try {
+		// Resolve provider config and build the client while still in the
+		// project root (the orchestrator spawns this process there): the
+		// clone only has committed files, so an uncommitted project-level
+		// agents.config.json would otherwise be invisible.
 		const {client} = await createLLMClient();
+		getAppConfig();
+
+		// Safe here — this process has no other concurrent work sharing its
+		// cwd, which is the entire reason it's a separate process from the
+		// daemon.
+		process.chdir(input.worktreePath);
+
 		const toolManager = new ToolManager();
 		const executor = new SubagentExecutor(
 			toolManager,

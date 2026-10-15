@@ -96,6 +96,9 @@ This warning will not be shown again for this project.
 async function defaultConfirmFullCommitTrust(
 	projectRoot: string,
 ): Promise<boolean> {
+	// A scripted/backgrounded start has nobody to answer; waiting on stdin
+	// would hang `daemon start` before the lockfile is ever written.
+	if (!process.stdin.isTTY) return false;
 	process.stdout.write(FULL_COMMIT_WARNING(projectRoot));
 	const rl = createInterface({input: process.stdin, output: process.stdout});
 	try {
@@ -266,10 +269,13 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	const loadVerifyConfig =
 		opts.loadVerifyConfigFn ?? (() => getAppConfig().verify);
-	const trustLevel = resolveTrustLevel(
-		parsed.trustLevel,
-		loadVerifyConfig()?.trustLevel,
-	);
+	const configTrustLevel = loadVerifyConfig()?.trustLevel;
+	const trustLevel = resolveTrustLevel(parsed.trustLevel, configTrustLevel);
+	const trustSource = parsed.trustLevel
+		? '--trust flag'
+		: configTrustLevel
+			? 'agents.config.json'
+			: 'default';
 
 	if (trustLevel === 'full-commit') {
 		const isConfirmed =
@@ -281,7 +287,10 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 			if (!confirmed) {
 				return {
 					exitCode: 1,
-					output: 'Aborted: full-commit trust was not confirmed.',
+					output:
+						'Aborted: full-commit trust was not confirmed. It needs a one-time ' +
+						'interactive confirmation: run `nanocoder daemon start --trust full-commit` ' +
+						'once from a terminal.',
 				};
 			}
 			(opts.recordFullCommitTrustConfirmedFn ?? recordFullCommitTrustConfirmed)(
@@ -312,7 +321,7 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	return {
 		exitCode: 0,
-		output: `Daemon started (pid ${lock.pid}, socket ${lock.socketPath}).`,
+		output: `Daemon started (pid ${lock.pid}, socket ${lock.socketPath}). CI trust level: ${trustLevel} (${trustSource}).`,
 	};
 }
 
