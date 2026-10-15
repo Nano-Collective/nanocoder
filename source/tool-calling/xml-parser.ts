@@ -97,6 +97,16 @@ export class XMLToolCallParser {
 		content: string,
 		index: number,
 	): boolean {
+		// A call around the index opens a tag before it and closes that tag
+		// after it; checking this first spares most fences the full scan.
+		const closedAfter = new Set(
+			Array.from(content.slice(index).matchAll(/<\/(\w+)>/g), m => m[1]),
+		);
+		const openedBefore = Array.from(
+			content.slice(0, index).matchAll(/<(\w+)>/g),
+			m => m[1],
+		);
+		if (!openedBefore.some(name => closedAfter.has(name))) return false;
 		const unwrapped = this.blankToolCallWrappers(content);
 		for (const [start, end] of this.findToolCallRanges(unwrapped)) {
 			if (index < start || index >= end) continue;

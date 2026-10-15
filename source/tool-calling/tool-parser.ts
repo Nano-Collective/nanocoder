@@ -223,6 +223,7 @@ function maskEmbeddedCalls(
 	content: string,
 	ranges: Array<[number, number]>,
 ): string {
+	if (ranges.length === 0) return content;
 	const xmlRanges = XMLToolCallParser.findToolCallRanges(content);
 	let result = content;
 	for (const [start, end] of ranges) {

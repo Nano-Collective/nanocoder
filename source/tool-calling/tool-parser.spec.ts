@@ -175,6 +175,22 @@ test('parseToolCalls: many unterminated JSON openers do not stall parsing', t =>
 	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
 });
 
+test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {
+	// ~630 KB: scanning these tags for a call around the fence takes about 1 s.
+	const tags = `<item>${'x'.repeat(57)}`.repeat(10000);
+	const content = `${tags}\n\`\`\`\nhello\n\`\`\``;
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 0);
+	}
+	t.true(elapsed < 100, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
 test('parseToolCalls: function-tag examples inside XML arguments keep their contents', t => {
 	const example = '<function=read_file>{"path":"a.ts"}</function>';
 	for (const content of [
