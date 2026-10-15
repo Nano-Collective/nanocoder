@@ -57,6 +57,74 @@ test('parseToolCalls - handles empty parameter values', t => {
 	t.deepEqual(result[0].parameters, {query: '', path: '/test'});
 });
 
+test('parseToolCalls - keeps bash command containing =', t => {
+	const content =
+		'<execute_bash><command>FOO=1 echo hi</command></execute_bash>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'execute_bash');
+	t.deepEqual(result[0].parameters, {command: 'FOO=1 echo hi'});
+});
+
+test('parseToolCalls - keeps string_replace with = in old_str and new_str', t => {
+	const content =
+		'<string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'string_replace');
+	t.deepEqual(result[0].parameters, {
+		path: 'a.ts',
+		old_str: 'const x = 1;',
+		new_str: 'const x = 2;',
+	});
+});
+
+test('parseToolCalls - keeps comparison operators like == and <= in values', t => {
+	const content =
+		'<string_replace><path>a.ts</path><old_str>if (a == b && c <= d) {}</old_str><new_str>if (a === b) {}</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].parameters.old_str, 'if (a == b && c <= d) {}');
+	t.is(result[0].parameters.new_str, 'if (a === b) {}');
+});
+
+test('parseToolCalls - a code fence inside a call stays part of its argument', t => {
+	const markdown = '# Setup\n\n```bash\nFOO=1 make\n```';
+	const content = `<write_file><path>README.md</path><content>${markdown}</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'write_file');
+	t.deepEqual(result[0].parameters, {path: 'README.md', content: markdown});
+});
+
+test('parseToolCalls - still unwraps a fenced call inside a generic wrapper tag', t => {
+	const fenced = '```xml\n<read_file><path>a.ts</path></read_file>\n```';
+	for (const content of [
+		`<response>Reading a.ts:\n${fenced}\n</response>`,
+		`<response><tool_call>Reading a.ts:\n${fenced}\n</tool_call></response>`,
+	]) {
+		const result = XMLToolCallParser.parseToolCalls(content);
+
+		t.is(result.length, 1, content);
+		t.is(result[0].toolName, 'read_file');
+		t.deepEqual(result[0].parameters, {path: 'a.ts'});
+	}
+});
+
+test('parseToolCalls - still rejects <parameter=name> attribute syntax', t => {
+	for (const content of [
+		'<read_file><parameter=path>/test.txt</parameter></read_file>',
+		'<read_file><parameter =path>/test.txt</parameter></read_file>',
+		'<read_file><Parameter=path>/test.txt</Parameter></read_file>',
+	]) {
+		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
 // JSON parameter tests
 test('parseToolCalls - parses JSON array parameters', t => {
 	const content =

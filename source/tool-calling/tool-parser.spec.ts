@@ -24,6 +24,118 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: parses XML tool calls whose values contain =', t => {
+	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
+<string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 2);
+		t.is(result.toolCalls[0].function.name, 'execute_bash');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			command: 'FOO=1 echo hi',
+		});
+		t.is(result.toolCalls[1].function.name, 'string_replace');
+		t.deepEqual(result.toolCalls[1].function.arguments, {
+			path: 'a.ts',
+			old_str: 'const x = 1;',
+			new_str: 'const x = 2;',
+		});
+	}
+});
+
+const EMBEDDED_XML =
+	'<execute_bash><command>FOO=1 echo hi</command></execute_bash>';
+
+test('parseToolCalls: XML quoted inside a Llama function-tag call stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `<function=write_file>${JSON.stringify(args)}</function>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: XML quoted inside a JSON tool call stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = JSON.stringify({name: 'write_file', arguments: args});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: fenced JSON call quoted inside an XML call stays an argument', t => {
+	const quoted = JSON.stringify({
+		name: 'write_file',
+		arguments: {path: 'examples.md', content: EMBEDDED_XML},
+	});
+	const fenced = `\`\`\`json\n${quoted}\n\`\`\``;
+	const content = `<write_file><path>a.md</path><content>${fenced}</content></write_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'a.md',
+			content: fenced,
+		});
+	}
+});
+
+test('parseToolCalls: JSON argument survives an HTML wrapper around a fenced XML call', t => {
+	const json = '{"name": "read_file", "arguments": {"path": "/x"}}';
+	const content = `<div>\n\`\`\`xml\n<write_file><path>a.json</path><content>${json}</content></write_file>\n\`\`\`\n</div>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'a.json',
+			content: {name: 'read_file', arguments: {path: '/x'}},
+		});
+	}
+});
+
+test('parseToolCalls: JSON tool call quoted inside an XML call stays an argument', t => {
+	const json = '{"name": "read_file", "arguments": {"path": "/x"}}';
+
+	for (const content of [
+		`<write_file><path>a.json</path><content>${json}</content></write_file>`,
+		`<tool_call><write_file><path>a.json</path><content>${json}</content></write_file></tool_call>`,
+	]) {
+		const result = parseToolCalls(content);
+
+		t.true(result.success);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.is(result.toolCalls[0].function.name, 'write_file');
+			t.deepEqual(result.toolCalls[0].function.arguments, {
+				path: 'a.json',
+				content: {name: 'read_file', arguments: {path: '/x'}},
+			});
+		}
+	}
+});
+
 test('parseToolCalls: detects malformed mixed function/parameter syntax (non-JSON body)', t => {
 	// The outer <function=name> body is XML, not JSON, so the function-tag
 	// parser skips it. The inner <parameter=name> still triggers the

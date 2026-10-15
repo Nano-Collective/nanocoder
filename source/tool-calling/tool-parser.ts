@@ -68,12 +68,13 @@ function tryParseJSONToolCall(raw: string): ToolCall | null {
 /**
  * JSON fallback parser for open-weights models that emit JSON-shaped tool calls
  * instead of XML (the panicked-into-JSON failure mode). Handles markdown-fenced
- * blocks and bare `{"name":..., "arguments":...}` objects. Only runs when the
- * XML parser found no tool calls.
+ * blocks and bare `{"name":..., "arguments":...}` objects. Its calls are only
+ * used when the XML and function-tag parsers found none.
  */
 function parseJSONToolCalls(content: string): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
+	ranges: Array<[number, number]>;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
@@ -105,10 +106,14 @@ function parseJSONToolCalls(content: string): {
 	}
 
 	if (toolCalls.length === 0) {
-		return {toolCalls, cleanedContent: content};
+		return {toolCalls, cleanedContent: content, ranges: matchedRanges};
 	}
 
-	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
+	return {
+		toolCalls,
+		cleanedContent: removeRanges(content, matchedRanges),
+		ranges: matchedRanges,
+	};
 }
 
 const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
@@ -123,6 +128,7 @@ const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
 function parseFunctionTagToolCalls(content: string): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
+	ranges: Array<[number, number]>;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
@@ -159,10 +165,34 @@ function parseFunctionTagToolCalls(content: string): {
 	}
 
 	if (toolCalls.length === 0) {
-		return {toolCalls, cleanedContent: content};
+		return {toolCalls, cleanedContent: content, ranges: matchedRanges};
 	}
 
-	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
+	return {
+		toolCalls,
+		cleanedContent: removeRanges(content, matchedRanges),
+		ranges: matchedRanges,
+	};
+}
+
+/**
+ * Blank out valid function-tag / JSON tool calls before the XML scan, so XML
+ * quoted inside their arguments (e.g. a write_file of docs containing
+ * `<execute_bash>...`) is not mistaken for a separate call. Spans enclosed by
+ * an XML call are kept: there the JSON is that call's argument.
+ */
+function maskEmbeddedCalls(
+	content: string,
+	ranges: Array<[number, number]>,
+): string {
+	const xmlRanges = XMLToolCallParser.findToolCallRanges(content);
+	let result = content;
+	for (const [start, end] of ranges) {
+		if (xmlRanges.some(([s, e]) => s <= start && end <= e)) continue;
+		result =
+			result.slice(0, start) + ' '.repeat(end - start) + result.slice(end);
+	}
+	return result;
 }
 
 const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
@@ -223,10 +253,17 @@ export function parseToolCalls(content: unknown): ParseResult {
 	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
 	const strippedContent = stripThinkTags(contentStr);
 
+	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
+	const jsonResult = parseJSONToolCalls(strippedContent);
+	const xmlContent = maskEmbeddedCalls(strippedContent, [
+		...fnTagResult.ranges,
+		...jsonResult.ranges,
+	]);
+
 	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
-	if (XMLToolCallParser.hasToolCalls(strippedContent)) {
+	if (XMLToolCallParser.hasToolCalls(xmlContent)) {
 		// Parse valid XML tool calls
-		const parsedCalls = XMLToolCallParser.parseToolCalls(strippedContent);
+		const parsedCalls = XMLToolCallParser.parseToolCalls(xmlContent);
 		const convertedCalls = XMLToolCallParser.convertToToolCalls(parsedCalls);
 
 		if (convertedCalls.length > 0) {
@@ -241,7 +278,6 @@ export function parseToolCalls(content: unknown): ParseResult {
 	}
 
 	// 3. Try Llama 3.x function-tag fallback: <function=name>{json}</function>
-	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
 	if (fnTagResult.toolCalls.length > 0) {
 		return {
 			success: true,
@@ -251,7 +287,6 @@ export function parseToolCalls(content: unknown): ParseResult {
 	}
 
 	// 4. Try JSON fallback (open-weights models that emit JSON-shaped tool calls)
-	const jsonResult = parseJSONToolCalls(strippedContent);
 	if (jsonResult.toolCalls.length > 0) {
 		return {
 			success: true,
