@@ -19,6 +19,7 @@ import {
 	NanocoderCodeLensProvider,
 	sendCodeLensPrompt,
 } from './code-lens-provider';
+import { resolveExtensionCwd } from './workspace-utils';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -116,8 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
 			acpProcessManager.start();
 		}),
 		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
-			const config = vscode.workspace.getConfiguration('nanocoder');
-			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+			const cwdSetting = resolveExtensionCwd();
 			// Project-level config first, then the global one - the same order the CLI reads them.
 			const configPath = resolveConfigPath(cwdSetting, getGlobalConfigDir(), 'agents.config.json');
 			try {

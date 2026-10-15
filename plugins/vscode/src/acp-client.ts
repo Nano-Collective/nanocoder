@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
+import { resolveExtensionCwd } from './workspace-utils';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -31,6 +32,13 @@ export class NanocoderAcpClient {
 	private _sessionId?: string;
 	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
 	private _pendingSession: Promise<string | undefined> | null = null;
+	/**
+	 * Bumped whenever the session is cleared or replaced other than by creation
+	 * (New Chat, a reconnect, a resume). A creation that started under an older
+	 * value belongs to a conversation the user has left, so its result is
+	 * dropped instead of being written back over the new state.
+	 */
+	private _sessionGeneration = 0;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
@@ -135,8 +143,15 @@ export class NanocoderAcpClient {
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
+		this._abandonPendingSession();
 		this._clearPendingPermissions();
 		this._handshakeComplete = false;
+	}
+
+	/** Drop any in-flight session creation; see {@link _sessionGeneration}. */
+	private _abandonPendingSession(): void {
+		this._sessionGeneration++;
+		this._pendingSession = null;
 	}
 
 	/** Handle custom notifications from the agent. */
@@ -242,18 +257,33 @@ export class NanocoderAcpClient {
 		// against the shared connection; the second writer overwrites the
 		// first `_sessionId` and the first session is orphaned with its mode
 		// and configOptions already read into local state.
-		if (this._pendingSession) {
-			return this._pendingSession;
+		const generation = this._sessionGeneration;
+		let pending = this._pendingSession;
+		if (!pending) {
+			pending = this._createSession(cwd, generation);
+			this._pendingSession = pending;
 		}
-		this._pendingSession = this._createSession(cwd);
+		let sessionId: string | undefined;
 		try {
-			return await this._pendingSession;
+			sessionId = await pending;
 		} finally {
-			this._pendingSession = null;
+			if (this._pendingSession === pending) {
+				this._pendingSession = null;
+			}
 		}
+		// New Chat, a resume or a reconnect happened while this was in flight,
+		// so the caller wants the current conversation's session. After a
+		// reconnect the new process creates its own once the handshake is done.
+		if (generation !== this._sessionGeneration) {
+			return this.isHandshakeComplete ? this.getOrCreateSession(cwd) : undefined;
+		}
+		return sessionId;
 	}
 
-	private async _createSession(cwd: string): Promise<string | undefined> {
+	private async _createSession(
+		cwd: string,
+		generation: number,
+	): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
@@ -261,6 +291,12 @@ export class NanocoderAcpClient {
 			const initialModel = config.get<string>('model');
 
 			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
+			if (generation !== this._sessionGeneration) {
+				this.outputChannel.appendLine(
+					`Discarded session ${result.sessionId}: the conversation changed while it was being created.`,
+				);
+				return undefined;
+			}
 			this._sessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
 
@@ -376,6 +412,8 @@ export class NanocoderAcpClient {
 		// Abandoning the conversation abandons its approval prompts too.
 		this._clearPendingPermissions();
 		this._sessionId = undefined;
+		// ...and a session still being created for it.
+		this._abandonPendingSession();
 		this.onSessionArtifacts?.(undefined);
 	}
 	/**
@@ -504,9 +542,10 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
+			// A session still being created must not land on top of this one.
+			this._abandonPendingSession();
 			this._sessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;

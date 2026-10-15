@@ -139,3 +139,73 @@ test('ChatWebviewProvider - _handleSubmit warns and drops a submit when idle but
 		'the webview must clear its loading state via a failed prompt_response',
 	);
 });
+
+// `@` mention search only covers a folder the user chose: `nanocoder.cwd` or
+// the first workspace folder. The home-directory fallback that sessions use
+// must never be crawled.
+function mentionDeps() {
+	const {provider} = makeStubs();
+	return (provider as any)._mentionSearchDeps() as {
+		workspaceRoot: string;
+		findFiles(glob: string, limit: number): Promise<string[]>;
+	};
+}
+
+function resetMentionStubs() {
+	(vscode as any).__test.reset();
+	(vscode.workspace as any).workspaceFolders = undefined;
+}
+
+test.serial('mention search finds nothing when no folder is open and nanocoder.cwd is unset', async (t) => {
+	resetMentionStubs();
+	try {
+		let searches = 0;
+		(vscode as any).__test.findFiles = async () => {
+			searches++;
+			return [vscode.Uri.file('/home/user/private.txt')];
+		};
+
+		t.deepEqual(await mentionDeps().findFiles('**/*a*', 5), []);
+		t.is(searches, 0, 'the home-directory fallback must not be searched');
+	} finally {
+		resetMentionStubs();
+	}
+});
+
+test.serial('mention search covers the configured nanocoder.cwd, not the first workspace folder', async (t) => {
+	resetMentionStubs();
+	try {
+		(vscode.workspace as any).workspaceFolders = [{uri: vscode.Uri.file('/workspace')}];
+		(vscode as any).__test.configuration = (section: string, key: string, fallback: unknown) =>
+			section === 'nanocoder' && key === 'cwd' ? '/custom/project' : fallback;
+		let searchedBase = '';
+		(vscode as any).__test.findFiles = async (include: {base: {fsPath: string}}) => {
+			searchedBase = include.base.fsPath;
+			return [vscode.Uri.file('/custom/project/a.ts')];
+		};
+
+		const deps = mentionDeps();
+		t.is(deps.workspaceRoot, '/custom/project');
+		t.deepEqual(await deps.findFiles('**/*a*', 5), ['/custom/project/a.ts']);
+		t.is(searchedBase, '/custom/project');
+	} finally {
+		resetMentionStubs();
+	}
+});
+
+test.serial('mention search covers the workspace folder when nanocoder.cwd is unset', async (t) => {
+	resetMentionStubs();
+	try {
+		(vscode.workspace as any).workspaceFolders = [{uri: vscode.Uri.file('/workspace')}];
+		let searchedBase = '';
+		(vscode as any).__test.findFiles = async (include: {base: {fsPath: string}}) => {
+			searchedBase = include.base.fsPath;
+			return [vscode.Uri.file('/workspace/b.ts')];
+		};
+
+		t.deepEqual(await mentionDeps().findFiles('**/*b*', 5), ['/workspace/b.ts']);
+		t.is(searchedBase, '/workspace');
+	} finally {
+		resetMentionStubs();
+	}
+});
