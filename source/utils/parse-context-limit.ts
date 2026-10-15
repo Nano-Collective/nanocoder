@@ -17,10 +17,14 @@ export function parseContextLimit(value: string): number | null {
 	// It can still overflow to Infinity on a very long digit string, and callers
 	// store whatever we hand back without further validation.
 	const parsed = Number.parseFloat(match[1]);
-	if (!Number.isFinite(parsed) || parsed <= 0) {
+	const multiplier = match[2] === 'k' ? 1000 : 1;
+	const scaled = parsed * multiplier;
+	if (!Number.isFinite(scaled) || scaled <= 0) {
 		return null;
 	}
-
-	const multiplier = match[2] === 'k' ? 1000 : 1;
-	return Math.round(parsed * multiplier);
+	const result = Math.round(scaled);
+	if (result <= 0) {
+		return null;
+	}
+	return result;
 }
