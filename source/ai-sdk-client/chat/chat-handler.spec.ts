@@ -1146,3 +1146,41 @@ test('openai-compatible: a tool screenshot reaches the request body as an image_
 		],
 	});
 });
+
+test('chat-handler names the provider and baseUrl when the endpoint is unreachable', async t => {
+	// Issue #1742: a refused connection used to surface as the bare
+	// "Connection failed: Unable to reach the model server", with no way to
+	// tell which provider or URL was at fault.
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const baseURL = 'http://127.0.0.1:59999/v1';
+	const model = createOpenAICompatible({
+		name: 'MyProvider',
+		baseURL,
+		fetch: async () => {
+			throw new TypeError('fetch failed', {
+				cause: new Error('connect ECONNREFUSED 127.0.0.1:59999'),
+			});
+		},
+	})('m');
+
+	const error = await t.throwsAsync(
+		handleChat({
+			model,
+			currentModel: 'm',
+			providerConfig: {
+				name: 'MyProvider',
+				type: 'openai',
+				models: ['m'],
+				config: {baseURL},
+			},
+			messages: [{role: 'user', content: 'hi'}],
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+		}),
+	);
+
+	t.true(error.message.includes('MyProvider'));
+	t.true(error.message.includes(baseURL));
+	t.true(error.message.includes('ECONNREFUSED'));
+});

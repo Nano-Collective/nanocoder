@@ -59,7 +59,10 @@ import {
 } from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
-import {parseAPIError} from '../error-handling/error-parser.js';
+import {
+	type ProviderErrorContext,
+	parseAPIError,
+} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
 import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
@@ -516,6 +519,13 @@ export async function handleChat(
 			// Calculate performance metrics even for errors
 			const finalMetrics = endMetrics(metrics);
 
+			// Names the failing provider and its baseUrl in connection and
+			// baseUrl errors, so the user knows which entry to fix.
+			const providerErrorContext: ProviderErrorContext = {
+				providerName: providerConfig.name,
+				baseUrl: providerConfig.config.baseURL,
+			};
+
 			// Check if this was a user-initiated cancellation
 			if (error instanceof Error && error.name === 'AbortError') {
 				logger.info('Chat request cancelled by user', {
@@ -638,6 +648,7 @@ export async function handleChat(
 					if (streamingErrors.length > 0) {
 						const userMessage = parseAPIError(
 							streamingErrors[streamingErrors.length - 1],
+							providerErrorContext,
 						);
 						throw new Error(userMessage);
 					}
@@ -670,12 +681,12 @@ export async function handleChat(
 					};
 				}
 				// There's a real error underneath, parse it
-				const userMessage = parseAPIError(rootError);
+				const userMessage = parseAPIError(rootError, providerErrorContext);
 				throw new Error(userMessage);
 			}
 
 			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(error);
+			const userMessage = parseAPIError(error, providerErrorContext);
 			throw new Error(userMessage);
 		}
 	}, correlationId); // End of withNewCorrelationContext

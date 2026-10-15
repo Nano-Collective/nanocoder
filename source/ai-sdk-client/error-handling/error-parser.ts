@@ -24,11 +24,103 @@ function describeError(error: Error): string {
 }
 
 /**
+ * Optional context describing the provider a failed request was aimed at.
+ * When supplied, connection and URL-configuration errors name the provider and
+ * the baseUrl it tried to reach instead of blaming "the model server", so the
+ * user can tell which of several providers is misconfigured.
+ */
+export interface ProviderErrorContext {
+	/** Display name of the active provider, e.g. "MyProvider". */
+	providerName?: string;
+	/** The provider's configured baseUrl, e.g. "http://127.0.0.1:11434/v1". */
+	baseUrl?: string;
+}
+
+/** Human-readable label for the endpoint a failed request was aimed at. */
+function describeProviderTarget(context?: ProviderErrorContext): string {
+	if (context?.providerName && context.baseUrl) {
+		return `provider "${context.providerName}" at ${context.baseUrl}`;
+	}
+	if (context?.providerName) {
+		return `provider "${context.providerName}"`;
+	}
+	if (context?.baseUrl) {
+		return `the model server at ${context.baseUrl}`;
+	}
+	return 'the model server';
+}
+
+/**
+ * Reads the Node error code (ECONNREFUSED, ERR_INVALID_URL, ...) off a root
+ * error so URL-parse failures can be recognised even when the message alone is
+ * ambiguous.
+ */
+function getErrorCode(error: Error): string | undefined {
+	const code = (error as {code?: unknown}).code;
+	return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Names the transport failure behind a "fetch failed" wrapper so a refused
+ * connection, an unknown host, and a temporary DNS failure no longer read the
+ * same. `errorMessage` is the unwrapped root cause, so the OS errno (or
+ * undici's friendlier phrasing) is already in the text.
+ */
+function describeConnectionReason(errorMessage: string): string | undefined {
+	if (errorMessage.includes('ECONNREFUSED')) {
+		return 'ECONNREFUSED: connection refused';
+	}
+	if (errorMessage.includes('ECONNRESET')) {
+		return 'ECONNRESET: connection reset by peer';
+	}
+	if (errorMessage.includes('ENOTFOUND')) {
+		return 'ENOTFOUND: host not found (DNS lookup failed)';
+	}
+	if (errorMessage.includes('EAI_AGAIN')) {
+		return 'EAI_AGAIN: temporary DNS failure';
+	}
+	if (/getaddrinfo/i.test(errorMessage)) {
+		return 'DNS lookup failed';
+	}
+	if (/self[- ]signed|certificate/i.test(errorMessage)) {
+		return 'TLS certificate error';
+	}
+	return undefined;
+}
+
+/**
+ * Recognises the pre-connection failures a malformed baseUrl produces: a
+ * `new URL()` TypeError ("Invalid URL", code ERR_INVALID_URL) and undici's
+ * "bad port" / "unknown scheme", both thrown before a request leaves the
+ * process. Matched on the whole message (or the error code) so ordinary API
+ * errors that merely mention these phrases are not misclassified.
+ */
+function describeBaseUrlProblem(
+	errorMessage: string,
+	code: string | undefined,
+): string | undefined {
+	const trimmed = errorMessage.trim();
+	if (code === 'ERR_INVALID_URL' || /^invalid url$/i.test(trimmed)) {
+		return 'it is not a valid URL';
+	}
+	if (/^bad port$/i.test(trimmed)) {
+		return 'it uses a port the HTTP client refuses to connect to';
+	}
+	if (/^unknown scheme$/i.test(trimmed)) {
+		return 'it is missing a scheme (expected http:// or https://)';
+	}
+	return undefined;
+}
+
+/**
  * Parses API errors into user-friendly messages.
  * Exported for testing purposes.
  */
-export function parseAPIError(error: unknown): string {
-	const result = parseAPIErrorInternal(error);
+export function parseAPIError(
+	error: unknown,
+	context?: ProviderErrorContext,
+): string {
+	const result = parseAPIErrorInternal(error, context);
 	// Final safety net: if our user-facing string still contains "[object Object]"
 	// then some upstream Error.message was already a stringified object. Replace
 	// with a structured dump so the real payload is visible.
@@ -41,7 +133,10 @@ export function parseAPIError(error: unknown): string {
 	return result;
 }
 
-function parseAPIErrorInternal(error: unknown): string {
+function parseAPIErrorInternal(
+	error: unknown,
+	context?: ProviderErrorContext,
+): string {
 	// First extract the root error from any wrappers
 	const rootError = extractRootError(error);
 
@@ -210,7 +305,32 @@ function parseAPIErrorInternal(error: unknown): string {
 		lowerMessage.includes('network error') ||
 		lowerMessage.includes('getaddrinfo')
 	) {
-		return 'Connection failed: Unable to reach the model server';
+		const reason = describeConnectionReason(errorMessage);
+		const cause = reason ? ` (${reason})` : '';
+		return (
+			`Couldn't reach ${describeProviderTarget(context)}${cause}. ` +
+			"Check the provider's baseUrl and that the server is running."
+		);
+	}
+
+	// Handle malformed baseUrl failures: an unset environment variable, a
+	// missing scheme, or a blocked port. These surface from Node/undici as raw
+	// one-word errors ("Invalid URL", "bad port", "unknown scheme") with no
+	// indication of which provider or URL was at fault.
+	const baseUrlProblem = describeBaseUrlProblem(
+		errorMessage,
+		getErrorCode(rootError),
+	);
+	if (baseUrlProblem) {
+		const provider = context?.providerName
+			? ` for provider "${context.providerName}"`
+			: '';
+		const url = context?.baseUrl ? ` (${context.baseUrl})` : '';
+		return (
+			`Invalid baseUrl${provider}${url}: ${baseUrlProblem}. ` +
+			'Check that baseUrl is a complete URL (http:// or https://) and ' +
+			'that any environment variables it references are set.'
+		);
 	}
 
 	// Handle context length errors

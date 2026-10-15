@@ -155,7 +155,10 @@ test('parseAPIError handles variant-case headers timeout errors', t => {
 test('parseAPIError handles connection errors', t => {
 	const error = new Error('ECONNREFUSED: connection refused');
 	const result = parseAPIError(error);
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError handles context length errors', t => {
@@ -203,13 +206,19 @@ test('parseAPIError handles token limit errors', t => {
 test('parseAPIError handles ECONNRESET errors', t => {
 	const error = new Error('read ECONNRESET');
 	const result = parseAPIError(error);
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (ECONNRESET: connection reset by peer). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError handles ENOTFOUND errors', t => {
 	const error = new Error('getaddrinfo ENOTFOUND example.invalid');
 	const result = parseAPIError(error);
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError handles connect ETIMEDOUT errors as timeout', t => {
@@ -222,7 +231,10 @@ test('parseAPIError handles connect ETIMEDOUT errors as timeout', t => {
 test('parseAPIError handles Failed to fetch errors', t => {
 	const error = new Error('Failed to fetch');
 	const result = parseAPIError(error);
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server. Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError does not misclassify "disconnect" as connection error', t => {
@@ -255,4 +267,91 @@ test('parseAPIError extracts first line from multiline errors', t => {
 	const error = new Error('First line\nSecond line\nThird line');
 	const result = parseAPIError(error);
 	t.is(result, 'First line');
+});
+
+// --- Issue #1742: name the provider, the URL, and the cause -----------------
+
+const CONTEXT = {
+	providerName: 'MyProvider',
+	baseUrl: 'http://127.0.0.1:59999/v1',
+};
+
+test('parseAPIError names provider and baseUrl on a refused connection', t => {
+	const error = new TypeError('fetch failed', {
+		cause: new Error('connect ECONNREFUSED 127.0.0.1:59999'),
+	});
+	const result = parseAPIError(error, CONTEXT);
+	t.is(
+		result,
+		"Couldn't reach provider \"MyProvider\" at http://127.0.0.1:59999/v1 (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+	);
+});
+
+test('parseAPIError distinguishes an unknown host from a refused connection', t => {
+	const refused = parseAPIError(
+		new Error('connect ECONNREFUSED 127.0.0.1:59999'),
+		CONTEXT,
+	);
+	const unknownHost = parseAPIError(
+		new Error('getaddrinfo ENOTFOUND no-such-host.invalid'),
+		{providerName: 'MyProvider', baseUrl: 'https://no-such-host.invalid/v1'},
+	);
+	t.true(refused.includes('ECONNREFUSED'));
+	t.true(unknownHost.includes('ENOTFOUND'));
+	t.not(refused, unknownHost);
+});
+
+test('parseAPIError wraps a bad port with the provider and URL', t => {
+	const error = new TypeError('fetch failed', {cause: new Error('bad port')});
+	const result = parseAPIError(error, {
+		providerName: 'MyProvider',
+		baseUrl: 'http://127.0.0.1:9/v1',
+	});
+	t.is(
+		result,
+		'Invalid baseUrl for provider "MyProvider" (http://127.0.0.1:9/v1): it uses a port the HTTP client refuses to connect to. Check that baseUrl is a complete URL (http:// or https://) and that any environment variables it references are set.',
+	);
+});
+
+test('parseAPIError explains an unknown scheme (missing http://)', t => {
+	const error = new TypeError('fetch failed', {
+		cause: new Error('unknown scheme'),
+	});
+	const result = parseAPIError(error, {
+		providerName: 'MyProvider',
+		baseUrl: 'localhost:11434/v1',
+	});
+	t.true(result.includes('Invalid baseUrl for provider "MyProvider"'));
+	t.true(result.includes('localhost:11434/v1'));
+	t.true(result.includes('missing a scheme'));
+});
+
+test('parseAPIError explains an unparseable baseUrl (missing env var)', t => {
+	// What `new URL()` throws for `${MISSING_URL}` or an empty string: a
+	// TypeError whose message is the one-word "Invalid URL".
+	const error = Object.assign(new TypeError('Invalid URL'), {
+		code: 'ERR_INVALID_URL',
+	});
+	const result = parseAPIError(error, {
+		providerName: 'MyProvider',
+		baseUrl: '',
+	});
+	t.true(result.includes('Invalid baseUrl for provider "MyProvider"'));
+	t.true(result.includes('it is not a valid URL'));
+	t.true(result.includes('environment variables'));
+});
+
+test('parseAPIError omits provider name when no context is supplied', t => {
+	const result = parseAPIError(new Error('bad port'));
+	t.is(
+		result,
+		'Invalid baseUrl: it uses a port the HTTP client refuses to connect to. Check that baseUrl is a complete URL (http:// or https://) and that any environment variables it references are set.',
+	);
+});
+
+test('parseAPIError does not treat a URL phrase mid-message as a baseUrl error', t => {
+	const result = parseAPIError(
+		new Error('The upstream returned invalid url metadata'),
+	);
+	t.is(result, 'The upstream returned invalid url metadata');
 });

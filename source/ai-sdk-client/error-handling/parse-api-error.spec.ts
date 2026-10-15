@@ -71,7 +71,10 @@ test('parseAPIError - handles connection refused', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError - handles offline undici fetch failure', t => {
@@ -83,7 +86,10 @@ test('parseAPIError - handles offline undici fetch failure', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError - handles offline fetch failure without a cause', t => {
@@ -91,7 +97,10 @@ test('parseAPIError - handles offline fetch failure without a cause', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server. Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError - handles DNS EAI_AGAIN error', t => {
@@ -99,7 +108,10 @@ test('parseAPIError - handles DNS EAI_AGAIN error', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.is(
+		result,
+		"Couldn't reach the model server (EAI_AGAIN: temporary DNS failure). Check the provider's baseUrl and that the server is running.",
+	);
 });
 
 test('parseAPIError - handles timeout error', t => {
