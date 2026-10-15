@@ -141,8 +141,9 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/context-max', '/context-max 128k', '/context-max --reset'],
 	},
 	copy: {
-		usage: '/copy',
-		examples: ['/copy'],
+		usage: '/copy [code]',
+		options: ['code'],
+		examples: ['/copy', '/copy code'],
 	},
 	expand: {
 		usage: '/expand [result-number]',

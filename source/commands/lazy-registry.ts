@@ -64,7 +64,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'copy',
-		description: 'Copy the last assistant response to the clipboard',
+		description:
+			'Copy the last assistant response to the clipboard (/copy [code] copies just the last code block)',
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{

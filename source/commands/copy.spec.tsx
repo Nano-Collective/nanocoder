@@ -46,7 +46,7 @@ test('copyCommand has correct name and description', t => {
 	t.is(copyCommand.name, 'copy');
 	t.is(
 		copyCommand.description,
-		'Copy the last assistant response to the clipboard',
+		'Copy the last assistant response to the clipboard (/copy [code] copies just the last code block)',
 	);
 });
 
@@ -194,20 +194,21 @@ test('copyCommand warns on an unknown argument', async t => {
 });
 
 test('copyCommand warns when multiple arguments are provided', async t => {
-        const result = await copyCommand.handler(
-                ['code', 'extra'],
-                baseMessages,
-                testMetadata,
-        );
+	const result = await copyCommand.handler(
+		['code', 'extra'],
+		baseMessages,
+		testMetadata,
+	);
 
-        t.truthy(React.isValidElement(result));
+	t.truthy(React.isValidElement(result));
 
-        const {lastFrame} = renderWithTheme(result as React.ReactElement);
-        const output = lastFrame() || '';
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
 
-        t.true(output.includes('Unknown option "code"'));
-        t.true(output.includes('Usage: /copy [code]'));
-        t.is(lastWritten, null);
+	t.true(output.includes('Too many arguments'));
+	t.true(output.includes('Usage: /copy [code]'));
+	t.false(output.includes('Unknown option'));
+	t.is(lastWritten, null);
 });
 
 test('copyCommand code warns when no code blocks exist', async t => {
