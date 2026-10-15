@@ -3,9 +3,10 @@
  * Supports GPT-3.5, GPT-4, and other OpenAI models
  */
 
-import {encoding_for_model, get_encoding, type TiktokenModel} from 'tiktoken';
+import type {get_encoding, TiktokenModel} from 'tiktoken';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '../../types/tokenization';
+import {loadTiktoken} from './tiktoken-loader';
 
 /**
  * OpenAI tokenizer using tiktoken for accurate token counting
@@ -16,11 +17,12 @@ export class OpenAITokenizer implements Tokenizer {
 
 	constructor(modelId?: string) {
 		this.modelName = modelId || 'gpt-4';
+		const tiktoken = loadTiktoken();
 
 		try {
-			this.encoding = encoding_for_model(modelId as TiktokenModel);
+			this.encoding = tiktoken.encoding_for_model(modelId as TiktokenModel);
 		} catch {
-			this.encoding = get_encoding('cl100k_base');
+			this.encoding = tiktoken.get_encoding('cl100k_base');
 		}
 	}
 
