@@ -30,7 +30,10 @@ test('DNS failure: distinguishes ENOTFOUND from ECONNREFUSED', t => {
 		baseUrl: 'https://no-such-host.invalid/v1',
 	});
 	t.true(message.includes('MyProvider'));
-	t.true(message.includes('https://no-such-host.invalid/v1'));
+	t.regex(
+    message,
+    /provider "MyProvider" at https:\/\/no-such-host\.invalid\/v1 \(ENOTFOUND\)/,
+	);
 	t.true(message.includes('ENOTFOUND'));
 	t.true(message.includes('DNS'));
 	t.false(message.includes('ECONNREFUSED'));
@@ -106,7 +109,10 @@ test('sanitizes credentials and query parameters from valid URL', t => {
 		providerName: 'MyProvider',
 		baseUrl: 'https://user:secret@example.com/v1?api_key=private#token',
 	});
-	t.true(message.includes('https://example.com/v1'));
+	t.regex(
+		message,
+		/provider "MyProvider" at https:\/\/example\.com\/v1\. Check that/,
+	);
 	t.false(message.includes('user:secret'));
 	t.false(message.includes('private'));
 	t.false(message.includes('token'));
