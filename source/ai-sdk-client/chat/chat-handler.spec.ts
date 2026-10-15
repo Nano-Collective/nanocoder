@@ -1153,6 +1153,7 @@ test('chat-handler names the provider and baseUrl when the endpoint is unreachab
 	// tell which provider or URL was at fault.
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	const baseURL = 'http://127.0.0.1:59999/v1';
+	const configPath = '/home/u/.config/nanocoder/agents.config.json';
 	const model = createOpenAICompatible({
 		name: 'MyProvider',
 		baseURL,
@@ -1173,6 +1174,7 @@ test('chat-handler names the provider and baseUrl when the endpoint is unreachab
 				models: ['m'],
 				config: {baseURL},
 			},
+			configPath,
 			messages: [{role: 'user', content: 'hi'}],
 			tools: {},
 			callbacks: {},
@@ -1183,4 +1185,5 @@ test('chat-handler names the provider and baseUrl when the endpoint is unreachab
 	t.true(error.message.includes('MyProvider'));
 	t.true(error.message.includes(baseURL));
 	t.true(error.message.includes('ECONNREFUSED'));
+	t.true(error.message.includes(configPath));
 });

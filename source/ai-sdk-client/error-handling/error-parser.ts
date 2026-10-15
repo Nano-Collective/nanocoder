@@ -34,6 +34,8 @@ export interface ProviderErrorContext {
 	providerName?: string;
 	/** The provider's configured baseUrl, e.g. "http://127.0.0.1:11434/v1". */
 	baseUrl?: string;
+	/** Path to the agents.config.json the provider was read from. */
+	configPath?: string;
 }
 
 /** Human-readable label for the endpoint a failed request was aimed at. */
@@ -48,6 +50,16 @@ function describeProviderTarget(context?: ProviderErrorContext): string {
 		return `the model server at ${context.baseUrl}`;
 	}
 	return 'the model server';
+}
+
+/**
+ * Points the user at the file that holds the offending baseUrl when we know
+ * it, and falls back to naming the setting when we do not.
+ */
+function describeConfigHint(context?: ProviderErrorContext): string {
+	return context?.configPath
+		? `Check baseUrl in ${context.configPath}.`
+		: "Check the provider's baseUrl.";
 }
 
 /**
@@ -309,7 +321,7 @@ function parseAPIErrorInternal(
 		const cause = reason ? ` (${reason})` : '';
 		return (
 			`Couldn't reach ${describeProviderTarget(context)}${cause}. ` +
-			"Check the provider's baseUrl and that the server is running."
+			`Is the server running? ${describeConfigHint(context)}`
 		);
 	}
 
@@ -328,8 +340,9 @@ function parseAPIErrorInternal(
 		const url = context?.baseUrl ? ` (${context.baseUrl})` : '';
 		return (
 			`Invalid baseUrl${provider}${url}: ${baseUrlProblem}. ` +
-			'Check that baseUrl is a complete URL (http:// or https://) and ' +
-			'that any environment variables it references are set.'
+			`${describeConfigHint(context)} It must be a complete URL ` +
+			'(http:// or https://) and any environment variables it references ' +
+			'must be set.'
 		);
 	}
 

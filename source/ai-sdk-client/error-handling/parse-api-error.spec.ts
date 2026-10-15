@@ -73,7 +73,7 @@ test('parseAPIError - handles connection refused', t => {
 
 	t.is(
 		result,
-		"Couldn't reach the model server (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (ECONNREFUSED: connection refused). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -88,7 +88,7 @@ test('parseAPIError - handles offline undici fetch failure', t => {
 
 	t.is(
 		result,
-		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -99,7 +99,7 @@ test('parseAPIError - handles offline fetch failure without a cause', t => {
 
 	t.is(
 		result,
-		"Couldn't reach the model server. Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server. Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -110,7 +110,7 @@ test('parseAPIError - handles DNS EAI_AGAIN error', t => {
 
 	t.is(
 		result,
-		"Couldn't reach the model server (EAI_AGAIN: temporary DNS failure). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (EAI_AGAIN: temporary DNS failure). Is the server running? Check the provider's baseUrl.",
 	);
 });
 

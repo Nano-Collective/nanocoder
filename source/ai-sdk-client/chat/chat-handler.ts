@@ -80,6 +80,8 @@ export interface ChatHandlerParams {
 	model: LanguageModel;
 	currentModel: string;
 	providerConfig: AIProviderConfig;
+	/** Path to the agents.config.json the provider was read from, if known. */
+	configPath?: string;
 	messages: Message[];
 	tools: Record<string, AISDKCoreTool>;
 	callbacks: StreamCallbacks;
@@ -102,6 +104,7 @@ export async function handleChat(
 		model,
 		currentModel,
 		providerConfig,
+		configPath,
 		messages,
 		tools,
 		callbacks,
@@ -524,6 +527,7 @@ export async function handleChat(
 			const providerErrorContext: ProviderErrorContext = {
 				providerName: providerConfig.name,
 				baseUrl: providerConfig.config.baseURL,
+				configPath,
 			};
 
 			// Check if this was a user-initiated cancellation

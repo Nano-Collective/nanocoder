@@ -157,7 +157,7 @@ test('parseAPIError handles connection errors', t => {
 	const result = parseAPIError(error);
 	t.is(
 		result,
-		"Couldn't reach the model server (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (ECONNREFUSED: connection refused). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -208,7 +208,7 @@ test('parseAPIError handles ECONNRESET errors', t => {
 	const result = parseAPIError(error);
 	t.is(
 		result,
-		"Couldn't reach the model server (ECONNRESET: connection reset by peer). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (ECONNRESET: connection reset by peer). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -217,7 +217,7 @@ test('parseAPIError handles ENOTFOUND errors', t => {
 	const result = parseAPIError(error);
 	t.is(
 		result,
-		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server (ENOTFOUND: host not found (DNS lookup failed)). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -233,7 +233,7 @@ test('parseAPIError handles Failed to fetch errors', t => {
 	const result = parseAPIError(error);
 	t.is(
 		result,
-		"Couldn't reach the model server. Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach the model server. Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -283,7 +283,7 @@ test('parseAPIError names provider and baseUrl on a refused connection', t => {
 	const result = parseAPIError(error, CONTEXT);
 	t.is(
 		result,
-		"Couldn't reach provider \"MyProvider\" at http://127.0.0.1:59999/v1 (ECONNREFUSED: connection refused). Check the provider's baseUrl and that the server is running.",
+		"Couldn't reach provider \"MyProvider\" at http://127.0.0.1:59999/v1 (ECONNREFUSED: connection refused). Is the server running? Check the provider's baseUrl.",
 	);
 });
 
@@ -309,7 +309,7 @@ test('parseAPIError wraps a bad port with the provider and URL', t => {
 	});
 	t.is(
 		result,
-		'Invalid baseUrl for provider "MyProvider" (http://127.0.0.1:9/v1): it uses a port the HTTP client refuses to connect to. Check that baseUrl is a complete URL (http:// or https://) and that any environment variables it references are set.',
+		'Invalid baseUrl for provider "MyProvider" (http://127.0.0.1:9/v1): it uses a port the HTTP client refuses to connect to. Check the provider\'s baseUrl. It must be a complete URL (http:// or https://) and any environment variables it references must be set.',
 	);
 });
 
@@ -345,7 +345,7 @@ test('parseAPIError omits provider name when no context is supplied', t => {
 	const result = parseAPIError(new Error('bad port'));
 	t.is(
 		result,
-		'Invalid baseUrl: it uses a port the HTTP client refuses to connect to. Check that baseUrl is a complete URL (http:// or https://) and that any environment variables it references are set.',
+		'Invalid baseUrl: it uses a port the HTTP client refuses to connect to. Check the provider\'s baseUrl. It must be a complete URL (http:// or https://) and any environment variables it references must be set.',
 	);
 });
 
@@ -354,4 +354,30 @@ test('parseAPIError does not treat a URL phrase mid-message as a baseUrl error',
 		new Error('The upstream returned invalid url metadata'),
 	);
 	t.is(result, 'The upstream returned invalid url metadata');
+});
+
+test('parseAPIError points at the config file when a connection is refused', t => {
+	const error = new TypeError('fetch failed', {
+		cause: new Error('connect ECONNREFUSED 127.0.0.1:59999'),
+	});
+	const result = parseAPIError(error, {
+		...CONTEXT,
+		configPath: '/home/u/.config/nanocoder/agents.config.json',
+	});
+	t.is(
+		result,
+		"Couldn't reach provider \"MyProvider\" at http://127.0.0.1:59999/v1 (ECONNREFUSED: connection refused). Is the server running? Check baseUrl in /home/u/.config/nanocoder/agents.config.json.",
+	);
+});
+
+test('parseAPIError points at the config file for a bad baseUrl', t => {
+	const result = parseAPIError(new Error('bad port'), {
+		providerName: 'MyProvider',
+		baseUrl: 'http://127.0.0.1:9/v1',
+		configPath: '/project/agents.config.json',
+	});
+	t.is(
+		result,
+		'Invalid baseUrl for provider "MyProvider" (http://127.0.0.1:9/v1): it uses a port the HTTP client refuses to connect to. Check baseUrl in /project/agents.config.json. It must be a complete URL (http:// or https://) and any environment variables it references must be set.',
+	);
 });

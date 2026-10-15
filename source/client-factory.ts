@@ -163,7 +163,10 @@ async function createAISDKClient(
 			// Validate credentials (sync, no network calls)
 			validateProviderCredentials(effectiveProviderConfig);
 
-			const client = await AISDKClient.create(effectiveProviderConfig);
+			const client = await AISDKClient.create(
+				effectiveProviderConfig,
+				configPath,
+			);
 
 			// Set model if specified
 			if (requestedModel) {

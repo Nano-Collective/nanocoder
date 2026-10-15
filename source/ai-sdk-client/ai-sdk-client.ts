@@ -32,6 +32,10 @@ export class AISDKClient implements LLMClient {
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
+	// Path to the config file the provider came from, surfaced in connection
+	// errors so the user knows which file to edit. Absent when the client was
+	// built programmatically (tests, in-memory configs).
+	private configPath?: string;
 	private undiciAgent: Agent;
 	private cachedContextSize: number;
 	private maxRetries: number;
@@ -44,10 +48,11 @@ export class AISDKClient implements LLMClient {
 		current: {},
 	};
 
-	constructor(providerConfig: AIProviderConfig) {
+	constructor(providerConfig: AIProviderConfig, configPath?: string) {
 		const logger = getLogger();
 
 		this.providerConfig = providerConfig;
+		this.configPath = configPath;
 		this.availableModels = providerConfig.models;
 		this.currentModel = providerConfig.models[0] || '';
 		this.cachedContextSize = 0;
@@ -110,8 +115,11 @@ export class AISDKClient implements LLMClient {
 		}
 	}
 
-	static async create(providerConfig: AIProviderConfig): Promise<AISDKClient> {
-		const client = new AISDKClient(providerConfig);
+	static async create(
+		providerConfig: AIProviderConfig,
+		configPath?: string,
+	): Promise<AISDKClient> {
+		const client = new AISDKClient(providerConfig, configPath);
 		// Async provider creation — lazily loads only the SDK package the
 		// configured `sdkProvider` actually needs.
 		client.provider = await createProvider(
@@ -196,6 +204,7 @@ export class AISDKClient implements LLMClient {
 			model,
 			currentModel: this.currentModel,
 			providerConfig: this.providerConfig,
+			configPath: this.configPath,
 			messages,
 			tools,
 			callbacks,
