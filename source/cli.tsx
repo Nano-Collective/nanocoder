@@ -285,6 +285,13 @@ Examples:
 	process.exit(0);
 }
 
+const {validateCliArgs} = await import('./cli-args.js');
+const cliArgsError = validateCliArgs(args);
+if (cliArgsError) {
+	console.error(cliArgsError);
+	process.exit(1);
+}
+
 // Validate output format value to prevent injection
 function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
 	return value === 'text' || value === 'json';
