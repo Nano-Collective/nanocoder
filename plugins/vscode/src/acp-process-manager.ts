@@ -34,11 +34,15 @@ export class AcpProcessManager {
 	 * spawns `nanocoder --acp` lazily, the first time something needs it (the
 	 * chat view opening), so this is safe to call from every such path; crash
 	 * retries and a manual restart go through {@link start} instead.
+	 *
+	 * Resolves when the launch this call started (or joined) finishes, or at
+	 * once when the process was started earlier.
 	 */
-	ensureStarted(): void {
+	ensureStarted(): Promise<void> {
 		if (!this.hasStarted) {
-			void this.start();
+			return this.start();
 		}
+		return this.currentLaunch ?? Promise.resolve();
 	}
 
 	async start(): Promise<void> {

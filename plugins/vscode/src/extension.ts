@@ -73,7 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
 				// (Explain Code / Generate Tests focus it first), so its first
 				// resolve is where the agent process gets spawned.
 				resolveWebviewView: (webviewView, resolveContext, token) => {
-					acpProcessManager.ensureStarted();
+					void acpProcessManager.ensureStarted();
 					return chatProvider.resolveWebviewView(webviewView, resolveContext, token);
 				},
 			},
