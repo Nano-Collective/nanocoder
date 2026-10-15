@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Load tokenizer packages lazily instead of at import time
+Load the Anthropic and Llama tokenizer packages lazily instead of at import time
