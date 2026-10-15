@@ -5,6 +5,7 @@
 
 import type {Tokenizer, TokenizerProvider} from '../types/tokenization.js';
 import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
+import {GeminiTokenizer} from './tokenizers/gemini-tokenizer.js';
 import {GenericTokenizer} from './tokenizers/generic-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
 import {OpenAITokenizer} from './tokenizers/openai-tokenizer.js';
@@ -28,6 +29,14 @@ function detectProvider(
 		return 'anthropic';
 	}
 
+	if (
+		lowerProvider.includes('gemini') ||
+		lowerProvider.includes('google') ||
+		lowerProvider.includes('vertex')
+	) {
+		return 'gemini';
+	}
+
 	// Check model ID for common patterns
 	if (lowerModel.includes('gpt') || lowerModel.includes('openai')) {
 		return 'openai';
@@ -35,6 +44,10 @@ function detectProvider(
 
 	if (lowerModel.includes('claude')) {
 		return 'anthropic';
+	}
+
+	if (lowerModel.includes('gemini') || lowerModel.includes('google')) {
+		return 'gemini';
 	}
 
 	if (
@@ -86,6 +99,9 @@ export function createTokenizer(
 
 		case 'llama':
 			return new LlamaTokenizer(normalizedModelId);
+
+		case 'gemini':
+			return new GeminiTokenizer(normalizedModelId);
 
 		case 'fallback':
 		default:
