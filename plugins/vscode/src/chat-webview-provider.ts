@@ -11,7 +11,11 @@ import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
-import { readCappedFile, readCappedDirectory } from './context-attachment';
+import {
+	findOpenDocumentText,
+	readAttachedFile,
+	readCappedDirectory,
+} from './context-attachment';
 import { PromptQueue, type QueuedPrompt } from './prompt-queue';
 import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
 
@@ -807,7 +811,9 @@ export class ChatWebviewProvider
 						// Capped rather than a bare readFileSync: `@` makes attaching
 						// a lockfile or a minified bundle one keystroke, and an
 						// uncapped read would silently eat the whole context window.
-						const content = readCappedFile(filePath);
+						const content = readAttachedFile(filePath, attached =>
+							findOpenDocumentText(attached, vscode.workspace.textDocuments),
+						);
 						if (content === null) {
 							this._outputChannel.appendLine(`[Context] Skipped unreadable or binary file ${filePath}`);
 							return `<!-- skipped ${filePath}: unreadable or binary -->`;
