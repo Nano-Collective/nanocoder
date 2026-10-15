@@ -200,6 +200,7 @@ These fields work with all transport types:
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
 | `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
+| `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable periodic health checks. Transport errors trigger a liveness ping even when periodic checks are disabled; recoverable errors preserve tools if the server responds. Health pings use `timeout` when configured, otherwise 10 seconds. A failed ping or transport close marks the server unhealthy and removes its tools until MCP servers are reinitialized or the session is restarted. |
 | `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
 ## Auto-Approve Tools
@@ -287,7 +288,7 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. Variable names must be up
 
 Run `/settings mcp` for interactive configuration with:
 
-- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, Context7, DeepWiki, Playwright, etc.)
+- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, FXMacroData, Context7, DeepWiki, Playwright, etc.)
 - Custom server setup for stdio, HTTP, and WebSocket
 - Edit or delete existing servers
 - **Ctrl+E** to open the config file in your system editor

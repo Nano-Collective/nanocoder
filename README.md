@@ -5,7 +5,7 @@
 
 An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
-Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
+Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Requesty, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
 
 [![Typing SVG](https://readme-typing-svg.herokuapp.com?font=&size=33&letterSpacing=large&pause=1000&color=8373F7&center=true&vCenter=true&width=1000&lines=Nanocoder;your+private+%2C+local+first+AI+coding+assistant)](https://git.io/typing-svg)
 
@@ -54,9 +54,14 @@ nanocoder --no-alt-screen
 # Review a branch or PR for bugs, security issues, and style violations
 nanocoder review main
 nanocoder review 42
+
+# Open a PR in an isolated worktree for an interactive coding session
+nanocoder worktree 42
 ```
 
 > **Note:** `nanocoder review` is diff-only v1 and requires an interactive terminal (TTY). It cannot be used with pipes or redirection and its output cannot currently be captured to a file — see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287).
+
+`nanocoder worktree <PR-number>` requires Git, an authenticated `gh` CLI, and an interactive terminal. It creates a sibling directory named `<repository>-pr-<number>`, checks out the PR head on a local `nanocoder/pr-<number>` branch, and starts Nanocoder there. The original working tree is left alone. Both the worktree and branch remain after Nanocoder exits; remove them with `git worktree remove <path>` and `git branch -d nanocoder/pr-<number>` when finished. An existing directory or branch is never reused or overwritten.
 
 ### Screen Modes
 
@@ -87,21 +92,6 @@ It is also bigger than one tool. The collective is assembling an open ecosystem 
 ## Sponsors
 
 Nanocoder is built not for profit, but for the community, and that work is funded by sponsors. [Become one](https://nanocollective.org/sponsor).
-
-### [Atlas Cloud](https://www.atlascloud.ai/console/coding-plan)
-
-<p>
-  <a href="https://www.atlascloud.ai/console/coding-plan" title="Atlas Cloud">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://nanocollective.org/sponsors/atlas-cloud-white.png">
-      <img alt="Atlas Cloud" height="40" src="https://nanocollective.org/sponsors/atlas-cloud-black.png">
-    </picture>
-  </a>
-</p>
-
-> Atlas Cloud is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities.
-
-Check out [Atlas Cloud's new coding plan promotion](https://www.atlascloud.ai/console/coding-plan) for more budget-friendly API access.
 
 ## Community
 

@@ -147,6 +147,22 @@ function remoteHttpTemplate(opts: {
 	};
 }
 
+/**
+ * Reject a credential that cannot be sent as a single HTTP header token:
+ * anything outside printable ASCII, so no spaces, line breaks or control
+ * characters inside it (the wizard trims the ends). The error message never
+ * echoes the value.
+ */
+function headerTokenValidator(value: string): string | undefined {
+	for (const char of value) {
+		const code = char.codePointAt(0) ?? 0;
+		if (code <= 0x20 || code >= 0x7f) {
+			return 'API key must not contain spaces, line breaks or control characters';
+		}
+	}
+	return undefined;
+}
+
 const GITHUB_REMOTE_URL = 'https://api.githubcopilot.com/mcp/';
 
 export const MCP_TEMPLATES: McpTemplate[] = [
@@ -387,6 +403,50 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			headers: {'X-API-Key': (answers.apiKey || '').trim()},
 			templateId: 'serply',
 		}),
+		category: 'remote',
+		transportType: 'http',
+	},
+	{
+		id: 'fxmacrodata',
+		name: 'FXMacroData',
+		description:
+			'FXMacroData macroeconomic releases, central bank rates, release calendars and FX data MCP server (leave the API key empty for the keyless USD tier)',
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: 'fxmacrodata',
+			},
+			{
+				name: 'apiKey',
+				prompt:
+					'FXMacroData API key (optional, leave empty for the keyless USD tier)',
+				required: false,
+				sensitive: true,
+				validator: headerTokenValidator,
+			},
+		],
+		buildConfig: answers => {
+			const apiKey = answers.apiKey?.trim();
+			const config: McpServerConfig = {
+				name: answers.serverName || 'fxmacrodata',
+				transport: 'http' as McpTransportType,
+				url: 'https://mcp.fxmacrodata.com',
+				description:
+					'FXMacroData macroeconomic, central bank and FX data MCP server',
+				tags: ['fxmacrodata', 'finance', 'macro', 'forex', 'http'],
+				timeout: TIMEOUT_MCP_DEFAULT_MS,
+				templateId: 'fxmacrodata',
+			};
+			// Keyless works for the free USD tier. A placeholder or empty bearer
+			// token is rejected with a 401, so only send the header for a real key.
+			if (apiKey) {
+				config.headers = {Authorization: `Bearer ${apiKey}`};
+			}
+			return config;
+		},
 		category: 'remote',
 		transportType: 'http',
 	},

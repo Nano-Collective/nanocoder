@@ -15,12 +15,17 @@ import {
 	DELAY_COMMAND_COMPLETE_MS,
 	MAX_SESSION_NAME_LENGTH,
 } from '@/constants';
+import {parseCustomCommandArgs} from '@/custom-commands/args';
+import {expandCustomCommandPrompt} from '@/custom-commands/executor';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {resetStatsLedger} from '@/stats/record';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {
+	distillBashResultForLLM,
+	executeBashCommand,
+} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -88,73 +93,6 @@ const CHECKPOINT_SUBCOMMANDS = {
 	RESTORE: 'restore',
 } as const;
 
-const ARGUMENT_QUOTE_CHARS = new Set(['"', "'", '`']);
-
-/**
- * Parses command arguments while preserving quoted multi-word values.
- */
-export function parseCustomCommandArgs(input: string): string[] {
-	const args: string[] = [];
-	let currentArg = '';
-	let quoteChar: string | null = null;
-	let isEscaped = false;
-	let hasCurrentArg = false;
-
-	for (const char of input.trim()) {
-		if (isEscaped) {
-			currentArg += char;
-			hasCurrentArg = true;
-			isEscaped = false;
-			continue;
-		}
-
-		if (char === '\\') {
-			isEscaped = true;
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (quoteChar) {
-			if (char === quoteChar) {
-				quoteChar = null;
-			} else {
-				currentArg += char;
-			}
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (ARGUMENT_QUOTE_CHARS.has(char)) {
-			quoteChar = char;
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (/\s/.test(char)) {
-			if (hasCurrentArg) {
-				args.push(currentArg);
-				currentArg = '';
-				hasCurrentArg = false;
-			}
-			continue;
-		}
-
-		currentArg += char;
-		hasCurrentArg = true;
-	}
-
-	if (isEscaped) {
-		currentArg += '\\';
-		hasCurrentArg = true;
-	}
-
-	if (hasCurrentArg) {
-		args.push(currentArg);
-	}
-
-	return args;
-}
-
 /**
  * Handles bash commands prefixed with !
  */
@@ -198,7 +136,9 @@ async function handleBashCommand(
 			}),
 		);
 
-		const llmContext = formatBashResultForLLM(result);
+		// No re-run here: the user typed this command, so nothing else is run
+		// on their behalf.
+		const llmContext = await distillBashResultForLLM(result);
 
 		if (llmContext) {
 			const userMessage: Message = {
@@ -243,14 +183,9 @@ async function handleCustomCommand(
 		return false;
 	}
 
-	const rawArgs = message.slice(commandName.length + 2).trim();
-	const args = parseCustomCommandArgs(rawArgs);
-
-	const processedPrompt = customCommandExecutor?.execute(
-		customCommand,
-		args,
-		rawArgs,
-	);
+	const processedPrompt = customCommandExecutor
+		? expandCustomCommandPrompt(customCommand, message, customCommandExecutor)
+		: undefined;
 
 	if (processedPrompt) {
 		await onHandleChatMessage(processedPrompt);

@@ -23,7 +23,8 @@
 		"scripts/fetch-models.js",
 		".husky/**",
 		".github/**",
-		"benchmarks/count-loader.mjs"
+		"benchmarks/count-loader.mjs",
+		"benchmarks/agent/fixtures/**"
 	],
 	"ignoreExportsUsedInFile": {
 		"interface": true,

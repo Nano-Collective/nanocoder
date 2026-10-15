@@ -1,4 +1,11 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {execSync} from 'node:child_process';
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -12,6 +19,7 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
@@ -346,6 +354,45 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('keeps screenshot images on a subagent tool message', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-shot',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The button is misaligned.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Look at the page',
+	});
+
+	t.true(result.success);
+	t.is(toolResults[0]?.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(toolResults[0]?.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
 });
 
 test.serial('stringifies structured tool output without llmContent', async t => {
@@ -1609,6 +1656,54 @@ function enterSubagentHookFixture(hooks: HooksConfig): () => void {
 // Portable hook body: `sh -c` on POSIX, `cmd /c` on Windows.
 const subagentHookNode = (script: string) => `node -e "${script}"`;
 
+test.serial('a plugin permission denial prevents delegated tool execution and approval', async t => {
+	const leave = enterSubagentHookFixture({});
+	resetPluginsForTests();
+	let approvalPrompts = 0;
+	let executions = 0;
+	const results: string[] = [];
+	setGlobalToolApprovalHandler(async () => {
+		approvalPrompts++;
+		return true;
+	});
+	try {
+		const dir = join(SUBAGENT_HOOK_DIR, '.nanocoder', 'plugins');
+		mkdirSync(dir, {recursive: true});
+		writeFileSync(join(dir, 'deny.mjs'), `export default {
+			apiVersion: 1, name: 'deny',
+			hooks: {'permission.asked': () => ({decision: 'deny', reason: 'delegated policy'})},
+		};`);
+		await loadPlugins(true);
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => { executions++; return 'contents'; },
+				readOnly: true,
+				needsApproval: true,
+			},
+		});
+		const client = createMockClient([
+			{content: '', tool_calls: [{
+				id: 'plugin-deny', function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+			}]},
+			{content: 'Understood.'},
+		], messages => {
+			for (const message of messages) {
+				if (message.role === 'tool') results.push(message.content);
+			}
+		});
+		await new SubagentExecutor(toolManager, client).execute({
+			subagent_type: 'explore', description: 'Read a.ts',
+		});
+		t.is(approvalPrompts, 0);
+		t.is(executions, 0);
+		t.true(results.includes('Error: delegated policy'));
+	} finally {
+		resetPluginsForTests();
+		leave();
+		setGlobalToolApprovalHandler(async () => true);
+	}
+});
+
 test.serial('a pre-tool-use veto stops a subagent tool call', async t => {
 	let handlerRan = false;
 	const toolManager = createMockToolManager({
@@ -1868,5 +1963,112 @@ test.serial(
 		runWithReadContentScope('stub-scope-agent', () => {
 			t.is(matchReadContent(filePath, stats), undefined);
 		});
+	},
+);
+
+// ============================================================================
+// nanocoder.autoCommit in delegated work.
+//
+// Subagents do not go through processToolUse, so auto-commit has to be wired
+// into their loop separately — and, as there, after the post-tool-use hooks.
+// ============================================================================
+
+test.serial(
+	'a subagent edit is auto-committed, including a formatter hook rewrite',
+	async t => {
+		const repo = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-autocommit-')),
+		);
+		const git = (command: string) =>
+			execSync(`git ${command}`, {cwd: repo, encoding: 'utf8'}).trimEnd();
+		git('init -q -b main');
+		git('config user.email test@example.com');
+		git('config user.name Test');
+		git('config commit.gpgsign false');
+		git('config core.autocrlf false');
+		git('config core.hooksPath .no-hooks');
+		git('commit -q --allow-empty -m baseline');
+
+		// A project subagent allowed to write, kept outside the repo so its
+		// definition does not show up as an untracked change.
+		const agentsRoot = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-writer-')),
+		);
+		mkdirSync(join(agentsRoot, '.nanocoder', 'agents'), {recursive: true});
+		writeFileSync(
+			join(agentsRoot, '.nanocoder', 'agents', 'writer.md'),
+			'---\nname: writer\ndescription: writer\ntools:\n  - write_file\n---\nwrite\n',
+			'utf-8',
+		);
+
+		const file = join(repo, 'edited.ts');
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async args => {
+					writeFileSync(String((args as {path: string}).path), 'agent\n');
+					return 'File written.';
+				},
+				readOnly: false,
+			},
+		});
+		const toolResults: Message[] = [];
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 'tc-commit',
+							function: {
+								name: 'write_file',
+								arguments: JSON.stringify({path: file}),
+							},
+						},
+					],
+				},
+				{content: 'Done.'},
+			],
+			messages => {
+				const toolMessage = messages.find(message => message.role === 'tool');
+				if (toolMessage) toolResults.push(toolMessage);
+			},
+		);
+
+		const leave = enterSubagentHookFixture({
+			'post-tool-use': [
+				{
+					command: subagentHookNode(
+						"require('fs').appendFileSync(process.env.NANOCODER_FILE, 'formatted\\n')",
+					),
+				},
+			],
+		});
+		getAppConfig().autoCommit = true;
+		getAppConfig().formatters = [{match: ['**/*.ts'], command: subagentHookNode(
+			"require('fs').appendFileSync(process.env.FILE, 'formatter\\n')",
+		)}];
+		setProjectRoot(repo);
+		let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+		let committed: string;
+		let status: string;
+		try {
+			result = await new SubagentExecutor(
+				toolManager,
+				client,
+				agentsRoot,
+			).execute({subagent_type: 'writer', description: 'Write edited.ts'});
+			committed = git('show HEAD:edited.ts');
+			status = git('status --porcelain');
+		} finally {
+			// reloadAppConfig() in leave() also turns autoCommit back off.
+			leave();
+			rmSync(repo, {recursive: true, force: true});
+			rmSync(agentsRoot, {recursive: true, force: true});
+		}
+
+		t.true(result.success, result.error);
+		t.regex(String(toolResults[0]?.content), /\[auto-commit\] [a-f0-9]{7,} /);
+		t.is(committed, 'agent\nformatter\nformatted');
+		t.is(status, '', 'nothing the edit or the hook wrote is left behind');
 	},
 );

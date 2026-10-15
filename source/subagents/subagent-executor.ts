@@ -15,6 +15,9 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {consultPluginPermission} from '@/plugins/host';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -776,11 +779,12 @@ export class SubagentExecutor {
 				);
 
 				// Count tokens from tool results
-				totalTokens += estimateTokens(toolResult);
+				totalTokens += estimateTokens(toolResult.content);
 
 				messages.push({
 					role: 'tool',
-					content: toolResult,
+					content: toolResult.content,
+					...(toolResult.images ? {images: toolResult.images} : {}),
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
@@ -822,9 +826,9 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
-	): Promise<string> {
+	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
-			return 'Error: Execution was cancelled';
+			return {content: 'Error: Execution was cancelled'};
 		}
 
 		// Enforce the allow-list at the execution boundary, not just when
@@ -835,15 +839,16 @@ export class SubagentExecutor {
 		// files, and let any subagent overwrite the parent session's plan, task
 		// list, or walkthrough (subagents run with the parent's session id).
 		if (!this.getAvailableToolNames(config).includes(toolName)) {
-			return (
-				`Error: Tool '${toolName}' is not available to this subagent. ` +
-				'Use only the tools listed in your instructions.'
-			);
+			return {
+				content:
+					`Error: Tool '${toolName}' is not available to this subagent. ` +
+					'Use only the tools listed in your instructions.',
+			};
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
-			return `Error: Tool '${toolName}' not found`;
+			return {content: `Error: Tool '${toolName}' not found`};
 		}
 
 		// One ToolCall object for this call, shared by the approval prompt and
@@ -866,7 +871,7 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return `Error: ${gate.reason}`;
+			return {content: `Error: ${gate.reason}`};
 		}
 
 		// Check if this tool needs user approval
@@ -875,6 +880,11 @@ export class SubagentExecutor {
 			rawArguments,
 		);
 		if (needsApproval) {
+			const vote = await consultPluginPermission(toolName, parsedArgs);
+			if (vote.decision === 'deny') {
+				return {content: `Error: ${vote.reason}`};
+			}
+
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
 			// them and joins with `Promise.allSettled`, so one subagent parked
@@ -889,7 +899,7 @@ export class SubagentExecutor {
 			);
 
 			if (!approved) {
-				return 'Tool execution was denied by the user.';
+				return {content: 'Tool execution was denied by the user.'};
 			}
 		}
 
@@ -904,22 +914,47 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
+			const images =
+				typeof result === 'object' &&
+				result !== null &&
+				'images' in result &&
+				Array.isArray(result.images)
+					? result.images
+					: undefined;
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const failed =
+				typeof result !== 'string' && 'isError' in result && result.isError;
+			const formatted = failed
+				? truncated
+				: await formatWrittenFile(toolName, parsedArgs, truncated);
+			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
-				truncateToolResult(content),
+				formatted,
 			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return {
+				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+				...(images && images.length > 0 ? {images} : {}),
+			};
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return appendPostToolUseOutput(
-				toolName,
-				parsedArgs,
-				truncateToolResult(toolErrorToContent(error)),
-			);
+			return {
+				content: await appendPostToolUseOutput(
+					toolName,
+					parsedArgs,
+					truncateToolResult(toolErrorToContent(error)),
+				),
+			};
 		}
 	}
 }

@@ -4,11 +4,13 @@ import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
 import {matchGlob} from '@/events/event-router';
+import {runPluginHooks} from '@/plugins/host';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
 import {logError} from '@/utils/message-queue';
+import {signalProcessTree} from '@/utils/process-tree';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /** Ceiling on a single hook's runtime. Overridable per hook via `timeout`. */
@@ -53,6 +55,18 @@ export interface HookOutcome {
 	/** Label + output of the hook that blocked, for the model and the user. */
 	reason?: string;
 	/** Combined stdout of the hooks that ran, trimmed. Empty when none wrote. */
+	output: string;
+	/**
+	 * Observe-only hooks that exited non-zero, in config order. They are still
+	 * logged for the user; `post-tool-use` also hands them to the model, since a
+	 * failing linter or test run is the output most worth acting on.
+	 */
+	failures: HookFailure[];
+}
+
+export interface HookFailure {
+	exitCode: number;
+	/** stdout and stderr, trimmed and joined. Empty when the hook wrote nothing. */
 	output: string;
 }
 
@@ -167,7 +181,9 @@ export async function runPreToolUseGate(
 	toolCall: ToolCall,
 	toolArgs: Record<string, unknown>,
 ): Promise<HookOutcome> {
-	if (gatedToolCalls.has(toolCall)) return {blocked: false, output: ''};
+	if (gatedToolCalls.has(toolCall)) {
+		return {blocked: false, output: '', failures: []};
+	}
 
 	const outcome = await runLifecycleHooks('pre-tool-use', {
 		toolName: toolCall.function.name,
@@ -180,29 +196,52 @@ export async function runPreToolUseGate(
 }
 
 /**
- * Run the `post-tool-use` hooks for one tool call and fold any stdout into the
- * result the model reads, so a formatter's output (or a linter's complaint)
- * lands on the same turn instead of a turn later. Shared by every execution
- * path so the tag the model sees is identical whichever one ran the tool.
+ * Run the `post-tool-use` hooks for one tool call and fold their output into
+ * the result the model reads, so a formatter's output (or a linter's complaint)
+ * lands on the same turn instead of a turn later. A hook that fails is folded
+ * in too, tagged with its exit code. Shared by every execution path so the tag
+ * the model sees is identical whichever one ran the tool.
  */
 export async function appendPostToolUseOutput(
 	toolName: string,
 	toolArgs: Record<string, unknown>,
 	content: string,
 ): Promise<string> {
-	const {output} = await runLifecycleHooks('post-tool-use', {
+	const {output, failures} = await runLifecycleHooks('post-tool-use', {
 		toolName,
 		toolArgs,
 		toolResult: content,
 	});
-	if (!output) return content;
+	if (!output && failures.length === 0) return content;
+
+	const blocks: string[] = [];
+	if (output) {
+		blocks.push(
+			`<hook-output event="post-tool-use">\n${output}\n</hook-output>`,
+		);
+	}
+	// A failing hook is still observe-only — the tool itself succeeded — but its
+	// output is what the model most needs to see, so it is forwarded with the
+	// exit code rather than only logged for the user.
+	for (const failure of failures) {
+		blocks.push(
+			`<hook-output event="post-tool-use" exit="${failure.exitCode}">\n${
+				failure.output || '(no output)'
+			}\n</hook-output>`,
+		);
+	}
+
 	// Re-truncate the joined result. The caller already capped `content`, so
 	// appending here without this could push a result past the cap by up to
 	// MAX_HOOK_OUTPUT_CHARS — the cap exists to protect the context window, and
 	// a chatty hook must not be the thing that breaches it.
-	return truncateToolResult(
-		`${content}\n\n<hook-output event="post-tool-use">\n${output}\n</hook-output>`,
-	);
+	//
+	// Failure blocks go last on purpose: truncateToolResult elides the middle
+	// and gives the larger share to the tail, so a long tool result or a
+	// chatty passing hook is cut before a failure is. Only a failure longer
+	// than the tail budget loses anything, and then it keeps its end, which
+	// is where test runners and linters print their summary.
+	return truncateToolResult(`${content}\n\n${blocks.join('\n\n')}`);
 }
 
 /** Human-readable label for transcripts and error messages. */
@@ -269,7 +308,9 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
  * argument `path`; `file_path` / `filePath` are accepted because weaker models
  * emit them and the formatters already tolerate both.
  */
-function resolveFilePath(args?: Record<string, unknown>): string | undefined {
+export function resolveFilePath(
+	args?: Record<string, unknown>,
+): string | undefined {
 	for (const key of ['path', 'file_path', 'filePath']) {
 		const value = args?.[key];
 		if (typeof value === 'string' && value !== '') return value;
@@ -321,7 +362,7 @@ function buildEnv(
 	return env;
 }
 
-interface HookRun {
+export interface HookRun {
 	exitCode: number | null;
 	stdout: string;
 	stderr: string;
@@ -331,69 +372,6 @@ interface HookRun {
 
 /** Grace period between a hook's SIGTERM and the SIGKILL that follows it. */
 const HOOK_SIGKILL_GRACE_MS = 1_000;
-
-/**
- * Kill a timed-out hook and anything it started.
- *
- * `shell: true` means the child is `sh` / `cmd.exe`, not the user's command —
- * signalling it alone leaves the grandchildren of a compound command (`a && b`,
- * a pipeline) running after the agent has moved on. On POSIX the child is
- * spawned `detached`, so it leads its own process group and a negative pid
- * signals the whole group. Windows has no equivalent, so `taskkill /T` walks
- * the tree instead.
- */
-function signalHookTree(
-	proc: ChildProcess,
-	signal: NodeJS.Signals = 'SIGTERM',
-): void {
-	const pid = proc.pid;
-	if (pid === undefined) return;
-
-	if (process.platform === 'win32') {
-		// /T kills the tree, /F forces it. Detached and unref'd so a slow
-		// taskkill can't itself hold the session open. Fixed argv, no shell,
-		// and the only interpolated value is a pid we minted ourselves.
-		// taskkill /F is already unconditional, so there is nothing to
-		// escalate to on this platform.
-		try {
-			// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-			const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-				stdio: 'ignore',
-				detached: true,
-			});
-			killer.on('error', () => {
-				// taskkill missing (a stripped image): fall back to the shell alone.
-				try {
-					proc.kill('SIGKILL');
-				} catch {
-					// Nothing left to kill.
-				}
-			});
-			killer.unref();
-		} catch {
-			try {
-				proc.kill('SIGKILL');
-			} catch {
-				// Nothing left to kill.
-			}
-		}
-		return;
-	}
-
-	try {
-		// Negative pid = "the whole process group", which the detached spawn
-		// above made this process the leader of.
-		process.kill(-pid, signal);
-	} catch {
-		// The group is already gone (or never formed) — fall back to the lone
-		// shell, which may still be there even when the group is not.
-		try {
-			proc.kill(signal);
-		} catch {
-			// Nothing left to kill.
-		}
-	}
-}
 
 /**
  * Terminate a timed-out hook, escalating if it refuses to go.
@@ -406,7 +384,7 @@ function signalHookTree(
  * The escalation timer is deliberately never cancelled: unlike a single
  * process, the shell exiting does not mean its group is empty, and reaping a
  * descendant that ignored SIGTERM is the whole point. Firing against a group
- * that has already gone is harmless — `signalHookTree` swallows the ESRCH —
+ * that has already gone is harmless — `signalProcessTree` swallows the ESRCH —
  * and it is unref'd so it can never hold the process open.
  */
 function killHookTree(proc: ChildProcess): void {
@@ -417,11 +395,11 @@ function killHookTree(proc: ChildProcess): void {
 	proc.stdout?.destroy();
 	proc.stderr?.destroy();
 
-	signalHookTree(proc, 'SIGTERM');
+	signalProcessTree(proc, 'SIGTERM');
 
 	if (process.platform === 'win32') return;
 	setTimeout(() => {
-		signalHookTree(proc, 'SIGKILL');
+		signalProcessTree(proc, 'SIGKILL');
 	}, HOOK_SIGKILL_GRACE_MS).unref();
 }
 
@@ -472,16 +450,118 @@ function makeHookCapture(): {
 }
 
 /**
+ * Variables a command may reference by POSIX name (`$FILE`, `${FILE}`) and
+ * still have expanded under cmd.exe. Only path-valued variables qualify: a
+ * Windows path cannot contain `"`, so once wrapped in double quotes cmd.exe
+ * treats every other character in it (`&`, `|`, `^`, `%`...) as literal.
+ * Free-text variables like `NANOCODER_TOOL_ARGS` or `NANOCODER_PROMPT` can
+ * hold a `"` and are deliberately left out — reference them as `%VAR%` from a
+ * script, never inline.
+ */
+const CMD_PATH_VARIABLES: ReadonlySet<string> = new Set([
+	'FILE',
+	'NANOCODER_FILE',
+	'NANOCODER_CWD',
+	'NANOCODER_SESSION_CWD',
+]);
+
+/** True when a value would end a quoted cmd.exe argument or the command line. */
+function isUnsafeCmdPath(value: string): boolean {
+	return /["\r\n]/.test(value) || value.includes('\0');
+}
+
+const POSIX_VARIABLE_REFERENCE =
+	/^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/;
+
+/**
+ * Translate the documented `$FILE` / `$NANOCODER_FILE` references in a hook or
+ * formatter command into cmd.exe's `%FILE%` form on Windows, where `cmd.exe`
+ * does not expand `$VAR` and the command would otherwise receive the literal
+ * text `$FILE` (#1688). Other platforms get the command back unchanged.
+ *
+ * This only rewrites how the config-authored command NAMES a variable; the
+ * value still travels through `env` and is expanded by cmd.exe itself, so the
+ * invariant in runHookCommand holds — no model-influenced value is spliced
+ * into the command string. A reference outside double quotes is emitted
+ * quoted (`"%FILE%"`) so a path containing `&` stays one literal argument.
+ * A value that cmd.exe cannot hold literally inside quotes (a `"`, a line
+ * break or a null byte) is refused rather than run.
+ */
+export function toPlatformHookCommand(
+	command: string,
+	env: NodeJS.ProcessEnv,
+	platform: NodeJS.Platform = process.platform,
+): {command: string} | {failure: string} {
+	if (platform !== 'win32' || !command.includes('$')) return {command};
+
+	let out = '';
+	let inQuotes = false;
+	for (let i = 0; i < command.length; i++) {
+		const char = command[i];
+		if (char === '"') {
+			inQuotes = !inQuotes;
+			out += char;
+			continue;
+		}
+		// Outside quotes `^` escapes the next character, so `^"` does not open a
+		// quoted region. Inside quotes cmd.exe treats `^` literally.
+		if (char === '^' && !inQuotes && i + 1 < command.length) {
+			out += char + command[i + 1];
+			i++;
+			continue;
+		}
+		if (char === '$') {
+			const match = POSIX_VARIABLE_REFERENCE.exec(command.slice(i));
+			const name = match?.[1] ?? match?.[2];
+			if (match && name && CMD_PATH_VARIABLES.has(name)) {
+				const value = env[name];
+				if (value && isUnsafeCmdPath(value)) {
+					return {
+						failure: `$${name} contains a character cmd.exe cannot quote safely`,
+					};
+				}
+				// An unset variable expands to nothing, as it does under sh; cmd.exe
+				// would otherwise leave the literal `%NAME%` behind.
+				if (value) {
+					// A closing quote right after a trailing backslash is read by most
+					// programs' argument parser as an escaped quote, so `"C:\proj\" next`
+					// reaches the program as the single argument `C:\proj" next`. That
+					// happens for a drive root such as `C:\`. `\.` names the same
+					// directory and keeps the quote a quote.
+					const closesQuote = !inQuotes || command[i + match[0].length] === '"';
+					const suffix = value.endsWith('\\') && closesQuote ? '.' : '';
+					out += inQuotes ? `%${name}%${suffix}` : `"%${name}%${suffix}"`;
+				}
+				i += match[0].length - 1;
+				continue;
+			}
+		}
+		out += char;
+	}
+	return {command: out};
+}
+
+/**
  * Run one hook command to completion. Never rejects: a spawn failure or a
  * timeout resolves with `failure` set and no exit code, which callers treat as
  * "did not veto" so a broken script can't wedge the session.
  */
-function runHookCommand(
+export function runHookCommand(
 	hook: HookDefinition,
 	env: NodeJS.ProcessEnv,
 	cwd: string,
 	defaultTimeoutMs: number,
 ): Promise<HookRun> {
+	const prepared = toPlatformHookCommand(hook.command, env);
+	if ('failure' in prepared) {
+		return Promise.resolve({
+			exitCode: null,
+			stdout: '',
+			stderr: '',
+			failure: prepared.failure,
+		});
+	}
+	const command = prepared.command;
 	return new Promise<HookRun>(resolve => {
 		let settled = false;
 		const finish = (run: HookRun) => {
@@ -512,6 +592,9 @@ function runHookCommand(
 		// interpolated into the command string, so a model-chosen path like
 		// `a.ts; rm -rf /` is inert here. Adding a template literal to this
 		// line would turn a config string into an injection sink.
+		// `command` is `hook.command` with, on Windows only, its `$FILE`-style
+		// references renamed to `%FILE%` by toPlatformHookCommand — still
+		// nothing but config text.
 		//
 		// `detached` puts the shell in its own process group on POSIX so the
 		// timeout below can signal the group rather than just `sh`. Without it a
@@ -520,7 +603,7 @@ function runHookCommand(
 		// detach into, and `detached` there spawns a new console window, so it
 		// stays off and the taskkill path below does the reaping instead.
 		// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true, javascript.lang.security.detect-child-process.detect-child-process
-		const proc = spawn(hook.command, {
+		const proc = spawn(command, {
 			cwd,
 			env,
 			shell: true,
@@ -578,10 +661,22 @@ export async function runLifecycleHooks(
 	event: HookEvent,
 	context: HookContext = {},
 ): Promise<HookOutcome> {
+	const shell = await runShellHooks(event, context);
+	if (shell.blocked) return shell;
+
+	const plugin = await runPluginHooks(event, context);
+	const output = [shell.output, plugin.output].filter(Boolean).join('\n');
+	return {...plugin, output, failures: shell.failures};
+}
+
+async function runShellHooks(
+	event: HookEvent,
+	context: HookContext,
+): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
 		appliesTo(hook, context),
 	);
-	if (hooks.length === 0) return {blocked: false, output: ''};
+	if (hooks.length === 0) return {blocked: false, output: '', failures: []};
 
 	// The project root, not the session cwd: a hook is defined in project
 	// config, so a relative `command` like `.nanocoder/hooks/guard.sh` has to
@@ -591,6 +686,7 @@ export async function runLifecycleHooks(
 	const canVeto = VETOING_EVENTS.has(event);
 	const defaultTimeoutMs = defaultTimeoutFor(event);
 	const collected: string[] = [];
+	const failures: HookFailure[] = [];
 
 	for (const hook of hooks) {
 		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs);
@@ -610,6 +706,7 @@ export async function runLifecycleHooks(
 						? `Blocked by hook "${label}": ${detail}`
 						: `Blocked by hook "${label}" (exit ${run.exitCode}).`,
 					output: collected.join('\n').trim(),
+					failures,
 				};
 			}
 			logError(
@@ -617,12 +714,28 @@ export async function runLifecycleHooks(
 					detail ? `: ${detail}` : ''
 				}`,
 			);
+			// A null exit code means the hook was killed by a signal: a broken
+			// hook, like a timeout, not a check that ran and failed. Log only.
+			if (run.exitCode !== null) {
+				// Both streams, not `detail`: test runners and linters often split
+				// the summary and the failures across stdout and stderr.
+				failures.push({
+					exitCode: run.exitCode,
+					output: [run.stdout.trim(), run.stderr.trim()]
+						.filter(Boolean)
+						.join('\n'),
+				});
+			}
 			continue;
 		}
 
+		// stdout only, unlike a failure above. On a passing run stderr is mostly
+		// progress lines and warnings the tool chose not to fail on; forwarding
+		// it would spend context on noise. On a failing run stderr is usually
+		// the reason, so that path keeps both.
 		const out = run.stdout.trim();
 		if (out) collected.push(out);
 	}
 
-	return {blocked: false, output: collected.join('\n').trim()};
+	return {blocked: false, output: collected.join('\n').trim(), failures};
 }
