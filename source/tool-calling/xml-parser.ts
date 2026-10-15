@@ -16,7 +16,6 @@ interface ParsedToolCall {
 export class XMLToolCallParser {
 	private static readonly TOOL_CALL_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
 	private static readonly PARAMETER_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
-	private static readonly ATTRIBUTE_TAG_REGEX = /<\/?\w+\s*=/;
 
 	/**
 	 * Extracts tool calls from text content containing XML-formatted tool calls
@@ -172,13 +171,13 @@ export class XMLToolCallParser {
 			fullMatch.length - (toolName.length + 3),
 		);
 
-		// Reject attribute-style syntax between parameters, not literal tag
-		// examples quoted inside their values.
+		// An `=` between parameters is attribute-style syntax such as
+		// <path=a.ts>; inside a parameter value it is ordinary content.
 		const parameterSyntax = innerContent.replace(
 			new RegExp(this.PARAMETER_REGEX),
 			'',
 		);
-		if (this.ATTRIBUTE_TAG_REGEX.test(parameterSyntax)) {
+		if (parameterSyntax.includes('=')) {
 			return false;
 		}
 

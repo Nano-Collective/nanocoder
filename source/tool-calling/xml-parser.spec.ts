@@ -136,6 +136,15 @@ test('parseToolCalls - still rejects attribute syntax on named parameter tags', 
 	}
 });
 
+test('parseToolCalls - still rejects = in text between parameters', t => {
+	for (const content of [
+		'<read_file>path=a.ts</read_file>',
+		'<read_file><path>a.ts</path> start_line=5</read_file>',
+	]) {
+		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
 test('parseToolCalls - preserves attribute-style tag examples inside parameter values', t => {
 	for (const example of [
 		'<function=read_file>{"path":"a.ts"}</function>',
