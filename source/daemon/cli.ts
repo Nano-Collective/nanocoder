@@ -22,6 +22,7 @@ import {
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
+import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
@@ -168,6 +169,7 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
+	await ensureNanocoderGitignore(opts.projectRoot);
 	const launcher = opts.launchDaemon ?? launchSelfHosted;
 	const child = launcher(opts.projectRoot);
 	if (!child) {
