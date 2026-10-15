@@ -81,6 +81,16 @@ test.serial('a session file missing from the index still protects its artifacts'
 	t.true(hasPlan(saved.id));
 });
 
+test.serial('an index entry whose session file is gone still protects its artifacts', async t => {
+	const saved = await saveSession();
+	await oldArtifact(saved.id);
+	await rm(join(sessionsDir, `${saved.id}.json`));
+
+	await new SessionManager(sessionsDir, artifacts).cleanupOrphanedArtifacts();
+
+	t.true(hasPlan(saved.id));
+});
+
 test.serial('with no sessions directory, old orphaned artifacts are still reclaimed', async t => {
 	const orphan = randomUUID();
 	await oldArtifact(orphan);
@@ -95,12 +105,14 @@ const posixNonRoot =
 	process.platform !== 'win32' && process.getuid?.() !== 0 ? test.serial : test.skip;
 
 posixNonRoot('an unreadable sessions directory keeps every artifact directory', async t => {
-	await saveSession();
+	const saved = await saveSession();
 	const orphan = randomUUID();
+	await oldArtifact(saved.id);
 	await oldArtifact(orphan);
 	await chmod(sessionsDir, 0o000);
 
 	await new SessionManager(sessionsDir, artifacts).cleanupOrphanedArtifacts();
 
+	t.true(hasPlan(saved.id), 'the saved session keeps its plan');
 	t.true(hasPlan(orphan), 'nothing is swept when saved sessions cannot be listed');
 });
