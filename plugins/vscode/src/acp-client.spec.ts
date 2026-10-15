@@ -265,3 +265,115 @@ test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', a
 	client.setConnection({initialize: async () => ({agentInfo: {version: '1.29.0'}})} as any);
 	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
 });
+
+/**
+ * A connection whose newSession() calls stay pending until released, in call
+ * order, so a test can act (New Chat, resume, reconnect) while one is in flight.
+ * Records every setSessionMode call so a test can see which session it hit.
+ */
+function makeSlowSessionConnection() {
+	const releases: Array<(sessionId: string) => void> = [];
+	const modeCalls: string[] = [];
+	const connection = {
+		newSession: () =>
+			new Promise<any>(resolve => {
+				releases.push(sessionId =>
+					resolve({
+						sessionId,
+						modes: {
+							currentModeId: 'normal',
+							availableModes: [{id: 'normal'}, {id: 'auto-accept'}],
+						},
+						_meta: {sessionId},
+					}),
+				);
+			}),
+		setSessionMode: async ({sessionId}: {sessionId: string}) => {
+			modeCalls.push(sessionId);
+		},
+		resumeSession: async () => ({}),
+	};
+	return {connection, releases, modeCalls};
+}
+
+function makeConnectedClient(connection: unknown) {
+	const client = new NanocoderAcpClient(
+		{appendLine: () => {}} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection(connection as any);
+	(client as any)._handshakeComplete = true;
+	return client;
+}
+
+/** Let pending promise callbacks run. */
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('NanocoderAcpClient - New Chat during session creation discards the abandoned session', async (t) => {
+	const {connection, releases, modeCalls} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+	const artifacts: unknown[] = [];
+	client.onSessionArtifacts = meta => artifacts.push(meta);
+
+	const pending = client.getOrCreateSession('/cwd');
+	client.newChat();
+
+	releases[0]?.('session-abandoned');
+	await settle();
+	t.is(releases.length, 2, 'the caller waiting across New Chat asks for a fresh session');
+	releases[1]?.('session-fresh');
+
+	t.is(await pending, 'session-fresh');
+	t.is((client as any)._sessionId, 'session-fresh');
+	t.false(
+		modeCalls.includes('session-abandoned'),
+		'the abandoned session must not be configured after New Chat',
+	);
+	t.false(
+		artifacts.some(meta => (meta as any)?.sessionId === 'session-abandoned'),
+		"the abandoned session's artifacts must not reach the UI",
+	);
+});
+
+test('NanocoderAcpClient - a session request after New Chat does not join the abandoned creation', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const beforeNewChat = client.getOrCreateSession('/cwd');
+	client.newChat();
+	const afterNewChat = client.getOrCreateSession('/cwd');
+
+	t.is(releases.length, 2, 'a request after New Chat starts its own newSession');
+	releases[0]?.('session-abandoned');
+	releases[1]?.('session-fresh');
+
+	t.deepEqual(await Promise.all([beforeNewChat, afterNewChat]), [
+		'session-fresh',
+		'session-fresh',
+	]);
+	t.is(releases.length, 2, 'both callers share the one fresh session');
+});
+
+test('NanocoderAcpClient - a creation still in flight when the process reconnects is discarded', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const pending = client.getOrCreateSession('/cwd');
+	client.setConnection(makeSlowSessionConnection().connection as any);
+	releases[0]?.('session-from-dead-process');
+
+	t.is(await pending, undefined, 'the new process re-creates its session after the handshake');
+	t.is((client as any)._sessionId, undefined);
+});
+
+test('NanocoderAcpClient - a creation still in flight does not overwrite a resumed session', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const pending = client.getOrCreateSession('/cwd');
+	await client.resumeSession('session-resumed');
+	releases[0]?.('session-created');
+
+	t.is(await pending, 'session-resumed');
+	t.is((client as any)._sessionId, 'session-resumed');
+});
