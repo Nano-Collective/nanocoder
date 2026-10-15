@@ -55,11 +55,16 @@ function extractCodeBlocks(markdown: string): string[] {
 
 export const copyCommand: Command = {
 	name: 'copy',
-	description: 'Copy the last assistant response to the clipboard',
+	description:
+		'Copy the last assistant response to the clipboard (/copy [code] for the last code block)',
 	handler: async (args, messages) => {
 		const argument = args[0]?.toLowerCase();
 
-		if (args.length > 1 || (args.length === 1 && argument !== 'code')) {
+		if (args.length > 1) {
+			return warningMsg('Too many arguments. Usage: /copy [code]', 'copy');
+		}
+
+		if (args.length === 1 && argument !== 'code') {
 			return warningMsg(
 				`Unknown option "${args[0]}". Usage: /copy [code]`,
 				'copy',
