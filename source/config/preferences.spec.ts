@@ -2442,3 +2442,53 @@ test.serial(
 		});
 	},
 );
+
+test.serial(
+	'loadPreferences ignores fullCommitConfirmedProjects and ciWatch from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{
+				fullCommitConfirmedProjects: ['/evil'],
+				ciWatch: {enabled: true},
+			},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.fullCommitConfirmedProjects, undefined);
+				t.is(prefs.ciWatch, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes fullCommitConfirmedProjects and ciWatch from the global file',
+	t => {
+		withProjectPreferences(
+			{fullCommitConfirmedProjects: ['/evil'], ciWatch: {enabled: false}},
+			{fullCommitConfirmedProjects: ['/mine'], ciWatch: {enabled: true}},
+			() => {
+				const prefs = loadPreferences();
+				t.deepEqual(prefs.fullCommitConfirmedProjects, ['/mine']);
+				t.true(prefs.ciWatch?.enabled);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes fullCommitConfirmedProjects to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.fullCommitConfirmedProjects = ['/confirmed'];
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.fullCommitConfirmedProjects, undefined);
+			t.deepEqual(global.fullCommitConfirmedProjects, ['/confirmed']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);

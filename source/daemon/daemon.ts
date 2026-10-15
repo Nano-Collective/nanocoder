@@ -396,7 +396,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		if (dormantCiSubs.length > 0) {
 			console.warn(
 				`Warning: ${dormantCiSubs.length} skill subscription(s) to 'ci.job.failed' will never fire ` +
-					`because CI watch is not active (nanocoder.ciWatch.enabled is false, or gh CLI was not found): ` +
+					`because CI watch is not active (ciWatch.enabled is false, or gh CLI was not found): ` +
 					dormantCiSubs.map(sub => sub.id).join(', '),
 			);
 		}

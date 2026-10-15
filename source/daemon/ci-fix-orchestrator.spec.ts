@@ -30,8 +30,12 @@ const FAKE_WORKTREE: CiFixWorktree = {
 	isNewBranch: true,
 };
 
-function stubDeps(overrides: Partial<CiFixOrchestratorDeps> = {}) {
+function stubDeps(
+	overrides: Partial<CiFixOrchestratorDeps> = {},
+	fixedShas: string[] = [],
+) {
 	const calls = {
+		recorded: [] as string[],
 		createWorktree: 0,
 		removeWorktree: 0,
 		spawnFixRunner: 0,
@@ -56,6 +60,10 @@ function stubDeps(overrides: Partial<CiFixOrchestratorDeps> = {}) {
 		createDraftPr: async opts => {
 			calls.createDraftPr.push(opts);
 			return 'https://github.com/o/r/pull/99';
+		},
+		readAutoFixedShas: async () => fixedShas,
+		recordAutoFixedShas: async (_root, shas) => {
+			calls.recorded.push(...shas);
 		},
 		...overrides,
 	};
@@ -141,7 +149,11 @@ test('auto-fix + committed pushes the fix branch and opens a draft PR against th
 	t.is(calls.createDraftPr.length, 1);
 	t.is(calls.createDraftPr[0]?.base, PAYLOAD.branch);
 	t.is(calls.createDraftPr[0]?.head, FAKE_WORKTREE.branch);
-	t.true(result.output.includes('https://github.com/o/r/pull/99'));
+	t.is(
+		result.output.split('\n')[0],
+		'Opened draft PR: https://github.com/o/r/pull/99',
+	);
+	t.deepEqual(calls.recorded, ['deadbeef']);
 	t.is(calls.removeWorktree, 1);
 });
 
@@ -206,4 +218,76 @@ test('a failure before the push (no createDraftPr call yet) reports "pushing the
 	t.regex(result.error ?? '', /Fix was committed but pushing the fix failed/);
 	t.is(calls.createDraftPr.length, 0);
 	t.is(calls.removeWorktree, 1);
+});
+
+test('a failing run on a commit the daemon already published as a fix is not retried', async t => {
+	const {deps, calls} = stubDeps({}, [PAYLOAD.headSha]);
+
+	const result = await runCiAutoFixFlow(ciTask(), 'full-commit', '/repo', deps);
+
+	t.false(result.success);
+	t.regex(result.error ?? '', /needs a human/);
+	t.is(calls.createWorktree, 0);
+	t.is(calls.spawnFixRunner, 0);
+});
+
+test('an already-aborted signal skips the run entirely', async t => {
+	const {deps, calls} = stubDeps();
+	const controller = new AbortController();
+	controller.abort();
+
+	const result = await runCiAutoFixFlow(
+		ciTask(),
+		'auto-fix',
+		'/repo',
+		deps,
+		controller.signal,
+	);
+
+	t.false(result.success);
+	t.is(calls.createWorktree, 0);
+});
+
+test('abort during the runner skips push/PR and still removes the clone', async t => {
+	const controller = new AbortController();
+	const {deps, calls} = stubDeps({
+		spawnFixRunner: async () => {
+			controller.abort();
+			return {
+				success: true,
+				committed: true,
+				commitShas: ['deadbeef'],
+				output: 'committed before shutdown',
+			};
+		},
+	});
+
+	const result = await runCiAutoFixFlow(
+		ciTask(),
+		'full-commit',
+		'/repo',
+		deps,
+		controller.signal,
+	);
+
+	t.false(result.success);
+	t.is(calls.pushBranch.length, 0);
+	t.is(calls.createDraftPr.length, 0);
+	t.is(calls.recorded.length, 0);
+	t.is(calls.removeWorktree, 1);
+});
+
+test('full-commit records the published commit SHAs', async t => {
+	const {deps, calls} = stubDeps({
+		spawnFixRunner: async () => ({
+			success: true,
+			committed: true,
+			commitShas: ['c0ffee'],
+			output: 'fixed',
+		}),
+	});
+
+	await runCiAutoFixFlow(ciTask(), 'full-commit', '/repo', deps);
+
+	t.deepEqual(calls.recorded, ['c0ffee']);
 });

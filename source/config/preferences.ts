@@ -18,7 +18,7 @@ import type {
 	NotificationsConfig,
 	TuneConfig,
 } from '@/types/config';
-import type {TrustedDirectoryRecord, UserPreferences} from '@/types/index';
+import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
@@ -59,31 +59,36 @@ function isProjectPreferencesPath(preferencesPath: string): boolean {
 	);
 }
 
-function readGlobalTrustedDirectories():
-	| Array<string | TrustedDirectoryRecord>
-	| undefined {
+// Keys that are personal, security-sensitive decisions. They live only in the
+// global file: a committed project file must not be able to pre-confirm the
+// `--trust full-commit` warning or switch on background CI polling.
+const GLOBAL_ONLY_KEYS = [
+	'trustedDirectories',
+	'fullCommitConfirmedProjects',
+	'ciWatch',
+] as const satisfies ReadonlyArray<keyof UserPreferences>;
+
+function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		const data = JSON.parse(
-			readFileSync(globalPath, 'utf-8'),
-		) as UserPreferences;
-		return data.trustedDirectories;
+		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
 		logError(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
 
-function writeGlobalTrustedDirectories(
-	trustedDirectories: Array<string | TrustedDirectoryRecord>,
-): void {
+function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
-	let data: UserPreferences = {};
+	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
+			string,
+			unknown
+		>;
 	}
-	data.trustedDirectories = trustedDirectories;
+	Object.assign(data, values);
 	mkdirSync(path.dirname(globalPath), {recursive: true});
 	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
 }
@@ -95,11 +100,12 @@ export function loadPreferences(): UserPreferences {
 			readFileSync(preferencesPath, 'utf-8'),
 		) as UserPreferences;
 		if (isProjectPreferencesPath(preferencesPath)) {
-			const trustedDirectories = readGlobalTrustedDirectories();
-			if (trustedDirectories === undefined) {
-				delete data.trustedDirectories;
-			} else {
-				data.trustedDirectories = trustedDirectories;
+			const globalPrefs = readGlobalOnlyPreferences();
+			const mutable = data as Record<string, unknown>;
+			for (const key of GLOBAL_ONLY_KEYS) {
+				const value = globalPrefs?.[key];
+				if (value === undefined) delete mutable[key];
+				else mutable[key] = value;
 			}
 		}
 		return data;
@@ -153,10 +159,16 @@ export function savePreferences(preferences: UserPreferences): void {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
-			const {trustedDirectories, ...rest} = preferences;
+			const rest: Record<string, unknown> = {...preferences};
+			const globalValues: Record<string, unknown> = {};
+			for (const key of GLOBAL_ONLY_KEYS) {
+				delete rest[key];
+				if (preferences[key] !== undefined)
+					globalValues[key] = preferences[key];
+			}
 			atomicWriteFileSync(preferencesPath, JSON.stringify(rest, null, 2));
-			if (trustedDirectories !== undefined) {
-				writeGlobalTrustedDirectories(trustedDirectories);
+			if (Object.keys(globalValues).length > 0) {
+				writeGlobalOnlyPreferences(globalValues as Partial<UserPreferences>);
 			}
 		} else {
 			atomicWriteFileSync(

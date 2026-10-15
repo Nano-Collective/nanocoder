@@ -60,3 +60,32 @@ test('a valid JSON file with a non-array seenFailedRunIds reads as an empty defa
 		await rm(root, {recursive: true, force: true});
 	}
 });
+
+test('writes merge into existing state so writers never clobber each other', async t => {
+	const root = await tempProject();
+	try {
+		await writeCiWatchState(root, {seenFailedRunIds: [1, 2]});
+		await writeCiWatchState(root, {autoFixedShas: ['abc']});
+		await writeCiWatchState(root, {seenFailedRunIds: [1, 2, 3]});
+		t.deepEqual(await readCiWatchState(root), {
+			seenFailedRunIds: [1, 2, 3],
+			autoFixedShas: ['abc'],
+		});
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('a non-array autoFixedShas is dropped instead of breaking the read', async t => {
+	const root = await tempProject();
+	try {
+		await mkdir(join(root, '.nanocoder'), {recursive: true});
+		await writeFile(
+			getCiWatchStatePath(root),
+			JSON.stringify({seenFailedRunIds: [7], autoFixedShas: 'oops'}),
+		);
+		t.deepEqual(await readCiWatchState(root), {seenFailedRunIds: [7]});
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});

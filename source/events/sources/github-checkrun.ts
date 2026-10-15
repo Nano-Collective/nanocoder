@@ -17,7 +17,7 @@
  * activation: it reports "which workflows are currently red," not a
  * backlog of every stale failure in that workflow's recent history.
  * Filtering by a specific workflow name is not supported — there's no config
- * surface naming which workflow(s) to watch; `nanocoder.ciWatch.workflows?:
+ * surface naming which workflow(s) to watch; `ciWatch.workflows?:
  * string[]` would be a natural follow-up.
  *
  * On a `gh` error or unparseable output (rate limit, network, a CLI banner

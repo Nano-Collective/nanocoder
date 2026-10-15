@@ -545,6 +545,7 @@ test.serial('--trust flag takes precedence over the project config value', async
 		});
 		t.is(result.exitCode, 0);
 		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+		t.regex(result.output, /CI trust level: auto-fix \(--trust flag\)/);
 	} finally {
 		await rm(root, {recursive: true, force: true});
 		await removeLockfile(root);
@@ -564,6 +565,7 @@ test.serial('project config trust level is used when no flag is given', async t 
 		});
 		t.is(result.exitCode, 0);
 		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+		t.regex(result.output, /CI trust level: auto-fix \(agents\.config\.json\)/);
 	} finally {
 		await rm(root, {recursive: true, force: true});
 		await removeLockfile(root);
@@ -656,5 +658,46 @@ test.serial('full-commit: already-confirmed projects skip the prompt entirely', 
 	} finally {
 		await rm(root, {recursive: true, force: true});
 		await removeLockfile(root);
+	}
+});
+
+test.serial('start output names the default trust level when nothing sets one', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.regex(result.output, /CI trust level: comment-only \(default\)/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('full-commit without an interactive terminal aborts instead of hanging', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	const original = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+	Object.defineProperty(process.stdin, 'isTTY', {value: false, configurable: true});
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'full-commit'],
+			launchDaemon: launcher.launch,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /one-time interactive confirmation/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		if (original) Object.defineProperty(process.stdin, 'isTTY', original);
+		else delete (process.stdin as {isTTY?: boolean}).isTTY;
+		await rm(root, {recursive: true, force: true});
 	}
 });

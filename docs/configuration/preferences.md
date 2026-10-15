@@ -177,23 +177,21 @@ You can change these via `/settings` → **Input** → **Notifications**. See [D
 
 ### CI Watch Configuration
 
-Background CI-watch preferences are stored under the `nanocoder.ciWatch` namespace. When enabled, the daemon (`nanocoder daemon start`) polls GitHub Actions for failures on the current branch and automatically investigates them:
+Background CI-watch preferences are stored under the top-level `ciWatch` key of your **global** preferences file (a project-level `nanocoder-preferences.json` is ignored for this key, since turning on background polling is a personal decision). When enabled, the daemon (`nanocoder daemon start`) polls GitHub Actions for failures on the current branch and automatically investigates them:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `nanocoder.ciWatch.enabled` | boolean | `false` | Enable background CI-watch polling. Requires the `gh` CLI to be installed and authenticated. |
-| `nanocoder.ciWatch.pollIntervalMs` | number | `30000` | Base interval between polls, in milliseconds. |
-| `nanocoder.ciWatch.maxPollIntervalMs` | number | `300000` | Backoff ceiling applied when consecutive `gh` calls fail. |
+| `ciWatch.enabled` | boolean | `false` | Enable background CI-watch polling. Requires the `gh` CLI to be installed and authenticated. |
+| `ciWatch.pollIntervalMs` | number | `30000` | Base interval between polls, in milliseconds. |
+| `ciWatch.maxPollIntervalMs` | number | `300000` | Backoff ceiling applied when consecutive `gh` calls fail. |
 
 There's no `/settings` wizard for this yet — set it by hand-editing the preferences file:
 
 ```json
 {
-  "nanocoder": {
-    "ciWatch": {
-      "enabled": true,
-      "pollIntervalMs": 30000
-    }
+  "ciWatch": {
+    "enabled": true,
+    "pollIntervalMs": 30000
   }
 }
 ```
@@ -221,7 +219,7 @@ Whether CI-watch investigations can auto-fix a failure — and how aggressively 
 `nanocoder daemon start --trust <comment-only|auto-fix|full-commit>` overrides this for a single run; the config value is used when the flag is omitted, falling back to `comment-only` if neither is set:
 
 - **`comment-only`** (default) — investigates and diagnoses a CI failure, posting the diagnosis as a PR comment. Never mutates anything.
-- **`auto-fix`** — additionally implements and commits a fix in an isolated `git worktree`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
+- **`auto-fix`** — additionally implements and commits a fix in an isolated `git clone`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
 - **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.

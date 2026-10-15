@@ -16,6 +16,8 @@ import {dirname, join} from 'node:path';
 
 export interface CiWatchState {
 	seenFailedRunIds: number[];
+	/** Commits the daemon published as automated CI fixes (loop guard). */
+	autoFixedShas?: string[];
 }
 
 export function getCiWatchStatePath(projectRoot: string): string {
@@ -31,18 +33,32 @@ export async function readCiWatchState(
 		const raw = await readFile(path, 'utf-8');
 		const parsed = JSON.parse(raw) as CiWatchState;
 		if (!Array.isArray(parsed.seenFailedRunIds)) return {seenFailedRunIds: []};
+		if (
+			parsed.autoFixedShas !== undefined &&
+			!Array.isArray(parsed.autoFixedShas)
+		) {
+			return {seenFailedRunIds: parsed.seenFailedRunIds};
+		}
 		return parsed;
 	} catch {
 		return {seenFailedRunIds: []};
 	}
 }
 
+/**
+ * Merges `patch` into what is on disk, so two writers (the poller's dedup ids
+ * and the orchestrator's auto-fixed SHAs) never clobber each other's field.
+ */
 export async function writeCiWatchState(
 	projectRoot: string,
-	state: CiWatchState,
+	patch: Partial<CiWatchState>,
 ): Promise<void> {
 	const path = getCiWatchStatePath(projectRoot);
 	await mkdir(dirname(path), {recursive: true});
+	const state: CiWatchState = {
+		...(await readCiWatchState(projectRoot)),
+		...patch,
+	};
 	const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
 	await writeFile(tmp, JSON.stringify(state, null, 2), 'utf-8');
 	await rename(tmp, path);
