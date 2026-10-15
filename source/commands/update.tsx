@@ -26,6 +26,16 @@ export function hasCommandFailed(output: string): boolean {
 		if (exitCode !== 0) {
 			return true;
 		}
+		// The command exited 0: it succeeded. Benign summaries such as
+		// "0 vulnerabilities (0 failed)" must not flip this into a failure,
+		// so only unambiguous error indicators are still checked below.
+		return (
+			/\bcommand not found\b/i.test(outputStr) ||
+			/\bno such file or directory\b/i.test(outputStr) ||
+			/\bpermission denied\b/i.test(outputStr) ||
+			/^error:/im.test(outputStr) ||
+			/\bfatal\b/i.test(outputStr)
+		);
 	}
 
 	// Strategy 2: Check for critical error patterns
@@ -46,11 +56,6 @@ export function hasCommandFailed(output: string): boolean {
 
 	for (const pattern of criticalErrors) {
 		if (pattern.test(normalized)) {
-			// Additional check: avoid false positives for success messages
-			// like "0 errors", "error-free", "no errors found"
-			if (/0\s*errors?|error-?free|no\s*errors?\s*found/i.test(normalized)) {
-				continue;
-			}
 			return true;
 		}
 	}

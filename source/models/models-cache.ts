@@ -5,6 +5,7 @@
 
 import {constants} from 'node:fs';
 import {access, mkdir, readFile, writeFile} from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {xdgCache} from 'xdg-basedir';
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
@@ -14,8 +15,8 @@ import type {CachedModelsData, ModelsDevDatabase} from './models-types.js';
 
 const DEFAULT_CACHE_DIR =
 	process.platform === 'darwin'
-		? path.join(process.env.HOME || '~', 'Library', 'Caches')
-		: path.join(process.env.HOME || '~', '.cache');
+		? path.join(os.homedir(), 'Library', 'Caches')
+		: path.join(os.homedir(), '.cache');
 
 function getCacheDir(): string {
 	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;

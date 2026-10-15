@@ -1,4 +1,4 @@
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -13,7 +13,10 @@ process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
 const {resetPreferencesCache} = await import('@/config/preferences');
 resetPreferencesCache();
 
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {ActiveMode} from '@/hooks/useAppState';
+import {readFileTool} from '@/tools/read-file';
+import {clearReadTracker} from '@/utils/read-tracker';
 import type {LLMClient, Message} from '@/types/core';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {useModeHandlers} from './useModeHandlers';
@@ -72,6 +75,7 @@ function setup(probe: ProbeProps = {}) {
 	const setMessages = spy<[Message[]]>();
 	const setActiveMode = spy<[ActiveMode]>();
 	const setIsSettingsMode = spy<[boolean]>();
+	const setSettingsActiveTab = spy<[SettingsTabId | undefined]>();
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const reinitializeMCPServers = spy<[unknown]>();
 	const setTune = spy<[TuneConfig]>();
@@ -89,6 +93,7 @@ function setup(probe: ProbeProps = {}) {
 		getMessageTokens: () => 0,
 		setActiveMode,
 		setIsSettingsMode,
+		setSettingsActiveTab,
 		addToChatQueue,
 		reinitializeMCPServers: async () => {
 			reinitializeMCPServers(undefined);
@@ -105,6 +110,7 @@ function setup(probe: ProbeProps = {}) {
 		setMessages,
 		setActiveMode,
 		setIsSettingsMode,
+		setSettingsActiveTab,
 		addToChatQueue,
 		setTune,
 	};
@@ -117,15 +123,12 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.exitMode, 'function');
 	t.is(typeof handlers.enterModelSelectionMode, 'function');
 	t.is(typeof handlers.enterModelDatabaseMode, 'function');
-	t.is(typeof handlers.enterConfigWizardMode, 'function');
-	t.is(typeof handlers.enterMcpWizardMode, 'function');
 	t.is(typeof handlers.enterExplorerMode, 'function');
 	t.is(typeof handlers.enterIdeSelectionMode, 'function');
 	t.is(typeof handlers.enterSettingsMode, 'function');
 	t.is(typeof handlers.enterTune, 'function');
 	t.is(typeof handlers.handleModelSelect, 'function');
 	t.is(typeof handlers.handleConfigWizardComplete, 'function');
-	t.is(typeof handlers.handleMcpWizardComplete, 'function');
 	t.is(typeof handlers.handleTuneSelect, 'function');
 });
 
@@ -151,8 +154,6 @@ test('each enter*Mode helper sets the matching active mode', t => {
 
 	handlers.enterModelSelectionMode();
 	handlers.enterModelDatabaseMode();
-	handlers.enterConfigWizardMode();
-	handlers.enterMcpWizardMode();
 	handlers.enterExplorerMode();
 	handlers.enterIdeSelectionMode();
 	handlers.enterTune();
@@ -160,8 +161,6 @@ test('each enter*Mode helper sets the matching active mode', t => {
 	t.deepEqual(setActiveMode.calls, [
 		['model'],
 		['modelDatabase'],
-		['configWizard'],
-		['mcpWizard'],
 		['explorer'],
 		['ideSelection'],
 		['tune'],
@@ -183,12 +182,11 @@ test('cancel handlers all return active mode to null', t => {
 	handlers.handleModelSelectionCancel();
 	handlers.handleModelDatabaseCancel();
 	handlers.handleConfigWizardCancel();
-	handlers.handleMcpWizardCancel();
 	handlers.handleExplorerCancel();
 	handlers.handleIdeSelectionCancel();
 	handlers.handleTuneCancel();
 
-	t.is(setActiveMode.calls.length, 7);
+	t.is(setActiveMode.calls.length, 6);
 	for (const args of setActiveMode.calls) {
 		t.deepEqual(args, [null]);
 	}
@@ -289,11 +287,93 @@ test('handleConfigWizardComplete with no path only exits mode', async t => {
 	t.is(addToChatQueue.calls.length, 0);
 });
 
-test('handleMcpWizardComplete with no path only exits mode', async t => {
-	const {handlers, setActiveMode, addToChatQueue} = setup();
+test('reloadProviders leaves the conversation and settings panel intact', async t => {
+	const {
+		handlers,
+		setMessages,
+		setActiveMode,
+		setIsSettingsMode,
+		addToChatQueue,
+	} = setup({client: createMockClient()});
 
-	await handlers.handleMcpWizardComplete();
+	await handlers.reloadProviders();
 
-	t.deepEqual(setActiveMode.calls, [[null]]);
-	t.is(addToChatQueue.calls.length, 0);
+	// This is why reloadProviders exists rather than reusing
+	// handleConfigWizardComplete: editing a provider mid-session must not wipe
+	// the model's history or tear down the settings panel around the user.
+	// These hold whether the rebuild succeeds or fails - handleConfigWizardComplete
+	// would have called exitMode() before it ever reached the client swap.
+	t.is(setMessages.calls.length, 0, 'conversation history is left alone');
+	t.is(setActiveMode.calls.length, 0, 'does not exit the current mode');
+	t.is(setIsSettingsMode.calls.length, 0, 'leaves the settings panel open');
+	t.is(addToChatQueue.calls.length, 1, 'reports the outcome exactly once');
+});
+
+async function withReadStub(
+	t: import('ava').ExecutionContext,
+	clearHistory: () => Promise<unknown>,
+) {
+	clearReadTracker();
+	const dir = join(process.cwd(), `mode-read-stub-${Date.now()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	const read = () =>
+		readFileTool.tool.execute!(
+			{path: file},
+			{toolCallId: 'read', messages: []},
+		) as Promise<string>;
+	try {
+		t.true((await read()).includes('kept = 1'));
+		t.true((await read()).includes('already in context'));
+		await clearHistory();
+		t.true((await read()).includes('kept = 1'));
+	} finally {
+		clearReadTracker();
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('handleTuneSelect makes the next read_file return the file', async t => {
+	const {handlers} = setup();
+	await withReadStub(t, () =>
+		handlers.handleTuneSelect({
+			enabled: false,
+			toolProfile: 'minimal',
+			aggressiveCompact: false,
+		} as unknown as TuneConfig),
+	);
+});
+
+test.serial(
+	'handleConfigWizardComplete makes the next read_file return the file',
+	async t => {
+		process.env.NANOCODER_PROVIDERS = JSON.stringify({
+			providers: [
+				{
+					name: 'LocalTest',
+					baseUrl: 'http://localhost:8000/v1',
+					models: ['test-model'],
+				},
+			],
+		});
+		const {handlers, setMessages} = setup();
+		try {
+			await withReadStub(t, () =>
+				handlers.handleConfigWizardComplete('agents.config.json'),
+			);
+			t.deepEqual(setMessages.calls, [[[]]]);
+		} finally {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	},
+);
+
+test('enterSettingsMode forwards the requested tab', t => {
+	const {handlers, setSettingsActiveTab} = setup();
+
+	handlers.enterSettingsMode('mcp');
+	handlers.enterSettingsMode();
+
+	t.deepEqual(setSettingsActiveTab.calls, [['mcp'], [undefined]]);
 });

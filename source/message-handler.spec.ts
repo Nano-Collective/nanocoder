@@ -8,6 +8,7 @@ import {
 	setToolRegistryGetter,
 } from './message-handler';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
+import {executeBashTool} from '@/tools/execute-bash';
 
 console.log(`\nmessage-handler.spec.ts`);
 
@@ -154,6 +155,25 @@ test('processToolUse - executes tool successfully with object arguments', async 
 	t.is(result.structuredContent, undefined);
 });
 
+test('processToolUse - carries screenshot images beside the caption', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			browser: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+		}),
+	);
+
+	const result = await processToolUse(
+		createMockToolCall('browser', {action: 'screenshot'}),
+	);
+
+	t.is(result.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(result.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+	t.false(result.content.includes('abc'));
+});
+
 test('processToolUse - carries structured handler output onto the result', async t => {
 	const mockHandler: ToolHandler = async () => ({
 		llmContent: '1 error found',
@@ -177,6 +197,83 @@ test('processToolUse - carries structured handler output onto the result', async
 	});
 });
 
+test('processToolUse - carries isError on a visual tool result', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			browser: async () => ({
+				llmContent: 'Screenshot failed',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+				isError: true,
+			}),
+		}),
+	);
+
+	const result = await processToolUse(
+		createMockToolCall('browser', {action: 'screenshot'}),
+	);
+
+	t.true(result.isError);
+	t.deepEqual(result.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+});
+
+test('processToolUse - carries a handler-reported failure onto the result', async t => {
+	// Handlers that fail without throwing report it on their output; the
+	// result must carry it, since --json and ACP read isError and nothing else.
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			failing_tool: async () => ({llmContent: 'EXIT_CODE: 7', isError: true}),
+		}),
+	);
+
+	const result = await processToolUse(createMockToolCall('failing_tool', {}));
+
+	t.true(result.isError);
+	t.is(result.content, 'EXIT_CODE: 7');
+	t.is(
+		result.structuredContent,
+		undefined,
+		'text-only output must not grow a structured payload',
+	);
+});
+
+test('processToolUse - leaves isError unset when the handler reports success', async t => {
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			ok_tool: async () => ({llmContent: 'EXIT_CODE: 0', isError: false}),
+		}),
+	);
+
+	const result = await processToolUse(createMockToolCall('ok_tool', {}));
+
+	t.is(result.isError, undefined);
+});
+
+test('processToolUse - reports a non-zero shell exit as an error', async t => {
+	// The reported repro, through the real execute_bash handler: before the
+	// fix this came back byte-for-byte identical to a clean run.
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			execute_bash: async (args, options) =>
+				executeBashTool.tool.execute!(args as {command: string}, {
+					toolCallId: 'test',
+					messages: [],
+					...options,
+				}),
+		}),
+	);
+
+	const failed = await processToolUse(
+		createMockToolCall('execute_bash', {command: 'exit 7'}),
+	);
+	const clean = await processToolUse(
+		createMockToolCall('execute_bash', {command: 'true'}),
+	);
+
+	t.true(failed.isError);
+	t.true(failed.content.includes('EXIT_CODE: 7'));
+	t.is(clean.isError, undefined);
+});
+
 test('processToolUse - caps oversized LLM content but keeps structured output', async t => {
 	const content = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
 
@@ -191,7 +288,9 @@ test('processToolUse - caps oversized LLM content but keeps structured output', 
 
 	const result = await processToolUse(createMockToolCall('large_tool', {}));
 
-	t.is(result.content.length, MAX_TOOL_RESULT_CHARS);
+	// At most the cap: the cut snaps to whitespace so it never splits a token.
+	t.true(result.content.length <= MAX_TOOL_RESULT_CHARS);
+	t.true(result.content.length > MAX_TOOL_RESULT_CHARS - 512);
 	t.true(result.content.startsWith('HEAD\n'));
 	t.true(result.content.endsWith('TAIL'));
 	t.true(result.content.includes('Output truncated'));

@@ -21,6 +21,7 @@ const mockTheme = {
 const mockTitleShape = {
 	currentTitleShape: 'pill' as const,
 	setCurrentTitleShape: () => {},
+	commitTitleShape: () => {},
 };
 
 function Wrapper({children}: {children: React.ReactNode}) {
@@ -268,6 +269,36 @@ test('Include AGENTS.md defaults OFF for nano profile', t => {
 	const {lastFrame} = renderTuneSelector(config);
 	const output = lastFrame()!;
 	t.regex(output, /Include AGENTS\.md.*OFF/);
+});
+
+test('Include AGENTS.md defaults OFF when auto resolves to nano for the model', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'auto'};
+	const {lastFrame} = render(
+		<Wrapper>
+			<TuneSelector
+				currentConfig={config}
+				currentModel="llama3.2:1b"
+				onSelect={() => {}}
+				onCancel={() => {}}
+			/>
+		</Wrapper>,
+	);
+	t.regex(lastFrame()!, /Include AGENTS\.md.*OFF/);
+});
+
+test('Include AGENTS.md defaults ON when auto resolves to full for the model', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'auto'};
+	const {lastFrame} = render(
+		<Wrapper>
+			<TuneSelector
+				currentConfig={config}
+				currentModel="gpt-5"
+				onSelect={() => {}}
+				onCancel={() => {}}
+			/>
+		</Wrapper>,
+	);
+	t.regex(lastFrame()!, /Include AGENTS\.md.*ON/);
 });
 
 test('Include AGENTS.md respects explicit override (false beats nano default-on)', t => {

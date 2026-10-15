@@ -1,9 +1,28 @@
+import {mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
+import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
-import {parseMarkdown} from './index.js';
+import {parseMarkdown, parseMarkdownParts} from './index.js';
 
 console.log(`\nindex.spec.ts`);
+
+// Highlighting consults the `syntaxTheme` preference, so run against an empty
+// config directory — a contributor who sets that preference must not change
+// which colours these assertions see.
+const testConfigDir = join(tmpdir(), `nanocoder-md-spec-${process.pid}`);
+
+test.before(() => {
+	mkdirSync(testConfigDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+
+test.after.always(() => {
+	rmSync(testConfigDir, {recursive: true, force: true});
+	delete process.env.NANOCODER_CONFIG_DIR;
+});
 
 const mockColors: Colors = {
 	primary: '#3b82f6',
@@ -151,6 +170,19 @@ test('parseMarkdown renders tables with plain text (no markdown)', t => {
 	t.false(result.includes('`npm install`'));
 });
 
+test('parseMarkdown keeps the last row of a table that ends the text', t => {
+	// Replies are trimmed, so the final row has no newline after it. It used
+	// to fall outside the rendered table as a raw markdown line.
+	const text = `| A | B |
+|---|---|
+| a1 | b1 |
+| a2 | b2 |`;
+	const result = stripAnsi(parseMarkdown(text, mockColors));
+	t.true(result.includes('a2'));
+	t.false(/\|\s*a2\s*\|\s*b2\s*\|/.test(result));
+	t.true(result.trimEnd().endsWith('┘'));
+});
+
 // Code block tests
 test('parseMarkdown handles code blocks with language', t => {
 	const text = '```javascript\nconst x = 5;\n```';
@@ -163,6 +195,42 @@ test('parseMarkdown handles code blocks without language', t => {
 	const text = '```\nPlain code\n```';
 	const result = parseMarkdown(text, mockColors);
 	t.true(result.includes('Plain code'));
+});
+
+test('parseMarkdown preserves HTML inside code blocks', t => {
+	const text = '```html\n<div>Hello<br>World</div>\n&lt;span&gt;test&lt;/span&gt;\n```';
+	const result = parseMarkdown(text, mockColors);
+	const plainResult = stripAnsi(result);
+
+	t.true(plainResult.includes('<br>'));
+	t.true(plainResult.includes('&lt;span&gt;test&lt;/span&gt;'));
+});
+
+// Code blocks used to render in cli-highlight's own palette: the parser passed
+// `theme: 'default'`, a string where the library expects a token -> formatter
+// map, so the option was dropped. Colour must come from the caller's palette.
+test('parseMarkdown highlights code blocks with the supplied colors', t => {
+	// Two separate things are going on here, both load-bearing.
+	//
+	// chalk.level = 3 because the runner reports no colour support, so the
+	// assertion would otherwise compare two unstyled strings.
+	//
+	// A distinct palette object because chalk bakes the colour MODEL into a
+	// builder when the builder is created: chalk.hex() picks ansi16, ansi256
+	// or truecolor from chalk.level at that moment. Whether to emit codes is
+	// re-checked per call, but which codes is not. getSyntaxTheme memoises
+	// per palette identity, so reusing mockColors here would reuse builders
+	// frozen at the runner's default level - emitting [91m where the
+	// assertion builds [38;2;... and the two would not match.
+	const previousLevel = chalk.level;
+	chalk.level = 3;
+	try {
+		const colors: Colors = {...mockColors, primary: '#ff0000'};
+		const result = parseMarkdown('```javascript\nconst x = 5;\n```', colors);
+		t.true(result.includes(chalk.hex(colors.primary)('const')));
+	} finally {
+		chalk.level = previousLevel;
+	}
 });
 
 // Edge case tests
@@ -282,4 +350,92 @@ test('parseMarkdown restores inline code placeholders correctly', t => {
 	t.false(result.includes('__INLINE_CODE'));
 	t.false(result.includes('_INLINE'));
 	t.false(result.includes('CODE_'));
+});
+
+test('parseMarkdown preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__CODE_BLOCK_0__'));
+	t.true(result.includes('__INLINE_CODE_0__'));
+	t.true(result.includes('const value = "real code";'));
+	t.true(result.includes('inline code'));
+	t.false(result.includes('__NANOCODER_MD_'));
+});
+
+test('parseMarkdown avoids marker collisions after HTML entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(result.includes('real code'));
+	t.false(result.includes('__NANOCODER_MD_1__'));
+});
+
+test('parseMarkdownParts preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('const value = "real code";'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_'));
+});
+
+test('parseMarkdownParts preserves namespaced literal markers after entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__ and __NANOCODER_MD_1__INLINE_CODE_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__NANOCODER_MD_1__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('real code'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_2__'));
 });

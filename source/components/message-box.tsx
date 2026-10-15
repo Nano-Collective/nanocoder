@@ -4,6 +4,7 @@ import {memo} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
 type MessageType = 'error' | 'success' | 'warning' | 'info';
 
@@ -38,6 +39,13 @@ const MessageBox = memo(function MessageBox({
 	const color = colors[type];
 	const title = defaultTitles[type];
 
+	// Ink wraps with trim: false, so the space at a word boundary survives as
+	// leading whitespace on the continuation line and a wrapped message reads
+	// as if its second line were indented. Pre-wrap so Ink never has to.
+	// Bordered variants lose 1 column to each border plus paddingX={2} a side.
+	const textWidth = hideBox ? boxWidth : boxWidth - 6;
+	const wrappedMessage = wrapWithTrimmedContinuations(message, textWidth);
+
 	return (
 		<>
 			{hideBox ? (
@@ -47,7 +55,7 @@ const MessageBox = memo(function MessageBox({
 					marginBottom={marginBottom}
 					marginTop={marginTop}
 				>
-					<Text color={color}>{message}</Text>
+					<Text color={color}>{wrappedMessage}</Text>
 				</Box>
 			) : hideTitle ? (
 				<Box
@@ -59,7 +67,7 @@ const MessageBox = memo(function MessageBox({
 					flexDirection="column"
 					marginBottom={marginBottom}
 				>
-					<Text color={color}>{message}</Text>
+					<Text color={color}>{wrappedMessage}</Text>
 				</Box>
 			) : (
 				<TitledBoxWithPreferences
@@ -71,7 +79,7 @@ const MessageBox = memo(function MessageBox({
 					flexDirection="column"
 					marginBottom={marginBottom}
 				>
-					<Text color={color}>{message}</Text>
+					<Text color={color}>{wrappedMessage}</Text>
 				</TitledBoxWithPreferences>
 			)}
 		</>

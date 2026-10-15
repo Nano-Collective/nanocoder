@@ -3,6 +3,14 @@ import type {ApiCallRecord, ApiUsageSnapshot, Message} from '@/types/core';
 export interface Command<T = React.ReactElement | void> {
 	name: string;
 	description: string;
+	/**
+	 * Opt into a live spinner while the handler runs. Set this on commands that
+	 * do a slow round-trip (LLM call, network) before returning, so the UI is
+	 * not silent for seconds. Present tense, no trailing ellipsis.
+	 */
+	progressLabel?: string;
+	/** Echo the submitted slash command into chat before showing its result. */
+	echoInvocation?: boolean;
 	handler: (
 		args: string[],
 		messages: Message[],
@@ -16,6 +24,7 @@ export interface Command<T = React.ReactElement | void> {
 			developmentMode?: import('@/types/core').DevelopmentMode;
 			lastApiUsage?: ApiUsageSnapshot | null;
 			apiCallHistory?: ApiCallRecord[];
+			sessionId?: string;
 		},
 	) => Promise<T>;
 }
@@ -30,6 +39,14 @@ export interface Command<T = React.ReactElement | void> {
 export interface LazyCommand {
 	name: string;
 	description: string;
+	/**
+	 * Mirrors `Command.progressLabel`. Duplicated here for the same reason as
+	 * `description`: the spinner must be shown before `load()` resolves, so it
+	 * cannot be read off the lazily-imported module.
+	 */
+	progressLabel?: string;
+	/** Mirrors `Command.echoInvocation` without loading the command module. */
+	echoInvocation?: boolean;
 	load: () => Promise<Command>;
 }
 

@@ -24,6 +24,7 @@ import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
+import {calculateUsageCost} from '@/usage/response-usage';
 import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 export const usageCommand: Command = {
@@ -193,19 +194,11 @@ export const usageCommand: Command = {
 				const isSnapshotFresh =
 					snapshot && snapshot.atMessageCount >= messages.length;
 
-				let currentContextCost: number;
-				if (
-					isSnapshotFresh &&
-					snapshot.inputTokens != null &&
-					snapshot.outputTokens != null
-				) {
-					currentContextCost =
-						(pricing.input * snapshot.inputTokens +
-							pricing.output * snapshot.outputTokens) /
-						1_000_000;
-				} else {
-					currentContextCost = (pricing.input * breakdown.total) / 1_000_000;
-				}
+				const reportedContextCost = isSnapshotFresh
+					? calculateUsageCost(snapshot, pricing)
+					: undefined;
+				const currentContextCost =
+					reportedContextCost ?? (pricing.input * breakdown.total) / 1_000_000;
 
 				// ---- Cumulative session + per-provider (from history) ----
 				const history = metadata.apiCallHistory ?? [];
@@ -228,23 +221,7 @@ export const usageCommand: Command = {
 						output: NaN,
 					};
 
-					const knownInputCost =
-						record.inputTokens != null
-							? (recordPricing.input * record.inputTokens) / 1_000_000
-							: 0;
-					const knownOutputCost =
-						record.outputTokens != null
-							? (recordPricing.output * record.outputTokens) / 1_000_000
-							: 0;
-
-					const callCost =
-						record.inputTokens != null && record.outputTokens != null
-							? knownInputCost + knownOutputCost
-							: record.totalTokens != null
-								? (((recordPricing.input + recordPricing.output) / 2) *
-										record.totalTokens) /
-									1_000_000
-								: knownInputCost + knownOutputCost;
+					const callCost = calculateUsageCost(record, recordPricing) ?? 0;
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =

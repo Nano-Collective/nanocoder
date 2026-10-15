@@ -10,7 +10,7 @@ sidebar_order: 3
 
 This is an honest comparison of Nanocoder against the most relevant CLI coding agents on the market. Honest meaning: where Nanocoder leads, this doc says so plainly; where parity exists, that is stated too; and where the project is genuinely behind, it is not hidden.
 
-The short version: Nanocoder is the most provider-diverse, most feature-complete, **community-driven, privacy-respecting, local-first** coding agent in the terminal today. The longer version is below.
+The short version: Nanocoder is the only **collectively-owned, zero-telemetry, local-first** coding agent in the terminal, and the most provider-diverse of the community-led options. It is not the biggest or the most feature-dense — OpenCode, Pi, and OMP are all larger projects, and this page says where they are ahead. The longer version is below.
 
 ## What Nanocoder is
 
@@ -19,14 +19,14 @@ A CLI coding agent built by the [Nano Collective](https://nanocollective.org), a
 The project rests on three purposes, in equal measure:
 
 - **Community-driven.** Owned by the Nano Collective, governed in public, contribution model written down. No backroom plan to monetize. No investor return to deliver. No paid tier ever.
-- **Privacy-respecting.** Zero telemetry. Zero tracking. No analytics product, no install ping, no usage metrics phoned home. What you do in Nanocoder stays in Nanocoder.
-- **Local-first.** Designed so the whole loop can run on your machine. Seven local server integrations documented as first-class providers, not as power-user escape hatches.
+- **Privacy-respecting.** Zero telemetry. Zero tracking. No analytics product, no usage metrics phoned home. The only calls Nanocoder makes on its own are an anonymous version check and a model-metadata download, both described below. What you do in Nanocoder stays in Nanocoder.
+- **Local-first.** Designed so the whole loop can run on your machine. Eight local server integrations documented as first-class providers, not as power-user escape hatches.
 
 The features below are how those three purposes show up in practice.
 
 ## Who we compare against
 
-Seven tools, picked to cover the realistic alternatives a developer chooses between when they want a terminal coding agent:
+Eight tools, picked to cover the realistic alternatives a developer chooses between when they want a terminal coding agent:
 
 - **Claude Code** (Anthropic) - proprietary, the dominant polished CLI
 - **OpenAI Codex CLI** - OpenAI's official CLI agent
@@ -34,7 +34,8 @@ Seven tools, picked to cover the realistic alternatives a developer chooses betw
 - **Aider** - long-running OSS agent, file-edit oriented
 - **OpenCode** (anomalyco / formerly sst) - the closest OSS peer to Nanocoder
 - **Crush** (Charmbracelet) - Go TUI, single-binary distribution
-- **Pi** (pi.dev / pi-mono) - minimalist OSS agent with a strong extension API
+- **Pi** (pi.dev / earendil-works) - small-core OSS agent with the deepest extension API
+- **OMP** (oh-my-pi) - a Pi fork that went the opposite way: IDE tooling wired into the agent
 
 Cursor, Cline, Continue, and Copilot Chat are excluded on purpose. They are IDE-native and play a different game.
 
@@ -61,14 +62,15 @@ Twelve axes grouped into four buckets:
 | OpenCode | MIT | Free + optional paid Zen / Go tiers | Yes (75+ providers) |
 | Crush | FSL-1.1-MIT | Free, BYO key | Yes (many providers) |
 | Pi | MIT | Free, BYO key or OAuth (Claude / ChatGPT / Copilot) | Yes (20+ providers) |
+| OMP | MIT | Free, BYO key | Yes (60+ providers) |
 
 Nanocoder's provider list is the broadest of any community-led project here:
 
-- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Google Gemini, GitHub Copilot, GitHub Models, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, Requesty, Z.ai, Z.ai Coding
-- **Local**: Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
+- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Cheaper Inference, Google Gemini, GitHub Copilot, GitHub Models, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, OrcaRouter, Poe, Requesty, Thesean AI, Together AI, Z.ai, Z.ai Coding
+- **Local**: Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
 - **Custom**: any OpenAI-compatible endpoint
 
-OpenCode lists more total providers in aggregate, but Nanocoder is the only tool with this many *first-class local* servers documented.
+OpenCode and OMP both list more total providers in aggregate. Nanocoder's distinction is narrower and worth stating precisely: eight *local* servers documented as first-class providers with their own setup pages, rather than as entries in a config schema.
 
 ### Ownership and governance
 
@@ -83,7 +85,8 @@ This is the metric most other comparisons skip. It matters: who owns the project
 | Aider | Paul Gauthier (solo / independent) | None documented | None (donations) | Maintainer's discretion |
 | OpenCode | anomalyco (formerly SST) | Venture-backed company | Paid Zen / Go tiers | Convert free users to paid |
 | Crush | Charmbracelet | Private company (VC-backed) | Free CLI; commercial parent now sells Charm Hyper coding-model subscriptions | Strengthen Charm brand and Hyper pipeline |
-| Pi | Mario Zechner (solo, via Earendil Inc.) | No disclosed VC | None | Maintainer's discretion |
+| Pi | earendil-works (Mario Zechner and collaborators) | No disclosed VC | None | Maintainers' discretion |
+| OMP | Can Bölük; copyright Stencil Labs, Inc. | No disclosed VC | None documented | Maintainer's discretion |
 
 Nanocoder is the only project in this survey that is **collectively owned, non-profit, with no paid tier and no growth metric to feed**. There is no backroom plan to monetize, no investor expecting a return, no eventual freemium split, no telemetry product hiding inside the binary. The project exists because the community wants it to.
 
@@ -91,32 +94,35 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 
 | Tool | Local models | MCP | Extensibility | Tool calling | Subagents / scheduled |
 |---|---|---|---|---|---|
-| **Nanocoder** | **7 local servers (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (both fallbacks with malformed-output repair)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
+| **Nanocoder** | **8 local servers (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (malformed calls are sent back to the model to self-correct)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
 | Claude Code | None (cloud only) | Client | Slash commands, Skills, Hooks, Agent SDK | Native | Subagents + Routines (cloud cron) |
 | Codex CLI | Via OpenAI-compatible config | Client | Slash commands, AGENTS.md, Skills, lifecycle hooks | Native | Subagents; no cron |
 | Gemini CLI | Not documented | Client | Custom commands, Extensions, tools, hooks | Native | Subagents; no scheduler |
 | Aider | Ollama, LM Studio, llama.cpp | None | Slash commands only | Diff / text formats (no native function calling) | None |
 | OpenCode | Ollama, LM Studio, llama.cpp | Client | Markdown slash commands, plugins, custom tools | Native | Subagents; no cron |
 | Crush | Ollama, LM Studio via OpenAI-compatible | Client (stdio / http / sse) | Agent Skills | Native | None built-in |
-| Pi | Ollama, OpenAI-compatible | None (deliberate non-goal) | TypeScript extension API | Native | Explicit non-goal |
+| Pi | Ollama, OpenAI-compatible | Not documented | TypeScript extensions (tools, commands, events, custom UI), Agent Skills, prompt templates, packages | Native | Subagents not documented; no scheduler |
+| OMP | Ollama, LM Studio, llama.cpp, vLLM, OpenAI-compatible | Client | 31 built-in tools, full LSP + DAP, MCP, skills | Native | Subagents; no scheduler |
 
-Nanocoder is the **only tool in this survey that combines all four** of: deep local-model support, MCP, subagents, and scheduled runs. Claude Code comes closest, but its scheduler is cloud-only and it has no local model story. Codex CLI, Gemini CLI, and OpenCode ship subagents but no local scheduler. Nanocoder also goes further on the trigger side: a per-project daemon (`nanocoder daemon start`) owns file-watch and cron sources, so Skills can subscribe to `file.changed` or `schedule.cron` events and run headless without the TUI being open.
+Nanocoder is the **only tool in this survey that combines all four** of: deep local-model support, MCP, subagents, and a local scheduler. That claim now rests mostly on the last one. OMP matches the first three and goes further on IDE integration (full LSP plus DAP against Nanocoder's LSP client). Claude Code has a scheduler, but it is cloud-only, tied to a paid subscription, and it has no local model story at all. Codex CLI, Gemini CLI, OpenCode, and OMP all ship subagents with no scheduler.
+
+Where Nanocoder is genuinely alone is the trigger side: a per-project daemon (`nanocoder daemon start`) owns file-watch and cron sources, so Skills can subscribe to `file.changed` or `schedule.cron` events and run headless without the TUI being open. No other tool surveyed has an event-driven local trigger story.
 
 ### Workflow features
 
 Beyond the headline capability axes, Nanocoder ships the kind of day-to-day workflow features usually only seen in paid proprietary tools:
 
-| Feature | Nanocoder | Claude Code | Codex CLI | Gemini CLI | Aider | OpenCode | Crush | Pi |
-|---|---|---|---|---|---|---|---|---|
-| Checkpointing (snapshot / restore) | Yes | Yes | Partial | Yes | Via git | Partial | No | No |
-| Context compression | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Yes |
-| Session autosave + resume | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| Task management (built-in) | Yes | Yes | Partial | Partial | No | Partial | No | No |
-| File explorer (interactive) | Yes | No | No | No | No | Partial | No | No |
-| Desktop notifications | Yes | Yes | Partial | Yes | Yes | Partial | Yes | No |
-| Runtime model tuning | Yes | No | Partial | No | No | No | No | No |
-| Live diff preview (VS Code) | Yes | Yes | Yes | Yes | Third-party | Partial | No | No |
-| Plan mode (preview without execution) | Yes | Yes | Yes | Yes | No | Yes | No | No |
+| Feature | Nanocoder | Claude Code | Codex CLI | Gemini CLI | Aider | OpenCode | Crush | Pi | OMP |
+|---|---|---|---|---|---|---|---|---|---|
+| Checkpointing (snapshot / restore) | Yes | Yes | Partial | Yes | Via git | Partial | No | No | Yes |
+| Context compression | Yes | Yes | Yes | Yes | Partial | Yes | Yes | Yes | Yes |
+| Session autosave + resume | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Task management (built-in) | Yes | Yes | Partial | Partial | No | Partial | No | No | Not documented |
+| File explorer (interactive) | Yes | No | No | No | No | Partial | No | No | Not documented |
+| Desktop notifications | Yes | Yes | Partial | Yes | Yes | Partial | Yes | No | Not documented |
+| Runtime model tuning | Yes | No | Partial | No | No | No | No | No | No |
+| Live diff preview (VS Code) | Yes | Yes | Yes | Yes | Third-party | Partial | No | No | Not documented |
+| Plan mode (preview without execution) | Yes | Yes | Yes | Yes | No | Yes | No | No | Yes |
 
 Runtime model tuning at this scope (changing tool profiles, compaction strategy, native-tool-calling toggle, and model parameters at runtime) is unique to Nanocoder among the tools surveyed. Codex CLI is the only other tool that exposes any runtime parameter controls, and only for reasoning effort and verbosity.
 
@@ -132,6 +138,7 @@ Runtime model tuning at this scope (changing tool profiles, compaction strategy,
 | OpenCode | TUI, web UI, desktop, IDE plugins | Yes (`opencode run`) |
 | Crush | TUI only | Yes (`crush run`) |
 | Pi | TUI with print / JSON / RPC / SDK modes | Yes (`-p`, `--mode json`, stdin, `--offline`) |
+| OMP | TUI, local observability dashboard | Yes |
 
 ### Project signals
 
@@ -139,14 +146,15 @@ Star and contributor counts are resolved from the GitHub API by the docs site wh
 
 | Tool | Stars | Contributors | Language | Telemetry |
 |---|---|---|---|---|
-| **Nanocoder** | <!--stars:Nano-Collective/nanocoder-->1.9k<!--/stars--> | <!--contributors:Nano-Collective/nanocoder-->51<!--/contributors--> | TypeScript / Node | **None - zero telemetry, zero tracking** |
-| Claude Code | <!--stars:anthropics/claude-code-->125k<!--/stars--> | <!--contributors:anthropics/claude-code-->52<!--/contributors--> | Shell wrapper, closed core | Opt-out (Anthropic default) |
-| Codex CLI | <!--stars:openai/codex-->84k<!--/stars--> | <!--contributors:openai/codex-->451<!--/contributors--> | Rust | Opt-in OpenTelemetry (off by default) |
-| Gemini CLI | <!--stars:google-gemini/gemini-cli-->104k<!--/stars--> | <!--contributors:google-gemini/gemini-cli-->675<!--/contributors--> | TypeScript / Node | Opt-in (disabled by default) |
-| Aider | <!--stars:Aider-AI/aider-->45k<!--/stars--> | <!--contributors:Aider-AI/aider-->181<!--/contributors--> | Python | Opt-in; excludes code, chat, keys |
-| OpenCode | <!--stars:anomalyco/opencode-->163k<!--/stars--> | <!--contributors:anomalyco/opencode-->917<!--/contributors--> | TypeScript (Bun) | Under-documented; treat as opt-out |
-| Crush | <!--stars:charmbracelet/crush-->24k<!--/stars--> | <!--contributors:charmbracelet/crush-->118<!--/contributors--> | Go | Opt-out; honors DO_NOT_TRACK |
-| Pi | <!--stars:earendil-works/pi-->52k<!--/stars--> | <!--contributors:earendil-works/pi-->212<!--/contributors--> | TypeScript / Node | Opt-out version check + install ping |
+| **Nanocoder** | <!--stars:Nano-Collective/nanocoder-->2.4k<!--/stars--> | <!--contributors:Nano-Collective/nanocoder-->51<!--/contributors--> | TypeScript / Node | **None - zero telemetry, zero tracking** |
+| Claude Code | <!--stars:anthropics/claude-code-->143k<!--/stars--> | <!--contributors:anthropics/claude-code-->52<!--/contributors--> | Closed core; public repo is tooling and issues | Opt-out (Anthropic default) |
+| Codex CLI | <!--stars:openai/codex-->120k<!--/stars--> | <!--contributors:openai/codex-->451<!--/contributors--> | Rust | Opt-in OpenTelemetry (off by default) |
+| Gemini CLI | <!--stars:google-gemini/gemini-cli-->107k<!--/stars--> | <!--contributors:google-gemini/gemini-cli-->675<!--/contributors--> | TypeScript / Node | Opt-in (disabled by default) |
+| Aider | <!--stars:Aider-AI/aider-->49k<!--/stars--> | <!--contributors:Aider-AI/aider-->181<!--/contributors--> | Python | Opt-in; excludes code, chat, keys |
+| OpenCode | <!--stars:anomalyco/opencode-->203k<!--/stars--> | <!--contributors:anomalyco/opencode-->917<!--/contributors--> | TypeScript (Bun) | Under-documented; treat as opt-out |
+| Crush | <!--stars:charmbracelet/crush-->28k<!--/stars--> | <!--contributors:charmbracelet/crush-->118<!--/contributors--> | Go | Opt-out; honors DO_NOT_TRACK |
+| Pi | <!--stars:earendil-works/pi-->99k<!--/stars--> | <!--contributors:earendil-works/pi-->212<!--/contributors--> | TypeScript / Node | Opt-out version check + install ping |
+| OMP | <!--stars:can1357/oh-my-pi-->28k<!--/stars--> | <!--contributors:can1357/oh-my-pi-->100<!--/contributors--> | TypeScript + Rust (Bun) | No stated posture; ships a local stats dashboard |
 
 ## Why Nanocoder
 
@@ -154,21 +162,26 @@ The matrix tells the structural story. This section tells the human one. The fir
 
 ### 1. Community-driven by design
 
-The Nano Collective owns Nanocoder. There are no investors waiting for a return, no eventual freemium split, no paid tier on the roadmap. [Governance](https://docs.nanocollective.org/collective/organisation/governance) and the [Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter) are published, so the contribution model is written down before you decide to invest your time. Every other tool in this survey is either a private company's product (Claude Code, Codex, Gemini, OpenCode, Crush) or a single maintainer's project (Aider, Pi). Nanocoder is the only collectively-owned, non-profit option.
+The Nano Collective owns Nanocoder. There are no investors waiting for a return, no eventual freemium split, no paid tier on the roadmap. [Governance](https://docs.nanocollective.org/collective/organisation/governance) and the [Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter) are published, so the contribution model is written down before you decide to invest your time. Every other tool in this survey is either a private company's product (Claude Code, Codex, Gemini, OpenCode, Crush) or driven by one maintainer or a small core (Aider, Pi, OMP). Nanocoder is the only collectively-owned, non-profit option.
 
 What this means in practice: the project's incentives are aligned with the people who use it, not with a growth metric or an eventual liquidity event. Decisions get made in public. There is no roadmap item to convert you to a paid plan, because there is no paid plan.
 
 ### 2. Privacy-respecting by design
 
-**Zero telemetry. Zero tracking. No analytics product, no install ping, no usage metrics phoned home.** The binary does not call out to anything you did not ask it to call out to. Compare that to the rest of the field: Anthropic and OpenAI's default postures are not transparent in their public repos; OpenCode's telemetry posture is under-documented; even Crush and Pi ship opt-out version checks and install pings.
+**Zero telemetry. Zero tracking. No analytics product, no usage metrics phoned home.** Beyond the providers and MCP servers you configure, Nanocoder makes exactly two calls on its own, and neither carries your code, prompts or any identifier:
 
-If you are running Nanocoder against a local model, the entire loop can run with zero outbound network traffic. What you do in Nanocoder stays in Nanocoder.
+- **Version check**: each interactive start asks the public npm registry for the latest `@nanocollective/nanocoder` version, so it can tell you when an update is available. There is currently no setting to turn this off.
+- **Model metadata**: context limits and pricing are looked up from the public [models.dev](https://models.dev) catalogue, downloaded once and cached locally.
+
+Compare that to the rest of the field: Anthropic and OpenAI's default postures are not transparent in their public repos; OpenCode's telemetry posture is under-documented and OMP states none at all; Crush and Pi ship version checks and install pings too.
+
+Against a local model, those two lookups are the only outbound traffic, and both fail quietly when you are offline. What you do in Nanocoder stays in Nanocoder.
 
 ### 3. Local-first by design
 
-Aider, OpenCode, and Crush will run against a local model. Nanocoder is built around the assumption that you might want to. Seven local server integrations (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM) are documented as first-class providers, not power-user hacks buried in a config schema. The Nano Collective also publishes [Nanotune](https://docs.nanocollective.org/nanotune), an interactive fine-tuning CLI for Apple Silicon, which is the supply side of the same philosophy: smaller local models that are actually good at coding.
+Aider, OpenCode, and Crush will run against a local model. Nanocoder is built around the assumption that you might want to. Eight local server integrations (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM) are documented as first-class providers, not power-user hacks buried in a config schema. The Nano Collective also publishes [Nanotune](https://docs.nanocollective.org/nanotune), an interactive fine-tuning CLI for Apple Silicon, which is the supply side of the same philosophy: smaller local models that are actually good at coding.
 
-If your laptop has the silicon, you can run the entire loop without sending a token anywhere.
+If your laptop has the silicon, you can run the entire loop without sending a prompt or a line of code anywhere.
 
 ### 4. The broadest provider matrix in any OSS terminal agent
 
@@ -178,9 +191,9 @@ OpenCode lists more raw providers, but Nanocoder is the broadest project that is
 
 ### 5. Works with models of all shapes and sizes
 
-Nanocoder ships three tool-calling paths: native function calling for modern models, an XML fallback, and a JSON fallback, with malformed-output repair on both fallback paths. The conversation loop detects what the model supports and routes accordingly; if the model emits broken XML or JSON, the parser repairs it instead of failing the turn. The practical result: small local models, older models, fine-tuned models, and models that simply do not implement function calling reliably all still work end to end.
+Nanocoder ships three tool-calling paths: native function calling for modern models, an XML fallback, and a JSON fallback. You pick the path per model (`disableToolModels`, or the tool mode in [`/tune`](features/tune.md)), and the loop also parses tool-call text when a native-tool model regresses to emitting it. If the model emits broken XML or JSON, the malformed call is detected and sent back to the model with an explanation so it can correct itself, up to a configurable retry limit, instead of failing the turn. The practical result: small local models, older models, fine-tuned models, and models that simply do not implement function calling reliably all still work end to end.
 
-Aider achieves something analogous with its diff formats. No other tool in this survey ships all three paths plus repair.
+Aider achieves something analogous with its diff formats. No other tool in this survey ships all three paths plus self-correction.
 
 ### 6. Local scheduler, subagents, and event-driven Skills
 
@@ -216,11 +229,11 @@ Free tier on a personal Google account is genuinely useful. Google-only. Best do
 
 ### Aider
 
-The veteran. Multi-provider, real local model support, mature workflow around `git` and edit formats. No MCP, no subagents, no plugin system, no native function calling. The diff edit format works on weaker models that cannot tool-call. Picks itself if you want a stable, opinionated, edit-focused tool.
+The veteran. Multi-provider, real local model support, mature workflow around `git` and edit formats. No MCP, no subagents, no plugin system, no native function calling. The diff edit format works on weaker models that cannot tool-call. Worth noting that development has slowed markedly — the repo has seen no pushes for several months at the time of writing, so check its activity before adopting. Picks itself if you want a stable, opinionated, edit-focused tool and are comfortable with a quiet upstream.
 
 ### OpenCode
 
-The closest direct competitor on every feature axis: OSS, multi-provider, local models, MCP, plugins, subagents, native tool calling, TUI plus web plus desktop. Much larger community (~163k stars). Has a paid vendor tier (Zen / Go). Owned by a venture-backed company; community involvement is structured around that. Picks itself if you want the most feature-complete OSS option and do not mind the governance model.
+The closest direct competitor on every feature axis: OSS, multi-provider, local models, MCP, plugins, subagents, native tool calling, TUI plus web plus desktop. By far the largest community in this survey (<!--stars:anomalyco/opencode-->203k<!--/stars--> stars). Has a paid vendor tier (Zen / Go). Owned by a venture-backed company; community involvement is structured around that. Picks itself if you want the most feature-complete OSS option and do not mind the governance model.
 
 ### Crush
 
@@ -228,26 +241,36 @@ Go single-binary, polished Charm aesthetic, multi-provider, MCP client with thre
 
 ### Pi
 
-Deliberately minimalist: four built-in tools, a system prompt under ~1,000 tokens (including tool definitions), no MCP, no subagents, no scheduler. Compensates with the deepest extension API of the set (TypeScript). Picks itself if you want a small, hackable core and are willing to write your own extensions.
+Built around a deliberately small core and a large extension surface. TypeScript modules for tools, commands, events, and custom UI; Agent Skills, prompt templates, themes, and shareable packages on top. Session branching, compaction, project trust and sandboxing, and an SDK plus RPC plus JSON streaming mode for programmatic use. No scheduler. MCP support is not documented in its current docs, so treat it as absent until confirmed rather than as a stated non-goal.
+
+Pi has grown fast — <!--stars:earendil-works/pi-->99k<!--/stars--> stars, roughly double where it sat when this page was first written — and it is now the second-largest project in this survey. The old framing of Pi as a niche minimalist option is out of date. Picks itself if you want a small, hackable core and enjoy assembling your own workflows.
+
+### OMP
+
+A fork of Pi by Can Bölük (copyright Stencil Labs, Inc.) that went in the opposite direction: instead of a minimal core, it wires IDE machinery straight into the agent. Roughly 80k lines of Rust under a TypeScript surface, on Bun. 60+ providers, 31 built-in tools, full LSP *and* DAP support, MCP client, subagents with parallel fan-out, plan mode, checkpoint / rewind, session memory across runs, and web search across many backends. Local models via Ollama, LM Studio, llama.cpp, and vLLM. Ships prebuilt binaries through a shell script, Homebrew, Bun, Nix, and PowerShell.
+
+At <!--stars:can1357/oh-my-pi-->28k<!--/stars--> stars it has already passed Crush. It has no scheduler and no stated telemetry posture. This is the tool that most directly contests Nanocoder's capability claims: it matches local models plus MCP plus subagents, and its LSP and DAP integration is deeper than ours. Picks itself if you want the agent to know everything your IDE knows and you do not need scheduled or event-driven runs.
 
 ## Where Nanocoder is honestly behind
 
 This is real and worth being clear about.
 
-- **Community size.** OpenCode (~163k stars), Claude Code (~125k), Gemini CLI (~104k), Codex (~84k), Pi (~52k), Aider (~45k), Crush (~24k) all sit above Nanocoder today. Growth and contribution velocity matter more than absolute count, but the gap exists.
+- **Community size.** Every other tool here sits above Nanocoder (<!--stars:Nano-Collective/nanocoder-->2.4k<!--/stars--> stars): OpenCode <!--stars:anomalyco/opencode-->203k<!--/stars-->, Claude Code <!--stars:anthropics/claude-code-->143k<!--/stars-->, Codex <!--stars:openai/codex-->120k<!--/stars-->, Gemini CLI <!--stars:google-gemini/gemini-cli-->107k<!--/stars-->, Pi <!--stars:earendil-works/pi-->99k<!--/stars-->, Aider <!--stars:Aider-AI/aider-->49k<!--/stars-->, OMP <!--stars:can1357/oh-my-pi-->28k<!--/stars-->, Crush <!--stars:charmbracelet/crush-->28k<!--/stars-->. Growth and contribution velocity matter more than absolute count, but the gap is large and it is not closing on its own.
 - **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus ACP plus `--plain`. Enough for most CLI users, not all.
-- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools combination. Claude Code's Hooks system (process-level event hooks) also has no direct Nanocoder equivalent; Nanocoder's event story runs through Skill `subscribe:` blocks via the daemon, not arbitrary user-defined shell hooks on the agent lifecycle.
-- **Distribution polish.** Crush's single Go binary is smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
+- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools + hooks combination.
+- **IDE-level code intelligence.** OMP wires full LSP and DAP into the agent's tool surface. Nanocoder has an LSP client but nothing at that depth, and no debugger integration at all.
+- **Distribution polish.** Crush's single Go binary and OMP's prebuilt binaries are both smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
 
 Everywhere else, Nanocoder is at parity or ahead.
 
 ## Where Nanocoder is at parity
 
-- **Multi-provider support.** Matched by Aider, OpenCode, Crush, Pi.
-- **MCP client support.** Matched by Claude Code, Codex, Gemini, OpenCode, Crush.
-- **OSS license.** Matched by Codex, Gemini, Aider, OpenCode, Crush, Pi.
-- **Plain / non-TTY mode for CI.** Matched by Claude Code, Codex, Gemini, Aider, OpenCode, Crush, Pi.
+- **Multi-provider support.** Matched by Aider, OpenCode, Crush, Pi, OMP.
+- **MCP client support**, including resources surfaced as `@`-mentions and prompts surfaced as slash commands, not just tools. Matched by Claude Code, Codex, Gemini, OpenCode, Crush, OMP.
+- **OSS license.** Matched by Codex, Gemini, Aider, OpenCode, Crush, Pi, OMP.
+- **Plain / non-TTY mode for CI.** Matched by every tool in this survey.
 - **Native tool calling.** Matched by every tool except Aider.
+- **Subagents.** Matched by Claude Code, Codex, Gemini, OpenCode, OMP.
 
 ## Who Nanocoder is for
 
@@ -269,5 +292,8 @@ Star counts, contributor counts, feature lists, and pricing change. Re-verify be
 - Aider: aider.chat/docs
 - OpenCode: opencode.ai/docs, github.com/anomalyco/opencode
 - Crush: github.com/charmbracelet/crush
-- Pi: pi.dev, github.com/earendil-works/pi
+- Pi: pi.dev/docs, github.com/earendil-works/pi
+- OMP: github.com/can1357/oh-my-pi
 - Nanocoder: docs.nanocollective.org/nanocoder
+
+Star and contributor counts anywhere on this page (tables and prose alike) use `<!--stars:owner/repo-->` markers, which the docs build resolves from the GitHub API. Do not hardcode a count in new prose — it will go stale and this page's credibility rests on it not doing that.

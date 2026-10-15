@@ -1,5 +1,40 @@
+import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
-import {themes} from '@/config/themes';
+import chalk from 'chalk';
+import {DEFAULT_THEME, highlight} from 'cli-highlight';
+import {getSyntaxTheme, themes} from '@/config/themes';
+import {resetPreferencesCache, savePreferences} from '@/config/preferences';
+
+// AVA runs each spec in its own non-TTY process, where chalk disables colour and
+// every formatter becomes a no-op. Force truecolor so the escapes are assertable.
+chalk.level = 3;
+
+// getSyntaxTheme reads the `syntaxTheme` preference, so point every test at a
+// config directory of its own — a contributor who sets that preference must not
+// change what this spec sees.
+const configRoot = join(tmpdir(), `nanocoder-themes-spec-${process.pid}`);
+
+/** Point the config lookup at a directory holding exactly `preferences`. */
+function useConfigDir(name: string, preferences: Record<string, unknown>): void {
+	const dir = join(configRoot, name);
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(
+		join(dir, 'nanocoder-preferences.json'),
+		JSON.stringify(preferences),
+	);
+	process.env.NANOCODER_CONFIG_DIR = dir;
+}
+
+test.before(() => {
+	useConfigDir('no-preference', {});
+});
+
+test.after.always(() => {
+	rmSync(configRoot, {recursive: true, force: true});
+	delete process.env.NANOCODER_CONFIG_DIR;
+});
 
 /** Relative luminance per WCAG 2.1. */
 function luminance(hex: string): number {
@@ -66,3 +101,167 @@ test('themeType matches whether base is actually light or dark', t => {
 		);
 	}
 });
+
+/** The opening escape chalk emits for a hex colour. */
+function ansiFor(hex: string): string {
+	return chalk.hex(hex)('x').split('x')[0] ?? '';
+}
+
+const snippet = `// greet
+const greeting = 'hi';
+const answer = 42;`;
+
+// Every call site used to pass `theme: 'default'`, a string where cli-highlight
+// expects a token -> formatter map, so the option was dropped and code always
+// rendered in the library's palette. Any token left unmapped reintroduces that
+// clash for the constructs it covers.
+test('getSyntaxTheme maps every token cli-highlight styles by default', t => {
+	for (const [name, theme] of entries) {
+		const syntax = getSyntaxTheme(theme.colors);
+		const unmapped = Object.keys(DEFAULT_THEME).filter(
+			token => !(token in syntax),
+		);
+		t.deepEqual(unmapped, [], `${name} leaves tokens on the library default`);
+	}
+});
+
+test('getSyntaxTheme colours tokens with the palette it was given', t => {
+	const colors = themes['tokyo-night'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(colors),
+	});
+
+	t.true(output.includes(ansiFor(colors.primary)), 'keyword uses primary');
+	t.true(output.includes(ansiFor(colors.success)), 'string uses success');
+	t.true(output.includes(ansiFor(colors.warning)), 'number uses warning');
+	t.true(output.includes(ansiFor(colors.secondary)), 'comment uses secondary');
+	t.true(output.includes(ansiFor(colors.text)), 'unmatched code uses text');
+});
+
+test('getSyntaxTheme renders the same code differently per theme', t => {
+	const rendered = new Set(
+		entries.map(([, theme]) =>
+			highlight(snippet, {
+				language: 'typescript',
+				theme: getSyntaxTheme(theme.colors),
+			}),
+		),
+	);
+
+	// The snippet exercises exactly these five roles, so two themes may only
+	// share a rendering when they share all five. Collapsing further is what the
+	// ignored `theme: 'default'` option did — every theme rendered identically.
+	const palettes = new Set(
+		entries.map(([, theme]) =>
+			[
+				theme.colors.primary,
+				theme.colors.success,
+				theme.colors.warning,
+				theme.colors.secondary,
+				theme.colors.text,
+			].join('/'),
+		),
+	);
+
+	t.is(rendered.size, palettes.size);
+	t.true(palettes.size > 1);
+});
+
+test('getSyntaxTheme reuses the theme built for a palette', t => {
+	const colors = themes['gruvbox-dark'].colors;
+	t.is(getSyntaxTheme(colors), getSyntaxTheme(colors));
+	t.not(getSyntaxTheme(colors), getSyntaxTheme(themes['one-light'].colors));
+});
+
+// These run last: each repoints NANOCODER_CONFIG_DIR, which is what re-resolves
+// the cached `syntaxTheme` lookup.
+test('syntaxTheme gives code its own palette without moving the UI theme', t => {
+	useConfigDir('dracula-code', {
+		selectedTheme: 'tokyo-night',
+		syntaxTheme: 'dracula',
+	});
+
+	const ui = themes['tokyo-night'].colors;
+	const code = themes['dracula'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(code.primary)), 'keyword uses dracula primary');
+	t.true(output.includes(ansiFor(code.warning)), 'number uses dracula warning');
+	t.false(
+		output.includes(ansiFor(ui.primary)),
+		'the UI theme must not colour code once syntaxTheme is set',
+	);
+});
+
+test('an unknown syntaxTheme falls back to the UI palette', t => {
+	useConfigDir('misspelt', {syntaxTheme: 'draclua'});
+
+	const ui = themes['nord-frost'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(ui.primary)));
+});
+
+test('code follows the UI palette when syntaxTheme is unset', t => {
+	useConfigDir('ui-only', {selectedTheme: 'gruvbox-light'});
+
+	const ui = themes['gruvbox-light'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(ui.primary)));
+});
+
+// The cache used to key on NANOCODER_CONFIG_DIR alone, which never moves in a
+// real session - so syntaxTheme was read once per process and a later write was
+// ignored until restart. Keying on the preferences version as well fixes that,
+// and this pins it without touching the env var at all.
+test('a syntaxTheme written mid-session takes effect without a restart', t => {
+	useConfigDir('live-write', {selectedTheme: 'nord-frost'});
+
+	const ui = themes['nord-frost'].colors;
+	const before = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+	t.true(before.includes(ansiFor(ui.primary)), 'starts on the UI palette');
+
+	// Same config dir, new preferences: only the version counter moves.
+	resetPreferencesCache();
+	savePreferences({selectedTheme: 'nord-frost', syntaxTheme: 'dracula'});
+
+	const after = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+	t.true(
+		after.includes(ansiFor(themes['dracula'].colors.primary)),
+		'the write is picked up on the next highlight',
+	);
+});
+
+// `themes` comes from JSON.parse, so it carries Object.prototype: a `preset in
+// themes` check would accept these and resolve to a non-theme whose `.colors` is
+// undefined, leaving the fallback to rescue it by accident.
+for (const inherited of ['constructor', 'toString', 'valueOf', '__proto__']) {
+	test(`a syntaxTheme of '${inherited}' falls back to the UI palette`, t => {
+		useConfigDir(`inherited-${inherited}`, {syntaxTheme: inherited});
+
+		const ui = themes['one-light'].colors;
+		const output = highlight(snippet, {
+			language: 'typescript',
+			theme: getSyntaxTheme(ui),
+		});
+
+		t.true(output.includes(ansiFor(ui.primary)));
+	});
+}

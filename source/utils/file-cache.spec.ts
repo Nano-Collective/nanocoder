@@ -1,5 +1,6 @@
 import test from 'ava';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import fs, {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mock} from 'node:test';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
@@ -9,6 +10,7 @@ import {
 	getCacheSize,
 	MAX_CACHE_SIZE,
 } from './file-cache';
+import {buildMinimalPdf} from '@/test-utils/minimal-pdf';
 
 // Helper to create a temp directory for tests
 async function createTempDir(): Promise<string> {
@@ -73,7 +75,7 @@ test('getCachedFileContent - mtime change triggers re-read', async t => {
 		t.is(result1.content, 'original content');
 
 		// Modify file (changes mtime)
-		await delay(10); // Ensure different mtime
+		await delay(50); // 50ms ensures different mtime even on filesystems with coarse resolution (e.g. CI runners)
 		await writeFile(filePath, 'modified content', 'utf-8');
 
 		const result2 = await getCachedFileContent(filePath);
@@ -262,7 +264,7 @@ test('getCachedFileContent - concurrent reads with mtime change get consistent r
 		t.is(initial.content, 'original');
 
 		// Modify the file to trigger mtime change
-		await delay(10);
+		await delay(50);
 		await writeFile(filePath, 'modified', 'utf-8');
 
 		// Launch multiple concurrent reads - they should all see the modified content
@@ -286,6 +288,121 @@ test('getCachedFileContent - concurrent reads with mtime change get consistent r
 	}
 });
 
+test('getCachedFileContent - does not clear a replacement pending read', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'pending-read-race.txt');
+		await writeFile(filePath, 'original', 'utf-8');
+		await getCachedFileContent(filePath);
+
+		let targetStatCalls = 0;
+		let targetReadCalls = 0;
+		let replacementRead: ReturnType<typeof getCachedFileContent> | undefined;
+
+		let releaseInitialStats!: () => void;
+		const initialStatsReleased = new Promise<void>(resolve => {
+			releaseInitialStats = resolve;
+		});
+		let resolveInitialStatsStarted!: () => void;
+		const initialStatsStarted = new Promise<void>(resolve => {
+			resolveInitialStatsStarted = resolve;
+		});
+
+		let releaseOriginalRead!: () => void;
+		const originalReadReleased = new Promise<void>(resolve => {
+			releaseOriginalRead = resolve;
+		});
+		let resolveOriginalReadStarted!: () => void;
+		const originalReadStarted = new Promise<void>(resolve => {
+			resolveOriginalReadStarted = resolve;
+		});
+
+		let releaseReplacementRead!: () => void;
+		const replacementReadReleased = new Promise<void>(resolve => {
+			releaseReplacementRead = resolve;
+		});
+		let resolveReplacementReadStarted!: () => void;
+		const replacementReadStarted = new Promise<void>(resolve => {
+			resolveReplacementReadStarted = resolve;
+		});
+
+		const syntheticStat = (mtimeMs: number) => ({mtimeMs});
+		const originalStat = fs.stat;
+		const originalReadFile = fs.readFile;
+
+		mock.method(fs, 'stat', async path => {
+			if (path !== filePath) {
+				return originalStat(path);
+			}
+
+			targetStatCalls += 1;
+			if (targetStatCalls <= 2) {
+				if (targetStatCalls === 2) {
+					resolveInitialStatsStarted();
+				}
+				await initialStatsReleased;
+				return syntheticStat(2);
+			}
+
+			if (targetStatCalls === 3) {
+				// Replace the original pending read before its owner resumes.
+				clearCache();
+				replacementRead = getCachedFileContent(filePath);
+				return syntheticStat(2);
+			}
+
+			return syntheticStat(3);
+		});
+
+		mock.method(fs, 'readFile', async path => {
+			if (path !== filePath) {
+				return originalReadFile(path);
+			}
+
+			targetReadCalls += 1;
+			if (targetReadCalls === 1) {
+				resolveOriginalReadStarted();
+				await originalReadReleased;
+				return Buffer.from('original read');
+			}
+			if (targetReadCalls === 2) {
+				resolveReplacementReadStarted();
+				await replacementReadReleased;
+				return Buffer.from('replacement read');
+			}
+
+			throw new Error('duplicate read after replacement pending read was cleared');
+		});
+
+		const firstRead = getCachedFileContent(filePath);
+		const secondRead = getCachedFileContent(filePath);
+		await initialStatsStarted;
+		releaseInitialStats();
+		await originalReadStarted;
+		releaseOriginalRead();
+		await replacementReadStarted;
+		await Promise.all([firstRead, secondRead]);
+
+		if (!replacementRead) {
+			t.fail('Expected a replacement pending read to be created');
+			return;
+		}
+
+		const deduplicatedRead = getCachedFileContent(filePath);
+		releaseReplacementRead();
+		const [replacementResult, deduplicatedResult] = await Promise.all([
+			replacementRead,
+			deduplicatedRead,
+		]);
+
+		t.is(deduplicatedResult, replacementResult);
+		t.is(targetReadCalls, 2);
+	} finally {
+		mock.restoreAll();
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test('getCachedFileContent - handles rapid sequential modifications', async t => {
 	const tempDir = await createTempDir();
 	try {
@@ -298,7 +415,7 @@ test('getCachedFileContent - handles rapid sequential modifications', async t =>
 
 		// Rapidly modify and read multiple times
 		for (let i = 2; i <= 5; i++) {
-			await delay(10); // Ensure different mtime
+			await delay(50); // 50ms ensures different mtime even on filesystems with coarse resolution (e.g. CI runners)
 			await writeFile(filePath, `v${i}`, 'utf-8');
 			const result = await getCachedFileContent(filePath);
 			t.is(result.content, `v${i}`, `Should see version ${i}`);
@@ -357,6 +474,54 @@ test('getCachedFileContent - reads extensionless file as utf-8 text', async t =>
 
 		t.is(result.content, 'plain text\nno extension');
 		t.deepEqual(result.lines, ['plain text', 'no extension']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - marks a converted document as derived', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'spec.pdf');
+		const bytes = buildMinimalPdf('Hello World');
+		await writeFile(filePath, bytes);
+
+		const result = await getCachedFileContent(filePath);
+
+		// The provenance flag and the content have to tell the same story: what
+		// came back is a transcript of the document, not the document.
+		t.true(result.derived);
+		t.regex(result.content, /Hello World/);
+		t.false(result.content.startsWith('%PDF-'));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - derived flag survives a cache hit', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'spec.pdf');
+		await writeFile(filePath, buildMinimalPdf('Hello World'));
+
+		await getCachedFileContent(filePath);
+		const cached = await getCachedFileContent(filePath);
+
+		t.true(cached.derived);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - marks plain text content as not derived', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'notes.md');
+		await writeFile(filePath, '# heading', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.false(result.derived);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}

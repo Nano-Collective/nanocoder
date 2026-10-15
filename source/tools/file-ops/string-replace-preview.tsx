@@ -2,21 +2,24 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import ToolMessage from '@/components/tool-message';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
+import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
+import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 /** Truncate a plain line to fit terminal width */
@@ -40,7 +43,7 @@ export async function formatStringReplacePreview(
 	const isResult = result !== undefined;
 
 	try {
-		const absPath = resolve(path);
+		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -174,7 +177,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {
@@ -190,6 +193,8 @@ export async function formatStringReplacePreview(
 
 		// Build unified diff
 		const diffLines: React.ReactElement[] = [];
+		// Indexes into diffLines of lines the replacement leaves as they were.
+		const unchangedDiffRows = new Set<number>();
 		let oldIdx = 0;
 		let newIdx = 0;
 		let diffKey = 0;
@@ -204,6 +209,7 @@ export async function formatStringReplacePreview(
 				newIdx < normalizedNewLines.length ? normalizedNewLines[newIdx] : null;
 
 			if (oldLine !== null && newLine !== null && oldLine === newLine) {
+				unchangedDiffRows.add(diffLines.length);
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
 				diffLines.push(
 					<Box key={`diff-${diffKey++}`}>
@@ -218,7 +224,7 @@ export async function formatStringReplacePreview(
 			} else if (
 				oldLine !== null &&
 				newLine !== null &&
-				areLinesSimlar(oldLine, newLine)
+				areLinesSimilar(oldLine, newLine)
 			) {
 				const truncatedOldLine = truncateLine(oldLine, availableWidth);
 				const truncatedNewLine = truncateLine(newLine, availableWidth);
@@ -338,7 +344,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {
@@ -362,6 +368,12 @@ export async function formatStringReplacePreview(
 				message={
 					<Box flexDirection="column">
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
+						{args.description && (
+							<Box flexDirection="column">
+								<Text color={themeColors.secondary}>Description:</Text>
+								<Text color={themeColors.text}> {args.description}</Text>
+							</Box>
+						)}
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
@@ -380,9 +392,18 @@ export async function formatStringReplacePreview(
 								{newStrLines.length > 1 ? 's' : ''}
 							</Text>
 							<Box flexDirection="column">
-								{contextBefore}
-								{diffLines}
-								{contextAfter}
+								<CappedLines
+									items={[...contextBefore, ...diffLines, ...contextAfter]}
+									renderItem={line => line}
+									isChange={(_, index) => {
+										const row = index - contextBefore.length;
+										return (
+											row >= 0 &&
+											row < diffLines.length &&
+											!unchangedDiffRows.has(row)
+										);
+									}}
+								/>
 							</Box>
 						</Box>
 					</Box>

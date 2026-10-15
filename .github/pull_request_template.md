@@ -32,6 +32,7 @@ Docs-only or internal chores need no changeset (or run `pnpm changeset --empty` 
 
 ## Checklist
 
+- [ ] If this was for an open issue, I was assigned to it
 - [ ] Code follows project style guidelines
 - [ ] Self-review completed
 - [ ] Documentation updated (if needed)

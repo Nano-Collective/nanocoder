@@ -3,7 +3,8 @@
  * Detects installed language servers on the system
  */
 
-import {execFileSync, spawn} from 'child_process';
+import {execFileSync} from 'child_process';
+import spawn from 'cross-spawn';
 import {existsSync} from 'fs';
 import {join} from 'path';
 import {
@@ -257,11 +258,17 @@ function findCommand(command: string): string | null {
 		logger.trace({command}, 'Command not in PATH');
 	}
 
-	// Check local node_modules/.bin
-	// nosemgrep
-	const localBinPath = join(process.cwd(), 'node_modules', '.bin', command); // nosemgrep
-	if (existsSync(localBinPath)) {
-		return localBinPath;
+	// Windows needs an executable or batch shim, rather than the POSIX shim.
+	const extensions =
+		process.platform === 'win32' ? ['.exe', '.cmd', '.bat'] : [''];
+
+	for (const extension of extensions) {
+		const binName = `${command}${extension}`;
+		const localBinPath = join(process.cwd(), 'node_modules', '.bin', binName); // nosemgrep
+
+		if (existsSync(localBinPath)) {
+			return localBinPath;
+		}
 	}
 
 	return null;
@@ -270,20 +277,24 @@ function findCommand(command: string): string | null {
 /**
  * Check if a command works by running a check command
  */
-function verifyServer(checkCommand: string): boolean {
+function verifyServer(command: string, args: string[]): boolean {
 	try {
-		// Parse command and arguments from the check command string
-		const parts = checkCommand.split(/\s+/);
-		const command = parts[0];
-		const args = parts.slice(1);
-
-		execFileSync(command, args, {
+		const result = spawn.sync(command, args, {
 			stdio: 'ignore',
 			timeout: TIMEOUT_LSP_VERIFICATION_MS,
 		});
+
+		if (result.error || result.status !== 0) {
+			logger.trace(
+				{command, args, err: result.error, status: result.status},
+				'Server verification failed',
+			);
+			return false;
+		}
+
 		return true;
 	} catch {
-		logger.trace({checkCommand}, 'Server verification failed');
+		logger.trace({command, args}, 'Server verification failed');
 		return false;
 	}
 }
@@ -328,6 +339,7 @@ function verifyLSPServerWithCommunication(
 			// A clean exit can also indicate success for some servers
 			// However, for LSP servers waiting for input, an immediate exit is often a failure
 			// The 'spawn' event is a more reliable indicator for our purpose
+			resolve(false);
 		});
 	});
 }
@@ -388,11 +400,9 @@ export async function discoverLanguageServers(
 			case 'version':
 				// Use the existing check command approach
 				if (server.checkCommand) {
-					const checkCmd = server.checkCommand.replace(
-						server.command,
-						commandPath,
-					);
-					verified = verifyServer(checkCmd);
+					// Parse the known check arguments separately to preserve spaces in the path.
+					const checkArgs = server.checkCommand.trim().split(/\s+/).slice(1);
+					verified = verifyServer(commandPath, checkArgs);
 				}
 				break;
 

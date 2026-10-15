@@ -12,6 +12,7 @@
  * callers, since they know which surface they are parsing.
  */
 
+import {validateCron} from '@/schedule/cron';
 import type {
 	CiJobFailedTrigger,
 	FileChangedTrigger,
@@ -19,6 +20,7 @@ import type {
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
+import {logError} from '@/utils/message-queue';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
@@ -48,6 +50,29 @@ export function parseSubscribeBlock(raw: unknown): SkillTrigger[] | undefined {
 		);
 	}
 	return raw.map((entry, index) => parseTrigger(entry, index));
+}
+
+/**
+ * Parse a `subscribe:` block from a single-file command, agent or tool.
+ * A malformed block is logged and dropped: the file still loads, just
+ * without triggers. All three member kinds share this so a bad block is
+ * handled the same way everywhere.
+ */
+export function parseSubscribeBlockOrWarn(
+	raw: unknown,
+	filePath: string,
+): SkillTrigger[] | undefined {
+	try {
+		return parseSubscribeBlock(raw);
+	} catch (err) {
+		if (err instanceof SubscribeParseError) {
+			logError(
+				`Invalid subscribe block in ${filePath}: ${err.message}. Loaded without triggers.`,
+			);
+			return undefined;
+		}
+		throw err;
+	}
 }
 
 function parseTrigger(raw: unknown, index: number): SkillTrigger {
@@ -150,6 +175,12 @@ function parseScheduleCron(
 	if (typeof cron !== 'string' || !cron.trim()) {
 		throw new SubscribeParseError(
 			`subscribe[${index}].cron must be a non-empty cron expression`,
+		);
+	}
+	const invalid = validateCron(cron);
+	if (invalid) {
+		throw new SubscribeParseError(
+			`subscribe[${index}].cron "${cron}" is not a valid cron expression: ${invalid}`,
 		);
 	}
 	return {kind: 'schedule.cron', cron};

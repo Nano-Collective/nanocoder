@@ -1,6 +1,7 @@
-import {readFile, stat} from 'node:fs/promises';
-import {extname} from 'node:path';
+import fs from 'node:fs/promises';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
+import {isDerivedContentPath} from '@/utils/derived-content';
+import {withPreservedProcess} from '@/utils/preserve-process';
 
 /**
  * File content cache to reduce duplicate file reads during tool confirmation flow.
@@ -17,6 +18,12 @@ export interface CachedFile {
 	lines: string[];
 	mtime: number;
 	cachedAt: number;
+	/**
+	 * True when `content` is a derived representation of the file (the markdown
+	 * transcript of a PDF/DOCX) rather than the bytes on disk. Callers that write
+	 * content back must refuse these paths: the transcript is not the document.
+	 */
+	derived: boolean;
 }
 
 interface CacheEntry {
@@ -30,6 +37,15 @@ let accessCounter = 0;
 
 // Track pending reads to deduplicate concurrent requests for the same file
 const pendingReads = new Map<string, Promise<CachedFile>>();
+
+function cleanupPendingRead(
+	absPath: string,
+	pending: Promise<CachedFile>,
+): void {
+	if (pendingReads.get(absPath) === pending) {
+		pendingReads.delete(absPath);
+	}
+}
 
 /**
  * Get file content from cache or read from disk.
@@ -54,7 +70,7 @@ export async function getCachedFileContent(
 		} else {
 			// Check if file mtime has changed
 			try {
-				const fileStat = await stat(absPath);
+				const fileStat = await fs.stat(absPath);
 				const currentMtime = fileStat.mtimeMs;
 
 				if (currentMtime === data.mtime) {
@@ -67,16 +83,20 @@ export async function getCachedFileContent(
 
 				// Check for pending read before starting a new one (deduplication)
 				let pending = pendingReads.get(absPath);
+				let ownsPendingRead = false;
 				if (!pending) {
 					// Reuse the stat we just did to avoid double stat
 					pending = readAndCacheFile(absPath, now, fileStat.mtimeMs);
 					pendingReads.set(absPath, pending);
+					ownsPendingRead = true;
 				}
 
 				try {
 					return await pending;
 				} finally {
-					pendingReads.delete(absPath);
+					if (ownsPendingRead) {
+						cleanupPendingRead(absPath, pending);
+					}
 				}
 			} catch {
 				// File may have been deleted, invalidate cache
@@ -98,7 +118,7 @@ export async function getCachedFileContent(
 	try {
 		return await readPromise;
 	} finally {
-		pendingReads.delete(absPath);
+		cleanupPendingRead(absPath, readPromise);
 	}
 }
 
@@ -114,13 +134,13 @@ async function readAndCacheFile(
 	retryCount = 0,
 ): Promise<CachedFile> {
 	// Get mtime before reading (or use known mtime from caller)
-	const mtimeBefore = knownMtime ?? (await stat(absPath)).mtimeMs;
+	const mtimeBefore = knownMtime ?? (await fs.stat(absPath)).mtimeMs;
 
 	// Read as Buffer to support both text and binary formats
-	const buffer = await readFile(absPath);
+	const buffer = await fs.readFile(absPath);
 
 	// Verify mtime didn't change during read
-	const mtimeAfter = (await stat(absPath)).mtimeMs;
+	const mtimeAfter = (await fs.stat(absPath)).mtimeMs;
 	if (mtimeAfter !== mtimeBefore) {
 		if (retryCount >= MAX_FILE_READ_RETRIES) {
 			throw new Error(
@@ -132,13 +152,16 @@ async function readAndCacheFile(
 	}
 
 	let content: string;
-	const ext = extname(absPath).toLowerCase();
+	const derived = isDerivedContentPath(absPath);
 
-	if (ext === '.pdf' || ext === '.docx') {
+	if (derived) {
 		try {
 			const {convertToMarkdown} = await import('@nanocollective/get-md');
-			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
-			const result = await convertToMarkdown(buffer as any);
+			// The conversion runs guarded to protect `globalThis.process`.
+			const result = await withPreservedProcess(() =>
+				// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
+				convertToMarkdown(buffer as any),
+			);
 			content = result.markdown;
 		} catch (error) {
 			const errorMessage =
@@ -154,6 +177,7 @@ async function readAndCacheFile(
 		lines: content.split('\n'),
 		mtime: mtimeAfter,
 		cachedAt: now,
+		derived,
 	};
 
 	// Enforce max cache size with LRU eviction

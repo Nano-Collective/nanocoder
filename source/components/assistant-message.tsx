@@ -43,6 +43,7 @@ export default memo(function AssistantMessage({
 	message,
 	model,
 	usage,
+	showUsageFooter = true,
 }: AssistantMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -123,11 +124,17 @@ export default memo(function AssistantMessage({
 					</Box>
 				),
 			)}
-			<Box marginBottom={2}>
-				<Text color={colors.secondary}>
-					{usageIndicator ?? `~${tokens.toLocaleString()} tokens`}
-				</Text>
-			</Box>
+			{showUsageFooter ? (
+				<Box marginBottom={2}>
+					<Text color={colors.secondary}>
+						{usageIndicator ?? `~${tokens.toLocaleString()} tokens`}
+					</Text>
+				</Box>
+			) : (
+				// Keep the trailing gap the footer used to provide, so turning
+				// the footer off doesn't visually cram messages together.
+				<Box marginBottom={1} />
+			)}
 		</>
 	);
 });

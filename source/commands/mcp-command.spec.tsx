@@ -225,6 +225,65 @@ test('MCP command: shows configuration examples', t => {
 	t.regex(output!, /"url":/);
 });
 
+test('MCP command: displays resource and prompt counts and names', t => {
+	const mockToolManager = {
+		getConnectedServers: () => ['docs-server'],
+		getServerTools: () => [{name: 'search', description: 'Search docs'}],
+		getServerInfo: () => ({
+			name: 'docs-server',
+			transport: 'stdio',
+			toolCount: 1,
+			resourceCount: 2,
+			promptCount: 1,
+			connected: true,
+		}),
+		getMCPClient: () => ({
+			getServerResources: () => [
+				{uri: 'file:///a.md', name: 'api-docs', serverName: 'docs-server'},
+				{uri: 'file:///b.md', name: 'changelog', serverName: 'docs-server'},
+			],
+			getServerPrompts: () => [
+				{name: 'summarize', serverName: 'docs-server'},
+			],
+		}),
+	} as unknown as ToolManager;
+
+	const {lastFrame} = renderWithTheme(<MCP toolManager={mockToolManager} />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /2 resources/);
+	t.regex(output!, /1 prompt\b/);
+	t.regex(output!, /Resources:/);
+	t.regex(output!, /api-docs/);
+	t.regex(output!, /changelog/);
+	t.regex(output!, /Prompts:/);
+	t.regex(output!, /\/mcp:docs-server:summarize/);
+});
+
+test('MCP command: omits resource and prompt lines when a server has none (no getMCPClient on the mock)', t => {
+	const mockToolManager = {
+		getConnectedServers: () => ['plain-server'],
+		getServerTools: () => [{name: 'tool', description: 'A tool'}],
+		getServerInfo: () => ({
+			name: 'plain-server',
+			transport: 'stdio',
+			toolCount: 1,
+			connected: true,
+		}),
+		// Deliberately no getMCPClient, matching a caller/mock that predates
+		// resources/prompts support - must not throw.
+	} as unknown as ToolManager;
+
+	t.notThrows(() => {
+		const {lastFrame} = renderWithTheme(<MCP toolManager={mockToolManager} />);
+		const output = lastFrame();
+		t.truthy(output);
+		t.notRegex(output!, /Resources:/);
+		t.notRegex(output!, /Prompts:/);
+	});
+});
+
 test('MCP command: uses transport type getTransportIcon function correctly', t => {
 	// Test the helper function indirectly through component rendering
 	const testCases = [

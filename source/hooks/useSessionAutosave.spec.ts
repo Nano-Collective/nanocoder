@@ -26,6 +26,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import {SessionManager} from '../session/session-manager.js';
 import {
+	deriveSessionTitle,
+	shouldResetSessionId,
+} from './useSessionAutosave.js';
+import {
 	getKeyGeneratorSessionId,
 	resetKeyGeneratorForTests,
 	setKeyGeneratorSessionId,
@@ -41,6 +45,119 @@ function makeMessages(count: number) {
 		content: `msg ${i + 1}`,
 	}));
 }
+
+test('slash-only sessions keep their preallocated ID while messages stay empty', t => {
+	t.false(shouldResetSessionId(0, 0));
+});
+
+test('clearing a non-empty conversation resets its session ID', t => {
+	t.true(shouldResetSessionId(1, 0));
+});
+
+test('internal walkthrough fallback does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('approved plan injection does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'The plan is ready for approval.'},
+		{
+			role: 'user',
+			content:
+				'The implementation plan below is approved. Proceed with implementing it now.\n\n<approved_plan>\nImplement the helper.\n</approved_plan>',
+		},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('the first substantive user turn names the session, not the latest', t => {
+	// The bug this fixes: deriving from the latest user message made the title
+	// a rolling mirror of whatever was typed most recently, and autosave
+	// rewrote it every 30 seconds. Every other case here has a single real
+	// user turn, so it passes under both a forward and a backward scan - this
+	// one only passes forward.
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Add rate limiting to the auth endpoints'},
+		{role: 'assistant', content: 'Done.'},
+		{role: 'user', content: 'Now update the README'},
+		{role: 'assistant', content: 'Done.'},
+	]);
+
+	t.is(title, 'Add rate limiting to the auth endpoints');
+});
+
+test('bash output never names the session', t => {
+	// !bash output is pushed as a plain role:'user' turn with no displayOnly
+	// flag. The forward scan would latch onto it and, unlike the old backward
+	// scan, never recover once the real request arrived.
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content: 'Bash command output:\n```\n$ git status\nOn branch main\n```',
+		},
+		{role: 'assistant', content: 'You are on main.'},
+		{role: 'user', content: 'add retry logic to the OpenRouter client'},
+	]);
+
+	t.is(title, 'add retry logic to the OpenRouter client');
+});
+
+test('the active-file prefix never becomes the title', t => {
+	// The VS Code UI prepends this; it is plumbing, not the request.
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content: '[Active file: source/app/App.tsx]\n\nfix the crash on resume',
+		},
+	]);
+
+	t.is(title, 'fix the crash on resume');
+});
+
+test('a first turn that is only plumbing falls through to the next real one', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: '[Active file: a.ts]\n\n'},
+		{role: 'user', content: 'Add rate limiting'},
+	]);
+
+	t.is(title, 'Add rate limiting');
+});
+
+test('session titles keep the existing 50-character truncation', t => {
+	const content = 'a'.repeat(51);
+
+	t.is(deriveSessionTitle([{role: 'user', content}]), `${'a'.repeat(50)}...`);
+});
+
+test('an internal walkthrough without a real user message uses the fallback title', t => {
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, `Session ${new Date().toLocaleDateString()}`);
+});
 
 // ---------------------------------------------------------------------------
 // Bug A — Duplicate-session race
@@ -113,7 +230,6 @@ test.serial(
 		t.is(sessions.length, 1);
 	},
 );
-
 test.serial(
 	'A: without serialisation, concurrent saves can create duplicate sessions (demonstrates the old bug)',
 	async t => {
@@ -328,5 +444,117 @@ test.serial(
 			originalLastAccessed,
 			'autosave must bump lastAccessedAt so "last used" reflects real activity',
 		);
+	},
+);
+
+// ---------------------------------------------------------------------------
+// Issue #932 — Auto-save indicator & unblocked flush
+// ---------------------------------------------------------------------------
+
+test.serial(
+	'Issue 932: indicator hide timer does not block save chain or flush resolution',
+	async t => {
+		let isSaving = false;
+		let hideTimer: NodeJS.Timeout | null = null;
+		const minDuration = 500;
+
+		const runSave = async () => {
+			let startTime: number | null = null;
+			try {
+				if (hideTimer) {
+					clearTimeout(hideTimer);
+					hideTimer = null;
+				}
+				startTime = Date.now();
+				isSaving = true;
+
+				// Fast mock disk write (~5ms)
+				await new Promise(r => setTimeout(r, 5));
+			} finally {
+				if (startTime !== null) {
+					const elapsed = Date.now() - startTime;
+					const remaining = Math.max(0, minDuration - elapsed);
+					hideTimer = setTimeout(() => {
+						isSaving = false;
+						hideTimer = null;
+					}, remaining);
+				}
+			}
+		};
+
+		const flushStart = Date.now();
+		await runSave();
+		const flushElapsed = Date.now() - flushStart;
+
+		// flush/save resolution must finish immediately on I/O completion (< 100ms),
+		// NOT blocked by the 500ms UI indicator timer
+		t.true(
+			flushElapsed < 100,
+			`flush() took ${flushElapsed}ms; must not wait for the 500ms UI timer`,
+		);
+		t.true(isSaving, 'isSaving must be true immediately after save finishes');
+
+		// Wait 250ms: isSaving must still be true (within the 500ms floor)
+		await new Promise(r => setTimeout(r, 250));
+		t.true(isSaving, 'isSaving must stay true at 250ms (within 500ms floor)');
+
+		// Wait another 300ms (total > 550ms): isSaving must transition to false
+		await new Promise(r => setTimeout(r, 300));
+		t.false(
+			isSaving,
+			'isSaving must transition to false after 500ms minimum display floor',
+		);
+		t.is(hideTimer, null);
+	},
+);
+
+test.serial(
+	'Issue 932: subsequent save cancels earlier pending hide timer',
+	async t => {
+		let isSaving = false;
+		let hideTimer: NodeJS.Timeout | null = null;
+		let timerClearCount = 0;
+		const minDuration = 500;
+
+		const runSave = async () => {
+			let startTime: number | null = null;
+			try {
+				if (hideTimer) {
+					clearTimeout(hideTimer);
+					hideTimer = null;
+					timerClearCount++;
+				}
+				startTime = Date.now();
+				isSaving = true;
+
+				await new Promise(r => setTimeout(r, 5));
+			} finally {
+				if (startTime !== null) {
+					const elapsed = Date.now() - startTime;
+					const remaining = Math.max(0, minDuration - elapsed);
+					hideTimer = setTimeout(() => {
+						isSaving = false;
+						hideTimer = null;
+					}, remaining);
+				}
+			}
+		};
+
+		// First save schedules a hide timer for 500ms
+		await runSave();
+		t.true(isSaving);
+		t.truthy(hideTimer);
+
+		// Second save starts 100ms later (while hide timer is still pending)
+		await new Promise(r => setTimeout(r, 100));
+		await runSave();
+
+		t.is(timerClearCount, 1, 'Previous hide timer must be cancelled');
+		t.true(isSaving);
+
+		// Clean up
+		if (hideTimer) {
+			clearTimeout(hideTimer);
+		}
 	},
 );

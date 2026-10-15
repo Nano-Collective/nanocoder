@@ -8,8 +8,8 @@ import {useTheme} from '@/hooks/useTheme';
 import {McpWizard} from '@/wizards/mcp-wizard';
 
 /**
- * Lists the configured MCP servers first, then opens the existing MCP wizard to
- * add/edit rather than jumping straight into it.
+ * Lists the configured MCP servers first. Selecting a server opens the wizard on
+ * that entry's edit/delete choice; the trailing row adds a new one.
  */
 export function SettingsMcpListPanel({
 	onBack,
@@ -21,40 +21,43 @@ export function SettingsMcpListPanel({
 }) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const [editing, setEditing] = useState(false);
+	// null = not editing. '' = adding a new server (no entry targeted).
+	const [editTarget, setEditTarget] = useState<string | null>(null);
 
 	const servers = getAppConfig().mcpServers ?? [];
 
 	useInput((_, key) => {
-		if (editing) return;
+		if (editTarget !== null) return;
 		if (key.escape) onBack();
 		if (key.shift && key.tab) onBack();
 	});
 
-	if (editing) {
+	if (editTarget !== null) {
 		return (
 			<McpWizard
 				projectDir={process.cwd()}
-				onComplete={() => {
+				initialEditName={editTarget || undefined}
+				onComplete={async () => {
 					// Rebuild the running session's MCP connections; otherwise a server
 					// added here stays inert until the next launch.
-					void onMcpChanged?.();
-					onBack();
+					await onMcpChanged?.();
+					setEditTarget(null);
 				}}
-				onCancel={() => setEditing(false)}
+				onCancel={() => setEditTarget(null)}
 			/>
 		);
 	}
 
 	const items = [
-		...servers.map((s, i) => {
+		...servers.map(s => {
 			const detail = s.command ? s.command : s.url ? s.url : '(no endpoint)';
+			// Value is the server name so the wizard can target this entry.
 			return {
 				label: `${s.name}  ·  ${s.transport}  ·  ${detail}`,
-				value: String(i),
+				value: s.name,
 			};
 		}),
-		{label: '+ Add or edit MCP servers…', value: 'edit'},
+		{label: '+ Add an MCP server…', value: ''},
 	];
 
 	return (
@@ -70,10 +73,13 @@ export function SettingsMcpListPanel({
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
 					{servers.length} server{servers.length === 1 ? '' : 's'} configured.
-					Enter opens the wizard to add or edit.
+					Enter edits or deletes the selected server.
 				</Text>
 			</Box>
-			<StyledSelectInput items={items} onSelect={() => setEditing(true)} />
+			<StyledSelectInput
+				items={items}
+				onSelect={item => setEditTarget(item.value)}
+			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>

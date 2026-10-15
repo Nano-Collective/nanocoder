@@ -82,7 +82,7 @@ async function defaultRunSubagent(
 	// That's a property of headless mode, not of this tool list — if a
 	// future trust level ever runs headless with an approval handler
 	// registered, this override alone would no longer be sufficient.
-	return executor.execute(task, signal, 0, undefined, {
+	return executor.execute(task, signal, 0, undefined, undefined, {
 		tools: getAllowedToolNames('comment-only'),
 	});
 }

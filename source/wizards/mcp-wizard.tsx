@@ -9,13 +9,25 @@ interface McpWizardProps {
 	projectDir: string;
 	onComplete: (configPath: string) => void;
 	onCancel?: () => void;
+	/** Open straight into the edit/delete choice for this server. */
+	initialEditName?: string;
 }
 
 type McpServers = Record<string, McpServerConfig>;
 
 function parseMcpConfig(raw: unknown): McpServers {
 	const config = raw as {mcpServers?: McpServers} | null;
-	return config?.mcpServers ?? {};
+	const servers = config?.mcpServers ?? {};
+	// In `.mcp.json` a server's name is its key; only wizard-built entries also
+	// carry a `name` field. Without this, a hand-written server showed as a
+	// blank "•  (stdio)" throughout the wizard and its edit form opened with
+	// an empty name.
+	return Object.fromEntries(
+		Object.entries(servers).map(([key, server]) => [
+			key,
+			{...server, name: server.name || key},
+		]),
+	);
 }
 
 function McpSummaryItems({items}: {items: McpServers}) {
@@ -42,7 +54,12 @@ function McpSummaryItems({items}: {items: McpServers}) {
 	);
 }
 
-export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
+export function McpWizard({
+	projectDir,
+	onComplete,
+	onCancel,
+	initialEditName,
+}: McpWizardProps) {
 	return (
 		<BaseConfigWizard<McpServers>
 			title="MCP Server Configuration"
@@ -65,6 +82,7 @@ export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
 					onBack={onBack}
 					onDelete={onDelete}
 					configExists={configExists}
+					initialEditName={initialEditName}
 				/>
 			)}
 			renderSummaryItems={items => <McpSummaryItems items={items} />}

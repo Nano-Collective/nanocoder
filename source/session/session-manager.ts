@@ -1,14 +1,20 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
-import {getAppDataPath} from '@/config/paths';
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {isValidSessionId} from '@/session/session-id';
+import {getSessionsDirectory} from '@/session/session-paths';
+import {
+	isValidSession,
+	isValidSessionMetadata,
+} from '@/session/session-validation';
 import type {Message} from '@/types/core';
-
-/** UUID v4 pattern for session ID validation (prevents path traversal) */
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+import {withExclusiveLock} from '@/utils/exclusive-file-lock';
 
 export interface Session {
 	id: string;
@@ -23,6 +29,9 @@ export interface Session {
 	/** True once a user has explicitly renamed this session, so autosave's
 	 * auto-derived title (from the latest message) stops overwriting it. */
 	titleManuallySet?: boolean;
+	/** True once the background titler has named this session, so the
+	 * heuristic title stops overwriting it and we never re-generate. */
+	titleGenerated?: boolean;
 }
 
 export interface SessionMetadata {
@@ -35,33 +44,7 @@ export interface SessionMetadata {
 	model: string;
 	workingDirectory: string;
 	titleManuallySet?: boolean;
-}
-
-function isValidSessionId(id: string): boolean {
-	return SESSION_ID_PATTERN.test(id);
-}
-
-function isRecord(obj: unknown): obj is Record<string, unknown> {
-	return typeof obj === 'object' && obj !== null && !Array.isArray(obj);
-}
-
-function isValidSessionMetadata(obj: unknown): obj is SessionMetadata {
-	if (!isRecord(obj)) return false;
-	return (
-		typeof obj.id === 'string' &&
-		typeof obj.title === 'string' &&
-		typeof obj.createdAt === 'string' &&
-		typeof obj.lastAccessedAt === 'string' &&
-		typeof obj.messageCount === 'number' &&
-		typeof obj.provider === 'string' &&
-		typeof obj.model === 'string' &&
-		typeof obj.workingDirectory === 'string'
-	);
-}
-
-function isValidSession(obj: unknown): obj is Session {
-	if (!isRecord(obj)) return false;
-	return isValidSessionMetadata(obj) && Array.isArray(obj.messages);
+	titleGenerated?: boolean;
 }
 
 /** Write data to a temp file then atomically rename into place. */
@@ -89,16 +72,34 @@ function isEnoent(error: unknown): boolean {
 	return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+function toSessionMetadata(session: Session): SessionMetadata {
+	return {
+		id: session.id,
+		title: session.title,
+		createdAt: session.createdAt,
+		lastAccessedAt: session.lastAccessedAt,
+		messageCount: session.messageCount,
+		provider: session.provider,
+		model: session.model,
+		workingDirectory: session.workingDirectory,
+		titleManuallySet: session.titleManuallySet,
+		titleGenerated: session.titleGenerated,
+	};
+}
+
 export class SessionManager {
 	private sessionsDir!: string;
 	private sessionsIndexPath!: string;
 	private initialized = false;
-	/** Serializes read-modify-write of sessions.json to prevent lost updates from concurrent autosave/resume. */
+	/** Serializes read-modify-write of sessions.json within this process. Other processes are kept out by the lock file in withIndexLock. */
 	private indexWriteLock: Promise<void> = Promise.resolve();
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
 
-	constructor(sessionsDir?: string) {
+	constructor(
+		sessionsDir?: string,
+		private readonly artifacts: ArtifactManager = artifactManager,
+	) {
 		this.overrideDir = sessionsDir;
 	}
 
@@ -109,29 +110,7 @@ export class SessionManager {
 			return;
 		}
 
-		const config = getAppConfig();
-		const sessionConfig = config.sessions;
-		const configuredDir = sessionConfig?.directory;
-
-		if (configuredDir) {
-			// User explicitly configured a directory — expand tilde
-			let sessionDirPath = configuredDir;
-			if (sessionDirPath === '~') {
-				sessionDirPath = path.resolve(
-					process.env.HOME || process.env.USERPROFILE || '.',
-				);
-			} else if (sessionDirPath.startsWith('~/')) {
-				sessionDirPath = path.join(
-					process.env.HOME || process.env.USERPROFILE || '.',
-					sessionDirPath.slice(2),
-				);
-			}
-			this.sessionsDir = sessionDirPath;
-		} else {
-			// Default: use platform-aware app data path
-			this.sessionsDir = path.join(getAppDataPath(), 'sessions');
-		}
-
+		this.sessionsDir = getSessionsDirectory(getAppConfig().sessions?.directory);
 		this.sessionsIndexPath = path.join(this.sessionsDir, 'sessions.json');
 	}
 
@@ -143,15 +122,7 @@ export class SessionManager {
 		try {
 			await fs.mkdir(this.sessionsDir, {recursive: true, mode: 0o700});
 			await fs.chmod(this.sessionsDir, 0o700);
-			try {
-				await fs.access(this.sessionsIndexPath);
-			} catch (_error) {
-				await atomicWriteFile(
-					this.sessionsIndexPath,
-					JSON.stringify([]),
-					0o600,
-				);
-			}
+			await this.withIndexLock(() => this.reconcileIndex());
 
 			this.initialized = true;
 
@@ -164,9 +135,17 @@ export class SessionManager {
 	}
 
 	async createSession(
-		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
+		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'> & {
+			id?: string;
+		},
 	): Promise<Session> {
-		const sessionId = crypto.randomUUID();
+		// A caller-supplied id is used verbatim as a path segment, so validate it
+		// rather than trusting it. Anything unexpected falls back to a fresh id
+		// instead of reaching path.join().
+		const sessionId =
+			sessionData.id && isValidSessionId(sessionData.id)
+				? sessionData.id
+				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -217,6 +196,7 @@ export class SessionManager {
 				model: session.model,
 				workingDirectory: session.workingDirectory,
 				titleManuallySet: session.titleManuallySet,
+				titleGenerated: session.titleGenerated,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -252,7 +232,8 @@ export class SessionManager {
 
 	/**
 	 * Rebuild the index by scanning session files on disk.
-	 * Called when the index is missing, corrupt, or empty despite files existing.
+	 * Called when the index is corrupt, or empty despite files existing. A
+	 * missing or incomplete index is repaired at startup by reconcileIndex.
 	 */
 	private async rebuildIndex(): Promise<SessionMetadata[]> {
 		try {
@@ -269,17 +250,7 @@ export class SessionManager {
 					const data = await fs.readFile(filePath, 'utf-8');
 					const parsed: unknown = JSON.parse(data);
 					if (isValidSession(parsed)) {
-						metadata.push({
-							id: parsed.id,
-							title: parsed.title,
-							createdAt: parsed.createdAt,
-							lastAccessedAt: parsed.lastAccessedAt,
-							messageCount: parsed.messageCount,
-							provider: parsed.provider,
-							model: parsed.model,
-							workingDirectory: parsed.workingDirectory,
-							titleManuallySet: parsed.titleManuallySet,
-						});
+						metadata.push(toSessionMetadata(parsed));
 					}
 				} catch (_fileError) {
 					// Skip unreadable files
@@ -298,6 +269,87 @@ export class SessionManager {
 			return metadata;
 		} catch (_error) {
 			return [];
+		}
+	}
+
+	/**
+	 * Bring sessions.json back in line with the session files on disk.
+	 *
+	 * readIndex trusts any index that parses, so an entry it lost - two
+	 * processes saving at once before the index had a cross-process lock, a
+	 * deleted index, a crash - stayed lost: the session file was on disk, but
+	 * resume, retention and pruning never saw it. Runs once per process at
+	 * startup, under the index lock. Indexes valid session files the index is
+	 * missing, drops entries whose file is gone, and creates the index if it
+	 * does not exist. Only the unindexed files are read.
+	 */
+	private async reconcileIndex(): Promise<void> {
+		const indexExists = await fs.access(this.sessionsIndexPath).then(
+			() => true,
+			() => false,
+		);
+		const indexed = indexExists ? await this.readIndex() : [];
+		const onDisk = await this.listSessionFileIds();
+
+		const indexedIds = new Set(indexed.map(s => s.id));
+		const kept = indexed.filter(s => onDisk.has(s.id));
+		const recovered: SessionMetadata[] = [];
+		for (const id of onDisk) {
+			if (indexedIds.has(id)) continue;
+			const session = await this.readSession(id);
+			if (session) recovered.push(toSessionMetadata(session));
+		}
+
+		if (
+			indexExists &&
+			recovered.length === 0 &&
+			kept.length === indexed.length
+		) {
+			return;
+		}
+
+		await atomicWriteFile(
+			this.sessionsIndexPath,
+			JSON.stringify([...kept, ...recovered], null, 2),
+			0o600,
+		);
+	}
+
+	/** Ids of the session files in the sessions directory. */
+	private async listSessionFileIds(): Promise<Set<string>> {
+		const ids = new Set<string>();
+		for (const entry of await fs.readdir(this.sessionsDir)) {
+			if (!entry.endsWith('.json') || entry === 'sessions.json') continue;
+			const id = entry.slice(0, -'.json'.length);
+			if (isValidSessionId(id)) ids.add(id);
+		}
+		return ids;
+	}
+
+	/**
+	 * Delete artifact directories with no surviving session.
+	 *
+	 * Runs at startup regardless of the autosave setting. With autosave off no
+	 * session file is ever written, so nothing else would ever reclaim these
+	 * directories; with autosave on, every `/clear` retires a session id and
+	 * only the persisted ones are kept.
+	 *
+	 * Best-effort: a missing or unreadable session index means "keep nothing
+	 * known", and any failure is swallowed — reclaiming disk must never block
+	 * or crash startup.
+	 */
+	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
+		try {
+			let known: string[] = [];
+			try {
+				known = (await this.readIndex()).map(session => session.id);
+			} catch {
+				known = [];
+			}
+			if (liveSessionId) known.push(liveSessionId);
+			await this.artifacts.cleanupOrphanedSessions(known);
+		} catch {
+			// Never let artifact housekeeping break startup.
 		}
 	}
 
@@ -398,13 +450,23 @@ export class SessionManager {
 				0o600,
 			);
 		});
+
+		await this.artifacts.deleteSessionArtifacts(sessionId);
 	}
 
 	getSessionDirectory(): string {
 		return this.sessionsDir;
 	}
 
-	/** Run a read-modify-write on the index one at a time to avoid lost updates. */
+	/**
+	 * Run a read-modify-write on the index one at a time to avoid lost updates.
+	 *
+	 * The promise chain orders callers in this process. Every Nanocoder process
+	 * shares the same store, though (other terminals, the VS Code extension,
+	 * parallel `nanocoder run`s), so the update also holds `sessions.json.lock`.
+	 * Without it, two processes saving at once each rename their own copy of the
+	 * index into place, and the session the other one added is silently lost.
+	 */
 	private async withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
 		const prev = this.indexWriteLock;
 		let release!: () => void;
@@ -413,7 +475,10 @@ export class SessionManager {
 		});
 		await prev;
 		try {
-			return await fn();
+			// Before initialize() there is no index path to lock, and the caller
+			// fails on that missing path exactly as it did before.
+			if (!this.sessionsIndexPath) return await fn();
+			return await withExclusiveLock(`${this.sessionsIndexPath}.lock`, fn);
 		} finally {
 			release();
 		}
@@ -460,6 +525,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}
@@ -501,6 +567,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}

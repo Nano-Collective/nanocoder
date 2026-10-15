@@ -1,11 +1,18 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
 import {exportCommand} from './export';
+import {lazyCommands} from './lazy-registry';
 import {promises as fs} from 'fs';
+import path from 'path';
 import React from 'react';
 import {render} from 'ink-testing-library';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 
 // Mock fs module
 const originalWriteFile = fs.writeFile;
@@ -17,10 +24,13 @@ test.beforeEach(() => {
 		mockWriteFileCalls.push({path: filepath, content});
 		return Promise.resolve(void 0);
 	};
+	// Isolate each test from session-cwd state set by others.
+	resetSessionCwd();
 });
 
 test.afterEach(() => {
 	fs.writeFile = originalWriteFile;
+	resetSessionCwd();
 });
 
 // Mock ThemeProvider for testing
@@ -51,7 +61,15 @@ const testMetadata = {
 
 test('exportCommand has correct name and description', t => {
 	t.is(exportCommand.name, 'export');
-	t.is(exportCommand.description, 'Export the chat history to a markdown file');
+	t.is(
+		exportCommand.description,
+		'Export the chat history to a markdown or JSON file',
+	);
+});
+
+test('lazy registry keeps the export description in sync', t => {
+	const entry = lazyCommands.find(command => command.name === 'export');
+	t.is(entry?.description, exportCommand.description);
 });
 
 test('exportCommand handler returns React element', async t => {
@@ -66,8 +84,163 @@ test('exportCommand uses provided filename', async t => {
 	t.true(mockWriteFileCalls[0].path.includes('custom-export.md'));
 });
 
-test('exportCommand generates default filename when none provided', async t => {
+test('exportCommand keeps overwrite semantics for a user-provided filename', async t => {
+	// A user-typed name must always write to that exact path (overwrite), never
+	// be auto-suffixed, no matter what already exists on disk.
+	await exportCommand.handler(['fixed-name.md'], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.endsWith('fixed-name.md'));
+	t.false(mockWriteFileCalls[0].path.includes('fixed-name-2'));
+});
+
+test('exportCommand writes complete transcript metadata for --json', async t => {
+	fs.writeFile = originalWriteFile;
+	const before = new Set(
+		(await fs.readdir(process.cwd())).filter(filename => filename.endsWith('.json')),
+	);
+	t.teardown(async () => {
+		const files = (await fs.readdir(process.cwd())).filter(
+			filename => filename.endsWith('.json') && !before.has(filename),
+		);
+		await Promise.all(files.map(filename => fs.rm(path.join(process.cwd(), filename))));
+	});
+
+	const messages: Message[] = [
+		{
+			role: 'system',
+			content: 'System instruction',
+		},
+		{
+			role: 'assistant',
+			content: 'I will inspect the file.',
+			reasoning: 'The request needs a file inspection.',
+			structuredContent: {kind: 'plan', steps: ['inspect']},
+			images: [{data: 'base64-image', mediaType: 'image/png'}],
+			responseUsage: {
+				inputTokens: 12,
+				outputTokens: 5,
+				totalTokens: 17,
+			},
+		},
+		{
+			role: 'tool',
+			name: 'read_file',
+			content: 'file contents',
+			tool_call_id: 'call-1',
+		},
+	];
+
+	await exportCommand.handler(['--json'], messages, testMetadata);
+
+	const jsonFiles = (await fs.readdir(process.cwd())).filter(
+		filename => filename.endsWith('.json') && !before.has(filename),
+	);
+	t.is(jsonFiles.length, 1);
+	const exported = JSON.parse(
+		await fs.readFile(path.join(process.cwd(), jsonFiles[0]!), 'utf8'),
+	) as {
+		sessionDate: string;
+		provider: string;
+		model: string;
+		totalTokens: number;
+		sessionCwd: string;
+		messages: Message[];
+	};
+	t.regex(exported.sessionDate, /T/);
+	t.is(exported.provider, 'test-provider');
+	t.is(exported.model, 'test-model');
+	t.is(exported.totalTokens, 100);
+	t.is(exported.sessionCwd, process.cwd());
+	t.deepEqual(exported.messages, messages);
+});
+
+test('exportCommand uses an explicit JSON filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-export-${process.pid}.json`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler([filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	t.deepEqual(
+		JSON.parse(await fs.readFile(filepath, 'utf8')).messages,
+		JSON.parse(JSON.stringify(testMessages)),
+	);
+});
+
+test('exportCommand uses a JSON filename supplied after --json', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.json`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	t.deepEqual(
+		JSON.parse(await fs.readFile(filepath, 'utf8')).messages,
+		JSON.parse(JSON.stringify(testMessages)),
+	);
+});
+
+test('exportCommand treats --json as JSON even with a non-JSON filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `explicit-flag-export-${process.pid}.md`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler(['--json', filename], testMessages, testMetadata);
+
+	t.true((await fs.stat(filepath)).isFile());
+	const content = await fs.readFile(filepath, 'utf8');
+	t.deepEqual(JSON.parse(content).messages, JSON.parse(JSON.stringify(testMessages)));
+	t.false(content.includes('# Nanocoder Chat Export'));
+});
+
+test('exportCommand writes a generated filename that is free', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	// No auto-suffix (matches -2, -3 etc.) when the target does not exist.
+	t.regex(mockWriteFileCalls[0].path, /hello-\d{4}-\d{2}-\d{2}\.md$/);
+});
+
+test('exportCommand surfaces a write failure instead of a false success', async t => {
+	const originalWriteFile = fs.writeFile;
+	fs.writeFile = async () => {
+		throw new Error('ENOSPC: no space left on device');
+	};
+
+	const result = (await exportCommand.handler(
+		['big.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Failed to export chat/);
+	t.regex(output!, /ENOSPC/);
+	t.false(output!.includes('Chat exported'));
+	fs.writeFile = originalWriteFile;
+});
+
+test('exportCommand generates default filename from first user message', async t => {
+	await exportCommand.handler([], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.includes('hello-'));
+	t.true(mockWriteFileCalls[0].path.endsWith('.md'));
+});
+
+test('exportCommand falls back to nanocoder-chat when no user messages', async t => {
+	const noUserMessages: Message[] = [
+		{role: 'assistant', content: 'Hi there', tool_calls: undefined},
+	];
+	await exportCommand.handler([], noUserMessages, testMetadata);
 
 	t.is(mockWriteFileCalls.length, 1);
 	t.true(mockWriteFileCalls[0].path.includes('nanocoder-chat-'));
@@ -146,8 +319,20 @@ test('exportCommand formats tool messages correctly', async t => {
 
 	const content = mockWriteFileCalls[0].content;
 	t.true(content.includes('## Tool Output: my_tool'));
-	t.true(content.includes('```'));
-	t.true(content.includes('Tool output'));
+	t.true(content.includes('```\nTool output\n```'));
+});
+
+test('exportCommand formats tool messages containing code fences correctly', async t => {
+	const messages: Message[] = [{
+		role: 'tool',
+		name: 'read_file',
+		content: 'File content:\n```javascript\nconsole.log("hello");\n```'
+	}];
+	await exportCommand.handler(['test.md'], messages, testMetadata);
+
+	const content = mockWriteFileCalls[0].content;
+	t.true(content.includes('## Tool Output: read_file'));
+	t.true(content.includes('````\nFile content:\n```javascript\nconsole.log("hello");\n```\n````'));
 });
 
 test('exportCommand excludes system messages', async t => {
@@ -184,4 +369,184 @@ test('exportCommand renders Export component with correct filename', async t => 
 		t.truthy(output);
 		t.regex(output!, /my-export\.md/);
 	}
+});
+
+test('exportCommand rejects path traversal in filename', async t => {
+	const result = (await exportCommand.handler(
+		['../../../etc/passwd'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /'\.\.' segments are not allowed/);
+	t.false(output!.includes('Chat exported'));
+});
+
+test('exportCommand allows exporting into a subdirectory', async t => {
+	// isValidFilePath is segment-aware, so a subdirectory export must work while
+	// traversal is still blocked.
+	await exportCommand.handler(
+		['reports/chat.md'],
+		testMessages,
+		testMetadata,
+	);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.endsWith('chat.md'));
+	t.true(
+		mockWriteFileCalls[0].path
+			.split(/[\\/]/)
+			.slice(-2)
+			.join('/') === 'reports/chat.md',
+	);
+});
+
+test('exportCommand rejects a filename with a null byte', async t => {
+	const result = (await exportCommand.handler(
+		['evil\u0000.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	// The message must name the actual cause, not a generic "invalid path".
+	t.regex(output!, /Invalid export path: the filename contains a null byte/);
+});
+
+test('exportCommand rejects a home-directory shorthand path', async t => {
+	const result = (await exportCommand.handler(
+		['~/notes.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	// `~` is not expanded, so say so and point at what does work.
+	t.regex(output!, /'~' is not expanded/);
+	t.regex(output!, /absolute path inside it/);
+});
+
+test('exportCommand rejects a path escaping the project directory', async t => {
+	const result = (await exportCommand.handler(
+		['../../outside.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /'\.\.' segments are not allowed/);
+	t.false(output!.includes('Chat exported'));
+});
+
+test('exportCommand rejects an absolute path outside the project', async t => {
+	const outside = path.resolve(process.cwd(), '..', 'outside.md');
+	const result = (await exportCommand.handler(
+		[outside],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	t.is(mockWriteFileCalls.length, 0);
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame();
+	t.truthy(output);
+	// Containment is deliberate: name the boundary that was crossed.
+	t.regex(output!, /outside the project directory/);
+});
+
+test('exportCommand resolves a relative path against the session cwd (honours cd)', async t => {
+	// Pin the session cwd to a subdirectory, as a bash `cd` would, and confirm a
+	// bare relative export lands there -- not in the launch dir (process.cwd()).
+	// Must live under the project root for the containment check to pass, so
+	// register cleanup up front — a mid-test failure would otherwise leave the
+	// directory behind in the working tree.
+	const subdir = path.join(process.cwd(), 'tmp-session-cwd-test');
+	await fs.mkdir(subdir, {recursive: true});
+	t.teardown(() => fs.rm(subdir, {recursive: true, force: true}));
+	setSessionCwd(subdir);
+
+	await exportCommand.handler(['chat.md'], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	const expected = path.join(subdir, 'chat.md');
+	t.is(mockWriteFileCalls[0].path, expected);
+});
+
+test('exportCommand contains writes to the project root even when the session cwd is deeper', async t => {
+	// A pinned project root is the non-shrinking containment boundary. With the
+	// session cwd inside a worktree, an absolute path inside the project root
+	// (but above the cwd) is still allowed, while one above the project root is
+	// rejected. Relative '..' is blocked outright by isValidFilePath.
+	const root = path.join(process.cwd(), 'tmp-prjroot-test');
+	const subdir = path.join(root, 'worktree');
+	await fs.mkdir(subdir, {recursive: true});
+	t.teardown(() => fs.rm(root, {recursive: true, force: true}));
+	setProjectRoot(root);
+	setSessionCwd(subdir);
+
+	// Absolute path inside the project root but above the session cwd is allowed.
+	const insideRoot = path.join(root, 'chat.md');
+	await exportCommand.handler([insideRoot], testMessages, testMetadata);
+	t.is(mockWriteFileCalls.length, 1);
+	t.is(mockWriteFileCalls[0].path, insideRoot);
+
+	// Absolute path escaping above the project root is rejected.
+	const outside = path.join(root, '..', 'outside.md');
+	const escape = (await exportCommand.handler(
+		[outside],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+	t.is(mockWriteFileCalls.length, 1);
+	const {lastFrame} = render(<MockThemeProvider>{escape}</MockThemeProvider>);
+	t.regex(lastFrame()!, /outside the project directory/);
+});
+
+test('exportCommand reports a missing parent directory clearly', async t => {
+	fs.writeFile = originalWriteFile;
+
+	const result = (await exportCommand.handler(
+		['no-such-folder/chat.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+	fs.writeFile = originalWriteFile;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	t.regex(lastFrame()!, /Failed to export chat/);
+	t.regex(lastFrame()!, /Parent directory does not exist/);
+});
+
+test('exportCommand renders a subdirectory export relative to the project root', async t => {
+	const result = (await exportCommand.handler(
+		['reports/chat.md'],
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame()!;
+	// Full relative path is shown (with the platform separator), not a bare
+	// basename.
+	t.true(output.includes(`Chat exported to reports${path.sep}chat.md`));
+	t.false(output.includes(`Chat exported to chat${path.sep}`));
+	t.false(output.includes('Chat exported to chat.md'));
 });

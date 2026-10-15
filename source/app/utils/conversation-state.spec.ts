@@ -308,22 +308,22 @@ test('updateAfterToolExecution: describes write_file action', t => {
 	t.is(state!.progress.completedActions[0], 'Created/wrote file: output.txt');
 });
 
-test('updateAfterToolExecution: describes create_file action', t => {
+test('updateAfterToolExecution: describes string_replace action', t => {
 	const manager = new ConversationStateManager();
 	manager.initializeState('Task');
 
-	const toolCall = createToolCall('create_file', {filename: 'new.txt'});
+	const toolCall = createToolCall('string_replace', {filename: 'existing.txt'});
 	manager.updateAfterToolExecution(toolCall, 'Success');
 
 	const state = manager.getState();
-	t.is(state!.progress.completedActions[0], 'Created/wrote file: new.txt');
+	t.is(state!.progress.completedActions[0], 'Edited file: existing.txt');
 });
 
-test('updateAfterToolExecution: describes edit_file action', t => {
+test('updateAfterToolExecution: describes diff_edit action', t => {
 	const manager = new ConversationStateManager();
 	manager.initializeState('Task');
 
-	const toolCall = createToolCall('edit_file', {filename: 'existing.txt'});
+	const toolCall = createToolCall('diff_edit', {filename: 'existing.txt'});
 	manager.updateAfterToolExecution(toolCall, 'Success');
 
 	const state = manager.getState();
@@ -504,11 +504,11 @@ test('generateContinuationContext: suggests next steps after write_file', t => {
 	t.true(context.includes('testing') || context.includes('verifying'));
 });
 
-test('generateContinuationContext: suggests next steps after edit_file', t => {
+test('generateContinuationContext: suggests next steps after string_replace', t => {
 	const manager = new ConversationStateManager();
 	manager.initializeState('Task');
 
-	const toolCall = createToolCall('edit_file', {filename: 'test.txt'});
+	const toolCall = createToolCall('string_replace', {filename: 'test.txt'});
 	manager.updateAfterToolExecution(toolCall, 'Success');
 
 	const context = manager.generateContinuationContext();

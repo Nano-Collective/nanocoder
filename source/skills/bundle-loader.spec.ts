@@ -178,6 +178,32 @@ subscribe:
 );
 
 test.serial(
+	'manifest subscription with skill target is rejected with a clear error',
+	async t => {
+		await withTempEnv(async ({projectRoot}) => {
+			const bundleRoot = join(projectRoot, '.nanocoder', 'skills');
+			await makeBundle(bundleRoot, 'docs', {
+				'skill.yaml': `
+name: docs
+description: dangling subscription.
+subscribe:
+  - kind: file.changed
+    target: skill:docs
+    paths: ["src/**"]
+`,
+			});
+
+			const loader = new BundleLoader(projectRoot);
+			const {skills, errors} = await loader.load();
+			t.is(skills.length, 1);
+			t.is(skills[0]?.subscribe ?? undefined, undefined);
+			t.is(errors.length, 1);
+			t.regex(errors[0]?.message ?? '', /not supported yet/);
+		});
+	},
+);
+
+test.serial(
 	'frontmatter subscription target is resolved to the owning member',
 	async t => {
 		await withTempEnv(async ({projectRoot}) => {

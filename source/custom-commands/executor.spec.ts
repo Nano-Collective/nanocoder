@@ -1,6 +1,6 @@
 import test from 'ava';
 import type {CustomCommand} from '@/types/index';
-import {CustomCommandExecutor} from './executor';
+import {CustomCommandExecutor, expandCustomCommandPrompt} from './executor';
 
 const executor = new CustomCommandExecutor();
 
@@ -76,6 +76,15 @@ test('execute includes args variable with all arguments', t => {
 
 	const result = executor.execute(command, ['hello', 'world']);
 	t.true(result.includes('hello world'));
+});
+
+test('execute includes args variable without declared parameters', t => {
+	const command = createTestCommand({
+		content: 'All args: {{args}}',
+	});
+
+	const result = executor.execute(command, ['hello', 'world']);
+	t.true(result.includes('All args: hello world'));
 });
 
 test('execute wraps the prompt with the command name', t => {
@@ -192,4 +201,43 @@ test('formatHelp includes aliases without namespace', t => {
 
 	const result = executor.formatHelp(command);
 	t.true(result.includes('t, testy'));
+});
+
+test('expandCustomCommandPrompt fills {{args}} from the typed line', t => {
+	const command = createTestCommand({
+		name: 'review',
+		fullName: 'review',
+		content: 'Review {{args}} now.',
+	});
+
+	const result = expandCustomCommandPrompt(command, '/review main', executor);
+	t.true(result.includes('Review main now.'));
+	t.false(result.includes('{{args}}'));
+});
+
+test('expandCustomCommandPrompt keeps quotes in {{args}} and parsed tokens in parameters', t => {
+	const command = createTestCommand({
+		name: 'review',
+		fullName: 'review',
+		content: 'File {{file}}. Raw {{args}}.',
+		metadata: {parameters: ['file']},
+	});
+
+	const result = expandCustomCommandPrompt(
+		command,
+		`/review "src/app.ts" don't`,
+		executor,
+	);
+	t.true(result.includes('File src/app.ts.'));
+	t.true(result.includes(`Raw "src/app.ts" don't.`));
+});
+
+test('args variable keeps the raw text: apostrophes, quotes and $ patterns', t => {
+	const command = createTestCommand({
+		content: 'All args: {{args}} END',
+	});
+	const raw = `don't touch $' $\` $& $$ 'q' "dq"  two`;
+
+	const result = executor.execute(command, ['ignored'], raw);
+	t.true(result.includes(`All args: ${raw} END`));
 });

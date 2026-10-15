@@ -1,11 +1,103 @@
 import chalk from 'chalk';
-import {Text, useInput} from 'ink';
-import {useEffect, useRef, useState} from 'react';
+import {type Key, Text, useInput, useStdin} from 'ink';
+import {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
+import {isNewlineKey} from '@/utils/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/utils/text-wrapping';
+
+/**
+ * The raw byte sequence behind the keypress a `useInput` handler is running
+ * for. Read `.current` inside the handler, not during render.
+ *
+ * Ink maps physical Backspace (`\x7f`) and forward Delete (`\x1b[3~`) to the
+ * same `key.delete`, and does not recognise xterm's modified Enter at all, so
+ * telling them apart needs the sequence itself. Stock Ink never puts it on
+ * `Key`. A pnpm patch used to add a `raw` field to `Key`, but pnpm patches only
+ * apply inside this repo: the published package depends on plain Ink, so
+ * npm installs lost the field and Backspace became forward Delete (#1505).
+ *
+ * The sequence comes from the stdin emitter Ink exposes through `useStdin`,
+ * the stream `useInput` itself listens to. The listener is prepended so it
+ * always runs before any `useInput` handler, whatever order those
+ * re-subscribe in.
+ */
+export function useRawInput() {
+	const {internal_eventEmitter: emitter} = useStdin();
+	const rawRef = useRef('');
+
+	useEffect(() => {
+		const onInput = (data: unknown) => {
+			rawRef.current = String(data);
+		};
+		emitter.prependListener('input', onInput);
+		return () => {
+			emitter.removeListener('input', onInput);
+		};
+	}, [emitter]);
+
+	return rawRef;
+}
+
+/** Physical Backspace (`\x7f`) or Option/Alt+Backspace (`\x1b\x7f`). */
+export const isBackspaceKey = (key: Key, raw: string) =>
+	key.backspace || (key.delete && (raw === '\x7f' || raw === '\x1b\x7f'));
+
+/**
+ * How the value effect should treat an incoming `value`, given the values
+ * this input emitted that the parent has not echoed back yet (oldest first).
+ *
+ * - `stale-echo`: one of our own emissions, but newer ones are still in
+ *   flight, so this render is behind the user's latest keystroke.
+ * - `echo`: our latest emission came back; the value is current.
+ * - `external`: a value we never emitted (undo/redo, draft restore, clear).
+ * - `unchanged`: the same value we last settled on.
+ */
+export function classifyIncomingValue(
+	value: string,
+	pending: readonly string[],
+	lastEmitted: string,
+): {
+	kind: 'stale-echo' | 'echo' | 'external' | 'unchanged';
+	pending: string[];
+} {
+	const echoIndex = pending.indexOf(value);
+	if (echoIndex !== -1) {
+		const rest = pending.slice(echoIndex + 1);
+		return {kind: rest.length > 0 ? 'stale-echo' : 'echo', pending: rest};
+	}
+	if (value !== lastEmitted) {
+		return {kind: 'external', pending: []};
+	}
+	return {kind: 'unchanged', pending: [...pending]};
+}
+
+// Cursor offsets are UTF-16 code-unit indexes into the value. An astral
+// character (every emoji) is a surrogate pair, two units, so a key press has to
+// move over or delete it whole: stepping by one unit strands the caret inside
+// the pair and lets Backspace/Delete leave a lone surrogate behind.
+
+/** Pulls an offset that falls inside a surrogate pair back to the pair's start. */
+function snapToCharBoundary(value: string, offset: number): number {
+	return (value.codePointAt(offset - 1) ?? 0) > 0xffff ? offset - 1 : offset;
+}
+
+function stepBack(value: string, offset: number): number {
+	return snapToCharBoundary(value, Math.max(0, offset - 1));
+}
+
+function stepForward(value: string, offset: number): number {
+	const width = (value.codePointAt(offset) ?? 0) > 0xffff ? 2 : 1;
+	return Math.min(value.length, offset + width);
+}
 
 export type Props = {
 	readonly placeholder?: string;
@@ -22,20 +114,40 @@ export type Props = {
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
 };
 
-function TextInput({
-	value: originalValue,
-	placeholder = '',
-	focus = true,
-	mask,
-	highlightPastedText = false,
-	showCursor = true,
-	onChange,
-	onSubmit,
-	onEnter,
-	wrapWidth,
-	handleEnter = true,
-	onEdgeArrow,
-}: Props) {
+/**
+ * Imperative handle for TextInput. Exposed so the parent can read the caret
+ * position before a programmatic insert (terminal paste) and restore it after,
+ * without lifting cursor state up the tree.
+ */
+export type TextInputHandle = {
+	getCursorOffset: () => number;
+	/**
+	 * Move the caret. Pass `value` when the parent has just changed the value
+	 * out of band (a terminal paste) and `offset` is in that new value's
+	 * coordinates: keys arriving before the next render then edit the new
+	 * value at the new caret, instead of the old value at an offset that does
+	 * not fit it.
+	 */
+	setCursorOffset: (offset: number, value?: string) => void;
+};
+
+const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
+	{
+		value: originalValue,
+		placeholder = '',
+		focus = true,
+		mask,
+		highlightPastedText = false,
+		showCursor = true,
+		onChange,
+		onSubmit,
+		onEnter,
+		wrapWidth,
+		handleEnter = true,
+		onEdgeArrow,
+	}: Props,
+	ref,
+) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
 		cursorWidth: 0,
@@ -43,19 +155,112 @@ function TextInput({
 
 	const {cursorOffset, cursorWidth} = state;
 
+	useImperativeHandle(
+		ref,
+		() => ({
+			getCursorOffset: () => cursorOffsetRef.current,
+			setCursorOffset: (offset: number, value?: string) => {
+				// Don't clamp against originalValueRef.current here: the parent
+				// typically calls this in the same tick it schedules the new
+				// `value`, so the ref is stale. The next render's effect clamps
+				// the offset against the real newValue.length. We trust the
+				// caller to pass a sane offset; out-of-bounds requests are
+				// still corrected, just one render later.
+				if (value !== undefined) {
+					originalValueRef.current = value;
+				}
+				cursorOffsetRef.current = offset;
+				skipNextCursorResetRef.current = true;
+				setState({cursorOffset: offset, cursorWidth: 0});
+			},
+		}),
+		[],
+	);
+
 	// Refs so useInput handlers always read the latest values (avoids stale closures)
 	const cursorOffsetRef = useRef(cursorOffset);
 	const originalValueRef = useRef(originalValue);
 	cursorOffsetRef.current = cursorOffset;
 	originalValueRef.current = originalValue;
 
+	// The last value this component emitted via onChange. Anything arriving in
+	// `value` that we did not emit is an external replacement (undo/redo, draft
+	// restore, a programmatic clear) rather than one of our own edits.
+	const lastEmittedValueRef = useRef(originalValue);
+
+	// Values emitted via onChange that the parent has not echoed back yet, in
+	// emission order. React runs the value effect after the commit, so while
+	// the user is typing quickly the effect for an older render can run after
+	// a newer keystroke has already been emitted. Compared only against the
+	// latest emission, that stale echo of our own edit read as an external
+	// replacement and parked the caret at the end of the old, shorter value:
+	// the next keystrokes then landed mid-word ("/tune" typed as "/etun").
+	const pendingEmitsRef = useRef<string[]>([]);
+	const recordEmit = (value: string) => {
+		lastEmittedValueRef.current = value;
+		pendingEmitsRef.current.push(value);
+		// Only a runaway parent that never re-renders could grow this; keep it
+		// bounded regardless.
+		if (pendingEmitsRef.current.length > 64) {
+			pendingEmitsRef.current.shift();
+		}
+	};
+
+	// When the imperative handle moves the caret, the upcoming value change
+	// (already in flight from the parent) would otherwise be misread by the
+	// effect as "external replacement, park at end" and clobber the caret.
+	// Setting this flag tells the effect to respect whatever offset is now in
+	// state — and only clamp it against the new value's bounds.
+	const skipNextCursorResetRef = useRef(false);
+
 	useEffect(() => {
+		if (!focus || !showCursor) {
+			return;
+		}
+
+		const newValue = originalValue || '';
+
+		const echo = classifyIncomingValue(
+			newValue,
+			pendingEmitsRef.current,
+			lastEmittedValueRef.current || '',
+		);
+		pendingEmitsRef.current = echo.pending;
+		// A stale echo of our own edit: the caret belongs to the newest edit,
+		// so leave it alone rather than fit it to the old value.
+		if (echo.kind === 'stale-echo') {
+			return;
+		}
+		const isExternalChange = echo.kind === 'external';
+		const skipReset = skipNextCursorResetRef.current;
+		skipNextCursorResetRef.current = false;
+		lastEmittedValueRef.current = originalValue;
+
 		setState(previousState => {
-			if (!focus || !showCursor) {
-				return previousState;
+			// Programmatic cursor move paired with the value change: trust the
+			// offset the parent requested, just clamp it into the new value's
+			// bounds so we never render an out-of-range caret.
+			if (skipReset) {
+				const clamped = Math.max(
+					0,
+					Math.min(previousState.cursorOffset, newValue.length),
+				);
+				return {cursorOffset: clamped, cursorWidth: 0};
 			}
 
-			const newValue = originalValue || '';
+			// An external replacement carries no cursor of its own, so the caret
+			// left over from the previous value is meaningless against the new one.
+			// Park it at the end, the way a fresh mount does. Clamping alone is not
+			// enough: it only pulls the caret back when the value SHRINKS, so a
+			// redo that restores a longer value would strand the caret at the
+			// offset the undo clamped it to (0 for an undo back to empty) and the
+			// next keystroke would insert at the start.
+			if (isExternalChange) {
+				return {
+					cursorOffset: newValue.length,
+					cursorWidth: 0,
+				};
+			}
 
 			if (previousState.cursorOffset > newValue.length - 1) {
 				return {
@@ -86,6 +291,19 @@ function TextInput({
 		return i;
 	}
 
+	// Logical-line boundaries around the cursor, for readline's Ctrl+A/E/U/K.
+	// A "line" is the text between the \n before the cursor and the \n at or
+	// after it, so multi-line input keeps these scoped to the current line
+	// instead of the whole buffer.
+	function startOfLine(value: string, offset: number): number {
+		return value.lastIndexOf('\n', offset - 1) + 1;
+	}
+
+	function endOfLine(value: string, offset: number): number {
+		const next = value.indexOf('\n', offset);
+		return next === -1 ? value.length : next;
+	}
+
 	const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
 	const value = mask ? mask.repeat(originalValue.length) : originalValue;
 	let renderedValue = value;
@@ -99,23 +317,31 @@ function TextInput({
 
 		renderedValue = value.length > 0 ? '' : chalk.inverse(' ');
 
+		// for...of yields code points but cursorOffset counts UTF-16 units, so
+		// advance by each character's unit length. A character is highlighted
+		// when any of its units falls in the caret range.
 		let i = 0;
 
 		for (const char of value) {
-			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+			if (
+				i + char.length > cursorOffset - cursorActualWidth &&
+				i <= cursorOffset
+			) {
 				renderedValue +=
 					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
 			} else {
 				renderedValue += char;
 			}
 
-			i++;
+			i += char.length;
 		}
 
 		if (value.length > 0 && cursorOffset === value.length) {
 			renderedValue += chalk.inverse(' ');
 		}
 	}
+
+	const rawInputRef = useRawInput();
 
 	useInput(
 		(input, key) => {
@@ -140,14 +366,38 @@ function TextInput({
 				}
 
 				const direction = key.upArrow ? 'up' : 'down';
-				const next = moveCursorToVisualLine(segments, cur, direction);
-				if (next === null) {
+				const target = moveCursorToVisualLine(segments, cur, direction);
+				if (target === null) {
 					// First/last visual line — hand off to history navigation
 					onEdgeArrow?.(direction);
 				} else {
+					// A column on the new row can fall inside an emoji's pair.
+					const next = snapToCharBoundary(val, target);
 					cursorOffsetRef.current = next;
 					setState(s => ({...s, cursorOffset: next}));
 				}
+				return;
+			}
+
+			// Newline keys insert a \n at the cursor. TextInput owns the insertion
+			// because it is the only side that knows the cursor offset: UserInput
+			// used to append '\n' to the end of the value, which put the newline in
+			// the wrong place when the cursor was mid-text and left the cursor
+			// stranded in front of it. Checked before `key.return` because several
+			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
+			if (isNewlineKey(input, key, rawInputRef.current)) {
+				const currentValue = originalValueRef.current;
+				const offset = cursorOffsetRef.current;
+				const withNewline =
+					currentValue.slice(0, offset) + '\n' + currentValue.slice(offset);
+
+				// Mirror the refs before returning so a second newline arriving in
+				// the same stdin read block inserts after the first, not over it.
+				cursorOffsetRef.current = offset + 1;
+				originalValueRef.current = withNewline;
+				recordEmit(withNewline);
+				setState({cursorOffset: offset + 1, cursorWidth: 0});
+				onChange(withNewline);
 				return;
 			}
 
@@ -167,7 +417,15 @@ function TextInput({
 			let nextValue = originalValueRef.current;
 			let nextCursorWidth = 0;
 
-			if (key.ctrl) {
+			if (key.home) {
+				if (showCursor) {
+					nextCursorOffset = 0;
+				}
+			} else if (key.end) {
+				if (showCursor) {
+					nextCursorOffset = originalValueRef.current.length;
+				}
+			} else if (key.ctrl) {
 				if (key.leftArrow) {
 					// Ctrl+Left: jump to start of previous word
 					if (showCursor) {
@@ -188,21 +446,31 @@ function TextInput({
 					// Readline keybinds
 					switch (input) {
 						case 'a': {
-							// Move cursor to start of line
-							nextCursorOffset = 0;
+							// Move cursor to start of the current line
+							if (showCursor) {
+								nextCursorOffset = startOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
+							}
 							break;
 						}
 
 						case 'e': {
-							// Move cursor to end of line
-							nextCursorOffset = originalValueRef.current.length;
+							// Move cursor to end of the current line
+							if (showCursor) {
+								nextCursorOffset = endOfLine(
+									originalValueRef.current,
+									cursorOffsetRef.current,
+								);
+							}
 							break;
 						}
 
 						case 'b': {
 							// Move cursor back one character
 							if (showCursor) {
-								nextCursorOffset--;
+								nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -211,7 +479,7 @@ function TextInput({
 						case 'f': {
 							// Move cursor forward one character
 							if (showCursor) {
-								nextCursorOffset++;
+								nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -219,8 +487,8 @@ function TextInput({
 
 						case 'w': {
 							// Delete previous word (backward-kill-word, newline-aware)
-							if (cursorOffset > 0) {
-								let i = cursorOffset;
+							if (cursorOffsetRef.current > 0) {
+								let i = cursorOffsetRef.current;
 								while (
 									i > 0 &&
 									(originalValueRef.current[i - 1] === ' ' ||
@@ -235,7 +503,7 @@ function TextInput({
 									i--;
 								nextValue =
 									originalValueRef.current.slice(0, i) +
-									originalValueRef.current.slice(cursorOffset);
+									originalValueRef.current.slice(cursorOffsetRef.current);
 								nextCursorOffset = i;
 							}
 
@@ -243,15 +511,27 @@ function TextInput({
 						}
 
 						case 'u': {
-							// Delete from cursor to start of line
-							nextValue = originalValueRef.current.slice(cursorOffset);
-							nextCursorOffset = 0;
+							// Delete from cursor to start of the current line
+							const start = startOfLine(
+								originalValueRef.current,
+								cursorOffsetRef.current,
+							);
+							nextValue =
+								originalValueRef.current.slice(0, start) +
+								originalValueRef.current.slice(cursorOffsetRef.current);
+							nextCursorOffset = start;
 							break;
 						}
 
 						case 'k': {
-							// Delete from cursor to end of line
-							nextValue = originalValueRef.current.slice(0, cursorOffset);
+							// Delete from cursor to end of the current line
+							const end = endOfLine(
+								originalValueRef.current,
+								cursorOffsetRef.current,
+							);
+							nextValue =
+								originalValueRef.current.slice(0, cursorOffsetRef.current) +
+								originalValueRef.current.slice(end);
 							break;
 						}
 
@@ -262,28 +542,53 @@ function TextInput({
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
-			} else if (key.backspace || key.delete) {
-				if (cursorOffset > 0) {
+			} else if (isBackspaceKey(key, rawInputRef.current)) {
+				// Backspace deletes the character before the cursor.
+				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
+				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
+				// sequence (see useRawInput): '\x7f' and the Option/Alt+Backspace
+				// variant '\x1b\x7f' (macOS/Linux terminals) are backward deletes,
+				// while '\x1b[3~' is the forward Delete key. Kitty keyboard protocol encodes
+				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
+				// it is dormant here because nanocoder does not enable
+				// kittyKeyboard — if that changes, this guard needs the
+				// corresponding handling.
+				if (cursorOffsetRef.current > 0) {
+					const start = stepBack(nextValue, cursorOffsetRef.current);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffset - 1) +
+						originalValueRef.current.slice(0, start) +
 						originalValueRef.current.slice(
-							cursorOffset,
+							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
-					nextCursorOffset--;
+					nextCursorOffset = start;
+				}
+			} else if (key.delete) {
+				// Delete removes the character after the cursor (forward delete).
+				// Only reached for the forward Delete key (\x1b[3~); the
+				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
+				// are handled in the branch above.
+				if (cursorOffsetRef.current < originalValueRef.current.length) {
+					nextValue =
+						originalValueRef.current.slice(0, cursorOffsetRef.current) +
+						originalValueRef.current.slice(
+							stepForward(nextValue, cursorOffsetRef.current),
+							originalValueRef.current.length,
+						);
+					// Cursor stays in place — forward delete doesn't move it.
 				}
 			} else {
 				nextValue =
-					originalValueRef.current.slice(0, cursorOffset) +
+					originalValueRef.current.slice(0, cursorOffsetRef.current) +
 					input +
 					originalValueRef.current.slice(
-						cursorOffset,
+						cursorOffsetRef.current,
 						originalValueRef.current.length,
 					);
 				nextCursorOffset += input.length;
@@ -311,6 +616,7 @@ function TextInput({
 
 			if (nextValue !== originalValueRef.current) {
 				originalValueRef.current = nextValue;
+				recordEmit(nextValue);
 				onChange(nextValue);
 			}
 		},
@@ -329,6 +635,6 @@ function TextInput({
 			: finalValue;
 
 	return <Text>{displayValue}</Text>;
-}
+});
 
 export default TextInput;

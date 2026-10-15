@@ -5,6 +5,7 @@ import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {
 	buildAutoDiagnosticsMessage,
 	collectEditedPaths,
+	lastTurnEditedFiles,
 } from './auto-diagnostics.js';
 import {processAssistantResponse} from './conversation-loop.js';
 
@@ -39,6 +40,68 @@ const toolResult = (
 	name,
 	content,
 	...overrides,
+});
+
+test('lastTurnEditedFiles is true when the latest turn made a successful edit', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'edit it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [toolCall('1', 'write_file', {path: 'a.ts'})],
+		},
+		toolResult('1', 'write_file'),
+		{role: 'assistant', content: 'done'},
+	];
+
+	t.true(lastTurnEditedFiles(messages));
+});
+
+test('lastTurnEditedFiles ignores earlier turns and failed edits', t => {
+	const editInEarlierTurn: Message[] = [
+		{role: 'user', content: 'edit it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [toolCall('1', 'write_file', {path: 'a.ts'})],
+		},
+		toolResult('1', 'write_file'),
+		{role: 'user', content: 'thanks'},
+		{role: 'assistant', content: 'you are welcome'},
+	];
+	const failedEdit: Message[] = [
+		{role: 'user', content: 'edit it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [toolCall('1', 'string_replace', {path: 'a.ts'})],
+		},
+		toolResult('1', 'string_replace', 'Error: no match found'),
+	];
+
+	t.false(lastTurnEditedFiles(editInEarlierTurn));
+	t.false(lastTurnEditedFiles(failedEdit));
+	t.false(lastTurnEditedFiles([]));
+});
+
+test('lastTurnEditedFiles looks past the synthetic auto-diagnostics prompt', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'edit it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [toolCall('1', 'write_file', {path: 'a.ts'})],
+		},
+		toolResult('1', 'write_file'),
+		{
+			role: 'user',
+			content:
+				'Automatic diagnostics after the recent edits found issues. Please fix them.',
+		},
+		{role: 'assistant', content: 'fixed'},
+	];
+
+	t.true(lastTurnEditedFiles(messages));
 });
 
 const createLoopParams = (overrides = {}) => ({

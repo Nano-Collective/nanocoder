@@ -141,7 +141,7 @@ Summarize last week.`,
 );
 
 test.serial(
-	'flat-form custom tool with frontmatter subscribe also wires through',
+	'flat-form custom tool with frontmatter subscribe is rejected with a collision',
 	async t => {
 		await withTempProject(async root => {
 			resetSkillRegistry();
@@ -171,12 +171,19 @@ echo hi`,
 				eventRouter: router,
 			});
 
-			// Tool targets are deferred in the dispatcher (plan step 8), but
-			// the subscription itself should still register cleanly through
-			// the bootstrap.
-			t.true(
+			// A triggered tool call has no model to fill in its arguments, so
+			// the registrar rejects the subscription loudly instead of letting
+			// it register and be skipped at dispatch time.
+			t.false(
 				result.registration.subscriptionIds.some(id =>
 					id.includes('gh_pr_diff'),
+				),
+			);
+			t.true(
+				result.registration.collisions.some(
+					c =>
+						c.kind === 'subscription' &&
+						/tools cannot be triggered/.test(c.message),
 				),
 			);
 		});

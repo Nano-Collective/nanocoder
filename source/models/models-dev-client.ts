@@ -228,6 +228,15 @@ function createModelInfo(
 		cost: {
 			input: model.cost?.input ?? 0,
 			output: model.cost?.output ?? 0,
+			// Left undefined rather than zeroed when models.dev omits them:
+			// pricing falls back to the input rate, and a 0 would price cache
+			// hits as free.
+			...(model.cost?.cache_read != null
+				? {cache_read: model.cost.cache_read}
+				: {}),
+			...(model.cost?.cache_write != null
+				? {cache_write: model.cost.cache_write}
+				: {}),
 		},
 	};
 }
@@ -498,6 +507,30 @@ export async function getModelContextLimit(
 ): Promise<number | null> {
 	const resolved = await resolveModelContextLimit(modelId, options);
 	return resolved.limit;
+}
+
+/**
+ * Whether models.dev lists image input for this exact model id. Providers
+ * can disagree, so any listing with image input wins. null when the model is
+ * not listed (most local models), so callers can still try.
+ */
+export async function getModelAcceptsImages(
+	modelId: string,
+): Promise<boolean | null> {
+	let listed = false;
+	try {
+		const data = await getModelsData();
+		for (const provider of Object.values(data ?? {})) {
+			const input = provider?.models?.[modelId]?.modalities?.input;
+			if (input?.includes('image')) {
+				return true;
+			}
+			listed ||= !!input;
+		}
+	} catch {
+		// Lookup failure is the same as an unlisted model.
+	}
+	return listed ? false : null;
 }
 
 /**

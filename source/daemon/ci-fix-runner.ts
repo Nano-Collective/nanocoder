@@ -117,6 +117,7 @@ async function main(): Promise<void> {
 			undefined,
 			0,
 			undefined,
+			undefined,
 			{
 				tools: getAllowedToolNames(input.trustLevel),
 				alwaysAllow: getHeadlessAutoApproveToolNames(input.trustLevel),

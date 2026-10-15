@@ -20,8 +20,6 @@ function createDefaultProps(
 		onModelDatabaseCancel: () => {},
 		onConfigWizardComplete: async () => {},
 		onConfigWizardCancel: () => {},
-		onMcpWizardComplete: async () => {},
-		onMcpWizardCancel: () => {},
 		onCheckpointSelect: async () => {},
 		onCheckpointCancel: () => {},
 		onSessionSelect: () => {},
@@ -63,17 +61,6 @@ test('ModalSelectors renders ModelDatabaseDisplay when activeMode is modelDataba
 
 test('ModalSelectors renders ConfigWizard when activeMode is configWizard', t => {
 	const props = createDefaultProps({activeMode: 'configWizard'});
-	const component = ModalSelectors(props);
-	t.truthy(component);
-
-	const {lastFrame, unmount} = renderWithTheme(<>{component}</>);
-	const output = lastFrame();
-	t.truthy(output);
-	unmount();
-});
-
-test('ModalSelectors renders McpWizard when activeMode is mcpWizard', t => {
-	const props = createDefaultProps({activeMode: 'mcpWizard'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 

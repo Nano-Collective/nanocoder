@@ -11,7 +11,10 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProjectContextPreferences,
 	getReasoningExpanded,
+	getShowAgentBashOutput,
+	getShowUsageFooter,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
@@ -19,15 +22,25 @@ import {
 	updatePrivacyPreference,
 	updateReasoningExpanded,
 	updateSelectedTheme,
+	updateSemanticMemoryEnabled,
+	updateSemanticMemoryLimit,
+	updateSemanticMemoryTokenBudget,
+	updateShowAgentBashOutput,
+	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import type {NotificationsConfig} from '@/types/config';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import {
+	DEFAULT_NANOCODER_SHAPE,
+	type NanocoderShape,
+	type ThemePreset,
+} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import type {SettingsTabId} from './settings-constants';
 
 /**
  * The set of "managed" settings panels: preserved full-featured sub-UIs that
@@ -43,6 +56,7 @@ export type ManagedSettingsPanel =
 	| 'notifications'
 	| 'display-settings'
 	| 'privacy'
+	| 'semantic-memory'
 	| 'json-config'
 	| 'web-search'
 	| 'providers-config'
@@ -65,6 +79,20 @@ export interface SettingsSelectorProps {
 	 * this, servers added here only take effect on the next launch.
 	 */
 	onMcpChanged?: () => void | Promise<void>;
+	/**
+	 * Rebuild the client for the current provider/model after the Providers panel
+	 * edits config, without clearing messages or resetting to default provider.
+	 */
+	onProvidersChanged?: () => void | Promise<void>;
+	/**
+	 * The tab to open initially. Defaults to 'appearance' if not specified.
+	 */
+	initialTab?: SettingsTabId;
+	/**
+	 * Called when the active tab changes, so the parent can track it for
+	 * returning after launching wizards.
+	 */
+	onTabChange?: (tab: SettingsTabId) => void;
 }
 
 function ThemePreviewMessage({
@@ -287,11 +315,16 @@ export function SettingsTitleShapePanel({
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
-	const {currentTitleShape, setCurrentTitleShape} = useTitleShape();
+	const {currentTitleShape, setCurrentTitleShape, commitTitleShape} =
+		useTitleShape();
 	const [originalShape] = useState<TitleShape>(currentTitleShape);
 
 	useInput((_, key) => {
 		if (key.escape) {
+			// Esc/Shift+Tab = cancel. Navigation only previews via
+			// setCurrentTitleShape (in-memory, never persisted), so revert the
+			// in-memory preview back to the shape the panel was opened with
+			// before navigating away. Nothing is written to disk on cancel.
 			setCurrentTitleShape(originalShape);
 			onCancel();
 		}
@@ -391,11 +424,14 @@ export function SettingsTitleShapePanel({
 	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: TitleShape}) => {
-		setCurrentTitleShape(item.value);
+		// Only commit (persist to disk) on an explicit Enter.
+		commitTitleShape(item.value);
 		onBack();
 	};
 
 	const handleHighlight = (item: {label: string; value: TitleShape}) => {
+		// Preview only — updates the in-memory app title live but does NOT
+		// persist. Canceling (Esc/Shift+Tab) reverts this with no disk write.
 		setCurrentTitleShape(item.value);
 	};
 
@@ -418,7 +454,9 @@ export function SettingsTitleShapePanel({
 					onHighlight={handleHighlight}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={colors.secondary}>
+					Enter to apply · Shift+Tab back · Esc back
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -435,7 +473,7 @@ export function SettingsTitleShapePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to go back
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 
@@ -461,7 +499,7 @@ export function SettingsNanocoderShapePanel({
 	const {colors} = useTheme();
 
 	const savedShape = getNanocoderShape();
-	const initialShape: NanocoderShape = savedShape ?? 'tiny';
+	const initialShape: NanocoderShape = savedShape ?? DEFAULT_NANOCODER_SHAPE;
 	const [originalShape] = useState<NanocoderShape>(initialShape);
 	const [previewShape, setPreviewShape] =
 		useState<NanocoderShape>(initialShape);
@@ -477,8 +515,8 @@ export function SettingsNanocoderShapePanel({
 
 	const shapeOptions: {label: string; value: NanocoderShape}[] = useMemo(
 		() => [
-			{label: 'Tiny (default)', value: 'tiny'},
-			{label: 'Block', value: 'block'},
+			{label: 'Block (default)', value: 'block'},
+			{label: 'Tiny', value: 'tiny'},
 			{label: 'Simple', value: 'simple'},
 			{label: 'Simple Block', value: 'simpleBlock'},
 			{label: 'Slick', value: 'slick'},
@@ -534,7 +572,9 @@ export function SettingsNanocoderShapePanel({
 						onHighlight={handleHighlight}
 					/>
 					<Box marginBottom={1}></Box>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</TitledBoxWithPreferences>
 			</>
 		);
@@ -559,7 +599,7 @@ export function SettingsNanocoderShapePanel({
 			>
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Enter to apply, Shift+Tab to go back, Esc to go back
+						Enter to apply · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 
@@ -663,9 +703,7 @@ export function SettingsPasteThresholdPanel({
 			/>
 			<Box marginTop={isNarrow ? 0 : 1}>
 				<Text color={colors.secondary}>
-					{isNarrow
-						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to go back'}
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
@@ -688,10 +726,12 @@ export function SettingsNotificationsPanel({
 		saved ?? {
 			enabled: false,
 			sound: false,
+			bell: false,
 			events: {
 				toolConfirmation: true,
 				questionPrompt: true,
 				generationComplete: true,
+				triggeredRunComplete: true,
 			},
 		},
 	);
@@ -708,9 +748,11 @@ export function SettingsNotificationsPanel({
 	type ToggleKey =
 		| 'enabled'
 		| 'sound'
+		| 'bell'
 		| 'toolConfirmation'
 		| 'questionPrompt'
-		| 'generationComplete';
+		| 'generationComplete'
+		| 'triggeredRunComplete';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -724,6 +766,10 @@ export function SettingsNotificationsPanel({
 				value: 'sound' as ToggleKey,
 			},
 			{
+				label: `  Terminal Bell: ${isOn(config.bell)}`,
+				value: 'bell' as ToggleKey,
+			},
+			{
 				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
 				value: 'toolConfirmation' as ToggleKey,
 			},
@@ -735,6 +781,12 @@ export function SettingsNotificationsPanel({
 				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
 				value: 'generationComplete' as ToggleKey,
 			},
+			{
+				label: `  Triggered Run Complete: ${isOn(
+					config.events?.triggeredRunComplete,
+				)}`,
+				value: 'triggeredRunComplete' as ToggleKey,
+			},
 		];
 	}, [config]);
 
@@ -744,6 +796,8 @@ export function SettingsNotificationsPanel({
 			next.enabled = !next.enabled;
 		} else if (item.value === 'sound') {
 			next.sound = !next.sound;
+		} else if (item.value === 'bell') {
+			next.bell = !next.bell;
 		} else {
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
@@ -767,14 +821,16 @@ export function SettingsNotificationsPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -794,6 +850,8 @@ export function SettingsDisplayPanel({
 
 	const currentReasoningExpanded = getReasoningExpanded();
 	const currentCompactToolDisplay = getCompactToolDisplay();
+	const currentShowAgentBashOutput = getShowAgentBashOutput();
+	const currentShowUsageFooter = getShowUsageFooter();
 
 	useInput((_, key) => {
 		if (key.escape) {
@@ -804,7 +862,11 @@ export function SettingsDisplayPanel({
 		}
 	});
 
-	type ToggleKey = 'reasoningExpanded' | 'compactToolDisplay';
+	type ToggleKey =
+		| 'reasoningExpanded'
+		| 'compactToolDisplay'
+		| 'showAgentBashOutput'
+		| 'showUsageFooter';
 
 	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
 		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
@@ -814,11 +876,28 @@ export function SettingsDisplayPanel({
 				value: 'reasoningExpanded' as ToggleKey,
 			},
 			{
-				label: `Expand Tool Results by default: ${isOn(currentCompactToolDisplay)}`,
+				// compactToolDisplay=true means results are COMPACT, so
+				// expansion is on exactly when the preference is false.
+				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
 				value: 'compactToolDisplay' as ToggleKey,
 			},
+			{
+				// Show the command output on bash tool cards the agent runs,
+				// compact or not.
+				label: `Agent Bash Output: ${isOn(currentShowAgentBashOutput)}`,
+				value: 'showAgentBashOutput' as ToggleKey,
+			},
+			{
+				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
+				value: 'showUsageFooter' as ToggleKey,
+			},
 		];
-	}, [currentReasoningExpanded, currentCompactToolDisplay]);
+	}, [
+		currentReasoningExpanded,
+		currentCompactToolDisplay,
+		currentShowAgentBashOutput,
+		currentShowUsageFooter,
+	]);
 
 	const handleSelect = (item: {label: string; value: ToggleKey}) => {
 		if (item.value === 'reasoningExpanded') {
@@ -827,6 +906,14 @@ export function SettingsDisplayPanel({
 		} else if (item.value === 'compactToolDisplay') {
 			const newValue = !currentCompactToolDisplay;
 			updateCompactToolDisplay(newValue);
+		} else if (item.value === 'showAgentBashOutput') {
+			// Applies to the next bash card, no restart needed - read from
+			// preferences when the card renders.
+			updateShowAgentBashOutput(!currentShowAgentBashOutput);
+		} else if (item.value === 'showUsageFooter') {
+			// Applies to the next response, no restart needed - the footer is
+			// read from preferences per message.
+			updateShowUsageFooter(!currentShowUsageFooter);
 		}
 		onBack();
 	};
@@ -846,14 +933,16 @@ export function SettingsDisplayPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+					<Text color={colors.secondary}>
+						Enter to apply · Shift+Tab back · Esc back
+					</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -912,7 +1001,7 @@ export function SettingsPrivacyPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
+						Enter to toggle · Shift+Tab back · Esc back
 					</Text>
 				</Box>
 			)}
@@ -928,7 +1017,128 @@ export function SettingsPrivacyPanel({
 			<StyledSelectInput items={items} onSelect={handleSelect} />
 
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+/** Presets cycled by the Advanced panel. Any value in range can still be set
+ * directly in nanocoder-preferences.json; these are just the common choices. */
+const TOKEN_BUDGET_PRESETS = [120, 240, 480, 960];
+const MEMORY_LIMIT_PRESETS = [3, 5, 8, 12];
+
+/** Next preset after `current`, wrapping. Falls to the first when `current`
+ * is a hand-edited value that isn't in the list. */
+function cyclePreset(presets: number[], current: number): number {
+	const index = presets.indexOf(current);
+	return presets[(index + 1) % presets.length] ?? presets[0] ?? current;
+}
+
+// Semantic memory settings panel
+export function SettingsSemanticMemoryPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const initialContextPreferences = getProjectContextPreferences();
+	const [semanticMemoryEnabled, setSemanticMemoryEnabled] = useState(
+		initialContextPreferences.semanticMemoryEnabled,
+	);
+	const [tokenBudget, setTokenBudget] = useState(
+		initialContextPreferences.tokenBudget,
+	);
+	const [memoryLimit, setMemoryLimit] = useState(
+		initialContextPreferences.memoryLimit,
+	);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const items = useMemo(() => {
+		return [
+			{
+				label: `Semantic Memory: ${semanticMemoryEnabled ? 'ON' : 'OFF'}`,
+				value: 'semantic-memory',
+			},
+			{
+				label: `Memory Token Budget: ${tokenBudget}`,
+				value: 'semantic-memory-token-budget',
+			},
+			{
+				label: `Memories Per Prompt: ${memoryLimit}`,
+				value: 'semantic-memory-limit',
+			},
+		];
+	}, [semanticMemoryEnabled, tokenBudget, memoryLimit]);
+
+	const handleSelect = (item: {value: string}) => {
+		switch (item.value) {
+			case 'semantic-memory': {
+				const next = !semanticMemoryEnabled;
+				setSemanticMemoryEnabled(next);
+				updateSemanticMemoryEnabled(next);
+				break;
+			}
+			case 'semantic-memory-token-budget': {
+				const next = cyclePreset(TOKEN_BUDGET_PRESETS, tokenBudget);
+				setTokenBudget(next);
+				updateSemanticMemoryTokenBudget(next);
+				break;
+			}
+			case 'semantic-memory-limit': {
+				const next = cyclePreset(MEMORY_LIMIT_PRESETS, memoryLimit);
+				setMemoryLimit(next);
+				updateSemanticMemoryLimit(next);
+				break;
+			}
+		}
+	};
+
+	const title = isNarrow ? 'Memory' : 'Semantic Memory';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Enter to toggle · Shift+Tab back · Esc back
+					</Text>
+				</Box>
+			)}
+
+			<Box marginBottom={1}>
+				<Text color={colors.warning}>
+					Semantic Memory recalls saved project context and injects it into
+					future prompts. Turn it off for stateless agent behavior. The budget
+					and per-prompt count bound how much of the context window it may
+					consume - lower them on small local models.
+				</Text>
+			</Box>
+
+			<StyledSelectInput items={items} onSelect={handleSelect} />
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);

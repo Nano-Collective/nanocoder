@@ -9,6 +9,7 @@ import {execSync, spawn} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 import {isAbsolute, join} from 'node:path';
 import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
+import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -259,12 +260,24 @@ export function formatGitStatusSummary(status: GitStatusSummary): {
 // Git Command Execution
 // ============================================================================
 
+const GIT_TIMEOUT_MS = 60_000;
+
+/**
+ * Terminal prompts are disabled so a credential request fails with an error
+ * instead of waiting on input nobody can provide (#1344).
+ */
+const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
+
 /**
  * Spawn a command, collect stdout, and resolve with the trimmed output.
  * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
  * the human-readable command name used in error messages (e.g. 'Git', 'gh').
- * When `timeoutMs` is given, the process is killed and the promise rejects
- * if it hasn't closed in time (unset by default, matching prior behavior).
+ *
+ * stdin is closed so nothing the child runs can block on it, and the whole
+ * call is bounded by a timeout as a backstop for prompts that bypass stdin
+ * (ssh passphrases and gpg pinentry read the tty directly).
+ *
+ * `timeoutMs` overrides the default bound for slower calls (e.g. push).
  */
 function execProcess(
 	command: string,
@@ -273,25 +286,38 @@ function execProcess(
 	timeoutMs?: number,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn(command, args);
+		// The project root, not the live process cwd: inside an ACP session it is
+		// the session's own directory (see services/session-cwd).
+		const proc = spawn(command, args, {
+			cwd: getProjectRoot(),
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: GIT_ENV,
+		});
 		let stdout = '';
 		let stderr = '';
-		let timedOut = false;
-		let closed = false;
+		let settled = false;
 
-		const timer =
-			timeoutMs && timeoutMs > 0
-				? setTimeout(() => {
-						timedOut = true;
-						proc.kill('SIGTERM');
-						// Force-kill if the process ignores SIGTERM within a grace window.
-						const forceKillTimer = setTimeout(() => {
-							if (!closed) proc.kill('SIGKILL');
-						}, 1_000);
-						forceKillTimer.unref();
-					}, timeoutMs)
-				: undefined;
-		timer?.unref();
+		// Settle here rather than on `close`: a helper the child spawned (ssh,
+		// gpg, credential manager) inherits the stderr pipe, and `close` does
+		// not fire until every holder of that pipe has exited.
+		const limitMs = timeoutMs && timeoutMs > 0 ? timeoutMs : GIT_TIMEOUT_MS;
+		const timer = setTimeout(() => {
+			proc.stdout.destroy();
+			proc.stderr.destroy();
+			proc.kill();
+			settle(() =>
+				reject(
+					new Error(`${label} command timed out after ${limitMs / 1000}s`),
+				),
+			);
+		}, limitMs);
+
+		const settle = (finish: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			finish();
+		};
 
 		proc.stdout.on('data', (data: Buffer) => {
 			stdout += data.toString();
@@ -302,23 +328,21 @@ function execProcess(
 		});
 
 		proc.on('close', (code: number | null) => {
-			closed = true;
-			if (timer) clearTimeout(timer);
-			if (timedOut) {
-				reject(new Error(`${label} command timed out after ${timeoutMs}ms`));
-			} else if (code === 0) {
-				resolve(stdout.trimEnd());
-			} else {
-				const errorMessage =
-					stderr.trim() || `${label} command failed with exit code ${code}`;
-				reject(new Error(errorMessage));
-			}
+			settle(() => {
+				if (code === 0) {
+					resolve(stdout.trimEnd());
+				} else {
+					const errorMessage =
+						stderr.trim() || `${label} command failed with exit code ${code}`;
+					reject(new Error(errorMessage));
+				}
+			});
 		});
 
 		proc.on('error', error => {
-			closed = true;
-			if (timer) clearTimeout(timer);
-			reject(new Error(`Failed to execute ${command}: ${error.message}`));
+			settle(() =>
+				reject(new Error(`Failed to execute ${command}: ${error.message}`)),
+			);
 		});
 	});
 }
@@ -635,25 +659,39 @@ export async function isLastCommitPushed(): Promise<boolean> {
 }
 
 /**
+ * Which commits to walk: a revision range (`main..HEAD`) or a single branch.
+ * Not both - git would read them as two separate revisions and log the union.
+ */
+type CommitSelection =
+	| {range?: string; branch?: never}
+	| {branch?: string; range?: never};
+
+/**
  * Get commits with various filters
  */
-export async function getCommits(options: {
-	count?: number;
-	range?: string;
-	file?: string;
-	author?: string;
-	since?: string;
-	grep?: string;
-}): Promise<CommitInfo[]> {
+export async function getCommits(
+	options: CommitSelection & {
+		count?: number;
+		file?: string;
+		author?: string;
+		since?: string;
+		grep?: string;
+	},
+): Promise<CommitInfo[]> {
 	try {
 		const args = ['log', '--format=%H|%h|%an|%ae|%ad|%ar|%s', '--date=short'];
 
 		if (options.count) args.push(`-n`, options.count.toString());
 		if (options.range) args.push(options.range);
+		if (options.branch) args.push(options.branch);
 		if (options.author) args.push(`--author=${options.author}`);
 		if (options.since) args.push(`--since=${options.since}`);
 		if (options.grep) args.push(`--grep=${options.grep}`);
-		if (options.file) args.push('--', options.file);
+		// Always close the revisions with `--`: a branch that shares its name
+		// with a file or folder (a `docs` branch next to `docs/`) is otherwise
+		// rejected as ambiguous, which would surface here as "no commits".
+		args.push('--');
+		if (options.file) args.push(options.file);
 
 		const output = await execGit(args);
 		if (!output.trim()) return [];

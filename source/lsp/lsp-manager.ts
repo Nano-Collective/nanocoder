@@ -8,8 +8,9 @@ import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';
 import {formatError} from '@/utils/error-formatter';
+import {logError, logInfo} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
-import {LSPClient, LSPServerConfig} from './lsp-client';
+import {LSPClient, type LSPCrashInfo, LSPServerConfig} from './lsp-client';
 import {
 	CodeAction,
 	CompletionItem,
@@ -38,6 +39,16 @@ export interface LSPInitResult {
 	error?: string;
 }
 
+/**
+ * Restarts allowed per server after a crash. One recovers from a one-off death
+ * (OOM, a killed process); a server that keeps dying is left down instead of
+ * being restarted in a loop.
+ */
+const MAX_CRASH_RESTARTS = 1;
+
+/** Lines of a crashed server's stderr shown to the user. */
+const CRASH_STDERR_LINES = 10;
+
 export interface DiagnosticsResult {
 	uri: string;
 	diagnostics: Diagnostic[];
@@ -50,6 +61,11 @@ export class LSPManager extends EventEmitter {
 	private diagnosticsCache: Map<string, Diagnostic[]> = new Map(); // uri -> diagnostics
 	private rootUri: string;
 	private initialized: boolean = false;
+	private restartCounts: Map<string, number> = new Map(); // serverName -> restarts
+	// extension -> why its server is down, so a diagnostics call can say so
+	// instead of looking like the file type was never supported.
+	private unavailableReasons: Map<string, string> = new Map();
+	private shuttingDown: boolean = false;
 
 	constructor(config: LSPManagerConfig = {}) {
 		super();
@@ -62,6 +78,7 @@ export class LSPManager extends EventEmitter {
 	async initialize(config: LSPManagerConfig = {}): Promise<LSPInitResult[]> {
 		const results: LSPInitResult[] = [];
 		const serversToStart: LSPServerConfig[] = [];
+		this.shuttingDown = false;
 
 		// Add custom servers first (they take priority)
 		if (config.servers) {
@@ -133,6 +150,9 @@ export class LSPManager extends EventEmitter {
 			});
 
 			client.on('exit', (_code: number | null) => {
+				// A restarted server registers a new client under the same name;
+				// a late exit from the old one must not unregister it.
+				if (this.clients.get(config.name) !== client) return;
 				this.clients.delete(config.name);
 				// Remove language mappings for this server
 				for (const [lang, serverName] of this.languageToServer.entries()) {
@@ -140,6 +160,10 @@ export class LSPManager extends EventEmitter {
 						this.languageToServer.delete(lang);
 					}
 				}
+			});
+
+			client.on('crash', (info: LSPCrashInfo) => {
+				void this.handleCrash(config, info);
 			});
 
 			await client.start();
@@ -165,9 +189,95 @@ export class LSPManager extends EventEmitter {
 	}
 
 	/**
+	 * A server died without being asked to. Say so — otherwise every later
+	 * diagnostics call quietly reports a clean file — and try one restart.
+	 */
+	private async handleCrash(
+		config: LSPServerConfig,
+		info: LSPCrashInfo,
+	): Promise<void> {
+		// Its published diagnostics describe files as they were when it died.
+		this.dropDiagnosticsFor(config.languages);
+
+		const status = info.signal
+			? `signal ${info.signal}`
+			: `exit code ${info.code}`;
+		const tail = info.stderrTail
+			.split('\n')
+			.slice(-CRASH_STDERR_LINES)
+			.join('\n');
+		const restarts = this.restartCounts.get(config.name) ?? 0;
+		const canRestart = restarts < MAX_CRASH_RESTARTS && !this.shuttingDown;
+		this.markUnavailable(
+			config.languages,
+			`Language server "${config.name}" crashed (${status})${
+				canRestart
+					? ' and is restarting; try again shortly.'
+					: ' and was not restarted.'
+			}`,
+		);
+
+		logError(
+			`Language server "${config.name}" crashed (${status}).${
+				canRestart
+					? ' Restarting it.'
+					: ` Not restarting; ${config.languages.map(l => `.${l}`).join(', ')} diagnostics are unavailable until Nanocoder restarts.`
+			}${tail ? `\n${tail}` : ''}`,
+		);
+		if (!canRestart) return;
+
+		this.restartCounts.set(config.name, restarts + 1);
+		const result = await this.startServer(config);
+		if (this.shuttingDown) {
+			// shutdown() ran while the restart was starting; it never saw this
+			// client, so stop it here rather than leave the process running.
+			await this.clients.get(config.name)?.stop();
+			return;
+		}
+		if (result.success) {
+			this.markAvailable(config.languages);
+			logInfo(`Language server "${config.name}" restarted.`);
+		} else {
+			this.markUnavailable(
+				config.languages,
+				`Language server "${config.name}" crashed (${status}) and could not be restarted: ${result.error}`,
+			);
+			logError(
+				`Language server "${config.name}" could not be restarted: ${result.error}`,
+			);
+		}
+	}
+
+	private markUnavailable(languages: string[], reason: string): void {
+		for (const lang of languages) this.unavailableReasons.set(lang, reason);
+	}
+
+	private markAvailable(languages: string[]): void {
+		for (const lang of languages) this.unavailableReasons.delete(lang);
+	}
+
+	/**
+	 * Why the language server for this file is down, when it crashed. Undefined
+	 * when it is running, or when no server was ever configured for the type.
+	 */
+	getUnavailableReason(filePath: string): string | undefined {
+		return this.unavailableReasons.get(extname(filePath).slice(1));
+	}
+
+	private dropDiagnosticsFor(languages: string[]): void {
+		for (const uri of this.diagnosticsCache.keys()) {
+			if (languages.includes(extname(uri).slice(1))) {
+				this.diagnosticsCache.delete(uri);
+				this.documentServers.delete(uri);
+			}
+		}
+	}
+
+	/**
 	 * Stop all language servers
 	 */
 	async shutdown(): Promise<void> {
+		this.shuttingDown = true;
 		const stopPromises = Array.from(this.clients.values()).map(client =>
 			client.stop(),
 		);
@@ -177,6 +287,8 @@ export class LSPManager extends EventEmitter {
 		this.languageToServer.clear();
 		this.documentServers.clear();
 		this.diagnosticsCache.clear();
+		this.restartCounts.clear();
+		this.unavailableReasons.clear();
 		this.initialized = false;
 	}
 
@@ -340,6 +452,15 @@ export class LSPManager extends EventEmitter {
 
 		const uri = this.fileToUri(filePath);
 		return client.formatDocument(uri, options);
+	}
+
+	/**
+	 * Whether the language server for this file advertises document formatting.
+	 */
+	supportsDocumentFormatting(filePath: string): boolean {
+		const client = this.getClientForFile(filePath);
+		if (!client || !client.isReady()) return false;
+		return Boolean(client.getCapabilities()?.documentFormattingProvider);
 	}
 
 	/**

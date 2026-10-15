@@ -13,10 +13,14 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {validateProjectConfigSecurity} from '@/config/validation';
 import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
-import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {
+	recordSubagentApiCallForStats,
+	SubagentExecutor,
+} from '@/subagents/subagent-executor';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
@@ -98,19 +102,24 @@ async function main(): Promise<void> {
 			client,
 			projectRoot,
 			mode,
+			recordSubagentApiCallForStats,
 		);
 		return {
-			execute: (task: SubagentTask): Promise<SubagentResult> => {
+			execute: (
+				task: SubagentTask,
+				signal?: AbortSignal,
+			): Promise<SubagentResult> => {
 				if (task.subagent_type !== 'verify-ci-investigator') {
-					return executor.execute(task);
+					return executor.execute(task, signal);
 				}
 				if (trustLevel !== 'comment-only') {
 					return runCiAutoFixFlow(task, trustLevel, projectRoot);
 				}
 				return executor.execute(
 					task,
-					undefined,
+					signal,
 					0,
+					undefined,
 					undefined,
 					ciInvestigatorOverride,
 				);
@@ -146,7 +155,29 @@ async function main(): Promise<void> {
 		buildExecutor,
 		checkpointer,
 		ciWatch: getAppConfig().ciWatch,
+		// Shared with buildExecutor: the skill pipeline fills this registry,
+		// and triggered runs have to see what it registered.
+		toolManager,
 	});
+
+	// Connect the project's MCP servers so triggered runs can use MCP tools,
+	// as the TUI and --plain do. A server that fails to connect is logged and
+	// skipped rather than taking the daemon down.
+	const {mcpServers} = getAppConfig();
+	if (mcpServers && mcpServers.length > 0) {
+		validateProjectConfigSecurity(mcpServers);
+		try {
+			await toolManager.initializeMCP(mcpServers, result => {
+				if (!result.success) {
+					console.error(
+						`MCP server failed: ${result.serverName} (${result.error})`,
+					);
+				}
+			});
+		} catch (err) {
+			console.error(`MCP initialization error: ${formatError(err)}`);
+		}
+	}
 
 	// Wire shutdown through the existing ShutdownManager rather than
 	// registering our own signal handler. Otherwise the SM's default

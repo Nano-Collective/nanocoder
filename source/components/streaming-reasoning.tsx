@@ -6,6 +6,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
+import {computeStreamingTail} from './streaming-message';
 
 /**
  * Lightweight streaming reasoning component. Shows the last N lines of
@@ -30,15 +31,31 @@ export default memo(function StreamingReasoning({
 	const textWidth = boxWidth - 3;
 
 	// Only show the tail of the content to keep the render small
-	// and avoid off-screen reflow that causes iTerm2 flickering.
+	// and avoid off-screen reflow that causes iTerm2 flickering. Bounding the
+	// wrap input to that tail also keeps each flush O(tail) instead of
+	// re-wrapping the whole history, which grows for the length of the stream.
 	const MAX_LINES = 12;
-	const wrapped = wrapWithTrimmedContinuations(reasoning.trimEnd(), textWidth);
-	const lines = wrapped.split('\n');
-	const truncated = lines.length > MAX_LINES;
-	const visibleLines = truncated ? lines.slice(-MAX_LINES) : lines;
-	const displayText = visibleLines.join('\n');
 
-	const tokens = calculateTokens(reasoning);
+	// Collapsed is the default, and nothing below the header renders then, so
+	// neither the wrap nor the token count is worth paying for on every flush.
+	let truncated = false;
+	let displayText = '';
+	let tokens = 0;
+	if (expand) {
+		const {tail, sliced} = computeStreamingTail(
+			reasoning,
+			textWidth,
+			MAX_LINES,
+		);
+		const wrapped = wrapWithTrimmedContinuations(tail, textWidth);
+		const lines = wrapped.split('\n');
+		truncated = sliced || lines.length > MAX_LINES;
+		displayText = (
+			lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines
+		).join('\n');
+		tokens = calculateTokens(reasoning);
+	}
+
 	const elapsedSec = (Date.now() - startTime) / 1000;
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
 

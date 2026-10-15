@@ -1,43 +1,58 @@
-import {mkdir, rm} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {tasksCommand} from './tasks.js';
-import {loadTasks, saveTasks} from '@/tools/tasks/storage.js';
+import React from 'react';
+import type {Command} from '@/types/index';
 import type {Task} from '@/tools/tasks/types.js';
 
 // ============================================================================
 // /tasks Command Tests
 // ============================================================================
 // Tests for the /tasks slash command that provides interactive task management.
+//
+// Task state is session-scoped and stored under the app data directory, so
+// isolation here means (a) pointing NANOCODER_DATA_DIR at a temp dir before
+// anything imports the artifact manager, and (b) giving each test its own
+// session id. Nothing is written to the working directory any more.
 
-let testDir: string;
-let originalCwd: typeof process.cwd;
+const dataDir = join(tmpdir(), `nanocoder-tasks-command-${process.pid}`);
+process.env.NANOCODER_DATA_DIR = dataDir;
+
+// Imported lazily so the env var above is in place before the artifact
+// manager module initialises and resolves its root directory.
+let tasksCommand: Command;
+let loadTasks: typeof import('@/tools/tasks/storage.js').loadTasks;
+let saveTasks: typeof import('@/tools/tasks/storage.js').saveTasks;
+let setCliSessionId: typeof import('@/session/cli-session-context.js').setCliSessionId;
 
 test.before(async () => {
-	testDir = join(tmpdir(), `nanocoder-tasks-command-test-${Date.now()}`);
-	await mkdir(testDir, {recursive: true});
-	originalCwd = process.cwd;
+	// No mkdir needed: the artifact manager creates session directories on
+	// demand with the right permissions.
+	({tasksCommand} = await import('./tasks.js'));
+	({loadTasks, saveTasks} = await import('@/tools/tasks/storage.js'));
+	({setCliSessionId} = await import('@/session/cli-session-context.js'));
 });
 
 test.after.always(async () => {
-	process.cwd = originalCwd;
-	if (testDir) {
-		await rm(testDir, {recursive: true, force: true}).catch(() => {});
-	}
+	setCliSessionId?.(null);
+	await rm(dataDir, {recursive: true, force: true}).catch(() => {});
 });
 
+/**
+ * Give the test its own session so its task list is isolated from every other
+ * test in the file. `restore` clears the active session id again.
+ */
 async function setupTestEnv(
-	subDir: string,
-): Promise<{dir: string; restore: () => void}> {
-	const dir = join(testDir, subDir);
-	await mkdir(dir, {recursive: true});
-	const savedCwd = process.cwd;
-	process.cwd = () => dir;
+	_label: string,
+): Promise<{sessionId: string; restore: () => void}> {
+	const sessionId = randomUUID();
+	setCliSessionId(sessionId);
 	return {
-		dir,
+		sessionId,
 		restore: () => {
-			process.cwd = savedCwd;
+			setCliSessionId(null);
 		},
 	};
 }
@@ -47,6 +62,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-1',
 			title: 'First Task',
+			description: 'First task description',
 			status: 'pending',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-01T00:00:00.000Z',
@@ -61,6 +77,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-3',
 			title: 'Third Task',
+			description: 'Third task description',
 			status: 'completed',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-03T00:00:00.000Z',
@@ -97,9 +114,10 @@ test('handler - lists tasks when no args provided', async t => {
 
 		const result = await tasksCommand.handler([]);
 
-		t.truthy(result);
-		// Result should be a React element
-		t.is(typeof result, 'object');
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
 	} finally {
 		env.restore();
 	}
@@ -306,30 +324,132 @@ test('handler - clear works when no tasks exist', async t => {
 });
 
 // ============================================================================
-// Default Behavior Tests (unknown subcommand = add task)
+// Update Task Status Tests
 // ============================================================================
 
-test('handler - treats unknown subcommand as task title', async t => {
-	const env = await setupTestEnv('default-add');
+test('handler - completes a task with "done" subcommand', async t => {
+	const env = await setupTestEnv('complete-task');
 	try {
-		await tasksCommand.handler(['Fix', 'the', 'bug']);
+		await saveTasks(getSampleTasks());
+		const before = new Date().toISOString();
+
+		await tasksCommand.handler(['done', '1']);
 
 		const tasks = await loadTasks();
-		t.is(tasks.length, 1);
-		t.is(tasks[0]?.title, 'Fix the bug');
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
+		t.is(tasks[0]?.title, 'First Task');
+		t.is(tasks[0]?.description, 'First task description');
+		t.is(tasks[0]?.status, 'completed');
+		t.truthy(tasks[0]?.completedAt);
+		t.truthy(tasks[0]?.updatedAt);
+		t.true(tasks[0]!.updatedAt >= before);
 	} finally {
 		env.restore();
 	}
 });
 
-test('handler - treats single word as task title', async t => {
-	const env = await setupTestEnv('single-word');
+test('handler - supports complete alias and clears completedAt when starting', async t => {
+	const env = await setupTestEnv('start-task');
 	try {
-		await tasksCommand.handler(['Refactor']);
+		await saveTasks(getSampleTasks());
 
+		await tasksCommand.handler(['start', '3']);
+		let tasks = await loadTasks();
+		t.is(tasks[2]?.id, 'task-3');
+		t.is(tasks[2]?.title, 'Third Task');
+		t.is(tasks[2]?.description, 'Third task description');
+		t.is(tasks[2]?.status, 'in_progress');
+		t.falsy(tasks[2]?.completedAt);
+
+		await tasksCommand.handler(['complete', '1']);
+		tasks = await loadTasks();
+		t.is(tasks[0]?.status, 'completed');
+		t.truthy(tasks[0]?.completedAt);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for invalid status task number', async t => {
+	const env = await setupTestEnv('status-invalid');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['done', 'abc']);
+
+		t.truthy(result);
 		const tasks = await loadTasks();
-		t.is(tasks.length, 1);
-		t.is(tasks[0]?.title, 'Refactor');
+		t.is(tasks[0]?.status, 'pending');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for status task number out of range', async t => {
+	const env = await setupTestEnv('status-range');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['start', '99']);
+
+		t.truthy(result);
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+	} finally {
+		env.restore();
+	}
+});
+
+// ============================================================================
+// Explicit Command Validation Tests
+// ============================================================================
+
+test('handler - lists tasks with "list" subcommand', async t => {
+	const env = await setupTestEnv('list-subcommand');
+	try {
+		await saveTasks(getSampleTasks());
+		const result = await tasksCommand.handler(['list']);
+
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for unknown subcommand without adding a task', async t => {
+	const env = await setupTestEnv('unknown-subcommand');
+	try {
+		const result = await tasksCommand.handler(['completee', '1']);
+
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TaskMessage');
+			t.true(result.props.message.includes('Unknown subcommand'));
+		}
+		const tasks = await loadTasks();
+		t.is(tasks.length, 0);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - rejects trailing characters in remove task number', async t => {
+	const env = await setupTestEnv('remove-invalid-suffix');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['remove', '1abc']);
+
+		t.true(React.isValidElement(result));
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
 	} finally {
 		env.restore();
 	}
@@ -401,9 +521,9 @@ test('handler - handles special characters in task title', async t => {
 test('handler - generates unique task IDs', async t => {
 	const env = await setupTestEnv('unique-ids');
 	try {
-		await tasksCommand.handler(['Task 1']);
-		await tasksCommand.handler(['Task 2']);
-		await tasksCommand.handler(['Task 3']);
+		await tasksCommand.handler(['add', 'Task 1']);
+		await tasksCommand.handler(['add', 'Task 2']);
+		await tasksCommand.handler(['add', 'Task 3']);
 
 		const tasks = await loadTasks();
 		const ids = tasks.map(t => t.id);
@@ -418,7 +538,7 @@ test('handler - sets proper timestamps on new task', async t => {
 	const env = await setupTestEnv('timestamps');
 	try {
 		const before = new Date().toISOString();
-		await tasksCommand.handler(['New', 'Task']);
+		await tasksCommand.handler(['add', 'New', 'Task']);
 		const after = new Date().toISOString();
 
 		const tasks = await loadTasks();

@@ -1,40 +1,42 @@
 ---
 title: "ACP (Editor Integration)"
-description: "Run Nanocoder as an Agent Client Protocol server for editors like Zed"
+description: "Run Nanocoder as an Agent Client Protocol server for editors like Zed and the VS Code sidebar"
 sidebar_order: 9
 ---
 
 # ACP (Agent Client Protocol)
 
-Nanocoder can run as an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) server, letting ACP-compatible editors drive it as a native coding agent. Instead of the Ink terminal UI, Nanocoder speaks JSON-RPC over stdin/stdout, and the editor renders the conversation, tool calls, diffs, and permission prompts in its own UI.
+Nanocoder can run as an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) server, letting ACP-compatible clients drive it as a native coding agent. Instead of the Ink terminal UI, Nanocoder speaks JSON-RPC over stdin/stdout, and the client renders the conversation, tool calls, diffs, and permission prompts in its own UI.
 
 ```bash
 nanocoder --acp
 ```
 
-You normally don't run this command yourself — the editor spawns it for you (see [Setup in Zed](#setup-in-zed) below).
+You normally don't run this command yourself — the editor or extension spawns it for you (see [Setup in Zed](#setup-in-zed) and the [VS Code extension](vscode-extension.md)).
 
-## ACP vs. the VS Code extension
+## ACP vs. the VS Code companion
 
-Both connect Nanocoder to an editor, but they are different mechanisms — pick the one your editor supports:
+ACP is the transport for both the **VS Code sidebar chat** and other ACP clients (Zed, etc.). The older `--vscode` WebSocket path is a separate, opt-in **legacy terminal companion** for Ink TUI sessions — not how the sidebar works.
 
-| | Transport | Flag | Editors |
+| | Transport | Flag | Clients |
 | --- | --- | --- | --- |
-| **ACP** | JSON-RPC over stdin/stdout | `--acp` | Zed and other ACP clients |
-| **[VS Code extension](vscode-extension.md)** | WebSocket | `--vscode` | VS Code |
+| **ACP** | JSON-RPC over stdin/stdout | `--acp` | VS Code sidebar, Zed, and other ACP clients |
+| **Legacy companion** | WebSocket | `--vscode` | VS Code (opt-in terminal companion) |
 
-With ACP the **editor is the UI**: the agent runs headless and everything (streaming text, tool cards, diffs, approvals) is rendered by the editor. With the VS Code extension, the Nanocoder terminal UI stays in charge and the editor adds diff previews and editor context on top.
+With ACP the **client is the UI**: the agent runs headless and everything (streaming text, tool cards, diffs, approvals) is rendered by the editor or sidebar. The legacy `--vscode` companion keeps the Nanocoder terminal TUI in charge and adds diff previews and editor context on top — see [Legacy Companion Mode](vscode-extension.md#legacy-companion-mode).
 
 ## What works over ACP
 
 - **Streaming responses** including reasoning/thinking, rendered in the editor's agent panel.
 - **Tool calls with rich cards** — file tools report their kind and the files they touch, and edits (`string_replace`, `write_file`) include a **before/after diff** the editor can preview.
 - **Permission prompts** — tools that need approval surface as the editor's own allow/deny prompt, respecting the current [development mode](development-modes.md).
-- **Development modes** — `normal`, `auto-accept`, `yolo`, and `plan` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
+- **Development modes** — `normal`, `auto-accept`, `yolo`, `plan`, and `architect` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`, which still asks before bash commands and before `file_op` deletes a file or overwrites one with a move or copy).
 - **Model display and switching** — the editor shows the current model and lets you switch between the models configured for your active provider.
 - **`ask_user`** — when the agent asks a clarifying question, the options appear as selectable buttons in the editor. (Selection only; a free-form typed answer is not available over ACP.)
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.
-- **Session reload** — reopening a thread is supported, so the editor won't error when restoring a session.
+- **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart.
+- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `renameSession` extension method (`sessionId`, `title`), and new sessions get a generated title from the first message.
+- **Images** - PNG, JPEG, GIF and WebP attachments are sent to the model as images.
 
 ## Setup in Zed
 
@@ -76,13 +78,14 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 
 - Nanocoder installed and on your `PATH` (a global install puts `nanocoder` on `PATH`).
 - A configured provider. The ACP server resolves provider and model the same way the CLI does — from the project's `agents.config.json` (or your global config). See [Providers](../configuration/providers/index.md).
-- The editor spawns the agent in your **project directory**, so project-level config and relative paths resolve against the open folder.
+- Each session works in the directory the editor names for it (the `cwd` in `session/new`), even if the agent process was started somewhere else. Relative paths, `execute_bash`, the git tools, the project boundary for file tools, the system prompt and `AGENTS.md` all follow that directory, and a `cd` in one session does not move another.
+- Project-level configuration (`agents.config.json`, MCP servers, custom tools and skills) is read once, from the directory the agent process starts in, so editors should still spawn the agent in your **project directory**. Plugins are the exception: each session loads `.nanocoder/plugins/` from its own directory (see [Hooks](hooks.md)).
 
 ## Limitations
 
-- **Session history is in-memory.** Reopening a thread within the same running agent restores its history, but after the editor (and agent process) fully restarts, a reloaded thread starts empty — it is usable, but prior messages are not replayed.
 - **`ask_user` is selection-only.** ACP permission options have no text input, so the model receives whichever option you pick rather than a typed answer.
-- **Images and audio are not processed.** Non-text attachments are noted to the model but not interpreted.
+- **Audio and other image types are not processed.** Audio, and images other than PNG, JPEG, GIF and WebP, are noted to the model but not sent.
+- **Sub-agent tool approvals ignore the session mode.** Tool calls inside a sub-agent always ask for permission, regardless of the ACP session's mode or the configured `alwaysAllow` list, so a `yolo` or `auto-accept` session is still prompted there. An approved sub-agent call is also marked `completed` as soon as it is approved, before it actually runs, so it may still fail afterwards. The sub-agent approval handler is also shared across the agent process, so if two sessions run sub-agents at the same time, an approval prompt can be routed to the wrong session.
 
 ## Troubleshooting
 

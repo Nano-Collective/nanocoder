@@ -1,4 +1,5 @@
 import {
+	mkdir,
 	mkdtemp,
 	readFile,
 	readdir,
@@ -9,6 +10,8 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {ArtifactManager} from '@/artifacts/artifact-manager';
+import {reloadAppConfig} from '@/config/index';
 import {SessionManager} from './session-manager.js';
 
 let testDir: string;
@@ -84,6 +87,22 @@ test.serial('createSession writes session file to disk', async t => {
 	const parsed = JSON.parse(data);
 	t.is(parsed.id, session.id);
 	t.is(parsed.title, 'Disk test');
+});
+
+test.serial('createSession can persist a preallocated session ID', async t => {
+	const id = '11111111-1111-4111-8111-111111111111';
+	const session = await manager.createSession({
+		id,
+		title: 'Preallocated session',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	t.is(session.id, id);
+	t.is((await manager.readSession(id))?.title, 'Preallocated session');
 });
 
 test.serial('createSession adds metadata to the index', async t => {
@@ -198,6 +217,62 @@ test.serial('saveSession updates an existing session', async t => {
 	t.is(loaded!.messages.length, 2);
 });
 
+test.serial('saveSession round-trips the displayOnly flag', async t => {
+	// A resumed session must keep harness notices marked; losing the flag on
+	// disk would let them re-enter the provider payload on the next turn.
+	const session = await manager.createSession({
+		title: 'Notices',
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'go'},
+			{
+				role: 'assistant',
+				content: '_Cancelled by user._',
+				displayOnly: true,
+			},
+		],
+	});
+
+	const loaded = await manager.readSession(session.id);
+	t.is(loaded!.messages.length, 2);
+	t.is(loaded!.messages[0].displayOnly, undefined);
+	t.true(loaded!.messages[1].displayOnly);
+});
+
+test.serial('saveSession round-trips optional response usage', async t => {
+	const session = await manager.createSession({
+		title: 'Usage',
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'hello'},
+			{
+				role: 'assistant',
+				content: 'hi',
+				responseUsage: {
+					inputTokens: 100,
+					outputTokens: 20,
+					totalTokens: 120,
+					cost: 0.002,
+				},
+			},
+		],
+	});
+
+	const loaded = await manager.readSession(session.id);
+	t.deepEqual(loaded!.messages[1].responseUsage, {
+		inputTokens: 100,
+		outputTokens: 20,
+		totalTokens: 120,
+		cost: 0.002,
+	});
+});
+
 test.serial('saveSession rejects invalid session ID', async t => {
 	await t.throwsAsync(
 		() =>
@@ -257,6 +332,25 @@ test.serial(
 		await t.notThrowsAsync(() => manager.deleteSession(session.id));
 	},
 );
+
+test.serial('deleteSession removes the session artifacts', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+	const coupledManager = new SessionManager(sessionsDir, artifacts);
+	await coupledManager.initialize();
+	const session = await coupledManager.createSession({
+		title: 'Delete artifacts',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+	await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+
+	await coupledManager.deleteSession(session.id);
+
+	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
+});
 
 test.serial('deleteSession rejects invalid ID', async t => {
 	await t.throwsAsync(() => manager.deleteSession('bad-id'), {
@@ -611,32 +705,85 @@ test.serial(
 // --- enforceSessionLimits ---
 
 test.serial(
-	'enforceSessionLimits deletes oldest sessions when over limit',
+	'enforceSessionLimits deletes oldest sessions and their artifacts when over limit',
 	async t => {
-		// Use a separate manager with overrideDir to avoid config interference
-		const limitDir = join(testDir, 'limit-test');
-		const limitManager = new SessionManager(limitDir);
-		await limitManager.initialize();
+		const prevConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const customConfigDir = join(testDir, 'config');
+		await mkdir(customConfigDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = customConfigDir;
 
-		// Create 5 sessions with staggered timestamps
-		const ids: string[] = [];
-		for (let i = 0; i < 5; i++) {
-			const session = await limitManager.createSession({
-				title: `Session ${i}`,
-				messageCount: 0,
-				provider: 'test',
-				model: 'test',
-				workingDirectory: '/tmp',
-				messages: [],
-			});
-			ids.push(session.id);
-			// Small delay for distinct timestamps
-			await new Promise(r => setTimeout(r, 5));
+		try {
+			await writeFile(
+				join(customConfigDir, 'nanocoder-preferences.json'),
+				JSON.stringify({
+					nanocoder: {
+						sessions: {
+							maxSessions: 2,
+						},
+					},
+				}),
+				'utf-8',
+			);
+			reloadAppConfig();
+
+			const limitDir = join(testDir, 'limit-test');
+			const artifacts = new ArtifactManager(join(testDir, 'limit-artifacts'));
+			const limitManager = new SessionManager(limitDir, artifacts);
+			await limitManager.initialize();
+
+			// Create 3 sessions with staggered timestamps and write artifacts for each
+			const ids: string[] = [];
+			for (let i = 0; i < 3; i++) {
+				const session = await limitManager.createSession({
+					title: `Session ${i}`,
+					messageCount: 0,
+					provider: 'test',
+					model: 'test',
+					workingDirectory: '/tmp',
+					messages: [],
+				});
+				ids.push(session.id);
+				await artifacts.writeArtifact(
+					session.id,
+					'implementation_plan',
+					`# Plan for session ${i}\n`,
+				);
+				// Small delay for distinct timestamps
+				await new Promise(r => setTimeout(r, 10));
+			}
+
+			// Since maxSessions is 2, creating the 3rd session triggers enforceSessionLimits
+			// and trims the oldest session (ids[0])
+			const sessions = await limitManager.listSessions();
+			t.is(sessions.length, 2);
+			t.false(sessions.some(s => s.id === ids[0]));
+			t.true(sessions.some(s => s.id === ids[1]));
+			t.true(sessions.some(s => s.id === ids[2]));
+
+			// Oldest session's JSON file should be unlinked
+			const oldestFile = await limitManager.readSession(ids[0]);
+			t.is(oldestFile, null);
+
+			// Oldest session's artifact directory should be deleted
+			const oldestArtifact = await artifacts.readArtifact(
+				ids[0],
+				'implementation_plan',
+			);
+			t.is(oldestArtifact, null);
+
+			// Remaining sessions' files and artifacts should remain intact
+			t.truthy(await limitManager.readSession(ids[1]));
+			t.truthy(await limitManager.readSession(ids[2]));
+			t.truthy(await artifacts.readArtifact(ids[1], 'implementation_plan'));
+			t.truthy(await artifacts.readArtifact(ids[2], 'implementation_plan'));
+		} finally {
+			if (prevConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = prevConfigDir;
+			}
+			reloadAppConfig();
 		}
-
-		// Default maxSessions is 100, so all 5 should be present
-		const sessions = await limitManager.listSessions();
-		t.is(sessions.length, 5);
 	},
 );
 
@@ -662,9 +809,15 @@ test.serial(
 		oldDate.setDate(oldDate.getDate() - 60);
 		index[0].lastAccessedAt = oldDate.toISOString();
 		await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+		const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+		await artifacts.writeArtifact(
+			session.id,
+			'implementation_plan',
+			'# Old plan\n',
+		);
 
 		// Re-initialize to trigger cleanup (default retention is 30 days)
-		const mgr2 = new SessionManager(sessionsDir);
+		const mgr2 = new SessionManager(sessionsDir, artifacts);
 		await mgr2.initialize();
 
 		const sessions = await mgr2.listSessions();
@@ -673,6 +826,7 @@ test.serial(
 		// File should also be deleted
 		const result = await mgr2.readSession(session.id);
 		t.is(result, null);
+		t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
 	},
 );
 
@@ -987,3 +1141,69 @@ test.serial(
 		t.is(loaded!.title, 'Kept title');
 	},
 );
+
+test('titleGenerated round-trips through save and read', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+
+	await manager.saveSession({
+		...session,
+		title: 'Fix Login Bug',
+		titleGenerated: true,
+	});
+
+	const reloaded = await manager.readSession(session.id);
+	t.is(reloaded?.title, 'Fix Login Bug');
+	t.true(reloaded?.titleGenerated);
+});
+
+test('titleGenerated survives an index rebuild', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	await manager.saveSession({
+		...session,
+		title: 'Fix Login Bug',
+		titleGenerated: true,
+	});
+
+	// Corrupt the index so listSessions is forced to rebuild it from the
+	// session files on disk. rebuildIndex hand-lists every metadata field,
+	// so a field missing there is dropped silently.
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+
+	const listed = await manager.listSessions();
+	const found = listed.find(s => s.id === session.id);
+	t.truthy(found);
+	t.true(found?.titleGenerated);
+});
+
+test('titleManuallySet also survives an index rebuild', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	await manager.renameSession(session.id, 'My Own Name');
+
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+
+	const listed = await manager.listSessions();
+	const found = listed.find(s => s.id === session.id);
+	t.is(found?.title, 'My Own Name');
+	t.true(found?.titleManuallySet);
+});
