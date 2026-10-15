@@ -452,7 +452,6 @@ for (const [name, initial, keys, expected] of emojiEdits) {
 // deleted every line before it.
 
 const MULTILINE = 'alpha\nbravo\ncharlie';
-const LEFT = '\u001b[D';
 
 // Moves the cursor from end-of-buffer to index 9: inside "bravo", between
 // the second and third character ("bra|vo").
