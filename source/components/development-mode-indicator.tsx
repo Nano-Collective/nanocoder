@@ -29,6 +29,7 @@ interface DevelopmentModeIndicatorProps {
 	sessionName?: string;
 	tune?: TuneConfig;
 	currentModel?: string;
+	currentProvider?: string;
 	activeEditor?: ActiveEditorState | null;
 	taskInfo?: TaskIndicatorInfo | null;
 	isSaving?: boolean;
@@ -64,6 +65,7 @@ export const DevelopmentModeIndicator = React.memo(
 		sessionName,
 		tune,
 		currentModel,
+		currentProvider,
 		activeEditor,
 		taskInfo,
 		isSaving,
@@ -80,7 +82,11 @@ export const DevelopmentModeIndicator = React.memo(
 		// flag the '(auto)' origin; narrow ones drop it to save space.
 		const tuneLabel = (() => {
 			if (!tune?.enabled) return '';
-			const resolved = resolveToolProfile(tune.toolProfile, currentModel);
+			const resolved = resolveToolProfile(
+				tune.toolProfile,
+				currentModel,
+				currentProvider,
+			);
 			if (isNarrow) return `tune: ${resolved}`;
 			return tune.toolProfile === 'auto'
 				? `tune: ${resolved} (auto)`
