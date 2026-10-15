@@ -130,3 +130,26 @@ test('malformed URL is not echoed into user-facing error', t => {
 test('unrelated errors still use generic behavior', t => {
 	t.is(parseAPIError(new Error('Something went wrong'), localContext), 'Something went wrong');
 });
+
+test('Node.js credential URL errors do not leak secrets', t => {
+    const baseUrl =
+        'https://user:secret@127.0.0.1:59999/v1?api_key=private';
+
+    const error = new TypeError(
+        `Request cannot be constructed from a URL that includes credentials: ${baseUrl}`,
+    );
+
+    const message = parseAPIError(error, {
+        providerName: 'MyProvider',
+        baseUrl,
+    });
+
+    t.true(message.includes('MyProvider'));
+    t.true(message.includes('127.0.0.1:59999'));
+    t.true(message.includes('credentials'));
+
+    t.false(message.includes('user:secret'));
+    t.false(message.includes('secret'));
+    t.false(message.includes('api_key'));
+    t.false(message.includes('private'));
+});

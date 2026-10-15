@@ -32,7 +32,7 @@ function getNetworkErrorCode(error: unknown): string | undefined {
 
 		if (
 			typeof candidate.code === 'string' &&
-			candidate.code in NETWORK_ERROR_HINTS
+			Object.hasOwn(NETWORK_ERROR_HINTS, candidate.code)
 		) {
 			return candidate.code;
 		}
@@ -72,10 +72,14 @@ function safeProviderUrl(baseUrl?: string): string {
 }
 
 function providerDetails(context?: APIErrorContext): string {
-	const provider = context?.providerName ?? 'unknown';
+	const provider = `provider "${context?.providerName ?? 'unknown'}"`;
 	const url = safeProviderUrl(context?.baseUrl);
 
-	return `provider "${provider}" at ${url}`;
+	if (url === '(not configured)' || url === '(invalid URL)') {
+		return `${provider} (baseUrl: ${url})`;
+	}
+
+	return `${provider} at ${url}`;
 }
 /**
  * Last-resort serializer for errors whose .message ended up as the literal
@@ -201,6 +205,21 @@ function parseAPIErrorInternal(
 
 	const errorMessage = rootError.message;
 	const lowerMessage = errorMessage.toLowerCase();
+
+	// Node.js may include credentials and query parameters in this error.
+	// Never return the raw message because it can contain secrets.
+	if (
+		lowerMessage.includes(
+			'request cannot be constructed from a url that includes credentials',
+		)
+	) {
+		return (
+			`Invalid provider URL for ${providerDetails(context)}. ` +
+			'URLs containing embedded credentials are not supported. ' +
+			'Remove the username and password from baseUrl and configure ' +
+			'authentication separately.'
+		);
+	}
 
 	// Extract status code and clean message from common error patterns FIRST
 	// This ensures HTTP status codes are properly parsed before falling through
