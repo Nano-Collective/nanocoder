@@ -47,9 +47,9 @@ export function activate(context: vscode.ExtensionContext) {
 	acpStateManager = new AcpStateManager();
 	acpClient = new NanocoderAcpClient(outputChannel, acpStateManager);
 	acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
-
-	// Start the ACP process side-by-side with the companion mode
-	acpProcessManager.start();
+	// The agent process (`nanocoder --acp`) is not spawned here: activation also
+	// happens for commands that never talk to it (Open Configuration, Show
+	// Output, the legacy companion). It starts when the chat view first resolves.
 
 	// Create status bar item
 	statusBarItem = vscode.window.createStatusBarItem(
@@ -67,11 +67,23 @@ export function activate(context: vscode.ExtensionContext) {
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
 		chatProvider,
-		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
-			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
-			// Without this VS Code destroys the webview on hide, wiping the transcript.
-			webviewOptions: {retainContextWhenHidden: true},
-		})
+		vscode.window.registerWebviewViewProvider(
+			ChatWebviewProvider.viewType,
+			{
+				// Everything that talks to the agent goes through the chat view
+				// (Explain Code / Generate Tests focus it first), so its first
+				// resolve is where the agent process gets spawned.
+				resolveWebviewView: (webviewView, resolveContext, token) => {
+					void acpProcessManager.ensureStarted();
+					return chatProvider.resolveWebviewView(webviewView, resolveContext, token);
+				},
+			},
+			{
+				// Preserve DOM when user switches to Explorer/SCM/etc. and back.
+				// Without this VS Code destroys the webview on hide, wiping the transcript.
+				webviewOptions: {retainContextWhenHidden: true},
+			},
+		)
 	);
 
 	// Register Title Bar Actions
