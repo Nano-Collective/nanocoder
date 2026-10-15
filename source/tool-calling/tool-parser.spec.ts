@@ -118,6 +118,63 @@ test('parseToolCalls: scans complete JSON objects with nested arguments and reor
 	}
 });
 
+test('parseToolCalls: finds JSON tool calls inside wrapper objects', t => {
+	const call = {name: 'read_file', arguments: {path: 'src/a.ts'}};
+	for (const wrapper of [
+		{tool_calls: [call]},
+		{tool_call: call},
+		{response: {action: call}},
+	]) {
+		const content = JSON.stringify(wrapper);
+		const result = parseToolCalls(content);
+
+		t.true(result.success, content);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, content);
+			t.is(result.toolCalls[0].function.name, 'read_file', content);
+			t.deepEqual(
+				result.toolCalls[0].function.arguments,
+				call.arguments,
+				content,
+			);
+		}
+	}
+});
+
+test('parseToolCalls: finds every JSON tool call in a tool_calls array', t => {
+	const content = JSON.stringify({
+		tool_calls: [
+			{name: 'read_file', arguments: {path: 'a.ts'}},
+			{name: 'read_file', arguments: {path: 'b.ts'}},
+		],
+	});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.deepEqual(
+			result.toolCalls.map(call => call.function.arguments),
+			[{path: 'a.ts'}, {path: 'b.ts'}],
+		);
+	}
+});
+
+test('parseToolCalls: many unterminated JSON openers do not stall parsing', t => {
+	// ~315 KB: rescanning to the end from every opener takes seconds here.
+	const content = `{"${'x'.repeat(61)}`.repeat(5000);
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 0);
+	}
+	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
 test('parseToolCalls: function-tag examples inside XML arguments keep their contents', t => {
 	const example = '<function=read_file>{"path":"a.ts"}</function>';
 	for (const content of [

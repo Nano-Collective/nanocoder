@@ -35,7 +35,9 @@ type ParseResult =
 	  };
 
 const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
-const JSON_OBJECT_START_REGEX = /\{\s*"/g;
+// Only objects that open like a call are scanned: scanning from every `{"`
+// is quadratic when many of them never close.
+const JSON_OBJECT_START_REGEX = /\{\s*"(?:name|arguments)"\s*:/g;
 
 // Braces inside JSON strings must not end the enclosing tool call.
 function findJSONObjectEnd(content: string, start: number): number | null {
@@ -131,11 +133,13 @@ function parseJSONToolCalls(content: string): {
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
 		const end = findJSONObjectEnd(content, start);
 		if (end === null) continue;
-		inlinePattern.lastIndex = end;
 		const call = tryParseJSONToolCall(content.slice(start, end));
 		if (call) {
 			toolCalls.push(call);
 			matchedRanges.push([start, end]);
+			// Skip only past parsed calls: a non-call object can still
+			// contain one.
+			inlinePattern.lastIndex = end;
 		}
 	}
 

@@ -16,8 +16,7 @@ interface ParsedToolCall {
 export class XMLToolCallParser {
 	private static readonly TOOL_CALL_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
 	private static readonly PARAMETER_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
-	private static readonly ATTRIBUTE_TAG_REGEX =
-		/<\/?(?:function|parameter)\s*=/i;
+	private static readonly ATTRIBUTE_TAG_REGEX = /<\/?\w+\s*=/;
 
 	/**
 	 * Extracts tool calls from text content containing XML-formatted tool calls
