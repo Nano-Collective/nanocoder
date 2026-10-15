@@ -77,6 +77,68 @@ test('parseToolCalls: XML quoted inside a JSON tool call stays an argument', t =
 	}
 });
 
+test('parseToolCalls: JSON strings containing braces and escapes keep XML as an argument', t => {
+	for (const prefix of [
+		'{{x}}',
+		'a "quoted }} value"',
+		'C:\\templates\\{{x}}',
+		'an unclosed { brace and }}} closers',
+	]) {
+		const args = {path: 'docs.md', content: `${prefix} ${EMBEDDED_XML}`};
+		const result = parseToolCalls(
+			JSON.stringify({name: 'write_file', arguments: args}),
+		);
+
+		t.true(result.success, prefix);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, prefix);
+			t.is(result.toolCalls[0].function.name, 'write_file', prefix);
+			t.deepEqual(result.toolCalls[0].function.arguments, args, prefix);
+			t.is(result.cleanedContent, '', prefix);
+		}
+	}
+});
+
+test('parseToolCalls: scans complete JSON objects with nested arguments and reordered keys', t => {
+	const args = {
+		path: 'docs.md',
+		content: EMBEDDED_XML,
+		options: {groups: [{message: '}}', values: [1, true, null]}]},
+	};
+	const result = parseToolCalls(
+		JSON.stringify({arguments: args, name: 'write_file'}),
+	);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+		t.is(result.cleanedContent, '');
+	}
+});
+
+test('parseToolCalls: function-tag examples inside XML arguments keep their contents', t => {
+	const example = '<function=read_file>{"path":"a.ts"}</function>';
+	for (const content of [
+		`<write_file><path>docs.md</path><content>${example}</content></write_file>`,
+		`<tool_call><write_file><path>docs.md</path><content>${example}</content></write_file></tool_call>`,
+	]) {
+		const result = parseToolCalls(content);
+
+		t.true(result.success);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.is(result.toolCalls[0].function.name, 'write_file');
+			t.deepEqual(result.toolCalls[0].function.arguments, {
+				path: 'docs.md',
+				content: example,
+			});
+			t.is(result.cleanedContent, '');
+		}
+	}
+});
+
 test('parseToolCalls: fenced JSON call quoted inside an XML call stays an argument', t => {
 	const quoted = JSON.stringify({
 		name: 'write_file',

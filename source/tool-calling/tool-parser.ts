@@ -35,8 +35,39 @@ type ParseResult =
 	  };
 
 const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
-const JSON_INLINE_REGEX =
-	/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+const JSON_OBJECT_START_REGEX = /\{\s*"/g;
+
+// Braces inside JSON strings must not end the enclosing tool call.
+function findJSONObjectEnd(content: string, start: number): number | null {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+
+	for (let index = start; index < content.length; index++) {
+		const char = content[index];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (char === '\\') {
+				escaped = true;
+			} else if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (char === '"') {
+			inString = true;
+		} else if (char === '{') {
+			depth++;
+		} else if (char === '}') {
+			depth--;
+			if (depth === 0) return index + 1;
+		}
+	}
+
+	return null;
+}
 
 function tryParseJSONToolCall(raw: string): ToolCall | null {
 	try {
@@ -94,14 +125,17 @@ function parseJSONToolCalls(content: string): {
 	}
 
 	let inlineMatch: RegExpExecArray | null;
-	const inlinePattern = new RegExp(JSON_INLINE_REGEX);
+	const inlinePattern = new RegExp(JSON_OBJECT_START_REGEX);
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
-		const call = tryParseJSONToolCall(inlineMatch[0]);
+		const end = findJSONObjectEnd(content, start);
+		if (end === null) continue;
+		inlinePattern.lastIndex = end;
+		const call = tryParseJSONToolCall(content.slice(start, end));
 		if (call) {
 			toolCalls.push(call);
-			matchedRanges.push([start, start + inlineMatch[0].length]);
+			matchedRanges.push([start, end]);
 		}
 	}
 

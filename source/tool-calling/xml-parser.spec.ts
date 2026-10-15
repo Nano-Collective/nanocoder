@@ -120,8 +120,27 @@ test('parseToolCalls - still rejects <parameter=name> attribute syntax', t => {
 		'<read_file><parameter=path>/test.txt</parameter></read_file>',
 		'<read_file><parameter =path>/test.txt</parameter></read_file>',
 		'<read_file><Parameter=path>/test.txt</Parameter></read_file>',
+		'<read_file><path>a.ts</path><parameter=other>value</parameter></read_file>',
+		'<read_file><function=read_file>{"path":"a.ts"}</function></read_file>',
 	]) {
 		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
+test('parseToolCalls - preserves attribute-style tag examples inside parameter values', t => {
+	for (const example of [
+		'<function=read_file>{"path":"a.ts"}</function>',
+		'<parameter=path>a.ts</parameter>',
+		'<Parameter =path>a.ts</Parameter>',
+	]) {
+		const content = `<write_file><path>docs.md</path><content>${example}</content></write_file>`;
+
+		t.deepEqual(XMLToolCallParser.parseToolCalls(content), [
+			{
+				toolName: 'write_file',
+				parameters: {path: 'docs.md', content: example},
+			},
+		]);
 	}
 });
 

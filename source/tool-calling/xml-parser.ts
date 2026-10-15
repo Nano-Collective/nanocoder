@@ -162,13 +162,6 @@ export class XMLToolCallParser {
 			return false;
 		}
 
-		// Only reject attribute-style tags like <function=name> or <parameter=name>.
-		// Parameter values (bash env assignments, code in string_replace) contain
-		// `=` routinely, so a bare `=` anywhere in the block is not a signal.
-		if (this.ATTRIBUTE_TAG_REGEX.test(fullMatch)) {
-			return false;
-		}
-
 		// Check if the closing tag is properly formed
 		if (!fullMatch.endsWith(`</${toolName}>`)) {
 			return false;
@@ -179,6 +172,16 @@ export class XMLToolCallParser {
 			toolName.length + 2,
 			fullMatch.length - (toolName.length + 3),
 		);
+
+		// Reject attribute-style syntax between parameters, not literal tag
+		// examples quoted inside their values.
+		const parameterSyntax = innerContent.replace(
+			new RegExp(this.PARAMETER_REGEX),
+			'',
+		);
+		if (this.ATTRIBUTE_TAG_REGEX.test(parameterSyntax)) {
+			return false;
+		}
 
 		// Valid tool calls should contain parameter tags (other XML tags inside)
 		// This prevents matching on standalone parameter tags from malformed XML
