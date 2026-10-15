@@ -177,9 +177,9 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const lock = await waitForLockfile(opts.projectRoot, 5000);
 	if (!lock) {
 		return {
-			exitCode: 1,
+			exitCode: 0,
 			output:
-				'Daemon process spawned but did not write a lockfile within 5s. Check the daemon log.',
+				'Daemon process spawned and is still starting. Run `nanocoder daemon status` shortly to confirm it is ready.',
 		};
 	}
 

@@ -253,6 +253,26 @@ test.serial(
 	},
 );
 
+test.serial('start reports a daemon that is still booting without failing', async t => {
+	t.timeout(7_000);
+	const root = await tempProject();
+	try {
+		await withIsolatedPreferences(async () => {
+			savePreferences({
+				trustedDirectories: [{path: root, fingerprint: describeProjectTrust(root).fingerprint}],
+			});
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				launchDaemon: () => ({}) as ChildProcess,
+			});
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /still starting/i);
+		});
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test.serial(
 	'start --trust-directory bypasses the check without persisting trust',
 	async t => {
