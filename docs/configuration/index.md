@@ -288,6 +288,30 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
 
+### Completion Evidence
+
+Models sometimes edit code and say "fixed" without ever running the tests. Set `nanocoder.verify.required` and a turn that edited files is not accepted as finished until each required command has run through `execute_bash` and exited `0` **after the last edit**. Off by default.
+
+```json
+{
+  "nanocoder": {
+    "verify": {
+      "required": ["pnpm test", "pnpm run lint"]
+    }
+  }
+}
+```
+
+`required` is a list of commands, or `"auto"` to require the `test`, `typecheck` and `lint` scripts that exist in the project's `package.json` (the package manager is read from the lockfile; other ecosystems list their commands explicitly). Anything else is ignored with a warning, which leaves the feature off.
+
+- **How it works.** The agent loop keeps a ledger for each task (each user message) with every `execute_bash` command, its exit code and a timestamp. When the model tries to finish after editing, any required command without a fresh exit-`0` run is sent back to it ("You must run each command below and fix any failure before finishing").
+- **Stale evidence does not count.** A passing run followed by another edit has to be repeated.
+- **A command matches as whole words:** `pnpm test` is satisfied by `pnpm test -- --watch=false` or `cd app && pnpm test`, but not by `pnpm test:all`.
+- **The exit code has to be real.** A run containing a pipe, `;` or `||` (such as `pnpm test | tail`) does not count, because those can report `0` whatever the tests did.
+- **No endless loops.** A task is sent back at most twice, after which the model may finish and the result is marked unverified.
+- The final response ends with a line such as `Verification: ✓ pnpm test (exit 0) · ✗ pnpm run lint (last run exited 1)`. It is shown after a turn in the interactive UI, appended to the answer in `nanocoder run` (including `--json`), and sent as a final message over ACP.
+- Works the same in the interactive UI, `nanocoder run` / `--plain`, and the VS Code extension. A task that edits nothing is never held up, and edits made by [subagents](../features/subagents.md) are not tracked.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).

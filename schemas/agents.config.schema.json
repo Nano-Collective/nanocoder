@@ -147,6 +147,10 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"verify": {
+					"$ref": "#/definitions/VerifyConfig",
+					"description": "Completion evidence. Set `required` to commands (e.g. `[\"pnpm test\"]`) or\n`\"auto\"`, and a turn that edited files is not accepted as finished until\neach command has exited 0 since the last edit. Off by default."
 				}
 			},
 			"type": "object",
@@ -714,6 +718,26 @@
 				"mode": {
 					"enum": ["append", "replace"],
 					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"VerifyConfig": {
+			"properties": {
+				"required": {
+					"anyOf": [
+						{
+							"items": {
+								"type": "string"
+							},
+							"type": "array"
+						},
+						{
+							"const": "auto",
+							"type": "string"
+						}
+					]
 				}
 			},
 			"type": "object",

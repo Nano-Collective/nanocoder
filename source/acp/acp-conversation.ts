@@ -28,6 +28,11 @@ import {
 	consultPluginPermission,
 	withTrustedProjectPlugins,
 } from '@/plugins/host';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {
 	getAllSubagentProgress,
@@ -482,6 +487,28 @@ async function runTurn(
 				messages = [...messages, fallback];
 				continue;
 			}
+
+			// With `nanocoder.verify` set, a turn that edited files cannot end
+			// until the required commands have exited 0 since the last edit.
+			const evidenceRejection = finalTurn
+				? null
+				: takeEvidenceRejection(walkthroughLifecycle.ledger);
+			if (evidenceRejection) {
+				messages = [...messages, evidenceRejection];
+				continue;
+			}
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			if (verification) {
+				conn.sessionUpdate({
+					sessionId: session.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: `\n\n${verification}`},
+					},
+				});
+			}
 			session.messages = messages;
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
@@ -724,6 +751,7 @@ async function runTurn(
 				toolResult.content,
 			);
 			toolResults.push(toolResult);
+			recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 			if (status === 'completed') {
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 				if (toolCall.function.name === 'write_plan') {

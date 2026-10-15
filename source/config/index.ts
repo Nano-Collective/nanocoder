@@ -42,6 +42,7 @@ import type {
 	RetryLimitsConfig,
 	SystemPromptConfig,
 	TuneConfig,
+	VerifyConfig,
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
@@ -453,6 +454,28 @@ function loadAutoCommitConfig(): boolean {
 	);
 }
 
+// `nanocoder.verify.required`: commands, or "auto". Anything else is ignored
+// with a warning, which leaves completion evidence off.
+function loadVerifyConfig(): VerifyConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'verify', config => {
+			const required = config.nanocoder?.verify?.required;
+			if (required === undefined) return null;
+			if (required === 'auto') return {required};
+			if (
+				Array.isArray(required) &&
+				required.every(item => typeof item === 'string' && item.trim() !== '')
+			) {
+				return {required};
+			}
+			logWarning(
+				`nanocoder.verify.required must be "auto" or a list of commands (got ${JSON.stringify(required)}); completion evidence is off`,
+			);
+			return null;
+		}) ?? undefined
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -858,6 +881,8 @@ function loadAppConfig(): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig();
 
+	const verify = loadVerifyConfig();
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
@@ -881,6 +906,7 @@ function loadAppConfig(): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		verify,
 	};
 }
 

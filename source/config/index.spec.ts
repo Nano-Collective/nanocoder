@@ -1439,6 +1439,43 @@ test.serial('non-boolean autoCommit is treated as off', async t => {
 	}
 });
 
+test.serial('nanocoder.verify.required accepts commands or "auto" and ignores anything else', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	try {
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		const load = (name: string, nanocoder: object) => {
+			const dir = join(sandboxConfigTestDir, `verify-${name}`);
+			mkdirSync(dir, {recursive: true});
+			writeFileSync(
+				join(dir, 'agents.config.json'),
+				JSON.stringify({nanocoder}),
+				'utf-8',
+			);
+			process.chdir(dir);
+			process.env.NANOCODER_CONFIG_DIR = join(dir, 'no-global');
+			reload();
+			return getAppConfig().verify;
+		};
+
+		t.is(load('unset', {}), undefined);
+		t.deepEqual(load('list', {verify: {required: ['pnpm test', 'pnpm lint']}}), {
+			required: ['pnpm test', 'pnpm lint'],
+		});
+		t.deepEqual(load('auto', {verify: {required: 'auto'}}), {required: 'auto'});
+		t.is(load('string', {verify: {required: 'pnpm test'}}), undefined);
+		t.is(load('number', {verify: {required: [1]}}), undefined);
+		t.is(load('blank', {verify: {required: ['pnpm test', ' ']}}), undefined);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
 // ============================================================================
 // lspServers
 // ============================================================================
