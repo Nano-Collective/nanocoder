@@ -72,13 +72,15 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 	mkdirSync(binDirectory);
 	const extension = process.platform === 'win32' ? '.cmd' : '';
 	const marker = join(tempRoot, 'graphql-version-checks');
+	let eventLoopTicked = false;
+	let eventLoopTick: NodeJS.Timeout | undefined;
 
 	try {
 		if (process.platform === 'win32') {
 			process.env.PATHEXT = '.CMD';
 			writeFileSync(
 				join(binDirectory, `typescript-language-server${extension}`),
-				'@echo off\r\nexit /b 0\r\n',
+				`@echo off\r\n"${process.execPath}" -e "setTimeout(() => process.exit(0), 150)"\r\n`,
 				'utf-8',
 			);
 			writeFileSync(
@@ -89,7 +91,11 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 		} else {
 			const typescriptServer = join(binDirectory, 'typescript-language-server');
 			const graphqlServer = join(binDirectory, 'graphql-lsp');
-			writeFileSync(typescriptServer, '#!/bin/sh\nexit 0\n', 'utf-8');
+			writeFileSync(
+				typescriptServer,
+				`#!/bin/sh\n"${process.execPath}" -e "setTimeout(() => process.exit(0), 150)"\n`,
+				'utf-8',
+			);
 			writeFileSync(
 				graphqlServer,
 				`#!/bin/sh\necho checked >> "${marker}"\nexit 1\n`,
@@ -100,7 +106,18 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 		}
 		process.env.PATH = binDirectory;
 
+		t.is(
+			await findCommand('typescript-language-server'),
+			'typescript-language-server',
+			'prime the PATH snapshot before probing version-check responsiveness',
+		);
+		eventLoopTick = setTimeout(() => {
+			eventLoopTicked = true;
+		}, 10);
 		const discovered = await discoverLanguageServers(tempRoot);
+		clearTimeout(eventLoopTick);
+		eventLoopTick = undefined;
+		t.true(eventLoopTicked, 'the event loop should run during a slow version check');
 		const typescriptServer = discovered.find(
 			server => server.name === 'typescript-language-server',
 		);
@@ -113,6 +130,7 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 		else process.env.PATH = originalPath;
 		if (originalPathExt === undefined) delete process.env.PATHEXT;
 		else process.env.PATHEXT = originalPathExt;
+		if (eventLoopTick) clearTimeout(eventLoopTick);
 		rmSync(tempRoot, {recursive: true, force: true});
 	}
 });
