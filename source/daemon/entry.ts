@@ -75,8 +75,10 @@ async function main(): Promise<void> {
 			recordSubagentApiCallForStats,
 		);
 		return {
-			execute: (task: SubagentTask): Promise<SubagentResult> =>
-				executor.execute(task),
+			execute: (
+				task: SubagentTask,
+				signal?: AbortSignal,
+			): Promise<SubagentResult> => executor.execute(task, signal),
 		};
 	};
 

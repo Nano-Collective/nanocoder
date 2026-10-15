@@ -1,4 +1,5 @@
 import type {ChildProcess} from 'node:child_process';
+import {once} from 'node:events';
 import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -391,6 +392,44 @@ test.serial('stop reports no daemon when there is no lockfile', async t => {
 		t.is(result.exitCode, 0);
 		t.is(result.output, 'No daemon is running.');
 	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('stop preserves the live lockfile while shutdown takes longer than five seconds', async t => {
+	t.timeout(15_000);
+	const root = await tempProject();
+	const {spawn} = await import('node:child_process');
+	const child = spawn(
+		process.execPath,
+		[
+			'-e',
+			"process.on('SIGTERM', () => setTimeout(() => process.exit(0), 6000)); setInterval(() => {}, 1000); process.stdout.write('ready');",
+		],
+		{stdio: ['ignore', 'pipe', 'ignore']},
+	);
+	try {
+		await once(child.stdout!, 'data');
+		await writeLockfile({
+			pid: child.pid!,
+			socketPath: '/nonexistent/test-daemon.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+		});
+		let stopped = false;
+		const stopping = runDaemonCli('stop', {projectRoot: root}).then(result => {
+			stopped = true;
+			return result;
+		});
+		await new Promise(resolve => setTimeout(resolve, 5500));
+		t.false(stopped);
+		t.true(existsSync(getLockfilePath(root)));
+		const result = await stopping;
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Daemon stopped/);
+		t.false(existsSync(getLockfilePath(root)));
+	} finally {
+		if (child.exitCode === null) child.kill('SIGKILL');
 		await rm(root, {recursive: true, force: true});
 	}
 });

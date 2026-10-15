@@ -28,7 +28,7 @@ import {
 import type {DevelopmentMode} from '@/types/core';
 
 export interface SubagentExecutorLike {
-	execute(task: SubagentTask): Promise<SubagentResult>;
+	execute(task: SubagentTask, signal?: AbortSignal): Promise<SubagentResult>;
 }
 
 export type ExecutorFactory = (mode: DevelopmentMode) => SubagentExecutorLike;
@@ -113,9 +113,34 @@ export interface SkillDispatcherOptions {
 }
 
 export class SkillDispatcher implements SubscriptionDispatcher {
+	private readonly abortController = new AbortController();
+	private readonly activeRuns = new Set<Promise<void>>();
+
 	constructor(private readonly options: SkillDispatcherOptions) {}
 
-	async dispatch(subscription: Subscription, event: Event): Promise<void> {
+	dispatch(subscription: Subscription, event: Event): Promise<void> {
+		if (this.abortController.signal.aborted) return Promise.resolve();
+		const run = this.dispatchTarget(subscription, event);
+		this.activeRuns.add(run);
+		// Track the entire dispatch, including checkpoint and activity work.
+		// Handle both outcomes so a failed run cannot prevent shutdown.
+		void run.then(
+			() => this.activeRuns.delete(run),
+			() => this.activeRuns.delete(run),
+		);
+		return run;
+	}
+
+	/** Cancel triggered runs and wait for their cleanup before releasing tools. */
+	async stop(): Promise<void> {
+		this.abortController.abort();
+		await Promise.allSettled(this.activeRuns);
+	}
+
+	private async dispatchTarget(
+		subscription: Subscription,
+		event: Event,
+	): Promise<void> {
 		const target = subscription.target;
 		if (target.kind === 'agent') {
 			await this.run(
@@ -181,9 +206,12 @@ export class SkillDispatcher implements SubscriptionDispatcher {
 			}
 		}
 
+		// A checkpoint can still be writing when shutdown begins. Let it finish,
+		// but do not start another executor once cancellation has been requested.
+		if (this.abortController.signal.aborted) return;
 		const executor = this.options.buildExecutor(mode);
 		const start = Date.now();
-		const result = await executor.execute(task);
+		const result = await executor.execute(task, this.abortController.signal);
 		const durationMs = Date.now() - start;
 
 		this.options.onActivity?.({

@@ -23,12 +23,7 @@ import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
-import {
-	getLockfilePath,
-	readLiveLockfile,
-	readLockfile,
-	removeLockfile,
-} from './lockfile';
+import {getLockfilePath, readLiveLockfile, readLockfile} from './lockfile';
 
 function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
@@ -218,14 +213,14 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		}
 	}
 
-	// Wait for the daemon to remove its lockfile, then we know it's gone.
-	const removed = await waitForLockfileGone(opts.projectRoot, 5000);
+	// Allow the entry's 30s shutdown budget plus 5s for final cleanup.
+	// The lockfile still protects an active run from a second daemon.
+	const removed = await waitForLockfileGone(opts.projectRoot, 35_000);
 	if (!removed) {
-		await removeLockfile(opts.projectRoot);
 		const how = ipcAccepted ? 'IPC shutdown' : 'SIGTERM';
 		return {
-			exitCode: 0,
-			output: `Sent ${how} to daemon (pid ${live.pid}). Lockfile cleaned up manually.`,
+			exitCode: 1,
+			output: `Sent ${how} to daemon (pid ${live.pid}), but shutdown has not completed. Lockfile preserved; check the daemon log.`,
 		};
 	}
 	return {exitCode: 0, output: `Daemon stopped (was pid ${live.pid}).`};
@@ -371,9 +366,9 @@ async function waitForLockfileGone(
 	timeoutMs: number,
 ): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
-	const path = getLockfilePath(projectRoot);
 	while (Date.now() < deadline) {
-		if (!existsSync(path)) return true;
+		// Reap a stale lockfile only when its process has actually exited.
+		if (!(await readLiveLockfile(projectRoot))) return true;
 		await new Promise(r => setTimeout(r, 50));
 	}
 	return false;
