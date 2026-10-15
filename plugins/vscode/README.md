@@ -124,7 +124,7 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 | Setting                     | Default       | Description                                                          |
 | --------------------------- | ------------- | -------------------------------------------------------------------- |
 | `nanocoder.cliPath`         | (empty)       | Absolute path to the nanocoder CLI. If empty, uses the global install |
-| `nanocoder.cwd`             | (empty)       | Working directory for the CLI. Defaults to the workspace root         |
+| `nanocoder.cwd`             | (empty)       | Working directory for the CLI, new sessions, settings and `@` mention search. Defaults to the workspace root, and takes priority over it when set. With no folder open, sessions use your home directory and `@` search finds no files |
 | `nanocoder.mode`            | `auto-accept` | Operating mode for the assistant                                      |
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
