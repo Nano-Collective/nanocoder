@@ -452,6 +452,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'yapi',
+		name: 'Y-API',
+		baseUrl: 'https://api.y-api.bestvirtualgoods.com/v1',
+		apiKeyPrompt: 'API Key (from y-api.bestvirtualgoods.com/app/keys)',
+		modelDefault: 'deepseek/deepseek-v4-flash',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
