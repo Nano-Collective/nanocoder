@@ -6,13 +6,13 @@ test('cli-highlight is loaded only when syntax highlighting is requested', t => 
 		import {createRequire} from 'node:module';
 		const require = createRequire(import.meta.url);
 		const {highlightCode} = await import('./source/utils/syntax-highlighter.ts');
+		const {default: stripAnsi} = await import('strip-ansi');
 		const modulePath = require.resolve('cli-highlight');
 		if (require.cache[modulePath]) {
 			throw new Error('cli-highlight loaded before syntax highlighting was requested');
 		}
 		const output = highlightCode('const answer = 42;', {language: 'javascript'});
-		// cli-highlight wraps tokens in ANSI codes but preserves the original source text.
-		if (!output.includes('const answer = 42;')) {
+		if (!stripAnsi(output).includes('const answer = 42;')) {
 			throw new Error('highlightCode did not preserve the source text');
 		}
 		if (!require.cache[modulePath]) {
