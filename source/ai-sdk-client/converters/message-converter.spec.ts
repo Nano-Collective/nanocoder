@@ -1,5 +1,17 @@
 import type {ModelMessage} from 'ai';
 import test from 'ava';
+
+test('invalid persisted images cannot poison subsequent provider requests', t => {
+	const messages = convertToModelMessages([
+		{role: 'user', content: 'broken picture', images: [{data: '%%%invalid', mediaType: 'image/png'}]},
+		{role: 'assistant', content: 'Previous reply'},
+		{role: 'user', content: 'Continue'},
+	]);
+	t.deepEqual(messages[0], {role: 'user', content: [{type: 'text', text: 'broken picture'}]});
+	t.deepEqual(messages[2], {role: 'user', content: 'Continue'});
+	const imageOnly = convertToModelMessages([{role: 'user', content: '', images: [{data: '!', mediaType: 'image/png'}]}]);
+	t.like(imageOnly[0], {content: [{type: 'text', text: '[Invalid image attachment omitted]'}]});
+});
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import type {Message} from '@/types/index';
 import {
@@ -92,7 +104,7 @@ test('convertToModelMessages emits image parts for a user message with attachmen
 		{
 			role: 'user',
 			content: 'what is in this screenshot?',
-			images: [{data: 'BASE64DATA', mediaType: 'image/png'}],
+			images: [{data: 'AA==', mediaType: 'image/png'}],
 		},
 	];
 
@@ -104,7 +116,7 @@ test('convertToModelMessages emits image parts for a user message with attachmen
 	t.is(content[0].type, 'text');
 	t.is(content[0].text, 'what is in this screenshot?');
 	t.is(content[1].type, 'image');
-	t.is(content[1].image, 'data:image/png;base64,BASE64DATA');
+	t.is(content[1].image, 'data:image/png;base64,AA==');
 	t.is(content[1].mediaType, 'image/png');
 });
 
@@ -113,7 +125,7 @@ test('convertToModelMessages keeps image-only user messages without a text part'
 		{
 			role: 'user',
 			content: '',
-			images: [{data: 'IMG', mediaType: 'image/jpeg'}],
+			images: [{data: 'AA==', mediaType: 'image/jpeg'}],
 		},
 	];
 
@@ -121,6 +133,12 @@ test('convertToModelMessages keeps image-only user messages without a text part'
 	const content = result[0].content as Array<Record<string, unknown>>;
 	t.is(content.length, 1);
 	t.is(content[0].type, 'image');
+});
+
+test('saved browser data URLs are not prefixed twice', t => {
+	const result = convertToModelMessages([{role: 'user', content: 'describe', images: [{data: 'data:image/png;base64,AA==', mediaType: 'image/png'}]}]);
+	const content = result[0].content as Array<Record<string, unknown>>;
+	t.is(content[1].image, 'data:image/png;base64,AA==');
 });
 
 test('convertToModelMessages leaves text-only user messages as plain strings', t => {
@@ -313,7 +331,7 @@ test('convertToModelMessages moves tool images after the whole run of tool resul
 			content: 'Screenshot',
 			tool_call_id: 'call_shot',
 			name: 'browser',
-			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			images: [{data: 'YWJj', mediaType: 'image/jpeg'}],
 		},
 		{
 			role: 'tool',
@@ -333,10 +351,10 @@ test('convertToModelMessages moves tool images after the whole run of tool resul
 		role: 'user',
 		content: [
 			{type: 'text', text: 'Images from the tool results above.'},
-			{type: 'image', image: 'data:image/jpeg;base64,abc', mediaType: 'image/jpeg'},
+			{type: 'image', image: 'data:image/jpeg;base64,YWJj', mediaType: 'image/jpeg'},
 		],
 	});
-	t.false(JSON.stringify(result.slice(0, 3)).includes('abc'));
+	t.false(JSON.stringify(result.slice(0, 3)).includes('YWJj'));
 });
 
 test('convertToModelMessages drops tool images for a model without image input', t => {

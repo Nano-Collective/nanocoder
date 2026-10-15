@@ -224,6 +224,12 @@ Navigate with arrow keys, select files with **Space**, search with **`/`**, and 
 
 ## Integrations
 
+### Local Browser Interface
+
+Run `nanocoder --web` (or `--gui`) to use streaming chat, approvals, session
+history, Tasks, and Changes from a token-protected localhost browser page.
+See [Web Mode](web-mode.md) for setup and the local transport model.
+
 ### VS Code Extension
 
 The [VS Code extension](vscode-extension.md) bridges your editor and the CLI:

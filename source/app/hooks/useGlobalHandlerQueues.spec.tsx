@@ -10,6 +10,8 @@ import {
 	signalToolApproval,
 } from '@/utils/tool-approval-queue';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
+import type {WebServerEvent} from '@/web/protocol';
+import {createWebRuntimeBridge, type WebRuntimeBridge} from '@/web/runtime-bridge';
 import {useGlobalHandlerQueues} from './useGlobalHandlerQueues';
 
 console.log('\nuseGlobalHandlerQueues.spec.tsx');
@@ -29,7 +31,7 @@ function spy<T extends unknown[] = unknown[]>(): CallSpy<T> {
 
 let captured: ReturnType<typeof useGlobalHandlerQueues> | null = null;
 
-function setup() {
+function setup(webRuntimeBridge?: WebRuntimeBridge) {
 	const setPendingQuestion = spy<[PendingQuestion | null]>();
 	const setIsQuestionMode = spy<[boolean]>();
 
@@ -37,6 +39,7 @@ function setup() {
 		captured = useGlobalHandlerQueues({
 			setPendingQuestion,
 			setIsQuestionMode,
+			webRuntimeBridge,
 		});
 		return null;
 	}
@@ -374,4 +377,58 @@ test('a signal already aborted never reaches the screen', async t => {
 
 	t.false(await approval);
 	t.deepEqual(setPendingQuestion.calls, [], 'nothing was presented');
+});
+
+test('browser turns route questions and both approval slots to the browser, then return to terminal queues', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {},
+	});
+	const {setPendingQuestion, setIsQuestionMode} = setup(bridge);
+	await bridge.handleClientEvent({type: 'user_message', id: 'turn-1', text: 'hi'});
+
+	const answer = signalQuestion(question('browser?'));
+	t.deepEqual(setPendingQuestion.calls, []);
+	t.deepEqual(setIsQuestionMode.calls, []);
+	const questionEvent = events.at(-1);
+	if (questionEvent?.type !== 'question_required') throw new Error('Expected browser question');
+	await bridge.handleClientEvent({type: 'question_response', id: questionEvent.id, answer: 'web'});
+	t.is(await answer, 'web');
+
+	const approval = signalToolApproval(approvalFrom('agent-A'));
+	const approvalEvent = events.at(-1);
+	if (approvalEvent?.type !== 'approval_required') throw new Error('Expected browser approval');
+	t.is(approvalEvent.context, 'Subagent: agent-A');
+	await bridge.handleClientEvent({type: 'approval_response', id: approvalEvent.id, approved: true});
+	t.true(await approval);
+
+	const confirmation = signalToolConfirm({toolCall: approvalFrom('main').toolCall});
+	const confirmationEvent = events.at(-1);
+	if (confirmationEvent?.type !== 'approval_required') throw new Error('Expected browser confirmation');
+	t.is(confirmationEvent.context, undefined);
+	await bridge.handleClientEvent({type: 'approval_response', id: confirmationEvent.id, approved: false});
+	t.false(await confirmation);
+	bridge.completeTurn();
+
+	const terminalAnswer = signalQuestion(question('terminal?'));
+	t.deepEqual(setPendingQuestion.calls, [[question('terminal?')]]);
+	captured!.handleQuestionAnswer('terminal');
+	t.is(await terminalAnswer, 'terminal');
+});
+
+test('browser routing forwards cancellation to the pending approval', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers({submitMessage: () => new Promise<void>(() => {}), cancel: () => {}, resetSession: () => {}});
+	setup(bridge);
+	await bridge.handleClientEvent({type: 'user_message', id: 'turn', text: 'hello'});
+	const controller = new AbortController();
+	const approval = signalToolApproval(approvalFrom('agent'), controller.signal);
+	const event = events.at(-1)!;
+	controller.abort();
+	t.false(await approval);
+	await t.throwsAsync(bridge.handleClientEvent({type: 'approval_response', id: event.id!, approved: true}));
 });

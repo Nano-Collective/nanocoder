@@ -31,6 +31,10 @@ import {
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
+import {
+	publishWebToolFinished,
+	publishWebToolStarted,
+} from '@/web/tool-lifecycle';
 
 /**
  * Validates and executes a single tool call.
@@ -43,10 +47,22 @@ const executeOne = async (
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
+	publishWebToolStarted(
+		toolCall.id,
+		toolCall.function.name,
+		toolCall.function.arguments,
+	);
 	try {
 		const result = await processToolUse(toolCall);
+		publishWebToolFinished(
+			toolCall.id,
+			toolCall.function.name,
+			!isToolResultError(result),
+			result.content,
+		);
 		return {toolCall, result};
 	} catch (error) {
+		publishWebToolFinished(toolCall.id, toolCall.function.name, false);
 		return {
 			toolCall,
 			result: {
@@ -95,7 +111,7 @@ export interface ToolDisplayOptions {
  * the validated registry handler. The single per-tool execution primitive
  * shared by the auto-execute batch and the (post-approval) confirmation path.
  */
-export const executeApprovedTool = (
+export const executeApprovedTool = async (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
@@ -103,12 +119,29 @@ export const executeApprovedTool = (
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
-		return executeBashStreaming(
-			toolCall,
-			toolManager,
-			setLiveComponent,
-			signal,
+		publishWebToolStarted(
+			toolCall.id,
+			toolCall.function.name,
+			toolCall.function.arguments,
 		);
+		try {
+			const execution = await executeBashStreaming(
+				toolCall,
+				toolManager,
+				setLiveComponent,
+				signal,
+			);
+			publishWebToolFinished(
+				toolCall.id,
+				toolCall.function.name,
+				!isToolResultError(execution.result),
+				execution.result.content,
+			);
+			return execution;
+		} catch (error) {
+			publishWebToolFinished(toolCall.id, toolCall.function.name, false);
+			throw error;
+		}
 	}
 	return executeOne(toolCall, processToolUse);
 };

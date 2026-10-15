@@ -3,12 +3,14 @@ import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import {createStaticComponents} from '@/app/components/app-container';
 import {NonInteractiveShell} from '@/app/components/non-interactive-shell';
+import {getWebModeFooterRows} from '@/app/components/web-mode-footer';
 import {useAppLogging} from '@/app/hooks/useAppLogging';
 import {useGlobalHandlerQueues} from '@/app/hooks/useGlobalHandlerQueues';
 import {
 	useUserSubmit,
 	useVSCodePromptDispatcher,
 } from '@/app/hooks/useVSCodePromptHandling';
+import {useWebRuntime} from '@/app/hooks/useWebRuntime';
 import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
@@ -37,7 +39,7 @@ import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useNotifications} from '@/hooks/useNotifications';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
-import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
@@ -72,6 +74,8 @@ export default function App({
 	altScreenActive = false,
 	initialSession,
 	openSessionSelectorOnStart = false,
+	webRuntimeBridge,
+	webUrl,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -247,6 +251,7 @@ export default function App({
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
+		webRuntimeBridge,
 	});
 
 	// Auto-commit writes its commit messages with the session's current client.
@@ -286,6 +291,13 @@ export default function App({
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
 		},
+		onError: error => {
+			webRuntimeBridge?.failTurn(error);
+		},
+		onAssistantContent: (content, newResponse) => {
+			webRuntimeBridge?.publishAssistantContent(content, newResponse);
+		},
+		onReasoningContent: content => webRuntimeBridge?.publishReasoning(content),
 		// A turn that started in plan mode finished uninterrupted — a plan was
 		// produced. Flag it so the interactive UI can show the plan review bar.
 		onPlanTurnComplete: () => {
@@ -571,6 +583,25 @@ export default function App({
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
+	const {isSaving, flush: flushSession} = useSessionAutosave({
+		messages: appState.messages,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+		currentSessionId: appState.currentSessionId,
+		setCurrentSessionId: appState.setCurrentSessionId,
+		client: appState.client,
+		isConversationComplete: appState.isConversationComplete,
+	});
+	useWebRuntime({
+		bridge: webRuntimeBridge,
+		state: appState,
+		handlers: appHandlers,
+		modes: modeHandlers,
+		isGenerating: chatHandler.isGenerating,
+		trusted: isEffectivelyTrusted,
+		trustError: isTrustedError,
+		flushSession,
+	});
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
 	// the picker for a bare --resume), once on mount. Reuses the exact same
@@ -623,15 +654,6 @@ export default function App({
 		developmentMode: initialDevelopmentMode,
 	});
 
-	// Setup session autosave
-	const {isSaving} = useSessionAutosave({
-		messages: appState.messages,
-		currentProvider: appState.currentProvider,
-		currentModel: appState.currentModel,
-		currentSessionId: appState.currentSessionId,
-		setCurrentSessionId: appState.setCurrentSessionId,
-	});
-
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
@@ -640,8 +662,14 @@ export default function App({
 	// minus the interactive frame: the root box's padding rows plus the input
 	// footer beneath it. Inline mode prints into scrollback and clips nothing.
 	const terminalRows = useTerminalRows();
+	const {actualWidth} = useResponsiveTerminal();
 	const welcomeRows = altScreenActive
-		? Math.max(0, terminalRows - FULLSCREEN_CHROME_ROWS)
+		? Math.max(
+				0,
+				terminalRows -
+					FULLSCREEN_CHROME_ROWS -
+					getWebModeFooterRows(webUrl, actualWidth - 2),
+			)
 		: terminalRows;
 
 	// Pin the provider/model the run started under, but only once
@@ -828,6 +856,7 @@ export default function App({
 					) : (
 						<InteractiveApp
 							altScreenActive={altScreenActive}
+							webUrl={webUrl}
 							appState={appState}
 							chatHandler={chatHandler}
 							modeHandlers={modeHandlers}

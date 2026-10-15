@@ -176,6 +176,7 @@ export interface AppHandlers {
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		externalId?: string,
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
@@ -205,6 +206,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			props.setSessionName('');
 			// Reset the key-generator session ID so keys in the new conversation
 			// are not prefixed with the cleared session's ID. A fresh random ID
 			// will be lazily generated on the next generateKey() call.
@@ -572,6 +574,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
+			props.setSessionName(session.title);
 			setKeyGeneratorSessionId(session.id);
 			void loadTasks(session.id).then(tasks => {
 				props.setLiveTaskList(tasks.length > 0 ? tasks : null);
@@ -871,6 +874,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			message: string,
 			displayValue?: string,
 			images?: ImageAttachment[],
+			externalId?: string,
 		) => {
 			props.ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
@@ -991,6 +995,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				// the raw message so the user still sees what they typed.
 				displayValue ?? message,
 				images,
+				externalId,
 			);
 		},
 		[

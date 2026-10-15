@@ -95,6 +95,21 @@ function parseAPIErrorInternal(error: unknown): string {
 				}
 				case 401:
 					return 'Authentication failed: Invalid API key or credentials';
+				case 402: {
+					// Some providers (Groq, custom gateways) return 402 for free-tier
+					// quota exhaustion or billing requirements rather than 429. Surface
+					// the payload so the user can tell which case they hit.
+					const lowered = cleanMessage.toLowerCase();
+					if (
+						lowered.includes('quota') ||
+						lowered.includes('rate') ||
+						lowered.includes('limit') ||
+						lowered.includes('free tier')
+					) {
+						return `Quota exceeded: ${cleanMessage}`;
+					}
+					return `Payment required: ${cleanMessage}`;
+				}
 				case 403:
 					return 'Access forbidden: Check your API permissions';
 				case 404:
@@ -135,6 +150,18 @@ function parseAPIErrorInternal(error: unknown): string {
 				return `Bad request: ${cleanMessage}`;
 			case '401':
 				return 'Authentication failed: Invalid API key or credentials';
+			case '402': {
+				const lowered = cleanMessage.toLowerCase();
+				if (
+					lowered.includes('quota') ||
+					lowered.includes('rate') ||
+					lowered.includes('limit') ||
+					lowered.includes('free tier')
+				) {
+					return `Quota exceeded: ${cleanMessage}`;
+				}
+				return `Payment required: ${cleanMessage}`;
+			}
 			case '403':
 				return 'Access forbidden: Check your API permissions';
 			case '404':

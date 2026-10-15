@@ -221,7 +221,7 @@ This setting is stored in `nanocoder-preferences.json` (see [Preferences](prefer
 | `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat and by [subagents](../features/subagents.md) (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
-| `smartTitles` | boolean | `true` | Generate a short title once per session (ACP clients only). See [Session Management](../features/session-management.md) |
+| `smartTitles` | boolean | `true` | Generate a short title once per session in terminal/web and ACP clients. See [Session Management](../features/session-management.md) |
 | `titleModel` | string | (session model) | Model used for title generation |
 | `titleProvider` | string | (session provider) | Provider used for title generation |
 

@@ -46,12 +46,22 @@ export class MessageBuilder {
 
 	/**
 	 * Add a user message, optionally with image attachments for multimodal turns.
+	 *
+	 * `id` is an optional external correlation id supplied by the originator
+	 * (the web browser passes the page-generated prompt id here so the UI can
+	 * inline error notices next to the matching prompt). It is preserved on
+	 * the resulting Message but never sent to a provider.
 	 */
-	addUserMessage(content: string, images?: ImageAttachment[]): this {
+	addUserMessage(
+		content: string,
+		images?: ImageAttachment[],
+		id?: string,
+	): this {
 		this.messages.push({
 			role: 'user',
 			content,
 			...(images && images.length > 0 ? {images} : {}),
+			...(id ? {id} : {}),
 		});
 		return this;
 	}
