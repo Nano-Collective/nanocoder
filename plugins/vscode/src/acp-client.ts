@@ -21,6 +21,10 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+
+	get sessionId(): string | undefined {
+		return this._sessionId;
+	}
 	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
 	private _pendingSession: Promise<string | undefined> | null = null;
 	/**
@@ -508,8 +512,8 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async resumeSession(sessionId: string): Promise<void> {
-		if (!this.connection) return;
+	async resumeSession(sessionId: string): Promise<boolean> {
+		if (!this.connection) return false;
 		try {
 			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
@@ -525,9 +529,11 @@ export class NanocoderAcpClient {
 			}
 			this.onSessionArtifacts?.(result._meta);
 			this.notifyStateSync();
+			return true;
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+			return false;
 		}
 	}
 
