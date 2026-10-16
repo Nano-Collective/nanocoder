@@ -1028,6 +1028,10 @@ export class ChatWebviewProvider
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'))
 			.with({query: `v=${assetVersion('chat-panel.css')}`});
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const highlightUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'highlight.min.js'));
+		const markdownHighlightUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'markdown-highlight.js'))
+			.with({query: `v=${assetVersion('markdown-highlight.js')}`});
 		const mentionUtilsUri = webview
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
 			.with({query: `v=${assetVersion('mention-utils.js')}`});
@@ -1044,6 +1048,8 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{highlightUri\}\}/g, highlightUri.toString());
+		html = html.replace(/\{\{markdownHighlightUri\}\}/g, markdownHighlightUri.toString());
 		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
 		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());
