@@ -13,7 +13,7 @@ import { setProjectRoot } from "@/services/session-cwd";
 import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
-import type { LLMClient } from "@/types/core";
+import type { DevelopmentMode, LLMClient } from "@/types/core";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
 import type { RunPlainShellDeps } from "./shell.js";
@@ -379,6 +379,7 @@ test.serial(
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
+						autoAcceptWouldRun: false,
 						finalText: "",
 						reasoning: null,
 						steps: 1,
@@ -845,39 +846,87 @@ test.serial(
 	},
 );
 
+async function runTextApprovalRequired(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+	autoAcceptWouldRun: boolean,
+): Promise<{ stderr: string; code: number | null }> {
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	const stderr = capturingStderr();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode,
+			trustDirectory: true,
+			outputFormat: "text",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: makeFakeRunPlainConversation({
+					kind: TOOL_APPROVAL_REQUIRED_KIND,
+					toolNames,
+					autoAcceptWouldRun,
+					finalText: "",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+		stderr.restore();
+	}
+	return { stderr: stderr.get(), code: shutdown.code };
+}
+
 test.serial(
 	"text tool-approval-required outcome writes guidance to stderr with exit code 2",
 	async (t) => {
-		const shutdown: CapturedShutdown = { code: null };
-		const stdout = capturingStdout();
-		const stderr = capturingStderr();
-		try {
-			await runPlainShell({
-				prompt: "do the thing",
-				developmentMode: "auto-accept",
-				trustDirectory: true,
-				outputFormat: "text",
-				deps: baseDeps({
-					initializePlain: makeFakeInitializePlain(),
-					runPlainConversation: makeFakeRunPlainConversation({
-						kind: TOOL_APPROVAL_REQUIRED_KIND,
-						toolNames: ["risky_tool"],
-						finalText: "",
-						reasoning: null,
-						steps: 1,
-						toolCalls: [],
-					}),
-					getShutdownManager: makeFakeShutdownManager(shutdown),
-				}),
-			});
-		} finally {
-			stdout.restore();
-			stderr.restore();
-		}
+		const { stderr, code } = await runTextApprovalRequired(
+			"normal",
+			["risky_tool"],
+			true,
+		);
 
-		t.regex(stderr.get(), /Tool approval required for: risky_tool/);
-		t.regex(stderr.get(), /auto-accept|yolo/);
-		t.is(shutdown.code, 2);
+		t.regex(stderr, /Tool approval required for: risky_tool/);
+		t.regex(stderr, /--mode auto-accept or --mode yolo/);
+		t.is(code, 2);
+	},
+);
+
+test.serial(
+	"text tool-approval-required in auto-accept does not suggest --mode auto-accept",
+	async (t) => {
+		const { stderr, code } = await runTextApprovalRequired(
+			"auto-accept",
+			["execute_bash"],
+			false,
+		);
+
+		t.regex(stderr, /Tool approval required for: execute_bash/);
+		t.false(stderr.includes("--mode auto-accept"));
+		t.regex(stderr, /--mode yolo/);
+		t.is(code, 2);
+	},
+);
+
+test.serial(
+	"text tool-approval-required shows alwaysAllow nested under nanocoder",
+	async (t) => {
+		const { stderr } = await runTextApprovalRequired(
+			"auto-accept",
+			["execute_bash", "file_op", "execute_bash"],
+			false,
+		);
+
+		t.true(
+			stderr.includes(
+				'{"nanocoder": {"alwaysAllow": ["execute_bash", "file_op"]}}',
+			),
+		);
+		t.regex(stderr, /Tool approval required for: execute_bash, file_op\./);
 	},
 );
 
