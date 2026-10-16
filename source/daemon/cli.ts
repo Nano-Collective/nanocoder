@@ -62,6 +62,8 @@ function parseStartArgs(args: string[]): ParsedStartArgs | {error: string} {
 				};
 			}
 			trustLevel = value;
+		} else if (arg === '--trust-directory') {
+			// Handled by cli.tsx (passed as `trustDirectory`); not a start-arg here.
 		} else {
 			return {error: `Unknown flag: "${arg}".`};
 		}

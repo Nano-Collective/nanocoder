@@ -701,3 +701,22 @@ test.serial('full-commit without an interactive terminal aborts instead of hangi
 		await rm(root, {recursive: true, force: true});
 	}
 });
+
+test.serial('--trust-directory alongside --trust is accepted by the start parser', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust-directory', '--trust', 'auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
