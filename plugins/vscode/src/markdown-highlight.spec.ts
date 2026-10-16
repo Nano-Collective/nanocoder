@@ -39,16 +39,31 @@ function loadPanel(withHighlighter = true): {
 
 const fence = '```';
 
-/** What a reader would copy: markup stripped, entities decoded (marked's own trailing newline dropped). */
-const visibleText = (html: string): string =>
-	html
-		.replace(/<\/pre>\n$/, '</pre>')
-		.replace(/<[^>]+>/g, '')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&amp;/g, '&');
+const entities: Record<string, string> = {
+	lt: '<',
+	gt: '>',
+	quot: '"',
+	'#39': "'",
+	amp: '&',
+};
+
+/**
+ * What a reader would copy: tags dropped, entities decoded once, and marked's
+ * own trailing newline (after the closing tag) removed. Tags are skipped with a
+ * scan, not a regex, so this stays an obvious test helper and not a sanitizer.
+ */
+function visibleText(html: string): string {
+	let text = '';
+	let inTag = false;
+	for (const char of html) {
+		if (char === '<') inTag = true;
+		else if (char === '>' && inTag) inTag = false;
+		else if (!inTag) text += char;
+	}
+	return text
+		.replace(/&(lt|gt|quot|#39|amp);/g, (_match, name: string) => entities[name])
+		.replace(/\n$/, '');
+}
 
 test('a closed fence is highlighted inside the usual pre/code markup', t => {
 	const { marked } = loadPanel();
@@ -100,7 +115,7 @@ test('code is HTML-escaped whether or not the language is highlighted', t => {
 	for (const lang of ['html', 'xml', 'markdown', 'nolang', '']) {
 		const html = marked.parse(`${fence}${lang}\n${payload}\n${fence}`);
 		t.false(/<(script|img)\b/i.test(html), `raw tag survived for "${lang}"`);
-		t.is(visibleText(html), `${payload}\n`, `text changed for "${lang}"`);
+		t.is(visibleText(html), payload + '\n', `text changed for "${lang}"`);
 	}
 });
 
