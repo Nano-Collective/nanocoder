@@ -450,6 +450,21 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'remote',
 		transportType: 'http',
 	},
+	// Declared after fxmacrodata deliberately. The remote tab renders the
+	// remote presets in declaration order and shows a window sized to the
+	// terminal, so inserting above the existing entries pushes the last one
+	// out of the default window and breaks the test asserting FXMacroData is
+	// listed. Appending leaves every existing entry where it was; the list is
+	// scrollable by design.
+	remoteHttpTemplate({
+		id: 'parallel-search',
+		name: 'Parallel Search',
+		description:
+			'Free web search and page fetching, with no account or API key. Queries and requested URLs are sent to Parallel. Anonymous access is subject to rate limits.',
+		defaultServerName: 'parallel-search',
+		defaultUrl: 'https://search.parallel.ai/mcp',
+		tags: ['remote', 'search', 'web', 'fetch', 'http'],
+	}),
 	{
 		id: 'gitlab',
 		name: 'GitLab',
