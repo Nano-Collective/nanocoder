@@ -128,7 +128,7 @@ importers:
         version: 10.0.1
       ws:
         specifier: ^8.18.0
-        version: 8.21.3
+        version: 8.22.0
       xdg-basedir:
         specifier: ^5.1.0
         version: 5.1.0
@@ -159,7 +159,7 @@ importers:
         version: 19.3.0
       '@types/ws':
         specifier: ^8.18.1
-        version: 8.18.1
+        version: 8.18.2
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -206,7 +206,7 @@ importers:
         version: 1.4.0(zod@4.6.5)
       ws:
         specifier: ^8.16.0
-        version: 8.21.3
+        version: 8.22.0
     devDependencies:
       '@tailwindcss/cli':
         specifier: ^4.3.3
@@ -219,7 +219,7 @@ importers:
         version: 1.137.0
       '@types/ws':
         specifier: ^8.5.10
-        version: 8.18.1
+        version: 8.18.2
       '@vscode/vsce':
         specifier: ^3.9.1
         version: 3.9.2
@@ -1638,9 +1638,6 @@ packages:
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
-  '@types/node@25.9.3':
-    resolution: {integrity: sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg==}
-
   '@types/node@26.2.0':
     resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
 
@@ -1659,8 +1656,8 @@ packages:
   '@types/vscode@1.137.0':
     resolution: {integrity: sha512-0dc/BBWxkyUsJzXIZ7PkKSalThmS4xiBT+8YEDiWdCefRKHGVV5ZNkM5NB5ULYamallYJujIfncNoXWFlyzL8A==}
 
-  '@types/ws@8.18.1':
-    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -4322,9 +4319,6 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
-  undici-types@7.24.6:
-    resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
-
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
@@ -4459,8 +4453,8 @@ packages:
     resolution: {integrity: sha512-OTIk8iR8/aCRWBqvxrzxR0hgxWpnYBblY1S5hDWBQfk/VFmJwzmJgQFN3WsoUKHISv2eAwe+PpbUzyL1CKTLXg==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  ws@8.21.3:
-    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -5726,10 +5720,6 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@types/node@25.9.3':
-    dependencies:
-      undici-types: 7.24.6
-
   '@types/node@26.2.0':
     dependencies:
       undici-types: 8.3.0
@@ -5746,9 +5736,9 @@ snapshots:
 
   '@types/vscode@1.137.0': {}
 
-  '@types/ws@8.18.1':
+  '@types/ws@8.18.2':
     dependencies:
-      '@types/node': 25.9.3
+      '@types/node': 26.2.0
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -7171,7 +7161,7 @@ snapshots:
       type-fest: 5.7.0
       widest-line: 6.0.0
       wrap-ansi: 9.0.2
-      ws: 8.21.3
+      ws: 8.22.0
       yoga-layout: 3.2.1
     optionalDependencies:
       '@types/react': 19.3.0
@@ -8510,8 +8500,6 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  undici-types@7.24.6: {}
-
   undici-types@8.3.0: {}
 
   undici@7.29.1: {}
@@ -8622,7 +8610,7 @@ snapshots:
     dependencies:
       signal-exit: 4.1.0
 
-  ws@8.21.3: {}
+  ws@8.22.0: {}
 
   wsl-utils@0.1.0:
     dependencies:
