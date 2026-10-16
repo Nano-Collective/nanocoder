@@ -498,6 +498,63 @@ test('worktree snapshots leave the real index and files untouched', async t => {
 	t.is(fixture.runGit(['diff', '--cached', '--name-only']), 'src/file.ts');
 });
 
+function toolsWithIndexPath(
+	fixture: ReturnType<typeof createReviewGitFixture>,
+	indexPath: string,
+) {
+	const tools = createReviewFixtureTools(fixture);
+	const execGit = tools.execGit;
+	tools.execGit = async (args, signal, env) =>
+		args.includes('--git-path') ? indexPath : execGit(args, signal, env);
+	return tools;
+}
+
+test('a repository without a Git index starts the scratch index empty without a warning', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.write('src/file.ts', 'export const value = 2;\n');
+	fixture.write('src/new.ts', 'export const added = true;\n');
+	const activity = new ReviewActivityStore({reviewId: 'missing-index'});
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'missing index'}},
+		{tools: toolsWithIndexPath(fixture, join(fixture.root, 'missing-index')), activity},
+	);
+
+	t.deepEqual(snapshot.files.map(file => file.path).sort(), [
+		'src/file.ts',
+		'src/new.ts',
+	]);
+	t.false(activity.getEvents().some(event => event.name === 'Copy Git index'));
+});
+
+test('a Git index that cannot be copied is reported and the snapshot still completes', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.write('src/file.ts', 'export const value = 2;\n');
+	fixture.write('src/new.ts', 'export const added = true;\n');
+	const activity = new ReviewActivityStore({reviewId: 'unreadable-index'});
+	// A directory cannot be copied as a file, so the copy fails with an error
+	// other than a missing index.
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'unreadable index'}},
+		{tools: toolsWithIndexPath(fixture, fixture.root), activity},
+	);
+
+	t.deepEqual(snapshot.files.map(file => file.path).sort(), [
+		'src/file.ts',
+		'src/new.ts',
+	]);
+	const warnings = activity
+		.getEvents()
+		.filter(event => event.name === 'Copy Git index');
+	t.is(warnings.length, 1);
+	t.is(warnings[0]?.status, 'failed');
+	t.is(
+		warnings[0]?.updates.at(-1)?.summary,
+		'Could not copy the Git index; recording the worktree from an empty index instead',
+	);
+});
+
 test('remote revisions use one fixed ref per source and are removed after success and failure', async t => {
 	const fixture = createReviewGitFixture();
 	t.teardown(fixture.cleanup);

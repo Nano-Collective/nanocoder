@@ -388,7 +388,19 @@ async function writeWorkingTree(
 	try {
 		// Starting from a copy keeps Git's stat cache, so unchanged files are
 		// not re-hashed. A repository without an index starts empty.
-		await copyFile(realIndex, scratchIndex).catch(() => undefined);
+		await copyFile(realIndex, scratchIndex).catch((error: unknown) => {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+			dependencies.activity
+				.begin({
+					source: 'review',
+					name: 'Copy Git index',
+					summary: 'Copying the Git index into a scratch index',
+				})
+				.fail(
+					error,
+					'Could not copy the Git index; recording the worktree from an empty index instead',
+				);
+		});
 		const env = {GIT_INDEX_FILE: scratchIndex};
 		const addArgs = ['-C', repositoryRoot, 'add', '--all', '--', '.'];
 		await trackReviewOperation(
