@@ -386,10 +386,8 @@ function stubSettingsUpdate(
 	update: (key: string, value: unknown) => Promise<void>,
 ) {
 	const original = vscode.workspace.getConfiguration;
-	(vscode.workspace as any).getConfiguration = (section: string) => ({
-		...original(section),
-		update,
-	});
+	// Saving the model setting only calls `update`.
+	(vscode.workspace as any).getConfiguration = () => ({update});
 	t.teardown(() => {
 		(vscode.workspace as any).getConfiguration = original;
 	});
