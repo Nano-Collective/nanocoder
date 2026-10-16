@@ -34,10 +34,6 @@ export class NanocoderAcpClient {
 	set lastActiveSessionId(id: string | undefined) {
 		this._lastActiveSessionId = id;
 	}
-
-	clearLastActiveSessionId(): void {
-		this._lastActiveSessionId = undefined;
-	}
 	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
 	private _pendingSession: Promise<string | undefined> | null = null;
 	/**

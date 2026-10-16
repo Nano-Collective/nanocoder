@@ -506,9 +506,14 @@ export class ChatWebviewProvider
 			const previousSessionId = this._acpClient.lastActiveSessionId;
 			let resumed = false;
 			if (previousSessionId) {
-				this._acpClient.clearLastActiveSessionId();
+				this._acpClient.lastActiveSessionId = undefined;
 				this._outputChannel.appendLine(`[Extension] Attempting to resume previous session: ${previousSessionId}`);
-				resumed = await this.resumeSession(previousSessionId);
+				try {
+					resumed = await this.resumeSession(previousSessionId);
+				} catch (error) {
+					this._outputChannel.appendLine(`[Extension] resumeSession threw error: ${error}`);
+					resumed = false;
+				}
 				if (!resumed) {
 					this._outputChannel.appendLine(
 						`[Extension] Failed to resume previous session ${previousSessionId}; falling back to new session.`,
