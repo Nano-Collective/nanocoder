@@ -447,7 +447,10 @@ function randomId(): string {
 	return `review-${idCounter}`;
 }
 
-test('worktree snapshots read symlink text, not a file outside the repository', async t => {
+// Creating symlinks on Windows needs administrator rights or Developer Mode.
+const symlinkTest = process.platform === 'win32' ? test.skip : test;
+
+symlinkTest('worktree snapshots read symlink text, not a file outside the repository', async t => {
 	const fixture = createReviewGitFixture();
 	t.teardown(fixture.cleanup);
 	const outside = join(fixture.root, '..', 'outside-secret.txt');
