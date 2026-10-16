@@ -34,7 +34,8 @@ export function LSP({autoDiscoveryEnabled = true, status}: LSPProps) {
 			{!autoDiscoveryEnabled && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Automatic LSP discovery is disabled in nanocoder.lsp.autoDiscover.
+						Automatic LSP discovery is disabled; only explicitly configured
+						servers will be used.
 					</Text>
 				</Box>
 			)}

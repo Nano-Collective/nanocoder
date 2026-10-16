@@ -63,6 +63,9 @@ test('LSP command: explains when automatic discovery is disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Automatic LSP discovery is disabled/);
+	t.regex(output!, /only explicitly configured/);
+	t.regex(output!, /servers will be used/);
+	t.notRegex(output!, /nanocoder\.lsp\.autoDiscover/);
 	t.notRegex(output!, /LSP servers may auto-discover/);
 });
 
