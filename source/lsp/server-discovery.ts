@@ -257,7 +257,7 @@ function getWindowsExtensions(): string[] {
 	return (configured || '.COM;.EXE;.BAT;.CMD')
 		.split(';')
 		.map(extension => extension.trim().toLowerCase())
-		.filter(Boolean);
+		.filter(extension => /^\.[a-z0-9_-]+$/.test(extension));
 }
 
 function getPathSnapshotKey(): string {
@@ -278,7 +278,8 @@ async function scanPathDirectories(): Promise<PathDirectorySnapshot[]> {
 			directory.endsWith('"')
 				? directory.slice(1, -1)
 				: directory;
-		return resolve(unquoted || process.cwd());
+		// PATH is local process configuration and each entry is intentionally a search directory.
+		return resolve(unquoted || process.cwd()); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- PATH entries are local search roots, not request-supplied file paths.
 	});
 	const uniqueDirectories = [...new Set(directories)];
 
@@ -351,13 +352,19 @@ async function isRunnableFile(path: string): Promise<boolean> {
  * @internal
  */
 export async function findCommand(command: string): Promise<string | null> {
+	if (!/^[a-z0-9][a-z0-9._-]*$/i.test(command)) return null;
+
 	const pathDirectories = await getPathSnapshot();
 	const extensions =
 		process.platform === 'win32' ? getWindowsExtensions() : [''];
 
 	for (const directory of pathDirectories) {
 		const entry = findPathEntry(command, directory.entries, extensions);
-		if (entry && (await isRunnableFile(join(directory.path, entry)))) {
+		// `entry` is one basename returned by readdir; joining it to its PATH root is the intended lookup.
+		const candidatePath = entry
+			? join(directory.path, entry) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- `entry` comes from readdir and cannot contain path separators.
+			: undefined;
+		if (candidatePath && (await isRunnableFile(candidatePath))) {
 			return command;
 		}
 	}
@@ -371,8 +378,8 @@ export async function findCommand(command: string): Promise<string | null> {
 			process.cwd(),
 			'node_modules',
 			'.bin',
-			`${command}${extension}`,
-		); // nosemgrep
+			`${command}${extension}`, // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- command names and PATHEXT suffixes are validated before this local shim lookup.
+		);
 		if (await isRunnableFile(localBinPath)) {
 			return localBinPath;
 		}
@@ -516,11 +523,9 @@ export async function discoverLanguageServers(
 		// Use the resolved command path for verification
 		const verificationMethod = server.verificationMethod || 'version';
 
-		const verificationKey = JSON.stringify([
-			commandPath,
-			verificationMethod,
-			server.checkCommand ?? server.args,
-		]);
+		// Multiple definitions can point to one executable (for example YAML and
+		// Docker Compose). Reuse an actual verification even if their methods differ.
+		const verificationKey = commandPath;
 		let sharedVerification = verifications.get(verificationKey);
 		if (!sharedVerification) {
 			switch (verificationMethod) {
@@ -543,8 +548,13 @@ export async function discoverLanguageServers(
 					// Skip verification, only check if command exists.
 					break;
 			}
-			sharedVerification ??= Promise.resolve(true);
-			verifications.set(verificationKey, sharedVerification);
+			if (sharedVerification) {
+				verifications.set(verificationKey, sharedVerification);
+			} else {
+				// A skipped check must not prevent a later definition from running
+				// its real verification for this same executable.
+				sharedVerification = Promise.resolve(true);
+			}
 		}
 		const verified = await sharedVerification;
 		if (!verified) continue;

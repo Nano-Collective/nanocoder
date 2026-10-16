@@ -4,7 +4,6 @@ import {
 	existsSync,
 	mkdtempSync,
 	mkdirSync,
-	readFileSync,
 	rmSync,
 	writeFileSync,
 } from 'fs';
@@ -52,6 +51,11 @@ test.serial('findCommand scans PATH without spawning where or which', async t =>
 		process.env.PATH = binDirectory;
 
 		t.is(await findCommand('fake-language-server'), 'fake-language-server');
+		t.is(
+			await findCommand('../fake-language-server'),
+			null,
+			'command names cannot escape a search directory',
+		);
 		if (process.platform !== 'win32') {
 			t.false(existsSync(join(binDirectory, 'which-was-spawned')));
 		}
@@ -64,14 +68,14 @@ test.serial('findCommand scans PATH without spawning where or which', async t =>
 	}
 });
 
-test.serial('discovery verifies installed servers asynchronously and deduplicates commands', async t => {
+test.serial('discovery verifies each executable once across server definitions', async t => {
 	const originalPath = process.env.PATH;
 	const originalPathExt = process.env.PATHEXT;
 	const tempRoot = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-discovery-'));
 	const binDirectory = join(tempRoot, 'bin');
 	mkdirSync(binDirectory);
 	const extension = process.platform === 'win32' ? '.cmd' : '';
-	const marker = join(tempRoot, 'graphql-version-checks');
+	const marker = join(tempRoot, 'yaml-version-checks');
 	let eventLoopTicked = false;
 	let eventLoopTick: NodeJS.Timeout | undefined;
 
@@ -84,25 +88,25 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 				'utf-8',
 			);
 			writeFileSync(
-				join(binDirectory, `graphql-lsp${extension}`),
-				`@echo off\r\necho checked>>"${marker}"\r\nexit /b 1\r\n`,
+				join(binDirectory, `yaml-language-server${extension}`),
+				`@echo off\r\nif /I "%1"=="--version" echo checked>>"${marker}"\r\nexit /b 0\r\n`,
 				'utf-8',
 			);
 		} else {
 			const typescriptServer = join(binDirectory, 'typescript-language-server');
-			const graphqlServer = join(binDirectory, 'graphql-lsp');
+			const yamlServer = join(binDirectory, 'yaml-language-server');
 			writeFileSync(
 				typescriptServer,
 				`#!/bin/sh\n"${process.execPath}" -e "setTimeout(() => process.exit(0), 150)"\n`,
 				'utf-8',
 			);
 			writeFileSync(
-				graphqlServer,
-				`#!/bin/sh\necho checked >> "${marker}"\nexit 1\n`,
+				yamlServer,
+				`#!/bin/sh\nif [ "$1" = "--version" ]; then echo checked >> "${marker}"; exit 0; fi\nexec "${process.execPath}" -e "setInterval(() => {}, 1000)"\n`,
 				'utf-8',
 			);
 			chmodSync(typescriptServer, 0o755);
-			chmodSync(graphqlServer, 0o755);
+			chmodSync(yamlServer, 0o755);
 		}
 		process.env.PATH = binDirectory;
 
@@ -122,9 +126,12 @@ test.serial('discovery verifies installed servers asynchronously and deduplicate
 			server => server.name === 'typescript-language-server',
 		);
 		t.deepEqual(typescriptServer?.languages, ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
-		t.false(discovered.some(server => server.name.includes('graphql')));
-		t.true(existsSync(marker), 'the GraphQL server version check should run');
-		t.is(readFileSync(marker, 'utf-8').trim().split(/\r?\n/).length, 1);
+		t.true(discovered.some(server => server.name === 'yaml-language-server'));
+		t.true(discovered.some(server => server.name === 'docker-compose-language'));
+		t.false(
+			existsSync(marker),
+			'the YAML executable should not run a second version check after its LSP spawn check',
+		);
 	} finally {
 		if (originalPath === undefined) delete process.env.PATH;
 		else process.env.PATH = originalPath;
