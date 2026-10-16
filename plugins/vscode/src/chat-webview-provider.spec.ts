@@ -250,3 +250,57 @@ test('ChatWebviewProvider - resumeSession success buffers updates and posts clea
 	t.true(updateIdx < loadedIdx, 'buffered updates must precede sessionLoaded');
 });
 
+test('ChatWebviewProvider - resumeSession buffers onSessionArtifacts and applies it on success', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	const testMeta = {
+		'nanocoder/artifacts': [
+			{kind: 'task', path: '/tmp/task.md'},
+		],
+	};
+
+	(acpClient as any).resumeSession = async () => {
+		(acpClient as any).onSessionArtifacts?.(testMeta);
+		return true;
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-artifacts');
+
+	t.true(result);
+	t.deepEqual(
+		(provider as any)._artifacts.artifacts,
+		[{kind: 'task', path: '/tmp/task.md'}],
+		'buffered artifacts metadata must be applied to ArtifactController',
+	);
+	const messages = getPostedMessages();
+	const artifactMsg = messages.find(m => m.type === 'artifactsUpdated');
+	t.truthy(artifactMsg, 'must post artifacts update to webview');
+	t.is(artifactMsg.artifacts.length, 1);
+	t.is(artifactMsg.artifacts[0].path, '/tmp/task.md');
+});
+
+test('ChatWebviewProvider - resumeSession rejects concurrent resume calls', async (t) => {
+	const {provider, acpClient} = makeStubs();
+
+	let resumeCalls = 0;
+	let resolveResume: (val: boolean) => void = () => {};
+	(acpClient as any).resumeSession = () => {
+		resumeCalls++;
+		return new Promise<boolean>(resolve => {
+			resolveResume = resolve;
+		});
+	};
+
+	const firstResume = provider.resumeSession('session-first');
+	const secondResume = provider.resumeSession('session-second');
+
+	const secondResult = await secondResume;
+	t.false(secondResult, 'concurrent resume request must return false');
+	t.is(resumeCalls, 1, 'must not invoke acpClient.resumeSession for concurrent request');
+
+	resolveResume(true);
+	const firstResult = await firstResume;
+	t.true(firstResult, 'first resume request must complete successfully');
+});
+
+

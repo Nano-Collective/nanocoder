@@ -554,9 +554,10 @@ export class ChatWebviewProvider
 			const success = await this._acpClient.resumeSession(sessionId);
 			if (success) {
 				this._planReview.reset();
-				this._artifacts.reset();
 				if (this._resumedArtifactsMeta !== undefined) {
 					this._artifacts.replaceFromMeta(this._resumedArtifactsMeta);
+				} else {
+					this._artifacts.reset();
 				}
 				this.postArtifacts();
 				this._discardQueuedPrompts('resume session');
