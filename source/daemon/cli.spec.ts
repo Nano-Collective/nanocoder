@@ -1,8 +1,24 @@
+import type {ChildProcess} from 'node:child_process';
+import {once} from 'node:events';
+import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {
+	isDirectoryTrusted,
+	loadPreferences,
+	resetPreferencesCache,
+	savePreferences,
+} from '@/config/preferences';
+import {describeProjectTrust} from '@/config/project-trust';
 import {runDaemonCli} from './cli';
+import {
+	getLockfilePath,
+	getSocketPath,
+	removeLockfile,
+	writeLockfile,
+} from './lockfile';
 
 console.log(`\ncli.spec.ts`);
 
@@ -15,6 +31,43 @@ async function tempProject(logContent?: string): Promise<string> {
 		await writeFile(join(root, '.nanocoder', 'daemon.log'), logContent, 'utf-8');
 	}
 	return root;
+}
+
+/**
+ * `start`'s directory-trust gate reads/writes preferences through the real
+ * `@/config/preferences` module (there's no deps-injection seam for it, unlike
+ * `launchDaemon`), so these tests point `NANOCODER_CONFIG_DIR` at a scratch
+ * directory rather than touching whatever preferences file the machine
+ * running the suite already has.
+ */
+async function withIsolatedPreferences<T>(fn: () => Promise<T>): Promise<T> {
+	const configDir = await mkdtemp(join(tmpdir(), 'daemon-cli-prefs-'));
+	const previous = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = configDir;
+	resetPreferencesCache();
+	try {
+		return await fn();
+	} finally {
+		if (previous === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = previous;
+		resetPreferencesCache();
+		await rm(configDir, {recursive: true, force: true});
+	}
+}
+
+/**
+ * Stub launcher matching the real daemon's behavior just enough for
+ * `start`'s `waitForLockfile` poll to succeed: it writes a lockfile pointing
+ * at this test process's own pid, which `isProcessAlive` will find alive.
+ */
+function stubLaunchDaemon(projectRoot: string): ChildProcess {
+	void writeLockfile({
+		pid: process.pid,
+		socketPath: 'fake-socket-for-test',
+		startedAt: Date.now(),
+		projectRoot,
+	});
+	return {} as unknown as ChildProcess;
 }
 
 test.serial('logs reports when no daemon log exists', async t => {
@@ -140,5 +193,530 @@ test.serial('logs starts the tail on a line boundary', async t => {
 		}
 	} finally {
 		await rm(root, {recursive: true, force: true});
+	}
+});
+
+// ============================================================================
+// start: directory-trust gate. The daemon loads and executes skills
+// unattended (headless mode, no confirmation prompts), so it must refuse to
+// boot in a directory the user hasn't trusted.
+// ============================================================================
+
+test.serial(
+	'start refuses to boot in an untrusted directory and never spawns the launcher',
+	async t => {
+		const root = await tempProject();
+		try {
+			await withIsolatedPreferences(async () => {
+				let launched = false;
+				const result = await runDaemonCli('start', {
+					projectRoot: root,
+					launchDaemon: () => {
+						launched = true;
+						return stubLaunchDaemon(root);
+					},
+				});
+				t.is(result.exitCode, 1);
+				t.regex(result.output, /not trusted/i);
+				t.false(launched, 'an untrusted directory must never spawn the daemon');
+			});
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start boots normally when the directory is already trusted',
+	async t => {
+		const root = await tempProject();
+		try {
+			await withIsolatedPreferences(async () => {
+				savePreferences({
+					trustedDirectories: [
+						{
+							path: root,
+							fingerprint: describeProjectTrust(root).fingerprint,
+						},
+					],
+				});
+				let launched = false;
+				const result = await runDaemonCli('start', {
+					projectRoot: root,
+					launchDaemon: projectRoot => {
+						launched = true;
+						return stubLaunchDaemon(projectRoot);
+					},
+				});
+				t.true(launched);
+				t.is(result.exitCode, 0);
+				t.regex(result.output, /Daemon started/);
+			});
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start --trust-directory bypasses the check without persisting trust',
+	async t => {
+		const root = await tempProject();
+		try {
+			await withIsolatedPreferences(async () => {
+				let launched = false;
+				const result = await runDaemonCli('start', {
+					projectRoot: root,
+					trustDirectory: true,
+					launchDaemon: projectRoot => {
+						launched = true;
+						return stubLaunchDaemon(projectRoot);
+					},
+				});
+				t.true(launched);
+				t.is(result.exitCode, 0);
+				t.false(
+					isDirectoryTrusted(root, loadPreferences()),
+					'--trust-directory is a one-shot bypass and must not persist',
+				);
+			});
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start with NANOCODER_TRUST_DIRECTORY=1 trusts and persists, then boots',
+	async t => {
+		const root = await tempProject();
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		try {
+			await withIsolatedPreferences(async () => {
+				let launched = false;
+				const result = await runDaemonCli('start', {
+					projectRoot: root,
+					launchDaemon: projectRoot => {
+						launched = true;
+						return stubLaunchDaemon(projectRoot);
+					},
+				});
+				t.true(launched);
+				t.is(result.exitCode, 0);
+				t.true(
+					isDirectoryTrusted(root, loadPreferences()),
+				);
+			});
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// status: no lockfile / stale lockfile / live lockfile. The three states the
+// CLI can encounter at runtime, each with a distinct output line.
+// ============================================================================
+
+test.serial('status reports not running when there is no lockfile', async t => {
+	const root = await tempProject();
+	try {
+		const result = await runDaemonCli('status', {projectRoot: root});
+		t.is(result.exitCode, 0);
+		t.is(result.output, 'Not running.');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('status cleans a stale lockfile and reports the previous pid', async t => {
+	const root = await tempProject();
+	try {
+		// Pick a pid unambiguously past any pid_max (Linux/macOS cap at
+		// 2^22 = 4_194_304; 99_999_999 is what the sibling lockfile test
+		// uses for the same reason).
+		await writeLockfile({
+			pid: 99_999_999,
+			socketPath: '/tmp/stale.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+		});
+
+		const result = await runDaemonCli('status', {projectRoot: root});
+
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Stale lockfile cleaned \(was pid 99999999\)/);
+		// Side effect: stale lockfile must be gone after status runs. Use
+		// getLockfilePath so the test stays in sync with future renames —
+		// the previous hardcoded `daemon.lock` filename never existed on
+		// disk and made the assertion vacuous.
+		t.false(existsSync(getLockfilePath(root)));
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'status reports the live pid, socket, and uptime when the daemon is running',
+	async t => {
+		const root = await tempProject();
+		try {
+			// Stub the daemon with this process's own pid so isProcessAlive
+			// returns true. Matches what stubLaunchDaemon does for `start`.
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: '/tmp/test-daemon.sock',
+				startedAt: Date.now() - 5_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('status', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /Running\. pid /);
+			t.regex(result.output, new RegExp(`pid ${process.pid}`));
+			t.regex(result.output, /socket \/tmp\/test-daemon\.sock/);
+			t.regex(result.output, /uptime 5s/);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// stop: no live daemon / live daemon. The two states the user actually hits.
+// Stale-lockfile falls out of readLiveLockfile (treats stale as no daemon),
+// so the "no lockfile" test covers the stale case too.
+// ============================================================================
+
+test.serial('stop reports no daemon when there is no lockfile', async t => {
+	const root = await tempProject();
+	try {
+		const result = await runDaemonCli('stop', {projectRoot: root});
+		t.is(result.exitCode, 0);
+		t.is(result.output, 'No daemon is running.');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('stop preserves the live lockfile while shutdown takes longer than five seconds', async t => {
+	t.timeout(15_000);
+	const root = await tempProject();
+	const {spawn} = await import('node:child_process');
+	const child = spawn(
+		process.execPath,
+		[
+			'-e',
+			"process.on('SIGTERM', () => setTimeout(() => process.exit(0), 6000)); setInterval(() => {}, 1000); process.stdout.write('ready');",
+		],
+		{stdio: ['ignore', 'pipe', 'ignore']},
+	);
+	try {
+		await once(child.stdout!, 'data');
+		await writeLockfile({
+			pid: child.pid!,
+			socketPath: '/nonexistent/test-daemon.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+		});
+		let stopped = false;
+		const stopping = runDaemonCli('stop', {projectRoot: root}).then(result => {
+			stopped = true;
+			return result;
+		});
+		await new Promise(resolve => setTimeout(resolve, 5500));
+		t.false(stopped);
+		t.true(existsSync(getLockfilePath(root)));
+		const result = await stopping;
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /Daemon stopped/);
+		t.false(existsSync(getLockfilePath(root)));
+	} finally {
+		if (child.exitCode === null) child.kill('SIGKILL');
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'stop removes the lockfile and reports the previous pid when the daemon is live',
+	async t => {
+		const root = await tempProject();
+		// Fork a real child so SIGTERM from `stop` lands on something that
+		// isn't this test process (which would trip the shutdown manager and
+		// abort the run). The child just sleeps; we kill it at the end.
+		const {spawn} = await import('node:child_process');
+		const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+			stdio: 'ignore',
+		});
+		try {
+			await writeLockfile({
+				pid: child.pid ?? -1,
+				socketPath: '/nonexistent/test-daemon.sock',
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('stop', {projectRoot: root});
+
+			// Either the clean path (IPC failed, SIGTERM killed the child,
+			// child removed its lockfile) or the manual-cleanup fallback
+			// (SIGTERM killed it, but the lockfile removal raced). Both
+			// produce exit 0 with the pid acknowledged in the output.
+			t.is(result.exitCode, 0);
+			t.regex(result.output, new RegExp(`pid ${child.pid}`));
+		} finally {
+			if (!child.killed) child.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// ---- CI trust-level (--trust) tests ----
+
+/** A launchDaemon stub that simulates a successful boot by writing a real,
+ * live lockfile (pid = this test process's own pid, so isProcessAlive sees
+ * it as live) — lets `start()`'s real waitForLockfile polling succeed
+ * quickly without spawning an actual child process. */
+function successfulLaunchDaemon(projectRoot: string) {
+	const calls: Array<{projectRoot: string; trustLevel: string}> = [];
+	return {
+		launch: (root: string, trustLevel: import('@/verify/trust').TrustLevel) => {
+			calls.push({projectRoot: root, trustLevel});
+			void writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(projectRoot),
+				startedAt: Date.now(),
+				projectRoot,
+			});
+			return {} as import('node:child_process').ChildProcess;
+		},
+		calls,
+	};
+}
+
+test.serial('unknown flag is rejected with exit 1 and no daemon spawned', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--bogus'],
+			launchDaemon: launcher.launch,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /Unknown flag/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('invalid --trust value is rejected with exit 1', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'yolo'],
+			launchDaemon: launcher.launch,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /Invalid --trust value/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('--trust flag takes precedence over the project config value', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'comment-only'}),
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+		t.regex(result.output, /CI trust level: auto-fix \(--trust flag\)/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('project config trust level is used when no flag is given', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+		t.regex(result.output, /CI trust level: auto-fix \(agents\.config\.json\)/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('defaults to comment-only when neither flag nor config is given', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'comment-only');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('full-commit: declining the confirmation aborts without spawning the daemon', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'full-commit'],
+			launchDaemon: launcher.launch,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmFullCommitTrust: async () => false,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /not confirmed/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('full-commit: accepting the confirmation records it and spawns the daemon', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	let recorded: string | undefined;
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'full-commit'],
+			launchDaemon: launcher.launch,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmFullCommitTrust: async () => true,
+			recordFullCommitTrustConfirmedFn: p => {
+				recorded = p;
+			},
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'full-commit');
+		t.is(recorded, root);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('full-commit: already-confirmed projects skip the prompt entirely', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	let promptCalled = false;
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'full-commit'],
+			launchDaemon: launcher.launch,
+			isFullCommitTrustConfirmedFn: () => true,
+			confirmFullCommitTrust: async () => {
+				promptCalled = true;
+				return true;
+			},
+		});
+		t.is(result.exitCode, 0);
+		t.false(promptCalled, 'the prompt must not run when already confirmed');
+		t.is(launcher.calls[0]?.trustLevel, 'full-commit');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('start output names the default trust level when nothing sets one', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.regex(result.output, /CI trust level: comment-only \(default\)/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('full-commit without an interactive terminal aborts instead of hanging', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	const original = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+	Object.defineProperty(process.stdin, 'isTTY', {value: false, configurable: true});
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'full-commit'],
+			launchDaemon: launcher.launch,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /one-time interactive confirmation/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		if (original) Object.defineProperty(process.stdin, 'isTTY', original);
+		else delete (process.stdin as {isTTY?: boolean}).isTTY;
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('--trust-directory alongside --trust is accepted by the start parser', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust-directory', '--trust', 'auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
 	}
 });

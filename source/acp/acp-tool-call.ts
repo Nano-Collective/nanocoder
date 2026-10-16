@@ -5,8 +5,14 @@ import type {
 	ToolCallLocation,
 	ToolKind,
 } from '@agentclientprotocol/sdk';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
+
+// A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.
+function resolveToolPath(path: string): string {
+	return resolve(getSafeSessionCwd(), path);
+}
 
 export interface AcpToolCallMeta {
 	title: string;
@@ -23,10 +29,12 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	read_file: 'read',
 	list_directory: 'read',
 	lsp_get_diagnostics: 'read',
+	lsp_format_document: 'edit',
 	search_file_contents: 'search',
 	find_files: 'search',
 	string_replace: 'edit',
 	write_file: 'edit',
+	diff_edit: 'edit',
 	execute_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',
@@ -69,6 +77,8 @@ export async function buildToolCallMeta(
 			};
 		case 'agent':
 			return buildAgentMeta(args, kind);
+		case 'file_op':
+			return buildFileOpMeta(args);
 		case 'execute_bash': {
 			const command = asString(args.command);
 			return {
@@ -85,7 +95,9 @@ export async function buildToolCallMeta(
 	}
 
 	const path = extractPath(args);
-	const locations: ToolCallLocation[] = path ? [{path: resolve(path)}] : [];
+	const locations: ToolCallLocation[] = path
+		? [{path: resolveToolPath(path)}]
+		: [];
 	const content: ToolCallContent[] = [];
 	let title = name;
 
@@ -102,6 +114,49 @@ export async function buildToolCallMeta(
 	}
 
 	return {title, kind, locations, content};
+}
+
+/**
+ * file_op is four tools behind one name, and the operation - not the name - is
+ * what tells a client whether a path is appearing, moving or going away.
+ *
+ * `locations` keeps the rule the rest of this file follows: the file the call
+ * leaves behind comes last. A move therefore reports [source, destination], so
+ * a client can follow the file to its new path instead of holding a reference
+ * to one that no longer exists.
+ */
+function buildFileOpMeta(args: Record<string, unknown>): AcpToolCallMeta {
+	const operation = asString(args.operation);
+	const path = extractPath(args);
+	const destination = asString(args.destination);
+
+	// mkdir stays 'other': it creates a directory, which is nothing to open.
+	const kind: ToolKind =
+		operation === 'delete'
+			? 'delete'
+			: operation === 'move'
+				? 'move'
+				: operation === 'copy'
+					? 'edit'
+					: 'other';
+
+	const locations: ToolCallLocation[] = [];
+	// A copy leaves its source untouched, so only the new file is reported, and
+	// mkdir reports nothing at all: clients treat `locations` as things to open,
+	// and the directory it creates is not one of them.
+	if (path && operation !== 'copy' && operation !== 'mkdir') {
+		locations.push({path: resolveToolPath(path)});
+	}
+	if (destination && (operation === 'move' || operation === 'copy')) {
+		locations.push({path: resolveToolPath(destination)});
+	}
+
+	const target = [path, destination].filter(Boolean).join(' → ');
+	const title = target
+		? `file_op: ${operation ?? 'run'} ${target}`
+		: `file_op: ${operation ?? 'run'}`;
+
+	return {title, kind, locations, content: []};
 }
 
 function buildAgentMeta(
@@ -149,7 +204,7 @@ async function buildStringReplaceDiff(
 		return undefined;
 	}
 
-	const absPath = resolve(path);
+	const absPath = resolveToolPath(path);
 	let current: string;
 	try {
 		current = await readFile(absPath, 'utf8');
@@ -182,7 +237,7 @@ async function buildWriteFileDiff(
 		typeof args.content === 'string'
 			? args.content
 			: String(args.content ?? '');
-	const absPath = resolve(path);
+	const absPath = resolveToolPath(path);
 
 	let oldText: string | null = null;
 	try {

@@ -100,6 +100,44 @@ test('CLI integration: help flag takes precedence over other arguments', t => {
 	t.true(output.includes('--version'));
 });
 
+test('CLI integration: worktree rejects malformed PR numbers before starting', t => {
+	for (const args of [
+		['worktree'],
+		['worktree', '0'],
+		['worktree', 'abc'],
+		['worktree', '42', 'extra'],
+	]) {
+		const result = spawnSync(process.execPath, [cliPath, ...args], {
+			encoding: 'utf8',
+		});
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('Usage: nanocoder worktree <PR-number>'));
+	}
+});
+
+test('CLI integration: worktree requires a TTY before any PR setup', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'worktree', '42'], {
+		encoding: 'utf8',
+	});
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('requires an interactive terminal (TTY)'));
+});
+
+test('CLI integration: help and version remain fast for worktree arguments', t => {
+	const help = runCliCommand(['worktree', 'bad', '--help']);
+	t.true(help.includes('worktree <PR-number>'));
+	const version = runCliCommand(['worktree', 'bad', '--version']);
+	t.regex(version, /^\d+\.\d+\.\d+$/);
+});
+
+test('CLI integration: review PR command retains its interactive guard', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
+		encoding: 'utf8',
+	});
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('`nanocoder review` requires an interactive terminal'));
+});
+
 test('CLI integration: init help exits successfully with preset guidance', t => {
 	const result = spawnSync(process.execPath, [cliPath, 'init', '--help'], {
 		encoding: 'utf8',
@@ -151,4 +189,34 @@ test.serial('CLI integration: init invalid preset exits with an error', t => {
 	} finally {
 		rmSync(projectPath, {recursive: true, force: true});
 	}
+});
+
+test.serial('CLI integration: completion zsh prints the zsh script to stdout', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'completion', 'zsh'], {
+		encoding: 'utf8',
+	});
+
+	t.is(result.status, 0);
+	t.true(result.stdout.startsWith('#compdef nanocoder'));
+});
+
+test.serial('CLI integration: completion without a shell exits 1 with usage', t => {
+	const result = spawnSync(process.execPath, [cliPath, 'completion'], {
+		encoding: 'utf8',
+	});
+
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('shell argument is required'));
+	t.true(result.stderr.includes('Usage: nanocoder completion'));
+});
+
+test.serial('CLI integration: completion with an unknown shell exits 1', t => {
+	const result = spawnSync(
+		process.execPath,
+		[cliPath, 'completion', 'tcsh'],
+		{encoding: 'utf8'},
+	);
+
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('unknown shell "tcsh"'));
 });

@@ -25,12 +25,17 @@ export class XMLToolCallParser {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
-		// Handle content that might be wrapped in markdown code blocks
+		// Handle content that might be wrapped in markdown code blocks. A fence
+		// inside a parameter value (e.g. markdown in write_file content) is that
+		// argument, not a wrapper.
 		let processedContent = ensureString(content);
 		const codeBlockMatch = processedContent.match(
 			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
 		);
-		if (codeBlockMatch && codeBlockMatch[1]) {
+		if (
+			codeBlockMatch?.[1] &&
+			!this.isInsideParameterValue(processedContent, codeBlockMatch.index ?? 0)
+		) {
 			processedContent = codeBlockMatch[1].trim();
 		}
 
@@ -61,6 +66,63 @@ export class XMLToolCallParser {
 		}
 
 		return toolCalls;
+	}
+
+	/**
+	 * Returns `[start, end)` offsets of valid XML tool calls in the raw content.
+	 */
+	static findToolCallRanges(content: string): Array<[number, number]> {
+		const ranges: Array<[number, number]> = [];
+		const unwrapped = this.blankToolCallWrappers(content);
+		const pattern = new RegExp(this.TOOL_CALL_REGEX);
+		let match: RegExpExecArray | null;
+		while ((match = pattern.exec(unwrapped)) !== null) {
+			const [fullMatch, toolName] = match;
+			if (this.isValidToolCall(fullMatch, toolName)) {
+				ranges.push([match.index, match.index + fullMatch.length]);
+			} else {
+				// A rejected wrapper such as <div> may still enclose a real call.
+				pattern.lastIndex = match.index + 1;
+			}
+		}
+		return ranges;
+	}
+
+	// Same-length blanking keeps offsets aligned with the caller's content.
+	private static blankToolCallWrappers(content: string): string {
+		return content.replace(/<\/?tool_call>/g, tag => ' '.repeat(tag.length));
+	}
+
+	private static isInsideParameterValue(
+		content: string,
+		index: number,
+	): boolean {
+		// A call around the index opens a tag before it and closes that tag
+		// after it; checking this first spares most fences the full scan.
+		const closedAfter = new Set(
+			Array.from(content.slice(index).matchAll(/<\/(\w+)>/g), m => m[1]),
+		);
+		const openedBefore = Array.from(
+			content.slice(0, index).matchAll(/<(\w+)>/g),
+			m => m[1],
+		);
+		if (!openedBefore.some(name => closedAfter.has(name))) return false;
+		const unwrapped = this.blankToolCallWrappers(content);
+		for (const [start, end] of this.findToolCallRanges(unwrapped)) {
+			if (index < start || index >= end) continue;
+			const openTagLength = unwrapped.indexOf('>', start) - start + 1;
+			const innerStart = start + openTagLength;
+			const inner = unwrapped.slice(innerStart, end - (openTagLength + 1));
+			const pattern = new RegExp(this.PARAMETER_REGEX);
+			let match: RegExpExecArray | null;
+			while ((match = pattern.exec(inner)) !== null) {
+				const valueStart = innerStart + match.index + match[1].length + 2;
+				if (index >= valueStart && index < valueStart + match[2].length) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -108,11 +170,6 @@ export class XMLToolCallParser {
 			return false;
 		}
 
-		// Check for malformed attribute-style syntax like <function=name> or <parameter=name>
-		if (fullMatch.includes('=')) {
-			return false;
-		}
-
 		// Check if the closing tag is properly formed
 		if (!fullMatch.endsWith(`</${toolName}>`)) {
 			return false;
@@ -123,6 +180,16 @@ export class XMLToolCallParser {
 			toolName.length + 2,
 			fullMatch.length - (toolName.length + 3),
 		);
+
+		// An `=` between parameters is attribute-style syntax such as
+		// <path=a.ts>; inside a parameter value it is ordinary content.
+		const parameterSyntax = innerContent.replace(
+			new RegExp(this.PARAMETER_REGEX),
+			'',
+		);
+		if (parameterSyntax.includes('=')) {
+			return false;
+		}
 
 		// Valid tool calls should contain parameter tags (other XML tags inside)
 		// This prevents matching on standalone parameter tags from malformed XML

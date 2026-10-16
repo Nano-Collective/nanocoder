@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -13,6 +14,9 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {readFileTool} from '@/tools/read-file';
+import type {Message} from '@/types/core';
+import {clearReadTracker} from '@/utils/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -177,12 +181,13 @@ test('AcpAgent.newSession - returns auto-accept as current mode', async t => {
 test('AcpAgent.newSession - returns all available modes', async t => {
 	const {agent} = createAgent();
 	const result = await agent.newSession({cwd: '/tmp'});
-	t.is(result.modes.availableModes.length, 4);
+	t.is(result.modes.availableModes.length, 5);
 	const modeIds = result.modes.availableModes.map((m: any) => m.id);
 	t.true(modeIds.includes('normal'));
 	t.true(modeIds.includes('auto-accept'));
 	t.true(modeIds.includes('yolo'));
 	t.true(modeIds.includes('plan'));
+	t.true(modeIds.includes('architect'));
 });
 
 test('AcpAgent.newSession - exposes available models and current model', async t => {
@@ -247,6 +252,118 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 		u => u.update?.sessionUpdate === 'user_message_chunk',
 	);
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
+});
+
+test('AcpAgent.loadSession - restores persisted response usage metadata', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await sessionManager.initialize();
+		const timestamp = new Date().toISOString();
+		await sessionManager.saveSession({
+			id: session.sessionId,
+			title: 'Usage replay',
+			createdAt: timestamp,
+			lastAccessedAt: timestamp,
+			messageCount: 2,
+			provider: 'test-provider',
+			model: 'test-model',
+			workingDirectory: '/tmp',
+			messages: [
+				{role: 'user', content: 'count this'},
+				{
+					role: 'assistant',
+					content: 'Counted.',
+					responseUsage: {
+						inputTokens: 6500,
+						outputTokens: 500,
+						totalTokens: 7000,
+						cost: 0.004,
+					},
+				},
+			],
+		});
+
+		const reloadedAgent = new AcpAgent(createMockInitContext(), conn);
+		updates.length = 0;
+		await reloadedAgent.loadSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+
+		const usageUpdate = updates.find(
+			update =>
+				update.update?._meta?.['nanocoder/response-usage'] !== undefined,
+		);
+		t.deepEqual(usageUpdate?.update._meta['nanocoder/response-usage'], {
+			inputTokens: 6500,
+			outputTokens: 500,
+			totalTokens: 7000,
+			cost: 0.004,
+		});
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent - attaches provider-reported usage to the response message', async t => {
+	const agent = new AcpAgent(createMockInitContext(), createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		const activeSession = (agent as any).sessions.get(session.sessionId);
+		activeSession.messages = [
+			{role: 'user', content: 'measure this'},
+			{role: 'assistant', content: 'Measured.'},
+		];
+		(agent as any).attachResponseUsage(activeSession, {
+			stopReason: 'end_turn',
+			usage: {inputTokens: 12, outputTokens: 3, totalTokens: 15},
+			_meta: {'nanocoder/usage': {cost: 0.0002}},
+		});
+
+		const assistant = [...activeSession.messages]
+			.reverse()
+			.find(message => message.role === 'assistant');
+		t.deepEqual(assistant?.responseUsage, {
+			inputTokens: 12,
+			outputTokens: 3,
+			totalTokens: 15,
+			cost: 0.0002,
+		});
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent - does not attach new usage to a previous response', async t => {
+	const agent = new AcpAgent(createMockInitContext(), createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		const activeSession = (agent as any).sessions.get(session.sessionId);
+		const previousAssistant: any = {role: 'assistant', content: 'Previous'};
+		activeSession.messages = [previousAssistant, {role: 'user', content: 'next'}];
+		(agent as any).attachResponseUsage(
+			activeSession,
+			{
+				stopReason: 'end_turn',
+				usage: {inputTokens: 12, outputTokens: 3, totalTokens: 15},
+			},
+			previousAssistant,
+		);
+
+		t.is(previousAssistant.responseUsage, undefined);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
 });
 
 test('AcpAgent.loadSession - hides internal walkthrough fallback messages', async t => {
@@ -457,7 +574,6 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 	);
 });
 
-
 test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	const {agent} = createAgent();
 	
@@ -517,6 +633,109 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 	const notice = persisted[persisted.length - 1];
 	t.is(notice.role, 'assistant');
 	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
+});
+
+const promptCustomCommandWithFile = async (
+	content: string,
+	parameters?: string[],
+): Promise<string> => {
+	const {agent} = createAgent();
+	agent['initContext'].customCommandLoader = {
+		getAllCommands: () => [],
+		getCommand: (name: string) =>
+			name === 'review'
+				? {
+						name: 'review',
+						fullName: 'review',
+						path: '/tmp/review.md',
+						content,
+						metadata: parameters ? {parameters} : {},
+					}
+				: undefined,
+	} as any;
+	let sent = '';
+	agent['initContext'].client.chat = async (messages: any[]) => {
+		sent = String(messages.findLast(m => m.role === 'user')?.content ?? '');
+		return {choices: [{message: {content: 'ok'}}]};
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{type: 'text', text: '/review'},
+			{
+				type: 'resource',
+				resource: {uri: 'src/auth.ts', text: 'export const auth = 1;'},
+			},
+		],
+	});
+	return sent;
+};
+
+test('AcpAgent.prompt - custom command keeps an attached file after the body', async t => {
+	const sent = await promptCustomCommandWithFile('Review the code.');
+	t.true(sent.includes('Review the code.'));
+	t.true(sent.includes('export const auth = 1;'));
+	t.true(sent.indexOf('Review the code.') < sent.indexOf('Contents of'));
+});
+
+test('AcpAgent.prompt - an attached file does not fill a custom command parameter', async t => {
+	const sent = await promptCustomCommandWithFile('Review {{target}}.', [
+		'target=HEAD',
+	]);
+	t.true(sent.includes('Review HEAD.'));
+	t.true(sent.includes('export const auth = 1;'));
+});
+
+test('AcpAgent.prompt - serializes overlapping prompts instead of throwing', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	let releaseFirst!: () => void;
+	const firstGate = new Promise<void>(resolve => {
+		releaseFirst = resolve;
+	});
+	let firstEntered!: () => void;
+	const firstEnteredAtChat = new Promise<void>(resolve => {
+		firstEntered = resolve;
+	});
+	let started = 0;
+
+	agent['initContext'].client.chat = async () => {
+		started += 1;
+		if (started === 1) {
+			firstEntered();
+			await firstGate;
+		}
+		return {choices: [{message: {content: `response-${started}`}}]};
+	};
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const second = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+
+	await firstEnteredAtChat;
+	// Drain multiple microtask cycles. A regression where the second waiter
+	// wakes up before the first turn's `releaseTurn()` would start the second
+	// chat call here; we want started to stay at 1 until release First().
+	for (let i = 0; i < 5; i++) {
+		await Promise.resolve();
+	}
+	t.is(
+		started,
+		1,
+		'A follow-up submitted mid-turn must wait, not throw RequestError: Internal error',
+	);
+
+	releaseFirst();
+	await Promise.all([first, second]);
+	t.is(started, 2);
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {
@@ -600,6 +819,38 @@ test('AcpAgent.prompt - a built-in command exchange stays out of model context',
 	t.true(messages.every(m => m.displayOnly));
 	t.deepEqual(convertToModelMessages(messages), []);
 });
+
+test.serial(
+	'AcpAgent.prompt - built-in replies persist with sessions but do not create one alone',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const commandOnlySession = await agent.newSession({cwd: '/tmp'});
+
+		await agent.prompt({
+			sessionId: commandOnlySession.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+		t.falsy(await sessionManager.readSession(commandOnlySession.sessionId));
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'real prompt'}],
+		});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.truthy(persisted);
+		t.true(
+			persisted!.messages.some(m => m.displayOnly),
+			'display-only built-in replies must remain in session history',
+		);
+	},
+);
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/definitelynotacommand');
@@ -799,6 +1050,103 @@ test.serial(
 	},
 );
 
+// ============================================================================
+// background session titling
+// ============================================================================
+
+test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		// Calls 1 and 2 are conversation turns; call 3 is the titler.
+		return chatCalls < 3
+			? {choices: [{message: {content: 'Done.'}}]}
+			: {choices: [{message: {content: 'Fix Login Redirect'}}]};
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+
+	await agent['pendingTitleGeneration'];
+	const beforeContext = await sessionManager.readSession(session.sessionId);
+	t.not(beforeContext?.titleGenerated, true);
+	t.is(chatCalls, 1);
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'summarize the README'}],
+	});
+
+	await agent['pendingTitleGeneration'];
+	const titled = await sessionManager.readSession(session.sessionId);
+	t.true(titled?.titleGenerated, 'expected a generated title to be persisted');
+	t.is(titled?.title, 'Fix Login Redirect');
+	// A generated title must never masquerade as a user rename.
+	t.not(titled?.titleManuallySet, true);
+
+	// A third turn must not re-title: titleGenerated short-circuits it.
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'and now this'}],
+	});
+	await agent['pendingTitleGeneration'];
+
+	const after = await sessionManager.readSession(session.sessionId);
+	t.is(after!.title, 'Fix Login Redirect');
+	// Exactly one more chat call, the conversation turn, and no second titler.
+	t.is(chatCalls, 4);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+	await agent['pendingTitleGeneration'];
+
+	// The cancel path early-returns from inside catch, which still runs the
+	// finally. Reaching the finally must not be mistaken for a clean turn.
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+	);
+	await agent['pendingTitleGeneration'];
+
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});
 /** Throwaway workspace for the timeline tests, removed by the caller. */
 const createTimelineWorkspace = (label: string): string => {
 	const cwd = join(
@@ -978,3 +1326,271 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
 	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
 });
+
+test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'first prompt'},
+		{role: 'assistant', content: 'first response'},
+		{role: 'user', content: 'second prompt'},
+		{role: 'assistant', content: 'second response'},
+	];
+
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'second prompt',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[0].content, 'first prompt');
+	t.is(session.messages[1].content, 'first response');
+
+	// Also verify retrying the first turn truncates all messages and saves to disk
+	const resultFirst = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+	t.true(resultFirst.ok);
+	t.is(session.messages.length, 0);
+
+	const stored = await sessionManager.loadSession(created.sessionId);
+	t.is(stored?.messageCount, 0);
+	t.deepEqual(stored?.messages, []);
+});
+
+test('AcpAgent.extMethod - retryTurn uses an exact prompt match and never picks a substring', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{role: 'user', content: 'foo'},
+		{role: 'assistant', content: 'r1'},
+		{role: 'user', content: 'foo bar'},
+		{role: 'assistant', content: 'r2'},
+	];
+
+	// Retrying the literal "foo bar" must truncate at the second user turn,
+	// not the earlier "foo" turn, even though "foo bar" contains "foo".
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'foo bar',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 2);
+	t.is(session.messages[1].content, 'r1');
+});
+
+test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried turn', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('retry');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'first prompt'},
+			{role: 'assistant', content: 'first response'},
+			{role: 'user', content: 'second prompt'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+
+		// A checkpoint captured during the first turn (kept across retry).
+		await session.timeline.capture({
+			toolCallId: 'call-0',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (first turn)',
+			truncateToMessageIndex: 0,
+			files: new Map([['a.ts', 'before']]),
+		});
+		// A checkpoint captured during the second turn (must be dropped).
+		const dropped = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts (second turn)',
+			truncateToMessageIndex: 2,
+			files: new Map([['a.ts', 'before']]),
+		});
+		t.truthy(dropped);
+
+		await agent.extMethod('retryTurn', {
+			sessionId: created.sessionId,
+			promptText: 'second prompt',
+		});
+
+		const entries = (await session.timeline.list()) as Array<{
+			id: string;
+		}>;
+		t.is(entries.length, 1);
+		t.not(entries[0].id, dropped?.id);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+
+// ============================================================================
+// read_file stubs follow the chat history
+// ============================================================================
+
+function createReadAgent(file: string): AcpAgent {
+	const context = createMockInitContext();
+	(context.client as any).chat = async (messages: Message[]) => {
+		const last = messages.at(-1);
+		if (last?.role === 'user' && String(last.content).includes('read it')) {
+			return {
+				choices: [
+					{
+						message: {
+							content: '',
+							tool_calls: [
+								{
+									id: `call-${randomUUID()}`,
+									function: {name: 'read_file', arguments: {path: file}},
+								},
+							],
+						},
+					},
+				],
+			};
+		}
+		return {choices: [{message: {content: 'done'}}]};
+	};
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	} as any;
+	return new AcpAgent(context, createMockConn());
+}
+
+async function sendText(agent: AcpAgent, sessionId: string, text: string) {
+	await agent.prompt({sessionId, prompt: [{type: 'text', text}]});
+}
+
+async function withAcpReadFixture(
+	run: (fixture: {
+		agent: AcpAgent;
+		sessionId: string;
+		dir: string;
+		lastRead: () => string;
+	}) => Promise<void>,
+): Promise<void> {
+	clearReadTracker();
+	let last = '';
+	setToolManagerGetter(() => null);
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => {
+			last = await readFileTool.tool.execute!(args, {
+				toolCallId: 'read',
+				messages: [],
+			});
+			return last;
+		},
+	}));
+	const dir = join(process.cwd(), `acp-read-stub-${randomUUID()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	try {
+		const agent = createReadAgent(file);
+		const {sessionId} = await agent.newSession({cwd: dir, mcpServers: []});
+		await run({agent, sessionId, dir, lastRead: () => last});
+	} finally {
+		clearReadTracker();
+		setToolRegistryGetter(() => ({}));
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('ACP /clear makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('already in context'));
+
+		await sendText(agent, sessionId, '/clear');
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial('ACP retryTurn makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+
+		await agent.extMethod('retryTurn', {sessionId});
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial(
+	'ACP timeline/revert makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			const session = (agent as any).sessions.get(sessionId);
+			writeFileSync(join(dir, 'other.ts'), 'before');
+			const entry = await session.timeline.capture({
+				toolCallId: 'call-other',
+				toolName: 'write_file',
+				title: 'write_file: other.ts',
+				truncateToMessageIndex: 0,
+				files: new Map([['other.ts', 'before']]),
+			});
+			await agent.extMethod('timeline/revert', {
+				sessionId,
+				checkpointId: entry.id,
+			});
+
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
+
+test.serial(
+	'ACP resumeSession makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			await agent.resumeSession({sessionId, cwd: dir, mcpServers: []});
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
+
+test.serial(
+	'ACP loadSession from disk makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			(agent as any).sessions.delete(sessionId);
+			t.false((agent as any).sessions.has(sessionId));
+			await agent.loadSession({sessionId, cwd: dir, mcpServers: []});
+			t.true((agent as any).sessions.has(sessionId));
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);

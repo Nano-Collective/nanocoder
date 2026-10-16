@@ -80,15 +80,7 @@ export async function fetchModels(
 			}
 			default: {
 				// OpenAI-compatible: GET {baseUrl}/models with Bearer auth
-				if (normalizedUrl.endsWith('/v1')) {
-					endpoint = `${normalizedUrl}/models`;
-				} else if (normalizedUrl.includes('/v1/')) {
-					const v1Index = normalizedUrl.indexOf('/v1/');
-					normalizedUrl = normalizedUrl.substring(0, v1Index + 3);
-					endpoint = `${normalizedUrl}/models`;
-				} else {
-					endpoint = `${normalizedUrl}/v1/models`;
-				}
+				endpoint = resolveOpenAICompatibleModelsEndpoint(normalizedUrl);
 				if (apiKey) {
 					headers.Authorization = `Bearer ${apiKey}`;
 				}
@@ -146,6 +138,28 @@ export async function fetchModels(
 	}
 }
 
+/**
+ * Work out the `/models` URL for an OpenAI-compatible base URL. Most base
+ * URLs end in an API version segment (`/v1`, `/v4`, `/v1beta`) and list
+ * models directly under it; a bare host (`http://localhost:8000`) gets `/v1`
+ * added. GitHub Models serves its catalogue outside the inference path.
+ */
+export function resolveOpenAICompatibleModelsEndpoint(baseUrl: string): string {
+	const url = baseUrl.trim().replace(/\/+$/, '');
+
+	if (/^https?:\/\/models\.github\.ai(\/|$)/i.test(url)) {
+		return 'https://models.github.ai/catalog/models';
+	}
+
+	const versionSegment = /\/v\d+(?:alpha|beta)?\d*(?=\/|$)/i;
+	const match = versionSegment.exec(url);
+	if (match) {
+		return `${url.slice(0, match.index + match[0].length)}/models`;
+	}
+
+	return `${url}/v1/models`;
+}
+
 function parseModelsResponse(
 	data: unknown,
 	apiCompatibility: ApiCompatibility,
@@ -180,12 +194,23 @@ function parseModelsResponse(
 			});
 	}
 
+	// GitHub Models' catalogue is a bare array of { id, name }.
+	if (Array.isArray(data)) {
+		return parseIdNameList(data);
+	}
+
 	// OpenAI-compatible and Anthropic both return { data: [{ id, ... }] }
 	const d = data as {
 		data?: Array<{id?: string; name?: string; display_name?: string}>;
 	};
 	if (!Array.isArray(d.data)) return [];
-	return d.data
+	return parseIdNameList(d.data);
+}
+
+function parseIdNameList(
+	list: Array<{id?: string; name?: string; display_name?: string}>,
+): FetchedModel[] {
+	return list
 		.filter(
 			(m): m is {id: string; name?: string; display_name?: string} =>
 				!!m && typeof m.id === 'string' && !!m.id.trim(),

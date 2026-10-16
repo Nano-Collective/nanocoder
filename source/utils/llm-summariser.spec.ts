@@ -1,7 +1,7 @@
 import test from 'ava';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
-import {summariseWithLLM} from './llm-summariser';
+import {summariseWithLLM, truncate} from './llm-summariser';
 
 function makeTokenizer(): Tokenizer {
 	return {
@@ -45,6 +45,55 @@ const systemMessage: Message = {
 	role: 'system',
 	content: 'You are a coding agent.',
 };
+
+test('truncate returns text untouched when it already fits', t => {
+	t.is(truncate('short', 10), 'short');
+	t.is(truncate('exact', 5), 'exact', 'a string of exactly max is not truncated');
+	t.is(truncate('', 0), '');
+});
+
+test('truncate never exceeds max, suffix included', t => {
+	// The suffix is part of the budget, so the total must fit — the bug was
+	// returning `max + suffix.length` characters.
+	for (const max of [30, 31, 40, 100, 400, 1200, 1500]) {
+		for (const length of [max + 1, max + 9, max + 10, max * 3, 100_000]) {
+			const result = truncate('a'.repeat(length), max);
+			t.true(
+				result.length <= max,
+				`truncate(${length} chars, ${max}) returned ${result.length} chars`,
+			);
+		}
+	}
+});
+
+test('truncate keeps as much content as the budget allows', t => {
+	const max = 60;
+	const result = truncate('a'.repeat(500), max);
+
+	t.is(result.length, max, 'the budget is spent, not undershot');
+	const kept = result.indexOf('...');
+	t.is(result, `${'a'.repeat(kept)}... [truncated ${500 - kept} chars]`);
+	// One more kept character would push the total past the budget.
+	t.true(kept + 1 + `... [truncated ${500 - kept - 1} chars]`.length > max);
+});
+
+test('truncate degrades to a hard slice when the notice would crowd out content', t => {
+	// Budgets too small for the notice at all.
+	for (const max of [1, 5, 20, 25]) {
+		const result = truncate('a'.repeat(1000), max);
+		t.is(result, 'a'.repeat(max));
+	}
+
+	// The boundary: for 30 chars of text a budget of 24 fits the notice
+	// `... [truncated 30 chars]` exactly, but with zero characters left beside
+	// it. A notice saying everything was dropped carries less than the text it
+	// displaced, so content wins — and the cap holds either way.
+	t.is(truncate('a'.repeat(30), 24), 'a'.repeat(24));
+
+	// One character of headroom more and the notice earns its place.
+	t.is(truncate('a'.repeat(30), 25), 'a... [truncated 29 chars]');
+	t.is(truncate('a'.repeat(30), 26), 'aa... [truncated 28 chars]');
+});
 
 test('summariseWithLLM returns [summary, ...recent] when segment is non-empty', async t => {
 	const tokenizer = makeTokenizer();

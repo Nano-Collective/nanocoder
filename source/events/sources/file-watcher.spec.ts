@@ -53,7 +53,8 @@ test.serial('emits add / change / unlink events', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
-	await new Promise(r => setTimeout(r, 100));
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		const file = join(dir, 'thing.txt');
@@ -107,7 +108,8 @@ test.serial('paths emitted are relative to the watch root', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
-	await new Promise(r => setTimeout(r, 100));
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		await writeFile(join(sub, 'leaf.ts'), 'x');
@@ -145,7 +147,8 @@ test.serial('subscriptions with paths filter narrow down events', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
-	await new Promise(r => setTimeout(r, 100));
+	// Wait for chokidar's initial scan to settle before writing files
+	await new Promise(r => setTimeout(r, 200));
 
 	try {
 		await mkdir(join(dir, 'docs'));

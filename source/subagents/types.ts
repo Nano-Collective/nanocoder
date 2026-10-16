@@ -61,10 +61,16 @@ export interface SubagentResult {
 	success: boolean;
 	/** Error message if execution failed */
 	error?: string;
-	/** Number of tokens used (if available) */
+	/** Approximate streamed token count for progress display, not billing usage */
 	tokensUsed?: number;
 	/** Execution time in milliseconds */
 	executionTimeMs: number;
+	/** Set by `ci-fix-orchestrator.ts` when a CI-fix run actually committed
+	 * and published a fix (auto-fix's draft PR, or full-commit's direct
+	 * push) — lets a caller distinguish "a fix was applied" from "just a
+	 * diagnosis" without string-sniffing `output`. Undefined/false for every
+	 * other kind of subagent run. */
+	fixApplied?: boolean;
 }
 
 /**
@@ -90,7 +96,7 @@ export interface SubagentContext {
 export enum SubagentLoadPriority {
 	/** Built-in defaults (lowest priority) */
 	BuiltIn = 0,
-	/** User-level configuration (~/.config/nanocoder/agents/) */
+	/** User-level configuration (<config dir>/agents/) */
 	User = 1,
 	/** Project-level configuration (.nanocoder/agents/) (highest priority) */
 	Project = 2,

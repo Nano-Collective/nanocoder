@@ -6,7 +6,11 @@ import {useEffect, useRef, useState} from 'react';
 import {z} from 'zod';
 import type {SwarmConfig} from '@/app/types';
 import type {LLMClient} from '@/types/core';
-import {createWorktree, ensureCleanTree} from '@/utils/git-worktree';
+import {
+	createWorktree,
+	ensureCleanTree,
+	ensureSwarmExcludes,
+} from '@/utils/git-worktree';
 import {
 	type TaskDefinition,
 	TaskSchema,
@@ -69,7 +73,9 @@ export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 		try {
 			// 1. Capture preSwarmCommit
 			setStatus('starting');
-			// Ensure the working tree is clean before running the swarm
+			// Keep swarm artifacts out of `git status` in this repo, then require a
+			// clean tree before running the swarm
+			ensureSwarmExcludes(process.cwd());
 			ensureCleanTree(process.cwd());
 
 			const {stdout} = await execFileAsync('git', ['rev-parse', 'HEAD']);
@@ -106,6 +112,7 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
     }
   ]
 }`,
+						abortController.current.signal,
 					);
 
 					tasks = result.tasks;
@@ -124,6 +131,7 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 					// Success
 					break;
 				} catch (err) {
+					if (abortController.current.signal.aborted) throw err;
 					if (attempt >= maxAttempts) {
 						throw new Error(
 							`Failed to decompose goal after ${maxAttempts} attempts: ${err instanceof Error ? err.message : String(err)}`,
@@ -131,6 +139,10 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 					}
 					// Will retry
 				}
+			}
+
+			if (abortController.current.signal.aborted) {
+				throw new Error('Swarm cancelled by user');
 			}
 
 			// Initialize worker states
@@ -362,6 +374,9 @@ IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
 			);
 			setError(err instanceof Error ? err.message : String(err));
 			setStatus('rolling_back');
+
+			// Stop any workers still running before their worktrees are removed.
+			abortController.current.abort(err);
 
 			// Cleanup worktrees and rollback
 			if (localPreSwarmCommit) {

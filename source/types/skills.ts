@@ -16,6 +16,7 @@ import type {CustomCommand} from '@/types/commands';
 import type {ToolEntry} from '@/types/core';
 
 export type SkillMemberKind = 'command' | 'agent' | 'tool';
+export type SkillTargetKind = SkillMemberKind | 'skill';
 
 /**
  * Resolved reference to a single skill member. The string form used in YAML
@@ -23,7 +24,7 @@ export type SkillMemberKind = 'command' | 'agent' | 'tool';
  * registrar before subscriptions are dispatched.
  */
 export interface SkillMemberRef {
-	kind: SkillMemberKind;
+	kind: SkillTargetKind;
 	name: string;
 }
 
@@ -81,12 +82,21 @@ export interface ScheduleCronTrigger extends SkillTriggerBase {
 	cron: string;
 }
 
+export interface CiJobFailedTrigger extends SkillTriggerBase {
+	kind: 'ci.job.failed';
+	/** Glob patterns; omitted = every branch the source polls. */
+	branches?: string[];
+}
+
 /**
  * A subscription declaration as it appears in user-authored YAML (either a
  * bundle manifest's `subscribe:` block or a member file's frontmatter).
  * The registrar resolves these into runtime `Subscription` objects.
  */
-export type SkillTrigger = FileChangedTrigger | ScheduleCronTrigger;
+export type SkillTrigger =
+	| FileChangedTrigger
+	| ScheduleCronTrigger
+	| CiJobFailedTrigger;
 
 export interface SkillSource {
 	priority: SkillPriority;

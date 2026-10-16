@@ -179,6 +179,29 @@ test('displayToolResult - compact mode condenses a validation failure too', asyn
 	unmount();
 });
 
+test('displayToolResult - compact mode marks a non-zero exit as a failure', async t => {
+	const toolCall = createMockToolCall('call-1', 'execute_bash');
+	// A failed command's output is ordinary stdout/stderr with no "Error: "
+	// prefix, so `isError` is the only thing separating it from a clean run.
+	// Without it this folded into the "Ran 1 command" tally and read as success.
+	const result: ToolResult = {
+		...createMockToolResult(
+			'call-1',
+			'execute_bash',
+			'EXIT_CODE: 1\nSTDERR:\nbuild failed\nSTDOUT:\n',
+		),
+		isError: true,
+	};
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue, true);
+
+	t.is(queue.length, 1);
+	const {lastFrame, unmount} = renderWithTheme(queue[0] as React.ReactElement);
+	t.regex(lastFrame()!, /execute_bash failed/);
+	unmount();
+});
+
 test('displayToolResult - non-compact error still shows full message', async t => {
 	const toolCall = createMockToolCall('call-1', 'write_file');
 	const result = createMockToolResult(
@@ -652,6 +675,26 @@ test('LiveCompactCounts - renders single count without plural', t => {
 	unmount();
 });
 
+// Regression (#1556): git_status, git_diff and git_log used to share the
+// same "Ran N git command(s)" phrasing, so a turn mixing them produced
+// indistinguishable rows.
+test('LiveCompactCounts - gives each git tool distinct phrasing', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts
+			counts={{git_status: 1, git_diff: 1, git_log: 1}}
+		/>,
+	);
+
+	const output = lastFrame()!;
+	const lines = output
+		.split('\n')
+		.map(line => line.trim())
+		.filter(Boolean);
+	t.is(lines.length, 3);
+	t.is(new Set(lines).size, 3, 'each git tool row must be distinct');
+	unmount();
+});
+
 test('LiveCompactCounts - renders empty counts without error', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<LiveCompactCounts counts={{}} />,
@@ -671,6 +714,35 @@ test('LiveCompactCounts - renders hammer icon for each entry', t => {
 	t.truthy(output);
 	const hammerCount = (output!.match(/\u2692/g) || []).length;
 	t.is(hammerCount, 2);
+	unmount();
+});
+
+const distinctToolCounts = (toolCount: number) =>
+	Object.fromEntries(
+		Array.from({length: toolCount}, (_, i) => [`mcp_tool_${i + 1}`, 1]),
+	);
+
+test('LiveCompactCounts - caps rows at 5 with a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(8)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /mcp_tool_6/);
+	t.regex(output, /\+3 more/);
+	t.is(output.trim().split('\n').length, 6);
+	unmount();
+});
+
+test('LiveCompactCounts - shows exactly 5 tools without a "+N more" line', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={distinctToolCounts(5)} />,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /mcp_tool_5/);
+	t.notRegex(output, /more/);
 	unmount();
 });
 
@@ -706,4 +778,33 @@ test('displayToolResult compact - unknown tool uses default description', t => {
 	displayToolResult(toolCall, result, null, addToChatQueue, true);
 
 	t.is(queue.length, 1);
+});
+
+// ============================================================================
+// Line Cap Tests
+// ============================================================================
+
+test('displayToolResult - names the /expand number when raw output is capped', async t => {
+	const content = Array.from({length: 25}, (_, i) => `row ${i + 1}`).join(
+		'\n',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(
+		createMockToolCall('call-1', 'NoFormatterTool'),
+		createMockToolResult('call-1', 'NoFormatterTool', content),
+		asMockToolManager(new MockToolManager()),
+		addToChatQueue,
+		false,
+		4,
+	);
+
+	const element = queue[0] as React.ReactElement;
+	t.regex(element.key as string, /call-1/);
+	const {lastFrame, unmount} = renderWithTheme(element);
+	const output = lastFrame()!;
+	t.regex(output, /row 20/);
+	t.notRegex(output, /row 21/);
+	t.regex(output, /\+5 more lines · \/expand 4/);
+	unmount();
 });

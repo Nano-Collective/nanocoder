@@ -1,3 +1,4 @@
+import {stripVTControlCharacters} from 'node:util';
 import test from 'ava';
 import type {Colors} from '../types/markdown-parser';
 import {parseMarkdownTable} from './table-parser';
@@ -130,4 +131,19 @@ test('parseMarkdownTable creates table with borders', t => {
 	const result = parseMarkdownTable(table, mockColors);
 	// Should contain table border characters
 	t.true(result.includes('─') || result.includes('│'));
+});
+
+const wideTable = `| Name | License | Stars | Language | Updated | Maintainer | Bundle | Downloads |
+|------|---------|-------|----------|---------|------------|--------|-----------|
+| solidjs | MIT | 32000 | TypeScript | 2024-05-01 | Ryan Carniato | 7kb | 1200000 |`;
+
+test('parseMarkdownTable keeps a many-column table within the terminal width', t => {
+	const result = parseMarkdownTable(wideTable, mockColors, 80);
+	const lines = stripVTControlCharacters(result).split('\n');
+	t.true(lines.every(line => line.length <= 80));
+	t.true(lines[0].startsWith('┌'));
+});
+
+test('parseMarkdownTable leaves a table that cannot fit as markdown', t => {
+	t.is(parseMarkdownTable(wideTable, mockColors, 20), wideTable);
 });

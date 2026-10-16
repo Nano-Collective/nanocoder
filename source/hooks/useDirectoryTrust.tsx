@@ -1,12 +1,17 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
-import {loadPreferences, savePreferences} from '@/config/preferences';
+import {
+	grantDirectoryTrust,
+	isDirectoryTrusted,
+	loadPreferences,
+	savePreferences,
+} from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 
 interface UseDirectoryTrustReturn {
 	isTrusted: boolean;
-	handleConfirmTrust: () => void;
+	handleConfirmTrust: (shownFingerprint?: string) => void;
 	isTrustLoading: boolean;
 	isTrustedError: string | null;
 }
@@ -22,13 +27,10 @@ function checkTrustSync(directory: string): {
 	error: string | null;
 } {
 	try {
-		const preferences = loadPreferences();
-		const trustedDirectories = preferences.trustedDirectories || [];
-		const normalizedDirectory = path.resolve(directory); // nosemgrep
-		const trusted = trustedDirectories.some(
-			trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-		);
-		return {trusted, error: null};
+		return {
+			trusted: isDirectoryTrusted(directory, loadPreferences()),
+			error: null,
+		};
 	} catch (err) {
 		const errorMessage = formatError(err);
 		logError(`${errorMessage}`);
@@ -58,37 +60,35 @@ export function useDirectoryTrust(
 	const [error, setError] = useState<string | null>(initial.error);
 
 	// Handler to confirm trust for the current directory
-	const handleConfirmTrust = useCallback(() => {
-		try {
-			setError(null);
+	const handleConfirmTrust = useCallback(
+		(shownFingerprint?: string) => {
+			try {
+				setError(null);
 
-			const preferences = loadPreferences();
-			const trustedDirectories = preferences.trustedDirectories || [];
+				const preferences = loadPreferences();
 
-			// Normalize the directory path before storing and checking
-			const normalizedDirectory = path.resolve(directory); // nosemgrep
+				if (!isDirectoryTrusted(directory, preferences)) {
+					const granted = grantDirectoryTrust(
+						preferences,
+						directory,
+						shownFingerprint,
+					);
+					savePreferences(granted);
+					logInfo(
+						`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
+					);
+				}
 
-			// Only add if not already trusted (check using normalized paths)
-			if (
-				!trustedDirectories.some(
-					trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-				)
-			) {
-				trustedDirectories.push(normalizedDirectory);
-				preferences.trustedDirectories = trustedDirectories;
-				savePreferences(preferences);
+				setIsTrusted(true);
+			} catch (err) {
+				const errorMessage = formatError(err);
+				setError(`Failed to save directory trust: ${errorMessage}`);
 
-				logInfo(`Directory added to trusted list: ${normalizedDirectory}`);
+				logError(`${errorMessage}`);
 			}
-
-			setIsTrusted(true);
-		} catch (err) {
-			const errorMessage = formatError(err);
-			setError(`Failed to save directory trust: ${errorMessage}`);
-
-			logError(`${errorMessage}`);
-		}
-	}, [directory]);
+		},
+		[directory],
+	);
 
 	return {
 		isTrusted,

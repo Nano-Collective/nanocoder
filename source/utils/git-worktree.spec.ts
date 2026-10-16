@@ -1,11 +1,12 @@
 import {execSync} from 'node:child_process';
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
 	createWorktree,
 	ensureCleanTree,
+	ensureSwarmExcludes,
 	isGitRepo,
 	removeWorktree,
 } from './git-worktree';
@@ -122,4 +123,26 @@ test('removeWorktree throws on unsafe branch name', t => {
 	t.throws(() => removeWorktree('worker-1', 'unsafe-branch', dir), {
 		message: /Name must start with "nanocoder-swarm-" for safety/,
 	});
+});
+
+test('ensureSwarmExcludes keeps swarm artifacts out of git status and is idempotent', t => {
+	const dir = createTestRepo('swarm-excludes');
+	try {
+		ensureSwarmExcludes(dir);
+		ensureSwarmExcludes(dir);
+		mkdirSync(join(dir, '.nanocoder', 'worktrees', '1'), {recursive: true});
+		writeFileSync(join(dir, '.nanocoder', 'worktrees', '1', 'a.txt'), 'x');
+		writeFileSync(join(dir, '.nanocoder', 'worker-1.patch'), 'x');
+		writeFileSync(join(dir, '.nanocoder', 'worker-1-error.log'), 'x');
+		writeFileSync(join(dir, '.nanocoder', 'swarm-error.log'), 'x');
+		t.notThrows(() => ensureCleanTree(dir));
+		const exclude = execSync('git rev-parse --git-path info/exclude', {
+			cwd: dir,
+			encoding: 'utf-8',
+		}).trim();
+		const content = readFileSync(join(dir, exclude), 'utf-8');
+		t.is(content.split('.nanocoder/worktrees/').length - 1, 1);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
 });

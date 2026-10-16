@@ -40,10 +40,12 @@ export interface MessageSubmissionOptions {
 		message: string,
 		displayValue?: string,
 		images?: ImageAttachment[],
+		historyMessages?: Message[],
 	) => Promise<void>;
 	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setLiveComponentCapturesInput: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
 	setMessages: (messages: Message[]) => void;

@@ -5,7 +5,5 @@
  * handling streaming responses, tool calls, and conversation state.
  */
 
-// Types
-export type {ChatHandlerReturn, UseChatHandlerProps} from './types';
 // Main hook
 export {useChatHandler} from './useChatHandler';

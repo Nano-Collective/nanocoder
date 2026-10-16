@@ -16,10 +16,8 @@ import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
-import {
-	setAutoCompactMode,
-	setAutoCompactThreshold,
-} from '@/utils/auto-compact';
+import {applyTuneCompaction} from '@/utils/auto-compact';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -237,6 +235,7 @@ export function useModeHandlers({
 				setCurrentModel(newModel);
 
 				setMessages([]);
+				bumpReadContentGeneration();
 				await newClient.clearContext();
 
 				const toolManager = getToolManager();
@@ -355,17 +354,13 @@ export function useModeHandlers({
 		setTune(config);
 		saveTune(config);
 
-		// Apply/remove auto-compact session overrides
-		if (config.enabled && config.aggressiveCompact) {
-			setAutoCompactThreshold(40);
-			setAutoCompactMode('aggressive');
-		} else {
-			setAutoCompactThreshold(null);
-			setAutoCompactMode(null);
-		}
+		// Tune's aggressive compact is its own layer below the user's explicit
+		// `/compact` overrides, so toggling it never clears those.
+		applyTuneCompaction(config);
 
 		// Clear conversation when toggling — tool profiles change what's available
 		setMessages([]);
+		bumpReadContentGeneration();
 		if (client) {
 			await client.clearContext();
 		}

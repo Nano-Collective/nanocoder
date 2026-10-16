@@ -6,7 +6,7 @@ import type {
 	ToolCallPart,
 	UserContent,
 } from 'ai';
-import type {Message} from '@/types/index';
+import type {ImageAttachment, Message} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {filterModelFacing} from '@/utils/message-visibility';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -125,6 +125,54 @@ export function withCacheBreakpoints(
 }
 
 /**
+ * Where tool-result images go.
+ * - inline: inside the tool result (Anthropic, Google, OpenAI Responses).
+ * - user-message: Chat Completions only allows text in a tool message, and
+ *   the SDK would stringify the base64 into it. Send the images in a user
+ *   message after the run of tool results instead.
+ * - omit: the model takes no image input.
+ */
+export type ToolImageDelivery = 'inline' | 'user-message' | 'omit';
+
+function placeToolImages(
+	messages: Message[],
+	delivery: ToolImageDelivery,
+): Message[] {
+	if (delivery === 'inline') {
+		return messages;
+	}
+	const placed: Message[] = [];
+	let pending: ImageAttachment[] = [];
+	messages.forEach((msg, index) => {
+		if (msg.role === 'tool' && msg.images && msg.images.length > 0) {
+			const {images, ...text} = msg;
+			if (delivery === 'omit') {
+				placed.push({
+					...text,
+					content: `${text.content}\n[Image not sent: this model does not accept image input.]`,
+				});
+			} else {
+				placed.push(text);
+				pending.push(...images);
+			}
+		} else {
+			placed.push(msg);
+		}
+		// Every tool result has to follow its assistant turn directly, so the
+		// image message waits until the run of tool results ends.
+		if (pending.length > 0 && messages[index + 1]?.role !== 'tool') {
+			placed.push({
+				role: 'user',
+				content: 'Images from the tool results above.',
+				images: pending,
+			});
+			pending = [];
+		}
+	});
+	return placed;
+}
+
+/**
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
  * Tool messages: Converted to AI SDK tool-result format with proper structure.
@@ -137,7 +185,10 @@ export function withCacheBreakpoints(
  * carrying tool_calls would take its answering tool results down with it —
  * that combination is a bug, so warn loudly rather than fail silently.
  */
-export function convertToModelMessages(messages: Message[]): ModelMessage[] {
+export function convertToModelMessages(
+	messages: Message[],
+	toolImages: ToolImageDelivery = 'inline',
+): ModelMessage[] {
 	const modelFacing = filterModelFacing(messages);
 	if (modelFacing.length !== messages.length) {
 		for (const msg of messages) {
@@ -152,13 +203,39 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 			}
 		}
 	}
-	return dropOrphanedToolResults(modelFacing).map((msg): ModelMessage => {
+	const paired = placeToolImages(
+		dropOrphanedToolResults(modelFacing),
+		toolImages,
+	);
+	return paired.map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
-			// Convert to AI SDK tool-result format
-			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }
-			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
-			// Structured tool results travel as JSON so the model can reason over
-			// the typed shape; everything else falls back to the text content.
+			// Convert to AI SDK tool-result format.
+			// output is text, json, or content. content is the SDK's multimodal
+			// tool result: text parts plus image-data. Anthropic, Google, and
+			// OpenAI Responses each map image-data onto their own image block.
+			if (msg.images && msg.images.length > 0) {
+				return {
+					role: 'tool',
+					content: [
+						{
+							type: 'tool-result',
+							toolCallId: msg.tool_call_id || '',
+							toolName: msg.name || '',
+							output: {
+								type: 'content',
+								value: [
+									{type: 'text', text: truncateToolResult(msg.content)},
+									...msg.images.map(image => ({
+										type: 'image-data' as const,
+										data: image.data,
+										mediaType: image.mediaType,
+									})),
+								],
+							},
+						},
+					],
+				};
+			}
 			let output;
 			if (msg.structuredContent === undefined) {
 				output = {

@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {formatParameterUsage} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -18,11 +19,8 @@ interface CustomCommandsProps {
  * of each command entry. Description and aliases now render on their own
  * indented secondary lines for visual consistency with `/agents`. */
 function formatCommandHeader(cmd: CustomCommand): string {
-	const parts: string[] = [`/${cmd.fullName}`];
-	if (cmd.metadata.parameters && cmd.metadata.parameters.length > 0) {
-		parts.push(cmd.metadata.parameters.map((p: string) => `<${p}>`).join(' '));
-	}
-	return parts.join(' ');
+	const usage = formatParameterUsage(cmd.metadata.parameters);
+	return usage ? `/${cmd.fullName} ${usage}` : `/${cmd.fullName}`;
 }
 
 function aliasesLine(cmd: CustomCommand): string | null {

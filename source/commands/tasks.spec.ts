@@ -3,6 +3,7 @@ import {rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import React from 'react';
 import type {Command} from '@/types/index';
 import type {Task} from '@/tools/tasks/types.js';
 
@@ -61,6 +62,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-1',
 			title: 'First Task',
+			description: 'First task description',
 			status: 'pending',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-01T00:00:00.000Z',
@@ -75,6 +77,7 @@ function getSampleTasks(): Task[] {
 		{
 			id: 'task-3',
 			title: 'Third Task',
+			description: 'Third task description',
 			status: 'completed',
 			createdAt: '2024-01-01T00:00:00.000Z',
 			updatedAt: '2024-01-03T00:00:00.000Z',
@@ -111,9 +114,10 @@ test('handler - lists tasks when no args provided', async t => {
 
 		const result = await tasksCommand.handler([]);
 
-		t.truthy(result);
-		// Result should be a React element
-		t.is(typeof result, 'object');
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
 	} finally {
 		env.restore();
 	}
@@ -320,30 +324,132 @@ test('handler - clear works when no tasks exist', async t => {
 });
 
 // ============================================================================
-// Default Behavior Tests (unknown subcommand = add task)
+// Update Task Status Tests
 // ============================================================================
 
-test('handler - treats unknown subcommand as task title', async t => {
-	const env = await setupTestEnv('default-add');
+test('handler - completes a task with "done" subcommand', async t => {
+	const env = await setupTestEnv('complete-task');
 	try {
-		await tasksCommand.handler(['Fix', 'the', 'bug']);
+		await saveTasks(getSampleTasks());
+		const before = new Date().toISOString();
+
+		await tasksCommand.handler(['done', '1']);
 
 		const tasks = await loadTasks();
-		t.is(tasks.length, 1);
-		t.is(tasks[0]?.title, 'Fix the bug');
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
+		t.is(tasks[0]?.title, 'First Task');
+		t.is(tasks[0]?.description, 'First task description');
+		t.is(tasks[0]?.status, 'completed');
+		t.truthy(tasks[0]?.completedAt);
+		t.truthy(tasks[0]?.updatedAt);
+		t.true(tasks[0]!.updatedAt >= before);
 	} finally {
 		env.restore();
 	}
 });
 
-test('handler - treats single word as task title', async t => {
-	const env = await setupTestEnv('single-word');
+test('handler - supports complete alias and clears completedAt when starting', async t => {
+	const env = await setupTestEnv('start-task');
 	try {
-		await tasksCommand.handler(['Refactor']);
+		await saveTasks(getSampleTasks());
 
+		await tasksCommand.handler(['start', '3']);
+		let tasks = await loadTasks();
+		t.is(tasks[2]?.id, 'task-3');
+		t.is(tasks[2]?.title, 'Third Task');
+		t.is(tasks[2]?.description, 'Third task description');
+		t.is(tasks[2]?.status, 'in_progress');
+		t.falsy(tasks[2]?.completedAt);
+
+		await tasksCommand.handler(['complete', '1']);
+		tasks = await loadTasks();
+		t.is(tasks[0]?.status, 'completed');
+		t.truthy(tasks[0]?.completedAt);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for invalid status task number', async t => {
+	const env = await setupTestEnv('status-invalid');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['done', 'abc']);
+
+		t.truthy(result);
 		const tasks = await loadTasks();
-		t.is(tasks.length, 1);
-		t.is(tasks[0]?.title, 'Refactor');
+		t.is(tasks[0]?.status, 'pending');
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for status task number out of range', async t => {
+	const env = await setupTestEnv('status-range');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['start', '99']);
+
+		t.truthy(result);
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+	} finally {
+		env.restore();
+	}
+});
+
+// ============================================================================
+// Explicit Command Validation Tests
+// ============================================================================
+
+test('handler - lists tasks with "list" subcommand', async t => {
+	const env = await setupTestEnv('list-subcommand');
+	try {
+		await saveTasks(getSampleTasks());
+		const result = await tasksCommand.handler(['list']);
+
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TasksDisplay');
+		}
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - returns error for unknown subcommand without adding a task', async t => {
+	const env = await setupTestEnv('unknown-subcommand');
+	try {
+		const result = await tasksCommand.handler(['completee', '1']);
+
+		t.true(React.isValidElement(result));
+		if (React.isValidElement(result) && typeof result.type === 'function') {
+			t.is(result.type.name, 'TaskMessage');
+			t.true(result.props.message.includes('Unknown subcommand'));
+		}
+		const tasks = await loadTasks();
+		t.is(tasks.length, 0);
+	} finally {
+		env.restore();
+	}
+});
+
+test('handler - rejects trailing characters in remove task number', async t => {
+	const env = await setupTestEnv('remove-invalid-suffix');
+	try {
+		await saveTasks(getSampleTasks());
+
+		const result = await tasksCommand.handler(['remove', '1abc']);
+
+		t.true(React.isValidElement(result));
+		const tasks = await loadTasks();
+		t.is(tasks.length, 3);
+		t.is(tasks[0]?.id, 'task-1');
 	} finally {
 		env.restore();
 	}
@@ -415,9 +521,9 @@ test('handler - handles special characters in task title', async t => {
 test('handler - generates unique task IDs', async t => {
 	const env = await setupTestEnv('unique-ids');
 	try {
-		await tasksCommand.handler(['Task 1']);
-		await tasksCommand.handler(['Task 2']);
-		await tasksCommand.handler(['Task 3']);
+		await tasksCommand.handler(['add', 'Task 1']);
+		await tasksCommand.handler(['add', 'Task 2']);
+		await tasksCommand.handler(['add', 'Task 3']);
 
 		const tasks = await loadTasks();
 		const ids = tasks.map(t => t.id);
@@ -432,7 +538,7 @@ test('handler - sets proper timestamps on new task', async t => {
 	const env = await setupTestEnv('timestamps');
 	try {
 		const before = new Date().toISOString();
-		await tasksCommand.handler(['New', 'Task']);
+		await tasksCommand.handler(['add', 'New', 'Task']);
 		const after = new Date().toISOString();
 
 		const tasks = await loadTasks();

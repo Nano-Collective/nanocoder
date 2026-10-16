@@ -16,6 +16,7 @@ import {basename} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {createTerminalFileLink as createFileLink} from '@/utils/terminal-file-link';
@@ -33,6 +34,8 @@ export interface PlanReviewPromptProps {
 	onModify: () => void;
 	/** Stay in plan mode and ask additional clarifying questions. */
 	onAskMore: () => void;
+	/** Called when user presses Escape to dismiss prompt. */
+	onDismiss?: () => void;
 }
 
 type PlanAction = 'proceed' | 'modify' | 'askMore';
@@ -66,6 +69,7 @@ export default function PlanReviewPrompt({
 	onProceed,
 	onModify,
 	onAskMore,
+	onDismiss,
 }: PlanReviewPromptProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -74,7 +78,11 @@ export default function PlanReviewPrompt({
 	// SelectInput owns up/down/Enter. Escape is the safe, non-executing path.
 	useInput((_input, key) => {
 		if (key.escape) {
-			onModify();
+			if (onDismiss) {
+				onDismiss();
+			} else {
+				onModify();
+			}
 		}
 	});
 
@@ -92,67 +100,61 @@ export default function PlanReviewPrompt({
 		OPTIONS.find(o => o.value === highlighted)?.description ?? '';
 
 	return (
-		<Box
-			flexDirection="column"
-			marginTop={1}
-			marginBottom={1}
-			padding={1}
+		<TitledBoxWithPreferences
+			title="Plan ready."
 			width={boxWidth}
-			borderStyle="bold"
-			borderLeft={true}
-			borderRight={false}
-			borderTop={false}
-			borderBottom={false}
-			borderLeftColor={colors.primary}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			marginBottom={1}
 		>
-			<Box marginBottom={2}>
-				<Text color={colors.primary} bold>
-					📋 Plan ready.{' '}
-				</Text>
-				<Text color={colors.secondary}>What would you like to do?</Text>
-			</Box>
-
-			{artifactPath && (
-				<Box flexDirection="column" marginBottom={2}>
-					<Text color={colors.secondary}>Saved plan</Text>
-
-					{/* The link is the actionable thing, so it leads. The raw path
-					    sits below it, dimmed and separated — it is the fallback for
-					    terminals without OSC-8 hyperlinks, and for copy/paste. */}
-					<Box marginTop={1}>
-						<Text color={colors.primary} underline>
-							{createTerminalFileLink(artifactPath)}
-						</Text>
-						<Text color={colors.secondary}> · Cmd/Ctrl+click to open</Text>
-					</Box>
-
-					<Box marginTop={1}>
-						<Text color={colors.secondary} dimColor wrap="wrap">
-							{artifactPath}
-						</Text>
-					</Box>
+			<Box flexDirection="column">
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>What would you like to do?</Text>
 				</Box>
-			)}
 
-			<StyledSelectInput
-				items={OPTIONS}
-				onSelect={handleSelect}
-				onHighlight={item => setHighlighted(item.value)}
-			/>
+				{artifactPath && (
+					<Box flexDirection="column" marginBottom={1}>
+						<Text color={colors.secondary}>Saved plan</Text>
 
-			{/* The highlighted option's description already states whether the
-			    choice leaves Plan Mode, so there is no separate summary line. */}
-			<Box marginTop={1} marginBottom={1}>
-				<Text color={colors.secondary} italic wrap="wrap">
-					{activeDescription}
-				</Text>
+						{/* The link is the actionable thing, so it leads. The raw path
+						    sits below it, dimmed and separated — it is the fallback for
+						    terminals without OSC-8 hyperlinks, and for copy/paste. */}
+						<Box marginTop={1}>
+							<Text color={colors.primary} underline>
+								{createTerminalFileLink(artifactPath)}
+							</Text>
+							<Text color={colors.secondary}> · Cmd/Ctrl+click to open</Text>
+						</Box>
+
+						<Box marginTop={1}>
+							<Text color={colors.secondary} dimColor wrap="wrap">
+								{artifactPath}
+							</Text>
+						</Box>
+					</Box>
+				)}
+
+				<StyledSelectInput
+					items={OPTIONS}
+					onSelect={handleSelect}
+					onHighlight={item => setHighlighted(item.value)}
+				/>
+
+				{/* The highlighted option's description already states whether the
+				    choice leaves Plan Mode, so there is no separate summary line. */}
+				<Box marginTop={1}>
+					<Text color={colors.secondary} italic wrap="wrap">
+						{activeDescription}
+					</Text>
+				</Box>
+
+				<Box marginTop={1}>
+					<Text color={colors.secondary} dimColor>
+						↑/↓ to move · Enter to select · Esc to request changes
+					</Text>
+				</Box>
 			</Box>
-
-			<Box>
-				<Text color={colors.secondary} dimColor>
-					↑/↓ to move · Enter to select · Esc to request changes
-				</Text>
-			</Box>
-		</Box>
+		</TitledBoxWithPreferences>
 	);
 }

@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url);
 type DiffChange = {value: string; added?: boolean; removed?: boolean};
 type DiffModule = {
 	diffWordsWithSpace: (oldText: string, newText: string) => DiffChange[];
+	diffLines: (oldText: string, newText: string) => DiffChange[];
 };
 let diffLib: DiffModule | null = null;
 function loadDiffLib(): DiffModule {
@@ -22,6 +23,93 @@ function loadDiffLib(): DiffModule {
 		diffLib = require('diff') as DiffModule;
 	}
 	return diffLib;
+}
+
+export type LineDiffEntry =
+	| {type: 'unchanged'; text: string; oldLine: number; newLine: number}
+	| {type: 'added'; text: string; newLine: number}
+	| {type: 'removed'; text: string; oldLine: number};
+
+/**
+ * Compute a line-level diff between two full texts, tracking each line's
+ * position in the original and/or updated file (unlike computeInlineDiff,
+ * which assumes both inputs are already the same known region).
+ */
+export function computeLineDiff(
+	oldText: string,
+	newText: string,
+): LineDiffEntry[] {
+	const {diffLines} = loadDiffLib();
+	const changes = diffLines(oldText, newText);
+	const entries: LineDiffEntry[] = [];
+	let oldLine = 0;
+	let newLine = 0;
+
+	for (const change of changes) {
+		const lines = change.value.split('\n');
+		if (lines.length > 0 && lines[lines.length - 1] === '') {
+			lines.pop();
+		}
+
+		for (const line of lines) {
+			if (change.added) {
+				newLine++;
+				entries.push({type: 'added', text: line, newLine});
+			} else if (change.removed) {
+				oldLine++;
+				entries.push({type: 'removed', text: line, oldLine});
+			} else {
+				oldLine++;
+				newLine++;
+				entries.push({type: 'unchanged', text: line, oldLine, newLine});
+			}
+		}
+	}
+
+	return entries;
+}
+
+export type CollapsedDiffEntry = LineDiffEntry | {type: 'gap'; count: number};
+
+/**
+ * Keep unchanged lines only within `context` lines of an added or removed
+ * line, replacing each longer unchanged run with one gap entry. A diff of a
+ * long file then opens on its edits instead of on untouched lines.
+ */
+export function collapseUnchangedLines(
+	entries: LineDiffEntry[],
+	context = 3,
+): CollapsedDiffEntry[] {
+	const nearChange = new Array<boolean>(entries.length).fill(false);
+
+	let lastChange = Number.NEGATIVE_INFINITY;
+	for (let i = 0; i < entries.length; i++) {
+		if (entries[i].type !== 'unchanged') lastChange = i;
+		if (i - lastChange <= context) nearChange[i] = true;
+	}
+
+	let nextChange = Number.POSITIVE_INFINITY;
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i].type !== 'unchanged') nextChange = i;
+		if (nextChange - i <= context) nearChange[i] = true;
+	}
+
+	const collapsed: CollapsedDiffEntry[] = [];
+	let gap = 0;
+	for (let i = 0; i < entries.length; i++) {
+		if (!nearChange[i]) {
+			gap++;
+			continue;
+		}
+		if (gap > 0) {
+			collapsed.push({type: 'gap', count: gap});
+			gap = 0;
+		}
+		collapsed.push(entries[i]);
+	}
+	if (gap > 0) collapsed.push({type: 'gap', count: gap});
+
+	return collapsed;
 }
 
 /**

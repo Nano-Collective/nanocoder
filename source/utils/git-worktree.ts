@@ -1,6 +1,6 @@
 import {execFileSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {appendFileSync, existsSync, mkdirSync, readFileSync} from 'node:fs';
+import {dirname, resolve} from 'node:path';
 
 /**
  * Helper to run git commands synchronously.
@@ -136,4 +136,35 @@ export function removeWorktree(
 		const err = error as Error;
 		throw new Error(`Failed to delete branch ${branchName}: ${err.message}`);
 	}
+}
+
+const SWARM_EXCLUDES = [
+	'.nanocoder/worktrees/',
+	'.nanocoder/*.patch',
+	'.nanocoder/worker-*',
+	'.nanocoder/swarm-error.log',
+];
+
+/**
+ * Keeps swarm artifacts (worktrees, saved patches, logs) out of `git status`
+ * in the user's repository via `.git/info/exclude`, without touching any
+ * tracked file. Without this, the first swarm run leaves untracked files that
+ * make the next run's clean-tree check fail, and the rollback's `git clean`
+ * would delete the saved patches.
+ */
+export function ensureSwarmExcludes(cwd: string = process.cwd()): void {
+	const excludePath = resolve(
+		cwd,
+		runGitCmd(['rev-parse', '--git-path', 'info/exclude'], cwd).trim(),
+	);
+	const existing = existsSync(excludePath)
+		? readFileSync(excludePath, 'utf-8')
+		: '';
+	const missing = SWARM_EXCLUDES.filter(
+		line => !existing.split('\n').includes(line),
+	);
+	if (missing.length === 0) return;
+	mkdirSync(dirname(excludePath), {recursive: true});
+	const prefix = existing === '' || existing.endsWith('\n') ? '' : '\n';
+	appendFileSync(excludePath, `${prefix}${missing.join('\n')}\n`);
 }

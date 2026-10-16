@@ -11,7 +11,7 @@ const FILENAME = 'codex-credentials.json';
 
 /** Shared message when no Codex credential is found. */
 export function getCodexNoCredentialsMessage(providerName: string): string {
-	return `No Codex credentials for "${providerName}". Type /codex-login in the chat to log in, or run: nanocoder codex login`;
+	return `No Codex credentials for "${providerName}". Type /codex-login ${providerName} in the chat to log in, or run: nanocoder codex login "${providerName}"`;
 }
 
 export interface CodexCredential {
@@ -63,6 +63,25 @@ export function saveCodexCredential(
 }
 
 /**
+ * Copy only the fields that were actually sent.
+ * JSON.stringify drops keys whose value is undefined, so a refresh that
+ * omits accountId or refreshToken must not overwrite the saved ones.
+ */
+export function mergeCodexCredential(
+	existing: CodexCredential,
+	updates: Partial<CodexCredential>,
+): CodexCredential {
+	const next = {...existing};
+	if (updates.accessToken !== undefined) next.accessToken = updates.accessToken;
+	if (updates.refreshToken !== undefined) {
+		next.refreshToken = updates.refreshToken;
+	}
+	if (updates.expiresAt !== undefined) next.expiresAt = updates.expiresAt;
+	if (updates.accountId !== undefined) next.accountId = updates.accountId;
+	return next;
+}
+
+/**
  * Update specific fields of a stored credential (e.g. after token refresh).
  */
 export function updateCodexCredential(
@@ -72,7 +91,7 @@ export function updateCodexCredential(
 	const store = credentialStore.load();
 	const existing = store[providerName];
 	if (!existing) return;
-	store[providerName] = {...existing, ...updates};
+	store[providerName] = mergeCodexCredential(existing, updates);
 	credentialStore.write(store);
 }
 

@@ -2,14 +2,22 @@ import type {MCPServerConfig} from '@/types/config';
 import {logWarning} from '@/utils/message-queue';
 
 /**
- * Validate MCP configuration for security issues
- * Checks for hardcoded credentials and other security concerns
+ * Collect MCP security findings as strings (no logging). Exported so tests
+ * and callers can assert on the scanner without capturing logWarning, which
+ * is a module binding and not monkey-patchable from globalThis.
+ *
+ * Prefers rawEnv/rawHeaders (pre-substitution snapshots from the loader) so
+ * `$API_KEY` is not reported as a hardcoded credential after env expansion.
  */
-export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
+export function collectMCPSecurityFindings(
+	mcpServers: MCPServerConfig[],
+): string[] {
+	const findings: string[] = [];
+
 	for (const server of mcpServers) {
-		// Check for hardcoded credentials in environment variables
-		if (server.env) {
-			for (const [key, value] of Object.entries(server.env)) {
+		const env = server.rawEnv ?? server.env;
+		if (env) {
+			for (const [key, value] of Object.entries(env)) {
 				// Check if the value is hardcoded (not an environment variable reference)
 				if (
 					typeof value === 'string' &&
@@ -20,7 +28,7 @@ export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
 						key.toLowerCase().includes('password') ||
 						key.toLowerCase().includes('auth'))
 				) {
-					logWarning(
+					findings.push(
 						`Security warning: Hardcoded credential detected in MCP server "${server.name}" for environment variable "${key}". ` +
 							'Consider using environment variable references (e.g., "$API_KEY") instead of hardcoded values.',
 					);
@@ -28,9 +36,9 @@ export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
 			}
 		}
 
-		// Check for hardcoded credentials in headers
-		if (server.headers) {
-			for (const [key, value] of Object.entries(server.headers)) {
+		const headers = server.rawHeaders ?? server.headers;
+		if (headers) {
+			for (const [key, value] of Object.entries(headers)) {
 				if (
 					typeof value === 'string' &&
 					(key.toLowerCase().includes('authorization') ||
@@ -38,13 +46,25 @@ export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
 						key.toLowerCase().includes('token')) &&
 					!value.startsWith('$')
 				) {
-					logWarning(
+					findings.push(
 						`Security warning: Hardcoded header value detected in MCP server "${server.name}" for header "${key}". ` +
 							'Consider using environment variable references (e.g., "$HEADER_VALUE") instead of hardcoded values.',
 					);
 				}
 			}
 		}
+	}
+
+	return findings;
+}
+
+/**
+ * Validate MCP configuration for security issues
+ * Checks for hardcoded credentials and other security concerns
+ */
+export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
+	for (const finding of collectMCPSecurityFindings(mcpServers)) {
+		logWarning(finding);
 	}
 }
 

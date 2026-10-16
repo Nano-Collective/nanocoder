@@ -7,6 +7,7 @@ import {
 } from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
+import type {ResponseUsage} from '@/types/usage';
 
 export {asSchema, jsonSchema, tool};
 
@@ -36,6 +37,8 @@ export interface Message {
 	reasoning?: string;
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
+	durationMs?: number;
+	outcome?: 'completed' | 'cancelled' | 'failed';
 	/**
 	 * Harness-authored chrome: rendered in chat and persisted with session
 	 * history, but filtered out of the provider payload (see
@@ -47,6 +50,12 @@ export interface Message {
 	 * drops the tool results that answer it.
 	 */
 	displayOnly?: boolean;
+	/**
+	 * Provider-reported usage for the completed ACP prompt that produced this
+	 * assistant message. Persisted so clients can restore the response footer
+	 * when a saved session is replayed. Older sessions omit this field.
+	 */
+	responseUsage?: ResponseUsage;
 }
 
 export interface ToolCall {
@@ -63,6 +72,8 @@ export interface ToolResult {
 	name: string;
 	content: string;
 	structuredContent?: JSONValue;
+	/** Raw base64. Sent as image parts, not copied into `content`. */
+	images?: ImageAttachment[];
 	isError?: boolean;
 }
 
@@ -87,10 +98,26 @@ export interface Tool {
 
 export interface StructuredToolOutput {
 	llmContent: string;
-	structured: JSONValue;
+	structured?: JSONValue;
+	/**
+	 * Set by a handler whose run failed without throwing - a shell command that
+	 * exited non-zero, say - so the result carries the failure instead of every
+	 * caller re-deriving it from the text.
+	 */
+	isError?: boolean;
 }
 
-export type ToolExecuteResult = string | StructuredToolOutput;
+export interface VisualToolOutput {
+	llmContent: string;
+	images: ImageAttachment[];
+	/** Same failure flag as `StructuredToolOutput`. A throw still becomes `isError` in the catch path. */
+	isError?: boolean;
+}
+
+export type ToolExecuteResult =
+	| string
+	| StructuredToolOutput
+	| VisualToolOutput;
 
 export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
@@ -176,7 +203,9 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	/** Cached input tokens read from the provider cache. */
 	cacheReadTokens?: number;
+	/** Input tokens written to the provider cache. */
 	cacheWriteTokens?: number;
 }
 
@@ -211,12 +240,33 @@ export interface ApiCallRecord {
  */
 export type ContextSource = 'api' | 'api+estimate' | 'estimate';
 
+/**
+ * Why the provider stopped generating, as reported by the AI SDK.
+ *
+ * `length` is the load-bearing one: it means the response was cut off at the
+ * output-token limit, so what came back is a fragment rather than a finished
+ * turn. A fragment with no tool calls is indistinguishable from a model that
+ * simply finished talking unless the caller checks this, which is why it is
+ * carried out of the client rather than only logged.
+ */
+export type LLMFinishReason =
+	| 'stop'
+	| 'length'
+	| 'content-filter'
+	| 'tool-calls'
+	| 'error'
+	| 'other'
+	| 'unknown';
+
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
 	}>;
 	toolsDisabled?: boolean;
 	usage?: ApiUsage;
+	// Absent when the provider did not report one (e.g. the streamed-fallback
+	// path after a no-output error). Treat absence as "not truncated".
+	finishReason?: LLMFinishReason;
 }
 
 export interface StreamCallbacks {
@@ -266,6 +316,7 @@ export type DevelopmentMode =
 	| 'auto-accept'
 	| 'yolo'
 	| 'plan'
+	| 'architect'
 	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
@@ -273,6 +324,7 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
+	architect: '◈ architect mode on',
 	headless: '⏵⏵ headless mode on',
 };
 
@@ -281,10 +333,11 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto',
 	yolo: '⏵⏵⏵ yolo',
 	plan: '⏸ plan',
+	architect: '◈ architect',
 	headless: '⏵⏵ headless',
 };
 
-export type ConnectionStatus = 'connected' | 'failed' | 'pending';
+export type ConnectionStatus = 'connected' | 'failed' | 'pending' | 'unhealthy';
 
 export interface MCPConnectionStatus {
 	name: string;

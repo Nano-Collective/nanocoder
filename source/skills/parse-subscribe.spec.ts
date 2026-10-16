@@ -38,6 +38,31 @@ test('parses schedule.cron with cron expression', t => {
 	t.deepEqual(result, [{kind: 'schedule.cron', cron: '0 9 * * MON'}]);
 });
 
+test('parses ci.job.failed with branches', t => {
+	const result = parseSubscribeBlock([
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+	t.deepEqual(result, [
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+});
+
+test('parses ci.job.failed with no branches', t => {
+	const result = parseSubscribeBlock([{kind: 'ci.job.failed'}]);
+	t.deepEqual(result, [{kind: 'ci.job.failed'}]);
+});
+
+test('rejects bad ci.job.failed branches entry', t => {
+	t.throws(
+		() =>
+			parseSubscribeBlock([{kind: 'ci.job.failed', branches: [42]}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /branches must be an array/,
+		},
+	);
+});
+
 test('carries through target and confirm fields', t => {
 	const result = parseSubscribeBlock([
 		{
@@ -89,6 +114,16 @@ test('rejects schedule.cron without cron', t => {
 		instanceOf: SubscribeParseError,
 		message: /\.cron must be a non-empty cron expression/,
 	});
+});
+
+test('rejects schedule.cron with an invalid cron expression', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'schedule.cron', cron: 'not a cron'}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /is not a valid cron expression/,
+		},
+	);
 });
 
 test('rejects confirm that is not a boolean', t => {

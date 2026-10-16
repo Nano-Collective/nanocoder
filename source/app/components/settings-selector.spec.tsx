@@ -17,9 +17,11 @@ const {SettingsSelector} = await import('./settings-tabs');
 const {SettingsDisplayPanel, SettingsNotificationsPanel} = await import(
 	'./settings-selector'
 );
-const {updateShowUsageFooter, updateNotificationsPreference} = await import(
-	'@/config/preferences'
-);
+const {
+	updateShowUsageFooter,
+	updateNotificationsPreference,
+	updateShowAgentBashOutput,
+} = await import('@/config/preferences');
 
 test('SettingsSelector renders without crashing', t => {
 	const {unmount} = renderWithTheme(<SettingsSelector onCancel={() => {}} />);
@@ -99,6 +101,32 @@ test('SettingsDisplayPanel reflects a disabled Usage & Cost Footer preference', 
 		unmount();
 	} finally {
 		updateShowUsageFooter(true);
+	}
+});
+
+test('SettingsDisplayPanel offers an Agent Bash Output toggle, OFF by default', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<SettingsDisplayPanel onBack={() => {}} onCancel={() => {}} />,
+	);
+	const output = lastFrame();
+	t.truthy(output);
+	// Unset in the temp config dir, so agent bash output starts folded.
+	t.true(output!.includes('Agent Bash Output: OFF'));
+	unmount();
+});
+
+test('SettingsDisplayPanel reflects an enabled Agent Bash Output preference', t => {
+	updateShowAgentBashOutput(true);
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<SettingsDisplayPanel onBack={() => {}} onCancel={() => {}} />,
+		);
+		const output = lastFrame();
+		t.truthy(output);
+		t.true(output!.includes('Agent Bash Output: ON'));
+		unmount();
+	} finally {
+		updateShowAgentBashOutput(false);
 	}
 });
 

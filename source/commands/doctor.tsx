@@ -12,8 +12,11 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
+import {getConfiguredFormatters} from '@/services/formatters';
+import {getConfiguredHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
+import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getPackageVersion} from '@/utils/package-version';
@@ -41,7 +44,20 @@ export interface DoctorMcpServer {
 	name: string;
 	transport: string;
 	toolCount: number;
+	resourceCount: number;
+	promptCount: number;
 	url?: string;
+}
+
+export interface DoctorHook {
+	event: HookEvent;
+	label: string;
+	matchTools?: string[];
+}
+
+export interface DoctorFormatter {
+	label: string;
+	match: string[];
 }
 
 export interface DoctorReport {
@@ -57,6 +73,8 @@ export interface DoctorReport {
 		servers: DoctorLspServer[];
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
+	hooks: Section<DoctorHook[]>;
+	formatters: Section<DoctorFormatter[]>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -181,7 +199,8 @@ async function collectProviders(
 }
 
 function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
-	const serverNames = toolManager?.getConnectedServers() ?? [];
+	const serverNames =
+		toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers() ?? [];
 
 	return serverNames.map(serverName => {
 		const serverInfo = toolManager?.getServerInfo(serverName);
@@ -190,9 +209,33 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			name: serverName,
 			transport: String(serverInfo?.transport ?? 'stdio'),
 			toolCount: serverTools.length,
+			resourceCount: serverInfo?.resourceCount ?? 0,
+			promptCount: serverInfo?.promptCount ?? 0,
 			url: serverInfo?.url,
 		};
 	});
+}
+
+/**
+ * Lifecycle hooks are user-supplied shell commands, so /doctor lists what is
+ * wired up (never a secret — hook commands are config, not credentials).
+ */
+function collectHooks(): DoctorHook[] {
+	return HOOK_EVENTS.flatMap(event =>
+		getConfiguredHooks(event).map(hook => ({
+			event,
+			label: hook.name ?? hook.command,
+			...(hook.matchTools ? {matchTools: hook.matchTools} : {}),
+		})),
+	);
+}
+
+/** Formatters are shell commands too, so they are listed the same way. */
+function collectFormatters(): DoctorFormatter[] {
+	return getConfiguredFormatters().map(formatter => ({
+		label: formatter.name ?? formatter.command,
+		match: formatter.match,
+	}));
 }
 
 function normalizeDaemon(
@@ -220,13 +263,16 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, daemonLock] = await Promise.all([
-		settle(() => dependencies.getVersion().then(version => ({version}))),
-		settle(() => collectProviders(dependencies)),
-		settle(() => dependencies.getLspStatus()),
-		settle(() => collectMcp(dependencies.getToolManager())),
-		settle(() => dependencies.getDaemonLock()),
-	]);
+	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
+		await Promise.all([
+			settle(() => dependencies.getVersion().then(version => ({version}))),
+			settle(() => collectProviders(dependencies)),
+			settle(() => dependencies.getLspStatus()),
+			settle(() => collectMcp(dependencies.getToolManager())),
+			settle(() => collectHooks()),
+			settle(() => collectFormatters()),
+			settle(() => dependencies.getDaemonLock()),
+		]);
 
 	return {
 		system: {
@@ -238,6 +284,8 @@ export async function collectDoctorReport(
 		providers,
 		lsp,
 		mcp,
+		hooks,
+		formatters,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -354,7 +402,40 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={server.name} color={colors.text}>
 						• {server.name}: {server.transport} • {server.toolCount} tool
 						{server.toolCount === 1 ? '' : 's'}
+						{server.resourceCount > 0
+							? ` • ${server.resourceCount} resource${server.resourceCount === 1 ? '' : 's'}`
+							: ''}
+						{server.promptCount > 0
+							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
+							: ''}
 						{server.url ? ` • ${server.url}` : ''}
+					</Text>
+				))
+			)}
+
+			<SectionTitle>Hooks</SectionTitle>
+			{report.hooks.status === 'error' ? (
+				<SectionError message={report.hooks.error} />
+			) : report.hooks.data.length === 0 ? (
+				<Text color={colors.secondary}>• No lifecycle hooks configured</Text>
+			) : (
+				report.hooks.data.map(hook => (
+					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
+						• {hook.event}: {hook.label}
+						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
+					</Text>
+				))
+			)}
+
+			<SectionTitle>Formatters</SectionTitle>
+			{report.formatters.status === 'error' ? (
+				<SectionError message={report.formatters.error} />
+			) : report.formatters.data.length === 0 ? (
+				<Text color={colors.secondary}>• No formatters configured</Text>
+			) : (
+				report.formatters.data.map(formatter => (
+					<Text key={formatter.label} color={colors.text}>
+						• {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
 			)}

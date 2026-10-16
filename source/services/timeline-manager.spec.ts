@@ -243,6 +243,50 @@ test.serial('TimelineManager clear removes the session directory', async t => {
 	}
 });
 
+test.serial('TimelineManager truncateAfter drops checkpoints at or past the message index', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-truncate');
+		await writeFile(tempDir, 'a.ts', 'before');
+		await writeFile(tempDir, 'b.ts', 'before');
+
+		const kept = await manager.capture({
+			toolCallId: 'c-keep',
+			toolName: 'write_file',
+			title: 'keep',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'before']]),
+		});
+		const dropped = await manager.capture({
+			toolCallId: 'c-drop',
+			toolName: 'write_file',
+			title: 'drop',
+			truncateToMessageIndex: 2,
+			files: filesMap([['b.ts', 'before']]),
+		});
+		t.truthy(kept);
+		t.truthy(dropped);
+
+		await manager.truncateAfter(2);
+
+		const remaining = await manager.list();
+		t.is(remaining.length, 1);
+		t.is(remaining[0].id, kept?.id);
+
+		const droppedDir = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-truncate',
+			'entries',
+			dropped?.id ?? '',
+		);
+		t.false(existsSync(droppedDir));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager rejects unsafe session ids', t => {
 	t.throws(() => new TimelineManager('/tmp', '../escape'), {
 		message: /Invalid timeline session id/,
@@ -407,6 +451,169 @@ test.serial('TimelineManager refuses index paths that escape the workspace', asy
 	}
 });
 
+// chmod-based permission tests: root ignores mode bits and Windows ignores
+// chmod on directories, so skip there instead of failing confusingly.
+const permissionTest =
+	process.platform === 'win32' || process.getuid?.() === 0
+		? test.serial.skip
+		: test.serial;
+
+permissionTest(
+	'TimelineManager saves the index atomically over a read-only live file',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new TimelineManager(tempDir, 'session-atomic');
+			const indexPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-atomic',
+				'timeline.json',
+			);
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step 1',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'v1']]),
+			});
+
+			// rename(2) only needs write permission on the directory, so an
+			// atomic save replaces the file; an in-place write fails with EACCES.
+			await fs.chmod(indexPath, 0o444);
+
+			const second = await manager.capture({
+				toolCallId: 'c2',
+				toolName: 'write_file',
+				title: 'step 2',
+				truncateToMessageIndex: 2,
+				files: filesMap([['b.ts', 'v2']]),
+			});
+
+			t.truthy(second);
+			t.is((await manager.list()).length, 2);
+			const saved = JSON.parse(await fs.readFile(indexPath, 'utf-8'));
+			t.is(saved.entries.length, 2);
+			const dirListing = await fs.readdir(path.dirname(indexPath));
+			t.false(dirListing.some(name => name.endsWith('.tmp')));
+		} finally {
+			const indexPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-atomic',
+				'timeline.json',
+			);
+			await fs.chmod(indexPath, 0o644).catch(() => {});
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+permissionTest(
+	'TimelineManager keeps the previous index intact when a save fails',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const sessionDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-fail',
+			);
+			const manager = new TimelineManager(tempDir, 'session-fail');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step 1',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'v1']]),
+			});
+			const previousIndex = await fs.readFile(
+				path.join(sessionDir, 'timeline.json'),
+				'utf-8',
+			);
+
+			// The failed save must not promote unsaved checkpoints either:
+			// reads after the failure report the index on disk. A read-only
+			// session directory blocks any new write, including the save.
+			await fs.chmod(path.join(sessionDir, 'timeline.json'), 0o444);
+			await fs.chmod(sessionDir, 0o555);
+			await t.throwsAsync(
+				manager.capture({
+					toolCallId: 'c2',
+					toolName: 'write_file',
+					title: 'step 2',
+					truncateToMessageIndex: 2,
+					files: filesMap([['b.ts', 'v2']]),
+				}),
+			);
+
+			const saved = await fs.readFile(
+				path.join(sessionDir, 'timeline.json'),
+				'utf-8',
+			);
+			t.is(saved, previousIndex);
+			t.is(JSON.parse(saved).entries.length, 1);
+			const dirListing = await fs.readdir(sessionDir);
+			t.false(dirListing.some(name => name.endsWith('.tmp')));
+			// The in-memory cache must match the disk, not the unpersisted write.
+			t.is((await manager.list()).length, 1);
+		} finally {
+			const sessionDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-fail',
+			);
+			await fs
+				.chmod(path.join(sessionDir, 'timeline.json'), 0o644)
+				.catch(() => {});
+			await fs.chmod(sessionDir, 0o755).catch(() => {});
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial('TimelineManager starts empty when the index file is corrupted', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-corrupt');
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'v1']]),
+		});
+		const indexPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-corrupt',
+			'timeline.json',
+		);
+		// A torn write leaves truncated JSON behind.
+		await fs.writeFile(indexPath, '{"entries": [', 'utf-8');
+
+		const fresh = new TimelineManager(tempDir, 'session-corrupt');
+		t.deepEqual(await fresh.list(), []);
+
+		const entry = await fresh.capture({
+			toolCallId: 'c2',
+			toolName: 'write_file',
+			title: 'recover',
+			truncateToMessageIndex: 1,
+			files: filesMap([['b.ts', 'v2']]),
+		});
+		t.truthy(entry);
+		t.is(JSON.parse(await fs.readFile(indexPath, 'utf-8')).entries.length, 1);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager prunes timelines from abandoned sessions', async t => {
 	const tempDir = await createTempDir();
 	try {
@@ -432,3 +639,301 @@ test.serial('TimelineManager prunes timelines from abandoned sessions', async t 
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test.serial(
+	'TimelineManager prunes abandoned sessions whose lockfile points to a dead process',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+			const stale = path.join(timelineRoot, 'stale-no-lock');
+			await fs.mkdir(stale, {recursive: true});
+			await fs.writeFile(path.join(stale, 'timeline.json'), '{}', 'utf-8');
+			// A lockfile pointing at a PID that cannot exist. isProcessAlive
+			// returns false, so the pruner is allowed to remove the dir.
+			// Write it before utimes so the utimes call is the final
+			// touch on the directory.
+			await fs.writeFile(
+				path.join(stale, '.lock'),
+				JSON.stringify({
+					pid: 2_000_000_000,
+					startedAt: 0,
+					purpose: 'session-active',
+				}),
+				'utf-8',
+			);
+			const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+			await fs.utimes(stale, longAgo, longAgo);
+
+			const manager = new TimelineManager(tempDir, 'session-fresh');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+
+			t.false(existsSync(stale), 'dead-lock stale session is reaped');
+			t.true(existsSync(path.join(timelineRoot, 'session-fresh')));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'TimelineManager skips pruning a stale-but-live session (issue #1149)',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+			const active = path.join(timelineRoot, 'active-but-stale');
+			await fs.mkdir(active, {recursive: true});
+			await fs.writeFile(
+				path.join(active, 'timeline.json'),
+				'{}',
+				'utf-8',
+			);
+			// Lockfile first so its mtime stays fresh (the age guard reads
+			// mtime, not the payload), then backdate only the directory to
+			// land it in the "would normally be pruned" set. The lock still
+			// points at our own PID, so the pruner must skip it.
+			await fs.writeFile(
+				path.join(active, '.lock'),
+				JSON.stringify({
+					pid: process.pid,
+					startedAt: Date.now(),
+					purpose: 'session-active',
+				}),
+				'utf-8',
+			);
+			const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+			await fs.utimes(active, longAgo, longAgo);
+
+			const manager = new TimelineManager(tempDir, 'session-fresh');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+
+			t.true(
+				existsSync(active),
+				'active session is preserved even when its mtime is stale',
+			);
+			t.true(existsSync(path.join(timelineRoot, 'session-fresh')));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial('TimelineManager.dispose releases the session lock', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-dispose');
+		// Trigger the lock acquisition by writing any entry.
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'x']]),
+		});
+		const lockPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-dispose',
+			'.lock',
+		);
+		t.true(existsSync(lockPath), 'lock is acquired on first write');
+
+		await manager.dispose();
+		t.false(existsSync(lockPath), 'lock is released on dispose');
+
+		// Calling dispose again is a safe no-op.
+		await manager.dispose();
+		t.false(existsSync(lockPath));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial(
+	'TimelineManager.dispose does not throw when the lock was never acquired',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new TimelineManager(tempDir, 'session-never-locked');
+			// No capture happened, so tryAcquireSessionLock was never called.
+			// A second dispose must still be safe.
+			await manager.dispose();
+			await manager.dispose();
+			t.pass();
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'TimelineManager.clear resets the lock claim so the next capture re-acquires',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new TimelineManager(tempDir, 'session-clear-relock');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+			const lockPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-clear-relock',
+				'.lock',
+			);
+			t.true(existsSync(lockPath), 'lock is acquired on first capture');
+
+			await manager.clear();
+			t.false(existsSync(lockPath), 'clear removes the directory incl. lock');
+
+			await manager.capture({
+				toolCallId: 'c2',
+				toolName: 'write_file',
+				title: 'step2',
+				truncateToMessageIndex: 1,
+				files: filesMap([['b.ts', 'y']]),
+			});
+			t.true(
+				existsSync(lockPath),
+				'post-clear capture must re-create the lock (lockHeld was reset)',
+			);
+			const {isTimelineLockLive} = await import('./timeline-lock.js');
+			const sessionDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-clear-relock',
+			);
+			t.true(
+				(await isTimelineLockLive(sessionDir)).live,
+				'pruner must see the re-acquired lock as live',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'TimelineManager reaps a dead predecessor lock on resume under the same id',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+			const sessionDir = path.join(timelineRoot, 'session-resume');
+			await fs.mkdir(sessionDir, {recursive: true});
+			// Simulate a crashed predecessor: lockfile with a dead PID.
+			await fs.writeFile(
+				path.join(sessionDir, '.lock'),
+				JSON.stringify({
+					pid: 2_000_000_000,
+					startedAt: 0,
+					purpose: 'session-active',
+				}),
+				'utf-8',
+			);
+
+			const manager = new TimelineManager(tempDir, 'session-resume');
+			await manager.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+
+			const raw = await fs.readFile(
+				path.join(sessionDir, '.lock'),
+				'utf-8',
+			);
+			t.is(
+				JSON.parse(raw).pid,
+				process.pid,
+				'dead predecessor lock must be reaped and replaced with ours',
+			);
+			const {isTimelineLockLive} = await import('./timeline-lock.js');
+			t.true(
+				(await isTimelineLockLive(sessionDir)).live,
+				'resumed session must be live-protected after reclaim',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'TimelineManager re-acquires a lock reaped by another process',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const sessionDir = path.join(
+				tempDir,
+				'.nanocoder',
+				'timeline',
+				'session-idle',
+			);
+			const lockPath = path.join(sessionDir, '.lock');
+			const a = new TimelineManager(tempDir, 'session-idle');
+			await a.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['a.ts', 'x']]),
+			});
+			t.true(existsSync(lockPath), 'lock is acquired on first capture');
+
+			// A goes idle for 8 days: its lock and directory age past both
+			// the lock guard and the session cutoff.
+			const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+			await fs.utimes(lockPath, longAgo, longAgo);
+			await fs.utimes(sessionDir, longAgo, longAgo);
+
+			const b = new TimelineManager(tempDir, 'session-other');
+			await b.capture({
+				toolCallId: 'c1',
+				toolName: 'write_file',
+				title: 'step',
+				truncateToMessageIndex: 0,
+				files: filesMap([['b.ts', 'y']]),
+			});
+			t.false(existsSync(sessionDir), "B's prune removed A's idle session");
+
+			await a.capture({
+				toolCallId: 'c2',
+				toolName: 'write_file',
+				title: 'step2',
+				truncateToMessageIndex: 1,
+				files: filesMap([['a.ts', 'z']]),
+			});
+			t.true(existsSync(lockPath), 'A re-creates its lock on next capture');
+			const {isTimelineLockLive} = await import('./timeline-lock.js');
+			t.true(
+				(await isTimelineLockLive(sessionDir)).live,
+				'pruner must see the re-acquired lock as live',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

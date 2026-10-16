@@ -24,9 +24,9 @@ export function SwarmDashboard({
 	// Handle graceful exit via Ctrl+C
 	useInput((input, key) => {
 		if (key.ctrl && input === 'c') {
+			// Cancel and let the coordinator roll back worktrees/branches; the
+			// effect below exits once the swarm reaches 'failed'.
 			cancelSwarm();
-			exit();
-			process.exit(1);
 		}
 	});
 

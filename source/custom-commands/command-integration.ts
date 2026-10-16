@@ -50,7 +50,7 @@ You have access to the following Skills for this request:
 
 ${commandPrompts.join('\n\n')}
 
-When a Skill is relevant, use its instructions. Tool restrictions listed in a Skill are enforced.`;
+When a Skill is relevant, use its instructions.`;
 
 		return basePrompt + section;
 	}
