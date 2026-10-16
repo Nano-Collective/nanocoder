@@ -24,6 +24,7 @@ import {createInterface} from 'node:readline/promises';
 import {fileURLToPath} from 'node:url';
 import {getAppConfig} from '@/config/index';
 import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
+import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';
 import {
@@ -299,6 +300,7 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		}
 	}
 
+	await ensureNanocoderGitignore(opts.projectRoot);
 	const launcher = opts.launchDaemon ?? launchSelfHosted;
 	const child = launcher(opts.projectRoot, trustLevel);
 	if (!child) {

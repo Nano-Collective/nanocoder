@@ -112,6 +112,9 @@ test('the clone has its own independent commit history from projectRoot', async 
 			trustLevel: 'full-commit',
 		});
 		try {
+			// The clone is a fresh repo with no identity; CI runners have no global one.
+			git(worktree.path, ['config', 'user.email', 'test@example.com']);
+			git(worktree.path, ['config', 'user.name', 'Test']);
 			git(worktree.path, ['commit', '--allow-empty', '-m', 'a fix']);
 			const cloneLog = git(worktree.path, ['log', '--oneline']).trim();
 			const projectLog = git(projectRoot, ['log', '--oneline']).trim();

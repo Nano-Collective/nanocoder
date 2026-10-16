@@ -88,9 +88,11 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 			unknown
 		>;
 	}
-	Object.assign(data, values);
 	mkdirSync(path.dirname(globalPath), {recursive: true});
-	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
+	atomicWriteFileSync(
+		globalPath,
+		JSON.stringify({...data, ...values}, null, 2),
+	);
 }
 
 export function loadPreferences(): UserPreferences {

@@ -353,6 +353,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 				source: 'manifest',
 				ownerSkill: 'builtin',
 			});
+			console.log(
+				'CI watch active: failed GitHub Actions runs on the current branch will be ' +
+					"investigated and the diagnosis posted to that branch's open PR.",
+			);
 			const ciWatchState = await readCiWatchState(opts.projectRoot);
 			const buildCiEventSource =
 				opts.ciEventSourceFactory ??
