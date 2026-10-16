@@ -400,14 +400,24 @@ function extractKeyInfo(content: string): string | null {
 		return null;
 	}
 
+	// A line that reports a failure must survive, even when an earlier line
+	// reads like a success (#1633): "Build completed successfully" followed by
+	// "failures: 3" must not compress to the first line alone.
+	const failureLine = lines.find(
+		line => line.length < 100 && checkForError(line),
+	);
+
 	// Prefer short, informative lines
 	for (const line of lines.slice(0, 5)) {
 		if (line.length < 100 && !line.includes('...') && !line.includes('node:')) {
+			if (failureLine && failureLine !== line) {
+				return `${line} | ${failureLine}`;
+			}
 			return line;
 		}
 	}
 
-	return null;
+	return failureLine ?? null;
 }
 
 // Compress user message

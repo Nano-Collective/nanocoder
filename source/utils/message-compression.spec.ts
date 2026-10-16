@@ -481,6 +481,30 @@ test('compressMessages keeps a log that mentions success but also reports failur
 
 	const toolMsg = result.compressedMessages[0];
 	t.false(toolMsg?.content?.includes('Result: success') ?? true);
+	t.true(toolMsg?.content?.includes('failures: 3') ?? false);
+	t.is(
+		toolMsg?.content,
+		'Tool: execute_bash\nResult: Build completed successfully | failures: 3',
+	);
+});
+
+test('compressMessages keeps a failure line that comes after a long first line', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'execute_bash',
+			`${'x'.repeat(120)}\n${'y'.repeat(120)}\n3 tests failed\n${'z'.repeat(120)}`,
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const toolMsg = result.compressedMessages[0];
+	t.is(toolMsg?.content, 'Tool: execute_bash\nResult: 3 tests failed');
 });
 
 test('compressMessages treats a single "completed successfully" line as success', t => {
