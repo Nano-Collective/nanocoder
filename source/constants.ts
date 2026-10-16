@@ -199,6 +199,15 @@ export const MAX_REPEATED_TOOL_CALLS = 3;
 // with whatever fragment arrived — the failure mode that silently produced no
 // output at all in runs whose entire deliverable was a tool call.
 export const MAX_TRUNCATED_TURNS = 2;
+// Default for `nanocoder.retries.maxVerificationAttempts` (see
+// source/config/index.ts): how many post-edit verification results we judge,
+// counting the first, before the loop stops asking the model for another fix.
+// 1 means "run the check and report, never retry". That is the default because
+// an unreviewed auto-fix loop is the more dangerous failure: on a check the
+// agent cannot satisfy, a higher cap spends the remaining context re-running
+// it while the user watches nothing improve. Opting into 2 or 3 is a statement
+// that the check is one this model can actually pass.
+export const MAX_VERIFICATION_ATTEMPTS = 1;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;
