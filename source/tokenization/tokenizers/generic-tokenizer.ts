@@ -8,10 +8,11 @@
  * tokenizer can never itself fail and stays a safe default for any provider.
  */
 
-import {get_encoding} from 'tiktoken';
+import type {get_encoding} from 'tiktoken';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '../../types/tokenization';
 import {FallbackTokenizer} from './fallback-tokenizer';
+import {loadTiktoken} from './tiktoken-loader';
 
 export class GenericTokenizer implements Tokenizer {
 	private encoding: ReturnType<typeof get_encoding> | null = null;
@@ -19,7 +20,7 @@ export class GenericTokenizer implements Tokenizer {
 
 	constructor() {
 		try {
-			this.encoding = get_encoding('o200k_base');
+			this.encoding = loadTiktoken().get_encoding('o200k_base');
 		} catch {
 			// WASM/native load failed — char/4 fallback below keeps us functional.
 			this.encoding = null;

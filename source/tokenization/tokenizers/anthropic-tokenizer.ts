@@ -3,9 +3,14 @@
  * Uses @anthropic-ai/tokenizer package
  */
 
-import {countTokens as anthropicCountTokens} from '@anthropic-ai/tokenizer';
+import {createRequire} from 'node:module';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '../../types/tokenization';
+
+type AnthropicModule = typeof import('@anthropic-ai/tokenizer');
+
+const require = createRequire(import.meta.url);
+let anthropicModule: AnthropicModule | undefined;
 
 /**
  * Anthropic tokenizer for Claude models
@@ -19,7 +24,9 @@ export class AnthropicTokenizer implements Tokenizer {
 
 	encode(text: string): number {
 		try {
-			return anthropicCountTokens(text);
+			// Loaded on first use so non-Claude sessions never pay for the package
+			anthropicModule ??= require('@anthropic-ai/tokenizer') as AnthropicModule;
+			return anthropicModule.countTokens(text);
 		} catch {
 			// Fallback to character-based estimation if tokenization fails
 			return Math.ceil(text.length / 4);
