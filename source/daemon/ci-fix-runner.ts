@@ -66,8 +66,8 @@ async function main(): Promise<void> {
 	}
 
 	// Write a failure result on SIGTERM (orchestrator's timeout) so the
-	// orchestrator's child.on('close') resolves with a clear "exceeded
-	// TIMEOUT_CI_FIX_RUNNER_MS" error instead of a generic
+	// orchestrator's child.on('close') resolves with a clear "terminated"
+	// error instead of a generic
 	// "no readable result" fallback. SIGKILL can't be trapped.
 	process.on('SIGTERM', () => {
 		writeResultAndExit(resultPath, {
@@ -75,7 +75,8 @@ async function main(): Promise<void> {
 			committed: false,
 			commitShas: [],
 			output: '',
-			error: 'ci-fix-runner was terminated: exceeded TIMEOUT_CI_FIX_RUNNER_MS',
+			error:
+				'ci-fix-runner was terminated (daemon shutdown, or it exceeded TIMEOUT_CI_FIX_RUNNER_MS)',
 		});
 	});
 
