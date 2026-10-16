@@ -109,6 +109,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('nanocoder.restartAcp', () => {
 			outputChannel.appendLine('Manually restarting ACP process...');
+			if (acpClient.sessionId) {
+				acpClient.lastActiveSessionId = acpClient.sessionId;
+			}
 			acpProcessManager.dispose();
 			
 			// DO NOT recreate acpStateManager or acpClient, as the ChatWebviewProvider

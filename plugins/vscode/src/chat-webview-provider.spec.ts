@@ -13,6 +13,12 @@ function makeStubs() {
 		currentMode: undefined,
 		getOrCreateSession: async () => 'session-1',
 		prompt: async () => ({stopReason: 'end_turn'}),
+		isHandshakeComplete: true,
+		lastActiveSessionId: undefined,
+		clearLastActiveSessionId() {
+			this.lastActiveSessionId = undefined;
+		},
+		listSessions: async () => [],
 	} as any as NanocoderAcpClient;
 
 	let postMessageCalls = 0;
@@ -209,3 +215,91 @@ test.serial('mention search covers the workspace folder when nanocoder.cwd is un
 		resetMentionStubs();
 	}
 });
+
+test('ChatWebviewProvider - resumeSession failure retains existing transcript and does not post clear or sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => false;
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-fail');
+
+	t.false(result);
+	const messages = getPostedMessages();
+	t.false(messages.some(m => m.type === 'clear'), 'must not clear the webview on failed resume');
+	t.false(messages.some(m => m.type === 'sessionLoaded'), 'must not send sessionLoaded on failed resume');
+});
+
+test('ChatWebviewProvider - resumeSession success buffers updates and posts clear then updates then sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => {
+		(acpClient as any).onSessionUpdate?.({
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'replayed turn'},
+		});
+		return true;
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-success');
+
+	t.true(result);
+	const messages = getPostedMessages();
+	const types = messages.map(m => m.type);
+	const clearIdx = types.indexOf('clear');
+	const updateIdx = types.indexOf('acpUpdate');
+	const loadedIdx = types.indexOf('sessionLoaded');
+
+	t.true(clearIdx !== -1, 'clear must be sent on success');
+	t.true(updateIdx !== -1, 'buffered acpUpdate must be sent on success');
+	t.true(loadedIdx !== -1, 'sessionLoaded must be sent on success');
+	t.true(clearIdx < updateIdx, 'clear must precede buffered updates');
+	t.true(updateIdx < loadedIdx, 'buffered updates must precede sessionLoaded');
+});
+
+test('ChatWebviewProvider - _initializeSessionIfReady attempts to resume lastActiveSessionId on reconnection', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(provider as any)._isWebviewReady = true;
+	(acpClient as any).isHandshakeComplete = true;
+	(acpClient as any).lastActiveSessionId = 'session-reconnect';
+
+	let resumedSessionId = '';
+	provider.resumeSession = async (id: string) => {
+		resumedSessionId = id;
+		return true;
+	};
+
+	resetPostedMessages();
+	await (provider as any)._initializeSessionIfReady();
+
+	t.is(resumedSessionId, 'session-reconnect', 'must attempt to resume lastActiveSessionId');
+	t.is(acpClient.lastActiveSessionId, undefined, 'lastActiveSessionId should be consumed');
+	const messages = getPostedMessages();
+	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
+});
+
+test('ChatWebviewProvider - _initializeSessionIfReady resets webview and announces when resume of previous session fails', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(provider as any)._isWebviewReady = true;
+	(acpClient as any).isHandshakeComplete = true;
+	(acpClient as any).lastActiveSessionId = 'session-unresumable';
+
+	provider.resumeSession = async () => false;
+	(acpClient as any).getOrCreateSession = async () => 'session-fresh-uuid';
+
+	resetPostedMessages();
+	await (provider as any)._initializeSessionIfReady();
+
+	const messages = getPostedMessages();
+	t.true(messages.some(m => m.type === 'clear'), 'must clear webview when falling back to new session');
+	t.true(
+		messages.some(
+			m =>
+				m.type === 'appendMessage' &&
+				typeof m.content === 'string' &&
+				m.content.includes('restarted in a fresh session'),
+		),
+		'must announce the fresh session restart',
+	);
+	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
+});
+
