@@ -279,7 +279,7 @@ async function scanPathDirectories(): Promise<PathDirectorySnapshot[]> {
 				? directory.slice(1, -1)
 				: directory;
 		// PATH is local process configuration and each entry is intentionally a search directory.
-		return resolve(unquoted || process.cwd()); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- PATH entries are local search roots, not request-supplied file paths.
+		return resolve(unquoted || process.cwd()); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- PATH entries are local search roots, not request-supplied file paths.
 	});
 	const uniqueDirectories = [...new Set(directories)];
 
@@ -362,7 +362,7 @@ export async function findCommand(command: string): Promise<string | null> {
 		const entry = findPathEntry(command, directory.entries, extensions);
 		// `entry` is one basename returned by readdir; joining it to its PATH root is the intended lookup.
 		const candidatePath = entry
-			? join(directory.path, entry) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- `entry` comes from readdir and cannot contain path separators.
+			? join(directory.path, entry) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- `entry` comes from readdir and cannot contain path separators.
 			: undefined;
 		if (candidatePath && (await isRunnableFile(candidatePath))) {
 			return command;
@@ -378,7 +378,7 @@ export async function findCommand(command: string): Promise<string | null> {
 			process.cwd(),
 			'node_modules',
 			'.bin',
-			`${command}${extension}`, // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal -- command names and PATHEXT suffixes are validated before this local shim lookup.
+			`${command}${extension}`, // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- command names and PATHEXT suffixes are validated before this local shim lookup.
 		);
 		if (await isRunnableFile(localBinPath)) {
 			return localBinPath;
