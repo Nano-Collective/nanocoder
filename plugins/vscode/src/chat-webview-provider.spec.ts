@@ -13,6 +13,12 @@ function makeStubs() {
 		currentMode: undefined,
 		getOrCreateSession: async () => 'session-1',
 		prompt: async () => ({stopReason: 'end_turn'}),
+		isHandshakeComplete: true,
+		lastActiveSessionId: undefined,
+		clearLastActiveSessionId() {
+			this.lastActiveSessionId = undefined;
+		},
+		listSessions: async () => [],
 	} as any as NanocoderAcpClient;
 
 	let postMessageCalls = 0;
@@ -208,4 +214,51 @@ test.serial('mention search covers the workspace folder when nanocoder.cwd is un
 	} finally {
 		resetMentionStubs();
 	}
+});
+
+test('ChatWebviewProvider - _initializeSessionIfReady attempts to resume lastActiveSessionId on reconnection', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(provider as any)._isWebviewReady = true;
+	(acpClient as any).isHandshakeComplete = true;
+	(acpClient as any).lastActiveSessionId = 'session-reconnect';
+
+	let resumedSessionId = '';
+	provider.resumeSession = async (id: string) => {
+		resumedSessionId = id;
+		return true;
+	};
+
+	resetPostedMessages();
+	await (provider as any)._initializeSessionIfReady();
+
+	t.is(resumedSessionId, 'session-reconnect', 'must attempt to resume lastActiveSessionId');
+	t.is(acpClient.lastActiveSessionId, undefined, 'lastActiveSessionId should be consumed');
+	const messages = getPostedMessages();
+	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
+});
+
+test('ChatWebviewProvider - _initializeSessionIfReady resets webview and announces when resume of previous session fails', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(provider as any)._isWebviewReady = true;
+	(acpClient as any).isHandshakeComplete = true;
+	(acpClient as any).lastActiveSessionId = 'session-unresumable';
+
+	provider.resumeSession = async () => false;
+	(acpClient as any).getOrCreateSession = async () => 'session-fresh-uuid';
+
+	resetPostedMessages();
+	await (provider as any)._initializeSessionIfReady();
+
+	const messages = getPostedMessages();
+	t.true(messages.some(m => m.type === 'clear'), 'must clear webview when falling back to new session');
+	t.true(
+		messages.some(
+			m =>
+				m.type === 'appendMessage' &&
+				typeof m.content === 'string' &&
+				m.content.includes('restarted in a fresh session'),
+		),
+		'must announce the fresh session restart',
+	);
+	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
 });

@@ -360,15 +360,7 @@ export class ChatWebviewProvider
 						this._broadcastSessions();
 						break;
 					case 'resumeSession':
-						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
-						this._planReview.reset();
-						this._artifacts.reset();
-						this.postArtifacts();
-						this._discardQueuedPrompts('resume session');
-						this.postMessage({type: 'clear', isLoading: true});
-						this._acpClient.resumeSession(message.sessionId).finally(() => {
-							this.postMessage({type: 'sessionLoaded'});
-						});
+						await this.resumeSession(message.sessionId);
 						break;
 					case 'deleteSession':
 						this._outputChannel.appendLine(`[Webview] User deleted session: ${message.sessionId}`);
@@ -511,20 +503,45 @@ export class ChatWebviewProvider
 		}
 		try {
 			const cwd = resolveExtensionCwd();
-			const sessionId = await this._acpClient.getOrCreateSession(cwd);
-			if (sessionId) {
-				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
+			const previousSessionId = this._acpClient.lastActiveSessionId;
+			let resumed = false;
+			if (previousSessionId) {
+				this._acpClient.clearLastActiveSessionId();
+				this._outputChannel.appendLine(`[Extension] Attempting to resume previous session: ${previousSessionId}`);
+				resumed = await this.resumeSession(previousSessionId);
+				if (!resumed) {
+					this._outputChannel.appendLine(
+						`[Extension] Failed to resume previous session ${previousSessionId}; falling back to new session.`,
+					);
+					this.resetSessionState();
+					this.postMessage({type: 'clear'});
+					this.postMessage({
+						type: 'appendMessage',
+						content: 'The Nanocoder agent process was restarted in a fresh session.',
+					});
+				}
+			}
+
+			if (!resumed) {
+				const sessionId = await this._acpClient.getOrCreateSession(cwd);
+				if (sessionId) {
+					this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
+					this.postMessage({type: 'connectionStatus', status: 'connected'});
+					// Broadcast session list to populate History tab
+					await this._broadcastSessions();
+					this._flushPendingPrompt();
+				} else {
+					this._outputChannel.appendLine('Failed to initialize session on ready: no session id.');
+					this.postMessage({
+						type: 'connectionStatus',
+						status: 'error',
+						message: 'Failed to create ACP session. Check the Nanocoder output channel.',
+					});
+				}
+			} else {
 				this.postMessage({type: 'connectionStatus', status: 'connected'});
-				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
 				this._flushPendingPrompt();
-			} else {
-				this._outputChannel.appendLine('Failed to initialize session on ready: no session id.');
-				this.postMessage({
-					type: 'connectionStatus',
-					status: 'error',
-					message: 'Failed to create ACP session. Check the Nanocoder output channel.',
-				});
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
@@ -533,6 +550,21 @@ export class ChatWebviewProvider
 				status: 'error',
 				message: `Failed to initialize session: ${error}`,
 			});
+		}
+	}
+
+	public async resumeSession(sessionId: string): Promise<boolean> {
+		this._outputChannel.appendLine(`[Webview] User resumed session: ${sessionId}`);
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+		this._discardQueuedPrompts('resume session');
+		this.postMessage({type: 'clear', isLoading: true});
+		try {
+			const success = await this._acpClient.resumeSession(sessionId);
+			return success;
+		} finally {
+			this.postMessage({type: 'sessionLoaded'});
 		}
 	}
 
