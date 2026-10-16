@@ -160,3 +160,25 @@ test('restores protection when existing rules unignore checkpoints', async t => 
 		await fs.rm(root, {recursive: true, force: true});
 	}
 });
+
+test('continues when .gitignore cannot be read', async t => {
+	const root = await fs.mkdtemp(
+		path.join(os.tmpdir(), 'nanocoder-ignore-error-'),
+	);
+
+	try {
+		const nanocoderDir = path.join(root, '.nanocoder');
+		const gitignorePath = path.join(nanocoderDir, '.gitignore');
+
+		await fs.mkdir(gitignorePath, {recursive: true});
+
+		await t.notThrowsAsync(
+			ensureNanocoderGitignore(root),
+		);
+
+		const stat = await fs.stat(gitignorePath);
+		t.true(stat.isDirectory());
+	} finally {
+		await fs.rm(root, {recursive: true, force: true});
+	}
+});

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {logWarning} from './message-queue';
 
 const RUNTIME_ENTRIES = ['/checkpoints/', '/timeline/', '/daemon.*'];
 
@@ -43,24 +44,32 @@ async function updateGitignore(workspaceRoot: string): Promise<void> {
 	);
 }
 
-export function ensureNanocoderGitignore(workspaceRoot: string): Promise<void> {
-	const key = path.resolve(workspaceRoot);
+export async function ensureNanocoderGitignore(
+	workspaceRoot: string,
+): Promise<void> {
+	try {
+		const key = path.resolve(workspaceRoot);
 
-	const previous = pending.get(key) ?? Promise.resolve();
+		const previous = pending.get(key) ?? Promise.resolve();
 
-	const current = previous
-		.catch(() => undefined)
-		.then(() => updateGitignore(key));
+		const current = previous
+			.catch(() => undefined)
+			.then(() => updateGitignore(key));
 
-	pending.set(key, current);
+		pending.set(key, current);
 
-	void current
-		.finally(() => {
-			if (pending.get(key) === current) {
-				pending.delete(key);
-			}
-		})
-		.catch(() => undefined);
+		void current
+			.finally(() => {
+				if (pending.get(key) === current) {
+					pending.delete(key);
+				}
+			})
+			.catch(() => undefined);
 
-	return current;
+		await current;
+	} catch (error) {
+		logWarning(
+			`Could not update .nanocoder/.gitignore. Runtime files may be staged by Git: ${String(error)}`,
+		);
+	}
 }
