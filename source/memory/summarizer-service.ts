@@ -264,7 +264,10 @@ function isContradiction(earlier: string, later: string): boolean {
 
 export class SummarizerService {
 	constructor(
-		private readonly memoryManager = new SemanticMemoryManager(),
+		private readonly memoryManager: Pick<
+			SemanticMemoryManager,
+			'addMemory'
+		> = new SemanticMemoryManager(),
 		private readonly isMemoryEnabled: () => boolean = getSemanticMemoryEnabled,
 	) {}
 

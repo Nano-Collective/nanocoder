@@ -33,6 +33,22 @@ class FakeMemoryManager {
 		this.cleared = true;
 		this.memories = [];
 	}
+
+	async addMemory(input: {
+		content: string;
+		category: string;
+		sourceSessionId?: string;
+	}): Promise<SemanticMemory> {
+		const memory: SemanticMemory = {
+			id: `memory-${this.memories.length + 1}`,
+			content: input.content,
+			category: input.category,
+			timestamp: '2026-08-05T00:00:00.000Z',
+			sourceSessionId: input.sourceSessionId,
+		};
+		this.memories.push(memory);
+		return memory;
+	}
 }
 
 class FakeSummarizerService {
@@ -531,3 +547,33 @@ test('memory ls and rm aliases behave like list and delete', async t => {
 	await command.handler(['rm', 'ff000000'], [], testMetadata);
 	t.deepEqual(manager.memories, []);
 });
+
+test('createMemoryCommand binds default summarizerService to the injected memoryManager', async t => {
+	const customManager = new FakeMemoryManager();
+	const command = createMemoryCommand({memoryManager: customManager});
+
+	// Propose memories from conversation turns
+	const proposeResult = await command.handler(
+		['propose'],
+		[
+			{
+				role: 'user',
+				content: 'Use the existing provider abstraction for model changes.',
+			},
+		],
+		testMetadata,
+	);
+	const proposeText = renderWithTheme(proposeResult as React.ReactElement).lastFrame() ?? '';
+	t.true(proposeText.includes('provider abstraction'));
+
+	// Accept proposal 1
+	const acceptResult = await command.handler(['accept', '1'], [], testMetadata);
+	const acceptText = renderWithTheme(acceptResult as React.ReactElement).lastFrame() ?? '';
+	t.true(acceptText.includes('Saved'));
+
+	// The accepted memory must be saved to customManager
+	const memories = await customManager.listMemories();
+	t.is(memories.length, 1, 'Injected memoryManager should contain the accepted memory');
+	t.true(memories[0].content.includes('provider abstraction'));
+});
+
