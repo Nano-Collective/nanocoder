@@ -224,8 +224,10 @@ nanocoder daemon uninstall  # remove the auto-start unit
 gate applies when the daemon actually boots. Installing in an untrusted
 directory therefore succeeds and says so — install prints a warning naming
 both remedies — and every autostart boot after it is refused until you
-trust the directory, with the refusal reason written to `daemon.log` rather
-than to a terminal you are watching.
+trust the directory. That refusal comes from `daemon start` itself, before
+the daemon child that owns `daemon.log` is spawned, so it goes to the
+`daemon start` command's own output — under an autostart service, wherever
+the service manager sends it — not to `daemon.log`.
 
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at

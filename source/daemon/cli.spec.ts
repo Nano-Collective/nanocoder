@@ -316,7 +316,6 @@ test.serial(
 );
 
 // ============================================================================
-
 // status: no lockfile / stale lockfile / live lockfile. The three states the
 // CLI can encounter at runtime, each with a distinct output line.
 // ============================================================================
@@ -401,14 +400,94 @@ test.serial(
 			});
 			t.true(result.trusted, 'the env var still bypasses the gate');
 			t.false(result.persisted, 'a failed write must not report a persisted trust');
+			t.true(
+				result.persistFailed,
+				'a failed write is reported distinctly from the bypass paths',
+			);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
 	},
 );
 
-// ============================================================================
+test.serial(
+	'start warns instead of announcing a trust it could not save',
+	async t => {
+		const root = await tempProject();
+		const blocker = join(root, 'config-blocker');
+		await writeFile(blocker, 'not a directory');
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		// A config dir whose parent is a file: writing the preferences JSON must
+		// fail, which is the read-only-config / full-disk case the warning exists
+		// for. Recomputed per call, so `resetPreferencesCache` is enough.
+		process.env.NANOCODER_CONFIG_DIR = join(blocker, 'sub');
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		resetPreferencesCache();
+		const warnings: string[] = [];
+		const logged: string[] = [];
+		const originalWarn = console.warn;
+		const originalLog = console.log;
+		console.warn = (message?: unknown) => warnings.push(String(message));
+		console.log = (message?: unknown) => logged.push(String(message));
+		try {
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				launchDaemon: () => null,
+			});
+			t.is(result.exitCode, 1);
+			t.false(
+				logged.some(message => message.includes('Marked')),
+				'a failed write must not be announced as a saved trust',
+			);
+			t.true(
+				warnings.some(message => message.includes('Could not save trust')),
+				`expected a save-failure warning, got ${JSON.stringify(warnings)}`,
+			);
+		} finally {
+			console.warn = originalWarn;
+			console.log = originalLog;
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+			if (previousConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+			else process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			resetPreferencesCache();
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
 
+test.serial(
+	'ensureDirectoryTrust does not report a write failure for the bypass paths',
+	t => {
+		const bypassed = ensureDirectoryTrust('/tmp/untrusted-project', true, {
+			loadPreferences: () => ({trustedDirectories: []}),
+			savePreferences: () => false,
+		});
+		t.true(bypassed.trusted);
+		t.false(bypassed.persisted);
+		t.falsy(
+			bypassed.persistFailed,
+			'--trust-directory never writes, so nothing failed',
+		);
+
+		const dir = process.cwd();
+		const alreadyTrusted = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({
+				trustedDirectories: [
+					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+				],
+			}),
+			savePreferences: () => false,
+		});
+		t.true(alreadyTrusted.trusted);
+		t.false(alreadyTrusted.persisted);
+		t.falsy(
+			alreadyTrusted.persistFailed,
+			'an already-recorded directory does not write either',
+		);
+	},
+);
+
+// ============================================================================
 // stop: no live daemon / live daemon. The two states the user actually hits.
 // Stale-lockfile falls out of readLiveLockfile (treats stale as no daemon),
 // so the "no lockfile" test covers the stale case too.

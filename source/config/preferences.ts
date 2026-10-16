@@ -288,6 +288,14 @@ export interface DirectoryTrustResult {
 	 * the next boot would not see.
 	 */
 	persisted: boolean;
+	/**
+	 * True when the env-var bypass granted trust for this run but the write
+	 * did not land. `persisted === false` alone cannot say this: the one-shot
+	 * `bypass` argument and an already-recorded directory both leave it false
+	 * without anything having gone wrong. Callers warn on this flag so a
+	 * failed write is not silent.
+	 */
+	persistFailed?: boolean;
 	/** Set when refusing a folder that has a trust entry. */
 	recheck?: TrustRecheck | null;
 }
@@ -332,7 +340,8 @@ export function ensureDirectoryTrust(
 		const saved = deps.savePreferences(
 			grantDirectoryTrust(preferences, directory),
 		);
-		return {trusted: true, persisted: saved !== false};
+		const persisted = saved !== false;
+		return {trusted: true, persisted, persistFailed: !persisted};
 	}
 
 	return {
