@@ -164,6 +164,32 @@ This lets you persist context limits for unknown or local models without reapply
 
 Beyond providers and MCP servers, `agents.config.json` supports application-level settings under the `nanocoder` key.
 
+### Language servers
+
+Nanocoder discovers installed language servers by scanning `PATH` when it starts. Discovery is asynchronous and enabled by default. To turn it off while still using explicitly configured servers, set `nanocoder.lsp.autoDiscover` to `false`:
+
+```json
+{
+  "nanocoder": {
+    "lsp": {
+      "autoDiscover": false
+    },
+    "lspServers": [
+      {
+        "name": "typescript-language-server",
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "languages": ["ts", "tsx", "js", "jsx"]
+      }
+    ]
+  }
+}
+```
+
+Project-level configuration takes precedence over the user-level setting. With auto-discovery disabled, `/lsp` reports that state; any entries in `lspServers` are still started.
+
+The `NANOCODER_LSP=off` environment variable also disables automatic discovery for that process, overriding the config value.
+
 ### Auto-Compact
 
 Automatically compress context when it reaches a percentage of the model's context limit. See [Context Compression](../features/context-compression.md) for full details on how compression works.

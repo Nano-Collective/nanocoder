@@ -258,6 +258,21 @@ test('lspServers requires name, command, languages', t => {
 	});
 });
 
+test('lsp auto-discovery setting is optional and boolean', t => {
+	assertValid(t, 'lsp auto-discovery enabled', {
+		nanocoder: {lsp: {autoDiscover: true}},
+	});
+	assertValid(t, 'lsp auto-discovery disabled', {
+		nanocoder: {lsp: {autoDiscover: false}},
+	});
+	assertInvalid(t, 'lsp auto-discovery must be boolean', {
+		nanocoder: {lsp: {autoDiscover: 'off'}},
+	});
+	assertInvalid(t, 'lsp rejects unknown keys', {
+		nanocoder: {lsp: {unknown: true}},
+	});
+});
+
 // ---------------------------------------------------------------------------
 // mcpServers belong in .mcp.json, not agents.config.json
 // ---------------------------------------------------------------------------
@@ -481,6 +496,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'autoCompact',
 		'tune',
 		'headless',
+		'lsp',
 		'lspServers',
 		'alwaysAllow',
 		'disabledTools',

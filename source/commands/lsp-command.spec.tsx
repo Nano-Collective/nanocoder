@@ -48,8 +48,25 @@ test('LSP command: shows no servers when none connected', t => {
 	t.regex(output!, /agents\.config\.json/);
 	t.regex(
 		output!,
-		/LSP servers will auto-discover based on your project files/,
+		/LSP servers may auto-discover based on installed tools/,
 	);
+});
+
+test('LSP command: explains when automatic discovery is disabled', t => {
+	const {lastFrame} = renderWithTheme(
+		<LSP
+			autoDiscoveryEnabled={false}
+			status={{initialized: true, servers: []}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Automatic LSP discovery is disabled/);
+	t.regex(output!, /only explicitly configured/);
+	t.regex(output!, /servers will be used/);
+	t.notRegex(output!, /nanocoder\.lsp\.autoDiscover/);
+	t.notRegex(output!, /LSP servers may auto-discover/);
 });
 
 test('LSP command: displays server status correctly', t => {

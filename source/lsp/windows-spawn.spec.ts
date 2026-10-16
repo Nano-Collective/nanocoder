@@ -95,7 +95,7 @@ windowsTest('discovery verifies a .cmd language server on PATH', async t => {
     const fixture = createFixture(true);
     try {
         fixture.writeShim('typescript-language-server');
-        const status = getKnownServersStatus().find(
+        const status = (await getKnownServersStatus()).find(
             server => server.name === 'typescript-language-server',
         );
         t.true(status?.available);
@@ -130,7 +130,7 @@ windowsTest('discovery rejects a .cmd server whose version check fails', async t
     try {
         fixture.writeShim('typescript-language-server', '@echo off\r\nexit /b 1\r\n');
         t.true(
-            getKnownServersStatus().find(s => s.name === 'typescript-language-server')
+            (await getKnownServersStatus()).find(s => s.name === 'typescript-language-server')
                 ?.available,
         );
         const servers = await discoverLanguageServers(fixture.root);
@@ -145,7 +145,7 @@ windowsTest('Windows availability ignores a local POSIX shim without .cmd', asyn
     try {
         writeFileSync(join(fixture.bin, 'typescript-language-server'), '#!/bin/sh\nexit 0\n');
         t.false(
-            getKnownServersStatus().find(s => s.name === 'typescript-language-server')
+            (await getKnownServersStatus()).find(s => s.name === 'typescript-language-server')
                 ?.available,
         );
     } finally {
