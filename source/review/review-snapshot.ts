@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {copyFile, mkdtemp, rm} from 'node:fs/promises';
+import {copyFile, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {structuredPatch} from 'diff';
@@ -74,6 +74,19 @@ const REVIEW_REF_ROOT = 'refs/nanocoder/review';
 const MAX_REVIEW_FILES = 250;
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_SKIPPED_NAMES_SHOWN = 5;
+
+// Untracked files that usually hold credentials. Working-tree snapshots leave
+// them out so their contents are never hashed or shown to a model. Committed
+// files are reviewed as they are.
+const SECRET_FILE_PATTERNS = [
+	/(?:^|\/)\.env(?:\.[^/]+)?$/i,
+	/(?:^|\/)\.(?:netrc|npmrc)$/i,
+	/(?:^|\/)id_(?:rsa|ed25519)[^/]*$/i,
+	/\.(?:pem|key|p12|pfx|keystore)$/i,
+	/(?:^|\/)\.aws\/credentials$/i,
+];
+const SECRET_FILE_TEMPLATE = /(?:^|\/)\.env\.example$/i;
 
 function assertOid(oid: string): string {
 	if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(oid)) {
@@ -366,10 +379,58 @@ export async function createCommitSnapshot(
 	);
 }
 
+function looksLikeSecretFile(path: string): boolean {
+	return (
+		!SECRET_FILE_TEMPLATE.test(path) &&
+		SECRET_FILE_PATTERNS.some(pattern => pattern.test(path))
+	);
+}
+
+async function findSecretLookingUntrackedFiles(
+	repositoryRoot: string,
+	dependencies: ReviewSnapshotDependencies,
+): Promise<string[]> {
+	const tools = dependencies.tools ?? defaultReviewFoundationTools;
+	const listArgs = [
+		'-C',
+		repositoryRoot,
+		'ls-files',
+		'-z',
+		'--others',
+		'--exclude-standard',
+	];
+	const untracked = await trackReviewOperation(
+		dependencies.activity,
+		'tool',
+		'git',
+		listArgs,
+		'Listing untracked files',
+		dependencies.signal,
+		() => tools.execGit(listArgs, dependencies.signal),
+	);
+	const skipped = untracked.split('\0').filter(looksLikeSecretFile);
+	if (skipped.length > 0) {
+		const shown = skipped.slice(0, MAX_SKIPPED_NAMES_SHOWN).join(', ');
+		const hidden = skipped.length - MAX_SKIPPED_NAMES_SHOWN;
+		// Avoid "secret:" in the text; activity redaction treats what follows
+		// it as a secret value and would hide the file names.
+		const label = skipped.length === 1 ? 'file' : 'files';
+		dependencies.activity
+			.begin({
+				source: 'review',
+				name: 'Skip secret-looking files',
+				summary: `Skipped ${skipped.length} untracked ${label} that may contain secrets: ${shown}${hidden > 0 ? ` and ${hidden} more` : ''}`,
+			})
+			.complete();
+	}
+	return skipped;
+}
+
 /**
  * Record the worktree (tracked changes plus untracked, non-ignored files) as a
  * Git tree through a throwaway index, so the real index and files are never
  * touched and the review reads one pinned tree like any commit review.
+ * Untracked files that look like secrets are left out and reported by name.
  */
 async function writeWorkingTree(
 	repositoryRoot: string,
@@ -401,8 +462,28 @@ async function writeWorkingTree(
 					'Could not copy the Git index; recording the worktree from an empty index instead',
 				);
 		});
+		const skipped = await findSecretLookingUntrackedFiles(
+			repositoryRoot,
+			dependencies,
+		);
+		// A pathspec file keeps long skip lists off the command line, and
+		// literal magic stops names like `a*.pem` from matching other files.
+		const pathspecFile = join(directory, 'pathspec');
+		await writeFile(
+			pathspecFile,
+			['.', ...skipped.map(path => `:(exclude,literal)${path}`)]
+				.map(pathspec => `${pathspec}\0`)
+				.join(''),
+		);
 		const env = {GIT_INDEX_FILE: scratchIndex};
-		const addArgs = ['-C', repositoryRoot, 'add', '--all', '--', '.'];
+		const addArgs = [
+			'-C',
+			repositoryRoot,
+			'add',
+			'--all',
+			`--pathspec-from-file=${pathspecFile}`,
+			'--pathspec-file-nul',
+		];
 		await trackReviewOperation(
 			dependencies.activity,
 			'tool',

@@ -498,6 +498,94 @@ test('worktree snapshots leave the real index and files untouched', async t => {
 	t.is(fixture.runGit(['diff', '--cached', '--name-only']), 'src/file.ts');
 });
 
+function skipEvents(activity: ReviewActivityStore) {
+	return activity
+		.getEvents()
+		.filter(event => event.name === 'Skip secret-looking files');
+}
+
+test('worktree snapshots skip a secret-looking untracked file and keep templates and normal files', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.write('.env.local', 'API_TOKEN=do-not-send-this\n');
+	fixture.write('.env.example', 'API_TOKEN=\n');
+	fixture.write('src/new.ts', 'export const added = true;\n');
+	const secretOid = fixture.runGit(['hash-object', '.env.local']);
+	const activity = new ReviewActivityStore({reviewId: 'secret-skip'});
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'secret skip'}},
+		{tools: createReviewFixtureTools(fixture), activity},
+	);
+
+	t.deepEqual(snapshot.files.map(file => file.path).sort(), [
+		'.env.example',
+		'src/new.ts',
+	]);
+	t.deepEqual(
+		skipEvents(activity).map(event => event.updates[0]?.summary),
+		['Skipped 1 untracked file that may contain secrets: .env.local'],
+	);
+	t.false(JSON.stringify(activity.toSummary()).includes('do-not-send-this'));
+	// The skipped file is never hashed into the object store.
+	t.throws(() => fixture.runGit(['cat-file', '-e', secretOid]));
+});
+
+test('worktree snapshots skip every secret-looking pattern and keep look-alike names', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	const secrets = [
+		'.env',
+		'config/.env.production',
+		'.netrc',
+		'.npmrc',
+		'.aws/credentials',
+		'.ssh/id_rsa',
+		'.ssh/id_ed25519',
+		'certs/server.pem',
+		'certs/server.key',
+		'certs/client.p12',
+		'certs/client.pfx',
+		'android/release.keystore',
+		'certs/[prod].pem',
+	];
+	for (const path of secrets) fixture.write(path, 'secret\n');
+	const kept = ['src/env.ts', 'src/api.key.ts', '.environment'];
+	for (const path of kept) fixture.write(path, 'kept\n');
+	const activity = new ReviewActivityStore({reviewId: 'secret-patterns'});
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'secret patterns'}},
+		{tools: createReviewFixtureTools(fixture), activity},
+	);
+
+	t.deepEqual(snapshot.files.map(file => file.path).sort(), [...kept].sort());
+	const summaries = skipEvents(activity).map(event => event.updates[0]?.summary);
+	t.is(summaries.length, 1);
+	t.regex(
+		summaries[0] ?? '',
+		/^Skipped 13 untracked files that may contain secrets: (?:[^,]+, ){4}[^,]+ and 8 more$/,
+	);
+});
+
+test('worktree snapshots review committed secret-looking files as they are', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.write('.npmrc', 'registry=https://registry.example.test/\n');
+	fixture.runGit(['add', '--', '.npmrc']);
+	fixture.runGit(['commit', '-m', 'add npmrc']);
+	fixture.write('.npmrc', 'registry=https://mirror.example.test/\n');
+	const activity = new ReviewActivityStore({reviewId: 'tracked-secret'});
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'tracked secret-looking file'}},
+		{tools: createReviewFixtureTools(fixture), activity},
+	);
+
+	t.deepEqual(
+		snapshot.files.map(file => [file.path, file.headContent]),
+		[['.npmrc', 'registry=https://mirror.example.test/\n']],
+	);
+	t.deepEqual(skipEvents(activity), []);
+});
+
 function toolsWithIndexPath(
 	fixture: ReturnType<typeof createReviewGitFixture>,
 	indexPath: string,
