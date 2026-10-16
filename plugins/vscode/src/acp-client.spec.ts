@@ -377,3 +377,94 @@ test('NanocoderAcpClient - a creation still in flight does not overwrite a resum
 	t.is(await pending, 'session-resumed');
 	t.is((client as any)._sessionId, 'session-resumed');
 });
+
+// ── provider / model switching ─────────────────────────────
+
+/** Swap the `nanocoder` settings' `update` for the length of one test. */
+function stubSettingsUpdate(
+	t: import('ava').ExecutionContext,
+	update: (key: string, value: unknown) => Promise<void>,
+) {
+	const original = vscode.workspace.getConfiguration;
+	(vscode.workspace as any).getConfiguration = (section: string) => ({
+		...original(section),
+		update,
+	});
+	t.teardown(() => {
+		(vscode.workspace as any).getConfiguration = original;
+	});
+}
+
+test('NanocoderAcpClient - switching provider or model reports failure when not connected', async t => {
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+
+	client.setConnection({} as any);
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'no active session',
+	});
+});
+
+test('NanocoderAcpClient - a provider switch the backend rejects is reported as failed', async t => {
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+	client.currentProvider = 'openrouter';
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'Connection closed',
+	});
+	t.is(client.currentProvider, 'openrouter', 'the local state must not claim the switch');
+});
+
+test('NanocoderAcpClient - a confirmed provider switch is reported as ok', async t => {
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {ok: true});
+	t.is(client.currentProvider, 'ollama');
+});
+
+test('NanocoderAcpClient - a model switch the backend rejects is not saved as the default', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('unknown model')),
+	});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: false, error: 'unknown model'});
+	t.deepEqual(saved, []);
+});
+
+test('NanocoderAcpClient - a model switch that cannot be saved still reports the switch', async t => {
+	stubSettingsUpdate(t, () => Promise.reject(new Error('settings.json is read-only')));
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: true,
+		persistError: 'settings.json is read-only',
+	});
+	t.is(client.currentModel, 'qwen', 'the session did switch');
+});
+
+test('NanocoderAcpClient - a confirmed and saved model switch is reported as ok', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: true});
+	t.deepEqual(saved, [['model', 'qwen']]);
+});

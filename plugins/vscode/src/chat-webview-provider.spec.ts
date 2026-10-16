@@ -48,6 +48,75 @@ function makeStubs() {
 	};
 }
 
+/** Run a provider/model switch with a stubbed result and return what was shown. */
+async function shownAfterSwitch(
+	t: import('ava').ExecutionContext,
+	kind: 'provider' | 'model',
+	result: unknown,
+) {
+	const {provider, acpClient} = makeStubs();
+	(acpClient as any).setSessionProvider = async () => result;
+	(acpClient as any).setSessionModel = async () => result;
+	(vscode as any).__test.shownMessages = [];
+	t.teardown(() => (vscode as any).__test.reset());
+
+	if (kind === 'provider') {
+		await (provider as any)._switchProvider('ollama');
+	} else {
+		await (provider as any)._switchModel('qwen');
+	}
+	return (vscode as any).__test.shownMessages as {kind: string; message: string}[];
+}
+
+test('ChatWebviewProvider - a confirmed provider switch shows the success message', async t => {
+	t.deepEqual(await shownAfterSwitch(t, 'provider', {ok: true}), [
+		{kind: 'info', message: 'Nanocoder: Provider switched to ollama'},
+	]);
+});
+
+test('ChatWebviewProvider - a failed provider switch shows an error, not success', async t => {
+	t.deepEqual(
+		await shownAfterSwitch(t, 'provider', {ok: false, error: 'Connection closed'}),
+		[
+			{
+				kind: 'error',
+				message: 'Nanocoder: Could not switch provider to ollama: Connection closed',
+			},
+		],
+	);
+});
+
+test('ChatWebviewProvider - a failed model switch shows an error, not success', async t => {
+	t.deepEqual(
+		await shownAfterSwitch(t, 'model', {ok: false, error: 'no active session'}),
+		[
+			{
+				kind: 'error',
+				message: 'Nanocoder: Could not switch model to qwen: no active session',
+			},
+		],
+	);
+});
+
+test('ChatWebviewProvider - a model switch that could not be saved says so', async t => {
+	t.deepEqual(
+		await shownAfterSwitch(t, 'model', {ok: true, persistError: 'settings.json is read-only'}),
+		[
+			{
+				kind: 'warning',
+				message:
+					'Nanocoder: Model switched to qwen for this session, but it could not be saved as your default: settings.json is read-only',
+			},
+		],
+	);
+});
+
+test('ChatWebviewProvider - a confirmed and saved model switch shows the success message', async t => {
+	t.deepEqual(await shownAfterSwitch(t, 'model', {ok: true}), [
+		{kind: 'info', message: 'Nanocoder: Model switched to qwen'},
+	]);
+});
+
 test('ChatWebviewProvider - _handleSubmit queues a follow-up while a turn is in flight', async (t) => {
 	const {provider, acpClient, getPostedMessages} = makeStubs();
 

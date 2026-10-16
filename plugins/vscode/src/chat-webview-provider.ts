@@ -346,15 +346,11 @@ export class ChatWebviewProvider
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
-						this._acpClient.setSessionProvider(message.provider).then(() => {
-							vscode.window.showInformationMessage(`Nanocoder: Provider switched to ${message.provider}`);
-						});
+						void this._switchProvider(message.provider);
 						break;
 					case 'setModel':
 						this._outputChannel.appendLine(`[Webview] User selected model: ${message.model}`);
-						this._acpClient.setSessionModel(message.model).then(() => {
-							vscode.window.showInformationMessage(`Nanocoder: Model switched to ${message.model}`);
-						});
+						void this._switchModel(message.model);
 						break;
 					case 'listSessions':
 						this._broadcastSessions();
@@ -828,6 +824,33 @@ export class ChatWebviewProvider
 				}
 			},
 		);
+	}
+
+	/** Only claim a switch the agent confirmed; otherwise say why it failed. */
+	private async _switchProvider(provider: string): Promise<void> {
+		const result = await this._acpClient.setSessionProvider(provider);
+		if (result.ok) {
+			vscode.window.showInformationMessage(`Nanocoder: Provider switched to ${provider}`);
+		} else {
+			vscode.window.showErrorMessage(
+				`Nanocoder: Could not switch provider to ${provider}: ${result.error}`,
+			);
+		}
+	}
+
+	private async _switchModel(model: string): Promise<void> {
+		const result = await this._acpClient.setSessionModel(model);
+		if (!result.ok) {
+			vscode.window.showErrorMessage(
+				`Nanocoder: Could not switch model to ${model}: ${result.error}`,
+			);
+		} else if (result.persistError) {
+			vscode.window.showWarningMessage(
+				`Nanocoder: Model switched to ${model} for this session, but it could not be saved as your default: ${result.persistError}`,
+			);
+		} else {
+			vscode.window.showInformationMessage(`Nanocoder: Model switched to ${model}`);
+		}
 	}
 
 	private _handleSubmit(id: string | undefined, text: string, images?: { data: string, mimeType: string }[]) {
